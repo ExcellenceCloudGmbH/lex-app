@@ -5,7 +5,7 @@ with open("requirements.txt") as f:
 
 setup(
     name="lex-app",
-    version="1.1.1-mtm",
+    version="1.1.1+mtm",
     author="Melih Sünbül",
     author_email="m.sunbul@lund-it.com",
     description="A Python / Django library to create business applications easily with complex logic",
