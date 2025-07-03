@@ -1,4 +1,4 @@
-generic_app @ git+https://github.com/LundIT/lex-generic-app@v1.0.5
+generic_app @ git+https://github.com/LundIT/lex-generic-app@v1.0.5+mtm
 wheel
 django==4.2.17
 django-rest-framework
