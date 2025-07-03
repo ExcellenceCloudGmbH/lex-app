@@ -15,7 +15,8 @@ def resolve_user(request, id_token, rbac=True):
     set_user({"name": id_token['name'], "email": id_token['email']})
     user, _ = User.objects.get_or_create(username=id_token['sub'])
     user.email = id_token['email']
-    user.name = id_token['name'] if id_token['name'] in id_token.values() else "unknown"
+    user.first_name = id_token["given_name"]
+    user.last_name = id_token["family_name"]
     user.roles = []
     if rbac:
         user_roles = id_token['client_roles']
