@@ -34,7 +34,7 @@ uvicorn[standard]
 nest_asyncio
 Office365-REST-Python-Client
 streamlit
-streamlit-keycloak-lex==1.0.4
+streamlit-keycloak-lex==1.0.5
 amqp
 sqlalchemy
 django_redis
