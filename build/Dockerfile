@@ -1,4 +1,4 @@
-FROM python:3.9.17-slim-buster
+FROM python:3.9.17-slim-bullseye
 ARG IMAGE_VERSION
 # install all necessary packages
 WORKDIR /app
