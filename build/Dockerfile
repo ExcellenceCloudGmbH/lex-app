@@ -2,10 +2,17 @@ FROM python:3.9.17-slim-bullseye
 ARG IMAGE_VERSION
 # install all necessary packages
 WORKDIR /app
-RUN apt-get update && apt-get install -y curl gnupg2 wget apt-transport-https ca-certificates gnupg sudo&& \
-    echo "deb [arch=amd64]  http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \
-    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
-    sh -c 'echo "deb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list' && \
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg2 \
+    wget \
+    apt-transport-https \
+    ca-certificates \
+    sudo && \
+    echo "deb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-linux-signing-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    echo "deb http://deb.debian.org/debian bullseye contrib" >> /etc/apt/sources.list && \
     apt-get update && \
     ACCEPT_EULA=Y apt-get install -y \
         git \
@@ -15,13 +22,12 @@ RUN apt-get update && apt-get install -y curl gnupg2 wget apt-transport-https ca
         rsync \
         g++ \
         wget \
-        locales-all && \
-    apt-get install -y google-chrome-stable && \
-    wget http://ftp.de.debian.org/debian/pool/contrib/m/msttcorefonts/ttf-mscorefonts-installer_3.7_all.deb -P /tmp && \
-    ACCEPT_EULA=Y apt install -y \
-        /tmp/ttf-mscorefonts-installer_3.7_all.deb && \
+        locales-all \
+        google-chrome-stable \
+        ttf-mscorefonts-installer && \
     fc-cache -fv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
 
 RUN pip install --no-cache-dir "git+https://github.com/LundIT/lex-app@$IMAGE_VERSION"
