@@ -39,6 +39,8 @@ if __name__ == '__main__':
         st.session_state.user_info = None
     if 'id_token' not in st.session_state:
         st.session_state.id_token = None
+    if 'access_token' not in st.session_state:
+        st.session_state.access_token = None
 
     try:
         exec(f"import {repo_name}._streamlit_structure as streamlit_structure")
@@ -119,6 +121,7 @@ if __name__ == '__main__':
                         st.session_state.authenticated = True
                         st.session_state.user_info = keycloak.user_info
                         st.session_state.id_token = keycloak.id_token
+                        st.session_state.access_token = keycloak.access_token
                         container.empty()  # Clear the container after authentication
                         streamlit_structure.main(user=keycloak.user_info)
 
