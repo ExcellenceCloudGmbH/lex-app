@@ -43,9 +43,27 @@ class CalculationModel(LexModel):
     class Meta:
         abstract = True
 
-    @abstractmethod
+
     def update(self):
-        pass
+        """
+        Placeholder for update logic. Subclasses should override this method
+        if they provide 'update' functionality.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must override the 'update' or 'calculate' method."
+        )
+
+    def calculate(self):
+        """
+        Placeholder for calculation logic. Subclasses should override this method
+        if they provide 'calculate' functionality.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must override the 'update' or 'calculate' method."
+        )
+
+
+
 
     @hook(BEFORE_SAVE)
     def before_save(self):
@@ -57,6 +75,25 @@ class CalculationModel(LexModel):
         else:
             self.is_creation = False
 
+    def lex_func(self):
+        """
+        Dynamically selects the overridden calculation method ('calculate' or 'update').
+        It compares the function object of the instance's method with the function
+        object on the base class to detect an override.
+        """
+        # CORRECT: Compare the bound method's function with the base class's function
+        if self.calculate.__func__ is not CalculationModel.calculate:
+            return self.calculate
+        # CORRECT: Do the same for the 'update' method
+        elif self.update.__func__ is not CalculationModel.update:
+            return self.update
+
+        # Fallback will raise NotImplementedError when called
+        return self.calculate
+
+
+
+
     def should_use_celery(self) -> bool:
         """
         Determine if calculation should use Celery based on configuration and availability.
@@ -67,7 +104,7 @@ class CalculationModel(LexModel):
         from lex.lex_app import settings
 
         # Check if Celery is enabled in setting
-        if not os.getenv("CELERY_ACTIVE", None) == 'true' or not hasattr(self.update, 'delay'):
+        if not os.getenv("CELERY_ACTIVE", None) == 'true' or not hasattr(self.lex_func(), 'delay'):
             return False
 
         # Check if Celery is available by trying to import and test connection
@@ -93,12 +130,15 @@ class CalculationModel(LexModel):
         request_obj = context['request_obj'] or {}
         request_obj_extracted = OperationContext.extract_info_request(request_obj)
         new_context = {**context, "request_obj": request_obj_extracted}
+
+        # For backward compatibility
+        func = self.lex_func()
+
         # Dispatch single model calculation to Celery with calculation_id
-        update_method = self.update
         model_context = deepcopy(_model_context.get()['model_context'])
 
         # Dispatch the task
-        task_result = update_method.delay(context=new_context, model_context=model_context)
+        task_result = func.delay(context=new_context, model_context=model_context)
 
         # Register with RunInCelery context if one exists
         from lex.lex_app.celery_tasks import register_task_with_context  # Import from wherever you put this function
@@ -110,13 +150,14 @@ class CalculationModel(LexModel):
         """
         from lex.lex_app.rest_api.signals import update_calculation_status
 
+        func = self.lex_func()
         try:
             if hasattr(self, "is_atomic") and not self.is_atomic:
-                self.update()
+                func()
                 self.is_calculated = self.SUCCESS
             else:
                 with transaction.atomic():
-                    self.update()
+                    func()
                     self.is_calculated = self.SUCCESS
 
         except Exception as e:
@@ -160,7 +201,11 @@ class CalculationModel(LexModel):
                 # Dispatch to Celery worker
                 logger.info(f"Dispatching calculation for {self} to Celery worker")
                 # self.context = context_id.get()
-                task_result = self.dispatch_calculation_task()
+
+                task_result = None
+                from lex.lex_app.celery_tasks import RunInCelery
+                with RunInCelery():
+                    task_result = self.dispatch_calculation_task()
 
                 # Store task ID if the model has a task_id field
                 # if hasattr(self, 'task_id'):

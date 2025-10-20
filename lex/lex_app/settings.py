@@ -335,6 +335,7 @@ DATABASES = {
         "PASSWORD": "lundadminlocal",
         "HOST": "localhost",
         "PORT": "5432",
+        # "AUTOCOMMIT": False,
         # "TEST": {
         #     "NAME": f"db_{repo_name}_test",
         # },

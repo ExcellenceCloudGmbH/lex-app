@@ -39,9 +39,6 @@ class UpdateModel(LexModel):
 
 
 
-    # Save
-
-
 
     @hook(AFTER_UPDATE, on_commit=True)
     @hook(AFTER_CREATE, on_commit=True)

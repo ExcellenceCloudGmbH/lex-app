@@ -34,6 +34,43 @@ class FilteredListSerializer(serializers.ListSerializer):
         return ret
 
 
+class ManyToManyListField(serializers.ListField):
+    """
+    - Serializes to a list of PKs
+    - On input accepts:
+        * the string "[]"
+        * the list ["[]"]
+        * a list of PKs (ints or digit-strings)
+    """
+    def __init__(self, queryset, **kwargs):
+        child = serializers.PrimaryKeyRelatedField(queryset=queryset)
+        super().__init__(child=child, **kwargs)
+
+    def to_internal_value(self, data):
+        # 1) If client sent the raw string "[]", clear the relation
+        if isinstance(data, str) and data.strip() == '[]':
+            return []
+        # 2) If client sent ["[]"], also treat as clear
+        if isinstance(data, list) and len(data) == 1 and isinstance(data[0], str) and data[0].strip() == '[]':
+            return []
+        # 3) Otherwise, coerce digit-strings into ints, then validate as PKs
+        if isinstance(data, list):
+            coerced = []
+            for item in data:
+                if isinstance(item, str) and item.isdigit():
+                    coerced.append(int(item))
+                else:
+                    coerced.append(item)
+            return super().to_internal_value(coerced)
+        # 4) Fallback (will raise “not a list” if it’s neither str nor list)
+        return super().to_internal_value(data)
+
+    def to_representation(self, data):
+        # Always return a plain list of PKs
+        iterable = data.all() if hasattr(data, 'all') else data
+        return [self.child.to_representation(item) for item in iterable]
+
+
 # --- UPDATED PERMISSION-AWARE BASE SERIALIZER ---
 class LexSerializer(serializers.ModelSerializer):
     """
@@ -209,17 +246,25 @@ def model2serializer(model, fields=None, name_suffix=""):
     pk_alias = serializers.ReadOnlyField(default=model._meta.pk.name)
 
     all_fields = list(fields) + [ID_FIELD_NAME, SHORT_DESCR_NAME, "id"]
+    attrs = {
+        ID_FIELD_NAME: pk_alias,
+        "Meta": type(
+            "Meta",
+            (RestApiModelSerializerTemplate.Meta,),
+            {"model": model, "fields": all_fields},
+        ),
+    }
+
+    for m2m in model._meta.many_to_many:
+        if m2m.name in fields:
+            attrs[m2m.name] = ManyToManyListField(
+                queryset=m2m.remote_field.model.objects.all()
+            )
+
     return type(
         class_name,
         (RestApiModelSerializerTemplate,),
-        {
-            ID_FIELD_NAME: pk_alias,
-            "Meta": type(
-                "Meta",
-                (RestApiModelSerializerTemplate.Meta,),
-                {"model": model, "fields": all_fields},
-            ),
-        },
+        attrs
     )
 
 

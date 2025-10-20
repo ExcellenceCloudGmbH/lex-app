@@ -127,6 +127,7 @@ import itertools
 import logging
 
 import os
+from abc import abstractmethod
 from copy import deepcopy
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
@@ -137,6 +138,7 @@ from django.db.models.base import ModelBase
 from lex.lex_app import settings
 from lex.lex_app.rest_api.context import operation_context
 from lex.lex_app.lex_models.LexErrors import *
+from lex_app.lex_models.LexModel import LexModel
 
 if TYPE_CHECKING:
     pass  # CalculatedModelMixin is defined in this file
@@ -145,6 +147,15 @@ logger = logging.getLogger(__name__)
 
 def _flatten(list_2d):
     return list(itertools.chain.from_iterable(list_2d))
+from django.db import connection
+
+def get_transaction_depth():
+    """Returns the current savepoint/transaction nesting level"""
+    return len(connection.savepoint_ids) if hasattr(connection, 'savepoint_ids') else 0
+
+def assert_in_transaction():
+    """Enforce transaction context requirement"""
+    assert connection.in_atomic_block, "This function must run inside a transaction"
 
 
 class ModelCombinationGenerator:
@@ -850,7 +861,7 @@ def calc_and_save_sync(models, *args):
             # Calculate the model
             try:
                 model.save()
-                model.calculate(*args)
+                model.lex_func()(*args)
                 logger.debug(f"Calculation completed for model {i + 1}")
             except Exception as calc_error:
                 raise CalculatedModelError(
@@ -950,7 +961,7 @@ class CalculatedModelMixinMeta(ModelBase):
         return super().__new__(cls, name, bases, attrs, **kwargs)
 
 
-class CalculatedModelMixin(Model, metaclass=CalculatedModelMixinMeta):
+class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
     """
     Mixin for models that support calculated field combinations and parallel processing.
     
@@ -1126,7 +1137,19 @@ class CalculatedModelMixin(Model, metaclass=CalculatedModelMixinMeta):
             f"to return possible values for defining field '{key}'"
         )
 
-    def calculate(self) -> None:
+    @abstractmethod
+    def calculate(self):
+        pass
+
+    def lex_func(self):
+        return self.calculate_mixin if hasattr(self, "calculate_mixin") else self.calculate
+
+
+    # def get_func(self):
+    #     return self.
+
+    @abstractmethod
+    def calculate_mixin(self) -> None:
         """
         Perform calculations for this model instance.
         
@@ -1524,7 +1547,8 @@ class CalculatedModelMixin(Model, metaclass=CalculatedModelMixinMeta):
                 parallelizable_fields=cls.parallelizable_fields,
                 model_count=len(prepared_models)
             ) from e
-    
+
+
     @classmethod
     def _dispatch_model_processing(
         cls, 
@@ -1574,6 +1598,8 @@ class CalculatedModelMixin(Model, metaclass=CalculatedModelMixinMeta):
                         #     CeleryTaskDispatcher.dispatch_calculation_groups,
                         #     processing_groups, args, context=context
                         # )
+
+                        print(f"Transaction depth: {get_transaction_depth()}")
 
                         CeleryTaskDispatcher.dispatch_calculation_groups(processing_groups, *args, context=context)
                         logger.info(f"Celery dispatch completed for {cls.__name__}")
