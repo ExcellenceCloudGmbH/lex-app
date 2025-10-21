@@ -22,6 +22,10 @@ class ModelExportView(GenericAPIView):
 
     def get_exportable_fields_for_object(self, obj, request):
         """Get the set of exportable fields for a single object"""
+        # TODO: Just allow for Historical ?
+        if not hasattr(obj, 'can_export'):
+            return {f.name for f in obj._meta.fields}
+
         exportable_fields = obj.can_export(request)
         # Ensure it's a set and return empty set if None
         if exportable_fields is None:

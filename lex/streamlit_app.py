@@ -260,6 +260,8 @@ def authenticate_from_proxy_or_jwt() -> None:
 
     headers = getattr(st.context, "headers", {}) or {}
     h = normalize_headers(headers)
+    print("Headers h", h)
+    print("Headers", headers)
 
     # Try Streamlit identity headers from proxy
     user_id = (
@@ -418,28 +420,29 @@ if __name__ == '__main__':
         else:
             # Default application structure
             streamlit_structure.main()
+            if st.button("Logout"):
+                auth_method = st.session_state.get('auth_method', 'session')
+
+                if auth_method == 'jwt':
+                    # For JWT auth, just clear session and show message
+                    st.session_state.stop_token_refresher = True
+                    th = st.session_state.get("token_refresher_thread")
+                    if th and th.is_alive():
+                        # Give it a moment to exit; thread is daemon, so app exit also cleans up
+                        th.join(timeout=1.0)
+                    st.session_state.clear()
+                    st.success("✅ Logged out successfully. You can close this window.")
+                    st.stop()
+                else:
+                    # For session auth, redirect to logout
+                    rd = urllib.parse.quote("http://localhost:8501", safe="")
+                    st.markdown(
+                        f"<meta http-equiv='refresh' content='0;url=/oauth2/sign_out?rd={rd}'>",
+                        unsafe_allow_html=True
+                    )
 
         # Logout functionality (adjust based on auth method)
-        if st.button("Logout (complete)"):
-            auth_method = st.session_state.get('auth_method', 'session')
 
-            if auth_method == 'jwt':
-                # For JWT auth, just clear session and show message
-                st.session_state.stop_token_refresher = True
-                th = st.session_state.get("token_refresher_thread")
-                if th and th.is_alive():
-                    # Give it a moment to exit; thread is daemon, so app exit also cleans up
-                    th.join(timeout=1.0)
-                st.session_state.clear()
-                st.success("✅ Logged out successfully. You can close this window.")
-                st.stop()
-            else:
-                # For session auth, redirect to logout
-                rd = urllib.parse.quote("http://localhost:8501", safe="")
-                st.markdown(
-                    f"<meta http-equiv='refresh' content='0;url=/oauth2/sign_out?rd={rd}'>",
-                    unsafe_allow_html=True
-                )
 
     except Exception as e:
         if os.getenv("DEPLOYMENT_ENVIRONMENT") != "PROD":

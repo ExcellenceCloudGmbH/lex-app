@@ -7,7 +7,6 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from lex.lex_app.lex_models.calculated_model import CalculatedModelMixin
 from lex.lex_app.lex_models.model_process_admin import ModelProcessAdmin
 from lex.lex_app.rest_api import converters
-from lex.lex_app.rest_api.auth import TokenObtainPairWithUserView
 from lex.lex_app.rest_api.model_collection.model_collection import ModelCollection
 from lex.lex_app.rest_api.signals import do_post_save
 from lex.lex_app.rest_api.views.calculations.CleanCalculations import CleanCalculations
@@ -173,9 +172,6 @@ class ProcessAdminSite:
                     get_model_structure_func=self.get_model_structure_func,
                 ),
                 name="model-structure",
-            ),
-            path(
-                "api/auth/token/", TokenObtainPairWithUserView.as_view(), name="token"
             ),
             path(
                 "api/auth/token/refresh/",

@@ -5,7 +5,7 @@ from django.db import transaction
 from django.db.models.signals import post_save
 from rest_framework.exceptions import APIException
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
-from rest_framework.mixins import CreateModelMixin, LexModelMixin
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 
 from lex.lex_app.rest_api.views.model_entries.mixins.DestroyOneWithPayloadMixin import DestroyOneWithPayloadMixin
 from lex.lex_app.rest_api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
@@ -22,7 +22,7 @@ class CreateOrUpdate(ModelEntryProviderMixin, DestroyOneWithPayloadMixin, Retrie
                 post_save.disconnect(update_handler)
             with transaction.atomic():
                 if instance:
-                    response = LexModelMixin.update(self, request, *args, **kwargs)
+                    response = UpdateModelMixin.update(self, request, *args, **kwargs)
                 else:
                     response = CreateModelMixin.create(self, request, *args, **kwargs)
         except Exception as e:

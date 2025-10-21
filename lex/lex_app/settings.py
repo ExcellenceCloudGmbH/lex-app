@@ -145,10 +145,6 @@ ALLOWED_HOSTS = [
     "localhost",
     os.environ.get("POD_IP", default="envvar_not_existing"),
 ]
-if os.getenv("KUBERNETES_ENVIRONMENT", "envvar_not_existing") == "AGI":
-    ALLOWED_CIDR_NETS = ["172.16.0.0/12"]
-else:
-    ALLOWED_CIDR_NETS = ["10.0.0.0/8"]
 
 LOGIN_REDIRECT_URL = "/process_admin/all"
 
@@ -217,7 +213,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_extensions",
     "mozilla_django_oidc",
     "rest_framework",
     "rest_framework_api_key",
@@ -233,7 +228,6 @@ if repo_name != "lex":
 CRISPY_FAIL_SILENTLY = not DEBUG
 
 MIDDLEWARE = [
-    "allow_cidr.middleware.AllowCIDRMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -242,15 +236,12 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "django_cprofile_middleware.middleware.ProfilerMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
     "lex_app.rest_api.middleware.KeycloakPermissionsMiddleware",
     "oauth2_authcodeflow.middleware.LoginRequiredMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
 ]
-
-DJANGO_CPROFILE_MIDDLEWARE_REQUIRE_STAFF = False
 
 ROOT_URLCONF = "lex_app.urls"
 
@@ -446,13 +437,6 @@ AUTH_PASSWORD_VALIDATORS = [
 CORS_ORIGIN_ALLOW_ALL = True
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
-
-
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=2),
-}
 
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM")

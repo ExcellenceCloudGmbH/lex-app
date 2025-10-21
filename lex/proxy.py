@@ -249,15 +249,16 @@ async def auth_callback(request: Request):
     _put_tokens(sid, email, token)
     # tiny client-side session
     request.session["user"] = {"email": email, "sid": sid}
-    # opportunistic GC
-    _gc_tokens()
-    resp = RedirectResponse(url="/", status_code=303)
-    # short-lived access token for WS, httpOnly so JS can’t read it
-    resp.set_cookie("st_access", token["access_token"], httponly=True, samesite="lax", secure=False)
-    # optional: httpOnly refresh token if you want server to refresh on WS
-    if token.get("refresh_token"):
-        resp.set_cookie("st_refresh", token["refresh_token"], httponly=True, samesite="lax", secure=False)
-    return resp
+    return RedirectResponse(url="/", status_code=303)
+    # # opportunistic GC
+    # _gc_tokens()
+    # resp = RedirectResponse(url="/", status_code=303)
+    # # short-lived access token for WS, httpOnly so JS can’t read it
+    # resp.set_cookie("st_access", token["access_token"], httponly=True, samesite="lax", secure=False)
+    # # optional: httpOnly refresh token if you want server to refresh on WS
+    # if token.get("refresh_token"):
+    #     resp.set_cookie("st_refresh", token["refresh_token"], httponly=True, samesite="lax", secure=False)
+    # return resp
 
 
 
@@ -315,7 +316,7 @@ async def ws_proxy(websocket: WebSocket):
 
     if jwt_token:
         payload = validate_jwt_token(jwt_token)
-        print(payload)
+        print("Payload", payload)
         if payload:
             user_payload = {
                 'sub': payload.get('sub'),

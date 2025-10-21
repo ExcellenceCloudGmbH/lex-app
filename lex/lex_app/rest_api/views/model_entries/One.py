@@ -7,7 +7,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from lex.lex_app.logging.model_context import model_logging_context
 from rest_framework.exceptions import APIException
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
-from rest_framework.mixins import CreateModelMixin, LexModelMixin
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 
 from rest_framework.response import Response
 from rest_framework import status
@@ -103,7 +103,7 @@ class OneModelEntry(
                 # if "edited_file" not in request.data:
 
                 try:
-                    response = LexModelMixin.update(self, request, *args, **kwargs)
+                    response = UpdateModelMixin.update(self, request, *args, **kwargs)
 
 
                 except Exception as e:

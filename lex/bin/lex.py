@@ -98,7 +98,7 @@ def streamlit(ctx):
 
     # Run Streamlit in main thread (required due to signal handlers)
     # Pass a sys.argv-style list to streamlit_main
-    streamlit_main(streamlit_args or ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"])
+    streamlit_main(streamlit_args + ["--browser.serverPort", "8080"] or ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"])
 
 
     # uvicorn_args = '--host 0.0.0.0 --port 8080 proxy:app'.split()
