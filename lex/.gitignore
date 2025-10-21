@@ -128,7 +128,7 @@ dmypy.json
 .pyre/
 
 #IDEs
-.idea
+.idea/**/*
 
 #Files
 generic_app/submodels/*/
