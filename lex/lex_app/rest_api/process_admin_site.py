@@ -2,7 +2,6 @@ from django.db.models.base import ModelBase
 from django.db.models.signals import post_save
 from django.http import HttpResponse
 from django.urls import path, register_converter
-from rest_framework_simplejwt.views import TokenRefreshView
 
 from lex.lex_app.lex_models.calculated_model import CalculatedModelMixin
 from lex.lex_app.lex_models.model_process_admin import ModelProcessAdmin
@@ -172,11 +171,6 @@ class ProcessAdminSite:
                     get_model_structure_func=self.get_model_structure_func,
                 ),
                 name="model-structure",
-            ),
-            path(
-                "api/auth/token/refresh/",
-                TokenRefreshView.as_view(),
-                name="refresh_token",
             ),
             path(
                 "api/<model:model_container>/file-download",

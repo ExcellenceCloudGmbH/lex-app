@@ -213,7 +213,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "mozilla_django_oidc",
     "rest_framework",
     "rest_framework_api_key",
     "django.contrib.postgres",
