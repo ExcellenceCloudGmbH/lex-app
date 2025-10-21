@@ -23,7 +23,7 @@ from lex.lex_app import settings
 
 from . import views
 from .ProcessAdminSettings import processAdminSite, adminSite
-from lex.lex_app.rest_api.views.authentication.UserAPIView import UserAPIView
+from lex.lex_app.rest_api.views.authentication.UserAPIView import CurrentUser
 
 url_prefix = (
     os.getenv("DJANGO_BASE_PATH") if os.getenv("DJANGO_BASE_PATH") is not None else ""
@@ -31,7 +31,7 @@ url_prefix = (
 
 urlpatterns = [
     path("health", views.HealthCheck.as_view(), name="health_view"),
-    path("api/user/", UserAPIView.as_view(), name="api-user"),
+    path("api/user/", CurrentUser.as_view(), name="current-user"),
     path(url_prefix + "admin/", adminSite.urls),
     path(url_prefix, processAdminSite.urls),
     # path("oidc/", include("mozilla_django_oidc.urls")),

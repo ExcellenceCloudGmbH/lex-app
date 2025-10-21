@@ -26,17 +26,17 @@ except Exception:
         from websockets.client import connect as ws_connect      # websockets 10/11
     except Exception:
         from websockets import connect as ws_connect
-UPSTREAM = os.environ.get("UPSTREAM", "http://127.0.0.1:9000")
-SECRET = os.environ["SESSION_SECRET"]                # 32+ random bytes
-BASE_URL = os.environ["BASE_URL"]                    # e.g. http://localhost:8502
+UPSTREAM = os.environ.get("UPSTREAM", "http://localhost:8501")
+SECRET = os.environ.get("SESSION_SECRET", "PmJ8xyTxydrZomSCIAAaEOiQRBbjoMMJdYQAtGWP5l0=")             # 32+ random bytes
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8080")                    # e.g. http://localhost:8502
 CALLBACK_URL = BASE_URL + "/auth/callback"
-JWT_SECRET = settings.JWT_SECRET_KEY # Use same secret or a different one
+
 oauth = OAuth()
 oauth.register(
     name="oidc",
-    client_id='hazem',
-    client_secret='ajZBZn4FgS1HK7KIek82SEgMIq1rVwvq',
-    server_metadata_url="https://auth.excellence-cloud.dev/realms/lex/.well-known/openid-configuration",
+    client_id=os.getenv("OIDC_RP_CLIENT_ID"),
+    client_secret=os.getenv("OIDC_RP_CLIENT_SECRET"),
+    server_metadata_url=f"{os.getenv('KEYCLOAK_URL')}/realms/{os.getenv('KEYCLOAK_REALM')}/.well-known/openid-configuration",
     client_kwargs={"scope": "openid email profile", "verify": False},
 )
 # -------------------------------------------------------------------
@@ -85,7 +85,7 @@ async def _get_oidc_endpoints() -> dict:
     if _OIDC_META is None:
         verify = bool(oauth.oidc.client_kwargs.get("verify", True))
         meta_url = getattr(oauth.oidc, "server_metadata_url", None) or \
-                   "https://auth.excellence-cloud.dev/realms/lex/.well-known/openid-configuration"
+                   f"{os.getenv('KEYCLOAK_URL')}/realms/{os.getenv('KEYCLOAK_REALM')}/.well-known/openid-configuration"
         async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
             try:
                 r = await client.get(meta_url)
@@ -118,8 +118,8 @@ async def _refresh_access_token(sid: str) -> bool:
     data = {
         "grant_type": "refresh_token",
         "refresh_token": t["refresh_token"],
-        "client_id": 'hazem',
-        "client_secret": 'ajZBZn4FgS1HK7KIek82SEgMIq1rVwvq',
+        "client_id": os.getenv("OIDC_RP_CLIENT_ID"),
+        "client_secret": os.getenv("OIDC_RP_CLIENT_SECRET"),
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
@@ -201,7 +201,8 @@ def validate_jwt_token(token: str):
         # PyJWT >= 2.x: no 'verify' kwarg; use options + leeway
         payload = jwt.decode(
             token,
-            build_pem_from_keycloak_public_key("MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwX1kAVnwGRFiPoxwXsTjzGdRZ2v0JSxIt/PBDCUclB4HmKbiRtOETmUFgBceaJyvIhXQAAw2pHOrCJAh1CBe5PGW39a9FDk1tJfnfYROaUZyuniMog6uh8Ygluhhbb/XBpf5rue6ZCCVHMH8nEZwhxA3xkUyaV5mTMxpyCxJQVs+473F6njsg7V801khg8fSEJdY9bl/pFkP0f0d818jVTDxDBCdH5wrKyDLmyh16IouvKKFbmpTC+P+b+XO6/3mUptbIs/O6l78SppLWtJHIL5WyHXvC6BZiCz+3FCzrecvpaOVhXSmQx574Rb1zKd1c8VVrZcbOqDlmvN3Osh6MwIDAQAB"),            algorithms=["RS256"],
+            build_pem_from_keycloak_public_key("MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl/TL5m3eXsGg5FZitLMR2kkBeF+q3VCjGAcL9a08jHTIMrd0Gp4HktVBDlqz/orB8tdqC5v3RfTROEm1HUxMH+bEeSTEWE82vZvHctEXz5tJGw2xjwlwE048QADPFUG4TbSTpHopXrQjcdYK9QfwJnrA5zqi9u8fata6DAC15icm0elgC1cLB7DPIqrNapm2pDDYta9Uzf34CWTDw0bHXUlkhFkw+3npvd8xFNSkrAkwi/Jo5q29LLgkfhvgb2NPuy5Uj/2/CkDPEfdtAqirY29idSmDz5lU3nv81+tiCcDmU0MNgkVXD9zGrP19epwbpC7UGOI/YH/FtlSG26ZuFwIDAQAB"),
+            algorithms=["RS256"],
             options={
                 "require": ["exp"],            # require exp for safety
                 "verify_signature": True,
@@ -290,7 +291,7 @@ async def oauth2_sign_out(request: Request):
     qp = httpx.QueryParams({
         "id_token_hint": id_token,
         "post_logout_redirect_uri": rd,
-        "client_id": 'hazem',
+        "client_id": os.getenv("OIDC_RP_CLIENT_ID"),
     })
     # redirect to Keycloak; Keycloak will return the browser to BASE_URL
     logout_url = f"{end_session_endpoint}?{qp}"

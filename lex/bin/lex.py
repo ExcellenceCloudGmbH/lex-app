@@ -104,7 +104,7 @@ def streamlit(ctx):
     # uvicorn_args = '--host 0.0.0.0 --port 8080 proxy:app'.split()
     # 
     # print(streamlit_args)
-    # command = ['run', '/home/syscall/LUND_IT/ArmiraCashflowDB/.venv/src/lex-app/lex/streamlit_app.py']
+    # command = ['run', '/home/syscall/LUND_IT/.venv/src/lex-app/lex/streamlit_app.py']
     # 
     # loop = asyncio.new_event_loop()
     # asyncio.set_event_loop(loop)

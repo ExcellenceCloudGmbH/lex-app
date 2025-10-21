@@ -15,7 +15,7 @@ from django.db.models import (
     FileField,
     ImageField,
     AutoField,
-    JSONField, CharField, ManyToManyField,
+    JSONField
 )
 from lex.lex_app.rest_api.fields.Bokeh_field import BokehField
 from lex.lex_app.rest_api.fields.HTML_field import HTMLField
@@ -30,8 +30,6 @@ DEFAULT_TYPE_NAME = "string"
 # ModelField → API type
 DJANGO_FIELD2TYPE_NAME = {
     ForeignKey: "foreign_key",
-    ManyToManyField: 'many_to_many',
-    CharField: 'string',
     IntegerField: "int",
     FloatField: "float",
     BooleanField: "boolean",
@@ -74,25 +72,16 @@ def create_field_info(field):
 
     ftype = type(field)
 
-    type_name = DJANGO_FIELD2TYPE_NAME.get(ftype, DEFAULT_TYPE_NAME)
-    
     additional_info = {}
-    if ftype in (ForeignKey, ManyToManyField):
+    if ftype == ForeignKey:
         additional_info['target'] = field.remote_field.model._meta.model_name
         additional_info['limit_choices_to'] = field.remote_field.limit_choices_to
-        
-    if getattr(field, 'choices', None):
-        # turn each (value, label) into a dict for clarity
-        additional_info['choices'] = [
-            {'id': val, 'name': label}
-            for val, label in field.choices
-        ]
 
     info = {
         "name": field.name,
         "readable_name": field.verbose_name.title(),
-        "type": ftype,
-        "editable": field.editable and ftype is not AutoField,
+        "type": DJANGO_FIELD2TYPE_NAME.get(ftype, DEFAULT_TYPE_NAME),
+        "editable": field.editable and not isinstance(field, AutoField),
         "required": not (field.null or default is not None),
         "default_value": default,
         'is_pk': bool(field.primary_key),
@@ -122,7 +111,6 @@ class Fields(APIView):
 
         serializer = serializers_map[serializer_name]()
         fields_info = []
-        all_model_fields = {f.name: f for f in list(model._meta.fields) + list(model._meta.many_to_many)}
 
         # hide internal-only fields
         excluded = {ID_FIELD_NAME, SHORT_DESCR_NAME}
@@ -135,7 +123,7 @@ class Fields(APIView):
 
             # 1) Try Django model field first
             try:
-                mfield = all_model_fields[source]
+                mfield = model._meta.get_field(source)
                 info = create_field_info(mfield)
 
             except Exception:

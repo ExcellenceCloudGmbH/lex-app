@@ -195,7 +195,7 @@ class LexModel(LifecycleModel):
         # print_context_state()
         if context and hasattr(context['request_obj'], 'user'):
             # self.edited_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
-            self.edited_by = str(context.get("user", ""))
+            self.edited_by = str(context['request_obj'].user)
         else:
             self.edited_by = 'Initial Data Upload'
         self.save(skip_hooks=True)
@@ -206,7 +206,7 @@ class LexModel(LifecycleModel):
         logger.info(f"Request object: {context['request_obj']}")
         if context and hasattr(context['request_obj'], 'user'):
             # self.created_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
-            self.created_by = str(context.get("user", ""))
+            self.created_by = str(context['request_obj'].user)
         else:
             self.created_by = 'Initial Data Upload'
         self.save(skip_hooks=True)
@@ -328,7 +328,6 @@ class LexModel(LifecycleModel):
 
     def can_delete(self, request) -> bool:
         """Checks for the 'delete' scope in Keycloak."""
-        return True
         return "delete" in self._get_keycloak_permissions(request)
     #
     def can_list(self, request) -> bool:

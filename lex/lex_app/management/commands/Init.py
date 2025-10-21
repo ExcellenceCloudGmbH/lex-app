@@ -25,7 +25,7 @@ class KeycloakSyncManager:
     """Handles the sync between Django models and Keycloak resources/permissions"""
 
     def __init__(self):
-        from lexapp.restapi.views.authentication.KeycloakManager import KeycloakManager
+        from lex_app.rest_api.views.authentication.KeycloakManager import KeycloakManager
         self.kc_manager = KeycloakManager()
         self.default_scopes = ['list', 'read', 'create', 'edit', 'delete', 'export']
 
@@ -504,6 +504,15 @@ class Command(BaseCommand):
             # Execute migrations
             call_command(
                 'migrate',
+                verbosity=verbosity,
+                interactive=False,
+                stdout=self.stdout,
+                stderr=self.stderr
+            )
+
+            # Execute migrations
+            call_command(
+                'createcachetable',
                 verbosity=verbosity,
                 interactive=False,
                 stdout=self.stdout,

@@ -25,7 +25,7 @@ from lex.lex_app.logging.data_models import (
 class CalculationLog(models.Model):
     modification_restriction = AdminReportsModificationRestriction()
     id = models.AutoField(primary_key=True)
-    timestamp = models.DateTimeField(default=datetime.now())
+    timestamp = models.DateTimeField(auto_now_add=True)
     calculationId = models.TextField(default="test_id")
     calculation_log = models.TextField(default="")
     calculationlog = models.ForeignKey(

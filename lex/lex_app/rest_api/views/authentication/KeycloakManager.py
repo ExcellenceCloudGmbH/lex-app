@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 
 from django.apps.registry import apps
 from django.conf import settings
@@ -45,31 +46,18 @@ class KeycloakManager:
         self.initialize()
 
     def initialize(self):
-        self.realm_name = settings.KEYCLOAK_REALM_NAME
-        self.client_uuid = settings.OIDC_RP_CLIENT_UUID
+        self.realm_name = os.getenv("KEYCLOAK_REALM")
+        self.client_uuid = os.getenv("OIDC_RP_CLIENT_UUID")
 
         # Get SSL verification setting from Django settings
         verify_ssl = getattr(settings, "KEYCLOAK_VERIFY_SSL", False)
 
         try:
-            # When initializing the OIDC client, ensure proper scopes
-            # self.conn = KeycloakOpenIDConnection(
-            #     server_url=settings.KEYCLOAK_URL,
-            #     username='technical_controller',
-            #     password='dw0=jjK34mu10)kaio',
-            #     user_realm_name='master',
-            #     realm_name=self.realm_name,
-            #     # client_id=settings.OIDC_RP_CLIENT_ID,
-            #     # client_secret_key=settings.OIDC_RP_CLIENT_SECRET,
-            #     verify=verify_ssl
-            # )
             self.conn = KeycloakOpenIDConnection(
-                server_url=settings.KEYCLOAK_URL,
-                # username=settings.KEYCLOAK_USERNAME,
-                # password=settings.KEYCLOAK_PASSWORD,
-                client_id=settings.OIDC_RP_CLIENT_ID,
+                server_url=os.getenv("KEYCLOAK_URL"),
+                client_id=os.getenv("OIDC_RP_CLIENT_ID"),
                 realm_name=self.realm_name,
-                client_secret_key=settings.OIDC_RP_CLIENT_SECRET,
+                client_secret_key=os.getenv("OIDC_RP_CLIENT_SECRET"),
                 verify=verify_ssl,
             )
             self.admin = KeycloakAdmin(connection=self.conn)

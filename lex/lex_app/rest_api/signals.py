@@ -1,7 +1,6 @@
 import logging
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from lex.lex_app.lex_models.UpdateModel import UpdateModel
 
 from lex.lex_app.rest_api.calculated_model_updates.update_handler import (
     CalculatedModelUpdateHandler,
@@ -32,9 +31,7 @@ def save_profile(sender, instance, **kwargs):
 def update_calculation_status(instance):
     from lex.lex_app.lex_models.CalculationModel import CalculationModel
 
-    if issubclass(instance.__class__, CalculationModel) or issubclass(
-        instance.__class__, UpdateModel
-    ):
+    if issubclass(instance.__class__, CalculationModel):
         channel_layer = get_channel_layer()
         message_type = ""
         if instance.is_calculated == CalculationModel.IN_PROGRESS:

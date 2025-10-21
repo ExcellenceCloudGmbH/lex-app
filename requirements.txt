@@ -57,3 +57,4 @@ pre-commit
 factory-boy
 coverage
 python-jose
+django-oauth2-codeflow

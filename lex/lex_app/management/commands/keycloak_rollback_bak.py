@@ -14,7 +14,7 @@ class Command(BaseCommand):
             self.stdout.write("Connecting to Keycloak...")
             conn = KeycloakOpenIDConnection(
                 server_url=settings.KEYCLOAK_URL,
-                realm_name=settings.KEYCLOAK_REALM_NAME,
+                realm_name=settings.KEYCLOAK_REALM,
                 client_id=settings.OIDC_RP_CLIENT_ID,
                 client_secret_key=settings.OIDC_RP_CLIENT_SECRET,
                 verify=False,

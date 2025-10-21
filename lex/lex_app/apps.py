@@ -122,7 +122,6 @@ class LexAppConfig(GenericAppConfig):
         test = ProcessAdminTestCase()
 
         if (not running_in_uvicorn()
-                or not CELERY_ACTIVE
                 or self.is_running_in_celery()
                 or not _authentication_settings
                 or not hasattr(_authentication_settings, 'initial_data_load')
@@ -199,4 +198,4 @@ def running_in_uvicorn():
     """
     Check if the application is running in Uvicorn context.
     """
-    return True or sys.argv[-1:] == ["lex_app.asgi:application"] and os.getenv("CALLED_FROM_START_COMMAND")
+    return sys.argv[-1:] == ["lex_app.asgi:application"] and os.getenv("CALLED_FROM_START_COMMAND")

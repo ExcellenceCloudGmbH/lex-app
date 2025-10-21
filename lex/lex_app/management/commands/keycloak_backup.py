@@ -61,7 +61,7 @@ class Command(BaseCommand):
         backup_data = {
             "metadata": {
                 "timestamp": timestamp,
-                "realm": getattr(settings, 'KEYCLOAK_REALM_NAME', 'unknown'),
+                "realm": getattr(settings, 'KEYCLOAK_REALM', 'unknown'),
                 "client_uuid": getattr(settings, 'OIDC_RP_CLIENT_UUID', 'unknown'),
                 "backup_version": "1.0"
             },
