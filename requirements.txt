@@ -1,6 +1,6 @@
 generic_app @ git+https://github.com/LundIT/lex-generic-app@v1.0.6
 wheel
-django==4.2.17
+django==4.2.18
 django-rest-framework
 django-cors-headers
 djangorestframework-simplejwt
