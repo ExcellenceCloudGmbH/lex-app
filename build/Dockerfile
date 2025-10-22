@@ -1,5 +1,7 @@
 FROM python:3.9.17-slim-bullseye
 ARG IMAGE_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+
 # install all necessary packages
 WORKDIR /app
 RUN apt-get update && apt-get install -y \
@@ -17,16 +19,30 @@ RUN apt-get update && apt-get install -y \
     ACCEPT_EULA=Y apt-get install -y \
         git \
         gcc \
+        g++ \
+        make \
+        pkg-config \
+        cmake \
+        meson \
+        ninja-build \
         libpq-dev \
         wkhtmltopdf \
         rsync \
-        g++ \
-        wget \
         locales-all \
+        fontconfig \
         google-chrome-stable \
-        ttf-mscorefonts-installer && \
+        ttf-mscorefonts-installer \
+        # Cairo + friends (so pycairo / cairo-dependent packages build & run)
+        libcairo2 \
+        libcairo2-dev \
+        libpango-1.0-0 \
+        libpango1.0-dev \
+        libgdk-pixbuf2.0-0 \
+        libgdk-pixbuf2.0-dev \
+        librsvg2-2 \
+        librsvg2-dev && \
     fc-cache -fv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir lex-app==$IMAGE_VERSION
+RUN pip install --no-cache-dir "lex-app==${IMAGE_VERSION}"
