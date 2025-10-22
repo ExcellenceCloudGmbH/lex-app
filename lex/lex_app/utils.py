@@ -1,6 +1,11 @@
-import importlib
 import os
+import sys
+import types
 from pathlib import Path
+import importlib
+import importlib.util
+import importlib.abc
+import importlib.machinery
 
 from django.apps import AppConfig
 from django.contrib import admin
@@ -9,18 +14,7 @@ from django.db import models
 from lex.lex_app.model_utils.ModelRegistration import ModelRegistration
 from lex.lex_app.model_utils.ModelStructureBuilder import ModelStructureBuilder
 from lex.lex_app.model_utils.LexAuthentication import LexAuthentication
-
-
-# def create_api_key():
-#     try:
-#         from rest_framework_api_key.models import APIKey
-#         if APIKey.objects.count() == 0:
-#             api_key, key = APIKey.objects.create_key(name='APIKey')
-#             print("API_KEY:", key)
-#         else:
-#             print("API_KEY already exists")
-#     except ImportError as e:
-#         print(f"Error importing APIKey: {e}")
+from lex_app import settings
 
 
 def _is_structure_yaml_file(file):
@@ -29,6 +23,118 @@ def _is_structure_yaml_file(file):
 
 def _is_structure_file(file):
     return file.endswith('_structure.py')
+
+
+# --- helpers: virtual package + short->long aliasing ---
+
+def _ensure_virtual_prefix_package(prefix: str, root_path: str) -> None:
+    """
+    Ensure a virtual top-level package `prefix` exists whose __path__
+    points at `root_path`. This makes `import prefix.X.Y` load files
+    from `<root_path>/X/Y.py`.
+    """
+    if prefix in sys.modules:
+        return
+    spec = importlib.machinery.ModuleSpec(prefix, loader=None, is_package=True)
+    spec.submodule_search_locations = [root_path]
+    mod = types.ModuleType(prefix)
+    mod.__spec__ = spec
+    mod.__path__ = spec.submodule_search_locations
+    sys.modules[prefix] = mod
+
+
+def _discover_roots(project_path: str) -> set[str]:
+    """
+    Top-level package roots under project_path (directories with __init__.py).
+    You can expand this as needed; packages are what you import as `X.*`.
+    """
+    roots = set()
+    for entry in os.listdir(project_path):
+        if entry.startswith(('.', '_')):
+            continue
+        full = os.path.join(project_path, entry)
+        if os.path.isdir(full) and os.path.isfile(os.path.join(full, '__init__.py')):
+            roots.add(entry)
+    return roots
+
+
+class _ExistingModuleLoader(importlib.abc.Loader):
+    """No-op loader that returns an already-imported module."""
+    def create_module(self, spec):
+        return sys.modules.get(spec.name)
+    def exec_module(self, module):
+        return
+
+
+class _ShortToLongAliasFinder(importlib.abc.MetaPathFinder):
+    """
+    Intercepts imports of short names like `X.Y` where X is a discovered root,
+    imports the long name `PREFIX.X.Y`, then aliases the short name to it.
+    """
+    def __init__(self, prefix: str, roots: set[str]):
+        self.prefix = prefix
+        self.roots = set(roots)
+        self._marker = f'__short_to_long__{prefix}'
+
+    def find_spec(self, fullname, path, target=None):
+        # Only handle short roots (e.g., "InvestmentStructure.Organisation")
+        head = fullname.split('.', 1)[0]
+        if head not in self.roots:
+            return None
+
+        long_name = f"{self.prefix}.{fullname}"
+
+        # If already imported/aliased, return a trivial spec.
+        if fullname in sys.modules:
+            is_pkg = hasattr(sys.modules[fullname], '__path__')
+            spec = importlib.machinery.ModuleSpec(fullname, _ExistingModuleLoader(), is_package=is_pkg)
+            if is_pkg:
+                spec.submodule_search_locations = list(sys.modules[fullname].__path__)
+            return spec
+
+        # Import the *long* name via normal machinery (uses the virtual package).
+        # This does not re-enter this finder (we only handle short names).
+        module = importlib.import_module(long_name)
+
+        # Alias short -> long (same module object)
+        sys.modules[fullname] = module
+
+        # Also wire parent attributes so attribute access works (pkg.module)
+        parts = fullname.split('.')
+        for i in range(1, len(parts)):
+            parent = '.'.join(parts[:i])
+            child = parts[i]
+            pmod = sys.modules.get(parent)
+            if pmod is None:
+                # Create a lightweight package parent if missing
+                pmod = types.ModuleType(parent)
+                pmod.__path__ = []
+                sys.modules[parent] = pmod
+            setattr(pmod, child, sys.modules[fullname if i == len(parts)-1 else '.'.join(parts[:i+1])])
+
+        # Return a no-op spec for the short name (module is already in sys.modules)
+        is_pkg = hasattr(module, '__path__')
+        spec = importlib.machinery.ModuleSpec(fullname, _ExistingModuleLoader(), is_package=is_pkg)
+        if is_pkg and hasattr(module, '__path__'):
+            spec.submodule_search_locations = list(module.__path__)
+        return spec
+
+
+def _install_short_to_long_aliasing(prefix: str, project_path: str):
+    """
+    Install (once) the virtual package and the short->long alias finder.
+    """
+    if not prefix:
+        return
+    # Avoid double install
+    for f in sys.meta_path:
+        if getattr(f, '_marker', None) == f'__short_to_long__{prefix}':
+            return
+
+    _ensure_virtual_prefix_package(prefix, project_path)
+    roots = _discover_roots(project_path)
+    finder = _ShortToLongAliasFinder(prefix, roots)
+    sys.meta_path.insert(0, finder)
 
 
 class GenericAppConfig(AppConfig):
@@ -54,8 +160,15 @@ class GenericAppConfig(AppConfig):
         self.discovered_models = {}
         self.model_structure_builder = ModelStructureBuilder(repo=repo)
         self.project_path = os.path.dirname(self.module.__file__) if subdir else Path(
-            os.getenv("PROJECT_ROOT", os.getcwd())).resolve()
-        self.subdir = f"" if not subdir else subdir
+            os.getenv("PROJECT_ROOT", os.getcwd())
+        ).resolve()
+        self.subdir = "" if not subdir else subdir
+
+        # ✅ Install the aliasing BEFORE discovery/imports.
+        # Choose the long prefix you want (sounds like your app/repo name).
+        long_prefix = repo or ""
+        if long_prefix == settings.repo_name:
+            _install_short_to_long_aliasing(long_prefix, str(self.project_path))
 
         self.discover_models(self.project_path, repo=repo)
 
@@ -65,11 +178,7 @@ class GenericAppConfig(AppConfig):
         self.untracked_models += self.model_structure_builder.untracked_models
         self.register_models()
 
-        # TODO: Creation of API KEY should be possible in IC per instance
-        # if sys.argv[1:2] == ["runserver"]:
-        #     create_api_key()
 
-    # Extracting models from the valid python files, and processing them one by one
     def discover_models(self, path, repo):
         for root, dirs, files in os.walk(path):
             # Skip 'venv', '.venv', and 'build' directories
@@ -116,6 +225,7 @@ class GenericAppConfig(AppConfig):
     def load_models_from_module(self, full_module_name):
         try:
             if not full_module_name.startswith('.'):
+
                 module = importlib.import_module(full_module_name)
                 for name, obj in module.__dict__.items():
                     if (isinstance(obj, type)
