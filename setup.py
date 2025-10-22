@@ -28,12 +28,12 @@ class CustomInstallCommand(install):
 
 setup(
     name="lex-app",
-    version="1.0.6",
+    version="2.0.0rc1",
     author="Melih Sünbül",
-    author_email="m.sunbul@lund-it.com",
+    author_email="m.sunbul@excellence-cloud.com",
     description="A Python / Django library to create business applications easily with complex logic",
     long_description_content_type="text/markdown",
-    url="https://github.com/LundIT/lex-app",
+    url="https://github.com/ExcellenceCloudGmbH/lex-app",
     packages=find_packages(),
     include_package_data=True,
     entry_points={
