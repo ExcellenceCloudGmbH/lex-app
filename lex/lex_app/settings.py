@@ -65,29 +65,30 @@ sys.path.append(NEW_BASE_DIR)
 
 ASGI_APPLICATION = "lex_app.asgi.application"
 
-# if os.getenv("DEPLOYMENT_ENVIRONMENT") is None:
-#     CHANNEL_LAYERS = {
-#         "default": {
-#             "BACKEND": "channels.layers.InMemoryChannelLayer",
-#         },
-#     }
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.pubsub.RedisPubSubChannelLayer",
-        "CONFIG": {
-            "hosts": [
-                (
-                    f"redis://{os.getenv('REDIS_USERNAME')}:{os.getenv('REDIS_PASSWORD')}@{os.getenv('REDIS_HOST')}/2"
-                    if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
-                    else "redis://127.0.0.1:6379/2"
-                )
-            ],
-            "capacity": 100000,
-            "expiry": 10,
-            "prefix": f"{os.getenv('INSTANCE_RESOURCE_IDENTIFIER', 'local')}:",
+if os.getenv("DEPLOYMENT_ENVIRONMENT") is None:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
         },
-    },
-}
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.pubsub.RedisPubSubChannelLayer",
+            "CONFIG": {
+                "hosts": [
+                    (
+                        f"redis://{os.getenv('REDIS_USERNAME')}:{os.getenv('REDIS_PASSWORD')}@{os.getenv('REDIS_HOST')}/2"
+                        if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
+                        else "redis://127.0.0.1:6379/2"
+                    )
+                ],
+                "capacity": 100000,
+                "expiry": 10,
+                "prefix": f"{os.getenv('INSTANCE_RESOURCE_IDENTIFIER', 'local')}:",
+            },
+        },
+    }
 
 STORAGES = {
     "default": {
