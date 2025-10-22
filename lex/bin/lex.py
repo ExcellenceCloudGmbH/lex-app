@@ -1,17 +1,17 @@
 """lex-app Command Line Interface."""
-import sys
 import os
 import subprocess
-
+import sys
+import threading
+import asyncio
 from pathlib import Path
-import site
-import django
-import argparse
-import uvicorn
+
 import click
-from streamlit.web.cli import main as streamlit_main
+import django
+import uvicorn
 from celery.bin.celery import celery as celery_main
-from django.core.management import get_commands, call_command, load_command_class
+from django.core.management import get_commands, call_command
+from streamlit.web.cli import main as streamlit_main
 
 LEX_APP_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.as_posix()
 PROJECT_ROOT_DIR = Path(os.getcwd()).resolve()
@@ -29,7 +29,6 @@ os.environ.setdefault("LEX_APP_PACKAGE_ROOT", LEX_APP_PACKAGE_ROOT)
 django.setup()
 
 lex = click.Group()
-
 
 def execute_django_command(command_name, args):
     """
@@ -84,7 +83,36 @@ def streamlit(ctx):
     if file_index is not None:
         streamlit_args[file_index] = f"{LEX_APP_PACKAGE_ROOT}/{streamlit_args[file_index]}"
 
-    streamlit_main(streamlit_args)
+    def run_uvicorn():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        uvicorn.run(
+            "proxy:app",
+            host="0.0.0.0",
+            port=8080,
+            loop="asyncio",
+        )
+
+    t = threading.Thread(target=run_uvicorn, daemon=True)
+    t.start()
+
+    # Run Streamlit in main thread (required due to signal handlers)
+    # Pass a sys.argv-style list to streamlit_main
+    streamlit_main(streamlit_args + ["--browser.serverPort", "8080"] or ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"])
+
+
+    # uvicorn_args = '--host 0.0.0.0 --port 8080 proxy:app'.split()
+    # 
+    # print(streamlit_args)
+    # command = ['run', '/home/syscall/LUND_IT/.venv/src/lex-app/lex/streamlit_app.py']
+    # 
+    # loop = asyncio.new_event_loop()
+    # asyncio.set_event_loop(loop)
+    # 
+    # x = threading.Thread(target=uvicorn.main, args=(uvicorn_args,))
+    # x.start()
+    # 
+    # streamlit_main(streamlit_args)
 
 @lex.command(name="start", context_settings=dict(
     ignore_unknown_options=True,

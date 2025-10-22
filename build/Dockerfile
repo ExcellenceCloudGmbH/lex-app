@@ -29,5 +29,4 @@ RUN apt-get update && apt-get install -y \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-
-RUN pip install --no-cache-dir "git+https://github.com/LundIT/lex-app@$IMAGE_VERSION"
+RUN pip install --no-cache-dir lex-app==$IMAGE_VERSION"

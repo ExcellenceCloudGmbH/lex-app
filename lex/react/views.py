@@ -5,7 +5,9 @@ from pathlib import Path
 from django.http import HttpResponse
 from django.utils._os import safe_join
 from django.views.static import serve as static_serve
+
 from lex.lex_app import settings
+
 
 def serve_react(request, path, document_root=None):
     path = posixpath.normpath(path).lstrip("/")

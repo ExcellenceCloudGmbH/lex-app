@@ -13,18 +13,30 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.urls import path, include, re_path
-from . import settings
-from .ProcessAdminSettings import processAdminSite, adminSite
 import os
-from react.views import serve_react
 
-url_prefix = os.getenv("DJANGO_BASE_PATH") if os.getenv("DJANGO_BASE_PATH") is not None else ""
+from django.urls import path, include, re_path
+from lex.react.views import serve_react
 
-print(settings.REACT_APP_BUILD_PATH)
+from lex.lex_app import settings
+
+
+from . import views
+from .ProcessAdminSettings import processAdminSite, adminSite
+from lex.lex_app.rest_api.views.authentication.UserAPIView import CurrentUser
+
+url_prefix = (
+    os.getenv("DJANGO_BASE_PATH") if os.getenv("DJANGO_BASE_PATH") is not None else ""
+)
+
 urlpatterns = [
-    path(url_prefix + 'admin/', adminSite.urls),
+    path("health", views.HealthCheck.as_view(), name="health_view"),
+    path("api/user/", CurrentUser.as_view(), name="current-user"),
+    path(url_prefix + "admin/", adminSite.urls),
     path(url_prefix, processAdminSite.urls),
-    path(url_prefix, include('generic_app.urls')),
-    re_path(r"^(?P<path>.*)$", serve_react, {"document_root": settings.REACT_APP_BUILD_PATH}),
+    # path("oidc/", include("mozilla_django_oidc.urls")),
+    path("oidc/", include("oauth2_authcodeflow.urls")),
+    re_path(
+        r"^(?P<path>.*)$", serve_react, {"document_root": settings.REACT_APP_BUILD_PATH}
+    ),
 ]

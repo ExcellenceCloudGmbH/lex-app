@@ -128,7 +128,7 @@ dmypy.json
 .pyre/
 
 #IDEs
-.idea
+.idea/
 
 #Files
 generic_app/submodels/*/
@@ -137,3 +137,4 @@ uploads/
 
 gha-creds-*.json
 
+.DS_Store
