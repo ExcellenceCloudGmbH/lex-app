@@ -6,6 +6,7 @@ import nest_asyncio
 from asgiref.sync import sync_to_async
 from simple_history import register
 from django.db import models
+from lex.lex_app.simple_history_config import should_track_model, get_model_exclusion_reason
 
 
 class ModelRegistration:
@@ -110,12 +111,23 @@ class ModelRegistration:
         # Register with process admin site
         processAdminSite.register([model])
         
-        # Add history tracking if model is not in untracked list
-        if model_name not in untracked_models:
-            register(model)
-            processAdminSite.register([model.history.model])
+        # Determine if model should have history tracking
+        should_track = should_track_model(model) and model_name not in untracked_models
+        
+        if should_track:
+            try:
+                register(model)
+                processAdminSite.register([model.history.model])
+                print(f"✓ History tracking enabled for: {model.__name__}")
+            except Exception as e:
+                print(f"⚠ Failed to register history for {model.__name__}: {e}")
         else:
-            print(model_name)  # Maintain existing behavior for debugging
+            # Get exclusion reason for debugging
+            exclusion_reason = get_model_exclusion_reason(model)
+            if exclusion_reason:
+                print(f"⊘ History tracking skipped for {model.__name__}: {exclusion_reason}")
+            elif model_name in untracked_models:
+                print(f"⊘ History tracking skipped for {model.__name__}: In untracked_models list")
             
         # Register with standard admin site
         adminSite.register([model])

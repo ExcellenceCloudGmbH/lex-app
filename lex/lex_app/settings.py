@@ -580,3 +580,13 @@ LOGGING = {
 
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = None
+
+# Simple History Configuration
+# Set to False to disable automatic exclusion of Django built-in models
+SIMPLE_HISTORY_AUTO_EXCLUDE_BUILTIN = True
+
+# Additional models to exclude from history tracking (beyond the built-in exclusions)
+# Add model names (lowercase) that you specifically don't want to track
+SIMPLE_HISTORY_EXCLUDED_MODELS = [
+    # Example: 'temporarydata', 'cachedresult'
+]
