@@ -514,9 +514,6 @@ class Command(BaseCommand):
             call_command(
                 'createcachetable',
                 verbosity=verbosity,
-                interactive=False,
-                stdout=self.stdout,
-                stderr=self.stderr
             )
 
             self.stdout.write("✓ Django migrations completed successfully")
