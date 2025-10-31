@@ -16,7 +16,7 @@ class CustomInstallCommand(install):
 
         # Now handle the custom installation of other_directory
         self.move_other_directory()
-        
+
         # Generate PyCharm run configurations
         self.generate_pycharm_configs()
 
@@ -34,8 +34,36 @@ class CustomInstallCommand(install):
     def generate_pycharm_configs(self):
         """Generate PyCharm run configurations in the project root"""
         # Find the project root (where pip install was run from)
-        project_root = os.getcwd()
-        
+        project_root = None
+
+        # Strategy 1: Check for PROJECT_ROOT env var
+        project_root = os.environ.get('PROJECT_ROOT')
+
+        # Strategy 2: If installed with -e, try to find from current working directory
+        if not project_root:
+            cwd = os.getcwd()
+            # Check if cwd looks like a project root
+            if any((Path(cwd) / marker).exists() for marker in ['.git', 'manage.py', 'requirements.txt', '.env']):
+                project_root = cwd
+
+        # Strategy 3: Try parent directories of install location
+        if not project_root and hasattr(self, 'install_lib'):
+            search_path = Path(self.install_lib)
+            # Search up to 5 levels up for project markers
+            for parent in list(search_path.parents)[:5]:
+                if any((parent / marker).exists() for marker in ['.git', 'manage.py', 'requirements.txt']):
+                    project_root = str(parent)
+                    break
+
+        if not project_root:
+            print("\n" + "=" * 70)
+            print("Could not automatically determine project root.")
+            print("To generate PyCharm configurations, either:")
+            print("  1. Run: PROJECT_ROOT=$(pwd) pip install -e .")
+            print("  2. Or run after install: lex-generate-configs")
+            print("=" * 70 + "\n")
+            return
+
         # Check if we're in a virtual environment and adjust accordingly
         if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
             # We're in a virtual environment, try to find the actual project root
@@ -45,17 +73,17 @@ class CustomInstallCommand(install):
                 if any((parent / indicator).exists() for indicator in ['.env', 'manage.py', '.git', 'requirements.txt']):
                     project_root = str(parent)
                     break
-        
+
         runconfigs_dir = os.path.join(project_root, '.run')
         os.makedirs(runconfigs_dir, exist_ok=True)
-        
+
         # Get the project name from the root directory
         project_name = os.path.basename(project_root)
-        
+
         # Path to .env file in project root
         env_file_path = os.path.join(project_root, '.env')
         env_files_option = f'<option name="ENV_FILES" value="{env_file_path}" />' if os.path.exists(env_file_path) else '<option name="ENV_FILES" value="" />'
-        
+
         # Configuration templates
         configs = {
             'Init.run.xml': {
@@ -87,7 +115,7 @@ class CustomInstallCommand(install):
                 'parameters': 'flush'
             }
         }
-        
+
         for filename, config in configs.items():
             config_content = f'''<component name="ProjectRunConfigurationManager">
   <configuration default="false" name="{config['name']}" type="PythonConfigurationType" factoryName="Python">
@@ -114,13 +142,13 @@ class CustomInstallCommand(install):
     <method v="2" />
   </configuration>
 </component>'''
-            
+
             config_path = os.path.join(runconfigs_dir, filename)
             with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(config_content)
-            
+
             print(f'Generated PyCharm run configuration: {config_path}')
-        
+
         print(f'PyCharm run configurations generated in: {runconfigs_dir}')
         if os.path.exists(env_file_path):
             print(f'Configurations will use .env file: {env_file_path}')

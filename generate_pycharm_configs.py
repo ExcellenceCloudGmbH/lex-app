@@ -4,10 +4,49 @@ Standalone script to generate PyCharm run configurations for lex-app projects.
 This can be run independently of the setup.py installation process.
 """
 
+# generate_pycharm_configs.py (top additions)
 import os
-import sys
+import subprocess
 from pathlib import Path
 
+MARKERS = {".git", "pyproject.toml", "setup.cfg", "manage.py", "requirements.txt", ".idea", ".vscode"}
+
+def find_project_root(start=None):
+    # 1) Explicit override for determinism
+    env = os.environ.get("LEX_PROJECT_ROOT")
+    if env:
+        return str(Path(env).resolve())
+
+    base = Path(start or os.getcwd()).resolve()
+
+    # 2) Git repository root
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(base),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=True,
+        )
+        return out.stdout.strip()
+    except Exception:
+        pass
+
+    # 3) Ascend to nearest marker
+    for p in [base] + list(base.parents):
+        if any((p / m).exists() for m in MARKERS):
+            return str(p)
+
+    # 4) Fallback: caller's PWD if it has markers (useful under pip)
+    pwd = os.environ.get("PWD")
+    if pwd:
+        P = Path(pwd).resolve()
+        if any((P / m).exists() for m in MARKERS):
+            return str(P)
+
+    # Last resort
+    return str(base)
 
 def generate_pycharm_configs(project_root=None):
     """Generate PyCharm run configurations in the specified or current directory"""
@@ -16,6 +55,7 @@ def generate_pycharm_configs(project_root=None):
         project_root = os.getcwd()
     
     # Ensure we have the absolute path
+    project_root = find_project_root(project_root)
     project_root = os.path.abspath(project_root)
     
     # Create .run directory for PyCharm configurations
