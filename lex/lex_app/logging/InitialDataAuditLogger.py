@@ -97,7 +97,7 @@ class InitialDataAuditLogger:
                 )
                 
                 # Create initial status record
-                AuditLogStatus.objects.create(auditlog=audit_log, status='pending')
+                AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
                 self.batch_manager.add_pending_log(audit_log)
             
             logger.debug(
@@ -202,7 +202,7 @@ class InitialDataAuditLogger:
                 )
                 
                 # Create initial status record
-                AuditLogStatus.objects.create(auditlog=audit_log, status='pending')
+                AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
                 self.batch_manager.add_pending_log(audit_log)
             
             logger.debug(
@@ -295,7 +295,7 @@ class InitialDataAuditLogger:
                 )
                 
                 # Create initial status record
-                AuditLogStatus.objects.create(auditlog=audit_log, status='pending')
+                AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
                 self.batch_manager.add_pending_log(audit_log)
             
             logger.debug(
@@ -455,7 +455,7 @@ class InitialDataAuditLogger:
         #
         #     try:
         #         summary['successful_operations'] = AuditLogStatus.objects.filter(
-        #             auditlog__calculation_id=calculation_id,
+        #             audit_log=calculation_id,
         #             status='success'
         #         ).count()
         #     except Exception as e:
@@ -465,7 +465,7 @@ class InitialDataAuditLogger:
         #
         #     try:
         #         summary['failed_operations'] = AuditLogStatus.objects.filter(
-        #             auditlog__calculation_id=calculation_id,
+        #             audit_log=calculation_id,
         #             status='failure'
         #         ).count()
         #     except Exception as e:
@@ -475,7 +475,7 @@ class InitialDataAuditLogger:
         #
         #     try:
         #         summary['pending_operations'] = AuditLogStatus.objects.filter(
-        #             auditlog__calculation_id=calculation_id,
+        #             audit_log=calculation_id,
         #             status='pending'
         #         ).count()
         #     except Exception as e:

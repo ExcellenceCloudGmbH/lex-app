@@ -20,8 +20,7 @@ class ModelStructureObtainView(APIView):
 
     def delete_restricted_nodes_from_model_structure(self, tree, request):
         """
-        Recursively remove nodes the user cannot list. This now uses the fast,
-        refactored can_list method on the model instance.
+        Recursively remove nodes the user cannot list. Uses the new permission system.
         """
         for key in list(tree.keys()):
             node = tree[key]
@@ -32,15 +31,23 @@ class ModelStructureObtainView(APIView):
                     # Instantiate the model to call its permission check method
                     model_instance = model_container.model_class()
 
-                    # Use the new, simple, and efficient permission check
-                    if hasattr(
-                        model_instance, "can_list"
-                    ) and not model_instance.can_list(request):
+                    # Check permission using new system if available
+                    can_list = False
+                    if hasattr(model_instance, 'permission_list'):
+                        from lex.lex_app.lex_models.LexModel import UserContext
+                        user_context = UserContext.from_request(request, model_instance)
+                        can_list = model_instance.permission_list(user_context)
+                    elif hasattr(model_instance, "can_list"):
+                        can_list = model_instance.can_list(request)
+                    else:
+                        # Default to allow if no permission method
+                        can_list = True
+
+                    if not can_list:
                         del tree[key]
                         continue
 
                 except Exception as e:
-                    raise e
                     # If we can't get a container or check permissions, remove it for safety
                     del tree[key]
                     continue

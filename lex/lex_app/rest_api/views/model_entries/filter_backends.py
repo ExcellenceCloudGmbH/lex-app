@@ -63,7 +63,7 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         permitted = []
         for status in queryset:
             try:
-                al = getattr(status, "auditlog", None)
+                al = getattr(status, "audit_log", None)
                 if al is None or can_read_from_payload(request, al):
                     permitted.append(status.pk)
                 else:
@@ -77,7 +77,7 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         permitted = []
         for clog in queryset:
             try:
-                al = getattr(clog, "auditlog", None)
+                al = getattr(clog, "audit_log", None)
                 if al is None or can_read_from_payload(request, al):
                     permitted.append(clog.pk)
                 else:
@@ -89,13 +89,22 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
     def _handle_lexmodel_default(self, request, queryset):
         permitted = []
         for instance in queryset:
-            cr = getattr(instance, "can_read", None)
-            if callable(cr):
-                try:
-                    if cr(request):
+            try:
+                # Check if instance has new permission system
+                if hasattr(instance, 'permission_read'):
+                    from lex.lex_app.lex_models.LexModel import UserContext
+                    user_context = UserContext.from_request(request, instance)
+                    result = instance.permission_read(user_context)
+                    if result.allowed:
                         permitted.append(instance.pk)
-                except Exception:
-                    permitted.append(instance.pk)  # allow-by-default fallback
-            else:
+                # Fallback to legacy method
+                elif hasattr(instance, 'can_read') and callable(instance.can_read):
+                    if instance.can_read(request):
+                        permitted.append(instance.pk)
+                else:
+                    # Allow by default if no permission method
+                    permitted.append(instance.pk)
+            except Exception:
+                # Allow by default on any error
                 permitted.append(instance.pk)
         return queryset.filter(pk__in=permitted)

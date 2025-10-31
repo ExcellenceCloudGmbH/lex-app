@@ -14,8 +14,8 @@ class CalculationLogDefaultSerializer(serializers.ModelSerializer):
             "calculation_log",
             "timestamp",
             "calculation_record",  # renamed field now appears in the output
-            "auditlog",
-            "calculationlog",
+            "audit_log",
+            "parent_log",
         ]
 
     def get_calculation_record(self, obj):

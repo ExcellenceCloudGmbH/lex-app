@@ -28,14 +28,14 @@ class CalculationLog(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     calculationId = models.TextField(default="test_id")
     calculation_log = models.TextField(default="")
-    calculationlog = models.ForeignKey(
+    parent_log = models.ForeignKey(
         "self",
         on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="parent_logs",
     )  # parent calculation log
-    auditlog = models.ForeignKey(
+    audit_log = models.ForeignKey(
         "AuditLog", on_delete=models.CASCADE, null=True, blank=True
     )
     # Generic fields to reference any calculatable object:
@@ -92,12 +92,12 @@ class CalculationLog(models.Model):
             parent_log = None
             if context_info.parent_model and context_info.parent_content_type:
                 parent_debug = {"calculationId": context_info.calculation_id,
-                 "auditlog": context_info.audit_log,
+                 "audit_log": context_info.audit_log,
                  "content_type": context_info.parent_content_type,
                  "object_id": context_info.parent_model.pk}
                 parent_log, _ = cls.objects.get_or_create(
                     calculationId=context_info.calculation_id,
-                    auditlog=context_info.audit_log,
+                    audit_log=context_info.audit_log,
                     content_type=context_info.parent_content_type,
                     object_id=context_info.parent_model.pk,
                 )
@@ -114,10 +114,10 @@ class CalculationLog(models.Model):
             # TODO: Test this
             log_entry, _ = cls.objects.get_or_create(
                 calculationId=context_info.calculation_id,
-                auditlog=context_info.audit_log,
+                audit_log=context_info.audit_log,
                 content_type=context_info.content_type,
                 object_id=current_model_pk,
-                calculationlog=parent_log,
+                parent_log=parent_log,
             )
 
 

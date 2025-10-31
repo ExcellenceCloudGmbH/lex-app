@@ -3,7 +3,7 @@ from lex.lex_app.logging.AuditLog import AuditLog  # Adjust the import according
 from lex.lex_app.lex_models.LexModel import LexModel
 
 class AuditLogStatus(LexModel):
-    auditlog = models.ForeignKey(
+    audit_log = models.ForeignKey(
         AuditLog,
         related_name='status_records',
         on_delete=models.CASCADE
@@ -17,4 +17,4 @@ class AuditLogStatus(LexModel):
         app_label = 'lex_app'
 
     def __str__(self):
-        return f"AuditLogStatus({self.auditlog.id}): {self.status}"
+        return f"AuditLogStatus({self.audit_log.id}): {self.status}"

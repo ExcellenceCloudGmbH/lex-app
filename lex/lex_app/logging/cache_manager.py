@@ -78,7 +78,7 @@ class CacheManager:
 
 
     @staticmethod
-    def cleanup_calculation(calculation_id: str, specific_keys: Optional[List[str]] = None) -> CacheCleanupResult:
+    def cleanup_calculation(calculation_id: str = None, specific_keys: Optional[List[str]] = None) -> CacheCleanupResult:
         """
         Remove all cache entries for a completed calculation.
         
@@ -104,10 +104,12 @@ class CacheManager:
                 # Use provided specific keys
                 pattern_keys = specific_keys
                 logger.debug(f"Cleaning up {len(specific_keys)} specific cache keys for calculation {calculation_id}")
-            else:
+            elif calculation_id is not None:
                 # Try to find keys by pattern matching
                 pattern_keys = CacheManager._find_calculation_keys(cache, calculation_id)
                 logger.debug(f"Found {len(pattern_keys)} cache keys by pattern matching for calculation {calculation_id}")
+            else:
+                return CacheCleanupResult(success=True, errors=errors, cleaned_keys=cleaned_keys)
             
             for key in pattern_keys:
                 try:

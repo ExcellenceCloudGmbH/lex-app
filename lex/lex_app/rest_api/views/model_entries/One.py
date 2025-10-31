@@ -44,13 +44,27 @@ class OneModelEntry(
     def create(self, request, *args, **kwargs):
         model_container = self.kwargs["model_container"]
         instance = model_container.model_class()
-        if not instance.can_create(request):
-            return Response(
-                {
-                    "message": f"You are not authorized to create a record in {model_container.model_class.__name__}"
-                },
-                status=status.HTTP_400_BAD_REQUEST  # use 400/422 instead of 403
-            )
+        
+        # Check create permission using new system
+        try:
+            if hasattr(instance, 'permission_create'):
+                from lex.lex_app.lex_models.LexModel import UserContext
+                user_context = UserContext.from_request(request, instance)
+                can_create = instance.permission_create(user_context)
+            else:
+                # Fallback to legacy method
+                can_create = instance.can_create(request)
+                
+            if not can_create:
+                return Response(
+                    {
+                        "message": f"You are not authorized to create a record in {model_container.model_class.__name__}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except Exception:
+            # Allow by default on permission check error
+            pass
 
             # return Response(data={}, status=status.HTTP_204_NO_CONTENT, headers={}, exception=e)
 

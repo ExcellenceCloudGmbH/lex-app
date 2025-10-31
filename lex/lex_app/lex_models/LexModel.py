@@ -2,7 +2,7 @@ import logging
 from abc import ABCMeta
 
 import streamlit as st
-from typing import Set, Dict, Any
+from typing import Set, Dict, Any, Union, Optional
 from dataclasses import dataclass
 from typing import FrozenSet, Optional, Mapping, Any, Literal
 
@@ -21,28 +21,170 @@ class ValidationError(Exception):
         super().__init__(message)
 
 
-Op = Literal["read", "edit", "export", "create", "delete", "list"]
+@dataclass(frozen=True)
+class UserContext:
+    """Clean user context for authorization methods"""
+    user: Any  # Django User instance
+    email: str
+    is_authenticated: bool
+    is_superuser: bool
+    groups: Set[str]
+    keycloak_scopes: Set[str]  # Available Keycloak scopes for this resource
+    
+    @classmethod
+    def from_request(cls, request, instance=None):
+        """Create UserContext from Django request"""
+        if not request or not hasattr(request, 'user'):
+            return cls.anonymous()
+        
+        user = request.user
+        keycloak_scopes = set()
+        
+        # Extract Keycloak scopes if available
+        if hasattr(request, 'user_permissions') and instance:
+            resource_name = f"{instance._meta.app_label}.{instance.__class__.__name__}"
+            for perm in request.user_permissions:
+                if perm.get("rsname") == resource_name:
+                    if instance.pk and str(instance.pk) == perm.get("resource_set_id"):
+                        keycloak_scopes.update(perm.get("scopes", []))
+                    elif perm.get("resource_set_id") is None:
+                        keycloak_scopes.update(perm.get("scopes", []))
+        
+        return cls(
+            user=user,
+            email=getattr(user, 'email', ''),
+            is_authenticated=user.is_authenticated,
+            is_superuser=getattr(user, 'is_superuser', False),
+            groups=set(user.groups.values_list('name', flat=True)) if hasattr(user, 'groups') else set(),
+            keycloak_scopes=keycloak_scopes
+        )
+    
+    @classmethod
+    def anonymous(cls):
+        """Create anonymous user context"""
+        return cls(
+            user=None,
+            email='',
+            is_authenticated=False,
+            is_superuser=False,
+            groups=set(),
+            keycloak_scopes=set()
+        )
+
 
 @dataclass(frozen=True)
 class PermissionResult:
+    """Result of permission check with flexible field-level granularity"""
     allowed: bool
-    fields: FrozenSet[str] = frozenset()  # empty = no fields; for boolean ops stays empty
-    reason: Optional[str] = None          # optional diagnostic
-    explain: Optional[Mapping[str, Any]] = None  # for debugging/auditing
+    fields: Optional[Set[str]] = None  # None means all fields, empty set means no fields
+    excluded_fields: Optional[Set[str]] = None  # Fields to exclude from selection
+    reason: Optional[str] = None
+    
+    @classmethod
+    def allow_all(cls, reason: str = None):
+        """Allow access to all fields"""
+        return cls(allowed=True, fields=None, excluded_fields=None, reason=reason)
+    
+    @classmethod
+    def allow_fields(cls, fields: Union[Set[str], list], reason: str = None):
+        """Allow access to specific fields"""
+        field_set = set(fields) if isinstance(fields, list) else fields
+        return cls(allowed=True, fields=field_set, excluded_fields=None, reason=reason)
+    
+    @classmethod
+    def allow_all_except(cls, excluded_fields: Union[Set[str], list], reason: str = None):
+        """Allow access to all fields except specified ones"""
+        excluded_set = set(excluded_fields) if isinstance(excluded_fields, list) else excluded_fields
+        return cls(allowed=True, fields=None, excluded_fields=excluded_set, reason=reason)
+    
+    @classmethod
+    def deny(cls, reason: str = None):
+        """Deny access"""
+        return cls(allowed=False, fields=set(), excluded_fields=None, reason=reason)
+    
+    @classmethod
+    def deny_all(cls, reason: str = None):
+        """Explicitly deny all fields (same as deny but more explicit)"""
+        return cls(allowed=False, fields=set(), excluded_fields=None, reason=reason)
+    
+    def get_fields(self, all_field_names: Set[str]) -> Set[str]:
+        """Get the actual field names, resolving patterns to concrete fields"""
+        if not self.allowed:
+            return set()
+        
+        # If specific fields are set, use those
+        if self.fields is not None:
+            return self.fields & all_field_names  # Intersection to ensure valid fields
+        
+        # If no specific fields but we have exclusions, return all except excluded
+        if self.excluded_fields is not None:
+            # Safety check: ensure excluded_fields is a set
+            if isinstance(self.excluded_fields, str):
+                excluded_set = {self.excluded_fields}
+            elif isinstance(self.excluded_fields, (list, tuple)):
+                excluded_set = set(self.excluded_fields)
+            else:
+                excluded_set = self.excluded_fields
+            return all_field_names - excluded_set
+        
+        # Default: all fields
+        return all_field_names
+    
+    def __str__(self):
+        """String representation for debugging"""
+        if not self.allowed:
+            return f"DENIED: {self.reason or 'No reason given'}"
+        
+        if self.fields is not None:
+            field_list = sorted(self.fields) if self.fields else []
+            return f"ALLOWED fields {field_list}: {self.reason or 'No reason given'}"
+        
+        if self.excluded_fields is not None:
+            excluded_list = sorted(self.excluded_fields) if self.excluded_fields else []
+            return f"ALLOWED all except {excluded_list}: {self.reason or 'No reason given'}"
+        
+        return f"ALLOWED all fields: {self.reason or 'No reason given'}"
 
 
 class LexModel(LifecycleModel):
     """
-    An abstract base model that provides a flexible, override-driven permission system.
-
-    Key Architectural Changes:
-    - **`can_read` Returns Fields**: The `can_read` method is the source of truth
-      for field-level security, returning a set of visible field names.
-    - **`can_export` Returns Fields**: This method mirrors the `can_read` logic
-      for data exports, returning a set of fields the user is allowed to export.
-    - **Override Pattern**: All `can_*` methods are designed to be
-      overridden in subclasses for custom business logic, with a fallback to
-      Keycloak permissions.
+    Abstract base model with clean, user-friendly authorization system.
+    
+    ## Authorization Methods (Override these in your models):
+    
+    **Field-Level Methods** (return PermissionResult):
+    - `permission_read(user_context)` - Controls which fields user can view
+    - `permission_edit(user_context)` - Controls which fields user can modify  
+    - `permission_export(user_context)` - Controls which fields user can export
+    
+    **Action-Level Methods** (return bool):
+    - `permission_create(user_context)` - Can user create new instances?
+    - `permission_delete(user_context)` - Can user delete this instance?
+    - `permission_list(user_context)` - Can user list instances of this model?
+    
+    ## Example Usage:
+    ```python
+    class MyModel(LexModel):
+        sensitive_field = models.CharField(max_length=100)
+        
+        def permission_read(self, user_context):
+            if user_context.is_superuser:
+                return PermissionResult.allow_all("Superuser access")
+            
+            if 'admin' in user_context.groups:
+                return PermissionResult.allow_all("Admin group access")
+            
+            # Regular users can't see sensitive data
+            allowed_fields = {'id', 'name', 'created_at'}
+            return PermissionResult.allow_fields(allowed_fields, "Regular user")
+        
+        def permission_delete(self, user_context):
+            return user_context.is_superuser or 'admin' in user_context.groups
+    ```
+    
+    ## Keycloak Integration:
+    If you don't override these methods, they fall back to Keycloak scopes.
+    You can also use `user_context.keycloak_scopes` in your custom logic.
     """
 
     created_by = models.TextField(null=True, blank=True, editable=False)
@@ -219,120 +361,209 @@ class LexModel(LifecycleModel):
     def untrack(self):
         self.skip_history_when_saving = True
 
-    def authorize(self, op: Op, request) -> PermissionResult:
-        scopes = self._get_keycloak_permissions(request)
-        all_fields = frozenset(f.name for f in self._meta.fields)
-
-        if op in ("read", "export", "edit"):
-            key = {"read": "read", "export": "export", "edit": "edit"}[op]
-            if key in scopes:
-                return PermissionResult(True, all_fields)
-            return PermissionResult(False, frozenset())
-        elif op in ("create", "delete", "list"):
-            key = {"create": "create", "delete": "delete", "list": "list"}[op]
-            return PermissionResult(key in scopes)
-        else:
-            return PermissionResult(False)
+    # =============================================================================
+    # AUTHORIZATION METHODS - Override these in your models for custom logic
+    # =============================================================================
     
-    
-    def allow_read(self, request) -> bool:
-        return self.authorize("read", request).allowed
-
-    def readable_fields(self, request) -> FrozenSet[str]:
-        return self.authorize("read", request).fields
-
-    def allow_edit(self, request) -> bool:
-        return self.authorize("edit", request).allowed
-
-    def editable_fields(self, request) -> FrozenSet[str]:
-        return self.authorize("edit", request).fields
-
-    def allow_export(self, request) -> bool:
-        return self.authorize("export", request).allowed
-
-    def exportable_fields(self, request) -> FrozenSet[str]:
-        return self.authorize("export", request).fields
-
-    def allow_create(self, request) -> bool:
-        return self.authorize("create", request).allowed
-
-    def allow_delete(self, request) -> bool:
-        return self.authorize("delete", request).allowed
-
-    def allow_list(self, request) -> bool:
-        return self.authorize("list", request).allowed
-
-    def _get_keycloak_permissions(self, request):
+    def permission_read(self, user_context: UserContext) -> PermissionResult:
         """
-        Private helper to get the cached UMA permissions for this model/instance
-        from the request object.
+        Override this method to control which fields users can read.
+        
+        Args:
+            user_context: Clean user information and Keycloak scopes
+            
+        Returns:
+            PermissionResult with allowed fields
+            
+        Default: Uses Keycloak 'read' scope for all fields
         """
-        if not request or not hasattr(request, 'user_permissions'):
-            return set()
 
-        resource_name = f"{self._meta.app_label}.{self.__class__.__name__}"
-        all_perms = request.user_permissions
+        return PermissionResult.allow_all("Keycloak read scope")
+        if "read" in user_context.keycloak_scopes:
+            return PermissionResult.allow_all("Keycloak read scope")
+        return PermissionResult.deny("No read permission")
 
-        model_scopes = set()
-        record_scopes = set()
+    def permission_edit(self, user_context: UserContext) -> PermissionResult:
+        """
+        Override this method to control which fields users can edit.
 
-        for perm in all_perms:
-            if perm.get("rsname") == resource_name:
-                if self.pk and str(self.pk) == perm.get("resource_set_id"):
-                    record_scopes.update(perm.get("scopes", []))
-                elif perm.get("resource_set_id") is None:
-                    model_scopes.update(perm.get("scopes", []))
+        Args:
+            user_context: Clean user information and Keycloak scopes
 
-        return record_scopes if record_scopes else model_scopes
+        Returns:
+            PermissionResult with editable fields
 
-    # --- Field-Level Permission Methods ---
+        Default: Uses Keycloak 'edit' scope for all fields
+        """
+        return PermissionResult.allow_all()
+        if "edit" in user_context.keycloak_scopes:
+            return PermissionResult.allow_all("Keycloak edit scope")
+        return PermissionResult.deny("No edit permission")
 
+    def permission_export(self, user_context: UserContext) -> PermissionResult:
+        """
+        Override this method to control which fields users can export.
 
+        Args:
+            user_context: Clean user information and Keycloak scopes
+
+        Returns:
+            PermissionResult with exportable fields
+
+        Default: Uses Keycloak 'export' scope for all fields
+        """
+        if "export" in user_context.keycloak_scopes:
+            return PermissionResult.allow_all("Keycloak export scope")
+        return PermissionResult.deny("No export permission")
+
+    def permission_create(self, user_context: UserContext) -> bool:
+        """
+        Override this method to control if users can create instances.
+
+        Args:
+            user_context: Clean user information and Keycloak scopes
+
+        Returns:
+            True if user can create instances
+
+        Default: Uses Keycloak 'create' scope
+        """
+        return True
+        return "create" in user_context.keycloak_scopes
+
+    def permission_delete(self, user_context: UserContext) -> bool:
+        """
+        Override this method to control if users can delete this instance.
+
+        Args:
+            user_context: Clean user information and Keycloak scopes
+
+        Returns:
+            True if user can delete this instance
+
+        Default: Uses Keycloak 'delete' scope
+        """
+        return True
+        return "delete" in user_context.keycloak_scopes
+
+    def permission_list(self, user_context: UserContext) -> bool:
+        """
+        Override this method to control if users can list instances.
+
+        Args:
+            user_context: Clean user information and Keycloak scopes
+
+        Returns:
+            True if user can list instances
+
+        Default: Uses Keycloak 'list' scope
+        """
+        return True
+        return "list" in user_context.keycloak_scopes
+
+    # =============================================================================
+    # INTERNAL METHODS - Used by framework, don't override these
+    # =============================================================================
+
+    def _get_all_field_names(self) -> Set[str]:
+        """Get all field names for this model"""
+        return {f.name for f in self._meta.fields}
+
+    def _create_user_context(self, request) -> UserContext:
+        """Create UserContext from request"""
+        return UserContext.from_request(request, self)
+
+    # =============================================================================
+    # CONVENIENCE METHODS - Shortcuts for common permission patterns
+    # =============================================================================
+
+    def allow_all_if_superuser(self, user_context: UserContext, reason: str = "Superuser access") -> Optional[PermissionResult]:
+        """Helper: Allow all fields if user is superuser, otherwise return None"""
+        if user_context.is_superuser:
+            return PermissionResult.allow_all(reason)
+        return None
+
+    def allow_all_if_in_groups(self, user_context: UserContext, groups: Union[str, Set[str]], reason: str = None) -> Optional[PermissionResult]:
+        """Helper: Allow all fields if user is in specified groups, otherwise return None"""
+        if isinstance(groups, str):
+            groups = {groups}
+
+        if user_context.groups & groups:  # Intersection check
+            reason = reason or f"User in groups: {', '.join(groups)}"
+            return PermissionResult.allow_all(reason)
+        return None
+
+    def allow_fields_if_owner(self, user_context: UserContext, owner_field: str = 'owner', fields: Union[Set[str], list] = None, excluded_fields: Union[Set[str], list] = None, reason: str = None) -> Optional[PermissionResult]:
+        """Helper: Allow fields if user owns this record, otherwise return None"""
+        if not user_context.is_authenticated:
+            return None
+
+        owner = getattr(self, owner_field, None)
+        if owner == user_context.user:
+            reason = reason or "Record owner"
+            if fields is not None:
+                return PermissionResult.allow_fields(fields, reason)
+            elif excluded_fields is not None:
+                return PermissionResult.allow_all_except(excluded_fields, reason)
+            else:
+                return PermissionResult.allow_all(reason)
+        return None
+
+    def keycloak_fallback(self, user_context: UserContext, scope: str) -> PermissionResult:
+        """Helper: Use Keycloak scope as fallback permission"""
+        if scope in user_context.keycloak_scopes:
+            return PermissionResult.allow_all(f"Keycloak {scope} scope")
+        return PermissionResult.deny(f"No {scope} permission")
+
+    def allow_all_except_sensitive(self, user_context: UserContext, sensitive_fields: Union[Set[str], list] = None, reason: str = None) -> PermissionResult:
+        """Helper: Allow all fields except sensitive ones (common pattern)"""
+        if sensitive_fields is None:
+            sensitive_fields = {'password', 'social_security', 'ssn', 'credit_card', 'bank_account'}
+        return PermissionResult.allow_all_except(sensitive_fields, reason or "Excluding sensitive fields")
+
+    def allow_public_fields(self, user_context: UserContext, reason: str = None) -> PermissionResult:
+        """Helper: Allow only commonly public fields"""
+        public_fields = {'id', 'name', 'title', 'description', 'created_at', 'updated_at'}
+        return PermissionResult.allow_fields(public_fields, reason or "Public fields only")
+
+    def allow_basic_fields(self, user_context: UserContext, reason: str = None) -> PermissionResult:
+        """Helper: Allow basic identifying fields"""
+        basic_fields = {'id', 'name', 'email', 'created_at'}
+        return PermissionResult.allow_fields(basic_fields, reason or "Basic fields only")
+
+    # Legacy methods for backward compatibility - these call the new permission methods
     def can_read(self, request) -> Set[str]:
-        """
-        Determines which fields of this instance are visible to the current user.
-        Consumed by the serializer to control API output.
-
-        Returns: A set of visible field names.
-        """
-        record_scopes = self._get_keycloak_permissions(request)
-        if "read" in record_scopes:
-            return {f.name for f in self._meta.fields}
-        return set()
-
-    def can_export(self, request) -> Set[str]:
-        """
-        Determines which fields of this instance are exportable for the current user.
-        Should be called by your data export logic.
-
-        Returns: A set of exportable field names.
-        """
-        record_scopes = self._get_keycloak_permissions(request)
-        if "export" in record_scopes:
-            return {f.name for f in self._meta.fields}
-        return set()
-
-    # --- Action-Based Permission Methods ---
-
-    def can_create(self, request) -> bool:
-        """Checks for the 'create' scope in Keycloak."""
-        # return True
-        return "create" in self._get_keycloak_permissions(request)
+        """Legacy method - use permission_read instead"""
+        user_context = self._create_user_context(request)
+        result = self.permission_read(user_context)
+        return result.get_fields(self._get_all_field_names())
 
     def can_edit(self, request) -> Set[str]:
-        record_scopes = self._get_keycloak_permissions(request)
-        if "edit" in record_scopes:
-            return {f.name for f in self._meta.fields}
-        return set()
+        """Legacy method - use permission_edit instead"""
+        user_context = self._create_user_context(request)
+        result = self.permission_edit(user_context)
+        return result.get_fields(self._get_all_field_names())
 
+    def can_export(self, request) -> Set[str]:
+        """Legacy method - use permission_export instead"""
+        user_context = self._create_user_context(request)
+        result = self.permission_export(user_context)
+        return result.get_fields(self._get_all_field_names())
+
+    def can_create(self, request) -> bool:
+        """Legacy method - use permission_create instead"""
+        user_context = self._create_user_context(request)
+        return self.permission_create(user_context)
 
     def can_delete(self, request) -> bool:
-        """Checks for the 'delete' scope in Keycloak."""
-        return "delete" in self._get_keycloak_permissions(request)
-    #
+        """Legacy method - use permission_delete instead"""
+        user_context = self._create_user_context(request)
+        return self.permission_delete(user_context)
+
     def can_list(self, request) -> bool:
-        """Checks for the 'list' scope in Keycloak."""
-        return "list" in self._get_keycloak_permissions(request)
+        """Legacy method - use permission_list instead"""
+        user_context = self._create_user_context(request)
+        return self.permission_list(user_context)
 
     
     def streamlit_main(self, user=None):

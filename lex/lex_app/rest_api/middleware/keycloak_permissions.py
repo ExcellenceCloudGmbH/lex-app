@@ -1,7 +1,7 @@
 # lex_app/rest_api/middleware.py
 
 import logging
-from lex.lex_app.rest_api.views.authentication.KeycloakManager import KeycloakManager
+from lex_app.rest_api.views.authentication.KeycloakManager import KeycloakManager
 
 # It's good practice to have a dedicated logger for your middleware
 logger = logging.getLogger(__name__)
@@ -43,6 +43,9 @@ class KeycloakPermissionsMiddleware:
         This method is called for each request. It processes the request before it
         reaches the view and other middleware.
         """
+        # First, clean up any None tokens to prevent JWT parsing errors
+        self.cleanup_invalid_tokens(request)
+        
         # We only need to fetch permissions for authenticated users who have a Keycloak token.
         # The `hasattr` check provides a safeguard in case the user object is not standard.
         if (hasattr(request, "user") and
@@ -74,3 +77,38 @@ class KeycloakPermissionsMiddleware:
         response = self.get_response(request)
 
         return response
+
+    def cleanup_invalid_tokens(self, request):
+        """Remove None or empty tokens from session to prevent JWT parsing errors."""
+        session_changed = False
+        
+        # List of token keys that should not be None
+        token_keys = [
+            'oidc_id_token',
+            'oidc_access_token', 
+            'oidc_refresh_token',
+        ]
+        
+        for key in token_keys:
+            if key in request.session:
+                token_value = request.session[key]
+                if token_value is None or token_value == '' or not isinstance(token_value, str):
+                    logger.warning(f"Removing invalid token from session: {key} = {repr(token_value)}")
+                    del request.session[key]
+                    session_changed = True
+        
+        # If we removed any tokens, also clean up related session data
+        if session_changed:
+            related_keys = [
+                'oidc_access_expires_at',
+                'oidc_expires_at',
+                'oidc_logout_state',
+            ]
+            
+            for key in related_keys:
+                if key in request.session:
+                    logger.debug(f"Removing related session data: {key}")
+                    del request.session[key]
+            
+            request.session.save()
+            logger.info("Cleaned up invalid tokens from session")

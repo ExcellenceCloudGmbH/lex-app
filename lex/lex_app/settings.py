@@ -93,7 +93,9 @@ else:
 STORAGES = {
     "default": {
         "BACKEND": "lex_app.CustomDefaultStorage.CustomDefaultStorage",
-    }
+    },
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+
 }
 
 SHAREPOINT_APP_CLIENT_ID = os.getenv("SHAREPOINT_APP_CLIENT_ID")
@@ -237,7 +239,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
-    "lex_app.rest_api.middleware.KeycloakPermissionsMiddleware",
+    "lex_app.rest_api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
     "oauth2_authcodeflow.middleware.LoginRequiredMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
