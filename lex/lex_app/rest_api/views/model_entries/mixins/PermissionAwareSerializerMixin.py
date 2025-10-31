@@ -64,21 +64,42 @@ class PermissionAwareSerializerMixin:
         This is the main entry point for the permission check, overriding
         DRF's default to perform checks *before* field validation.
         """
+        from rest_framework.exceptions import PermissionDenied
+        from rest_framework import serializers
+        
         request = self.context.get('request')
         instance = self.instance
 
         if instance and request and data:
-            if not hasattr(instance, 'can_edit'):
-                return super().run_validation(data)
+            # Get editable fields using new system if available
+            editable_backend_fields = set()
+            
+            try:
+                if hasattr(instance, 'permission_edit'):
+                    from lex.lex_app.lex_models.LexModel import UserContext
+                    user_context = UserContext.from_request(request, instance)
+                    result = instance.permission_edit(user_context)
+                    if result.allowed:
+                        all_fields = {f.name for f in instance._meta.fields}
+                        editable_backend_fields = result.get_fields(all_fields)
+                elif hasattr(instance, 'can_edit'):
+                    editable_backend_fields = instance.can_edit(request)
+                    if not isinstance(editable_backend_fields, set):
+                        editable_backend_fields = set()
+                else:
+                    # Default to allow all fields if no permission method
+                    editable_backend_fields = {f.name for f in instance._meta.fields}
+            except Exception:
+                # Allow all fields by default on error
+                editable_backend_fields = {f.name for f in instance._meta.fields}
 
-            model_field_names = self._get_model_field_names()
-            non_editable_fields = self._get_non_editable_fields()
-            editable_backend_fields = instance.can_edit(request)
-
-            if not isinstance(editable_backend_fields, set):
+            if not editable_backend_fields:
                 raise PermissionDenied(
                     f"You do not have permission to edit this {instance.__class__.__name__}."
                 )
+
+            model_field_names = self._get_model_field_names()
+            non_editable_fields = self._get_non_editable_fields()
 
             for frontend_field_name, new_raw_value in data.items():
                 if frontend_field_name.startswith('lexReserved'):
@@ -117,11 +138,27 @@ class PermissionAwareSerializerMixin:
 
         elif not instance and request:
             model_class = self.Meta.model
-            if hasattr(model_class, 'can_create'):
-                if not model_class().can_create(request):
-                     raise PermissionDenied(
-                        f"You do not have permission to create a {model_class.__name__}."
-                    )
+            can_create = False
+            
+            try:
+                temp_instance = model_class()
+                if hasattr(temp_instance, 'permission_create'):
+                    from lex.lex_app.lex_models.LexModel import UserContext
+                    user_context = UserContext.from_request(request, temp_instance)
+                    can_create = temp_instance.permission_create(user_context)
+                elif hasattr(temp_instance, 'can_create'):
+                    can_create = temp_instance.can_create(request)
+                else:
+                    # Default to allow if no permission method
+                    can_create = True
+            except Exception:
+                # Allow by default on error
+                can_create = True
+                
+            if not can_create:
+                raise PermissionDenied(
+                    f"You do not have permission to create a {model_class.__name__}."
+                )
 
         return super().run_validation(data)
 

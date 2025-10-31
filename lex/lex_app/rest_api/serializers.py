@@ -47,49 +47,48 @@ class LexSerializer(serializers.ModelSerializer):
     # TODO: Just allow for Historical ?
     def get_lex_reserved_scopes(self, instance):
         """
-        Safely compute per-record scopes. If any of the can_* hooks are missing
-        or fail, return an empty dict (no scopes).
+        Compute per-record scopes using the new permission system.
         """
         request = self.context.get('request')
         if not request:
             return {}
 
         try:
-            # Ensure hooks exist and are callable; otherwise return empty.
-            for method_name in ('can_edit', 'can_delete', 'can_export'):
-                if not hasattr(instance, method_name) or not callable(getattr(instance, method_name)):
-                    return {}
+            # Check if this is a LexModel instance
+            if not hasattr(instance, 'permission_edit'):
+                return {}
 
-            # Call hooks defensively.
-            edit_raw = instance.can_edit(request)
-            delete_raw = instance.can_delete(request)
-            export_raw = instance.can_export(request)
-
-            # Normalize edit to a set of field-names.
-            if isinstance(edit_raw, (set, list, tuple)):
-                edit_set = set(map(str, edit_raw))
-            else:
-                # Unexpected type → treat as no editable fields.
-                edit_set = set()
-
-            # Best-effort: remove internal LexModel fields and id.
+            # Create user context
+            from lex.lex_app.lex_models.LexModel import UserContext
+            user_context = UserContext.from_request(request, instance)
+            
+            # Get all field names for this model
+            all_fields = {f.name for f in instance._meta.fields}
+            
+            # Get permissions using new system
+            edit_result = instance.permission_edit(user_context)
+            delete_allowed = instance.permission_delete(user_context)
+            export_result = instance.permission_export(user_context)
+            
+            # Get editable fields, excluding internal fields
+            edit_fields = edit_result.get_fields(all_fields)
+            
+            # Remove internal LexModel fields and id
             try:
+                from lex.lex_app.lex_models.LexModel import LexModel
                 lexmodel_fields = {f.name for f in LexModel._meta.fields}
             except Exception:
                 lexmodel_fields = set()
-
-            edit_set -= (lexmodel_fields | {'id'})
-
-            # Always return a list (DRF-friendly, JSON-serializable), sorted for stability.
-            edit_list = sorted(edit_set)
-
+            
+            edit_fields -= (lexmodel_fields | {'id'})
+            
             return {
-                "edit": edit_list,
-                "delete": bool(delete_raw),
-                "export": bool(export_raw),
+                "edit": sorted(edit_fields),
+                "delete": bool(delete_allowed),
+                "export": bool(export_result.allowed),
             }
         except Exception:
-            # Any unexpected error → hide scopes entirely.
+            # Any unexpected error → hide scopes entirely
             return {}
     @classmethod
     def _build_shadow_instance(cls, model_class: type[Model], payload: dict) -> Model | None:
@@ -98,7 +97,14 @@ class LexSerializer(serializers.ModelSerializer):
             init_kwargs = {}
             for key, val in (payload or {}).items():
                 if key in field_map:
-                    init_kwargs[key] = cls._parse_value_for_field(field_map[key], val)
+                    field = field_map[key]
+                    parsed_val = cls._parse_value_for_field(field, val)
+                    # For foreign key fields, use the _id suffix
+                    from django.db.models import ForeignKey
+                    if isinstance(field, ForeignKey) and not key.endswith('_id'):
+                        init_kwargs[f"{key}_id"] = parsed_val
+                    else:
+                        init_kwargs[key] = parsed_val
             # Ensure pk mapping if present in payload
             pk_name = model_class._meta.pk.name
             if pk_name in payload:
@@ -108,17 +114,80 @@ class LexSerializer(serializers.ModelSerializer):
             return None
 
     
+    @classmethod
+    def _filter_foreign_key_relations(cls, request, model_class, payload: dict) -> dict:
+        """
+        Filter foreign key relationships in payload based on individual permissions.
+        
+        Args:
+            request: Django request object
+            model_class: The main model class
+            payload: The audit log payload dictionary
+            
+        Returns:
+            Filtered payload with unauthorized foreign key relations removed
+        """
+        if not payload:
+            return payload
+            
+        filtered_payload = payload.copy()
+        
+        # Get field map for the model
+        field_map = {f.name: f for f in model_class._meta.concrete_fields}
+        
+        for field_name, field_value in payload.items():
+            if field_name in field_map:
+                field = field_map[field_name]
+                
+                # Check if this is a foreign key field with dictionary representation
+                from django.db.models import ForeignKey
+                if isinstance(field, ForeignKey) and isinstance(field_value, dict):
+                    related_model = field.related_model
+                    
+                    # Try to get the related object ID
+                    related_id = field_value.get('id')
+                    if related_id is not None:
+                        try:
+                            # Get the actual related object
+                            related_obj = related_model.objects.get(pk=related_id)
+                            
+                            # Check if user can read this related object
+                            if hasattr(related_obj, 'permission_read'):
+                                from lex.lex_app.lex_models.LexModel import UserContext
+                                user_context = UserContext.from_request(request, related_obj)
+                                result = related_obj.permission_read(user_context)
+                                
+                                # If permission is denied, remove this field from payload
+                                if not result.allowed:
+                                    filtered_payload.pop(field_name, None)
+                                    continue
+                            elif hasattr(related_obj, 'can_read'):
+                                # Fallback to legacy method
+                                readable_fields = related_obj.can_read(request)
+                                if isinstance(readable_fields, (set, list, tuple)) and len(readable_fields) == 0:
+                                    filtered_payload.pop(field_name, None)
+                                    continue
+                                elif not readable_fields:
+                                    filtered_payload.pop(field_name, None)
+                                    continue
+                                    
+                        except (related_model.DoesNotExist, Exception):
+                            # If we can't find or check the related object, keep it (preserve existing behavior)
+                            pass
+        
+        return filtered_payload
+
     @staticmethod
-    def _resolve_target_model(auditlog) -> type[Model] | None:
+    def _resolve_target_model(audit_log) -> type[Model] | None:
         # Prefer content_type if present
-        ct = getattr(auditlog, "content_type", None)
+        ct = getattr(audit_log, "content_type", None)
         if ct:
             try:
                 return ct.model_class()
             except Exception:
                 pass
         # Fallback: resolve from resource string
-        resource = getattr(auditlog, "resource", None)
+        resource = getattr(audit_log, "resource", None)
         if resource:
             res = resource.lower()
             for model in apps.get_models():
@@ -130,6 +199,15 @@ class LexSerializer(serializers.ModelSerializer):
     def _parse_value_for_field(field, value):
         if value is None:
             return None
+        
+        # Handle foreign key relationships stored as dictionaries
+        from django.db.models import ForeignKey
+        if isinstance(field, ForeignKey) and isinstance(value, dict):
+            # Extract the ID from foreign key dictionary representation
+            if 'id' in value:
+                return value['id']  # Return just the ID for foreign key assignment
+            return None
+        
         try:
             if isinstance(field, DateTimeField):
                 # Accept ISO-like strings captured in payload
@@ -174,17 +252,23 @@ class LexSerializer(serializers.ModelSerializer):
                 if isinstance(payload, dict):
                     model_class = self._resolve_target_model(instance)
                     if model_class is not None:
-                        shadow = self._build_shadow_instance(model_class, payload)
+                        # First filter foreign key relationships based on individual permissions
+                        filtered_payload = self._filter_foreign_key_relations(request, model_class, payload)
+                        
+                        shadow = self._build_shadow_instance(model_class, filtered_payload)
                         if shadow is not None and hasattr(shadow, 'can_read'):
                             target_visible = shadow.can_read(request) or set()
                             # Prune payload by target model visibility; keep identifiers
                             keep_always = {'id', 'id_field', SHORT_DESCR_NAME}
-                            pruned = {k: v for k, v in payload.items() if k in target_visible or k in keep_always}
-                            if "updates" in payload:
-                                pruned_updates = {k: v for k, v in payload['updates'].items() if k in target_visible or k in keep_always}
+                            pruned = {k: v for k, v in filtered_payload.items() if k in target_visible or k in keep_always}
+                            if "updates" in filtered_payload:
+                                pruned_updates = {k: v for k, v in filtered_payload['updates'].items() if k in target_visible or k in keep_always}
                                 pruned['updates'] = pruned_updates
 
                             representation['payload'] = pruned
+                        else:
+                            # If we can't build shadow instance, at least apply foreign key filtering
+                            representation['payload'] = filtered_payload
         except Exception:
             # Preserve representation on any failure to match existing allow-by-default semantics
             pass

@@ -175,7 +175,7 @@ class AuditLogBatchManager:
                 if self.success_updates:
                     try:
                         success_updated = AuditLogStatus.objects.filter(
-                            auditlog_id__in=self.success_updates
+                            audit_log_id__in=self.success_updates
                         ).update(status='success')
                         updated_count += success_updated
                         
@@ -204,7 +204,7 @@ class AuditLogBatchManager:
                         for audit_log_id, error_msg in self.failure_updates:
                             try:
                                 count = AuditLogStatus.objects.filter(
-                                    auditlog_id=audit_log_id
+                                    audit_log_id=audit_log_id
                                 ).update(status='failure', error_traceback=error_msg)
                                 failure_updated += count
                             except Exception as e:

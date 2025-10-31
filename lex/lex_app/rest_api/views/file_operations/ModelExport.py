@@ -22,15 +22,33 @@ class ModelExportView(GenericAPIView):
 
     def get_exportable_fields_for_object(self, obj, request):
         """Get the set of exportable fields for a single object"""
-        # TODO: Just allow for Historical ?
-        if not hasattr(obj, 'can_export'):
-            return {f.name for f in obj._meta.fields}
-
-        exportable_fields = obj.can_export(request)
-        # Ensure it's a set and return empty set if None
-        if exportable_fields is None:
-            return set()
-        return (set(exportable_fields) if not isinstance(exportable_fields, set) else exportable_fields).union({'id', 'created_by', 'edited_by'})
+        try:
+            # Use new permission system if available
+            if hasattr(obj, 'permission_export'):
+                from lex.lex_app.lex_models.LexModel import UserContext
+                user_context = UserContext.from_request(request, obj)
+                result = obj.permission_export(user_context)
+                if result.allowed:
+                    all_fields = {f.name for f in obj._meta.fields}
+                    exportable_fields = result.get_fields(all_fields)
+                else:
+                    exportable_fields = set()
+            # Fallback to legacy method
+            elif hasattr(obj, 'can_export'):
+                exportable_fields = obj.can_export(request)
+                if exportable_fields is None:
+                    exportable_fields = set()
+                elif not isinstance(exportable_fields, set):
+                    exportable_fields = set(exportable_fields)
+            else:
+                # Default to all fields if no permission method
+                exportable_fields = {f.name for f in obj._meta.fields}
+        except Exception:
+            # Default to all fields on error
+            exportable_fields = {f.name for f in obj._meta.fields}
+        
+        # Always include basic identifying fields
+        return exportable_fields.union({'id', 'created_by', 'edited_by'})
 
     def filter_and_mask_data_for_export(self, queryset: QuerySet, request) -> pd.DataFrame:
         """

@@ -9,12 +9,32 @@ class DestroyOneWithPayloadMixin:
     """
 
     def destroy(self, *args, **kwargs):
-
+        from rest_framework import response, status
+        
         instance = self.get_object()
-        if not instance.can_delete({}):
+        request = self.request
+        
+        # Check delete permission using new system
+        can_delete = False
+        try:
+            if hasattr(instance, 'permission_delete'):
+                from lex.lex_app.lex_models.LexModel import UserContext
+                user_context = UserContext.from_request(request, instance)
+                can_delete = instance.permission_delete(user_context)
+            elif hasattr(instance, 'can_delete'):
+                can_delete = instance.can_delete(request)
+            else:
+                # Default to allow if no permission method
+                can_delete = True
+        except Exception:
+            # Allow by default on permission check error
+            can_delete = True
+            
+        if not can_delete:
             return response.Response({
-                    "message": f"You are not authorized to this record in {instance.__class__.__name__}"
-                },status=status.HTTP_400_BAD_REQUEST)
+                "message": f"You are not authorized to delete this record in {instance.__class__.__name__}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
         serializer = self.get_serializer(instance)
         super().destroy(*args, **kwargs)
         return response.Response(serializer.data, status=status.HTTP_200_OK)

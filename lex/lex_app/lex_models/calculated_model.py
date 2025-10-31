@@ -138,7 +138,7 @@ from django.db.models.base import ModelBase
 from lex.lex_app import settings
 from lex.lex_app.rest_api.context import operation_context
 from lex.lex_app.lex_models.LexErrors import *
-from lex_app.lex_models.LexModel import LexModel
+from lex.lex_app.lex_models.LexModel import LexModel
 
 if TYPE_CHECKING:
     pass  # CalculatedModelMixin is defined in this file

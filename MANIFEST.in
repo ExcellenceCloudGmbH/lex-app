@@ -1,3 +1,5 @@
 recursive-include lex/react *
 recursive-include lex/assets *
 include requirements*.txt
+include generate_pycharm_configs.py
+include PYCHARM_CONFIGS.md
