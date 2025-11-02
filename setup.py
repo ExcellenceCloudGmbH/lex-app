@@ -2,7 +2,6 @@
 import os
 import shutil
 import sys
-import subprocess
 from pathlib import Path
 
 from setuptools import setup, find_packages
@@ -11,77 +10,113 @@ from setuptools.command.install import install
 with open("requirements.txt") as f:
     install_requires = f.read().splitlines()
 
-PROJECT_MARKERS = {'.git', 'pyproject.toml', 'setup.cfg', 'manage.py', 'requirements.txt', '.idea', '.vscode'}
-
-def _resolve_project_root(default=None):
-    base = Path(default or os.getcwd()).resolve()
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(base),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=True,
-        )
-        return out.stdout.strip()
-    except Exception:
-        pass
-    for p in [base] + list(base.parents):
-        if any((p / m).exists() for m in PROJECT_MARKERS):
-            return str(p)
-    return str(base)
-
 class CustomInstallCommand(install):
     def run(self):
+        # First, run the standard installation
         install.run(self)
+
+        # Now handle the custom installation of other_directory
         self.move_other_directory()
+
+        # Generate PyCharm run configurations
         self.generate_pycharm_configs()
-        self.generate_env_file()
 
     def move_other_directory(self):
+        # Define the source and target paths
         source = os.path.join(os.path.dirname(__file__), 'lex', 'generic_app')
         target = os.path.join(os.path.dirname(self.install_lib), 'generic_app')
+
+        # Ensure the package_data entry points to the correct location
         if os.path.exists(target):
-            shutil.rmtree(target)
+            shutil.rmtree(target)  # Remove the existing directory if it exists
         shutil.move(source, target)
         print(f'Moved other_directory to {target}')
 
-    def _project_root(self):
-        return _resolve_project_root(os.getcwd())
-
-    def generate_env_file(self):
-        project_root = self._project_root()
-        env_path = os.path.join(project_root, '.env')
-        if os.path.exists(env_path):
-            print(f'.env already exists at {env_path}, not modifying.')
-            return
-        content = """KEYCLOAK_URL=https://auth.excellence-cloud.dev
-KEYCLOAK_REALM=
-OIDC_RP_CLIENT_ID=
-OIDC_RP_CLIENT_SECRET=
-OIDC_RP_CLIENT_UUID=
-"""
-        with open(env_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f'Created .env at {env_path}')
-
     def generate_pycharm_configs(self):
-        project_root = self._project_root()
+        """Generate PyCharm run configurations in the project root"""
+        # Find the project root (where pip install was run from)
+        project_root = None
+
+        # Strategy 1: Check for PROJECT_ROOT env var
+        project_root = os.environ.get('PROJECT_ROOT')
+
+        # Strategy 2: If installed with -e, try to find from current working directory
+        if not project_root:
+            cwd = os.getcwd()
+            # Check if cwd looks like a project root
+            if any((Path(cwd) / marker).exists() for marker in ['.git', 'manage.py', 'requirements.txt', '.env']):
+                project_root = cwd
+
+        # Strategy 3: Try parent directories of install location
+        if not project_root and hasattr(self, 'install_lib'):
+            search_path = Path(self.install_lib)
+            # Search up to 5 levels up for project markers
+            for parent in list(search_path.parents)[:5]:
+                if any((parent / marker).exists() for marker in ['.git', 'manage.py', 'requirements.txt']):
+                    project_root = str(parent)
+                    break
+
+        if not project_root:
+            print("\n" + "=" * 70)
+            print("Could not automatically determine project root.")
+            print("To generate PyCharm configurations, either:")
+            print("  1. Run: PROJECT_ROOT=$(pwd) pip install -e .")
+            print("  2. Or run after install: lex-generate-configs")
+            print("=" * 70 + "\n")
+            return
+
+        # Check if we're in a virtual environment and adjust accordingly
+        if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+            # We're in a virtual environment, try to find the actual project root
+            current_dir = Path(project_root)
+            # Look for common project indicators
+            for parent in [current_dir] + list(current_dir.parents):
+                if any((parent / indicator).exists() for indicator in ['.env', 'manage.py', '.git', 'requirements.txt']):
+                    project_root = str(parent)
+                    break
+
         runconfigs_dir = os.path.join(project_root, '.run')
         os.makedirs(runconfigs_dir, exist_ok=True)
+
+        # Get the project name from the root directory
         project_name = os.path.basename(project_root)
+
+        # Path to .env file in project root
         env_file_path = os.path.join(project_root, '.env')
         env_files_option = f'<option name="ENV_FILES" value="{env_file_path}" />' if os.path.exists(env_file_path) else '<option name="ENV_FILES" value="" />'
+
+        # Configuration templates
         configs = {
-            'Init.run.xml': {'name': 'Init', 'parameters': 'Init'},
-            'Start.run.xml': {'name': 'Start', 'parameters': 'start --reload --loop asyncio lex_app.asgi:application'},
-            'Make_migrations.run.xml': {'name': 'Make migrations', 'parameters': 'makemigrations'},
-            'Migrate.run.xml': {'name': 'Migrate', 'parameters': 'migrate'},
-            'Streamlit.run.xml': {'name': 'Streamlit', 'parameters': 'streamlit run streamlit_app.py'},
-            'Create_DB.run.xml': {'name': 'Create DB', 'parameters': 'test lex.lex_app.logging.create_db.create_db --keepdb'},
-            'Flush_DB.run.xml': {'name': 'Flush DB', 'parameters': 'flush'},
+            'Init.run.xml': {
+                'name': 'Init',
+                'parameters': 'Init'
+            },
+            'Start.run.xml': {
+                'name': 'Start',
+                'parameters': 'start --reload --loop asyncio lex_app.asgi:application'
+            },
+            'Make_migrations.run.xml': {
+                'name': 'Make migrations',
+                'parameters': 'makemigrations'
+            },
+            'Migrate.run.xml': {
+                'name': 'Migrate',
+                'parameters': 'migrate'
+            },
+            'Streamlit.run.xml': {
+                'name': 'Streamlit',
+                'parameters': 'streamlit run streamlit_app.py'
+            },
+            'Create_DB.run.xml': {
+                'name': 'Create DB',
+                'parameters': 'test lex.lex_app.logging.create_db.create_db --keepdb'
+            },
+            'Flush_DB.run.xml': {
+                'name': 'Flush DB',
+                'parameters': 'flush'
+            }
         }
+
         for filename, config in configs.items():
             config_content = f'''<component name="ProjectRunConfigurationManager">
   <configuration default="false" name="{config['name']}" type="PythonConfigurationType" factoryName="Python">
@@ -142,5 +177,7 @@ setup(
     ],
     install_requires=install_requires,
     python_requires=">=3.6",
-    cmdclass={'install': CustomInstallCommand},
+    cmdclass={
+        'install': CustomInstallCommand,
+    },
 )
