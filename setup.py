@@ -36,8 +36,8 @@ class CustomInstallCommand(install):
     def run(self):
         install.run(self)
         self.move_other_directory()
-        self.generate_pycharm_configs()
-        self.generate_env_file()
+        # self.generate_pycharm_configs()
+        # self.generate_env_file()
 
     def move_other_directory(self):
         source = os.path.join(os.path.dirname(__file__), 'lex', 'generic_app')

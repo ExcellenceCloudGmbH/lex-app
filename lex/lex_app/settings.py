@@ -302,6 +302,10 @@ CACHES = {
 
 
 DATABASES = {
+    "local": {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR, f"{repo_name}.sqlite3"),
+    },
     "default": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
         "NAME": f"db_{repo_name}",
@@ -348,6 +352,8 @@ DATABASES = {
 DATABASE_DEPLOYMENT_TARGET = os.getenv("DATABASE_DEPLOYMENT_TARGET", "local")
 if DATABASE_DEPLOYMENT_TARGET != "local":
     DATABASES["default"] = DATABASES[DATABASE_DEPLOYMENT_TARGET]
+else:
+    DATABASES["default"] = DATABASES["local"]
 
 MIGRATION_MODULES = {}
 
