@@ -117,7 +117,6 @@ class LexAppConfig(GenericAppConfig):
         """
         from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
         _authentication_settings = LexAuthentication()
-        print(_authentication_settings.initial_data_load)
 
         test = ProcessAdminTestCase()
 

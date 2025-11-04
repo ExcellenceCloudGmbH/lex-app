@@ -8,26 +8,26 @@ from pathlib import Path
 import click
 import uvicorn
 
-# Defer all Django imports until after we know we need them
-# from django.core.management import get_commands, call_command
-# import django
+# Defer Django imports and setup until needed (NOT at import time)
+_DJANGO_READY = False
+_GET_COMMANDS = None
+_CALL_COMMAND = None
 
-LEX_APP_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent.as_posix()
+LEX_APP_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.as_posix()
 PROJECT_ROOT_DIR = Path(os.getcwd()).resolve()
 sys.path.append(LEX_APP_PACKAGE_ROOT)
 
-DEFAULT_ENV = """KEYCLOAK_URL=https://auth.excellence-cloud.dev
-KEYCLOAK_REALM=
-OIDC_RP_CLIENT_ID=
-OIDC_RP_CLIENT_SECRET=
-OIDC_RP_CLIENT_UUID=
-"""
+# KEEP: do not set DJANGO_SETTINGS_MODULE or call django.setup() here
+
+lex = click.Group(help="lex-app Command Line Interface")
+
+# ---------- Project root and configs (no Django) ----------
 
 MARKERS = {".git", "pyproject.toml", "setup.cfg", "manage.py", "requirements.txt", ".idea", ".vscode"}
 
 def find_project_root(start=None) -> str:
     base = Path(start or os.getcwd()).resolve()
-    # Try Git top-level
+    # Git root
     try:
         import subprocess
         out = subprocess.run(
@@ -41,11 +41,18 @@ def find_project_root(start=None) -> str:
         return out.stdout.strip()
     except Exception:
         pass
-    # Ascend looking for markers
+    # Marker ascent
     for p in [base] + list(base.parents):
         if any((p / m).exists() for m in MARKERS):
             return str(p)
     return str(base)
+
+DEFAULT_ENV = """KEYCLOAK_URL=https://auth.excellence-cloud.dev
+KEYCLOAK_REALM=
+OIDC_RP_CLIENT_ID=
+OIDC_RP_CLIENT_SECRET=
+OIDC_RP_CLIENT_UUID=
+"""
 
 def ensure_env_file(project_root: str, content: str = DEFAULT_ENV):
     p = Path(project_root) / ".env"
@@ -54,69 +61,63 @@ def ensure_env_file(project_root: str, content: str = DEFAULT_ENV):
     p.write_text(content, encoding="utf-8")
     return str(p), True
 
-def generate_pycharm_configs(project_root: str):
-    from generate_pycharm_configs import generate_pycharm_configs as gen
-    gen(project_root)
+def generate_configs(project_root: str):
+    from generate_pycharm_configs import generate_pycharm_configs
+    generate_pycharm_configs(project_root)
+    (Path(project_root) / Path("migrations")).mkdir(exist_ok=True, parents=True)
+    (Path(project_root) / Path("migrations") / Path("__init__.py")).touch(exist_ok=True)
 
-lex = click.Group(help="lex-app Command Line Interface")
+# ---------- Lazy Django bootstrap and dynamic forwarding ----------
 
 def _bootstrap_django():
-    # Import Django lazily and initialize settings for forwarded commands
+    global _DJANGO_READY, _GET_COMMANDS, _CALL_COMMAND
+    if _DJANGO_READY:
+        return _GET_COMMANDS, _CALL_COMMAND
+    # Configure env only now
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
     os.environ.setdefault("PROJECT_ROOT", PROJECT_ROOT_DIR.as_posix())
     os.environ.setdefault("LEX_APP_PACKAGE_ROOT", LEX_APP_PACKAGE_ROOT)
     import django
     django.setup()
-    from django.core.management import get_commands, call_command  # noqa: F401
-    return get_commands, call_command
+    from django.core.management import get_commands, call_command
+    _DJANGO_READY = True
+    _GET_COMMANDS = get_commands
+    _CALL_COMMAND = call_command
+    return _GET_COMMANDS, _CALL_COMMAND
 
 def _forward_to_django(command_name, args):
     get_commands, call_command = _bootstrap_django()
-    # Validate existence once; if unknown, let Django raise
     cmds = get_commands()
     if command_name not in cmds:
-        # Preserve legacy surface: Django error message
         from django.core.management import execute_from_command_line
         execute_from_command_line(["manage.py", command_name, *args])
         return
     call_command(command_name, *args)
 
-# Dynamic passthrough: generate Click commands for all Django commands at runtime
-@lex.command(name="__refresh__", hidden=True)  # internal helper
-def __refresh__():
-    _bootstrap_django()
-    click.echo("Django loaded")
-
 def _install_dynamic_commands():
+    # Only called for non-setup entry, so safe to initialize Django
     get_commands, _ = _bootstrap_django()
-    for command_name in get_commands().keys():
-        # Skip duplicates if reloaded
-        if command_name in lex.commands:
+    for name in get_commands().keys():
+        if name in lex.commands:
             continue
 
-        @lex.command(name=command_name, context_settings=dict(
+        @lex.command(name=name, context_settings=dict(
             ignore_unknown_options=True,
             allow_extra_args=True,
         ))
         @click.pass_context
-        def _cmd(ctx, __name=command_name):
+        def _cmd(ctx, __name=name):
             _forward_to_django(__name, ctx.args)
 
-# Public: keep your existing specialized commands
+# ---------- Existing specialized commands (unchanged behavior) ----------
 
-@lex.command(name="celery", context_settings=dict(
-    ignore_unknown_options=True,
-    allow_extra_args=True,
-))
+@lex.command(name="celery", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def celery(ctx):
     from celery.bin.celery import celery as celery_main
     celery_main(ctx.args)
 
-@lex.command(name="streamlit", context_settings=dict(
-    ignore_unknown_options=True,
-    allow_extra_args=True,
-))
+@lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
     from streamlit.web.cli import main as streamlit_main
@@ -134,42 +135,35 @@ def streamlit(ctx):
     t.start()
     streamlit_main(streamlit_args + ["--browser.serverPort", "8080"] or ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"])
 
-@lex.command(name="start", context_settings=dict(
-    ignore_unknown_options=True,
-    allow_extra_args=True,
-))
+@lex.command(name="start", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def start(ctx):
     os.environ.setdefault("CALLED_FROM_START_COMMAND", "True")
     uvicorn.main(ctx.args)
 
-@lex.command(name="init", context_settings=dict(
-    ignore_unknown_options=True,
-    allow_extra_args=True,
-))
+@lex.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def init(ctx):
-    # Forward canonical sequence without 'interactive' on createcachetable
     for command in ["createcachetable", "makemigrations", "migrate"]:
         _forward_to_django(command, ctx.args)
 
-# New: setup (does NOT bootstrap Django)
-@lex.command(name="setup", context_settings=dict(
-    ignore_unknown_options=True,
-    allow_extra_args=True,
-))
+# ---------- New: setup (never bootstraps Django) ----------
+
+@lex.command(name="setup", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.option("-p", "--project-root", help="Project root (default: execution dir)")
 def setup(project_root):
     root = find_project_root(project_root or os.getcwd())
     env_path, created = ensure_env_file(root)
-    generate_pycharm_configs(root)
+    generate_configs(root)
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
     click.echo(f".run: {os.path.join(root, '.run')} (updated)")
 
 def main():
-    # Install dynamic Django commands before dispatch, so `lex Init` works
+    # Detect if the first arg is 'setup'; if so, register only setup and dispatch without Django
+    argv = sys.argv[1:]
+    if argv and argv[0] == "setup":
+        # Register only built-ins (already registered above), do not install dynamic commands
+        return lex(prog_name="lex")
+    # Otherwise, install dynamic Django commands and dispatch
     _install_dynamic_commands()
-    lex(prog_name="lex")
-
-if __name__ == "__main__":
-    main()
+    return lex(prog_name="lex")

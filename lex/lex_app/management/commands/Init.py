@@ -526,6 +526,10 @@ class Command(BaseCommand):
             return False
 
     def handle(self, *args, **options):
+        from lex.helpers.cache_tables import ensure_cache_table
+        if not ensure_cache_table(options.get("database", "default")):
+            raise SystemExit("createcachetable failed")
+
         dry_run = options.get('dry_run', False)
         preserve_permissions = options.get('preserve_renamed_permissions', True)
         check_missing = options.get('check_missing', True)
