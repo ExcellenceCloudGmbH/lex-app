@@ -35,7 +35,7 @@ def _resolve_project_root(default=None):
 class CustomInstallCommand(install):
     def run(self):
         install.run(self)
-        self.move_other_directory()
+        # self.move_other_directory()
         # self.generate_pycharm_configs()
         # self.generate_env_file()
 
@@ -120,7 +120,7 @@ OIDC_RP_CLIENT_UUID=
 
 setup(
     name="lex-app",
-    version="2.0.0rc4",
+    version="2.0.0rc5",
     author="Melih Sünbül",
     author_email="m.sunbul@excellence-cloud.com",
     description="A Python / Django library to create business applications easily with complex logic",
