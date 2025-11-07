@@ -97,10 +97,12 @@ class LexAppConfig(GenericAppConfig):
         self._register_models_from_apps()
 
         # If repo_name is not "lex" and doesn't start with "lex", 
-        # also register models from the external project repo
+        # use custom discovery for the external project repo
         if repo_name != "lex" and not repo_name.startswith("lex"):
-            print(f"Registering models from {repo_name} project")
-            self._register_repo_models()
+            print(f"Starting custom model discovery for {repo_name}")
+            # Use the parent's start method for custom discovery
+            # This will discover models, build structure, and register them
+            self.start(repo=repo_name, subdir="")
         else:
             # For lex itself (or lex-app, lex-*, etc.), just call parent ready
             super().ready()
@@ -124,42 +126,55 @@ class LexAppConfig(GenericAppConfig):
                 # App not installed, skip
                 pass
         
+        # Store lex core models for filtering later
+        self._lex_core_models = set(all_models)
+        
         # Register the models
         if all_models:
             ModelRegistration.register_models(all_models)
     
-    def _register_repo_models(self):
+    def register_models(self):
         """
-        Register models from the repo_name app using Django's standard discovery.
-        This is simpler and more reliable than the old custom discovery system.
+        Override parent's register_models to filter out lex core models
+        when registering repo models.
         """
+        from django.contrib import admin
         from lex.process_admin.utils.model_registration import ModelRegistration
         
-        try:
-            # Get the app config for the repo_name
-            app_config = apps.get_app_config(repo_name)
-            repo_models = list(app_config.get_models())
+        # Filter out lex core models and historical models
+        models_to_register = []
+        for model in self.discovered_models.values():
+            # Skip if already registered in admin
+            if admin.site.is_registered(model):
+                continue
             
-            if repo_models:
-                print(f"Found {len(repo_models)} models in {repo_name} app")
-                # Filter out any models that are already registered (lex core models)
-                from django.contrib import admin
-                models_to_register = [m for m in repo_models if not admin.site.is_registered(m)]
-                
-                if models_to_register:
-                    print(f"Registering {len(models_to_register)} new models from {repo_name}")
-                    ModelRegistration.register_models(models_to_register, self.untracked_models)
-                else:
-                    print(f"All models from {repo_name} already registered")
-            else:
-                print(f"No models found in {repo_name} app")
-                
-        except LookupError:
-            print(f"Warning: {repo_name} app not found in INSTALLED_APPS")
-            print(f"Make sure {repo_name} has an apps.py with proper AppConfig")
-        except Exception as e:
-            print(f"Error registering models from {repo_name}: {e}")
-            traceback.print_exc()
+            # Skip if it's a lex core model (already registered)
+            if hasattr(self, '_lex_core_models') and model in self._lex_core_models:
+                continue
+            
+            # Skip historical models (created by django-simple-history)
+            if model.__name__.startswith('Historical'):
+                continue
+            
+            # Skip Django built-in models
+            if model._meta.app_label in ['auth', 'contenttypes', 'sessions', 'admin']:
+                continue
+            
+            models_to_register.append(model)
+        
+        if models_to_register:
+            print(f"Registering {len(models_to_register)} models from {repo_name}: {[m.__name__ for m in models_to_register]}")
+            ModelRegistration.register_models(models_to_register, self.untracked_models)
+        else:
+            print(f"No new models to register from {repo_name}")
+        
+        # Also register model structure and styling if available
+        if self.model_structure_builder.model_structure:
+            ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
+        if self.model_structure_builder.model_styling:
+            ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
+        if self.model_structure_builder.widget_structure:
+            ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
 
     def is_running_in_celery(self):
         # from celery import current_task
