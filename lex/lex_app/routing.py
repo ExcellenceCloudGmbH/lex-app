@@ -1,11 +1,20 @@
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
+from django.urls import path
 
-# TODO: Websocket routing needs to be migrated to the new api app structure
-# import lex.api.routing
+from lex.api.consumers.BackendHealthConsumer import BackendHealthConsumer
+from lex.api.consumers.CalculationLogConsumer import CalculationLogConsumer
+from lex.api.consumers.CalculationsConsumer import CalculationsConsumer
+from lex.api.consumers.LogConsumer import LogConsumer
+from lex.api.consumers.UpdateCalculationStatusConsumer import UpdateCalculationStatusConsumer
 
-# Temporary empty websocket patterns until routing is migrated
-websocket_urlpatterns = []
+websocket_urlpatterns = [
+    path('ws/logs', LogConsumer.as_asgi(), name='logs'),
+    path('ws/health', BackendHealthConsumer.as_asgi(), name='backend-health'),
+    path('ws/calculations', CalculationsConsumer.as_asgi(), name='calculations'),
+    path('ws/calculation_logs/<str:calculationId>', CalculationLogConsumer.as_asgi(), name='calculation-logs'),
+    path('ws/calculation_status_update', UpdateCalculationStatusConsumer.as_asgi(), name='calculation-status-update'),
+]
 
 application = ProtocolTypeRouter({
     # (http->django views is added by default)

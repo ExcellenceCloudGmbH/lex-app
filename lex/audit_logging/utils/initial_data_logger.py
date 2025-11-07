@@ -10,7 +10,7 @@ from django.db.models import Model
 from lex.audit_logging.models.audit_log import AuditLog
 from lex.audit_logging.models.audit_log_status import AuditLogStatus
 from lex.audit_logging.serializers.audit_log_mixin_serializer import _serialize_payload, generic_instance_payload
-from lex.audit_logging.models.audit_logBatchManager import AuditLogBatchManager
+# from lex.audit_logging.models.audit_logBatchManager import AuditLogBatchManager  # TODO: This class doesn't exist
 from lex.process_admin.settings import processAdminSite
 from lex.audit_logging.mixins.audit_mixin import AuditLogMixin
 
@@ -34,7 +34,8 @@ class InitialDataAuditLogger:
         Args:
             calculation_id: Optional calculation ID. If not provided, a unique ID will be generated.
         """
-        self.batch_manager = AuditLogBatchManager()
+        # self.batch_manager = AuditLogBatchManager()  # TODO: Implement AuditLogBatchManager
+        self.batch_manager = None  # Placeholder until AuditLogBatchManager is implemented
     def generate_calculation_id(self) -> str:
         return self._generate_calculation_id()
 
@@ -98,7 +99,8 @@ class InitialDataAuditLogger:
                 
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
-                self.batch_manager.add_pending_log(audit_log)
+                if self.batch_manager:
+                    self.batch_manager.add_pending_log(audit_log)
             
             logger.debug(
                 f"Successfully created audit log for {resource} creation",
@@ -203,7 +205,8 @@ class InitialDataAuditLogger:
                 
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
-                self.batch_manager.add_pending_log(audit_log)
+                if self.batch_manager:
+                    self.batch_manager.add_pending_log(audit_log)
             
             logger.debug(
                 f"Successfully created audit log for {resource} update",
@@ -296,7 +299,8 @@ class InitialDataAuditLogger:
                 
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
-                self.batch_manager.add_pending_log(audit_log)
+                if self.batch_manager:
+                    self.batch_manager.add_pending_log(audit_log)
             
             logger.debug(
                 f"Successfully created audit log for {resource} deletion",
@@ -340,7 +344,8 @@ class InitialDataAuditLogger:
 
         calculation_id = audit_log.calculation_id
         try:
-            self.batch_manager.mark_success(audit_log)
+            if self.batch_manager:
+                self.batch_manager.mark_success(audit_log)
             logger.debug(
                 f"Marked audit log {audit_log.id} as successful",
                 extra={
@@ -378,7 +383,8 @@ class InitialDataAuditLogger:
         calculation_id = audit_log.calculation_id
 
         try:
-            self.batch_manager.mark_failure(audit_log, error_msg)
+            if self.batch_manager:
+                self.batch_manager.mark_failure(audit_log, error_msg)
             logger.warning(
                 f"Marked audit log {audit_log.id} as failed: {error_msg}",
                 extra={
@@ -419,7 +425,8 @@ class InitialDataAuditLogger:
             # Flush any remaining batch operations
             updated_count = 0
             try:
-                updated_count = self.batch_manager.flush_batch()
+                if self.batch_manager:
+                    updated_count = self.batch_manager.flush_batch()
                 logger.debug(
                     f"Flushed {updated_count} batch operations",
                     extra={'calculation_id': calculation_id, 'updated_count': updated_count}
