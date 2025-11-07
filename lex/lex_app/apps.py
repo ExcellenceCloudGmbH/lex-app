@@ -92,19 +92,24 @@ class LexAppConfig(GenericAppConfig):
     name = 'lex_app'
 
     def ready(self):
-        # Call the parent GenericAppConfig.ready() which will skip for lex_app
-        # since it's not in the new app list
-        super().ready()
-        
         # For the new app structure, manually register models from Django apps
         # with the ProcessAdminSite
-        if repo_name != "lex":
-            self._register_models_from_apps()
+        self._register_models_from_apps()
+
+        # If repo_name is not "lex" and doesn't start with "lex", 
+        # use the full discovery system for the external project repo
+        # This includes custom import system, model structure building, etc.
+        if repo_name != "lex" and not repo_name.startswith("lex"):
+            print(f"Starting custom model discovery for {repo_name}")
+            self.start(repo=repo_name, subdir="")
+        else:
+            # For lex itself (or lex-app, lex-*, etc.), just call parent ready
+            super().ready()
 
     def _register_models_from_apps(self):
         """
         Register models from the new Django app structure with ProcessAdminSite.
-        This replaces the old custom model discovery system.
+        This replaces the old custom model discovery system for lex core apps.
         """
         from lex.process_admin.utils.model_registration import ModelRegistration
         
