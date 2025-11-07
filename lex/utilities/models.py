@@ -1,0 +1,1 @@
+# Utilities models will be added here as needed (typically utilities apps don't have models)

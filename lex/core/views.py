@@ -1,0 +1,1 @@
+# Core views will be added here as needed

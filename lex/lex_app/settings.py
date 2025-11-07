@@ -92,7 +92,7 @@ else:
 
 STORAGES = {
     "default": {
-        "BACKEND": "lex_app.CustomDefaultStorage.CustomDefaultStorage",
+        "BACKEND": "lex.utilities.storage.custom_storage.CustomDefaultStorage",
     },
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 
@@ -119,7 +119,7 @@ if os.getenv("STORAGE_TYPE") == "SHAREPOINT":
 if os.getenv("STORAGE_TYPE") == "GCS":
     STORAGES = {
         "default": {
-            "BACKEND": "lex_app.gcsUtils.Media",
+            "BACKEND": "lex.utilities.utils.gcs_utils.Media",
         }
     }
     GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME")
@@ -188,7 +188,7 @@ LOGGING = {
         },
         "websocket": {
             "level": "DEBUG",
-            "class": "lex.lex_app.LexLogger.WebSockerHandler",
+            "class": "lex.audit_logging.handlers.websocket_handler.WebSocketHandler",
         },
     },
     "loggers": {
@@ -205,6 +205,12 @@ LOGGING = {
 
 INSTALLED_APPS = [
     "channels",
+    "lex.utilities.apps.UtilitiesConfig",
+    "lex.core.apps.CoreConfig",
+    "lex.authentication.apps.AuthenticationConfig",
+    "lex.audit_logging.apps.LoggingConfig",
+    "lex.api.apps.ApiConfig",
+    "lex.process_admin.apps.ProcessAdminConfig",
     "lex.lex_app.apps.LexAppConfig",
     "simple_history",
     "celery",
@@ -223,7 +229,7 @@ INSTALLED_APPS = [
     "oauth2_authcodeflow",
 ]
 
-if repo_name != "lex":
+if not repo_name.startswith("lex"):
     INSTALLED_APPS.append(repo_name)
 
 
@@ -239,7 +245,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
-    "lex_app.rest_api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
+    "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
     "oauth2_authcodeflow.middleware.LoginRequiredMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
@@ -566,7 +572,7 @@ LOGGING = {
             "formatter": "default",
         },
         "ws": {
-            "()": "lex.lex_app.LexLogger.WebSocketHandler.WebSocketHandler",
+            "()": "lex.audit_logging.handlers.websocket_handler.WebSocketHandler",
             "level": "DEBUG",
             "formatter": "ws_md",
         },

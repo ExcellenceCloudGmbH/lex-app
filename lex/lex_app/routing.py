@@ -1,13 +1,17 @@
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 
-import lex.lex_app.rest_api.routing
+# TODO: Websocket routing needs to be migrated to the new api app structure
+# import lex.api.routing
+
+# Temporary empty websocket patterns until routing is migrated
+websocket_urlpatterns = []
 
 application = ProtocolTypeRouter({
     # (http->django views is added by default)
     'websocket': AuthMiddlewareStack(
         URLRouter(
-            lex.lex_app.rest_api.routing.websocket_urlpatterns
+            websocket_urlpatterns
         )
     ),
 })

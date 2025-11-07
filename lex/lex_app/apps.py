@@ -9,10 +9,10 @@ from asgiref.sync import sync_to_async
 from celery import shared_task
 from django.apps import apps
 
-from lex.lex_app.model_utils.LexAuthentication import LexAuthentication
+from lex.authentication.utils.lex_authentication import LexAuthentication
 from lex.lex_app.settings import repo_name, CELERY_ACTIVE
-from lex.lex_app.utils import GenericAppConfig
-from lex.lex_app.logging.config import is_audit_logging_enabled, get_audit_logging_config
+from lex.utilities.config.generic_app_config import GenericAppConfig
+from lex.audit_logging.utils.config import is_audit_logging_enabled, get_audit_logging_config
 
 
 def _create_audit_logger():
@@ -27,7 +27,7 @@ def _create_audit_logger():
             print("Audit logging is disabled for initial data upload")
             return None
         
-        from lex.lex_app.logging.InitialDataAuditLogger import InitialDataAuditLogger
+        from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
         logger = InitialDataAuditLogger()
         print(f"Successfully initialized audit logger")
         return logger
@@ -60,7 +60,7 @@ def _create_audit_logger_for_task(audit_logging_enabled=None, calculation_id=Non
             print("Audit logging explicitly disabled for task context")
             return None
         elif audit_logging_enabled is True or is_audit_logging_enabled():
-            from lex.lex_app.logging.InitialDataAuditLogger import InitialDataAuditLogger
+            from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
             logger = InitialDataAuditLogger()
             return logger
         else:
@@ -92,18 +92,37 @@ class LexAppConfig(GenericAppConfig):
     name = 'lex_app'
 
     def ready(self):
+        # Call the parent GenericAppConfig.ready() which will skip for lex_app
+        # since it's not in the new app list
         super().ready()
+        
+        # For the new app structure, manually register models from Django apps
+        # with the ProcessAdminSite
         if repo_name != "lex":
-            super().start(
-                repo=repo_name
-            )
-            generic_app_models = {f"{model.__name__}": model for model in
-                                  set(list(apps.get_app_config(repo_name).models.values())
-                                      + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
-            nest_asyncio.apply()
+            self._register_models_from_apps()
 
-
-            asyncio.run(self.async_ready(generic_app_models))
+    def _register_models_from_apps(self):
+        """
+        Register models from the new Django app structure with ProcessAdminSite.
+        This replaces the old custom model discovery system.
+        """
+        from lex.process_admin.utils.model_registration import ModelRegistration
+        
+        # Get all models from the new Django apps
+        all_models = []
+        app_labels = ['core', 'authentication', 'audit_logging', 'process_admin']
+        
+        for app_label in app_labels:
+            try:
+                app_config = apps.get_app_config(app_label)
+                all_models.extend(app_config.get_models())
+            except LookupError:
+                # App not installed, skip
+                pass
+        
+        # Register the models
+        if all_models:
+            ModelRegistration.register_models(all_models)
 
     def is_running_in_celery(self):
         # from celery import current_task
@@ -157,7 +176,7 @@ class LexAppConfig(GenericAppConfig):
             # if audit_enabled:
                 # # Generate calculation ID for continuity between async_ready and task execution
                 # try:
-                #     from lex.lex_app.logging.InitialDataAuditLogger import InitialDataAuditLogger
+                #     from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
                 #     temp_logger = InitialDataAuditLogger()
                 #     print(f"Generated calculation ID for task execution: {calculation_id}")
                 # except Exception as e:

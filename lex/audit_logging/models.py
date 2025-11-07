@@ -1,0 +1,1 @@
+# Logging models (AuditLog, CalculationLog, etc.) will be moved here during refactoring

@@ -1,0 +1,1 @@
+default_app_config = 'lex.audit_logging.apps.LoggingConfig'
