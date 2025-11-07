@@ -136,12 +136,12 @@ class LexAppConfig(GenericAppConfig):
     def register_models(self):
         """
         Override parent's register_models to filter out lex core models
-        when registering repo models.
+        when registering repo models, but include Historical models for repo models.
         """
         from django.contrib import admin
         from lex.process_admin.utils.model_registration import ModelRegistration
         
-        # Filter out lex core models and historical models
+        # Filter models appropriately
         models_to_register = []
         for model in self.discovered_models.values():
             # Skip if already registered in admin
@@ -152,9 +152,17 @@ class LexAppConfig(GenericAppConfig):
             if hasattr(self, '_lex_core_models') and model in self._lex_core_models:
                 continue
             
-            # Skip historical models (created by django-simple-history)
+            # For Historical models: only skip if they're for lex core models
             if model.__name__.startswith('Historical'):
-                continue
+                # Check if this is a historical model for a lex core model
+                base_model_name = model.__name__.replace('Historical', '')
+                is_lex_core_historical = any(
+                    m.__name__ == base_model_name 
+                    for m in getattr(self, '_lex_core_models', set())
+                )
+                if is_lex_core_historical:
+                    continue
+                # Otherwise, include it (it's a historical model for a repo model)
             
             # Skip Django built-in models
             if model._meta.app_label in ['auth', 'contenttypes', 'sessions', 'admin']:
@@ -168,13 +176,10 @@ class LexAppConfig(GenericAppConfig):
         else:
             print(f"No new models to register from {repo_name}")
         
-        # Also register model structure and styling if available
-        if self.model_structure_builder.model_structure:
-            ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
-        if self.model_structure_builder.model_styling:
-            ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
-        if self.model_structure_builder.widget_structure:
-            ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
+        # Don't register model structure/styling for external repos
+        # This avoids KeyError when structure references lex core models
+        # The structure will be built dynamically from the registered models
+        print(f"Skipping model structure registration for {repo_name} (will be built dynamically)")
 
     def is_running_in_celery(self):
         # from celery import current_task
