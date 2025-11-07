@@ -111,27 +111,42 @@ class LexAppConfig(GenericAppConfig):
         """
         Register models from the new Django app structure with ProcessAdminSite.
         This replaces the old custom model discovery system for lex core apps.
+        Excludes Profile, User, and their historical models from registration.
         """
         from lex.process_admin.utils.model_registration import ModelRegistration
         
+        # Models to exclude from registration (shouldn't show in frontend)
+        excluded_model_names = {'Profile', 'HistoricalProfile', 'User'}
+        
         # Get all models from the new Django apps
         all_models = []
+        models_to_register = []
         app_labels = ['core', 'authentication', 'audit_logging', 'process_admin']
         
         for app_label in app_labels:
             try:
                 app_config = apps.get_app_config(app_label)
-                all_models.extend(app_config.get_models())
+                for model in app_config.get_models():
+                    all_models.append(model)
+                    # Only register if not in excluded list
+                    if model.__name__ not in excluded_model_names:
+                        models_to_register.append(model)
             except LookupError:
                 # App not installed, skip
                 pass
         
-        # Store lex core models for filtering later
+        # Store ALL lex core models for filtering later (including excluded ones)
         self._lex_core_models = set(all_models)
         
-        # Register the models
-        if all_models:
-            ModelRegistration.register_models(all_models)
+        # Register only the non-excluded models
+        if models_to_register:
+            print(f"Registering {len(models_to_register)} lex core models (excluding Profile, User)")
+            ModelRegistration.register_models(models_to_register)
+        
+        # Log excluded models
+        excluded_count = len(all_models) - len(models_to_register)
+        if excluded_count > 0:
+            print(f"Excluded {excluded_count} models from registration: {excluded_model_names}")
     
     def register_models(self):
         """
