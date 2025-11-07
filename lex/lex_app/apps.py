@@ -156,9 +156,16 @@ class LexAppConfig(GenericAppConfig):
         from django.contrib import admin
         from lex.process_admin.utils.model_registration import ModelRegistration
         
+        # Models to explicitly exclude (shouldn't show in frontend)
+        excluded_model_names = {'Profile', 'HistoricalProfile', 'User'}
+        
         # Filter models appropriately
         models_to_register = []
         for model in self.discovered_models.values():
+            # Skip explicitly excluded models
+            if model.__name__ in excluded_model_names:
+                continue
+            
             # Skip if already registered in admin
             if admin.site.is_registered(model):
                 continue
@@ -191,10 +198,15 @@ class LexAppConfig(GenericAppConfig):
         else:
             print(f"No new models to register from {repo_name}")
         
-        # Don't register model structure/styling for external repos
-        # This avoids KeyError when structure references lex core models
-        # The structure will be built dynamically from the registered models
-        print(f"Skipping model structure registration for {repo_name} (will be built dynamically)")
+        # Register model structure and styling if available
+        # This provides the organized structure in the frontend
+        if self.model_structure_builder.model_structure:
+            print(f"Registering model structure for {repo_name}")
+            ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
+        if self.model_structure_builder.model_styling:
+            ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
+        if self.model_structure_builder.widget_structure:
+            ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
 
     def is_running_in_celery(self):
         # from celery import current_task
