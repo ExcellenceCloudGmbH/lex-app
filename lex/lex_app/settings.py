@@ -216,7 +216,7 @@ INSTALLED_APPS = [
     "celery",
     "react",
     "markdown",
-    "django.contrib.admin",
+    "lex.lex_app.apps.CustomAdminConfig",  # Custom admin config to prevent auth admin conflicts
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",

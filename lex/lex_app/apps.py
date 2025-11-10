@@ -8,11 +8,25 @@ import nest_asyncio
 from asgiref.sync import sync_to_async
 from celery import shared_task
 from django.apps import apps
+from django.contrib.admin.apps import AdminConfig
 
 from lex.authentication.utils.lex_authentication import LexAuthentication
 from lex.lex_app.settings import repo_name, CELERY_ACTIVE
 from lex.utilities.config.generic_app_config import GenericAppConfig
 from lex.audit_logging.utils.config import is_audit_logging_enabled, get_audit_logging_config
+
+
+class CustomAdminConfig(AdminConfig):
+    """
+    Custom admin configuration that prevents django.contrib.auth.admin from being loaded.
+    This avoids the AlreadyRegistered exception for the Group model.
+    """
+    default_site = 'django.contrib.admin.sites.AdminSite'
+    
+    def ready(self):
+        # Don't call super().ready() to prevent autodiscovery
+        # This prevents django.contrib.auth.admin from being loaded
+        pass
 
 
 def _create_audit_logger():
@@ -95,7 +109,8 @@ class LexAppConfig(GenericAppConfig):
     def ready(self):
         if not repo_name.startswith('lex'):
             super().start(
-                repo=repo_name
+                repo=repo_name,
+                is_lex=False
             )
             generic_app_models = {f"{model.__name__}": model for model in
                                   set(list(apps.get_app_config(repo_name).models.values())
