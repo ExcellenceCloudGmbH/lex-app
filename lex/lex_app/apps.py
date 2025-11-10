@@ -107,7 +107,8 @@ class LexAppConfig(GenericAppConfig):
     
     
     def ready(self):
-        if not self.name.startswith('lex'):
+        super().ready()
+        if not repo_name.startswith('lex') and self.name == 'lex_app':
             super().start(
                 repo=repo_name,
                 is_lex=False
@@ -119,66 +120,7 @@ class LexAppConfig(GenericAppConfig):
 
 
             asyncio.run(self.async_ready(generic_app_models))
-        else:
-            super().ready()
 
-    # def ready(self):
-    #     # For the new app structure, manually register models from Django apps
-    #     # with the ProcessAdminSite
-    #     self._register_models_from_apps()
-    # 
-    #     # If repo_name is not "lex" and doesn't start with "lex", 
-    #     # use custom discovery for the external project repo
-    #     if repo_name != "lex" and not repo_name.startswith("lex"):
-    #         print(f"Starting custom model discovery for {repo_name}")
-    #         # Use the parent's start method for custom discovery
-    #         # This will discover models, build structure, and register them
-    #         self.start(repo=repo_name, subdir="")
-    #     else:
-    #         # For lex itself (or lex-app, lex-*, etc.), just call parent ready
-    #         super().ready()
-    # 
-    def _register_models_from_apps(self):
-        """
-        Register models from the new Django app structure with ProcessAdminSite.
-        This replaces the old custom model discovery system for lex core apps.
-        Excludes Profile, User, and their historical models from registration.
-        """
-        from lex.process_admin.utils.model_registration import ModelRegistration
-        
-        # Models to exclude from registration (shouldn't show in frontend)
-        excluded_model_names = {'Profile', 'HistoricalProfile', 'User'}
-        
-        # Get all models from the new Django apps
-        all_models = []
-        models_to_register = []
-        app_labels = ['core', 'authentication', 'audit_logging', 'process_admin']
-        
-        for app_label in app_labels:
-            try:
-                app_config = apps.get_app_config(app_label)
-                for model in app_config.get_models():
-                    all_models.append(model)
-                    # Only register if not in excluded list
-                    if model.__name__ not in excluded_model_names:
-                        models_to_register.append(model)
-            except LookupError:
-                # App not installed, skip
-                pass
-        
-        # Store ALL lex core models for filtering later (including excluded ones)
-        self._lex_core_models = set(all_models)
-        
-        # Register only the non-excluded models
-        if models_to_register:
-            print(f"Registering {len(models_to_register)} lex core models (excluding Profile, User)")
-            ModelRegistration.register_models(models_to_register)
-        
-        # Log excluded models
-        excluded_count = len(all_models) - len(models_to_register)
-        if excluded_count > 0:
-            print(f"Excluded {excluded_count} models from registration: {excluded_model_names}")
-    
     def register_models(self):
         """
         Override parent's register_models to filter out lex core models
@@ -186,49 +128,38 @@ class LexAppConfig(GenericAppConfig):
         """
         from django.contrib import admin
         from lex.process_admin.utils.model_registration import ModelRegistration
-        
+        from lex.lex_app.streamlit.Streamlit import Streamlit
+
         # Models to explicitly exclude (shouldn't show in frontend)
         excluded_model_names = {'Profile', 'HistoricalProfile', 'User'}
-        
+
         # Filter models appropriately
         models_to_register = []
         for model in self.discovered_models.values():
             # Skip explicitly excluded models
             if model.__name__ in excluded_model_names:
                 continue
-            
+
             # Skip if already registered in admin
             if admin.site.is_registered(model):
                 continue
-            
+
             # Skip if it's a lex core model (already registered)
             if hasattr(self, '_lex_core_models') and model in self._lex_core_models:
                 continue
-            
-            # For Historical models: only skip if they're for lex core models
-            if model.__name__.startswith('Historical'):
-                # Check if this is a historical model for a lex core model
-                base_model_name = model.__name__.replace('Historical', '')
-                is_lex_core_historical = any(
-                    m.__name__ == base_model_name 
-                    for m in getattr(self, '_lex_core_models', set())
-                )
-                if is_lex_core_historical:
-                    continue
-                # Otherwise, include it (it's a historical model for a repo model)
-            
+
             # Skip Django built-in models
             if model._meta.app_label in ['auth', 'contenttypes', 'sessions', 'admin']:
                 continue
-            
+
             models_to_register.append(model)
-        
+
         if models_to_register:
             print(f"Registering {len(models_to_register)} models from {repo_name}: {[m.__name__ for m in models_to_register]}")
             ModelRegistration.register_models(models_to_register, self.untracked_models)
         else:
             print(f"No new models to register from {repo_name}")
-        
+
         # Register model structure and styling if available
         # This provides the organized structure in the frontend
         if self.model_structure_builder.model_structure:
@@ -238,6 +169,7 @@ class LexAppConfig(GenericAppConfig):
             ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         if self.model_structure_builder.widget_structure:
             ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
+        ModelRegistration.register_models([Streamlit], self.untracked_models)
 
     def is_running_in_celery(self):
         # from celery import current_task
