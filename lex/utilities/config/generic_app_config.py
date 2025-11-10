@@ -36,28 +36,19 @@ class GenericAppConfig(AppConfig):
         self.import_finder = None
 
     def ready(self):
-        # For new app structure (lex.utilities, lex.core, etc.), skip custom discovery
-        # Django already handles model discovery for properly structured apps
-        if self.name.startswith('lex.') and self.name not in ('lex_app',):
-            # Just call super().ready() for new-style apps
-            super().ready()
-            return
-        
-        # For old-style apps or lex_app, use the custom discovery
-        app_name = self.name.replace('lex.', '') if self.name.startswith('lex.') else self.name
-        self.start(repo=self.name, subdir=f"lex.{app_name}.")
+        self.start(repo=self.name)
 
-    def start(self, repo=None, subdir=""):
+
+    def start(self, repo=None, is_lex=True):
         self.pending_relationships = {}
         self.discovered_models = {}
         self.model_structure_builder = ModelStructureBuilder(repo=repo)
-        self.project_path = os.path.dirname(self.module.__file__) if subdir else Path(
+        self.project_path = os.path.dirname(self.module.__file__) if is_lex else Path(
             os.getenv("PROJECT_ROOT", os.getcwd())
         ).resolve()
-        self.subdir = "" if not subdir else subdir
 
         # ✅ Only install custom import system when subdir is NOT empty
-        if not subdir and repo:
+        if not is_lex and repo:
             self.import_finder = install_custom_import_system(
                 self.project_path,
                 repo
@@ -65,7 +56,7 @@ class GenericAppConfig(AppConfig):
 
         self.discover_models(self.project_path, repo=repo)
 
-        if not self.model_structure_builder.model_structure and not subdir:
+        if not self.model_structure_builder.model_structure and not is_lex:
             self.model_structure_builder.build_structure(self.discovered_models)
 
         self.untracked_models += self.model_structure_builder.untracked_models
@@ -79,17 +70,16 @@ class GenericAppConfig(AppConfig):
                 module_name = os.path.relpath(absolute_path, self.project_path)
 
                 # Add repo prefix if needed and not already present
-                if repo and not module_name.startswith(repo) and repo != 'lex_app':
+                if repo and not module_name.startswith(repo):
                     module_name = f"{repo}.{module_name}"
 
                 rel_module_name = module_name.replace(os.path.sep, '.')[:-3]
                 module_name = rel_module_name.split('.')[-1]
-                full_module_name = f"{self.subdir}{rel_module_name}"
 
                 if _is_structure_yaml_file(file):
                     self.model_structure_builder.extract_from_yaml(absolute_path)
                 elif self._is_valid_module(module_name, file):
-                    self._process_module(full_module_name, file)
+                    self._process_module(rel_module_name, file)
 
     def _dir_filter(self, directory):
         return directory not in self._EXCLUDED_DIRS and not directory.startswith(self._EXCLUDED_PREFIXES)

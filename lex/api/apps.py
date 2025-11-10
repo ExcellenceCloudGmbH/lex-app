@@ -1,7 +1,8 @@
 from lex.utilities.config.generic_app_config import GenericAppConfig
+from lex_app.apps import LexAppConfig
 
 
-class ApiConfig(GenericAppConfig):
+class ApiConfig(LexAppConfig):
     """
     Configuration for the API app handling REST API endpoints and external communication.
     """

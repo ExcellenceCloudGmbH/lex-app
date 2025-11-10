@@ -90,23 +90,39 @@ def should_load_data(auth_settings):
 
 class LexAppConfig(GenericAppConfig):
     name = 'lex_app'
-
+    
+    
     def ready(self):
-        # For the new app structure, manually register models from Django apps
-        # with the ProcessAdminSite
-        self._register_models_from_apps()
+        if not repo_name.startswith('lex'):
+            super().start(
+                repo=repo_name
+            )
+            generic_app_models = {f"{model.__name__}": model for model in
+                                  set(list(apps.get_app_config(repo_name).models.values())
+                                      + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
+            nest_asyncio.apply()
 
-        # If repo_name is not "lex" and doesn't start with "lex", 
-        # use custom discovery for the external project repo
-        if repo_name != "lex" and not repo_name.startswith("lex"):
-            print(f"Starting custom model discovery for {repo_name}")
-            # Use the parent's start method for custom discovery
-            # This will discover models, build structure, and register them
-            self.start(repo=repo_name, subdir="")
+
+            asyncio.run(self.async_ready(generic_app_models))
         else:
-            # For lex itself (or lex-app, lex-*, etc.), just call parent ready
             super().ready()
 
+    # def ready(self):
+    #     # For the new app structure, manually register models from Django apps
+    #     # with the ProcessAdminSite
+    #     self._register_models_from_apps()
+    # 
+    #     # If repo_name is not "lex" and doesn't start with "lex", 
+    #     # use custom discovery for the external project repo
+    #     if repo_name != "lex" and not repo_name.startswith("lex"):
+    #         print(f"Starting custom model discovery for {repo_name}")
+    #         # Use the parent's start method for custom discovery
+    #         # This will discover models, build structure, and register them
+    #         self.start(repo=repo_name, subdir="")
+    #     else:
+    #         # For lex itself (or lex-app, lex-*, etc.), just call parent ready
+    #         super().ready()
+    # 
     def _register_models_from_apps(self):
         """
         Register models from the new Django app structure with ProcessAdminSite.

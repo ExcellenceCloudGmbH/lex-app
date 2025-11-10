@@ -1,7 +1,8 @@
 from lex.utilities.config.generic_app_config import GenericAppConfig
+from lex_app.apps import LexAppConfig
 
 
-class UtilitiesConfig(GenericAppConfig):
+class UtilitiesConfig(LexAppConfig):
     """
     Configuration for the utilities app containing shared utilities, decorators, and helper functions.
     """
