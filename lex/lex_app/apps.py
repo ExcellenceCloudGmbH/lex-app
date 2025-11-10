@@ -107,7 +107,7 @@ class LexAppConfig(GenericAppConfig):
     
     
     def ready(self):
-        if not repo_name.startswith('lex'):
+        if not self.name.startswith('lex'):
             super().start(
                 repo=repo_name,
                 is_lex=False

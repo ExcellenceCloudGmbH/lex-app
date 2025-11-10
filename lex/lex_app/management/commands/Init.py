@@ -167,7 +167,7 @@ class KeycloakSyncManager:
 
                     # Delete the resource itself - use UMA API for resource deletion
                     try:
-                        self.kc_manager.uma.resource_set_delete(id=resource_id)
+                        self.kc_manager.uma.resource_set_delete(resource_id)
                         logger.info(f"  ✓ Deleted resource: {resource_name}")
                         deletion_success += 1
                     except Exception as e:
