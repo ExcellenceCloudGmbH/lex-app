@@ -10,12 +10,13 @@ from keycloak import (
     KeycloakUMA,
 )
 from keycloak.exceptions import KeycloakPostError, KeycloakGetError
-from lex.utilities.decorators.singleton import LexSingleton
 import json
 import requests
 from typing import Union, Dict, Any
 from pathlib import Path
 import logging
+
+from lex.utilities.decorators.singleton import LexSingleton
 
 # It's good practice to have a dedicated logger
 logger = logging.getLogger(__name__)

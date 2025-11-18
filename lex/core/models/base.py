@@ -375,7 +375,6 @@ class LexModel(LifecycleModel):
         Default: Uses Keycloak 'read' scope for all fields
         """
 
-        return PermissionResult.allow_all("Keycloak read scope")
         if "read" in user_context.keycloak_scopes:
             return PermissionResult.allow_all("Keycloak read scope")
         return PermissionResult.deny("No read permission")
@@ -392,7 +391,6 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'edit' scope for all fields
         """
-        return PermissionResult.allow_all()
         if "edit" in user_context.keycloak_scopes:
             return PermissionResult.allow_all("Keycloak edit scope")
         return PermissionResult.deny("No edit permission")
@@ -425,7 +423,6 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'create' scope
         """
-        return True
         return "create" in user_context.keycloak_scopes
 
     def permission_delete(self, user_context: UserContext) -> bool:
@@ -440,7 +437,6 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'delete' scope
         """
-        return True
         return "delete" in user_context.keycloak_scopes
 
     def permission_list(self, user_context: UserContext) -> bool:
@@ -455,7 +451,6 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'list' scope
         """
-        return True
         return "list" in user_context.keycloak_scopes
 
     # =============================================================================

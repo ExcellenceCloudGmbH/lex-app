@@ -451,7 +451,6 @@ AUTH_PASSWORD_VALIDATORS = [
 CORS_ORIGIN_ALLOW_ALL = True
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
-
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM")
 OIDC_RP_CLIENT_ID = os.getenv("OIDC_RP_CLIENT_ID")
@@ -525,7 +524,7 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = False
+USE_TZ = True
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
 TIME_ZONE = "Europe/Berlin"
@@ -589,6 +588,16 @@ LOGGING = {
         "level": os.getenv("LOG_LEVEL", "DEBUG"),
     },
 }
+
+INSTANCE_CONTROLLER_BASE_URL = os.getenv(
+    "INSTANCE_CONTROLLER_BASE_URL",
+    "https://hazem.excellence-cloud.dev",
+)
+
+KEYCLOAK_SETUP_CALLBACK_URL = os.getenv(
+    "KEYCLOAK_SETUP_CALLBACK_URL",
+    "http://127.0.0.1:8000/api/bootstrap/keycloak/",
+)
 
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = None
