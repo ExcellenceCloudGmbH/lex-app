@@ -1,0 +1,24 @@
+name: SAST
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read      # Required to clone your code
+  pull-requests: write # Required because the central workflow needs it
+
+jobs:
+  call-central-workflow:
+    uses: ExcellenceCloudGmbH/devops-toolkit/.github/workflows/python_security_scanning.yaml@main
+    
+    # Pass the required input defined in the central workflow
+    with:
+      sonarProjectKey: "lex-app"
+    
+    # Pass the required secrets
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
