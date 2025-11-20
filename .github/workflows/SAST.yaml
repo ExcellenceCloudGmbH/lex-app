@@ -16,6 +16,7 @@ jobs:
     # Pass the required input defined in the central workflow
     with:
       sonarProjectKey: "lex-app"
+      isRepoPublic: true
     
     # Pass the required secrets
     secrets:
