@@ -314,7 +314,7 @@ DATABASES = {
     },
     "default": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
-        "NAME": f"db_{repo_name}",
+        "NAME": f"db_{repo_name.lower()}",
         "USER": "django",
         "PASSWORD": "lundadminlocal",
         "HOST": "localhost",
@@ -463,9 +463,9 @@ AUTHENTICATION_BACKENDS = (
 )
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
-OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/"]
+OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "api/user_permissions/"]
 OIDC_RP_USE_PKCE = False
-OIDC_MIDDLEWARE_LOGIN_REQUIRED_REDIRECT = True
+# OIDC_MIDDLEWARE_LOGIN_REQUIRED_REDIRECT = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -475,11 +475,11 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 
-JWT_SECRET_KEY = SECRET_KEY
-JWT_ALGORITHM = 'HS256'
-JWT_ACCESS_TOKEN_LIFETIME = timedelta(minutes=5)  # Short-lived
-JWT_REFRESH_GRACE_PERIOD = timedelta(minutes=10)  # Grace period for refresh
-JWT_EXPIRATION_HOURS = 2
+# JWT_SECRET_KEY = SECRET_KEY
+# JWT_ALGORITHM = 'HS256'
+# JWT_ACCESS_TOKEN_LIFETIME = timedelta(minutes=5)  # Short-lived
+# JWT_REFRESH_GRACE_PERIOD = timedelta(minutes=10)  # Grace period for refresh
+# JWT_EXPIRATION_HOURS = 2
 
 
 REST_FRAMEWORK = {
