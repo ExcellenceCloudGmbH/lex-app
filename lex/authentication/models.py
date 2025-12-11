@@ -1,0 +1,1 @@
+# Authentication models (Profile, etc.) will be moved here from lex_models during refactoring

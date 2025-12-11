@@ -8,11 +8,25 @@ import nest_asyncio
 from asgiref.sync import sync_to_async
 from celery import shared_task
 from django.apps import apps
+from django.contrib.admin.apps import AdminConfig
 
-from lex.lex_app.model_utils.LexAuthentication import LexAuthentication
+from lex.authentication.utils.lex_authentication import LexAuthentication
 from lex.lex_app.settings import repo_name, CELERY_ACTIVE
-from lex.lex_app.utils import GenericAppConfig
-from lex.lex_app.logging.config import is_audit_logging_enabled, get_audit_logging_config
+from lex.utilities.config.generic_app_config import GenericAppConfig
+from lex.audit_logging.utils.config import is_audit_logging_enabled, get_audit_logging_config
+
+
+class CustomAdminConfig(AdminConfig):
+    """
+    Custom admin configuration that prevents django.contrib.auth.admin from being loaded.
+    This avoids the AlreadyRegistered exception for the Group model.
+    """
+    default_site = 'django.contrib.admin.sites.AdminSite'
+    
+    def ready(self):
+        # Don't call super().ready() to prevent autodiscovery
+        # This prevents django.contrib.auth.admin from being loaded
+        pass
 
 
 def _create_audit_logger():
@@ -27,7 +41,7 @@ def _create_audit_logger():
             print("Audit logging is disabled for initial data upload")
             return None
         
-        from lex.lex_app.logging.InitialDataAuditLogger import InitialDataAuditLogger
+        from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
         logger = InitialDataAuditLogger()
         print(f"Successfully initialized audit logger")
         return logger
@@ -60,7 +74,7 @@ def _create_audit_logger_for_task(audit_logging_enabled=None, calculation_id=Non
             print("Audit logging explicitly disabled for task context")
             return None
         elif audit_logging_enabled is True or is_audit_logging_enabled():
-            from lex.lex_app.logging.InitialDataAuditLogger import InitialDataAuditLogger
+            from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
             logger = InitialDataAuditLogger()
             return logger
         else:
@@ -90,12 +104,14 @@ def should_load_data(auth_settings):
 
 class LexAppConfig(GenericAppConfig):
     name = 'lex_app'
-
+    
+    
     def ready(self):
         super().ready()
-        if repo_name != "lex":
+        if not repo_name.startswith('lex') and self.name == 'lex_app':
             super().start(
-                repo=repo_name
+                repo=repo_name,
+                is_lex=False
             )
             generic_app_models = {f"{model.__name__}": model for model in
                                   set(list(apps.get_app_config(repo_name).models.values())
@@ -104,6 +120,56 @@ class LexAppConfig(GenericAppConfig):
 
 
             asyncio.run(self.async_ready(generic_app_models))
+
+    def register_models(self):
+        """
+        Override parent's register_models to filter out lex core models
+        when registering repo models, but include Historical models for repo models.
+        """
+        from django.contrib import admin
+        from lex.process_admin.utils.model_registration import ModelRegistration
+        from lex.lex_app.streamlit.Streamlit import Streamlit
+
+        # Models to explicitly exclude (shouldn't show in frontend)
+        excluded_model_names = {'Profile', 'HistoricalProfile', 'User'}
+
+        # Filter models appropriately
+        models_to_register = []
+        for model in self.discovered_models.values():
+            # Skip explicitly excluded models
+            if model.__name__ in excluded_model_names:
+                continue
+
+            # Skip if already registered in admin
+            if admin.site.is_registered(model):
+                continue
+
+            # Skip if it's a lex core model (already registered)
+            if hasattr(self, '_lex_core_models') and model in self._lex_core_models:
+                continue
+
+            # Skip Django built-in models
+            if model._meta.app_label in ['auth', 'contenttypes', 'sessions', 'admin']:
+                continue
+
+            models_to_register.append(model)
+
+        if models_to_register:
+            print(f"Registering {len(models_to_register)} models from {repo_name}: {[m.__name__ for m in models_to_register]}")
+            ModelRegistration.register_models(models_to_register, self.untracked_models)
+        else:
+            print(f"No new models to register from {repo_name}")
+
+        # Register model structure and styling if available
+        # This provides the organized structure in the frontend
+        if self.model_structure_builder.model_structure:
+            print(f"Registering model structure for {repo_name}")
+            ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
+        if self.model_structure_builder.model_styling:
+            ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
+        if self.model_structure_builder.widget_structure:
+            ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
+        ModelRegistration.register_models([Streamlit], self.untracked_models)
 
     def is_running_in_celery(self):
         # from celery import current_task
@@ -157,7 +223,7 @@ class LexAppConfig(GenericAppConfig):
             # if audit_enabled:
                 # # Generate calculation ID for continuity between async_ready and task execution
                 # try:
-                #     from lex.lex_app.logging.InitialDataAuditLogger import InitialDataAuditLogger
+                #     from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
                 #     temp_logger = InitialDataAuditLogger()
                 #     print(f"Generated calculation ID for task execution: {calculation_id}")
                 # except Exception as e:

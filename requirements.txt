@@ -13,6 +13,7 @@ djangorestframework
 django-sendgrid-v5
 redis
 celery
+python-dotenv
 sentry_sdk
 channels
 asyncio

@@ -92,7 +92,7 @@ else:
 
 STORAGES = {
     "default": {
-        "BACKEND": "lex_app.CustomDefaultStorage.CustomDefaultStorage",
+        "BACKEND": "lex.utilities.storage.custom_storage.CustomDefaultStorage",
     },
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 
@@ -119,7 +119,7 @@ if os.getenv("STORAGE_TYPE") == "SHAREPOINT":
 if os.getenv("STORAGE_TYPE") == "GCS":
     STORAGES = {
         "default": {
-            "BACKEND": "lex_app.gcsUtils.Media",
+            "BACKEND": "lex.utilities.utils.gcs_utils.Media",
         }
     }
     GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME")
@@ -188,7 +188,7 @@ LOGGING = {
         },
         "websocket": {
             "level": "DEBUG",
-            "class": "lex.lex_app.LexLogger.WebSockerHandler",
+            "class": "lex.audit_logging.handlers.websocket_handler.WebSocketHandler",
         },
     },
     "loggers": {
@@ -205,12 +205,18 @@ LOGGING = {
 
 INSTALLED_APPS = [
     "channels",
+    "lex.utilities.apps.UtilitiesConfig",
+    "lex.core.apps.CoreConfig",
+    "lex.authentication.apps.AuthenticationConfig",
+    "lex.audit_logging.apps.LoggingConfig",
+    "lex.api.apps.ApiConfig",
+    "lex.process_admin.apps.ProcessAdminConfig",
     "lex.lex_app.apps.LexAppConfig",
     "simple_history",
     "celery",
     "react",
     "markdown",
-    "django.contrib.admin",
+    "lex.lex_app.apps.CustomAdminConfig",  # Custom admin config to prevent auth admin conflicts
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -223,7 +229,7 @@ INSTALLED_APPS = [
     "oauth2_authcodeflow",
 ]
 
-if repo_name != "lex":
+if not repo_name.startswith("lex"):
     INSTALLED_APPS.append(repo_name)
 
 
@@ -239,7 +245,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
-    "lex_app.rest_api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
+    "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
     "oauth2_authcodeflow.middleware.LoginRequiredMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
@@ -308,7 +314,7 @@ DATABASES = {
     },
     "default": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
-        "NAME": f"db_{repo_name}",
+        "NAME": f"db_{repo_name.lower()}",
         "USER": "django",
         "PASSWORD": "lundadminlocal",
         "HOST": "localhost",
@@ -445,7 +451,6 @@ AUTH_PASSWORD_VALIDATORS = [
 CORS_ORIGIN_ALLOW_ALL = True
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
-
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM")
 OIDC_RP_CLIENT_ID = os.getenv("OIDC_RP_CLIENT_ID")
@@ -458,9 +463,9 @@ AUTHENTICATION_BACKENDS = (
 )
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
-OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/"]
+OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "api/user_permissions/"]
 OIDC_RP_USE_PKCE = False
-OIDC_MIDDLEWARE_LOGIN_REQUIRED_REDIRECT = True
+# OIDC_MIDDLEWARE_LOGIN_REQUIRED_REDIRECT = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -470,11 +475,11 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 
-JWT_SECRET_KEY = SECRET_KEY
-JWT_ALGORITHM = 'HS256'
-JWT_ACCESS_TOKEN_LIFETIME = timedelta(minutes=5)  # Short-lived
-JWT_REFRESH_GRACE_PERIOD = timedelta(minutes=10)  # Grace period for refresh
-JWT_EXPIRATION_HOURS = 2
+# JWT_SECRET_KEY = SECRET_KEY
+# JWT_ALGORITHM = 'HS256'
+# JWT_ACCESS_TOKEN_LIFETIME = timedelta(minutes=5)  # Short-lived
+# JWT_REFRESH_GRACE_PERIOD = timedelta(minutes=10)  # Grace period for refresh
+# JWT_EXPIRATION_HOURS = 2
 
 
 REST_FRAMEWORK = {
@@ -566,7 +571,7 @@ LOGGING = {
             "formatter": "default",
         },
         "ws": {
-            "()": "lex.lex_app.LexLogger.WebSocketHandler.WebSocketHandler",
+            "()": "lex.audit_logging.handlers.websocket_handler.WebSocketHandler",
             "level": "DEBUG",
             "formatter": "ws_md",
         },
@@ -583,6 +588,16 @@ LOGGING = {
         "level": os.getenv("LOG_LEVEL", "DEBUG"),
     },
 }
+
+INSTANCE_CONTROLLER_BASE_URL = os.getenv(
+    "INSTANCE_CONTROLLER_BASE_URL",
+    "https://hazem.excellence-cloud.dev",
+)
+
+KEYCLOAK_SETUP_CALLBACK_URL = os.getenv(
+    "KEYCLOAK_SETUP_CALLBACK_URL",
+    "http://127.0.0.1:8000/api/bootstrap/keycloak/",
+)
 
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = None

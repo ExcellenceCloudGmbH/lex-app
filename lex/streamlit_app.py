@@ -11,7 +11,7 @@ import logging
 
 import streamlit as st
 
-from lex.lex_app.rest_api.views.authentication.KeycloakManager import KeycloakManager
+from lex.api.views.authentication.KeycloakManager import KeycloakManager
 from django.conf import settings
 
 logger = logging.getLogger(__name__)

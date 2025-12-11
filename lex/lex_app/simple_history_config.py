@@ -118,6 +118,10 @@ def should_track_model(model_class):
     model_name = model_class.__name__.lower()
     app_label = model_class._meta.app_label.lower()
     
+    # CRITICAL: Never track Historical models themselves (prevents HistoricalHistorical* models)
+    if model_class.__name__.startswith('Historical'):
+        return False
+    
     # Check if model name is in excluded list
     if model_name in get_excluded_models():
         return False
@@ -162,6 +166,10 @@ def get_model_exclusion_reason(model_class):
     """
     model_name = model_class.__name__.lower()
     app_label = model_class._meta.app_label.lower()
+    
+    # Check for Historical models first (most important check)
+    if model_class.__name__.startswith('Historical'):
+        return "Historical model (simple_history generated)"
     
     if model_name in DJANGO_BUILTIN_MODELS:
         return f"Django built-in model: {model_name}"

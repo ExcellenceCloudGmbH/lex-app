@@ -1,0 +1,1 @@
+# API models will be added here as needed (typically API apps don't have models)

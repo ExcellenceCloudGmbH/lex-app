@@ -13,11 +13,11 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 from django.db import models
 
-from lex.lex_app.rest_api.context import OperationContext
-from lex.lex_app.logging.config import is_audit_logging_enabled
+from lex.api.utils import OperationContext
+from lex.audit_logging.utils.config import is_audit_logging_enabled
 from django.contrib.contenttypes.models import ContentType
-from lex.lex_app.logging.CalculationLog import CalculationLog
-from lex.lex_app.logging.model_context import model_logging_context
+from lex.audit_logging.models.calculation_log import CalculationLog
+from lex.audit_logging.utils.model_context import model_logging_context
 
 from lex.lex_app import settings
 from lex.lex_app.celery_tasks import lex_shared_task

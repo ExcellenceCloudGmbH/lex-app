@@ -22,8 +22,8 @@ from lex.lex_app import settings
 
 
 from . import views
-from .ProcessAdminSettings import processAdminSite, adminSite
-from lex.lex_app.rest_api.views.authentication.UserAPIView import CurrentUser
+from lex.process_admin.settings import processAdminSite, adminSite
+from lex.authentication.views.user_api import CurrentUser
 
 url_prefix = (
     os.getenv("DJANGO_BASE_PATH") if os.getenv("DJANGO_BASE_PATH") is not None else ""

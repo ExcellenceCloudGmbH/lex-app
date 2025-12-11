@@ -15,11 +15,11 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
 from django.core.asgi import get_asgi_application
 
-import lex.lex_app.rest_api.routing
-from lex.lex_app.rest_api.consumers.BackendHealthConsumer import BackendHealthConsumer
-from lex.lex_app.rest_api.consumers.CalculationLogConsumer import CalculationLogConsumer
-from lex.lex_app.rest_api.consumers.CalculationsConsumer import CalculationsConsumer
-from lex.lex_app.rest_api.consumers.UpdateCalculationStatusConsumer import UpdateCalculationStatusConsumer
+from lex.lex_app import routing
+from lex.api.consumers.BackendHealthConsumer import BackendHealthConsumer
+from lex.api.consumers.CalculationLogConsumer import CalculationLogConsumer
+from lex.api.consumers.CalculationsConsumer import CalculationsConsumer
+from lex.api.consumers.UpdateCalculationStatusConsumer import UpdateCalculationStatusConsumer
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
 django_asgi_app = get_asgi_application()
@@ -27,7 +27,7 @@ application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
         "websocket": AllowedHostsOriginValidator(
-            AuthMiddlewareStack(URLRouter(lex.lex_app.rest_api.routing.websocket_urlpatterns))
+            AuthMiddlewareStack(URLRouter(routing.websocket_urlpatterns))
         ),
     }
 )
