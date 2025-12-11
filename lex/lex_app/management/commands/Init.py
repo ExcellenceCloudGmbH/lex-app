@@ -724,6 +724,8 @@ class KeycloakSyncManager:
                 if not self.delete_resources_individual(to_delete_set, all_resources):
                     logger.error("Failed to delete resources individually")
                     return False
+            logger.info("Ensuring core role-based policies exist before adding resources...")
+            self.ensure_core_role_policies(auth_config)
 
             # 6. Add new resources and renamed resources to config
             if to_add_set:
@@ -847,9 +849,9 @@ class KeycloakSyncManager:
             # After step 6 (Add new resources) and before step 7 (Import)
             # ...existing code that adds resources...
 
-            # 6.5. Ensure core role-based policies exist
-            logger.info("Ensuring core role-based policies exist...")
-            self.ensure_core_role_policies(auth_config)
+            # # 6.5. Ensure core role-based policies exist
+            # logger.info("Ensuring core role-based policies exist...")
+            # self.ensure_core_role_policies(auth_config)
 
             # Also ensure default authz if requested
             if ensure_default_authz:
