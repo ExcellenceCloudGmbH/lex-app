@@ -65,7 +65,7 @@ class CustomInstallCommand(install):
     def setup_project(self, project_root):
         root = self.find_project_root(project_root or os.getcwd())
         env_path, created = self.ensure_env_file(root)
-        generate_configs(root)
+        self.generate_configs(root)
         click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
         click.echo(f".run: {os.path.join(root, '.run')} (updated)")
 
@@ -170,7 +170,7 @@ OIDC_RP_CLIENT_UUID=
 
 setup(
     name="lex-app",
-    version="2.0.0rc12",
+    version="2.0.0rc13",
     author="Melih Sünbül",
     author_email="m.sunbul@excellence-cloud.com",
     description="A Python / Django library to create business applications easily with complex logic",
