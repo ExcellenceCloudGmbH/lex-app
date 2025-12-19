@@ -66,7 +66,6 @@ class CustomInstallCommand(install):
         root = self.find_project_root(project_root or os.getcwd())
         env_path, created = self.ensure_env_file(root)
         self.generate_configs(root)
-        import click
         print(f".env: {env_path} ({'created' if created else 'exists'})")
         print(f".run: {os.path.join(root, '.run')} (updated)")
 
