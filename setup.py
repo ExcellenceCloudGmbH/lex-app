@@ -36,8 +36,8 @@ class CustomInstallCommand(install):
     def run(self):
         install.run(self)
         # self.move_other_directory()
-        # self.generate_pycharm_configs()
-        # self.generate_env_file()
+        self.generate_pycharm_configs()
+        self.generate_env_file()
 
     def move_other_directory(self):
         source = os.path.join(os.path.dirname(__file__), 'lex', 'generic_app')
@@ -56,7 +56,7 @@ class CustomInstallCommand(install):
         if os.path.exists(env_path):
             print(f'.env already exists at {env_path}, not modifying.')
             return
-        content = """KEYCLOAK_URL=https://auth.excellence-cloud.dev
+        content = """KEYCLOAK_URL=https://auth.excellence-cloud.de
 KEYCLOAK_REALM=
 OIDC_RP_CLIENT_ID=
 OIDC_RP_CLIENT_SECRET=
