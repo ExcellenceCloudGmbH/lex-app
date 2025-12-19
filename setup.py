@@ -62,7 +62,7 @@ class CustomInstallCommand(install):
                 return str(p)
         return str(base)
 
-    def setup_project(self, project_root):
+    def setup_project(self, project_root=None):
         root = self.find_project_root(project_root or os.getcwd())
         env_path, created = self.ensure_env_file(root)
         self.generate_configs(root)
@@ -74,7 +74,7 @@ class CustomInstallCommand(install):
         # self.move_other_directory()
         # self.generate_pycharm_configs()
         # self.generate_env_file()
-        self.setup_project(self.find_project_root())
+        self.setup_project()
 
     def move_other_directory(self):
         source = os.path.join(os.path.dirname(__file__), 'lex', 'generic_app')
