@@ -11,8 +11,15 @@ from setuptools.command.install import install
 with open("requirements.txt") as f:
     install_requires = f.read().splitlines()
 
-PROJECT_MARKERS = {'.git', 'pyproject.toml', 'setup.cfg', 'manage.py', 'requirements.txt', '.idea', '.vscode'}
+MARKERS = {'.git', 'pyproject.toml', 'setup.cfg', 'manage.py', 'requirements.txt', '.idea', '.vscode'}
 
+
+DEFAULT_ENV = """KEYCLOAK_URL=https://auth.excellence-cloud.dev
+KEYCLOAK_REALM=
+OIDC_RP_CLIENT_ID=
+OIDC_RP_CLIENT_SECRET=
+OIDC_RP_CLIENT_UUID=
+"""
 def _resolve_project_root(default=None):
     base = Path(default or os.getcwd()).resolve()
     try:
@@ -163,7 +170,7 @@ OIDC_RP_CLIENT_UUID=
 
 setup(
     name="lex-app",
-    version="2.0.0rc11",
+    version="2.0.0rc12",
     author="Melih Sünbül",
     author_email="m.sunbul@excellence-cloud.com",
     description="A Python / Django library to create business applications easily with complex logic",
