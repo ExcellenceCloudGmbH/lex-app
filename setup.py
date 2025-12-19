@@ -1,4 +1,5 @@
 # setup.py
+import click
 import os
 import shutil
 import sys
