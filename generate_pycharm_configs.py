@@ -69,13 +69,13 @@ def generate_pycharm_configs(project_root=None):
         path = os.path.join(runconfigs_dir, filename)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"✓ Generated: {filename}")
+        print(f"[OK] Generated: {filename}")
 
     print("\nPyCharm run configurations generated successfully!")
     if os.path.exists(env_file_path):
-        print(f"✓ Configurations will use .env file: {env_file_path}")
+        print(f"[OK] Configurations will use .env file: {env_file_path}")
     else:
-        print(f"⚠ No .env file found at {env_file_path}")
+        print(f"[WARN] No .env file found at {env_file_path}")
         print("  Create one if you need environment variables for your project.")
 
 if __name__ == "__main__":
