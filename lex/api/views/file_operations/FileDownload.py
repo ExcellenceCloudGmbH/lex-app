@@ -19,14 +19,35 @@ class FileDownloadView(APIView):
     def get(self, request, *args, **kwargs):
         model = kwargs["model_container"].model_class
 
-        instance = model.objects.filter(pk=request.query_params["pk"])[0]
-        file = instance.__getattribute__(request.query_params["field"])
+        # Use get_object_or_404 for better error handling (404 instead of 500 crash)
+        instance = get_object_or_404(model, pk=request.query_params["pk"])
+
+        # SECURITY NOTE: Validate 'field' exists to prevent arbitrary attribute access
+        field_name = request.query_params["field"]
+        if not hasattr(instance, field_name):
+            return Response({"error": "Field not found"}, status=400)
+
+        file_obj = getattr(instance, field_name)
+
+        # Get the raw URL from the storage backend
+        # If the file doesn't exist, this might raise a ValueError depending on storage
+        try:
+            raw_url = file_obj.url
+        except ValueError:
+            return Response({"error": "File does not exist"}, status=404)
+
+        # 1. WINDOWS FIX: Ensure URL uses forward slashes.
+        # Windows paths might introduce '\', which breaks URLs.
+        clean_url = raw_url.replace("\\", "/")
 
         if os.getenv("KUBERNETES_ENGINE", "NONE") == "NONE":
-            # TODO, not compatible with production environment
-            file_url = file.url if not file.url.startswith("/") else file.url
+            # 2. LOCAL DEV FIX: Build absolute URI
+            # If running locally, you often get a relative path (e.g., /media/file.jpg).
+            # This converts it to http://localhost:8000/media/file.jpg
+            file_url = request.build_absolute_uri(clean_url)
         else:
-            file_url = file.url
+            # Production usually uses S3/GCS, returning a full https:// URL already.
+            file_url = clean_url
 
         if os.getenv("STORAGE_TYPE") == "SHAREPOINT":
             shrp_ctx = SharePointContext()

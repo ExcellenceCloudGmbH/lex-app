@@ -524,7 +524,7 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = True
+USE_TZ = False
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
 TIME_ZONE = "Europe/Berlin"
