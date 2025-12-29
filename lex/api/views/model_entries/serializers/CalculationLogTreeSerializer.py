@@ -21,7 +21,7 @@ class CalculationLogTreeSerializer(serializers.ModelSerializer):
     def get_children(self, obj):
         # Retrieve the immediate children for the same calculation (returning just their IDs)
         children_qs = CalculationLog.objects.filter(
-            calculationlog=obj,
+            calculation_log=obj,
             calculationId=obj.calculationId
         )
         return list(children_qs.values_list('id', flat=True))
