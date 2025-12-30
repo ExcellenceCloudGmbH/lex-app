@@ -70,7 +70,7 @@ class XLSXField(FileField):
         for df, sheet_name in zip(data_frames, sheet_names):
             if df is not None:
                 if len(df) == 0:
-                    df = df.append(pd.Series(), ignore_index=True)
+                    df = pd.concat([df, pd.DataFrame([{}])], ignore_index=True)
                 if index:
                     idx_length = df.index.nlevels
                 df.to_excel(writer, sheet_name=sheet_name, merge_cells=merge_cells, freeze_panes=(1, idx_length),
