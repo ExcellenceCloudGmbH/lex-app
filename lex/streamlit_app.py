@@ -1,43 +1,39 @@
 import base64
 import json
-from typing import Optional, Dict
 import os
 import traceback
 import urllib.parse
+import threading
+import time
+import logging
+from datetime import datetime, timezone
+from typing import Optional, Dict
+
 import jwt
 import requests
-from datetime import datetime, timezone
-import logging
-
 import streamlit as st
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from lex.api.views.authentication.KeycloakManager import KeycloakManager
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
-
-
-import threading
-import time
-import requests
-import os
-import jwt
-import logging
-from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-
 log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # -------------------------
 # Token refresh: config
 # -------------------------
-TOKEN_SKEW_SECONDS = 10          # refresh 60s before exp
+TOKEN_SKEW_SECONDS = 10          # refresh 10s before exp
 REFRESH_MIN_INTERVAL = 15        # floor sleep
 REFRESH_MAX_BACKOFF = 300        # cap backoff to 5 minutes
 
+
 def _oidc_token_endpoint() -> str:
-    base = os.getenv("KEYCLOAK_URL").rstrip("/")
-    realm = os.getenv("KEYCLOAK_REALM")
+    base = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
+    realm = os.getenv("KEYCLOAK_REALM") or ""
     return f"{base}/realms/{realm}/protocol/openid-connect/token"
+
 
 def _decode_exp_no_verify(token: str) -> int:
     try:
@@ -46,23 +42,24 @@ def _decode_exp_no_verify(token: str) -> int:
     except Exception:
         return 0
 
+
 def _now() -> int:
     return int(time.time())
+
 
 def _compute_next_refresh_at(exp: int, expires_in: int | None) -> int:
     if exp:
         return max(_now() + REFRESH_MIN_INTERVAL, exp - TOKEN_SKEW_SECONDS)
     if expires_in:
         return _now() + max(REFRESH_MIN_INTERVAL, int(expires_in) - TOKEN_SKEW_SECONDS)
-    # Unknown expiry: retry soon
     return _now() + REFRESH_MIN_INTERVAL
+
 
 def _post_refresh(refresh_token: str) -> dict | None:
     url = _oidc_token_endpoint()
-    # client_id = os.getenv("KEYCLOAK_CLIENT_ID") or ""
-    # client_secret = os.getenv("KEYCLOAK_CLIENT_SECRET") or None
     client_id = os.getenv("OIDC_RP_CLIENT_ID")
     client_secret = os.getenv("OIDC_RP_CLIENT_SECRET")
+
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
@@ -70,6 +67,7 @@ def _post_refresh(refresh_token: str) -> dict | None:
     }
     if client_secret:
         data["client_secret"] = client_secret
+
     try:
         r = requests.post(url, data=data, timeout=15)
         if r.status_code >= 400:
@@ -80,17 +78,18 @@ def _post_refresh(refresh_token: str) -> dict | None:
         log.warning("Refresh exception: %s", e)
         return None
 
+
 def _update_tokens_from_response(tok: dict) -> None:
     access = tok.get("access_token") or ""
     refresh = tok.get("refresh_token") or st.session_state.get("refresh_token") or ""
     expires_in = tok.get("expires_in")
     exp = _decode_exp_no_verify(access) if access else 0
+
     st.session_state.access_token = access
     st.session_state.refresh_token = refresh
     st.session_state.token_exp = exp
     st.session_state.expires_in = expires_in
-    # Optionally hydrate user info again if needed by downstream code
-    # user = get_user_info(access) or st.session_state.get("user_info")
+
 
 def _token_refresher(stop_key: str = "stop_token_refresher") -> None:
     backoff = 5
@@ -100,10 +99,9 @@ def _token_refresher(stop_key: str = "stop_token_refresher") -> None:
         exp = st.session_state.get("token_exp") or _decode_exp_no_verify(access)
         expires_in = st.session_state.get("expires_in")
 
-        # Decide next refresh time
         next_at = _compute_next_refresh_at(exp, expires_in)
         sleep_for = max(1, next_at - _now())
-        # Sleep with small increments so stop flag is responsive
+
         end_at = _now() + sleep_for
         while _now() < end_at:
             if st.session_state.get(stop_key, False):
@@ -114,34 +112,31 @@ def _token_refresher(stop_key: str = "stop_token_refresher") -> None:
             return
 
         if not refresh:
-            # Nothing to refresh; try again later
             backoff = min(REFRESH_MAX_BACKOFF, backoff * 2)
             time.sleep(backoff)
             continue
 
         tok = _post_refresh(refresh)
-        print("Access Token", tok.get('access_token'))
         if tok and tok.get("access_token"):
             _update_tokens_from_response(tok)
-            backoff = 5  # reset backoff on success
+            backoff = 5
         else:
-            # Failure: backoff and retry
             backoff = min(REFRESH_MAX_BACKOFF, backoff * 2)
             time.sleep(backoff)
+
 
 def start_token_refresh_thread_if_needed() -> None:
     if st.session_state.get("token_refresher_started"):
         return
-    # Require a refresh_token; fall back to header if proxy forwards it
+
     if not st.session_state.get("refresh_token"):
-        # Optional header capture if proxy forwards refresh token
         headers = getattr(st.context, "headers", {}) or {}
-        rt = headers.get("x-streamlit-refresh-token") or ""
+        h = normalize_headers(headers)
+        rt = h.get("x-streamlit-refresh-token") or ""
         if rt:
             st.session_state.refresh_token = rt
 
     if not st.session_state.get("refresh_token"):
-        # No refresh path; do not start thread
         st.session_state.token_refresher_started = True
         return
 
@@ -149,34 +144,57 @@ def start_token_refresh_thread_if_needed() -> None:
     th = threading.Thread(target=_token_refresher, name="token_refresher", daemon=True)
     add_script_run_ctx(th, get_script_run_ctx())
     th.start()
+
     st.session_state.token_refresher_started = True
     st.session_state.token_refresher_thread = th
 
+
 def normalize(d: Dict[str, str]) -> Dict[str, str]:
-    """Normalize dictionary keys and values to lowercase."""
     return {(k or "").strip().lower(): (v or "").strip() for k, v in (d or {}).items()}
 
 
-def get_bearer_token(headers: Dict[str, str]) -> Optional[str]:
-    """Extract bearer token from various header formats."""
-    for name in ("authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
-        val = headers.get(name)
-        if not val:
-            continue
-        return strip_bearer(val)
-    return None
+def normalize_headers(h: Dict[str, str]) -> Dict[str, str]:
+    return {(k or "").strip().lower(): (v or "").strip() for k, v in (h or {}).items()}
 
 
 def strip_bearer(value: str) -> str:
-    """Remove 'Bearer ' prefix from token."""
     v = (value or "").strip()
     if v.lower().startswith("bearer "):
         return v.split(" ", 1)[1].strip()
     return v
 
 
-def get_user_info(access_token):
-    """Get user info from Keycloak using access token."""
+def get_bearer_token(headers: Dict[str, str]) -> Optional[str]:
+    h = normalize_headers(headers)
+    for name in ("authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
+        val = h.get(name)
+        if not val:
+            continue
+        return strip_bearer(val)
+    return None
+
+
+def bearer_from_headers(h: Dict[str, str]) -> Optional[str]:
+    for name in ("authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
+        v = h.get(name)
+        if not v:
+            continue
+        v = v.strip()
+        if v.lower().startswith("bearer "):
+            return v.split(" ", 1)[1].strip()
+        return v
+    return None
+
+
+def decode_jwt_claims_no_verify(token: str) -> Dict:
+    try:
+        return jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+    except Exception as e:
+        logger.warning(f"JWT decode (no verify) failed: {e}")
+        return {}
+
+
+def get_user_info(access_token: str):
     keycloak_url = os.getenv("KEYCLOAK_URL")
     realm_name = os.getenv("KEYCLOAK_REALM")
 
@@ -184,7 +202,6 @@ def get_user_info(access_token):
         return None
 
     userinfo_url = f"{keycloak_url}/realms/{realm_name}/protocol/openid-connect/userinfo"
-
     try:
         headers = {"Authorization": f"Bearer {access_token}"}
         response = requests.get(userinfo_url, headers=headers, timeout=10)
@@ -195,15 +212,102 @@ def get_user_info(access_token):
         return None
 
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+# -------------------------
+# Logout helpers (form-safe)
+# -------------------------
+def _is_truthy_qp(v) -> bool:
+    if v is None:
+        return False
+    if isinstance(v, list):
+        v = v[0] if v else None
+    return str(v).lower() in ("1", "true", "yes", "y", "on")
+
+
+def _base_path() -> str:
+    # Supports deployments where Streamlit is mounted under a subpath
+    try:
+        p = st.get_option("server.baseUrlPath") or ""
+    except Exception:
+        p = ""
+    if not p:
+        return ""
+    if not p.startswith("/"):
+        p = "/" + p
+    return p.rstrip("/")
+
+
+def _current_base_url() -> str:
+    # Prefer explicit public URL if provided
+    public = os.getenv("STREAMLIT_PUBLIC_URL") or os.getenv("PUBLIC_URL")
+    if public:
+        return public.rstrip("/")
+
+    # Otherwise infer from reverse-proxy headers
+    h = normalize_headers(getattr(st.context, "headers", {}) or {})
+    proto = (h.get("x-forwarded-proto") or "http").split(",")[0].strip()
+    host = (h.get("x-forwarded-host") or h.get("host") or "localhost:8501").split(",")[0].strip()
+    return f"{proto}://{host}".rstrip("/")
+
+
+def _local_logout_cleanup() -> None:
+    st.session_state.stop_token_refresher = True
+    th = st.session_state.get("token_refresher_thread")
+    if th and getattr(th, "is_alive", lambda: False)():
+        th.join(timeout=1.0)
+    st.session_state.clear()
+
+
+def handle_logout_landing() -> None:
+    # If we landed here with ?logout=1, do local cleanup and stop.
+    if _is_truthy_qp(st.query_params.get("logout")):
+        _local_logout_cleanup()
+        try:
+            st.query_params.clear()
+        except Exception:
+            pass
+        st.success("✅ Logged out successfully. You can close this window.")
+        st.stop()
+
+
+def render_logout_link() -> None:
+    """
+    Form-safe logout control:
+    - Not a Streamlit widget (so it won't break inside st.form()).
+    - Works regardless of whatever streamlit_structure.main() renders.
+    """
+    base_url = _current_base_url()
+    base_path = _base_path()
+
+    # After upstream logout, land on /?logout=1 to clear Streamlit session_state
+    logout_landing_abs = f"{base_url}{base_path}/?logout=1"
+    rd = urllib.parse.quote(logout_landing_abs, safe="")
+
+    auth_method = st.session_state.get("auth_method", "session")
+    if auth_method == "session":
+        href = f"{base_path}/oauth2/sign_out?rd={rd}"
+    else:
+        # JWT: we can't revoke upstream header; just clear local session_state on landing
+        href = f"{base_path}/?logout=1"
+
+    st.sidebar.markdown(
+        f"""
+        <a href="{href}" target="_top" style="
+            display:inline-block;
+            padding:0.45rem 0.8rem;
+            border-radius:0.5rem;
+            border:1px solid rgba(49,51,63,0.25);
+            text-decoration:none;
+            font-weight:600;
+        ">Logout</a>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # -------------------------
 # Session state initialization
 # -------------------------
 def init_session_state() -> None:
-    # Ensure all keys exist; never assume presence across reruns
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
     if "auth_method" not in st.session_state:
@@ -221,49 +325,15 @@ def init_session_state() -> None:
 
 
 # -------------------------
-# Header utilities
-# -------------------------
-def normalize_headers(h: Dict[str, str]) -> Dict[str, str]:
-    # Case-insensitive access
-    return {(k or "").strip().lower(): (v or "").strip() for k, v in (h or {}).items()}
-
-
-def bearer_from_headers(h: Dict[str, str]) -> Optional[str]:
-    # Prefer Authorization, fallback to X-Forwarded-Access-Token, X-Auth-Request-Access-Token
-    for name in ("authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
-        v = h.get(name)
-        if not v:
-            continue
-        v = v.strip()
-        if v.lower().startswith("bearer "):
-            return v.split(" ", 1)[1].strip()
-        return v
-    return None
-
-
-def decode_jwt_claims_no_verify(token: str) -> Dict:
-    # Proxy already validated upstream; here we only need claims to hydrate identity
-    try:
-        return jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
-    except Exception as e:
-        logger.warning(f"JWT decode (no verify) failed: {e}")
-        return {}
-
-
-# -------------------------
 # Authentication
 # -------------------------
 def authenticate_from_proxy_or_jwt() -> None:
-    # If already authenticated in this session, do not re-evaluate
     if st.session_state.authenticated:
         return
 
     headers = getattr(st.context, "headers", {}) or {}
     h = normalize_headers(headers)
-    print("Headers h", h)
-    print("Headers", headers)
 
-    # Try Streamlit identity headers from proxy
     user_id = (
         h.get("x-streamlit-user-id")
         or headers.get("X-Streamlit-User-ID", "")
@@ -291,11 +361,8 @@ def authenticate_from_proxy_or_jwt() -> None:
         or ""
     )
 
-    # If user_id empty, attempt to derive from JWT claims present in headers
-    # Works for iframe flow (JWT) and for session flow when proxy added Authorization bearer
     if not user_id:
         token = bearer_from_headers(h)
-        print("Token", token)
         if token:
             claims = decode_jwt_claims_no_verify(token)
             user_id = claims.get("sub") or user_id
@@ -304,11 +371,9 @@ def authenticate_from_proxy_or_jwt() -> None:
             if not auth_method:
                 auth_method = "jwt"
 
-    # Fallback: if still no user_id but email exists, use email as stable identifier
     if not user_id and user_email:
         user_id = user_email
 
-    # Parse permissions JSON safely
     permissions = {}
     if perms_raw:
         try:
@@ -316,10 +381,9 @@ def authenticate_from_proxy_or_jwt() -> None:
         except Exception:
             permissions = {}
 
-    # Hydrate session state
     if user_id:
         st.session_state.authenticated = True
-        st.session_state.auth_method = auth_method or ("session" if not (bearer_from_headers(h)) else "jwt")
+        st.session_state.auth_method = auth_method or ("session" if not bearer_from_headers(h) else "jwt")
         st.session_state.user_id = user_id
         st.session_state.user_email = user_email
         st.session_state.user_username = user_username or (user_email.split("@")[0] if user_email else "")
@@ -329,46 +393,50 @@ def authenticate_from_proxy_or_jwt() -> None:
             "email": st.session_state.user_email,
             "preferred_username": st.session_state.user_username,
         }
-        token_from_header = bearer_from_headers(h)  # already available
 
+        token_from_header = bearer_from_headers(h)
         st.session_state.access_token = token_from_header
-        st.session_state.token_exp = _decode_exp_no_verify(token_from_header)
+        st.session_state.token_exp = _decode_exp_no_verify(token_from_header) if token_from_header else 0
 
         rt_hdr = h.get("x-streamlit-refresh-token")
         if rt_hdr:
             st.session_state.refresh_token = rt_hdr
 
-        # Kick off background refresh if a refresh token is present
         start_token_refresh_thread_if_needed()
 
         logger.info(
             f"Authenticated via {st.session_state.auth_method} as "
             f"{st.session_state.user_email or st.session_state.user_id}"
         )
-    else:
-        # Not authenticated: leave session_state.authenticated as False
-        pass
 
 
 # -------------------------
 # App bootstrap
 # -------------------------
 init_session_state()
+
+# If user clicked logout link and landed on ?logout=1, we clear session_state safely and stop.
+handle_logout_landing()
+
 authenticate_from_proxy_or_jwt()
 
-# Fail closed if not authenticated; Streamlit reruns on interactions so session_state persists per session
 if not st.session_state.authenticated:
     st.error("❌ Authentication Error: Missing user information.")
     st.info("Please access this application through the main portal.")
     st.stop()
 
-if __name__ == '__main__':
+# Form-safe logout control (won't break no matter what streamlit_structure.main() does)
+render_logout_link()
+
+# -------------------------
+# Main app
+# -------------------------
+if __name__ == "__main__":
     from lex.lex_app.settings import repo_name
 
     try:
         exec(f"import {repo_name}._streamlit_structure as streamlit_structure")
 
-        # Your existing model rendering logic...
         params = st.query_params
         model = params.get("model")
         pk = params.get("pk")
@@ -377,18 +445,16 @@ if __name__ == '__main__':
             # Instance-level visualization
             try:
                 from django.apps import apps
-                from lex.lex_app.settings import repo_name
 
                 model_class = apps.get_model(repo_name, model)
                 model_obj = model_class.objects.filter(pk=pk).first()
 
                 if model_obj is None:
                     st.error(f"❌ Object with ID {pk} not found")
-                elif not hasattr(model_obj, 'streamlit_main'):
-                    st.error(f"❌ This model doesn't support visualization")
+                elif not hasattr(model_obj, "streamlit_main"):
+                    st.error("❌ This model doesn't support visualization")
                 else:
-                    # Pass user info from session state
-                    user = st.session_state.get('user_info')
+                    user = st.session_state.get("user_info")
                     model_obj.streamlit_main(user)
 
             except LookupError:
@@ -400,16 +466,14 @@ if __name__ == '__main__':
             # Class-level visualization
             try:
                 from django.apps import apps
-                from lex.lex_app.settings import repo_name
 
                 model_class = apps.get_model(repo_name, model)
 
-                if not hasattr(model_class, 'streamlit_class_main'):
-                    st.error(f"❌ This model doesn't support class-level visualization")
+                if not hasattr(model_class, "streamlit_class_main"):
+                    st.error("❌ This model doesn't support class-level visualization")
                 else:
-                    # Pass user info and permissions from session state
-                    user = st.session_state.get('user_info')
-                    permissions = st.session_state.get('permissions')
+                    user = st.session_state.get("user_info")
+                    permissions = st.session_state.get("permissions")
                     model_class.streamlit_class_main()
 
             except LookupError:
@@ -420,29 +484,6 @@ if __name__ == '__main__':
         else:
             # Default application structure
             streamlit_structure.main()
-            if st.button("Logout"):
-                auth_method = st.session_state.get('auth_method', 'session')
-
-                if auth_method == 'jwt':
-                    # For JWT auth, just clear session and show message
-                    st.session_state.stop_token_refresher = True
-                    th = st.session_state.get("token_refresher_thread")
-                    if th and th.is_alive():
-                        # Give it a moment to exit; thread is daemon, so app exit also cleans up
-                        th.join(timeout=1.0)
-                    st.session_state.clear()
-                    st.success("✅ Logged out successfully. You can close this window.")
-                    st.stop()
-                else:
-                    # For session auth, redirect to logout
-                    rd = urllib.parse.quote("http://localhost:8501", safe="")
-                    st.markdown(
-                        f"<meta http-equiv='refresh' content='0;url=/oauth2/sign_out?rd={rd}'>",
-                        unsafe_allow_html=True
-                    )
-
-        # Logout functionality (adjust based on auth method)
-
 
     except Exception as e:
         if os.getenv("DEPLOYMENT_ENVIRONMENT") != "PROD":

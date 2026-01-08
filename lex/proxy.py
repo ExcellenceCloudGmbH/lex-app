@@ -550,7 +550,7 @@ routes = [
     Route("/oauth2/sign_out", oauth2_sign_out), # RP-initiated (Keycloak)
     Route("/auth/logout", oauth2_logout),       # back-compat
     WebSocketRoute("/{path:path}", ws_proxy),
-    Route("/{path:path}", proxy),  # catch-all
+    Route("/{path:path}", proxy, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]),  # catch-all
 ]
 app = Starlette(routes=routes)
 app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=False, same_site="lax")
