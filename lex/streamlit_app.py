@@ -410,6 +410,36 @@ def authenticate_from_proxy_or_jwt() -> None:
         )
 
 
+def reset_streamlit_form_context() -> None:
+    """
+    Clears leaked Streamlit internal form context so the next st.form() starts clean.
+
+    Streamlit marks a DG as "in a form" by setting dg._form_data (FormData). [web:46]
+    Root DGs include st._main, st.sidebar, st._event, st._bottom. [web:59]
+    Streamlit also tracks the active container stack (context_dg_stack). [web:48]
+    """
+    try:
+        # 1) Clear known root DGs
+        for attr in ("_main", "sidebar", "_event", "_bottom"):
+            dg = getattr(st, attr, None)
+            if dg is not None and getattr(dg, "_form_data", None) is not None:
+                dg._form_data = None
+
+        # 2) Clear any DGs currently on the context stack (if available)
+        try:
+            from streamlit.delta_generator_singletons import context_dg_stack  # internal
+            stack = context_dg_stack.get() or ()
+            for dg in stack:
+                if dg is not None and getattr(dg, "_form_data", None) is not None:
+                    dg._form_data = None
+        except Exception:
+            # If internals move between Streamlit versions, ignore.
+            pass
+
+    except Exception:
+        # Never break app rendering because of this reset.
+        pass
+
 # -------------------------
 # App bootstrap
 # -------------------------
@@ -436,7 +466,7 @@ if __name__ == "__main__":
 
     try:
         exec(f"import {repo_name}._streamlit_structure as streamlit_structure")
-
+        reset_streamlit_form_context()
         params = st.query_params
         model = params.get("model")
         pk = params.get("pk")
