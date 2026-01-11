@@ -85,9 +85,10 @@ class GenericAppConfig(AppConfig):
         return directory not in self._EXCLUDED_DIRS and not directory.startswith(self._EXCLUDED_PREFIXES)
 
     def _is_valid_module(self, module_name, file):
-        return (file.endswith('.py') and
-                not module_name.endswith(self._EXCLUDED_POSTFIXES) and
-                module_name not in self._EXCLUDED_FILES)
+        return (file.endswith('.py')
+                and not module_name.endswith(self._EXCLUDED_POSTFIXES)
+                and module_name not in self._EXCLUDED_FILES
+                and not module_name.startswith(self._EXCLUDED_PREFIXES))
 
     def _process_module(self, full_module_name, file):
         if file.endswith('_authentication_settings.py'):
