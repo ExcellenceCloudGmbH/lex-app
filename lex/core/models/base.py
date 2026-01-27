@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from typing import FrozenSet, Optional, Mapping, Any, Literal
 
 from django.db import models, transaction
-from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE
+from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
+    BEFORE_UPDATE
+
 from lex.api.utils import operation_context
 
 logger = logging.getLogger(__name__)
@@ -327,8 +329,9 @@ class LexModel(LifecycleModel):
                 f"Transaction error during rollback: {transaction_error}"
             ) from transaction_error
 
-    @hook(AFTER_UPDATE)
+    @hook(BEFORE_UPDATE)
     def update_edited_by(self):
+        # self.track()
         context = operation_context.get()
         # from lex_app.celery_tasks import print_context_state
         # print_context_state()
@@ -337,9 +340,9 @@ class LexModel(LifecycleModel):
             self.edited_by = str(context['request_obj'].user)
         else:
             self.edited_by = 'Initial Data Upload'
-        self.save(skip_hooks=True)
+        # self.save_without_historical_record(skip_hooks=True)
 
-    @hook(AFTER_CREATE)
+    @hook(BEFORE_CREATE)
     def update_created_by(self):
         context = operation_context.get()
         logger.info(f"Request object: {context['request_obj']}")
@@ -348,15 +351,24 @@ class LexModel(LifecycleModel):
             self.created_by = str(context['request_obj'].user)
         else:
             self.created_by = 'Initial Data Upload'
-        self.save(skip_hooks=True)
+        # self.save_without_historical_record(skip_hooks=True)
 
 
     def track(self):
-        del self.skip_history_when_saving
+        if hasattr(self, 'skip_history_when_saving'):
+            del self.skip_history_when_saving
 
 
     def untrack(self):
         self.skip_history_when_saving = True
+
+    def save_without_historical_record(self, *args, **kwargs):
+        self.skip_history_when_saving = True
+        try:
+            ret = self.save(*args, **kwargs)
+        finally:
+            del self.skip_history_when_saving
+        return ret
 
     # =============================================================================
     # AUTHORIZATION METHODS - Override these in your models for custom logic

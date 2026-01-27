@@ -463,7 +463,7 @@ AUTHENTICATION_BACKENDS = (
 )
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
-OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "api/user_permissions/"]
+OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "api/user_permissions/", "/api/user", "/api/user_permissions/"]
 OIDC_RP_USE_PKCE = False
 # OIDC_MIDDLEWARE_LOGIN_REQUIRED_REDIRECT = True
 CORS_ALLOW_CREDENTIALS = True
@@ -524,7 +524,7 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = False
+USE_TZ = True
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
 TIME_ZONE = "Europe/Berlin"

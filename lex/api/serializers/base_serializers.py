@@ -69,19 +69,24 @@ class LexSerializer(serializers.ModelSerializer):
             edit_result = instance.permission_edit(user_context)
             delete_allowed = instance.permission_delete(user_context)
             export_result = instance.permission_export(user_context)
-            
+
             # Get editable fields, excluding internal fields
             edit_fields = edit_result.get_fields(all_fields)
-            
+
             # Remove internal LexModel fields and id
             try:
                 from lex.core.models.base import LexModel
                 lexmodel_fields = {f.name for f in LexModel._meta.fields}
             except Exception:
                 lexmodel_fields = set()
-            
+
             edit_fields -= (lexmodel_fields | {'id'})
-            
+
+            # return {
+            #     "edit": sorted(all_fields),
+            #     "delete": True,
+            #     "export": True,
+            # }
             return {
                 "edit": sorted(edit_fields),
                 "delete": bool(delete_allowed),
@@ -274,7 +279,6 @@ class LexSerializer(serializers.ModelSerializer):
             pass
 
         return representation
-
 
 # --- UPDATED BASE TEMPLATE ---
 class RestApiModelSerializerTemplate(LexSerializer):
