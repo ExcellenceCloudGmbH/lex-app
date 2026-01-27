@@ -214,6 +214,7 @@ INSTALLED_APPS = [
     "lex.lex_app.apps.LexAppConfig",
     "simple_history",
     "celery",
+    "django_celery_beat",
     "react",
     "markdown",
     "lex.lex_app.apps.CustomAdminConfig",  # Custom admin config to prevent auth admin conflicts
@@ -376,7 +377,7 @@ CELERY_BROKER_URL = (
 CELERY_RESULT_BACKEND = (
     f"db+postgresql://{db_username}:{os.getenv('POSTGRES_PASSWORD', 'envvar_not_existing')}@{os.getenv('DATABASE_DOMAIN', 'envvar_not_existing')}/{os.getenv('DATABASE_NAME', 'envvar_not_existing')}"
     if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
-    else f"db+postgresql://django:lundadminlocal@localhost/db_{repo_name}"
+    else f"db+postgresql://django:lundadminlocal@localhost/db_{repo_name.lower()}"
 )
 
 # Celery Configuration
@@ -463,7 +464,7 @@ AUTHENTICATION_BACKENDS = (
 )
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
-OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "api/user_permissions/"]
+OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "api/user_permissions/", "/api/user", "/api/user_permissions/"]
 OIDC_RP_USE_PKCE = False
 # OIDC_MIDDLEWARE_LOGIN_REQUIRED_REDIRECT = True
 CORS_ALLOW_CREDENTIALS = True
@@ -524,7 +525,7 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = False
+USE_TZ = True
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
 TIME_ZONE = "Europe/Berlin"

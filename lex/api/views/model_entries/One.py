@@ -44,7 +44,6 @@ class OneModelEntry(
     def create(self, request, *args, **kwargs):
         model_container = self.kwargs["model_container"]
         instance = model_container.model_class()
-        
         # Check create permission using new system
         try:
             if hasattr(instance, 'permission_create'):
@@ -110,13 +109,43 @@ class OneModelEntry(
                         calculation_id
                     )
                     CacheManager.store_message(cache_key, "")
-                    instance.track()
                     update_calculation_status(instance)
 
                 # TODO: For sharepoint preview, find a new way to create an audit log with the new structure
                 # if "edited_file" not in request.data:
 
+                # BITEMPORAL UPDATE LOGIC
+                # Check if this is a Historical Model (but not a Meta Historical Model)
+                # Note: history_date is renamed to valid_from in registration
+                is_historical = (hasattr(model_container.model_class, 'valid_from') or hasattr(model_container.model_class, 'history_date')) and hasattr(model_container.model_class, 'history_id')
+                is_meta = hasattr(model_container.model_class, 'meta_history_id')
+
+                if is_meta:
+                    raise PermissionDenied("Modifying Meta-History records is not allowed.")
+
+                if is_historical:
+                    # Bitemporal Correction:
+                    # We are correcting a specific "Reality Slice". 
+                    # The Historical Record represents {Valid From, Valid To, Data}.
+                    # We allow updating this record directly.
+                    # The 'Meta History' system (Level 2) will automatically:
+                    # 1. Detect the change (via post_save signal).
+                    # 2. Create a new Meta Record (New System Version).
+                    # 3. Close the previous Meta Record (System Time End).
+                    
+                    try:
+                        # STANDARD UPDATE (with Meta History tracking implicitly)
+                        response = UpdateModelMixin.update(self, request, *args, **kwargs)
+                        return response
+
+                    except Exception as e:
+                        raise APIException(
+                            {"error": f"Bitemporal update failed: {e}", "traceback": traceback.format_exc()}
+                        )
+
+                # STANDARD UPDATE LOGIC (Main Models)
                 try:
+                    instance.track()
                     response = UpdateModelMixin.update(self, request, *args, **kwargs)
 
 

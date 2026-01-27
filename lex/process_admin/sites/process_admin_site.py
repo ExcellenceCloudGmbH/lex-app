@@ -16,6 +16,7 @@ from lex.api.views.global_search_for_models.Search import Search
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.Many import ManyModelEntries
 from lex.api.views.model_entries.One import OneModelEntry
+from lex.api.views.model_entries.History import HistoryModelEntry
 from lex.api.views.model_info.Fields import Fields
 from lex.api.views.model_info.Widgets import Widgets
 from lex.process_admin.views.model_relation_views import (
@@ -199,6 +200,11 @@ class ProcessAdminSite:
                 "api/model_entries/<model:model_container>/<str:calculationId>/one",
                 OneModelEntry.as_view(),
                 name="model-one-entry-create",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/<str:calculationId>/history/<int:pk>",
+                HistoryModelEntry.as_view(),
+                name="model-history-list",
             ),
             path(
                 "api/run_step/<model:model_container>/<str:pk>",
