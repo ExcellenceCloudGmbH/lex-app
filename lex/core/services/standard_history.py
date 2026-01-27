@@ -76,4 +76,14 @@ class StandardHistory(HistoricalRecords):
             **attrs
         )
         history_instance.save(using=using)
+        
+        from simple_history.signals import post_create_historical_record
+        post_create_historical_record.send(
+            sender=manager.model,
+            instance=instance,
+            history_instance=history_instance,
+            history_date=history_instance.valid_from,
+            history_user=history_instance.history_user,
+            using=using,
+        )
         return history_instance

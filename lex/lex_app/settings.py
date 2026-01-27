@@ -214,6 +214,7 @@ INSTALLED_APPS = [
     "lex.lex_app.apps.LexAppConfig",
     "simple_history",
     "celery",
+    "django_celery_beat",
     "react",
     "markdown",
     "lex.lex_app.apps.CustomAdminConfig",  # Custom admin config to prevent auth admin conflicts
@@ -376,7 +377,7 @@ CELERY_BROKER_URL = (
 CELERY_RESULT_BACKEND = (
     f"db+postgresql://{db_username}:{os.getenv('POSTGRES_PASSWORD', 'envvar_not_existing')}@{os.getenv('DATABASE_DOMAIN', 'envvar_not_existing')}/{os.getenv('DATABASE_NAME', 'envvar_not_existing')}"
     if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
-    else f"db+postgresql://django:lundadminlocal@localhost/db_{repo_name}"
+    else f"db+postgresql://django:lundadminlocal@localhost/db_{repo_name.lower()}"
 )
 
 # Celery Configuration

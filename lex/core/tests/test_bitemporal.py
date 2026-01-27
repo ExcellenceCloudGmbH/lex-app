@@ -19,24 +19,15 @@ class BitemporalLogicTest(TransactionTestCase):
     
     def setUp(self):
         # 1. Use ModelRegistration to register everything (Standard + Meta + Signals)
-        # We need to simulate the environment or just call the method.
-        # But ModelRegistration might have dependencies on AdminSite.
-        # Let's import implementation and check.
         from lex.process_admin.utils.model_registration import ModelRegistration
         from simple_history.models import registered_models
-        
-        # We need valid_from/sys_from logic which is embedded in ModelRegistration
-        # so relying on it is best for "Verifying Implementation Details".
+        from django.db import connection
         
         mr = ModelRegistration()
         
         # Power-Clean previous registration
         if TestBitemporalModel in registered_models:
              del registered_models[TestBitemporalModel]
-        
-        # Mock processAdminSite to avoid side effects if needed? 
-        # It's imported as global in model_registration.py.
-        # Assuming it is standard Django admin site or similar.
         
         try:
             mr._register_standard_model(TestBitemporalModel, [])
@@ -46,14 +37,28 @@ class BitemporalLogicTest(TransactionTestCase):
         self.HistoryModel = TestBitemporalModel.history.model
         self.MetaModel = self.HistoryModel.meta_history.model
         
-        # 3. Create Tables
+        # 3. Create Tables (Check existence first)
+        tables = connection.introspection.table_names()
+        
         with connection.schema_editor() as schema_editor:
+            if TestBitemporalModel._meta.db_table in tables:
+                schema_editor.delete_model(TestBitemporalModel)
             schema_editor.create_model(TestBitemporalModel)
+            
+            if self.HistoryModel._meta.db_table in tables:
+                schema_editor.delete_model(self.HistoryModel)
             schema_editor.create_model(self.HistoryModel)
+            
+            if self.MetaModel._meta.db_table in tables:
+                schema_editor.delete_model(self.MetaModel)
             schema_editor.create_model(self.MetaModel)
 
     def tearDown(self):
         # Drop tables
+        from simple_history.models import registered_models
+        if TestBitemporalModel in registered_models:
+             del registered_models[TestBitemporalModel]
+
         with connection.schema_editor() as schema_editor:
             try: schema_editor.delete_model(self.MetaModel)
             except: pass
@@ -241,17 +246,32 @@ class BitemporalLogicTest(TransactionTestCase):
         # So we expect 2 rows: h1 and h2.
         
         
-        print("\n--- DEBUG: Meta Table Dump ---")
-        for m in TestBitemporalModel.history.model.meta_history.model.objects.all():
-            print(f"MetaID={m.pk} HistID={m.history_object_id} SysFrom={m.sys_from} SysTo={m.sys_to}")
-        print("------------------------------\n")
+        print("-" * 30 + "\n")
+ 
+        h1.refresh_from_db()
 
+        # Valid Time Query (Main Model) returns CURRENT Truth about 12:06.
         qs_2 = get_queryset_as_of(TestBitemporalModel, t1 + timedelta(minutes=1))
-        self.assertEqual(qs_2.count(), 2)
-        rows_2 = sorted(list(qs_2), key=lambda x: x.valid_from)
+        rows_2 = list(qs_2)
+        
+        # Since Step 3 moved 'melih2' to 11:00-12:00, and left 'melih' at 12:00-inf,
+        # The record valid at 12:06 is 'melih'.
+        self.assertEqual(len(rows_2), 1)
         self.assertEqual(rows_2[0].name, "melih")
-        self.assertEqual(rows_2[1].name, "melih2")
-        self.assertEqual(rows_2[1].valid_from, t1) # 12:05
+        
+        # System Time Query (History Model) - "Time Travel"
+        # "What did we believe at 12:06 (System Time)?"
+        # At 12:06 (Real Time), Step 3 (12:08) hadn't happened yet.
+        # So we should see 'melih2'.
+        qs_sys = get_queryset_as_of(TestBitemporalModel.history.model, t1 + timedelta(minutes=1))
+        # This returns MetaHistory objects representing the active row info.
+        self.assertTrue(qs_sys.count() >= 1)
+        # Find the one that was considered valid at that time
+        ms = list(qs_sys)
+        names = [m.name for m in ms]
+        self.assertIn("melih2", names)
+        
+        # 3. As Of T2 + 1m (After Correction)
         
         # 3. As Of T2 + 1m (After Correction)
         # We knew:

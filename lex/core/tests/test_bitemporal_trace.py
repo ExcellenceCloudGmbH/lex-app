@@ -13,9 +13,45 @@ class TraceModel(models.Model):
 class BitemporalTraceTest(TransactionTestCase):
     def setUp(self):
         # Register the model with history
+        from simple_history.models import registered_models
+        from django.db import connection
+        
+        # Clean up registration if exists from previous run
+        if TraceModel in registered_models:
+             del registered_models[TraceModel]
+
         ModelRegistration._register_standard_model(TraceModel, [])
         self.HistoryModel = TraceModel.history.model
         self.MetaModel = self.HistoryModel.meta_history.model
+        
+        # Create Tables
+        tables = connection.introspection.table_names()
+        with connection.schema_editor() as schema_editor:
+            if TraceModel._meta.db_table in tables:
+                schema_editor.delete_model(TraceModel)
+            schema_editor.create_model(TraceModel)
+            
+            if self.HistoryModel._meta.db_table in tables:
+                schema_editor.delete_model(self.HistoryModel)
+            schema_editor.create_model(self.HistoryModel)
+            
+            if self.MetaModel._meta.db_table in tables:
+                schema_editor.delete_model(self.MetaModel)
+            schema_editor.create_model(self.MetaModel)
+
+    def tearDown(self):
+        from django.db import connection
+        from simple_history.models import registered_models
+        if TraceModel in registered_models:
+             del registered_models[TraceModel]
+
+        with connection.schema_editor() as schema_editor:
+             try: schema_editor.delete_model(self.MetaModel)
+             except: pass
+             try: schema_editor.delete_model(self.HistoryModel)
+             except: pass
+             try: schema_editor.delete_model(TraceModel)
+             except: pass
 
     def test_trace_scenario(self):
         """

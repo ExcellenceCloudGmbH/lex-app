@@ -40,25 +40,26 @@ class ModelEntryProviderMixin:
                 # Use the bitemporal helper to get the historical snapshot
                 queryset = get_queryset_as_of(model_class, as_of_date)
         else:
+             pass
             # "Current Time" Request - Opportunity for Read Repair / Reconciliation
             
             # 1. Detail View: Check if we are requesting a specific ID
-            lookup_url_kwarg = getattr(self, 'lookup_url_kwarg', None) or getattr(self, 'lookup_field', 'pk')
-            pk = self.kwargs.get(lookup_url_kwarg)
+            # lookup_url_kwarg = getattr(self, 'lookup_url_kwarg', None) or getattr(self, 'lookup_field', 'pk')
+            # pk = self.kwargs.get(lookup_url_kwarg)
             
-            if pk:
-                # Sync SPECIFIC ID (Read-Repair)
-                # Ensure main table is up to date for this record
-                BitemporalSynchronizer.sync_record_for_model(model_class, pk)
-            else:
-                # 2. List View: "Reconcile changes upon get request"
-                # Doing full table scan is expensive. 
-                # Strategy: Reconcile records that became valid in the last X minutes?
-                # This covers the "I just waited for it to become valid" test case.
-                # Let's say last 1 hour for safety in this "test mode".
-                now = timezone.now()
-                start_window = now - timezone.timedelta(hours=1)
-                TemporalReconciler.reconcile_model_window(model_class, start_window, now)
+            # if pk:
+            #     # Sync SPECIFIC ID (Read-Repair)
+            #     # Ensure main table is up to date for this record
+            #     BitemporalSynchronizer.sync_record_for_model(model_class, pk)
+            # else:
+            #     # 2. List View: "Reconcile changes upon get request"
+            #     # Doing full table scan is expensive. 
+            #     # Strategy: Reconcile records that became valid in the last X minutes?
+            #     # This covers the "I just waited for it to become valid" test case.
+            #     # Let's say last 1 hour for safety in this "test mode".
+            #     now = timezone.now()
+            #     start_window = now - timezone.timedelta(hours=1)
+            #     TemporalReconciler.reconcile_model_window(model_class, start_window, now)
         
         return queryset
 

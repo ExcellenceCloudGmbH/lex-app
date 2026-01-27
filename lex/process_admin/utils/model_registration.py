@@ -62,6 +62,18 @@ class MetaLevelHistoricalRecords(HistoricalRecords):
                 on_delete=models.SET_NULL,
                 db_constraint=False
             ),
+            "meta_task_name": models.CharField(
+                max_length=255, 
+                null=True, 
+                blank=True, 
+                unique=True,
+                help_text="Name of the Celery PeriodicTask scheduled for this record."
+            ),
+            "meta_task_status": models.CharField(
+                max_length=20,
+                default="NONE",
+                choices=(("NONE", "None"), ("SCHEDULED", "Scheduled"), ("DONE", "Done"), ("CANCELLED", "Cancelled"))
+            ),
             "instance": property(get_instance),
             "instance_type": model,
         }
@@ -282,18 +294,112 @@ class ModelRegistration:
                 except Exception:
                     pass
 
-                def trigger_meta_history(sender, history_instance, **kwargs):
+                def trigger_meta_history(sender, instance, **kwargs):
+                    # Renamed 'history_instance' to 'instance' to match post_save signal
+                    history_instance = instance 
+                    
                     # Ensure we only act for the specific model we are currently registering
                     if sender == historical_model:
-                        # Create meta entry
                         try:
-                            # We use 'create_historical_record' from the descriptor or manual?
-                            # history.create_historical_record is bound to the manager? No, instance method?
-                            # 'history' here is the Descriptor/Manager factory?
-                            # usage: history.create_historical_record(instance, type)
-                            history.create_historical_record(history_instance, "+")
+                            # 1. CANCEL PREVIOUS SCHEDULES (Mutation Handling)
+                            # If this history record is being modified (updated), any previous schedule is invalid.
+                            # We find Meta Records for THIS history_id that are SCHEDULED.
+                            MetaModel = sender.meta_history.model
+                            
+                            # 2. GET OR CREATE META RECORD (Idempotency)
+                            # Access the automatic record created by signal if possible
+                            meta_instance = MetaModel.objects.filter(
+                                history_object=history_instance
+                            ).order_by('-sys_from', '-meta_history_id').first()
+
+                            if not meta_instance:
+                                 meta_instance = history.create_historical_record(history_instance, "+")
+                            
+                            # 3. SCHEDULE NEW (If Future)
+                            # Check valid_from > Now
+                            now = timezone.now()
+                            # Use a small buffer (e.g. 5s) to avoid scheduling for immediate/past
+                            if history_instance.valid_from > now + timezone.timedelta(seconds=5):
+                                
+                                # Check if already scheduled (idempotency)
+                                if meta_instance.meta_task_status == "SCHEDULED" and meta_instance.meta_task_name:
+                                    # CHECK IF TIME CHANGED!
+                                    # If the logic is re-running, maybe valid_from changed?
+                                    # We should verify if the existing task matches the current valid_from.
+                                    # Ideally we rely on cancellation above? NO, cancellation is on MetaModel queries.
+                                    # But we just got the meta_instance.
+                                    
+                                    # Simplest approach: If we are here (post_save), and we have a SCHEDULED task, 
+                                    # we should probably revoke and re-schedule to be safe (ensure correct time),
+                                    # OR check ClockedSchedule.
+                                    
+                                    # Since we didn't implement sophisticated checks, let's allow re-scheduling.
+                                    # But we need to be careful not to spam.
+                                    # For Bitemporal logic: If I update valid_from, I want the task to move.
+                                    pass
+                                
+                                # Check environment variable for CELERY activation
+                                if os.getenv("CELERY_ACTIVE", "false").lower() != "true":
+                                    # Fallback: LocalSchedulerBackend (In-Process)
+                                    from lex.process_admin.utils.local_scheduler import LocalSchedulerBackend
+                                    from lex.lex_app.celery_tasks import activate_history_version
+                                    
+                                    scheduler = LocalSchedulerBackend()
+                                    
+                                    # Schedule the task directly
+                                    # Note: We pass raw IDs as args just like the Celery task expects
+                                    scheduler.schedule(
+                                        run_at_time=history_instance.valid_from,
+                                        func=activate_history_version,
+                                        kwargs={
+                                            "model_app_label": model._meta.app_label,
+                                            "model_name": model_name,
+                                            "history_id": history_instance.pk
+                                        }
+                                    )
+                                    
+                                    # We can still track it in MetaModel if we want, or at least mark as Scheduled
+                                    # But since local backend is ephemeral, maybe we don't set a task_name?
+                                    # OR we set a dummy one so we know it's handled.
+                                    meta_instance.meta_task_status = "SCHEDULED"
+                                    meta_instance.meta_task_name = f"local_thread_{int(now.timestamp())}"
+                                    meta_instance.save(update_fields=["meta_task_status", "meta_task_name"])
+                                    
+                                else:
+                                    from django_celery_beat.models import ClockedSchedule, PeriodicTask
+                                    import json
+                                    import uuid
+                                    
+                                    # Revoke any previous tasks for this meta record (just in case)
+                                    if meta_instance.meta_task_name:
+                                        PeriodicTask.objects.filter(name=meta_instance.meta_task_name).delete()
+                                    
+                                    clocked, _ = ClockedSchedule.objects.get_or_create(
+                                        clocked_time=history_instance.valid_from
+                                    )
+                                    
+                                    # Unique Task Name: activate_{app}_{model}_{hist_id}_{timestamp}_{uuid}
+                                    task_unique_name = f"activate_{model._meta.app_label}_{model_name}_{history_instance.pk}_{int(now.timestamp())}_{uuid.uuid4()}"
+                                    
+                                    PeriodicTask.objects.create(
+                                        clocked=clocked,
+                                        name=task_unique_name,
+                                        task="activate_history_version",
+                                        # Args: label, model, history_id
+                                        args=json.dumps([model._meta.app_label, model_name, history_instance.pk]),
+                                        one_off=True
+                                    )
+                                    
+                                    meta_instance.meta_task_name = task_unique_name
+                                    meta_instance.meta_task_status = "SCHEDULED"
+                                    meta_instance.save(update_fields=["meta_task_name", "meta_task_status"])
+                                    
+                                    logger.info(f"Scheduled Activation for {history_instance.valid_from} (Task: {task_unique_name})")
+
+                        except ImportError:
+                            logger.warning("django-celery-beat not installed. Skipping Event Scheduling.")
                         except Exception as e:
-                             logger.error(f"Error creating meta history for {sender.__name__}: {e}")
+                             logger.error(f"Error creating meta history / scheduling for {sender.__name__}: {e}", exc_info=True)
 
                 def maintain_valid_period(sender, instance=None, history_instance=None, **kwargs):
                     """
@@ -334,9 +440,11 @@ class ModelRegistration:
                 post_create_historical_record.disconnect(trigger_meta_history, sender=historical_model)
                 post_create_historical_record.disconnect(maintain_valid_period, sender=historical_model)
                 
-                post_create_historical_record.connect(trigger_meta_history, sender=historical_model, weak=False)
-                
+                # Use post_save for triggering meta history to catch updates (e.g. valid_from changes)
                 from django.db.models.signals import post_save
+                post_save.disconnect(trigger_meta_history, sender=historical_model)
+                post_save.connect(trigger_meta_history, sender=historical_model, weak=False)
+                
                 post_save.disconnect(maintain_valid_period, sender=historical_model)
                 post_save.connect(maintain_valid_period, sender=historical_model, weak=False)
                 
@@ -364,6 +472,70 @@ class ModelRegistration:
                 # We might also want to hook into post_delete of history? 
                 # If the effective record is deleted, main table should revert to previous? 
                 # For now assume updates/inserts.
+                from django.db.models.signals import pre_delete
+                
+                def handle_history_deletion(sender, instance, **kwargs):
+                    """
+                    Handle deletion of a Level 1 History Record.
+                    Strict Chaining Requirement:
+                    When Record B is deleted, Record A's valid_to should be extended 
+                    to meet Record C's valid_from.
+                    
+                    A(12:00-12:05) -> B(12:05-13:00) -> C(13:00-inf)
+                    Delete B.
+                    Result: A(12:00-13:00) -> C(13:00-inf)
+                    """
+                    HistoryModel = sender
+                    # Ensure we are handling the correct history model
+                    if not issubclass(HistoryModel, models.Model): return
+                    
+                    pk_name = model._meta.pk.name
+                    pk_val = getattr(instance, pk_name)
+                    
+                    # 1. Find the PREVIOUS record
+                    # Previous means: Same ID, valid_from < instance.valid_from
+                    # Ordered by valid_from DESC
+                    
+                    previous_record = HistoryModel.objects.filter(
+                        **{pk_name: pk_val},
+                        valid_from__lt=instance.valid_from
+                    ).order_by('-valid_from').first()
+                    
+                    if previous_record:
+                        # 2. Find the NEXT record
+                        # Next means: Same ID, valid_from > instance.valid_from
+                        # Ordered by valid_from ASC
+                        
+                        next_record = HistoryModel.objects.filter(
+                            **{pk_name: pk_val},
+                            valid_from__gt=instance.valid_from
+                        ).order_by('valid_from').first()
+                        
+                        new_valid_to = next_record.valid_from if next_record else None
+                        
+                        # 3. Update Previous Record
+                        previous_record.save(update_fields=['valid_to'])
+                    
+                    # 4. CANCEL SCHEDULE (If Deleted Record was Future)
+                    # Even if not future, if it had a pending schedule, cancel it.
+                    try:
+                        MetaModel = sender.meta_history.model
+                        existing_schedules = MetaModel.objects.filter(
+                            history_object_id=instance.pk,
+                            meta_task_status="SCHEDULED"
+                        )
+                        from django_celery_beat.models import PeriodicTask
+                        for meta_log in existing_schedules:
+                             if meta_log.meta_task_name:
+                                 PeriodicTask.objects.filter(name=meta_log.meta_task_name).delete()
+                                 logger.info(f"Revoked Task (Deletion): {meta_log.meta_task_name}")
+                             meta_log.meta_task_status = "CANCELLED"
+                             meta_log.save(update_fields=["meta_task_status"])
+                    except Exception:
+                        pass # Ignore errors (e.g. table missing, app missing) during deletion cleanup
+                            
+                pre_delete.disconnect(handle_history_deletion, sender=historical_model)
+                pre_delete.connect(handle_history_deletion, sender=historical_model, weak=False)
 
                 # 4. Meta History Model logic
                 meta_historical_model = historical_model.meta_history.model

@@ -705,4 +705,70 @@ __all__ = [
     'is_in_unblock_context',
     'register_task_with_context',
     'respect_unblock_celery'
+    'respect_unblock_celery'
 ]
+
+@lex_shared_task(name="activate_history_version")
+def activate_history_version(model_app_label: str, model_name: str, history_id: int):
+    """
+    Event-Driven Activation Task.
+    Triggered by Celery Beat when a specific History Record becomes valid.
+    """
+    from django.apps import apps
+    from django.utils import timezone
+    from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
+    
+    try:
+        # 1. Resolve Model
+        try:
+             model = apps.get_model(model_app_label, model_name)
+        except LookupError:
+             logger.error(f"Activation Failed: Model {model_app_label}.{model_name} not found.")
+             return "failed_model_lookup"
+             
+        HistoryModel = model.history.model
+        MetaModel = HistoryModel.meta_history.model
+        
+        # 2. Fetch Record
+        try:
+            history_record = HistoryModel.objects.get(pk=history_id)
+        except HistoryModel.DoesNotExist:
+            # Record might have been deleted before activation?
+            logger.warning(f"Activation Skipped: History Record {history_id} not found.")
+            return "skipped_missing_record"
+            
+        # 3. Validation Check (Double Check against Time)
+        # Even though task was scheduled, check if we are actually past valid_from.
+        # Allow small clock drift (e.g. 1 sec).
+        now = timezone.now()
+        if history_record.valid_from > now + timezone.timedelta(seconds=5):
+             # Reschedule? Or just fail?
+             logger.error(f"Activation Too Early: Record {history_id} valid from {history_record.valid_from}, now is {now}")
+             return "failed_too_early"
+             
+        # 4. Sync
+        pk_name = model._meta.pk.name
+        pk_val = getattr(history_record, pk_name)
+        
+        logger.info(f"Activating History Record {history_id} for {model_name} {pk_val}")
+        BitemporalSynchronizer.sync_record_for_model(model, pk_val, HistoryModel)
+        
+        # 5. Update Meta Status
+        # We need to find the specific meta record that scheduled this? 
+        # Or just update any meta record pointing to this?
+        # The user design puts task_name ON the meta record. 
+        # But our MetaHistory records are versions themselves.
+        # We should find the Meta Record that has this task name?
+        # Wait, the task doesn't know the task name explicitly unless passed?
+        # But we can update all meta records for this history_id that are 'SCHEDULED' to 'DONE'.
+        
+        MetaModel.objects.filter(
+            history_object_id=history_id,
+            meta_task_status="SCHEDULED"
+        ).update(meta_task_status="DONE")
+        
+        return "success"
+        
+    except Exception as e:
+        logger.error(f"Activation Error for History {history_id}: {e}", exc_info=True)
+        raise e

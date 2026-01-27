@@ -331,6 +331,10 @@ class LexModel(LifecycleModel):
 
     @hook(BEFORE_UPDATE)
     def update_edited_by(self):
+        # Skip if we are syncing from history (bitemporal sync)
+        if getattr(self, 'skip_history_when_saving', False):
+            return
+
         # self.track()
         context = operation_context.get()
         # from lex_app.celery_tasks import print_context_state
@@ -344,6 +348,10 @@ class LexModel(LifecycleModel):
 
     @hook(BEFORE_CREATE)
     def update_created_by(self):
+        # Skip if we are syncing from history (bitemporal sync)
+        if getattr(self, 'skip_history_when_saving', False):
+            return
+
         context = operation_context.get()
         logger.info(f"Request object: {context['request_obj']}")
         if context and hasattr(context['request_obj'], 'user'):

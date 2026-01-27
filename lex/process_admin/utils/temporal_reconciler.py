@@ -65,9 +65,9 @@ class TemporalReconciler:
             history_model = model.history.model
             
             # Check table existence (safety)
-            from django.db import connection
-            if history_model._meta.db_table not in connection.introspection.table_names():
-                return 0
+            # from django.db import connection
+            # if history_model._meta.db_table not in connection.introspection.table_names():
+            #     return 0
                 
             candidates = history_model.objects.filter(
                 valid_from__gte=start_time,
