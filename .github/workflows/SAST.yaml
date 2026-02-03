@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read      # Required to clone your code
   pull-requests: write # Required because the central workflow needs it
+  security-events: write  # Required to upload SARIF results
 
 jobs:
   call-central-workflow:

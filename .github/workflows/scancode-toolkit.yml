@@ -1,28 +1,13 @@
-name: ScanCode Toolkit Scan
+name: Scheduled ScanCode Toolkit Trigger
 
 on:
   schedule:
-    - cron: '0 23 * * 0' # scheduled to run every Sunday at 23:00 PM
-  workflow_dispatch: # allows the workflow to be triggered manually
+    - cron: '0 23 * * 0'
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  scan-code:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-
-    - name: Install Python 3.8 and development tools
-      run: |
-        sudo apt-get update && sudo apt-get upgrade -y
-        sudo add-apt-repository ppa:deadsnakes/ppa --yes
-        sudo apt-get install python3.8 python3.8-distutils python3.8-dev build-essential -y
-
-    - name: Install ScanCode Toolkit
-      run: |
-        python3.8 -m pip install --upgrade pip
-        python3.8 -m pip install scancode-toolkit
-
-    - name: Scan code and print results
-      run: |
-        scancode -clip --json-pp - .
+  trigger-scan:
+    uses: ExcellenceCloudGmbH/devops-toolkit/.github/workflows/copyright-scan.yaml@main
