@@ -1,7 +1,6 @@
 import datetime
 from django.utils.functional import Promise  # Lazy translation objects
-from django.core.files.uploadedfile import InMemoryUploadedFile
-
+from django.core.files.uploadedfile import InMemoryUploadedFile, UploadedFile
 
 import datetime
 from decimal import Decimal
@@ -51,9 +50,6 @@ def generic_instance_payload(instance: Model) -> dict:
 
     return data
 
-
-
-
 def _serialize_payload(data):
     """
     Recursively process the data so it becomes JSON serializable.
@@ -81,15 +77,20 @@ def _serialize_payload(data):
         return str(data)  # or float(data) if that fits your needs
     elif isinstance(data, UUID):
         return str(data)
-    elif isinstance(data, FieldFile):
-        return {'name': data.name, 'url': data.url if hasattr(data, 'url') else None}
-    elif isinstance(data, InMemoryUploadedFile):
-        # Serialize in-memory files by recording key metadata
+
+    elif isinstance(data, Promise):  # Lazy translation strings
+        return str(data)
+
+        # 4. Handle Files (Base class catches both InMemory and Temporary)
+    elif isinstance(data, UploadedFile):
         return {
-            'name': data.name,
-            'size': data.size,
-            'content_type': data.content_type
+            'name': getattr(data, 'name', 'unknown'),
+            'size': getattr(data, 'size', 0),
+            'content_type': getattr(data, 'content_type', 'unknown')
         }
+    elif hasattr(data, 'url') and hasattr(data, 'name'):  # Catch generic FieldFiles
+        return {'name': data.name, 'url': data.url}
+
     elif isinstance(data, Model):
         return {'id': data.pk, 'display': str(data)}
     elif isinstance(data, Promise):
@@ -99,4 +100,9 @@ def _serialize_payload(data):
         return [_serialize_payload(item) for item in data.all()]
     elif isinstance(data, set):
         return list(data)
-    return data
+
+    try:
+        return str(data)
+    except Exception:
+        # In the extremely rare case __str__ fails, use repr or a placeholder
+        return f"<Unserializable: {type(data).__name__}>"

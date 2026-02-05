@@ -3,6 +3,7 @@ from django.db.models import Model
 
 from lex.process_admin.models.model_container import ModelContainer
 from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
+from process_admin.utils import ModelStructureBuilder
 
 
 def _create_model_containers(models_to_admins: Dict[Type[Model], Any]) -> Dict[str, ModelContainer]:
@@ -64,7 +65,7 @@ class ModelCollection:
             model_styling: Configuration dictionary for customizing model display properties
         """
         self.ids2containers = _create_model_containers(models_to_admins)
-        self.model_structure = model_structure or {'Models': {c.id: None for c in self.all_containers}}
+        self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml({"Models": {c.id: None for c in self.all_containers}}, model_structure)
         self.model_styling = model_styling
 
         self.model_structure_with_readable_names = {

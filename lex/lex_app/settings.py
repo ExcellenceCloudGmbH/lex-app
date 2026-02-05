@@ -612,3 +612,7 @@ SIMPLE_HISTORY_AUTO_EXCLUDE_BUILTIN = True
 SIMPLE_HISTORY_EXCLUDED_MODELS = [
     # Example: 'temporarydata', 'cachedresult'
 ]
+
+# Primary Key Configuration
+# Default auto-created primary key field type
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

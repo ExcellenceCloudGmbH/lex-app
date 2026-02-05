@@ -474,50 +474,14 @@ class ModelRegistration:
                 # For now assume updates/inserts.
                 from django.db.models.signals import pre_delete
                 
-                def handle_history_deletion(sender, instance, **kwargs):
+                def cleanup_schedules_pre_delete(sender, instance, **kwargs):
                     """
-                    Handle deletion of a Level 1 History Record.
-                    Strict Chaining Requirement:
-                    When Record B is deleted, Record A's valid_to should be extended 
-                    to meet Record C's valid_from.
-                    
-                    A(12:00-12:05) -> B(12:05-13:00) -> C(13:00-inf)
-                    Delete B.
-                    Result: A(12:00-13:00) -> C(13:00-inf)
+                    Handle cleanup of schedules BEFORE deletion (while relationships exist).
                     """
                     HistoryModel = sender
-                    # Ensure we are handling the correct history model
                     if not issubclass(HistoryModel, models.Model): return
                     
-                    pk_name = model._meta.pk.name
-                    pk_val = getattr(instance, pk_name)
-                    
-                    # 1. Find the PREVIOUS record
-                    # Previous means: Same ID, valid_from < instance.valid_from
-                    # Ordered by valid_from DESC
-                    
-                    previous_record = HistoryModel.objects.filter(
-                        **{pk_name: pk_val},
-                        valid_from__lt=instance.valid_from
-                    ).order_by('-valid_from').first()
-                    
-                    if previous_record:
-                        # 2. Find the NEXT record
-                        # Next means: Same ID, valid_from > instance.valid_from
-                        # Ordered by valid_from ASC
-                        
-                        next_record = HistoryModel.objects.filter(
-                            **{pk_name: pk_val},
-                            valid_from__gt=instance.valid_from
-                        ).order_by('valid_from').first()
-                        
-                        new_valid_to = next_record.valid_from if next_record else None
-                        
-                        # 3. Update Previous Record
-                        previous_record.save(update_fields=['valid_to'])
-                    
-                    # 4. CANCEL SCHEDULE (If Deleted Record was Future)
-                    # Even if not future, if it had a pending schedule, cancel it.
+                    # CANCEL SCHEDULE
                     try:
                         MetaModel = sender.meta_history.model
                         existing_schedules = MetaModel.objects.filter(
@@ -532,10 +496,46 @@ class ModelRegistration:
                              meta_log.meta_task_status = "CANCELLED"
                              meta_log.save(update_fields=["meta_task_status"])
                     except Exception:
-                        pass # Ignore errors (e.g. table missing, app missing) during deletion cleanup
+                        pass 
+
+                def repair_chain_post_delete(sender, instance, **kwargs):
+                    """
+                    Repair Validity Stubs AFTER deletion.
+                    A -> B -> C. Delete B.
+                    Post-Delete: A valid_to should extend to C valid_from.
+                    """
+                    HistoryModel = sender
+                    if not issubclass(HistoryModel, models.Model): return
+
+                    pk_name = model._meta.pk.name
+                    pk_val = getattr(instance, pk_name)
+                    
+                    # 1. Find the PREVIOUS record
+                    previous_record = HistoryModel.objects.filter(
+                        **{pk_name: pk_val},
+                        valid_from__lt=instance.valid_from
+                    ).order_by('-valid_from').first()
+                    
+                    if previous_record:
+                        # 2. Find the NEXT record
+                        next_record = HistoryModel.objects.filter(
+                            **{pk_name: pk_val},
+                            valid_from__gt=instance.valid_from
+                        ).order_by('valid_from').first()
+                        
+                        new_valid_to = next_record.valid_from if next_record else None
+                        
+                        # 3. Update Previous Record
+                        # Since B is already gone, maintain_valid_period will see A->C and agree with this change.
+                        previous_record.valid_to = new_valid_to
+                        previous_record.save(update_fields=['valid_to'])
                             
-                pre_delete.disconnect(handle_history_deletion, sender=historical_model)
-                pre_delete.connect(handle_history_deletion, sender=historical_model, weak=False)
+                pre_delete.disconnect(cleanup_schedules_pre_delete, sender=historical_model)
+                pre_delete.connect(cleanup_schedules_pre_delete, sender=historical_model, weak=False)
+                
+                from django.db.models.signals import post_delete
+                post_delete.disconnect(repair_chain_post_delete, sender=historical_model)
+                post_delete.connect(repair_chain_post_delete, sender=historical_model, weak=False)
 
                 # 4. Meta History Model logic
                 meta_historical_model = historical_model.meta_history.model

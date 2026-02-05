@@ -87,3 +87,13 @@ class StandardHistory(HistoricalRecords):
             using=using,
         )
         return history_instance
+
+    def get_default_history_user(self, instance):
+        """Helper for populate_history command which calls this method on the model class or manager."""
+        return None
+
+    # Fix for populate_history: It attempts to access get_default_history_user via the Model class (bases)
+    # when it can't find it on the instance.
+    @classmethod
+    def get_default_history_user(cls, instance):
+        return None

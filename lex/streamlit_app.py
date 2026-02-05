@@ -465,7 +465,11 @@ if __name__ == "__main__":
     from lex.lex_app.settings import repo_name
 
     try:
-        exec(f"import {repo_name}._streamlit_structure as streamlit_structure")
+        try:
+            exec(f"import {repo_name}._streamlit_structure as streamlit_structure")
+        except Exception:
+            streamlit_structure = None
+
         reset_streamlit_form_context()
         params = st.query_params
         model = params.get("model")
@@ -513,7 +517,8 @@ if __name__ == "__main__":
 
         else:
             # Default application structure
-            streamlit_structure.main()
+            if streamlit_structure and hasattr(streamlit_structure, "main"):
+                streamlit_structure.main()
 
     except Exception as e:
         if os.getenv("DEPLOYMENT_ENVIRONMENT") != "PROD":
