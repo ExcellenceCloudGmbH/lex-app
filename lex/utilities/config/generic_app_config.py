@@ -22,7 +22,7 @@ def _is_structure_file(file):
 class GenericAppConfig(AppConfig):
     _EXCLUDED_FILES = ("asgi", "wsgi", "settings", "urls", 'setup')
     _EXCLUDED_DIRS = ('venv', '.venv', 'build', 'migrations')
-    _EXCLUDED_PREFIXES = ('_', '.')
+    _EXCLUDED_PREFIXES = ('_', '.', 'test_')
     _EXCLUDED_POSTFIXES = ('_', '.', 'create_db', 'CalculationIDs', '_test')
 
     def __init__(self, app_name, app_module):
@@ -42,7 +42,16 @@ class GenericAppConfig(AppConfig):
     def start(self, repo=None, is_lex=True):
         self.pending_relationships = {}
         self.discovered_models = {}
-        self.model_structure_builder = ModelStructureBuilder(repo=repo)
+        predefined_structure = {"AuditLog": {
+            "auditlog": None,
+            "auditlogstatus": None
+        },
+        "CalculationLog" : {
+            "calculationlog": None,
+        }}
+
+        self.model_structure_builder = ModelStructureBuilder(repo=repo, predefined_structure= predefined_structure)
+
         self.project_path = os.path.dirname(self.module.__file__) if is_lex else Path(
             os.getenv("PROJECT_ROOT", os.getcwd())
         ).resolve()
@@ -132,8 +141,7 @@ class GenericAppConfig(AppConfig):
         ModelRegistration.register_models(
             [o for o in self.discovered_models.values() if not admin.site.is_registered(o)],
             self.untracked_models
-        )
-
+       )
         ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
         ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
