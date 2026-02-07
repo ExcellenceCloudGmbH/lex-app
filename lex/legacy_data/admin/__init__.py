@@ -1,0 +1,3 @@
+from lex.legacy_data.admin.legacy_calculation_log_admin import LegacyCalculationLogAdmin
+from lex.legacy_data.admin.legacy_user_change_log_admin import LegacyUserChangeLogAdmin
+from lex.legacy_data.admin.legacy_calculation_id_admin import LegacyCalculationIdAdmin

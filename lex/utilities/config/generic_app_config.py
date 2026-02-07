@@ -31,7 +31,7 @@ class GenericAppConfig(AppConfig):
         self.project_path = None
         self.model_structure_builder = None
         self.pending_relationships = None
-        self.untracked_models = ["calculationlog", "auditlog", "auditlogstatus"]
+        self.untracked_models = ["calculationlog", "auditlog", "auditlogstatus", "legacyuserchangelog", "legacycalculationlog", "legacycalculationid"]
         self.discovered_models = None
         self.import_finder = None
 

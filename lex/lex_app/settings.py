@@ -228,6 +228,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "django_db_views",
     "oauth2_authcodeflow",
+    "lex.legacy_data.apps.LegacyDataConfig",
 ]
 
 if not repo_name.startswith("lex"):

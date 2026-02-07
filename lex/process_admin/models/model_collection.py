@@ -1,6 +1,7 @@
 from typing import Dict, Any, Set, Type, Union
 from django.db.models import Model
 
+from legacy_data.models import LegacyUserChangeLog, LegacyCalculationId, LegacyCalculationLog
 from lex.process_admin.models.model_container import ModelContainer
 from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
 from process_admin.utils import ModelStructureBuilder
@@ -65,6 +66,13 @@ class ModelCollection:
             model_styling: Configuration dictionary for customizing model display properties
         """
         self.ids2containers = _create_model_containers(models_to_admins)
+        set_of_ids_container = [c.id for c in self.all_containers]
+        if LegacyUserChangeLog.__name__.lower() in set_of_ids_container and LegacyCalculationLog.__name__.lower() in set_of_ids_container and LegacyCalculationId.__name__.lower() in set_of_ids_container:
+            model_structure["Legacy Generic App (Archive)"] = {
+                LegacyUserChangeLog.__name__.lower(): None,
+                LegacyCalculationLog.__name__.lower(): None,
+                LegacyCalculationId.__name__.lower(): None,
+            }
         self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml({"Models": {c.id: None for c in self.all_containers}}, model_structure)
         self.model_styling = model_styling
 
