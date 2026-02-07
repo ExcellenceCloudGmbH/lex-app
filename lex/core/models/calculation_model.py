@@ -9,6 +9,8 @@ from django_lifecycle import (
     hook,
     AFTER_UPDATE,
     AFTER_CREATE,
+    BEFORE_UPDATE,
+    BEFORE_CREATE,
     BEFORE_SAVE,
 )
 from django_lifecycle.conditions import WhenFieldValueIs
@@ -150,20 +152,31 @@ class CalculationModel(LexModel):
         """
         from lex.core.signals.calculation_signals import update_calculation_status
 
+        error_to_raise = None
         func = self.lex_func()
         try:
             if hasattr(self, "is_atomic") and not self.is_atomic:
                 func()
-                self.is_calculated = self.SUCCESS
             else:
+                # If this fails, it rolls back ONLY the calculation changes
                 with transaction.atomic():
                     func()
-                    self.is_calculated = self.SUCCESS
+
+                    # 2. If successful, update state
+            self.is_calculated = self.SUCCESS
 
         except Exception as e:
+            # 3. Capture the error, but DO NOT save yet.
+            # We are potentially still in a "broken" transaction state depending on where this is called.
+            # But since we caught it, we have exited the `with transaction.atomic():` block above.
+            error_to_raise = e
             self.is_calculated = self.ERROR
-            raise e
+            if hasattr(self, 'error_message'):
+                self.error_message = str(e)
+
         finally:
+            self.save(skip_hooks=True)
+            update_calculation_status(self)
             # Clean up cache if context is available
             try:
                 context = ContextResolver.resolve()
@@ -178,11 +191,19 @@ class CalculationModel(LexModel):
             except Exception as cleanup_error:
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
 
-            self.save(skip_hooks=True)
-            update_calculation_status(self)
+        if error_to_raise:
+            raise error_to_raise
 
-    @hook(AFTER_UPDATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
-    @hook(AFTER_CREATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
+
+
+    @hook(BEFORE_UPDATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
+    @hook(BEFORE_CREATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
+    def error_hook(self):
+        self.is_calculated = self.ERROR
+
+
+    @hook(AFTER_UPDATE, condition=WhenFieldValueIs("is_calculated", ERROR))
+    @hook(AFTER_CREATE, condition=WhenFieldValueIs("is_calculated", ERROR))
     def calculate_hook(self):
         """
         Enhanced calculation hook with Celery integration.
