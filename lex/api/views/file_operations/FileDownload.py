@@ -9,7 +9,7 @@ from django_sharepoint_storage.SharePointContext import SharePointContext
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
-
+from django.shortcuts import get_object_or_404
 
 class FileDownloadView(APIView):
     model_collection = None

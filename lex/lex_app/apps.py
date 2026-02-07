@@ -132,7 +132,7 @@ class LexAppConfig(GenericAppConfig):
 
         # Models to explicitly exclude (shouldn't show in frontend)
         # REMOVED Profile from exclusion to allow history tracking demo
-        excluded_model_names = {'HistoricalProfile', 'User'}
+        excluded_model_names = {'Profile', 'HistoricalProfile', 'User'}
 
         # Filter models appropriately
         models_to_register = []
