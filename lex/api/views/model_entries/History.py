@@ -42,7 +42,7 @@ class HistoryModelEntry(ListAPIView):
         # Filter by the original object's PK (which is stored in the history model with the same name)
         pk_name = model_class._meta.pk.name
         
-        from lex.core.services.bitemporal import get_queryset_as_of
+        from lex.core.services.Bitemporal import get_queryset_as_of
         from django.utils.dateparse import parse_datetime
 
         as_of_param = request.query_params.get("as_of")

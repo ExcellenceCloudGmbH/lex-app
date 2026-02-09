@@ -5,7 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 from io import StringIO
 from django.db import models, connection
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
 from lex.process_admin.utils.model_registration import ModelRegistration
 
 # Define Test Model

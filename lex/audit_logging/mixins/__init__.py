@@ -1,4 +1,4 @@
-from .audit_mixin import AuditLogMixin
-from .bulk_audit_mixin import BulkAuditLogMixin
+from .AuditLogMixin import AuditLogMixin
+from .BulkAuditLogMixin import BulkAuditLogMixin
 
 __all__ = ['AuditLogMixin', 'BulkAuditLogMixin']

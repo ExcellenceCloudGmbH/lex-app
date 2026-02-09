@@ -31,7 +31,7 @@ class GenericAppConfig(AppConfig):
         self.project_path = None
         self.model_structure_builder = None
         self.pending_relationships = None
-        self.untracked_models = ["calculationlog", "auditlog", "auditlogstatus"]
+        self.untracked_models = ["calculationlog", "auditlog", "auditlogstatus", "legacyuserchangelog", "legacycalculationlog", "legacycalculationid"]
         self.discovered_models = None
         self.import_finder = None
 
@@ -100,18 +100,7 @@ class GenericAppConfig(AppConfig):
                 and not module_name.startswith(self._EXCLUDED_PREFIXES))
 
     def _process_module(self, full_module_name, file):
-        if file.endswith('_authentication_settings.py'):
-            try:
-                module = importlib.import_module(full_module_name)
-                LexAuthentication().load_settings(module)
-            except ImportError as e:
-                print(f"Error importing authentication settings: {e}")
-                raise
-            except Exception as e:
-                print(f"Authentication settings doesn't have method create_groups()")
-                raise
-        else:
-            self.load_models_from_module(full_module_name)
+        self.load_models_from_module(full_module_name)
 
     def load_models_from_module(self, full_module_name):
         try:

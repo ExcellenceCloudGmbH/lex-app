@@ -25,7 +25,7 @@ class ModelExportView(GenericAPIView):
         try:
             # Use new permission system if available
             if hasattr(obj, 'permission_export'):
-                from lex.core.models.base import UserContext
+                from lex.core.models.LexModel import UserContext
                 user_context = UserContext.from_request(request, obj)
                 result = obj.permission_export(user_context)
                 if result.allowed:

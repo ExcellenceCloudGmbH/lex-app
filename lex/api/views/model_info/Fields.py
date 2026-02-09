@@ -17,7 +17,7 @@ from django.db.models import (
     AutoField,
     JSONField
 )
-from lex.api.fields import BokehField, HTMLField, PDFField, XLSXField
+from lex.api.fields import  PDFField, XLSXField
 from lex.api.views.permissions.UserPermission import UserPermission
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
 
@@ -35,8 +35,6 @@ DJANGO_FIELD2TYPE_NAME = {
     FileField: "file",
     PDFField: "pdf_file",
     XLSXField: "xlsx_file",
-    HTMLField: "html",
-    BokehField: "bokeh",
     ImageField: "image_file",
     JSONField: "json",
 }

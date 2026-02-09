@@ -8,7 +8,8 @@ from decimal import Decimal
 from django.apps import apps
 from django.db.models import Model
 from django.db.models.fields import DateTimeField, DateField, TimeField
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
+from process_admin.utils.model_registration import MetaLevelHistoricalRecords
 
 # Field‐names that React-Admin expects
 ID_FIELD_NAME = "id_field"
@@ -54,44 +55,105 @@ class LexSerializer(serializers.ModelSerializer):
             return {}
 
         try:
+            if instance.__class__.__name__.startswith('MetaHistorical'):
+                return {
+                    "edit": [],
+                    "delete": False,
+                    "export": False,
+                }
             # Check if this is a LexModel instance
-            # if not hasattr(instance, 'permission_edit'):
-            #     return {}
-            #
-            # # Create user context
-            # from lex.core.models.base import UserContext
-            # user_context = UserContext.from_request(request, instance)
-            #
-            # # Get all field names for this model
-            all_fields = {f.name for f in instance._meta.fields}
-            #
-            # # Get permissions using new system
-            # edit_result = instance.permission_edit(user_context)
-            # delete_allowed = instance.permission_delete(user_context)
-            # export_result = instance.permission_export(user_context)
-            #
-            # # Get editable fields, excluding internal fields
-            # edit_fields = edit_result.get_fields(all_fields)
-            #
-            # # Remove internal LexModel fields and id
-            # try:
-            #     from lex.core.models.base import LexModel
-            #     lexmodel_fields = {f.name for f in LexModel._meta.fields}
-            # except Exception:
-            #     lexmodel_fields = set()
-            #
-            # edit_fields -= (lexmodel_fields | {'id'})
+            if not hasattr(instance, 'permission_edit'):
+                target_instance = instance
+
+                # 1. Unwrap Meta wrapper if present (Level 2 -> Level 1)
+                if hasattr(target_instance, 'history_object') and target_instance.history_object:
+                    target_instance = target_instance.history_object
+                
+                # 2. Unwrap History wrapper (Level 1 -> Main)
+                unwrapped = False
+                try:
+                    possible_instance = getattr(target_instance, 'instance', None)
+                    if possible_instance:
+                        target_instance = possible_instance
+                        unwrapped = True
+                except Exception:
+                    pass
+                
+                if not unwrapped and hasattr(target_instance, 'instance_type'):
+                    # Fallback: manually instantiate from instance_type if available
+                    try:
+                        ModelClass = target_instance.instance_type
+                        # Collect fields that exist on the original model
+                        init_kwargs = {}
+                        for field in ModelClass._meta.fields:
+                             # Use attname (e.g. 'parent_id') to avoid triggering FK lookups
+                             # and to satisfy Model constructor
+                             if hasattr(target_instance, field.attname):
+                                 init_kwargs[field.attname] = getattr(target_instance, field.attname)
+                        
+                        # Instantiate without saving
+                        target_instance = ModelClass(**init_kwargs)
+                    except Exception:
+                        pass
+
+                # Ensure the target instance has the permission methods
+                if not hasattr(target_instance, 'permission_edit') and not hasattr(target_instance, 'can_edit'):
+                    return {}
+            else:
+                target_instance = instance
+
+            # Create user context
+            from lex.core.models.LexModel import UserContext
+            user_context = UserContext.from_request(request, target_instance)
+
+            # Get all field names for this model
+            all_fields = {f.name for f in target_instance._meta.fields}
+
+            # Get permissions using new system or fallback
+            if hasattr(target_instance, 'permission_edit'):
+                edit_result = target_instance.permission_edit(user_context)
+                edit_fields = edit_result.get_fields(all_fields)
+            else:
+                # Fallback to legacy can_edit
+                edit_fields = target_instance.can_edit(request) if hasattr(target_instance, 'can_edit') else set()
+
+            if hasattr(target_instance, 'permission_delete'):
+                delete_allowed = target_instance.permission_delete(user_context)
+            else:
+                delete_allowed = target_instance.can_delete(request) if hasattr(target_instance, 'can_delete') else True
+
+            if hasattr(target_instance, 'permission_export'):
+                export_result = target_instance.permission_export(user_context)
+                if hasattr(export_result, 'allowed'):
+                    export_allowed = export_result.allowed
+                else:
+                    export_allowed = bool(export_result)
+            else:
+                export_allowed = bool(target_instance.can_export(request)) if hasattr(target_instance, 'can_export') else True
+
+            # Remove internal LexModel fields and id
+            try:
+                from lex.core.models.LexModel import LexModel
+                lexmodel_fields = {f.name for f in LexModel._meta.fields}
+            except Exception:
+                lexmodel_fields = set()
+
+            edit_fields -= (lexmodel_fields | {'id'})
+
+            # If the instance itself is a History Record, 'valid_from' and 'valid_to' should be editable by default
+            if hasattr(instance, 'history_type') or hasattr(instance, 'history_id'):
+                 # It's a history record
+                 history_edit_fields = {'valid_from', 'valid_to'}
+                 # Only add if they actually exist on the model (safety)
+                 for f in history_edit_fields:
+                     if hasattr(instance, f):
+                         edit_fields.add(f)
 
             return {
-                "edit": sorted(all_fields),
-                "delete": True,
-                "export": True,
+                "edit": sorted(edit_fields),
+                "delete": bool(delete_allowed),
+                "export": bool(export_allowed),
             }
-            # return {
-            #     "edit": sorted(edit_fields),
-            #     "delete": bool(delete_allowed),
-            #     "export": bool(export_result.allowed),
-            # }
         except Exception:
             # Any unexpected error → hide scopes entirely
             return {}
@@ -158,7 +220,7 @@ class LexSerializer(serializers.ModelSerializer):
                             
                             # Check if user can read this related object
                             if hasattr(related_obj, 'permission_read'):
-                                from lex.core.models.base import UserContext
+                                from lex.core.models.LexModel import UserContext
                                 user_context = UserContext.from_request(request, related_obj)
                                 result = related_obj.permission_read(user_context)
                                 
@@ -233,21 +295,81 @@ class LexSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         request = self.context.get('request')
 
+        # Resolve the target instance for permission checks
+        target_instance = instance
+        
+        # Handle Historical Records (simple_history) & MetaHistory
+        if not hasattr(instance, 'can_read') and not hasattr(instance, 'permission_read'):
+            # 1. Unwrap Meta wrapper if present (Level 2 -> Level 1)
+            if hasattr(target_instance, 'history_object') and target_instance.history_object:
+                target_instance = target_instance.history_object
+            
+            # 2. Unwrap History wrapper (Level 1 -> Main)
+            unwrapped = False
+            try:
+                # Use getattr to safely try accessing .instance
+                # This works even if accessing .instance raises AttributeError (which hasattr swallows)
+                possible_instance = getattr(target_instance, 'instance', None)
+                if possible_instance:
+                    target_instance = possible_instance
+                    unwrapped = True
+            except Exception:
+                pass
+            
+            if not unwrapped and hasattr(target_instance, 'instance_type'):
+                # Fallback: manually instantiate from instance_type if available
+                try:
+                    ModelClass = target_instance.instance_type
+                    # Collect fields that exist on the original model
+                    init_kwargs = {}
+                    for field in ModelClass._meta.fields:
+                         # Use attname (e.g. 'parent_id') to avoid triggering FK lookups
+                         if hasattr(target_instance, field.attname):
+                             init_kwargs[field.attname] = getattr(target_instance, field.attname)
+                    
+                    # Instantiate without saving
+                    target_instance = ModelClass(**init_kwargs)
+                except Exception:
+                    pass
+
         # Normal visible fields for concrete models
-        visible_fields = (
-            instance.can_read(request)
-            if hasattr(instance, 'can_read') else
-            {f.name for f in instance._meta.fields}
-        )
+        visible_fields = None
+        
+        # 1. Try Legacy 'can_read'
+        if hasattr(target_instance, 'can_read'):
+            visible_fields = target_instance.can_read(request)
+            
+        # 2. Try New System 'permission_read'
+        elif hasattr(target_instance, 'permission_read'):
+             from lex.core.models.LexModel import UserContext
+             user_context = UserContext.from_request(request, target_instance)
+             result = target_instance.permission_read(user_context)
+             if not result.allowed:
+                 return {} # Hide entirely
+             
+             # Calculate visible fields
+             all_fields = {f.name for f in target_instance._meta.fields}
+             visible_fields = result.get_fields(all_fields)
+
+        # 3. Fallback: All fields
+        if visible_fields is None:
+             visible_fields = {f.name for f in instance._meta.fields}
 
         if not visible_fields:
             return {}
 
         representation = super().to_representation(instance)
-
+        
         # Filter non-AuditLog outputs by visible fields (existing behavior)
+        # Always allow history/system fields if the record is visible
+        system_fields = {
+            'history_id', 'history_date', 'history_type', 'history_user', 'history_change_reason',
+            'valid_from', 'valid_to',
+            'calculation_record', 'lex_reserved_scopes', 'id', 'id_field', SHORT_DESCR_NAME
+        }
+        
         for field_name in list(representation.keys()):
-            if field_name not in visible_fields and field_name not in ['history_id', 'calculation_record', 'lex_reserved_scopes', 'id', 'id_field', SHORT_DESCR_NAME]:
+            if field_name not in visible_fields and field_name not in system_fields:
                 representation.pop(field_name, None)
 
         # AuditLog payload filtering using target model can_read

@@ -1,7 +1,7 @@
 from django.db.models import Model
 
-from lex.core.models.process import Process
-from lex.core.models.html_report import HTMLReport
+from lex.core.models.Process import Process
+from lex.core.models.HTMLReport import HTMLReport
 from lex.process_admin.models.constants import RELATION_FIELD_TYPES
 
 

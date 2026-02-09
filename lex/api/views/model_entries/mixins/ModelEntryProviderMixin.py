@@ -3,7 +3,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from rest_framework.exceptions import APIException
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from lex.audit_logging.models.calculation_log import (
+from lex.audit_logging.models.CalculationLog import (
     CalculationLog,
 )  # Import your CalculationLog model
 from lex.api.views.permissions.UserPermission import UserPermission
@@ -24,7 +24,7 @@ class ModelEntryProviderMixin:
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
 
     def get_queryset(self):
-        from lex.core.services.bitemporal import get_queryset_as_of
+        from lex.core.services.Bitemporal import get_queryset_as_of
         from django.utils.dateparse import parse_datetime
         from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
         from lex.process_admin.utils.temporal_reconciler import TemporalReconciler

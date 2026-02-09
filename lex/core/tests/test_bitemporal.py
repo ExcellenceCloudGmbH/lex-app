@@ -4,9 +4,9 @@ from django.test import TransactionTestCase
 from django.db import models, connection
 from django.utils import timezone
 from datetime import timedelta
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
 from lex.process_admin.utils.model_registration import ModelRegistration
-from lex.core.services.standard_history import StandardHistory
+from lex.core.services.StandardHistory import StandardHistory
 
 # Define a Test Model
 class TestBitemporalModel(LexModel):
@@ -221,7 +221,7 @@ class BitemporalLogicTest(TransactionTestCase):
         print(f"Step 3 OK")
 
         # --- STEP 4: As-Of Query Verification ---
-        from lex.core.services.bitemporal import get_queryset_as_of
+        from lex.core.services.Bitemporal import get_queryset_as_of
         
         # 1. As Of T0 + 1m (After Creation, Before Update)
         # Should see "melih" (h1)

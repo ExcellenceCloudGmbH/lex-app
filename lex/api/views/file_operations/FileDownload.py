@@ -1,65 +1,64 @@
 import os
 from io import BytesIO
-
 from django.http import FileResponse, JsonResponse
-from django_sharepoint_storage.SharePointCloudStorageUtils import (
-    get_server_relative_path,
-)
+from django_sharepoint_storage.SharePointCloudStorageUtils import get_server_relative_path
 from django_sharepoint_storage.SharePointContext import SharePointContext
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework_api_key.permissions import HasAPIKey
-from django.shortcuts import get_object_or_404
+
+
+# Assuming HasAPIKey is imported from your custom permissions
 
 class FileDownloadView(APIView):
     model_collection = None
-    http_method_names = ["get"]
+    http_method_names = ['get']
     permission_classes = [HasAPIKey | IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        model = kwargs["model_container"].model_class
+        # 1. Fetch the model and instance
+        model = kwargs['model_container'].model_class
+        # Using filter().first() is safer than [0] to avoid IndexError if not found
+        instance = model.objects.filter(pk=request.query_params['pk']).first()
 
-        # Use get_object_or_404 for better error handling (404 instead of 500 crash)
-        instance = get_object_or_404(model, pk=request.query_params["pk"])
+        if not instance:
+            return JsonResponse({"error": "File not found"}, status=404)
 
-        # SECURITY NOTE: Validate 'field' exists to prevent arbitrary attribute access
-        field_name = request.query_params["field"]
-        if not hasattr(instance, field_name):
-            return Response({"error": "Field not found"}, status=400)
-
+        # 2. Get the file field object safely
+        field_name = request.query_params['field']
         file_obj = getattr(instance, field_name)
 
-        # Get the raw URL from the storage backend
-        # If the file doesn't exist, this might raise a ValueError depending on storage
-        try:
-            raw_url = file_obj.url
-        except ValueError:
-            return Response({"error": "File does not exist"}, status=404)
+        storage_type = os.getenv("STORAGE_TYPE", "LOCAL")
 
-        # 1. WINDOWS FIX: Ensure URL uses forward slashes.
-        # Windows paths might introduce '\', which breaks URLs.
-        clean_url = raw_url.replace("\\", "/")
-
-        if os.getenv("KUBERNETES_ENGINE", "NONE") == "NONE":
-            # 2. LOCAL DEV FIX: Build absolute URI
-            # If running locally, you often get a relative path (e.g., /media/file.jpg).
-            # This converts it to http://localhost:8000/media/file.jpg
-            file_url = request.build_absolute_uri(clean_url)
-        else:
-            # Production usually uses S3/GCS, returning a full https:// URL already.
-            file_url = clean_url
-
-        if os.getenv("STORAGE_TYPE") == "SHAREPOINT":
+        # 3. Handle Storage Types
+        if storage_type == "SHAREPOINT":
+            # SharePoint typically works with the URL/Relative path structure
             shrp_ctx = SharePointContext()
-            file = shrp_ctx.ctx.web.get_file_by_server_relative_path(
-                get_server_relative_path(file.url)
+
+            # Ensure we pass the expected URL format to SharePoint utils
+            # If your util expects a relative path without leading slash:
+            rel_url = file_obj.url.lstrip('/')
+
+            target_file = shrp_ctx.ctx.web.get_file_by_server_relative_path(
+                get_server_relative_path(file_obj.url)
             ).execute_query()
-            binary_file = file.open_binary(
-                shrp_ctx.ctx, get_server_relative_path(file_url)
+
+            binary_file = target_file.open_binary(
+                shrp_ctx.ctx,
+                get_server_relative_path(rel_url)
             )
             bytesio_object = BytesIO(binary_file.content)
             return FileResponse(bytesio_object)
-        elif os.getenv("STORAGE_TYPE") == "GCS":
-            return JsonResponse({"download_url": file_url})
+
+        elif storage_type == "GCS":
+            # Cloud storage usually just needs the public/signed URL
+            return JsonResponse({"download_url": file_obj.url})
+
         else:
-            return FileResponse(open(file_url, "rb"))
+            # LOCAL STORAGE
+            # FIX: Use .path instead of .url for filesystem operations.
+            # .path provides the absolute OS-specific path automatically.
+            try:
+                return FileResponse(open(file_obj.path, 'rb'))
+            except FileNotFoundError:
+                return JsonResponse({"error": "File not found on server"}, status=404)

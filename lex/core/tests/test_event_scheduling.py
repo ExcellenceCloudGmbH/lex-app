@@ -3,7 +3,7 @@ from django.utils import timezone
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
 from django.db import models, connection
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
 from lex.process_admin.utils.model_registration import ModelRegistration
 import sys
 

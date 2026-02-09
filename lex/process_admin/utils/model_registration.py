@@ -21,10 +21,6 @@ from simple_history.models import HistoricalRecords
 
 from django.db.models import Subquery, OuterRef
 
-
-
-
-
 class MetaLevelHistoricalRecords(HistoricalRecords):
     """
     A specialized History provider for 'History on History'.
@@ -170,9 +166,9 @@ class ModelRegistration:
             AttributeError: If model registration fails due to missing attributes
         """
         from lex.process_admin.settings import processAdminSite, adminSite
-        from lex.core.models.process import Process
-        from lex.core.models.html_report import HTMLReport
-        from lex.core.models.calculation_model import CalculationModel
+        from lex.core.models.Process import Process
+        from lex.core.models.HTMLReport import HTMLReport
+        from lex.core.models.CalculationModel import CalculationModel
         from django.contrib.auth.models import User
 
         # Initialize untracked_models to empty list if None provided
@@ -252,7 +248,7 @@ class ModelRegistration:
                 historical_model = None
                 
                 # --- LEVEL 1: Standard History ---
-                from lex.core.services.standard_history import StandardHistory
+                from lex.core.services.StandardHistory import StandardHistory
                 from simple_history.exceptions import MultipleRegistrationsError
                 
                 try:
@@ -605,7 +601,7 @@ class ModelRegistration:
         Args:
             model: CalculationModel class to handle reset for
         """
-        from lex.core.models.calculation_model import CalculationModel
+        from lex.core.models.CalculationModel import CalculationModel
         
         if not os.getenv("CALLED_FROM_START_COMMAND"):
             return

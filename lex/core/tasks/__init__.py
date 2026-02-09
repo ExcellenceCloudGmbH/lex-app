@@ -1,3 +1,3 @@
-from lex.core.tasks.celery_dispatcher import CeleryTaskDispatcher
+from lex.core.tasks.CeleryTaskDispatcher import CeleryTaskDispatcher
 
 __all__ = ['CeleryTaskDispatcher']

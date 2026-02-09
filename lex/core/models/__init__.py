@@ -3,3 +3,5 @@
 # during Django initialization
 
 __all__ = ['LexModel', 'UserContext', 'PermissionResult', 'Process', 'CalculationModel', 'HTMLReport']
+
+from core.models.LexModel import UserContext, PermissionResult

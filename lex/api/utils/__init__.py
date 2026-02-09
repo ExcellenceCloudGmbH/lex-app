@@ -6,7 +6,7 @@ from .helpers import (
 )
 from .collection_utils import flatten
 from .converters import create_model_converter
-from .context import operation_context, OperationContext
+from .Context import operation_context, OperationContext
 
 __all__ = [
     'convert_dfs_in_excel',

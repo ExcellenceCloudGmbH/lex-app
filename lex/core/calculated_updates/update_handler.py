@@ -1,4 +1,4 @@
-from lex.core.mixins.calculated import CalculatedModelMixin
+from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
 # TODO: DependencyAnalysisMixin was not migrated from old structure
 # from lex.process_admin.models.model_process_admin import DependencyAnalysisMixin
 

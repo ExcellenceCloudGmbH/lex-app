@@ -1,4 +1,4 @@
-from lex.core.signals.calculation_signals import (
+from lex.core.signals.CalculationSignals import (
     update_calculation_status,
     do_post_save,
     custom_post_save,

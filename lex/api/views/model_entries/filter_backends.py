@@ -1,7 +1,7 @@
 import base64
 from urllib.parse import parse_qs
 from rest_framework import filters
-from lex.audit_logging.models.calculation_log import CalculationLog
+from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.api.utils import can_read_from_payload
 
 
@@ -90,16 +90,52 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         permitted = []
         for instance in queryset:
             try:
+                # Resolve target instance (handle Historical Records)
+                target_instance = instance
+                
+                if not hasattr(instance, 'permission_read') and not hasattr(instance, 'can_read'):
+                    # 1. Unwrap Meta wrapper if present (Level 2 -> Level 1)
+                    if hasattr(target_instance, 'history_object') and target_instance.history_object:
+                        target_instance = target_instance.history_object
+
+                    # 2. Unwrap History wrapper (Level 1 -> Main)
+                    # Use getattr to safely access .instance, as it might raise an error if reconstruction fails
+                    # If it fails, we try to reconstruct it manually from instance_type
+                    unwrapped = False
+                    try:
+                        possible_instance = getattr(target_instance, 'instance', None)
+                        if possible_instance:
+                            target_instance = possible_instance
+                            unwrapped = True
+                    except Exception:
+                        pass
+                    
+                    if not unwrapped and hasattr(target_instance, 'instance_type'):
+                        # Fallback: manually instantiate from instance_type if available
+                        try:
+                            ModelClass = target_instance.instance_type
+                            # Collect fields that exist on the original model
+                            init_kwargs = {}
+                            for field in ModelClass._meta.fields:
+                                # Use attname (e.g. 'parent_id') to avoid triggering FK lookups
+                                if hasattr(target_instance, field.attname):
+                                    init_kwargs[field.attname] = getattr(target_instance, field.attname)
+                            
+                            # Instantiate without saving
+                            target_instance = ModelClass(**init_kwargs)
+                        except Exception:
+                            pass
+
                 # Check if instance has new permission system
-                if hasattr(instance, 'permission_read'):
-                    from lex.core.models.base import UserContext
-                    user_context = UserContext.from_request(request, instance)
-                    result = instance.permission_read(user_context)
+                if hasattr(target_instance, 'permission_read'):
+                    from lex.core.models.LexModel import UserContext
+                    user_context = UserContext.from_request(request, target_instance)
+                    result = target_instance.permission_read(user_context)
                     if result.allowed:
                         permitted.append(instance.pk)
                 # Fallback to legacy method
-                elif hasattr(instance, 'can_read') and callable(instance.can_read):
-                    if instance.can_read(request):
+                elif hasattr(target_instance, 'can_read') and callable(target_instance.can_read):
+                    if target_instance.can_read(request):
                         permitted.append(instance.pk)
                 else:
                     # Allow by default if no permission method

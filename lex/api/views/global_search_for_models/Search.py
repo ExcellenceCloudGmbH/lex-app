@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
-from lex.process_admin.models.model_collection import ModelCollection
+from lex.process_admin.models.ModelCollection import ModelCollection
 from lex.api.views.permissions.UserPermission import UserPermission
 
 EXCLUDED_MODELS = {'calculationdashboard', 'user', 'group', 'permission', 'contenttype', 'userchangelog',

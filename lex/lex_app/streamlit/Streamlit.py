@@ -1,6 +1,6 @@
 import os
 
-from lex.core.models.html_report import HTMLReport
+from lex.core.models.HTMLReport import HTMLReport
 
 
 class Streamlit(HTMLReport):
