@@ -1,9 +1,24 @@
 from rest_framework import serializers
 
-from lex.audit_logging.models.audit_log import AuditLog
+from lex.audit_logging.models.AuditLog import AuditLog
 
 
-class AuditLogDefaultSerializer(serializers.ModelSerializer):
+class AuditLogReadOnlySerializerMixin:
+    """
+    Mixin to enforce read-only scopes for legacy models.
+    Overrides get_lex_reserved_scopes to return empty/disabled permissions.
+    """
+    lex_reserved_scopes = serializers.SerializerMethodField()
+
+    def get_lex_reserved_scopes(self, instance):
+        return {
+            "edit": [],  # No fields are editable
+            "delete": False,  # Deletion is disabled
+            "export": True,  # Export is allowed
+        }
+
+
+class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.ModelSerializer):
     calculation_record = serializers.SerializerMethodField()
 
     class Meta:
@@ -18,6 +33,7 @@ class AuditLogDefaultSerializer(serializers.ModelSerializer):
             'calculation_id',
             'calculation_record',
         ]
+        read_only_fields = [f.name for f in AuditLog._meta.fields]
 
     def get_calculation_record(self, obj):
         """
@@ -47,7 +63,6 @@ class AuditLogDefaultSerializer(serializers.ModelSerializer):
                 }
             }
         return None
-
 
 AuditLog.api_serializers = {
     "default": AuditLogDefaultSerializer,

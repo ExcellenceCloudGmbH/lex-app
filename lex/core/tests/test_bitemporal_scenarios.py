@@ -2,7 +2,7 @@ from unittest.mock import patch
 from django.test import TransactionTestCase
 from django.db import models, connection
 from datetime import timedelta
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
 import datetime
 
 # Define a Test Model uniquely for this test to avoid collisions

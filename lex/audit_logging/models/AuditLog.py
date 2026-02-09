@@ -1,8 +1,8 @@
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
-from lex.core.mixins.modification_restriction import AdminReportsModificationRestriction
-from lex.core.models.base import LexModel
+from lex.core.mixins.ModelModificationRestriction import AdminReportsModificationRestriction
+from lex.core.models.LexModel import LexModel
 
 class AuditLog(LexModel):
     ACTION_CHOICES = (

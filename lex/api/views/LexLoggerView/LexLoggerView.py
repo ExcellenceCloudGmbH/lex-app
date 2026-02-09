@@ -1,7 +1,7 @@
 from django.http import JsonResponse
 from django.views import View
 
-from lex.audit_logging.handlers.lex_logger import LexLogger
+from lex.audit_logging.handlers.LexLogger import LexLogger
 
 
 class LexLoggerView(View):

@@ -16,8 +16,8 @@ from django.db import models
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.config import is_audit_logging_enabled
 from django.contrib.contenttypes.models import ContentType
-from lex.audit_logging.models.calculation_log import CalculationLog
-from lex.audit_logging.utils.model_context import model_logging_context
+from lex.audit_logging.models.CalculationLog import CalculationLog
+from lex.audit_logging.utils.ModelContext import model_logging_context
 
 from lex.lex_app import settings
 from lex.lex_app.celery_tasks import lex_shared_task

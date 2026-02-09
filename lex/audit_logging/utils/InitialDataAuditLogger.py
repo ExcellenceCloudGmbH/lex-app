@@ -7,12 +7,12 @@ from typing import Dict, Any, Optional, Type
 from django.db import models, transaction
 from django.db.models import Model
 
-from lex.audit_logging.models.audit_log import AuditLog
-from lex.audit_logging.models.audit_log_status import AuditLogStatus
-from lex.audit_logging.serializers.audit_log_mixin_serializer import _serialize_payload, generic_instance_payload
+from lex.audit_logging.models.AuditLog import AuditLog
+from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
+from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload, generic_instance_payload
 # from lex.audit_logging.models.audit_logBatchManager import AuditLogBatchManager  # TODO: This class doesn't exist
 from lex.process_admin.settings import processAdminSite
-from lex.audit_logging.mixins.audit_mixin import AuditLogMixin
+from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 
 # Configure logger for audit operations
 logger = logging.getLogger('lex_app.audit.initial_data')

@@ -12,8 +12,8 @@ from typing import Optional
 from django.contrib.contenttypes.models import ContentType
 
 from lex.api.utils import operation_context
-from lex.audit_logging.utils.model_context import _model_context
-from lex.audit_logging.utils.data_models import ContextInfo, ContextResolutionError
+from lex.audit_logging.utils.ModelContext import _model_context
+from lex.audit_logging.utils.DataModels import ContextInfo, ContextResolutionError
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class ContextResolver:
             
             # Resolve AuditLog using calculation_id
             # Import here to avoid circular dependency
-            from lex.audit_logging.models.audit_log import AuditLog
+            from lex.audit_logging.models.AuditLog import AuditLog
             
             try:
                 audit_log = context_data.get('audit_log_temp') or AuditLog.objects.get(calculation_id=calculation_id)

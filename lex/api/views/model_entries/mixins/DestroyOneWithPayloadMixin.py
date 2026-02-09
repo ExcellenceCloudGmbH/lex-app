@@ -18,7 +18,7 @@ class DestroyOneWithPayloadMixin:
         can_delete = False
         try:
             if hasattr(instance, 'permission_delete'):
-                from lex.core.models.base import UserContext
+                from lex.core.models.LexModel import UserContext
                 user_context = UserContext.from_request(request, instance)
                 can_delete = instance.permission_delete(user_context)
             elif hasattr(instance, 'can_delete'):

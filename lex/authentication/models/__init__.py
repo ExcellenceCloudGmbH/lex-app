@@ -1,3 +1,3 @@
-from .profile import Profile
+from .Profile import Profile
 
 __all__ = ['Profile']

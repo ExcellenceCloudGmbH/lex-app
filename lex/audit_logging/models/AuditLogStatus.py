@@ -1,6 +1,6 @@
 from django.db import models
-from lex.audit_logging.models.audit_log import AuditLog
-from lex.core.models.base import LexModel
+from lex.audit_logging.models.AuditLog import AuditLog
+from lex.core.models.LexModel import LexModel
 
 class AuditLogStatus(LexModel):
     audit_log = models.ForeignKey(

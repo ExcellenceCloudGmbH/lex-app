@@ -96,6 +96,7 @@ STORAGES = {
     },
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 
+
 }
 
 SHAREPOINT_APP_CLIENT_ID = os.getenv("SHAREPOINT_APP_CLIENT_ID")
@@ -188,7 +189,7 @@ LOGGING = {
         },
         "websocket": {
             "level": "DEBUG",
-            "class": "lex.audit_logging.handlers.websocket_handler.WebSocketHandler",
+            "class": "lex.audit_logging.handlers.WebSocketHandler.WebSocketHandler",
         },
     },
     "loggers": {
@@ -526,7 +527,7 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = True
+USE_TZ = True if DATABASE_DEPLOYMENT_TARGET != "default" else False
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
 TIME_ZONE = "Europe/Berlin"
@@ -573,7 +574,7 @@ LOGGING = {
             "formatter": "default",
         },
         "ws": {
-            "()": "lex.audit_logging.handlers.websocket_handler.WebSocketHandler",
+            "()": "lex.audit_logging.handlers.WebSocketHandler.WebSocketHandler",
             "level": "DEBUG",
             "formatter": "ws_md",
         },
@@ -584,6 +585,12 @@ LOGGING = {
             "level": "DEBUG",
             "propagate": False,
         },
+        'oauth2_authcodeflow': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+
     },
     "root": {
         "handlers": ["console"],

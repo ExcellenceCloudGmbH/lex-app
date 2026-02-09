@@ -9,7 +9,7 @@ import pandas as pd
 from django.conf import settings
 
 from lex.utilities.decorators.singleton import LexSingleton
-from lex.audit_logging.models.calculation_log import CalculationLog
+from lex.audit_logging.models.CalculationLog import CalculationLog
 
 
 class LexLogLevel:

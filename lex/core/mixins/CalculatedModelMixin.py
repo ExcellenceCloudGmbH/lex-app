@@ -112,8 +112,8 @@ See Also:
 
 - calculated_model_usage_examples.py: Comprehensive usage examples and best practices
 - ModelRegistration.py: Enhanced model registration with better organization
-- model_collection.py: Improved model collection management
-- model_container.py: Enhanced model container with better documentation
+- ModelCollection.py: Improved model collection management
+- ModelContainer.py: Enhanced model container with better documentation
 
 Version History:
 
@@ -138,7 +138,7 @@ from django.db.models.base import ModelBase
 from lex.lex_app import settings
 from lex.api.utils import operation_context
 from lex.core.exceptions import *
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
 
 if TYPE_CHECKING:
     pass  # CalculatedModelMixin is defined in this file
@@ -1592,7 +1592,7 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
                         )
 
                         context = operation_context.get()
-                        from lex.core.tasks.celery_dispatcher import CeleryTaskDispatcher
+                        from lex.core.tasks.CeleryTaskDispatcher import CeleryTaskDispatcher
                         # from lex.lex_app.celery_tasks import synchronous_on_commit
                         # synchronous_on_commit(
                         #     CeleryTaskDispatcher.dispatch_calculation_groups,

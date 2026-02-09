@@ -2,7 +2,7 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
-from lex.audit_logging.mixins.bulk_audit_mixin import BulkAuditLogMixin
+from lex.audit_logging.mixins.BulkAuditLogMixin import BulkAuditLogMixin
 from django.apps import apps
 
 class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIView):

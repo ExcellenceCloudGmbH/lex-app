@@ -1,6 +1,6 @@
 from typing import Set, Dict, Any, Optional, Type, Union
 from django.db.models import Model
-from lex.core.mixins.modification_restriction import (
+from lex.core.mixins.ModelModificationRestriction import (
     ModelModificationRestriction,
 )
 from lex.api.serializers import get_serializer_map_for_model

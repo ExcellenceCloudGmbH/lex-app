@@ -1,21 +1,22 @@
+import sys
 import traceback
 import logging
 
 from django.db import transaction
 from rest_framework_api_key.permissions import HasAPIKey
 
-from lex.audit_logging.utils.model_context import model_logging_context
+from lex.audit_logging.utils.ModelContext import model_logging_context
 from rest_framework.exceptions import APIException
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
 from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 
 from rest_framework.response import Response
 from rest_framework import status
-from lex.core.models.calculation_model import CalculationModel
+from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 
 from lex.core.signals import update_calculation_status
-from lex.audit_logging.mixins.audit_mixin import AuditLogMixin
-from lex.api.utils.context import OperationContext
+from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
+from lex.api.utils.Context import OperationContext
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
     DestroyOneWithPayloadMixin,
 )
@@ -26,8 +27,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 
 from lex.api.views.permissions.UserPermission import UserPermission
-from lex.audit_logging.utils.cache_manager import CacheManager
-from lex.audit_logging.utils.websocket_notifier import WebSocketNotifier
+from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class OneModelEntry(
         # Check create permission using new system
         try:
             if hasattr(instance, 'permission_create'):
-                from lex.core.models.base import UserContext
+                from lex.core.models.LexModel import UserContext
                 user_context = UserContext.from_request(request, instance)
                 can_create = instance.permission_create(user_context)
             else:
@@ -148,6 +149,18 @@ class OneModelEntry(
                     instance.track()
                     response = UpdateModelMixin.update(self, request, *args, **kwargs)
 
+                except CalculationModelException as e:
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    calc_obj = exc_value.calc_obj
+                    exception_details = exc_value.exception_details
+                    stack_trace = exc_value.stack_trace
+                    if calc_obj:
+                        calc_obj.is_calculated = CalculationModel.ERROR
+                        calc_obj.save(skip_hooks=True)
+
+                    raise APIException(
+                        {"message": f"{exception_details} ", "traceback": stack_trace}
+                    )
 
                 except Exception as e:
                     raise APIException(

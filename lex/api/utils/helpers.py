@@ -222,7 +222,7 @@ def can_read_from_payload(request, audit_log) -> bool:
     try:
         # Try new permission system first
         if hasattr(instance, 'permission_read'):
-            from lex.core.models.base import UserContext
+            from lex.core.models.LexModel import UserContext
             user_context = UserContext.from_request(request, instance)
             result = instance.permission_read(user_context)
             return result.allowed

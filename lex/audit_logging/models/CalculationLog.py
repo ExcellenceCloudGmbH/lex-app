@@ -3,16 +3,16 @@ import logging
 
 from django.db import models
 
-from lex.core.mixins.modification_restriction import (
+from lex.core.mixins.ModelModificationRestriction import (
     AdminReportsModificationRestriction,
 )
 from django.contrib.contenttypes.fields import GenericForeignKey
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
 from django.contrib.contenttypes.models import ContentType
-from lex.audit_logging.utils.context_resolver import ContextResolver
-from lex.audit_logging.utils.cache_manager import CacheManager
-from lex.audit_logging.utils.websocket_notifier import WebSocketNotifier
-from lex.audit_logging.utils.data_models import (
+from lex.audit_logging.utils.ContextResolver import ContextResolver
+from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
+from lex.audit_logging.utils.DataModels import (
     CalculationLogError,
     ContextResolutionError,
     CacheOperationError
@@ -138,7 +138,14 @@ class CalculationLog(models.Model):
                     context_info.calculation_id
                 )
                 CacheManager.store_message(cache_key, message)
-            
+
+            if context_info.root_record and context_info.root_record != context_info.current_record:
+                cache_key = CacheManager.build_cache_key(
+                    context_info.root_record,
+                    context_info.calculation_id
+                )
+                CacheManager.store_message(cache_key, message)
+
             # 7) Log to standard logger
             logger.debug(
                 message,

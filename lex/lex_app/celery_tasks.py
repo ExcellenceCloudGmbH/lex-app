@@ -22,19 +22,16 @@ from uuid import uuid4
 from celery import Task, shared_task
 from celery.result import allow_join_result
 
-from lex.audit_logging.utils.model_context import _model_context, model_logging_context
+from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
 from celery.signals import task_postrun
 from django.db import transaction
 from django.db.models import Model
 
 from lex.core.signals import update_calculation_status
-from lex.api.utils import operation_context, OperationContext
-from celery.app.control import Control
-import threading
+from lex.api.utils import operation_context
 from asgiref.sync import sync_to_async
 
-from lex.core.models.calculation_model import CalculationModel
-from lex.authentication.utils.lex_authentication import LexAuthentication
+from lex.core.models.CalculationModel import CalculationModel
 
 logger = logging.getLogger(__name__)
 
@@ -682,7 +679,7 @@ def print_context_state(location: str = "Unknown"):
         print(f"Operation Context ERROR: {e}")
 
     try:
-        from lex.audit_logging.utils.model_context import _model_context
+        from lex.audit_logging.utils.ModelContext import _model_context
         model_ctx = _model_context.get()
         print(f"Model Context: {model_ctx}")
         if hasattr(model_ctx, '__dict__'):

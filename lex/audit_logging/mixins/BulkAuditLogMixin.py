@@ -1,7 +1,7 @@
 import traceback
-from lex.audit_logging.models.audit_log import AuditLog
-from lex.audit_logging.models.audit_log_status import AuditLogStatus
-from lex.audit_logging.serializers.audit_log_mixin_serializer import _serialize_payload
+from lex.audit_logging.models.AuditLog import AuditLog
+from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
+from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload
 from django.contrib.contenttypes.models import ContentType
 
 class BulkAuditLogMixin:

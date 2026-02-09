@@ -3,10 +3,11 @@ from django.db.models.signals import post_save
 from django.http import HttpResponse
 from django.urls import path, register_converter
 
-from lex.core.mixins.calculated import CalculatedModelMixin
-from lex.process_admin.models.model_process_admin import ModelProcessAdmin
+from api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
+from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
+from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
 from lex.api.utils import create_model_converter
-from lex.process_admin.models.model_collection import ModelCollection
+from lex.process_admin.models.ModelCollection import ModelCollection
 from lex.core.signals import do_post_save
 from lex.api.views.calculations.CleanCalculations import CleanCalculations
 from lex.api.views.calculations.InitCalculationLogs import InitCalculationLogs
@@ -280,7 +281,8 @@ class ProcessAdminSite:
                 SharePointPreview.as_view(),
                 name="sharepoint-file-preview-link",
             ),
-
+            path('api/delete-unused-files', DeleteUnusedFiles.as_view(),
+                 name='delete-unused-files'),
         ]
 
         return (

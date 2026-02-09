@@ -37,7 +37,7 @@ class LegacyDataConfig(LexAppConfig):
             LegacyUserChangeLogSerializer, 
             LegacyCalculationIdSerializer
         )
-        from lex.core.mixins.modification_restriction import AdminReportsModificationRestriction
+        from lex.core.mixins.ModelModificationRestriction import AdminReportsModificationRestriction
 
         # Inject custom read-only serializers onto the models dynamically
         # This avoids circular imports in models.py while ensuring the API uses our restricted serializers.

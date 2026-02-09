@@ -21,7 +21,7 @@ import os
 from typing import List, Optional
 from django.core.cache import caches
 from django.core.cache.backends.base import InvalidCacheBackendError
-from lex.audit_logging.utils.data_models import CacheCleanupResult, CacheOperationError
+from lex.audit_logging.utils.DataModels import CacheCleanupResult, CacheOperationError
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class CacheManager:
     """
     
     CACHE_TIMEOUT = 60 * 60 * 24 * 7  # Cache for one week
-    CALC_CACHE_NAME = "redis" if os.getenv("DEPLOYMENT_ENVIRONMENT") else "default"
+    CALC_CACHE_NAME = "redis"
 
     @staticmethod
     def store_message(cache_key: str, message: str) -> bool:

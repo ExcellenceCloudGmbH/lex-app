@@ -1,8 +1,9 @@
+from copy import deepcopy
 from typing import Dict, Any, Set, Type, Union
 from django.db.models import Model
 
 from legacy_data.models import LegacyUserChangeLog, LegacyCalculationId, LegacyCalculationLog
-from lex.process_admin.models.model_container import ModelContainer
+from lex.process_admin.models.ModelContainer import ModelContainer
 from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
 from process_admin.utils import ModelStructureBuilder
 
@@ -23,7 +24,7 @@ def _create_model_containers(models_to_admins: Dict[Type[Model], Any]) -> Dict[s
     ids2containers = dict()
 
     for model_class, process_admin in models_to_admins.items():
-        from lex.core.models.html_report import HTMLReport
+        from lex.core.models.HTMLReport import HTMLReport
         if not issubclass(model_class, HTMLReport):
             if model_class._meta.abstract:
                 raise ValueError(
@@ -67,13 +68,46 @@ class ModelCollection:
         """
         self.ids2containers = _create_model_containers(models_to_admins)
         set_of_ids_container = [c.id for c in self.all_containers]
-        if LegacyUserChangeLog.__name__.lower() in set_of_ids_container and LegacyCalculationLog.__name__.lower() in set_of_ids_container and LegacyCalculationId.__name__.lower() in set_of_ids_container:
-            model_structure["Legacy Generic App (Archive)"] = {
-                LegacyUserChangeLog.__name__.lower(): None,
-                LegacyCalculationLog.__name__.lower(): None,
-                LegacyCalculationId.__name__.lower(): None,
-            }
-        self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml({"Models": {c.id: None for c in self.all_containers}}, model_structure)
+
+        from django.db import connection
+        from django.core.exceptions import SynchronousOnlyOperation
+        def table_exists(table_name):
+            try:
+                # Try standard synchronous check
+                return table_name in connection.introspection.table_names()
+            except SynchronousOnlyOperation:
+                # If we are in an async context (e.g. ASGI startup), we can't safely 
+                # check the DB synchronously. We assume True to allow registration.
+                # If the table doesn't exist, accessing the admin page will error, 
+                # but startup won't crash. This is better than omitting them entirely.
+                return True
+            except Exception:
+                # Fallback for other DB errors (e.g. not ready)
+                return False
+        
+        temp = {}
+
+        if LegacyCalculationLog.__name__.lower() in set_of_ids_container:
+            set_of_ids_container.remove(LegacyCalculationLog.__name__.lower())
+        if LegacyUserChangeLog.__name__.lower() in set_of_ids_container:
+            set_of_ids_container.remove(LegacyUserChangeLog.__name__.lower())
+        if LegacyCalculationId.__name__.lower() in set_of_ids_container:
+            set_of_ids_container.remove(LegacyCalculationId.__name__.lower())
+
+        if table_exists(LegacyCalculationLog._meta.db_table):
+            temp[LegacyCalculationLog.__name__.lower()] = None
+
+        if table_exists(LegacyUserChangeLog._meta.db_table):
+            temp[LegacyUserChangeLog.__name__.lower()] = None
+
+        if table_exists(LegacyCalculationId._meta.db_table):
+            temp[LegacyCalculationId.__name__.lower()] = None
+
+        if temp:
+            model_structure["Legacy Generic App (Archive)"] = temp
+
+
+        self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml({"Models": {c: None for c in set_of_ids_container if not c.startswith("historical") and not c.startswith("metahistorical")}}, model_structure)
         self.model_styling = model_styling
 
         self.model_structure_with_readable_names = {

@@ -76,7 +76,7 @@ class PermissionAwareSerializerMixin:
             
             try:
                 if hasattr(instance, 'permission_edit'):
-                    from lex.core.models.base import UserContext
+                    from lex.core.models.LexModel import UserContext
                     user_context = UserContext.from_request(request, instance)
                     result = instance.permission_edit(user_context)
                     if result.allowed:
@@ -143,7 +143,7 @@ class PermissionAwareSerializerMixin:
             try:
                 temp_instance = model_class()
                 if hasattr(temp_instance, 'permission_create'):
-                    from lex.core.models.base import UserContext
+                    from lex.core.models.LexModel import UserContext
                     user_context = UserContext.from_request(request, temp_instance)
                     can_create = temp_instance.permission_create(user_context)
                 elif hasattr(temp_instance, 'can_create'):

@@ -1,10 +1,10 @@
-from .generic_filters import (
+from .GenericFilters import (
     UserReadRestrictionFilterBackend,
     ForeignKeyFilterBackend,
     PrimaryKeyListFilterBackend,
     StringFilterBackend,
 )
-from .filter_tree import FilterTreeNode
+from .FilterTreeNode import FilterTreeNode
 
 __all__ = [
     'UserReadRestrictionFilterBackend',

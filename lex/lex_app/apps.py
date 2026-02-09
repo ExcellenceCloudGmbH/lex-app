@@ -10,6 +10,7 @@ from celery import shared_task
 from django.apps import apps
 from django.contrib.admin.apps import AdminConfig
 
+from core.config import LexProjectConfig
 from lex.authentication.utils.lex_authentication import LexAuthentication
 from lex.lex_app.settings import repo_name, CELERY_ACTIVE
 from lex.utilities.config.generic_app_config import GenericAppConfig
@@ -41,7 +42,7 @@ def _create_audit_logger():
             print("Audit logging is disabled for initial data upload")
             return None
         
-        from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
+        from lex.audit_logging.utils.InitialDataAuditLogger import InitialDataAuditLogger
         logger = InitialDataAuditLogger()
         print(f"Successfully initialized audit logger")
         return logger
@@ -74,7 +75,7 @@ def _create_audit_logger_for_task(audit_logging_enabled=None, calculation_id=Non
             print("Audit logging explicitly disabled for task context")
             return None
         elif audit_logging_enabled is True or is_audit_logging_enabled():
-            from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
+            from lex.audit_logging.utils.InitialDataAuditLogger import InitialDataAuditLogger
             logger = InitialDataAuditLogger()
             return logger
         else:
@@ -183,15 +184,15 @@ class LexAppConfig(GenericAppConfig):
         Check conditions and decide whether to load data asynchronously.
         """
         from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
-        _authentication_settings = LexAuthentication()
-
+        from lex.core.config import LexProjectConfig
         test = ProcessAdminTestCase()
 
-        if (not running_in_uvicorn()
+
+        project_config = LexProjectConfig.load()
+        # TODO: FIX THIS
+        if ( not running_in_uvicorn()
                 or self.is_running_in_celery()
-                or not _authentication_settings
-                or not hasattr(_authentication_settings, 'initial_data_load')
-                or not _authentication_settings.initial_data_load):
+                or not project_config._loaded):
             return
 
         # Log audit logging configuration
@@ -216,7 +217,7 @@ class LexAppConfig(GenericAppConfig):
             print("Using fallback configuration")
             traceback.print_exc()
 
-        if await are_all_models_empty(test, _authentication_settings, generic_app_models):
+        if await are_all_models_empty(test, generic_app_models):
             # Prepare audit logging parameters for task execution
             audit_enabled = is_audit_logging_enabled()
             calculation_id = None
@@ -239,24 +240,25 @@ class LexAppConfig(GenericAppConfig):
                 # Pass audit logging parameters to Celery task
                 from lex.lex_app.celery_tasks import load_data, RunInCelery
                 with RunInCelery():
-                    load_data(test, generic_app_models, audit_enabled, _authentication_settings.initial_data_load)
+                    load_data(test, generic_app_models, audit_enabled, project_config.initial_data)
             else:
                 # Pass audit logging parameters to thread
                 from lex.lex_app.celery_tasks import load_data
-                x = threading.Thread(target=load_data, args=(test, generic_app_models, audit_enabled, _authentication_settings.initial_data_load))
+                x = threading.Thread(target=load_data, args=(test, generic_app_models, audit_enabled, project_config.initial_data))
                 x.start()
         else:
-            test.test_path = _authentication_settings.initial_data_load
+            test.test_path = project_config.initial_data
             non_empty_models = await sync_to_async(test.get_list_of_non_empty_models)(generic_app_models)
             print(f"Loading Initial Data not triggered due to existence of objects of Model: {non_empty_models}")
             print("Not all referenced Models are empty")
 
 
-async def are_all_models_empty(test, _authentication_settings, generic_app_models):
+async def are_all_models_empty(test,  generic_app_models):
     """
     Check if all models are empty.
     """
-    test.test_path = _authentication_settings.initial_data_load
+    project_config = LexProjectConfig.load()
+    test.test_path = project_config.initial_data
     return await sync_to_async(test.check_if_all_models_are_empty)(generic_app_models)
 
 

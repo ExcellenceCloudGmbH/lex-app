@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
-from lex.process_admin.models.model_collection import ModelCollection
+from lex.process_admin.models.ModelCollection import ModelCollection
 
 
 class ModelStructureObtainView(APIView):
@@ -34,7 +34,7 @@ class ModelStructureObtainView(APIView):
                     # Check permission using new system if available
                     can_list = False
                     if hasattr(model_instance, 'permission_list'):
-                        from lex.core.models.base import UserContext
+                        from lex.core.models.LexModel import UserContext
                         user_context = UserContext.from_request(request, model_instance)
                         can_list = model_instance.permission_list(user_context)
                     elif hasattr(model_instance, "can_list"):

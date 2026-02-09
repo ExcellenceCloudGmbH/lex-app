@@ -342,6 +342,8 @@ class LexModel(LifecycleModel):
         if context and hasattr(context['request_obj'], 'user'):
             # self.edited_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
             self.edited_by = str(context['request_obj'].user)
+        elif "api-key" in [header.lower() for header in list(context['request_obj'].headers)]:
+            self.edited_by = "Technical User"
         else:
             self.edited_by = 'Initial Data Upload'
         # self.save_without_historical_record(skip_hooks=True)
@@ -357,6 +359,8 @@ class LexModel(LifecycleModel):
         if context and hasattr(context['request_obj'], 'user'):
             # self.created_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
             self.created_by = str(context['request_obj'].user)
+        elif "api-key" in [header.lower() for header in list(context['request_obj'].headers)]:
+            self.edited_by = "Technical User"
         else:
             self.created_by = 'Initial Data Upload'
         # self.save_without_historical_record(skip_hooks=True)
@@ -395,7 +399,6 @@ class LexModel(LifecycleModel):
         Default: Uses Keycloak 'read' scope for all fields
         """
 
-        # return True
         # if "read" in user_context.keycloak_scopes:
         return PermissionResult.allow_all("Keycloak read scope")
         # return PermissionResult.deny("No read permission")
@@ -412,9 +415,9 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'edit' scope for all fields
         """
-        if "edit" in user_context.keycloak_scopes:
-            return PermissionResult.allow_all("Keycloak edit scope")
-        return PermissionResult.deny("No edit permission")
+        # if "edit" in user_context.keycloak_scopes:
+        return PermissionResult.allow_all("Keycloak edit scope")
+        # return PermissionResult.deny("No edit permission")
 
     def permission_export(self, user_context: UserContext) -> PermissionResult:
         """
@@ -428,7 +431,6 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'export' scope for all fields
         """
-        return True
         if "export" in user_context.keycloak_scopes:
             return PermissionResult.allow_all("Keycloak export scope")
         return PermissionResult.deny("No export permission")
@@ -445,7 +447,6 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'create' scope
         """
-        return True
         return "create" in user_context.keycloak_scopes
 
     def permission_delete(self, user_context: UserContext) -> bool:

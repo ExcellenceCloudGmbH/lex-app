@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 # import CalculationLog
-from lex.audit_logging.models.calculation_log import CalculationLog
+from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.api.views.model_entries.serializers.CalculationLogTreeSerializer import CalculationLogTreeSerializer
 
 class CalculationLogTreeView(APIView):

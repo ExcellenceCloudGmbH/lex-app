@@ -4,7 +4,7 @@ from django.db import models, connection
 from datetime import timedelta
 import datetime
 from django.utils import timezone
-from lex.core.models.base import LexModel
+from lex.core.models.LexModel import LexModel
 
 class HistoryDeleteTestModel(LexModel):
     name = models.CharField(max_length=100)

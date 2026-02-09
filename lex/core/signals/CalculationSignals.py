@@ -1,11 +1,15 @@
 import logging
+import sys
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.core.signals import got_request_exception
 
+from core.models.CalculationModel import CalculationModelException, CalculationModel
 from lex.core.calculated_updates.update_handler import (
     CalculatedModelUpdateHandler,
 )
-from lex.audit_logging.utils.cache_manager import CacheManager
+from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.api.utils import operation_context
 
 logger = logging.getLogger(__name__)
@@ -13,7 +17,7 @@ logger = logging.getLogger(__name__)
 from django.db.models.signals import post_save
 from django.dispatch import receiver, Signal
 from django.contrib.auth.models import User
-from lex.authentication.models.profile import Profile
+from lex.authentication.models.Profile import Profile
 
 
 @receiver(post_save, sender=User)
@@ -28,8 +32,9 @@ def save_profile(sender, instance, **kwargs):
     instance.profile.save()
 
 
+
 def update_calculation_status(instance):
-    from lex.core.models.calculation_model import CalculationModel
+    from lex.core.models.CalculationModel import CalculationModel
 
     if issubclass(instance.__class__, CalculationModel):
         channel_layer = get_channel_layer()

@@ -1,4 +1,5 @@
 import os
+import traceback
 from abc import abstractmethod
 import logging
 from copy import deepcopy
@@ -12,12 +13,21 @@ from django_lifecycle import (
     BEFORE_SAVE,
 )
 from django_lifecycle.conditions import WhenFieldValueIs
-from lex.core.models.base import LexModel
+from rest_framework.exceptions import APIException
+
+from lex.core.models.LexModel import LexModel
 from lex.api.utils import operation_context, OperationContext
-from lex.audit_logging.utils.cache_manager import CacheManager
-from lex.audit_logging.utils.context_resolver import ContextResolver
+from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.ContextResolver import ContextResolver
 
 logger = logging.getLogger(__name__)
+
+class CalculationModelException(APIException):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args)
+            self.calc_obj = kwargs.get("calc_obj", None)
+            self.exception_details = kwargs.get("exception_details", None)
+            self.stack_trace = kwargs.get("stack_trace", None)
 
 
 class CalculationModel(LexModel):
@@ -134,7 +144,7 @@ class CalculationModel(LexModel):
         func = self.lex_func()
 
         # Dispatch single model calculation to Celery with calculation_id
-        from lex.audit_logging.utils.model_context import model_logging_context
+        from lex.audit_logging.utils.ModelContext import model_logging_context
         model_context = deepcopy(model_logging_context.get()['model_context'])
 
         # Dispatch the task
@@ -148,7 +158,7 @@ class CalculationModel(LexModel):
         """
         Execute calculation synchronously in the current thread.
         """
-        from lex.core.signals.calculation_signals import update_calculation_status
+        from lex.core.signals.CalculationSignals import update_calculation_status
 
         func = self.lex_func()
         try:
@@ -161,20 +171,48 @@ class CalculationModel(LexModel):
                     self.is_calculated = self.SUCCESS
 
         except Exception as e:
-            self.is_calculated = self.ERROR
+            # Store error details
+            error_details = f"{str(e)}\n\n{traceback.format_exc()}"
+            if hasattr(self, 'calculation_error_message'):
+                self.calculation_error_message = error_details
+            elif hasattr(self, 'error_message'):
+                self.error_message = error_details
+
             raise e
+
+
+            logger.error(f"Calculation failed in execute_calculation_sync: {e}", exc_info=True)
+            # Do NOT re-raise. We want to commit the ERROR state.
         finally:
             # Clean up cache if context is available
             try:
                 context = ContextResolver.resolve()
-                calc_id = context.calculation_id
-                key_to_clean = CacheManager.build_cache_key(context.current_record, context.calculation_id)
-                cleanup_result = CacheManager.cleanup_calculation(specific_keys=[key_to_clean])
 
-                if cleanup_result.success:
-                    logger.info(f"Cache cleanup successful after calculation hook for calculation {calc_id}")
+                # Only perform cleanup if this is the ROOT process
+                # If we are a child process, we leave our logs in cache so the parent/frontend
+                # can still access them until the entire operation completes.
+                is_root = False
+                if context.root_record and context.current_record:
+                    if context.root_record == context.current_record:
+                        is_root = True
+                elif context.current_record and not context.parent_record:
+                    # If no explicit root but also no parent, we are effectively root
+                    is_root = True
+
+                if is_root:
+                    calc_id = context.calculation_id
+                    # If we are root, we can clean up everything for this calculation ID
+                    # or just our specific key. Cleaning everything ensures no orphaned child keys.
+                    cleanup_result = CacheManager.cleanup_calculation(calculation_id=calc_id)
+
+                    if cleanup_result.success:
+                        logger.info(f"Root process cleanup successful for calculation {calc_id}")
+                    else:
+                        logger.warning(
+                            f"Root process cleanup had errors for calculation {calc_id}: {cleanup_result.errors}")
                 else:
-                    logger.warning(f"Cache cleanup had errors after calculation hook for calculation {calc_id}: {cleanup_result.errors}")
+                    logger.debug(f"Skipping cache cleanup for child process {context.current_record}")
+
             except Exception as cleanup_error:
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
 
@@ -184,21 +222,21 @@ class CalculationModel(LexModel):
     @hook(AFTER_UPDATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     @hook(AFTER_CREATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     def calculate_hook(self):
-        """
-        Enhanced calculation hook with Celery integration.
+        """                                                                                                                      
+        Enhanced calculation hook with Celery integration.                                                                       
 
-        Dispatches calculations to Celery workers when celery_active=True and Celery
-        is available, otherwise falls back to synchronous execution. Proper status
-        management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.
+        Dispatches calculations to Celery workers when celery_active=True and Celery                                             
+        is available, otherwise falls back to synchronous execution. Proper status                                               
+        management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.                                                             
         """
-        from lex.core.signals.calculation_signals import update_calculation_status
+        from lex.core.signals.CalculationSignals import update_calculation_status
         import logging
 
         logger = logging.getLogger(__name__)
 
         try:
             if self.should_use_celery():
-                # Dispatch to Celery worker
+                # Dispatch to Celery worker                                                                                      
                 logger.info(f"Dispatching calculation for {self} to Celery worker")
 
                 task_result = None
@@ -206,38 +244,48 @@ class CalculationModel(LexModel):
                 with RunInCelery():
                     task_result = self.dispatch_calculation_task()
 
-                # Note: Status will be updated by CallbackTask.on_success/on_failure
-                # Model remains in IN_PROGRESS state until task completes
+                    # Note: Status will be updated by CallbackTask.on_success/on_failure                                             
+                # Model remains in IN_PROGRESS state until task completes                                                        
                 logger.info(f"Calculation task {task_result.id} dispatched for {self}")
 
             else:
-                # Execute synchronously as fallback
+                # Execute synchronously as fallback                                                                              
                 logger.info(f"Executing calculation for {self} synchronously (Celery not available)")
                 self.execute_calculation_sync()
 
         except Exception as e:
-            # Handle any errors in task dispatch or synchronous execution
+            # Handle any errors in task dispatch or synchronous execution                                                        
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
             self.is_calculated = self.ERROR
 
-            # Store error message if the model has an error_message field
-            if hasattr(self, 'error_message'):
-                self.error_message = str(e)
-
-            # Clean up cache and save error state
+            # Store error message if the model has an error_message field                                                        
+            stack_trace = f"{traceback.format_exc()}"
+            exception_details = str(e)
+                # Clean up cache and save error state
             try:
                 context = ContextResolver.resolve()
-                calc_id = context.calculation_id
-                key_to_clean = CacheManager.build_cache_key(context.current_record, context.calculation_id)
-                cleanup_result = CacheManager.cleanup_calculation(specific_keys=[key_to_clean])
 
-                if cleanup_result.success:
-                    logger.info(f"Cache cleanup successful after calculation hook for calculation {calc_id}")
+                # Only perform cleanup if this is the ROOT process                                                               
+                is_root = False
+                if context.root_record and context.current_record:
+                    if context.root_record == context.current_record:
+                        is_root = True
+                elif context.current_record and not context.parent_record:
+                    is_root = True
+
+                if is_root:
+                    calc_id = context.calculation_id
+                    # Clean up all keys associated with this calculation ID                                                      
+                    cleanup_result = CacheManager.cleanup_calculation(calculation_id=calc_id)
+
+                    if cleanup_result.success:
+                        logger.info(f"Root process cleanup successful after calculation hook for calculation {calc_id}")
+                    else:
+                        logger.warning(f"Root process cleanup had errors after calculation hook for calculation {calc_id}: {cleanup_result.errors} ")
                 else:
-                    logger.warning(f"Cache cleanup had errors after calculation hook for calculation {calc_id}: {cleanup_result.errors}")
+                    logger.debug(f"Skipping cache cleanup for child process {context.current_record}")
+
             except Exception as cleanup_error:
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
 
-            self.save(skip_hooks=True)
-            update_calculation_status(self)
-            raise e
+            raise CalculationModelException(calc_obj=self, exception_details=exception_details, stack_trace=stack_trace)

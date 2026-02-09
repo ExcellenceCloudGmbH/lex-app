@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 import markdown2
 from xhtml2pdf import pisa
 import io
-from lex.audit_logging.models.calculation_log import CalculationLog
+from lex.audit_logging.models.CalculationLog import CalculationLog
 
 class DownloadMarkdownPdf(APIView):
     permission_classes = [IsAuthenticated]

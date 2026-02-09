@@ -3,9 +3,9 @@ from typing import List, Optional, Any, Dict
 import logging
 
 from lex.core.exceptions import CeleryDispatchError
-from lex.core.mixins.calculated import calc_and_save_sync
+from lex.core.mixins.CalculatedModelMixin import calc_and_save_sync
 from lex.api.utils import operation_context, OperationContext
-from lex.audit_logging.utils.model_context import model_logging_context
+from lex.audit_logging.utils.ModelContext import model_logging_context
 
 logger = logging.getLogger(__name__)
 
