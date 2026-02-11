@@ -47,7 +47,7 @@ class BitemporalHistoryDeletionTest(TransactionTestCase):
         1. A: 12:00 -> 13:00 (Extended)
         3. C: 13:00 -> inf (Unchanged)
         """
-        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0)
         T1 = T0 + timedelta(minutes=5)   # 12:05
         T2 = T0 + timedelta(hours=1)     # 13:00
         

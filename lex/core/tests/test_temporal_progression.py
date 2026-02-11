@@ -38,7 +38,7 @@ class BitemporalProgressionTest(TransactionTestCase):
         """
         Verify what happens when time passes into a Future Record's validity period.
         """
-        T0 = datetime.datetime(2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = datetime.datetime(2025, 1, 1, 10, 0, 0)
         T_Future = T0 + timedelta(hours=1) # 11:00
         
         print("\n--- Test Passage of Time ---")

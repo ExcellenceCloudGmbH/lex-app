@@ -45,7 +45,7 @@ class EventSchedulingTest(TransactionTestCase):
     def test_future_insert_creates_schedule(self):
         """Test that inserting a record in the future creates a PeriodicTask."""
         import datetime
-        T_Now = timezone.datetime(2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        T_Now = timezone.datetime(2025, 1, 1, 10, 0, 0)
         T_Future = T_Now + timedelta(hours=2)
         
         # Reset Mock
@@ -82,7 +82,7 @@ class EventSchedulingTest(TransactionTestCase):
         """Test that deleting the future record revokes the task."""
         # Setup (Same as above)
         import datetime
-        T_Now = timezone.datetime(2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        T_Now = timezone.datetime(2025, 1, 1, 10, 0, 0)
         T_Future = T_Now + timedelta(hours=2)
         
         with patch('django.utils.timezone.now', return_value=T_Now):

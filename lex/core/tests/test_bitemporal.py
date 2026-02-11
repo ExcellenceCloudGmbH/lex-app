@@ -78,7 +78,7 @@ class BitemporalLogicTest(TransactionTestCase):
         # T0: Initial Time (12:00)
         # We use a fixed base time for reproducibility
         import datetime
-        base_time = datetime.datetime(2024, 4, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        base_time = datetime.datetime(2024, 4, 1, 12, 0, 0)
         
         # --- STEP 1: Insert "a1 melih" at 12:00 ---
         # EXPECTATION:
@@ -271,19 +271,25 @@ class BitemporalLogicTest(TransactionTestCase):
         names = [m.name for m in ms]
         self.assertIn("melih2", names)
         
-        # 3. As Of T2 + 1m (After Correction)
-        
-        # 3. As Of T2 + 1m (After Correction)
-        # We knew:
-        # - h1 (valid 12:00 to 12:05) -> UNCHANGED
-        # - h2 (valid 11:00 to inf) -> CHANGED START TIME
-        
+        # 3. Valid-Time query at T2 + 1m (12:09, after correction)
+        # After Step 3: h2 valid 11:00→12:00, h1 valid 12:00→∞
+        # At 12:09, only h1 is valid (h2 expired at 12:00).
         qs_3 = get_queryset_as_of(TestBitemporalModel, t2 + timedelta(minutes=1))
-        self.assertEqual(qs_3.count(), 2)
-        rows_3 = sorted(list(qs_3), key=lambda x: x.history_id)
-        # Check h2 specifically
-        h2_as_of_t3 = [r for r in rows_3 if r.name == "melih2"][0]
-        self.assertTrue(abs((h2_as_of_t3.valid_from - t_correction).total_seconds()) < 1.0) # 11:00
+        self.assertEqual(qs_3.count(), 1)
+        self.assertEqual(qs_3.first().name, "melih")
+
+        # System-Time query: "What did we know at 12:09?"
+        # Step 3 happened at 12:08, so at 12:09 we know about the correction.
+        qs_3_sys = get_queryset_as_of(
+            TestBitemporalModel.history.model, t2 + timedelta(minutes=1)
+        )
+        # Should see meta records for both h1 and h2
+        self.assertTrue(qs_3_sys.count() >= 2)
+        names_3 = [m.name for m in qs_3_sys]
+        self.assertIn("melih2", names_3)
+        # h2's valid_from should now be the correction time (11:00)
+        h2_meta = [m for m in qs_3_sys if m.name == "melih2"][0]
+        self.assertTrue(abs((h2_meta.valid_from - t_correction).total_seconds()) < 1.0)
         
         print(f"Step 4 OK: As-Of Queries verified.")
 

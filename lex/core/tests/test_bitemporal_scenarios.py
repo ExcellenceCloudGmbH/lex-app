@@ -48,7 +48,7 @@ class BitemporalScenarioTest(TransactionTestCase):
     def test_user_scenario(self):
         # Base Time: 12:00
         # We assume specific date is not important, only time
-        T12_00 = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        T12_00 = datetime.datetime(2024, 1, 1, 12, 0, 0)
         T12_05 = T12_00 + timedelta(minutes=5)
         T12_08 = T12_00 + timedelta(minutes=8)
         T13_00 = T12_00 + timedelta(hours=1)
@@ -164,7 +164,7 @@ class BitemporalScenarioTest(TransactionTestCase):
            But our valid_to logic is on History Table.
            If we delete main row, we can't query it.
         """
-        T12_00 = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        T12_00 = datetime.datetime(2024, 1, 1, 12, 0, 0)
         T12_10 = T12_00 + timedelta(minutes=10)
         
         with patch('django.utils.timezone.now', return_value=T12_00):
@@ -197,7 +197,7 @@ class BitemporalScenarioTest(TransactionTestCase):
         """
         Verify inserting a record valid from the past.
         """
-        T12_00 = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        T12_00 = datetime.datetime(2024, 1, 1, 12, 0, 0)
         T11_00 = T12_00 - timedelta(hours=1)
         
         # 1. Create at 12:00 but FORCE valid_from = 11:00

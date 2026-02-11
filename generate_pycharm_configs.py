@@ -31,7 +31,7 @@ def generate_pycharm_configs(project_root=None):
         "Streamlit.run.xml": {"name": "Streamlit", "parameters": "streamlit run streamlit_app.py"},
         "Create_DB.run.xml": {
             "name": "Create DB",
-            "parameters": "test lex.lex_app.logging.create_db.create_db --keepdb",
+            "parameters": "create_db",
         },
         "Flush_DB.run.xml": {"name": "Flush DB", "parameters": "flush"},
     }

@@ -47,7 +47,7 @@ def find_project_root(start=None) -> str:
             return str(p)
     return str(base)
 
-DEFAULT_ENV = """KEYCLOAK_URL=https://auth.excellence-cloud.dev
+DEFAULT_ENV = """KEYCLOAK_URL=https://auth.excellence-cloud.de
 KEYCLOAK_REALM=
 OIDC_RP_CLIENT_ID=
 OIDC_RP_CLIENT_SECRET=

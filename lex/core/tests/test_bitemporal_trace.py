@@ -1,6 +1,6 @@
 from django.test import TransactionTestCase
 from django.db import models
-from datetime import timedelta, datetime, timezone as dt_timezone
+from datetime import timedelta, datetime
 from unittest import mock
 from lex.process_admin.utils.model_registration import ModelRegistration
 
@@ -62,7 +62,7 @@ class BitemporalTraceTest(TransactionTestCase):
         """
         
         # --- STEP 1: Insert Melih at 12:00 ---
-        t_1200 = datetime(2026, 1, 26, 12, 0, 0, tzinfo=dt_timezone.utc)
+        t_1200 = datetime(2026, 1, 26, 12, 0, 0)
         
         with mock.patch('django.utils.timezone.now', return_value=t_1200):
             obj = TraceModel.objects.create(name="melih")
@@ -78,7 +78,7 @@ class BitemporalTraceTest(TransactionTestCase):
         self.assertIsNone(h_objs[0].valid_to)
 
         # --- STEP 2: Update to Melih2 at 12:05 ---
-        t_1205 = datetime(2026, 1, 26, 12, 5, 0, tzinfo=dt_timezone.utc)
+        t_1205 = datetime(2026, 1, 26, 12, 5, 0)
         
         with mock.patch('django.utils.timezone.now', return_value=t_1205):
             obj.name = "melih2"
@@ -103,8 +103,8 @@ class BitemporalTraceTest(TransactionTestCase):
 
 
         # --- STEP 3: Correction at 12:08 (Melih2 starts at 13:00) ---
-        t_1208 = datetime(2026, 1, 26, 12, 8, 0, tzinfo=dt_timezone.utc)
-        t_1300 = datetime(2026, 1, 26, 13, 0, 0, tzinfo=dt_timezone.utc)
+        t_1208 = datetime(2026, 1, 26, 12, 8, 0)
+        t_1300 = datetime(2026, 1, 26, 13, 0, 0)
         
         with mock.patch('django.utils.timezone.now', return_value=t_1208):
             # We access the History Object for Melih2 (Active one)

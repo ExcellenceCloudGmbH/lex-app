@@ -54,7 +54,7 @@ class ReconcileCommandTest(TransactionTestCase):
         Verify that the management command wakes up a record that became valid.
         """
         import datetime
-        T0 = timezone.datetime(2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = timezone.datetime(2025, 1, 1, 10, 0, 0)
         T_Future = T0 + timedelta(hours=1) # 11:00
         
         # 1. Insert Future Record

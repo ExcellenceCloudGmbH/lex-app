@@ -39,7 +39,7 @@ class BitemporalAsOfTest(TransactionTestCase):
         """
         Verify as_of query filters based on Valid Time.
         """
-        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0)
         T_Future = T0 + timedelta(hours=1) # 13:00
         
         # 1. Insert Future Record (Valid from 13:00)
@@ -67,7 +67,7 @@ class BitemporalAsOfTest(TransactionTestCase):
         """
         Verify as_of retrieves past valid records.
         """
-        T0 = datetime.datetime(2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = datetime.datetime(2025, 1, 1, 10, 0, 0)
         T1 = T0 + timedelta(hours=1)
         T2 = T0 + timedelta(hours=2)
         
@@ -97,7 +97,7 @@ class BitemporalAsOfTest(TransactionTestCase):
         Verify that passing the Historical Model class uses System Time (Meta-History).
         """
         # T0: Create Record
-        T0 = datetime.datetime(2025, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = datetime.datetime(2025, 1, 1, 10, 0, 0)
         
         with patch('django.utils.timezone.now', return_value=T0):
              obj = AsOfTestModel.objects.create(name="Original")

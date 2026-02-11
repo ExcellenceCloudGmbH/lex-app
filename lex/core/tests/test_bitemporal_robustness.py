@@ -39,7 +39,7 @@ class BitemporalRobustnessTest(TransactionTestCase):
         Test extracting a record that starts in the FUTURE.
         Main Table should NOT show it at T0.
         """
-        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0)
         T_Future = T0 + timedelta(hours=1)
         
         print("\n--- Test Future Insert ---")
@@ -74,7 +74,7 @@ class BitemporalRobustnessTest(TransactionTestCase):
         Test having a gap between two records.
         Main Table should disappear during gap.
         """
-        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        T0 = datetime.datetime(2025, 1, 1, 12, 0, 0)
         T1 = T0 + timedelta(minutes=10) # Gap Start
         T2 = T0 + timedelta(minutes=20) # Gap End / Next Record Start
         
