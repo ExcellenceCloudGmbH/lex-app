@@ -69,43 +69,19 @@ class ModelCollection:
         self.ids2containers = _create_model_containers(models_to_admins)
         set_of_ids_container = [c.id for c in self.all_containers]
 
-        from django.db import connection
-        from django.core.exceptions import SynchronousOnlyOperation
-        def table_exists(table_name):
-            try:
-                # Try standard synchronous check
-                return table_name in connection.introspection.table_names()
-            except SynchronousOnlyOperation:
-                # If we are in an async context (e.g. ASGI startup), we can't safely 
-                # check the DB synchronously. We assume True to allow registration.
-                # If the table doesn't exist, accessing the admin page will error, 
-                # but startup won't crash. This is better than omitting them entirely.
-                return True
-            except Exception:
-                # Fallback for other DB errors (e.g. not ready)
-                return False
-        
+        # Build the "Legacy Generic App (Archive)" folder from whatever legacy
+        # models were actually registered by LegacyDataConfig (which already
+        # performed the authoritative table-exists check at startup).
+        legacy_models = [LegacyCalculationLog, LegacyUserChangeLog, LegacyCalculationId]
         temp = {}
-
-        if LegacyCalculationLog.__name__.lower() in set_of_ids_container:
-            set_of_ids_container.remove(LegacyCalculationLog.__name__.lower())
-        if LegacyUserChangeLog.__name__.lower() in set_of_ids_container:
-            set_of_ids_container.remove(LegacyUserChangeLog.__name__.lower())
-        if LegacyCalculationId.__name__.lower() in set_of_ids_container:
-            set_of_ids_container.remove(LegacyCalculationId.__name__.lower())
-
-        if table_exists(LegacyCalculationLog._meta.db_table):
-            temp[LegacyCalculationLog.__name__.lower()] = None
-
-        if table_exists(LegacyUserChangeLog._meta.db_table):
-            temp[LegacyUserChangeLog.__name__.lower()] = None
-
-        if table_exists(LegacyCalculationId._meta.db_table):
-            temp[LegacyCalculationId.__name__.lower()] = None
+        for lm in legacy_models:
+            lm_id = lm.__name__.lower()
+            if lm_id in set_of_ids_container:
+                set_of_ids_container.remove(lm_id)
+                temp[lm_id] = None
 
         if temp:
             model_structure["Legacy Generic App (Archive)"] = temp
-
 
         self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml({"Models": {c: None for c in set_of_ids_container if not c.startswith("historical") and not c.startswith("metahistorical")}}, model_structure)
         self.model_styling = model_styling

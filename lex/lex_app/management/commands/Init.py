@@ -888,6 +888,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            '--no-makemigrations',
+            action='store_true',
+            help='Will skip making migrations',
+        )
+        parser.add_argument(
             '--dry-run',
             action='store_true',
             help='Show what would be changed without making actual changes',
@@ -954,11 +959,7 @@ class Command(BaseCommand):
             )
             
             
-            # Execute migrations
-            call_command(
-                'createcachetable',
-                verbosity=verbosity,
-            )
+
 
             self.stdout.write("✓ Django migrations completed successfully")
             return success
@@ -977,6 +978,7 @@ class Command(BaseCommand):
         check_missing = options.get('check_missing', True)
         skip_migrations = options.get('skip_migrations', False)
         migration_verbosity = options.get('migration_verbosity', 1)
+        no_makemigrations = options.get('no_makemigrations', False)
         ensure_default_authz = options.get('ensure_default_authz', False)
 
         missing = get_missing_keycloak_env()
@@ -1082,6 +1084,10 @@ class Command(BaseCommand):
             self.stdout.write("Executing Django Migrations")
             self.stdout.write("-" * 80)
 
+            # Execute migrations
+            call_command(
+                'createcachetable',
+            )
             if dry_run:
                 self.stdout.write("DRY RUN: Would execute Django migrations")
                 if self.check_unapplied_migrations():
@@ -1089,7 +1095,7 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write("No pending migrations found")
             else:
-                if not self.execute_migrations(migration_verbosity):
+                if not self.execute_migrations(migration_verbosity, not no_makemigrations):
                     self.stderr.write("Migration failed - aborting Keycloak sync")
                     return
         else:

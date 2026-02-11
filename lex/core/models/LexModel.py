@@ -178,6 +178,46 @@ class PermissionResult:
         
         return f"ALLOWED all fields: {self.reason or 'No reason given'}"
 
+class LexManager(models.Manager):
+    """Custom manager for LexModel that ensures history tracking.
+
+    Overrides ``bulk_create`` to use individual ``save()`` calls wrapped
+    in ``transaction.atomic()``.  This guarantees that Django's
+    ``post_save`` signal fires for every object, so simple_history and
+    the full bitemporal signal chain (meta-history, valid_to chaining,
+    scheduling) are triggered automatically.
+
+    Pass ``skip_history=True`` to fall back to Django's native
+    ``bulk_create`` when raw performance is required and history
+    tracking is not needed (e.g. large data migrations).
+    """
+
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False,
+                    update_conflicts=False, update_fields=None,
+                    unique_fields=None, skip_history=False):
+        if skip_history:
+            return super().bulk_create(
+                objs,
+                batch_size=batch_size,
+                ignore_conflicts=ignore_conflicts,
+                update_conflicts=update_conflicts,
+                update_fields=update_fields,
+                unique_fields=unique_fields,
+            )
+
+        created = []
+        with transaction.atomic():
+            for obj in objs:
+                obj.save()
+                created.append(obj)
+
+        logger.info(
+            "LexManager.bulk_create: saved %d %s objects with history tracking",
+            len(created),
+            self.model.__name__,
+        )
+        return created
+
 
 class LexModel(LifecycleModel):
     """
@@ -219,6 +259,8 @@ class LexModel(LifecycleModel):
     If you don't override these methods, they fall back to Keycloak scopes.
     You can also use `user_context.keycloak_scopes` in your custom logic.
     """
+
+    objects = LexManager()
 
     created_by = models.TextField(null=True, blank=True, editable=False)
     edited_by = models.TextField(null=True, blank=True, editable=False)

@@ -163,12 +163,8 @@ class ProgrammaticCreationTest(TransactionTestCase):
 
     def test_bulk_create_generates_history(self):
         """
-        bulk_create() bypasses post_save, so simple_history won't fire
-        automatically.  This test documents the current behaviour.
-
-        NOTE: If this test PASSES (history count > 0) it means simple_history
-        has been configured to handle bulk_create.  If it fails, it confirms
-        that bulk_create is a known gap requiring manual history creation.
+        LexManager.bulk_create() loops with save() inside transaction.atomic(),
+        so each object should get full history + meta-history.
         """
         T0 = datetime.datetime(2025, 6, 1, 14, 0, 0)
 
@@ -182,21 +178,45 @@ class ProgrammaticCreationTest(TransactionTestCase):
         # ── Main table ──
         self.assertEqual(ProgrammaticTestModel.objects.count(), 3)
 
-        # ── History (Level 1) ──
-        # bulk_create bypasses signals — simple_history may or may not track it
-        h_count = self.HistoryModel.objects.count()
+        # ── All 3 should have PKs assigned ──
+        for obj in objs:
+            self.assertIsNotNone(obj.pk, "bulk_create should return objects with PKs")
 
-        if h_count == 0:
-            print(
-                "⚠ bulk_create() did NOT generate history records. "
-                "This is expected — bulk_create bypasses post_save signals. "
-                "Use create() or iterate with save() for history tracking."
+        # ── History (Level 1) — each object should have 1 record ──
+        h_count = self.HistoryModel.objects.count()
+        self.assertEqual(h_count, 3, "Each bulk-created object should have 1 history record")
+
+        for obj in objs:
+            h = self.HistoryModel.objects.filter(id=obj.pk)
+            self.assertEqual(h.count(), 1, f"Object {obj.name} should have 1 history record")
+            self.assertEqual(h.first().name, obj.name)
+            self.assertEqual(h.first().history_type, "+")
+
+        # ── MetaHistory (Level 2) — each history record should have a meta record ──
+        m_count = self.MetaModel.objects.count()
+        self.assertGreaterEqual(m_count, 3, "Each history record should have at least 1 meta record")
+
+    def test_bulk_create_skip_history(self):
+        """
+        skip_history=True should use raw bulk_create without history.
+        """
+        T0 = datetime.datetime(2025, 6, 1, 14, 30, 0)
+
+        with patch("django.utils.timezone.now", return_value=T0):
+            objs = ProgrammaticTestModel.objects.bulk_create(
+                [
+                    ProgrammaticTestModel(name="raw_a", value=100),
+                    ProgrammaticTestModel(name="raw_b", value=200),
+                ],
+                skip_history=True,
             )
-            # This is acceptable behaviour — document it but don't fail
-            self.assertEqual(h_count, 0)
-        else:
-            print(f"✓ bulk_create() generated {h_count} history records")
-            self.assertEqual(h_count, 3, "Each bulk-created object should have 1 history record")
+
+        # Main table has the objects
+        self.assertEqual(ProgrammaticTestModel.objects.count(), 2)
+
+        # No history should exist (raw bulk_create bypasses signals)
+        h_count = self.HistoryModel.objects.count()
+        self.assertEqual(h_count, 0, "skip_history=True should NOT create history records")
 
     # ────────────────────────────────────────────────────────────────
     # Test: Multiple creates for same model
