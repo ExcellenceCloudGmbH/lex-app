@@ -1,4 +1,5 @@
 # core/management/commands/Init.py
+import argparse
 import json
 import shlex
 import time
@@ -911,15 +912,15 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             '--preserve-renamed-permissions',
-            action='store_true',
+            action=argparse.BooleanOptionalAction,
             default=True,
             help='Preserve permissions when renaming models (default: True)',
         )
         parser.add_argument(
-            '--check-missing',
-            action='store_true',
+            '--bootstrap',
+            action=argparse.BooleanOptionalAction,
             default=True,
-            help='Check for Django models missing from Keycloak and add them (default: True)',
+            help='Check for Django models missing from Keycloak and add them (default: True). Use --no-bootstrap to skip.',
         )
         parser.add_argument(
             '--ensure-default-authz',
@@ -961,11 +962,15 @@ class Command(BaseCommand):
         Parse a raw string of extra CLI arguments into positional args
         and keyword options suitable for Django's call_command().
 
+        Supports both ``--key value`` and ``--key=value`` syntax.
+
         Examples:
-            "--merge --empty myapp"  -> (['myapp'], {'merge': True, 'empty': True})
-            "--fake myapp 0001"      -> (['myapp', '0001'], {'fake': True})
-            "--run-syncdb"           -> ([], {'run_syncdb': True})
-            ""                       -> ([], {})
+            "--merge --empty myapp"   -> (['myapp'], {'merge': True, 'empty': True})
+            "--fake myapp 0001"       -> (['myapp', '0001'], {'fake': True})
+            "--run-syncdb"            -> ([], {'run_syncdb': True})
+            "--database=GCP"          -> ([], {'database': 'GCP'})
+            "--database GCP"          -> ([], {'database': 'GCP'})
+            ""                        -> ([], {})
         """
         if not raw or not raw.strip():
             return [], {}
@@ -977,14 +982,21 @@ class Command(BaseCommand):
         while i < len(tokens):
             token = tokens[i]
             if token.startswith('--'):
-                key = token.lstrip('-').replace('-', '_')
-                # Check if the next token is a value (not another flag)
-                if i + 1 < len(tokens) and not tokens[i + 1].startswith('-'):
-                    options[key] = tokens[i + 1]
-                    i += 2
-                else:
-                    options[key] = True
+                stripped = token.lstrip('-')
+                # Handle --key=value syntax
+                if '=' in stripped:
+                    key, value = stripped.split('=', 1)
+                    options[key.replace('-', '_')] = value
                     i += 1
+                else:
+                    key = stripped.replace('-', '_')
+                    # Check if the next token is a value (not another flag)
+                    if i + 1 < len(tokens) and not tokens[i + 1].startswith('-'):
+                        options[key] = tokens[i + 1]
+                        i += 2
+                    else:
+                        options[key] = True
+                        i += 1
             else:
                 positional.append(token)
                 i += 1
@@ -1051,7 +1063,7 @@ class Command(BaseCommand):
         tour = options.get("tour", False)
         dry_run = options.get('dry_run', False)
         preserve_permissions = options.get('preserve_renamed_permissions', True)
-        check_missing = options.get('check_missing', True)
+        check_missing = options.get('bootstrap', True)
         skip_migrations = options.get('skip_migrations', False)
         migration_verbosity = options.get('migration_verbosity', 1)
         no_makemigrations = options.get('no_makemigrations', False)
