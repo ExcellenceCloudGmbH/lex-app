@@ -1,7 +1,7 @@
+from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_api_key.permissions import HasAPIKey
 from rest_framework.exceptions import APIException
-from rest_framework import serializers
 from django.contrib.auth.models import User
 from lex.audit_logging.models.CalculationLog import (
     CalculationLog,
@@ -61,6 +61,15 @@ class ModelEntryProviderMixin:
             #     start_window = now - timezone.timedelta(hours=1)
             #     TemporalReconciler.reconcile_model_window(model_class, start_window, now)
         
+        # Auto select_related for FK fields to prevent N+1 queries during serialization
+        from django.db.models import ForeignKey
+        fk_fields = [
+            f.name for f in model_class._meta.fields
+            if isinstance(f, ForeignKey)
+        ]
+        if fk_fields:
+            queryset = queryset.select_related(*fk_fields)
+
         return queryset
 
     def get_serializer_class(self):

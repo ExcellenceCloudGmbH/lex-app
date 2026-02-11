@@ -54,6 +54,45 @@ class UserContext:
         )
     
     @classmethod
+    def from_request_base(cls, request):
+        """Create a base UserContext without instance-specific keycloak scopes.
+        Use with_instance() to efficiently add scopes for each record."""
+        if not request or not hasattr(request, 'user'):
+            return cls.anonymous()
+        
+        user = request.user
+        return cls(
+            user=user,
+            email=getattr(user, 'email', ''),
+            is_authenticated=user.is_authenticated,
+            is_superuser=getattr(user, 'is_superuser', False),
+            groups=set(user.groups.values_list('name', flat=True)) if hasattr(user, 'groups') else set(),
+            keycloak_scopes=frozenset()
+        )
+
+    def with_instance(self, request, instance):
+        """Create a new UserContext with keycloak scopes resolved for the given instance.
+        Reuses cached user/email/groups/is_superuser from the base context."""
+        keycloak_scopes = set()
+        if hasattr(request, 'user_permissions') and instance:
+            resource_name = f"{instance._meta.app_label}.{instance.__class__.__name__}"
+            for perm in request.user_permissions:
+                if perm.get("rsname") == resource_name:
+                    if instance.pk and str(instance.pk) == perm.get("resource_set_id"):
+                        keycloak_scopes.update(perm.get("scopes", []))
+                    elif perm.get("resource_set_id") is None:
+                        keycloak_scopes.update(perm.get("scopes", []))
+        
+        return UserContext(
+            user=self.user,
+            email=self.email,
+            is_authenticated=self.is_authenticated,
+            is_superuser=self.is_superuser,
+            groups=self.groups,
+            keycloak_scopes=keycloak_scopes
+        )
+
+    @classmethod
     def anonymous(cls):
         """Create anonymous user context"""
         return cls(
@@ -342,7 +381,7 @@ class LexModel(LifecycleModel):
         if context and hasattr(context['request_obj'], 'user'):
             # self.edited_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
             self.edited_by = str(context['request_obj'].user)
-        elif "api-key" in [header.lower() for header in list(context['request_obj'].headers)]:
+        elif context.get('request_obj') and "api-key" in [h.lower() for h in getattr(context['request_obj'], 'headers', {})]:
             self.edited_by = "Technical User"
         else:
             self.edited_by = 'Initial Data Upload'
@@ -359,7 +398,7 @@ class LexModel(LifecycleModel):
         if context and hasattr(context['request_obj'], 'user'):
             # self.created_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
             self.created_by = str(context['request_obj'].user)
-        elif "api-key" in [header.lower() for header in list(context['request_obj'].headers)]:
+        elif context.get('request_obj') and "api-key" in [h.lower() for h in getattr(context['request_obj'], 'headers', {})]:
             self.edited_by = "Technical User"
         else:
             self.created_by = 'Initial Data Upload'
@@ -399,9 +438,9 @@ class LexModel(LifecycleModel):
         Default: Uses Keycloak 'read' scope for all fields
         """
 
-        # if "read" in user_context.keycloak_scopes:
-        return PermissionResult.allow_all("Keycloak read scope")
-        # return PermissionResult.deny("No read permission")
+        if "read" in user_context.keycloak_scopes:
+            return PermissionResult.allow_all("Keycloak read scope")
+        return PermissionResult.deny("No read permission")
 
     def permission_edit(self, user_context: UserContext) -> PermissionResult:
         """
@@ -415,9 +454,9 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'edit' scope for all fields
         """
-        # if "edit" in user_context.keycloak_scopes:
-        return PermissionResult.allow_all("Keycloak edit scope")
-        # return PermissionResult.deny("No edit permission")
+        if "edit" in user_context.keycloak_scopes:
+            return PermissionResult.allow_all("Keycloak edit scope")
+        return PermissionResult.deny("No edit permission")
 
     def permission_export(self, user_context: UserContext) -> PermissionResult:
         """
@@ -475,7 +514,6 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'list' scope
         """
-        return True
         return "list" in user_context.keycloak_scopes
 
     # =============================================================================

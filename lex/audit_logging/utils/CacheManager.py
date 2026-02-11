@@ -36,7 +36,7 @@ class CacheManager:
     """
     
     CACHE_TIMEOUT = 60 * 60 * 24 * 7  # Cache for one week
-    CALC_CACHE_NAME = "redis"
+    CALC_CACHE_NAME = "redis" if os.getenv("DEPLOYMENT_ENVIRONMENT") else "local"
 
     @staticmethod
     def store_message(cache_key: str, message: str) -> bool:
