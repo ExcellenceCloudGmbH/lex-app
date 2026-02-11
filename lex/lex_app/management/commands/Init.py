@@ -1,5 +1,6 @@
 # core/management/commands/Init.py
 import json
+import shlex
 import time
 import uuid
 import logging
@@ -893,6 +894,17 @@ class Command(BaseCommand):
             help='Will skip making migrations',
         )
         parser.add_argument(
+            '--skip-migrations',
+            action='store_true',
+            help='Skip the entire migration step (both makemigrations and migrate)',
+        )
+        parser.add_argument(
+            '--migration-verbosity',
+            type=int,
+            default=1,
+            help='Verbosity level for migrate/makemigrations (0-3, default: 1)',
+        )
+        parser.add_argument(
             '--dry-run',
             action='store_true',
             help='Show what would be changed without making actual changes',
@@ -913,7 +925,25 @@ class Command(BaseCommand):
             '--ensure-default-authz',
             action='store_true',
             default=False,
-            help='Ensure a default resource, regex default policy and resource-based default permission exist'
+            help='Ensure a default resource, regex default policy and resource-based default permission exist',
+        )
+        parser.add_argument(
+            '--makemigrations-args',
+            type=str,
+            default='',
+            help=(
+                'Extra arguments to forward to makemigrations, as a quoted string. '
+                'Example: --makemigrations-args="--merge --empty myapp"'
+            ),
+        )
+        parser.add_argument(
+            '--migrate-args',
+            type=str,
+            default='',
+            help=(
+                'Extra arguments to forward to migrate, as a quoted string. '
+                'Example: --migrate-args="--run-syncdb" or --migrate-args="--fake myapp 0001"'
+            ),
         )
 
     def check_unapplied_migrations(self):
@@ -925,21 +955,68 @@ class Command(BaseCommand):
         plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
         return len(plan) > 0
 
-    def execute_migrations(self, verbosity=1, create_new=True):
-        """Execute Django migrations with proper workflow"""
+    @staticmethod
+    def _parse_extra_args(raw: str):
+        """
+        Parse a raw string of extra CLI arguments into positional args
+        and keyword options suitable for Django's call_command().
+
+        Examples:
+            "--merge --empty myapp"  -> (['myapp'], {'merge': True, 'empty': True})
+            "--fake myapp 0001"      -> (['myapp', '0001'], {'fake': True})
+            "--run-syncdb"           -> ([], {'run_syncdb': True})
+            ""                       -> ([], {})
+        """
+        if not raw or not raw.strip():
+            return [], {}
+
+        tokens = shlex.split(raw)
+        positional = []
+        options = {}
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            if token.startswith('--'):
+                key = token.lstrip('-').replace('-', '_')
+                # Check if the next token is a value (not another flag)
+                if i + 1 < len(tokens) and not tokens[i + 1].startswith('-'):
+                    options[key] = tokens[i + 1]
+                    i += 2
+                else:
+                    options[key] = True
+                    i += 1
+            else:
+                positional.append(token)
+                i += 1
+        return positional, options
+
+    def execute_migrations(self, verbosity=1, create_new=True,
+                           makemigrations_extra=None, migrate_extra=None):
+        """
+        Execute Django migrations with proper workflow.
+
+        Args:
+            verbosity: Verbosity level for commands (0-3)
+            create_new: Whether to run makemigrations first
+            makemigrations_extra: Raw string of extra makemigrations args
+            migrate_extra: Raw string of extra migrate args
+        """
         try:
             success = True
 
             # Step 1: Check for model changes and create new migrations if needed
             if create_new:
+                mm_pos, mm_opts = self._parse_extra_args(makemigrations_extra or '')
                 self.stdout.write("Creating new migrations for model changes...")
                 call_command(
                     'makemigrations',
+                    *mm_pos,
                     verbosity=verbosity,
                     interactive=False,
                     stdout=self.stdout,
                     stderr=self.stderr,
-                    no_input=True
+                    no_input=True,
+                    **mm_opts,
                 )
                 self.stdout.write("✓ New migrations created successfully")
 
@@ -949,17 +1026,17 @@ class Command(BaseCommand):
                 return success
 
             # Step 3: Apply unapplied migrations
+            mig_pos, mig_opts = self._parse_extra_args(migrate_extra or '')
             self.stdout.write("Applying unapplied migrations...")
             call_command(
                 'migrate',
+                *mig_pos,
                 verbosity=verbosity,
                 interactive=False,
                 stdout=self.stdout,
-                stderr=self.stderr
+                stderr=self.stderr,
+                **mig_opts,
             )
-            
-            
-
 
             self.stdout.write("✓ Django migrations completed successfully")
             return success
@@ -969,7 +1046,6 @@ class Command(BaseCommand):
             logger.error(f"Migration execution failed: {e}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return False
-        
 
     def handle(self, *args, **options):
         tour = options.get("tour", False)
@@ -1095,7 +1171,14 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write("No pending migrations found")
             else:
-                if not self.execute_migrations(migration_verbosity, not no_makemigrations):
+                makemigrations_args = options.get('makemigrations_args', '')
+                migrate_args = options.get('migrate_args', '')
+                if not self.execute_migrations(
+                    verbosity=migration_verbosity,
+                    create_new=not no_makemigrations,
+                    makemigrations_extra=makemigrations_args,
+                    migrate_extra=migrate_args,
+                ):
                     self.stderr.write("Migration failed - aborting Keycloak sync")
                     return
         else:
