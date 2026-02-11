@@ -64,10 +64,10 @@ jobs:
         shell: bash
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          PY="python:3.9.17-slim-bullseye"
+          PY="python:3.9.25-slim-bookworm"
 
           if [[ "$TAG" == "latest" || "$TAG" == v2* ]]; then
-            PY="python:3.12.12-slim-trixie"
+            PY="python:3.12.12-slim-bookworm"
           fi
 
           echo "PYTHON_BASE_IMAGE=$PY" >> "$GITHUB_OUTPUT"
