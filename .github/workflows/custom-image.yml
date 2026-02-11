@@ -58,6 +58,20 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # NEW: decide python base image from IMAGE_VERSION/tag
+      - name: Compute python base image
+        id: python-base
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          PY="python:3.9.17-slim-bullseye"
+
+          if [[ "$TAG" == "latest" || "$TAG" == v2* ]]; then
+            PY="python:3.12.12-slim-trixie"
+          fi
+
+          echo "PYTHON_BASE_IMAGE=$PY" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -70,3 +84,4 @@ jobs:
           file: ./build/Dockerfile
           build-args: |
             IMAGE_VERSION=${{ github.event.release.tag_name }}
+            PYTHON_BASE_IMAGE=${{ steps.python-base.outputs.PYTHON_BASE_IMAGE }}
