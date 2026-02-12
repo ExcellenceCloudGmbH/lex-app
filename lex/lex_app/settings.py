@@ -466,7 +466,12 @@ AUTHENTICATION_BACKENDS = (
 )
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
-OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "api/user_permissions/", "/api/user", "/api/user_permissions/"]
+OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/health", "/favicon.ico", "api/user/", "/api/user", "api/health", "api/favicon.ico", "api/api/user/", "api/api/user"]# NEW: endpoints that should not trigger session/access-token refresh checks
+# (do NOT include /api/user here)
+OIDC_MIDDLEWARE_NO_REFRESH_URL_PATTERNS = [
+    r"^/health$",
+    r"^/favicon\.ico$",
+]
 OIDC_RP_USE_PKCE = False
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
