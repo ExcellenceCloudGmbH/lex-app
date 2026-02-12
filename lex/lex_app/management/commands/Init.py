@@ -917,6 +917,12 @@ class Command(BaseCommand):
             help='Preserve permissions when renaming models (default: True)',
         )
         parser.add_argument(
+            '--check-missing',
+            action='store_true',
+            default=True,
+            help='Check for Django models missing from Keycloak and add them (default: True). Use --no-bootstrap to skip.',
+        )
+        parser.add_argument(
             '--bootstrap',
             action=argparse.BooleanOptionalAction,
             default=True,
@@ -1063,13 +1069,15 @@ class Command(BaseCommand):
         tour = options.get("tour", False)
         dry_run = options.get('dry_run', False)
         preserve_permissions = options.get('preserve_renamed_permissions', True)
-        check_missing = options.get('bootstrap', True)
+        check_missing = options.get('check_missing', True)
+        bootstrap = options.get('bootstrap', False)
         skip_migrations = options.get('skip_migrations', False)
         migration_verbosity = options.get('migration_verbosity', 1)
         no_makemigrations = options.get('no_makemigrations', False)
         ensure_default_authz = options.get('ensure_default_authz', False)
 
-        missing = get_missing_keycloak_env()
+
+        missing = get_missing_keycloak_env() if bootstrap else None
         if missing:
             state = str(uuid.uuid4())
 

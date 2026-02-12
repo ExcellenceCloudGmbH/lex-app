@@ -456,7 +456,9 @@ if not st.session_state.authenticated:
     st.stop()
 
 # Form-safe logout control (won't break no matter what streamlit_structure.main() does)
-render_logout_link()
+_logout_qp = st.query_params.get("is_logout_enabled")
+if _logout_qp is None or str(_logout_qp).lower() not in ("0", "false", "no", "n", "off"):
+    render_logout_link()
 
 # -------------------------
 # Main app

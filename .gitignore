@@ -4,3 +4,4 @@ tests/input*
 tests/output*
 dist/*
 *.egg-info
+*.sqlite3

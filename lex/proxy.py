@@ -26,9 +26,9 @@ except Exception:
         from websockets.client import connect as ws_connect      # websockets 10/11
     except Exception:
         from websockets import connect as ws_connect
-UPSTREAM = os.environ.get("UPSTREAM", "http://localhost:8501")
+UPSTREAM = os.environ.get("UPSTREAM", "http://localhost:8080")
 SECRET = os.environ.get("SESSION_SECRET", "PmJ8xyTxydrZomSCIAAaEOiQRBbjoMMJdYQAtGWP5l0=")             # 32+ random bytes
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:8080")                    # e.g. http://localhost:8502
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8501")                    # e.g. http://localhost:8502
 CALLBACK_URL = BASE_URL + "/auth/callback"
 
 oauth = OAuth()
@@ -186,36 +186,91 @@ async def ensure_valid_access_token(session: dict):
         print("Access token is still valid.")
         return user_session
 def build_pem_from_keycloak_public_key(public_key_b64: str) -> str:
-    #body = "\n".join(textwrap.wrap(public_key_b64.strip(), 64))
     return f"-----BEGIN PUBLIC KEY-----\n{public_key_b64}\n-----END PUBLIC KEY-----\n"
-# --- NEW: JWT Validation Logic ---
-# Updated proxy.py JWT validation
-def validate_jwt_token(token: str):
-    """Enhanced JWT validation with security checks (PyJWT >= 2.x safe)."""
+
+# -------------------------------------------------------------------
+# Dynamic Keycloak JWKS (public key) fetching with cache
+# -------------------------------------------------------------------
+_JWKS_CACHE: dict | None = None
+_JWKS_CACHE_TIME: float = 0
+_JWKS_CACHE_TTL: int = 3600  # 1 hour
+
+def _get_jwks_sync() -> dict | None:
+    """Synchronously fetch the Keycloak realm's JWKS (public keys).
+
+    Caches the result for ``_JWKS_CACHE_TTL`` seconds so we don't hit
+    Keycloak on every request.
+    """
+    global _JWKS_CACHE, _JWKS_CACHE_TIME
+    if _JWKS_CACHE and (time.time() - _JWKS_CACHE_TIME) < _JWKS_CACHE_TTL:
+        return _JWKS_CACHE
+
+    keycloak_url = os.getenv("KEYCLOAK_URL", "").rstrip("/")
+    realm = os.getenv("KEYCLOAK_REALM") or os.getenv("KEYCLOAK_REALM_NAME", "")
+    if not keycloak_url or not realm:
+        print("JWKS fetch skipped: KEYCLOAK_URL or KEYCLOAK_REALM not set")
+        return None
+
+    certs_url = f"{keycloak_url}/realms/{realm}/protocol/openid-connect/certs"
     try:
-        # Prefer a dedicated JWT secret; fall back to Django SECRET_KEY if present.
-        jwt_secret = getattr(settings, "JWT_SECRET_KEY", None) or getattr(settings, "SECRET_KEY", None)
-        if not jwt_secret:
-            print("JWT validation failed: no secret configured")
+        with httpx.Client(timeout=10.0, verify=False) as client:
+            resp = client.get(certs_url)
+            resp.raise_for_status()
+            _JWKS_CACHE = resp.json()
+            _JWKS_CACHE_TIME = time.time()
+            return _JWKS_CACHE
+    except Exception as e:
+        print(f"Failed to fetch JWKS from {certs_url}: {e}")
+        return None
+
+
+def _get_signing_key(token: str):
+    """Return the correct public key from the JWKS for the given token."""
+    jwks_data = _get_jwks_sync()
+    if not jwks_data:
+        return None
+    from jwt import PyJWKSet
+    jwks = PyJWKSet.from_dict(jwks_data)
+    header = jwt.get_unverified_header(token)
+    kid = header.get("kid")
+    for key in jwks.keys:
+        if key.key_id == kid:
+            return key.key
+    # If no kid match, return the first RS256 key
+    for key in jwks.keys:
+        if key.key_type == "RSA":
+            return key.key
+    return None
+
+
+# --- JWT Validation Logic ---
+def validate_jwt_token(token: str):
+    """Validate a Keycloak-issued JWT using the realm's JWKS endpoint.
+
+    The public key is fetched dynamically from Keycloak and cached.
+    The audience is derived from the OIDC_RP_CLIENT_ID environment variable.
+    """
+    try:
+        signing_key = _get_signing_key(token)
+        if not signing_key:
+            print("JWT validation failed: could not obtain signing key from Keycloak JWKS")
             return None
-        # PyJWT >= 2.x: no 'verify' kwarg; use options + leeway
+
+        client_id = os.getenv("OIDC_RP_CLIENT_ID", "")
+        # Keycloak tokens may have 'account' and 'broker' as additional audiences
+        audiences = [aud for aud in [client_id, "broker", "account"] if aud]
+
         payload = jwt.decode(
             token,
-            build_pem_from_keycloak_public_key("MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl/TL5m3eXsGg5FZitLMR2kkBeF+q3VCjGAcL9a08jHTIMrd0Gp4HktVBDlqz/orB8tdqC5v3RfTROEm1HUxMH+bEeSTEWE82vZvHctEXz5tJGw2xjwlwE048QADPFUG4TbSTpHopXrQjcdYK9QfwJnrA5zqi9u8fata6DAC15icm0elgC1cLB7DPIqrNapm2pDDYta9Uzf34CWTDw0bHXUlkhFkw+3npvd8xFNSkrAkwi/Jo5q29LLgkfhvgb2NPuy5Uj/2/CkDPEfdtAqirY29idSmDz5lU3nv81+tiCcDmU0MNgkVXD9zGrP19epwbpC7UGOI/YH/FtlSG26ZuFwIDAQAB"),
+            signing_key,
             algorithms=["RS256"],
             options={
-                "require": ["exp"],            # require exp for safety
+                "require": ["exp"],
                 "verify_signature": True,
             },
-            leeway=30,                         # small clock skew tolerance
-            audience= [
-    "LEX_LOCAL_ENV",
-    "broker",
-    "account"
-  ],     # uncomment if you enforce aud
-            # issuer="lex-backend",            # uncomment if you enforce iss
+            leeway=30,
+            audience=audiences,
         )
-        # (Optional) revoke-list / jti checks could go here.
         return payload
     except jwt.ExpiredSignatureError:
         print("JWT token expired")
@@ -223,19 +278,6 @@ def validate_jwt_token(token: str):
     except jwt.InvalidTokenError as e:
         print(f"JWT validation failed: {e}")
         return None
-# def validate_jwt_token(token: str):
-#     """Validates the JWT token and returns the payload if valid."""
-#     try:
-#         payload = jwt.decode(
-#             token,
-#             JWT_SECRET,
-#             algorithms=['HS256'],
-#             leeway=300  # 5 minutes leeway for clock skew
-#         )
-#         return payload
-#     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.ImmatureSignatureError) as e:
-#         print(f"JWT validation failed: {e}")
-#         return None
 # ------------------- Auth routes -------------------
 async def login(request: Request):
     return await oauth.oidc.authorize_redirect(request, CALLBACK_URL)

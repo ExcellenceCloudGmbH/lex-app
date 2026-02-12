@@ -120,6 +120,25 @@ def celery(ctx):
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
+    # ── uvloop / nest_asyncio fix ──────────────────────────────────────
+    # uvloop (pulled in by `uv` or `uvicorn[standard]`) sets itself as
+    # the global event-loop policy.  Streamlit imports nest_asyncio which
+    # patches asyncio.run at import time, capturing the *current* policy.
+    # If uvloop is still active at that moment, nest_asyncio's patched
+    # asyncio.run will later call uvloop's get_event_loop(), which raises:
+    #   RuntimeError: There is no current event loop in thread 'MainThread'
+    #
+    # Fix: reset the policy and create a main-thread loop BEFORE importing
+    # streamlit, and prevent uvloop from re-installing itself.
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    try:
+        import uvloop
+        uvloop.install = lambda: None  # prevent re-activation
+    except ImportError:
+        pass
+    # ───────────────────────────────────────────────────────────────────
+
     from streamlit.web.cli import main as streamlit_main
     streamlit_args = ctx.args
     file_index = next((i for i, item in enumerate(streamlit_args) if 'streamlit_app.py' in item), None)
@@ -129,11 +148,12 @@ def streamlit(ctx):
     def run_uvicorn():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        uvicorn.run("proxy:app", host="0.0.0.0", port=8080, loop="asyncio")
+        uvicorn.run("proxy:app", host="0.0.0.0", port=8501, loop="asyncio")
 
     t = threading.Thread(target=run_uvicorn, daemon=True)
     t.start()
-    streamlit_main(streamlit_args + ["--browser.serverPort", "8080"] or ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"])
+
+    streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"] or ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"])
 
 @lex.command(name="start", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
