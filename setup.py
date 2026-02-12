@@ -97,7 +97,7 @@ OIDC_RP_CLIENT_UUID=
 
 setup(
     name="lex-app",
-    version="2.0.0rc35",
+    version="2.0.0rc36",
     author="Melih Sünbül",
     author_email="m.sunbul@excellence-cloud.com",
     description="A Python / Django library to create business applications easily with complex logic",

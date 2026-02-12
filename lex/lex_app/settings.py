@@ -557,8 +557,8 @@ if os.getenv("STORAGE_TYPE") == "LEGACY" or not os.getenv("STORAGE_TYPE"):
         # this section is not in effect when a cloud storage option is used.
         # Check DjangoProcessAdminGeneric/gcsUtils.py or
         # DjangoProcessAdminGeneric/sharepoint/SharePointCloudStorageUtils.py for replacement.
-        MEDIA_ROOT = "/app/storage/uploads/"
-        MEDIA_URL = "/app/storage/uploads/"
+        MEDIA_ROOT = f"/app/storage/uploads/{repo_name}/"
+        MEDIA_URL = f"/app/storage/uploads/{repo_name}/"
 
         USER_REPORT_ROOT = "/app/storage/reports/"
 
