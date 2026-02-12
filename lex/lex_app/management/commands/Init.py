@@ -952,6 +952,13 @@ class Command(BaseCommand):
                 'Example: --migrate-args="--run-syncdb" or --migrate-args="--fake myapp 0001"'
             ),
         )
+        parser.add_argument(
+            '--sync-retries',
+            type=int,
+            default=1,
+            help='Number of attempts for the Keycloak sync step (default: 1, no retries). '
+                 'Example: --sync-retries=3 to retry up to 3 times on failure.',
+        )
 
     def check_unapplied_migrations(self):
         """Check if there are unapplied migrations (migration files that exist but haven't been applied to DB)"""
@@ -1075,6 +1082,7 @@ class Command(BaseCommand):
         migration_verbosity = options.get('migration_verbosity', 1)
         no_makemigrations = options.get('no_makemigrations', False)
         ensure_default_authz = options.get('ensure_default_authz', False)
+        sync_retries = max(1, options.get('sync_retries', 1))
 
 
         missing = get_missing_keycloak_env() if bootstrap else None
@@ -1238,10 +1246,34 @@ class Command(BaseCommand):
         missing_models.union(set(adds))
         new_missing_models_list = list(missing_models)
 
-        success = sync_manager.process_model_changes(new_missing_models_list, deletes, renames, preserve_permissions, ensure_default_authz=ensure_default_authz,
-)
+        success = False
+        for attempt in range(1, sync_retries + 1):
+            try:
+                success = sync_manager.process_model_changes(
+                    new_missing_models_list, deletes, renames,
+                    preserve_permissions,
+                    ensure_default_authz=ensure_default_authz,
+                )
+                if success:
+                    break
+                raise RuntimeError("process_model_changes returned False")
+            except Exception as e:
+                if attempt < sync_retries:
+                    wait = 2 ** attempt  # exponential backoff: 2s, 4s, 8s…
+                    self.stderr.write(
+                        f"Keycloak sync attempt {attempt}/{sync_retries} failed: {e}\n"
+                        f"  Retrying in {wait}s..."
+                    )
+                    import time as _time
+                    _time.sleep(wait)
+                else:
+                    self.stderr.write(
+                        f"Keycloak sync attempt {attempt}/{sync_retries} failed: {e}"
+                    )
 
         if success:
             self.stdout.write("✓ All model changes successfully synced to Keycloak!")
         else:
-            self.stdout.write("✗ Some operations failed. Check logs for details.")
+            self.stderr.write(
+                f"✗ Keycloak sync failed after {sync_retries} attempt(s). Check logs for details."
+            )
