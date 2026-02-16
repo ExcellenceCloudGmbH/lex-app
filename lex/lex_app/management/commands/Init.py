@@ -327,6 +327,9 @@ class KeycloakSyncManager:
         """Get all Django model names in the format 'app_label.ModelName'"""
         all_models = set()
 
+        repo_name = settings.repo_name if hasattr(settings, "repo_name") else None
+
+
         for app_config in apps.get_app_configs():
             app_label = app_config.label
 
@@ -336,9 +339,15 @@ class KeycloakSyncManager:
                 'staticfiles', 'migrations', 'django_extensions'
             }
 
-            if app_label in skip_apps:
-                logger.debug(f"Skipping built-in app: {app_label}")
-                continue
+            if not repo_name:
+                if app_label in skip_apps:
+                    logger.debug(f"Skipping built-in app: {app_label}")
+                    continue
+            else:
+                logger.debug(f"Using repo_name: {repo_name}")
+                if repo_name != app_label:
+                    continue
+
 
             try:
                 for model in app_config.get_models():
@@ -350,6 +359,10 @@ class KeycloakSyncManager:
                     # Skip proxy models (they don't need separate permissions)
                     if model._meta.proxy:
                         logger.debug(f"Skipping proxy model: {app_label}.{model.__name__}")
+                        continue
+
+                    if "Historical" in model.__name__:
+                        logger.debug(f"Skipping historical model: {app_label}.{model.__name__}")
                         continue
 
                     model_name = f"{app_label}.{model.__name__}"
@@ -955,7 +968,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--sync-retries',
             type=int,
-            default=1,
+            default=3,
             help='Number of attempts for the Keycloak sync step (default: 1, no retries). '
                  'Example: --sync-retries=3 to retry up to 3 times on failure.',
         )
@@ -1082,7 +1095,7 @@ class Command(BaseCommand):
         migration_verbosity = options.get('migration_verbosity', 1)
         no_makemigrations = options.get('no_makemigrations', False)
         ensure_default_authz = options.get('ensure_default_authz', False)
-        sync_retries = max(1, options.get('sync_retries', 1))
+        sync_retries = max(1, options.get('sync_retries', 3))
 
 
         missing = get_missing_keycloak_env() if bootstrap else None
@@ -1158,14 +1171,15 @@ class Command(BaseCommand):
         missing_models = {}
 
         for app_label, migrations in changes.items():
-            for migration in migrations:
-                for operation in migration.operations:
-                    if isinstance(operation, CreateModel):
-                        adds.append((app_label, operation.name))
-                    elif isinstance(operation, DeleteModel):
-                        deletes.append((app_label, operation.name))
-                    elif isinstance(operation, RenameModel):
-                        renames.append((app_label, operation.old_name, operation.new_name))
+            if "Historical" not in app_label:
+                for migration in migrations:
+                    for operation in migration.operations:
+                        if isinstance(operation, CreateModel):
+                            adds.append((app_label, operation.name))
+                        elif isinstance(operation, DeleteModel):
+                            deletes.append((app_label, operation.name))
+                        elif isinstance(operation, RenameModel):
+                            renames.append((app_label, operation.old_name, operation.new_name))
 
         # Display detected changes
         if adds or deletes or renames:

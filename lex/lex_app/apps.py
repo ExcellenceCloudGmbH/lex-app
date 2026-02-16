@@ -217,6 +217,10 @@ class LexAppConfig(GenericAppConfig):
             print("Using fallback configuration")
             traceback.print_exc()
 
+        # Validate initial data path before proceeding
+        if not self.validate_initial_data_path(project_config.initial_data):
+            return
+
         if await are_all_models_empty(test, generic_app_models):
             # Prepare audit logging parameters for task execution
             audit_enabled = is_audit_logging_enabled()
@@ -251,6 +255,90 @@ class LexAppConfig(GenericAppConfig):
             non_empty_models = await sync_to_async(test.get_list_of_non_empty_models)(generic_app_models)
             print(f"Loading Initial Data not triggered due to existence of objects of Model: {non_empty_models}")
             print("Not all referenced Models are empty")
+
+
+    def validate_initial_data_path(self, initial_data_path):
+        """
+        Validates that the initial data file exists, is accessible, and contains valid JSON structure.
+        Mimics logic from ProcessAdminTestCase.get_test_data() and adds content validation.
+        """
+        import json
+        
+        if not initial_data_path:
+            print("Initial data path not configured.")
+            return False
+
+        try:
+            # Construct the absolute path matches ProcessAdminTestCase logic
+            clean_path = initial_data_path.replace('/', os.sep)
+            project_root = os.getenv("PROJECT_ROOT")
+            
+            if not project_root:
+                # Fallback if PROJECT_ROOT is not set, though ProcessAdminTestCase relies on it
+                print("Warning: PROJECT_ROOT environment variable not set. Defaulting to os.getcwd().")
+                project_root = os.getcwd()
+                
+            full_path = str(project_root) + os.sep + clean_path
+            
+            # Check existence
+            if not os.path.exists(full_path):
+                print(f"ERROR: Initial data file not found at: {full_path}")
+                print(f"Configured path was: {initial_data_path}")
+                print(f"PROJECT_ROOT was: {project_root}")
+                print("Skipping initial data load to prevent crash.")
+                return False
+                
+            # Basic read check
+            if not os.access(full_path, os.R_OK):
+                print(f"ERROR: No read permission for initial data file: {full_path}")
+                return False
+
+            # Check if it's a valid file (not directory)
+            if not os.path.isfile(full_path):
+                print(f"ERROR: Initial data path is not a file: {full_path}") 
+                return False
+                
+            # Validate Content
+            try:
+                with open(full_path, 'r') as f:
+                    data = json.load(f)
+                    
+                if not isinstance(data, list):
+                    print(f"ERROR: Initial data file must contain a JSON list. Found: {type(data)}")
+                    return False
+                    
+                for idx, item in enumerate(data):
+                    if not isinstance(item, dict):
+                         print(f"ERROR: Item at index {idx} is not a dictionary.")
+                         return False
+                    
+                    # Check for required attributes that ProcessAdminTestCase expects
+                    if 'subprocess' in item:
+                        continue # Subprocesses are handled recursively in actual code, we skip shallow validation here
+                        
+                    if 'class' not in item:
+                        print(f"ERROR: Item at index {idx} missing required attribute 'class'.")
+                        print(f"Item content: {item}")
+                        return False
+                        
+                    # action is also used in setUpCloudStorage, but let's at least check class
+                    if 'action' not in item:
+                        print(f"Warning: Item at index {idx} missing attribute 'action'. This might cause issues.")
+
+            except json.JSONDecodeError as e:
+                print(f"ERROR: Initial data file contains invalid JSON: {e}")
+                return False
+            except Exception as e:
+                 print(f"ERROR: Failed to validate initial data file content: {e}")
+                 traceback.print_exc()
+                 return False
+
+            return True
+            
+        except Exception as e:
+            print(f"ERROR: unexpected error validating initial data path: {e}")
+            traceback.print_exc()
+            return False
 
 
 async def are_all_models_empty(test,  generic_app_models):

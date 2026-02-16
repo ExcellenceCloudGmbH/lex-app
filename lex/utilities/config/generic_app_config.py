@@ -7,7 +7,6 @@ from django.db import models
 
 from lex.process_admin.utils.model_registration import ModelRegistration
 from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
-from lex.authentication.utils.lex_authentication import LexAuthentication
 from lex.utilities.import_system.import_utils import install_custom_import_system
 
 
