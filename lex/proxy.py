@@ -1,120 +1,290 @@
-# proxy.py
-import base64
+import asyncio
 import json
 import os
-import textwrap
-import time
 import secrets
+import time
 from contextlib import suppress
 from inspect import signature
-import jwt
+from typing import Any, Dict, Optional, Tuple, List
+
+import httpx
+import jwt  # PyJWT
+from authlib.integrations.starlette_client import OAuth
 from starlette.applications import Starlette
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import RedirectResponse, Response, JSONResponse
 from starlette.requests import Request
-from starlette.routing import Route
-from authlib.integrations.starlette_client import OAuth
-import httpx
-import asyncio
+from starlette.responses import RedirectResponse, Response, JSONResponse
+from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
-from starlette.routing import WebSocketRoute
-from lex.lex_app import settings
+
+# If you're behind an ingress / reverse proxy, it's useful to respect X-Forwarded-*.
+# Starlette doesn't always ship ProxyHeadersMiddleware, so we fall back to Uvicorn's.
+try:
+    from starlette.middleware.proxy_headers import ProxyHeadersMiddleware  # type: ignore
+except Exception:  # pragma: no cover
+    try:
+        from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware  # type: ignore
+    except Exception:  # pragma: no cover
+        ProxyHeadersMiddleware = None  # type: ignore
+
+# Optional dependency (recommended for multi-replica production deployments)
+try:
+    import redis.asyncio as redis  # type: ignore
+except Exception:  # pragma: no cover
+    redis = None  # type: ignore
+
 try:
     from websockets.asyncio.client import connect as ws_connect  # websockets >= 12
 except Exception:
     try:
-        from websockets.client import connect as ws_connect      # websockets 10/11
+        from websockets.client import connect as ws_connect  # websockets 10/11
     except Exception:
-        from websockets import connect as ws_connect
-UPSTREAM = os.environ.get("UPSTREAM", "http://localhost:8080")
-SECRET = os.environ.get("SESSION_SECRET", "PmJ8xyTxydrZomSCIAAaEOiQRBbjoMMJdYQAtGWP5l0=")             # 32+ random bytes
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:8501")                    # e.g. http://localhost:8502
-CALLBACK_URL = BASE_URL + "/auth/callback"
+        from websockets import connect as ws_connect  # type: ignore
 
+
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
+def _env_bool(name: str, default: bool) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+# Public (external) URL of THIS proxy.
+# In production you said STREAMLIT_URL is the real Streamlit domain users hit.
+PUBLIC_URL = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").rstrip("/")
+PUBLIC_URL_OBJ = httpx.URL(PUBLIC_URL) if PUBLIC_URL else None
+PUBLIC_IS_HTTPS = (PUBLIC_URL_OBJ.scheme == "https") if PUBLIC_URL_OBJ else False
+
+# Upstream Streamlit server URL (internal service / localhost / cluster DNS).
+# Keep your original default (8080) to avoid surprises.
+UPSTREAM = (os.environ.get("UPSTREAM") or os.environ.get("STREAMLIT_UPSTREAM") or "http://localhost:8080").rstrip("/")
+
+# Session secret: MUST be set in prod and shared across replicas.
+SESSION_SECRET = os.environ.get("SESSION_SECRET") or os.environ.get("SESSION_KEY") or os.environ.get("SESSION_SECRET_KEY")
+if not SESSION_SECRET:
+    # dev-friendly fallback, but DO NOT use in production
+    SESSION_SECRET = "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32)
+
+# Cookie flags (override via env if needed)
+SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", PUBLIC_IS_HTTPS)
+SESSION_SAMESITE = (os.getenv("SESSION_SAMESITE") or "lax").lower()  # "lax" | "strict" | "none"
+# If embedding in an iframe on a different site, you typically need:
+#   SESSION_SAMESITE=none  AND  SESSION_HTTPS_ONLY=true
+
+# OIDC / Keycloak SSL verification (keep True in prod)
+OIDC_VERIFY_SSL = _env_bool("OIDC_VERIFY_SSL", True)
+
+# Token store: Redis recommended for production if you run >1 worker/replica.
+TOKEN_REDIS_URL = os.getenv("TOKEN_REDIS_URL") or os.getenv("REDIS_URL") or ""
+TOKEN_IDLE_TTL_SECONDS = int(os.getenv("TOKEN_IDLE_TTL_SECONDS", str(60 * 60 * 8)))  # 8 hours idle window
+TOKEN_EXPIRY_SKEW_SECONDS = int(os.getenv("TOKEN_EXPIRY_SKEW_SECONDS", "30"))
+
+# Optional: set short-lived httpOnly cookie for WS auth (useful if iframe can't send session cookie)
+SET_ST_ACCESS_COOKIE = _env_bool("SET_ST_ACCESS_COOKIE", False)
+ST_ACCESS_COOKIE_MAX_AGE = int(os.getenv("ST_ACCESS_COOKIE_MAX_AGE", "300"))  # 5 minutes
+
+# JWT verification knobs
+JWT_ALG = os.getenv("JWT_ALG", "RS256")
+JWT_VERIFY_ISSUER = _env_bool("JWT_VERIFY_ISSUER", False)
+KEYCLOAK_URL = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
+KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM") or ""
+EXPECTED_ISSUER = os.getenv("OIDC_ISSUER") or (
+    f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}" if KEYCLOAK_URL and KEYCLOAK_REALM else ""
+)
+
+# -----------------------------------------------------------------------------
+# OAuth client
+# -----------------------------------------------------------------------------
 oauth = OAuth()
 oauth.register(
     name="oidc",
     client_id=os.getenv("OIDC_RP_CLIENT_ID"),
     client_secret=os.getenv("OIDC_RP_CLIENT_SECRET"),
-    server_metadata_url=f"{os.getenv('KEYCLOAK_URL')}/realms/{os.getenv('KEYCLOAK_REALM')}/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile", "verify": False},
+    server_metadata_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile", "verify": OIDC_VERIFY_SSL},
 )
-# -------------------------------------------------------------------
-# Server-side token store (tiny cookie: only sid + email in session)
-# -------------------------------------------------------------------
-TOKENS: dict[str, dict] = {}  # sid -> {"access_token","id_token","refresh_token","expires_at","email","last_seen"}
+
+# -----------------------------------------------------------------------------
+# Token store (memory for dev, Redis for production)
+# -----------------------------------------------------------------------------
 def _now() -> int:
     return int(time.time())
-def _compute_expires_at(token: dict) -> int:
+
+
+def _compute_expires_at(token: Dict[str, Any]) -> int:
     if token.get("expires_at"):
-        try:
+        with suppress(Exception):
             return int(token["expires_at"])
-        except Exception:
-            pass
     if token.get("expires_in"):
-        try:
+        with suppress(Exception):
             return _now() + int(token["expires_in"])
-        except Exception:
-            pass
     return 0
-def _trim_token(token: dict) -> dict:
+
+
+def _trim_token(token: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "access_token": token.get("access_token"),
         "id_token": token.get("id_token"),
         "refresh_token": token.get("refresh_token"),
         "expires_at": _compute_expires_at(token),
     }
-def _put_tokens(sid: str, email: str, token: dict):
-    TOKENS[sid] = {**_trim_token(token), "email": email, "last_seen": _now()}
-def _get_tokens(sid: str) -> dict | None:
-    t = TOKENS.get(sid)
-    if t:
-        t["last_seen"] = _now()
-    return t
-def _drop_tokens(sid: str):
-    TOKENS.pop(sid, None)
-def _gc_tokens(max_idle_seconds: int = 60 * 60 * 8):
-    cutoff = _now() - max_idle_seconds
-    stale = [k for k, v in TOKENS.items() if v.get("last_seen", 0) < cutoff]
-    for k in stale:
-        TOKENS.pop(k, None)
-# Cache OIDC metadata
-_OIDC_META: dict | None = None
-async def _get_oidc_endpoints() -> dict:
+
+
+class TokenStore:
+    async def get(self, sid: str) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    async def set(self, sid: str, value: Dict[str, Any]) -> None:
+        raise NotImplementedError
+
+    async def delete(self, sid: str) -> None:
+        raise NotImplementedError
+
+    async def touch(self, sid: str) -> None:
+        raise NotImplementedError
+
+
+class MemoryTokenStore(TokenStore):
+    def __init__(self) -> None:
+        self._tokens: Dict[str, Dict[str, Any]] = {}
+
+    def _gc(self) -> None:
+        cutoff = _now() - TOKEN_IDLE_TTL_SECONDS
+        stale = [k for k, v in self._tokens.items() if int(v.get("last_seen", 0)) < cutoff]
+        for k in stale:
+            self._tokens.pop(k, None)
+
+    async def get(self, sid: str) -> Optional[Dict[str, Any]]:
+        self._gc()
+        t = self._tokens.get(sid)
+        if t:
+            t["last_seen"] = _now()
+        return t
+
+    async def set(self, sid: str, value: Dict[str, Any]) -> None:
+        self._gc()
+        self._tokens[sid] = value
+
+    async def delete(self, sid: str) -> None:
+        self._tokens.pop(sid, None)
+
+    async def touch(self, sid: str) -> None:
+        t = self._tokens.get(sid)
+        if t:
+            t["last_seen"] = _now()
+
+
+class RedisTokenStore(TokenStore):
+    def __init__(self, redis_url: str) -> None:
+        if redis is None:
+            raise RuntimeError("redis.asyncio is not installed but TOKEN_REDIS_URL/REDIS_URL is set")
+        self._r = redis.from_url(redis_url, decode_responses=True)
+        self._prefix = os.getenv("TOKEN_REDIS_PREFIX", "st_proxy_tokens:")
+
+    def _key(self, sid: str) -> str:
+        return f"{self._prefix}{sid}"
+
+    async def get(self, sid: str) -> Optional[Dict[str, Any]]:
+        raw = await self._r.get(self._key(sid))
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return None
+        await self.touch(sid)
+        return data
+
+    async def set(self, sid: str, value: Dict[str, Any]) -> None:
+        await self._r.set(self._key(sid), json.dumps(value), ex=TOKEN_IDLE_TTL_SECONDS)
+
+    async def delete(self, sid: str) -> None:
+        await self._r.delete(self._key(sid))
+
+    async def touch(self, sid: str) -> None:
+        await self._r.expire(self._key(sid), TOKEN_IDLE_TTL_SECONDS)
+
+
+def _build_token_store() -> TokenStore:
+    if TOKEN_REDIS_URL:
+        try:
+            return RedisTokenStore(TOKEN_REDIS_URL)
+        except Exception as e:
+            print(f"[proxy] Redis token store disabled: {e}. Falling back to in-memory store.")
+    return MemoryTokenStore()
+
+
+TOKEN_STORE: TokenStore = _build_token_store()
+
+
+async def _put_tokens(sid: str, email: str, token: Dict[str, Any]) -> None:
+    payload = {**_trim_token(token), "email": email, "last_seen": _now()}
+    await TOKEN_STORE.set(sid, payload)
+
+
+async def _get_tokens(sid: str) -> Optional[Dict[str, Any]]:
+    return await TOKEN_STORE.get(sid)
+
+
+async def _drop_tokens(sid: str) -> None:
+    await TOKEN_STORE.delete(sid)
+
+
+# -----------------------------------------------------------------------------
+# OIDC metadata & refresh
+# -----------------------------------------------------------------------------
+_OIDC_META: Optional[Dict[str, Any]] = None
+
+
+async def _get_oidc_endpoints() -> Dict[str, str]:
     global _OIDC_META
     if _OIDC_META is None:
-        verify = bool(oauth.oidc.client_kwargs.get("verify", True))
         meta_url = getattr(oauth.oidc, "server_metadata_url", None) or \
-                   f"{os.getenv('KEYCLOAK_URL')}/realms/{os.getenv('KEYCLOAK_REALM')}/.well-known/openid-configuration"
-        async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
+                   f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+        async with httpx.AsyncClient(timeout=10.0, verify=OIDC_VERIFY_SSL) as client:
             try:
                 r = await client.get(meta_url)
                 r.raise_for_status()
                 _OIDC_META = r.json()
             except Exception:
                 _OIDC_META = {}
+
         issuer = _OIDC_META.get("issuer")
         if not issuer:
             base = httpx.URL(meta_url)
             issuer = str(base.copy_with(path=base.path.replace("/.well-known/openid-configuration", "")))
             _OIDC_META["issuer"] = issuer
+
         base = httpx.URL(_OIDC_META["issuer"])
-        _OIDC_META.setdefault("token_endpoint",
-            str(base.copy_with(path=base.path.rstrip("/") + "/protocol/openid-connect/token")))
-        _OIDC_META.setdefault("end_session_endpoint",
-            str(base.copy_with(path=base.path.rstrip("/") + "/protocol/openid-connect/logout")))
+        _OIDC_META.setdefault(
+            "token_endpoint",
+            str(base.copy_with(path=base.path.rstrip("/") + "/protocol/openid-connect/token")),
+        )
+        _OIDC_META.setdefault(
+            "end_session_endpoint",
+            str(base.copy_with(path=base.path.rstrip("/") + "/protocol/openid-connect/logout")),
+        )
+
     return {
-        "issuer": _OIDC_META.get("issuer"),
-        "token_endpoint": _OIDC_META.get("token_endpoint"),
-        "end_session_endpoint": _OIDC_META.get("end_session_endpoint"),
+        "issuer": str(_OIDC_META.get("issuer") or ""),
+        "token_endpoint": str(_OIDC_META.get("token_endpoint") or ""),
+        "end_session_endpoint": str(_OIDC_META.get("end_session_endpoint") or ""),
     }
+
+
 async def _refresh_access_token(sid: str) -> bool:
-    t = _get_tokens(sid)
+    t = await _get_tokens(sid)
     if not t or not t.get("refresh_token"):
         return False
+
     endpoints = await _get_oidc_endpoints()
     token_url = endpoints["token_endpoint"]
-    verify = bool(oauth.oidc.client_kwargs.get("verify", True))
+    if not token_url:
+        return False
+
     data = {
         "grant_type": "refresh_token",
         "refresh_token": t["refresh_token"],
@@ -122,7 +292,8 @@ async def _refresh_access_token(sid: str) -> bool:
         "client_secret": os.getenv("OIDC_RP_CLIENT_SECRET"),
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
+
+    async with httpx.AsyncClient(timeout=10.0, verify=OIDC_VERIFY_SSL) as client:
         try:
             resp = await client.post(token_url, data=data, headers=headers)
             if resp.status_code >= 400:
@@ -130,297 +301,348 @@ async def _refresh_access_token(sid: str) -> bool:
             new_token = resp.json()
         except Exception:
             return False
-    # store rotated tokens
-    _put_tokens(sid, t.get("email", ""), new_token)
+
+    await _put_tokens(sid, t.get("email", ""), new_token)
     return True
-async def _ensure_valid_access_token(session: dict) -> dict | None:
+
+
+async def _ensure_valid_access_token(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     sid = (session.get("user") or {}).get("sid")
     if not sid:
         return None
-    t = _get_tokens(sid)
+
+    t = await _get_tokens(sid)
     if not t or not t.get("access_token"):
         return None
-    if _now() < int(t.get("expires_at") or 0) - 30:
+
+    expires_at = int(t.get("expires_at") or 0)
+    if _now() < (expires_at - TOKEN_EXPIRY_SKEW_SECONDS):
         return t
+
     ok = await _refresh_access_token(sid)
-    return _get_tokens(sid) if ok else None
-async def refresh_access_token(session: dict):
-    """
-    Uses the refresh token to get a new access token from Keycloak.
-    """
-    print("Attempting to refresh access token...")
-    refresh_token = session.get("user", {}).get("refresh_token")
-    if not refresh_token:
-        print("No refresh token found in session.")
-        return None
-    try:
-        # Use Authlib's built-in token refresh mechanism
-        new_token = await oauth.oidc.fetch_access_token(
-            grant_type='refresh_token',
-            refresh_token=refresh_token
-        )
-        # Update the session with the new token details
-        session["user"]["access_token"] = new_token["access_token"]
-        session["user"]["refresh_token"] = new_token.get("refresh_token",
-                                                         refresh_token)  # Keep old refresh token if new one not provided
-        session["user"]["expires_at"] = new_token["expires_at"]
-        session["user"]["expires_in"] = new_token["expires_in"]
-        print("Access token refreshed successfully.")
-        return session["user"]
-    except Exception as e:
-        print(f"Failed to refresh access token: {e}")
-        return None
-async def ensure_valid_access_token(session: dict):
-    """
-    Checks if the access token in the session is valid, refreshes it if needed.
-    """
-    if "user" not in session:
-        return None
-    user_session = session["user"]
-    expires_at = user_session.get("expires_at", 0)
-    # Check if token has expired or is about to expire (within 60 seconds)
-    if expires_at < int(time.time()) + 60:
-        print("Access token expired or expiring soon. Refreshing...")
-        return await refresh_access_token(session)
-    else:
-        print("Access token is still valid.")
-        return user_session
-def build_pem_from_keycloak_public_key(public_key_b64: str) -> str:
-    return f"-----BEGIN PUBLIC KEY-----\n{public_key_b64}\n-----END PUBLIC KEY-----\n"
+    return await _get_tokens(sid) if ok else None
 
-# -------------------------------------------------------------------
-# Dynamic Keycloak JWKS (public key) fetching with cache
-# -------------------------------------------------------------------
-_JWKS_CACHE: dict | None = None
-_JWKS_CACHE_TIME: float = 0
-_JWKS_CACHE_TTL: int = 3600  # 1 hour
 
-def _get_jwks_sync() -> dict | None:
-    """Synchronously fetch the Keycloak realm's JWKS (public keys).
+# -----------------------------------------------------------------------------
+# Dynamic JWKS fetching + JWT validation
+# -----------------------------------------------------------------------------
+_JWKS_CACHE: Optional[Dict[str, Any]] = None
+_JWKS_CACHE_TIME: float = 0.0
+_JWKS_CACHE_TTL: int = int(os.getenv("JWKS_CACHE_TTL", "3600"))
 
-    Caches the result for ``_JWKS_CACHE_TTL`` seconds so we don't hit
-    Keycloak on every request.
-    """
+
+def _get_jwks_sync() -> Optional[Dict[str, Any]]:
     global _JWKS_CACHE, _JWKS_CACHE_TIME
+
     if _JWKS_CACHE and (time.time() - _JWKS_CACHE_TIME) < _JWKS_CACHE_TTL:
         return _JWKS_CACHE
 
-    keycloak_url = os.getenv("KEYCLOAK_URL", "").rstrip("/")
-    realm = os.getenv("KEYCLOAK_REALM") or os.getenv("KEYCLOAK_REALM_NAME", "")
-    if not keycloak_url or not realm:
-        print("JWKS fetch skipped: KEYCLOAK_URL or KEYCLOAK_REALM not set")
+    if not KEYCLOAK_URL or not KEYCLOAK_REALM:
+        print("[proxy] JWKS fetch skipped: KEYCLOAK_URL or KEYCLOAK_REALM not set")
         return None
 
-    certs_url = f"{keycloak_url}/realms/{realm}/protocol/openid-connect/certs"
+    certs_url = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
     try:
-        with httpx.Client(timeout=10.0, verify=False) as client:
+        with httpx.Client(timeout=10.0, verify=OIDC_VERIFY_SSL) as client:
             resp = client.get(certs_url)
             resp.raise_for_status()
             _JWKS_CACHE = resp.json()
             _JWKS_CACHE_TIME = time.time()
             return _JWKS_CACHE
     except Exception as e:
-        print(f"Failed to fetch JWKS from {certs_url}: {e}")
+        print(f"[proxy] Failed to fetch JWKS from {certs_url}: {e}")
         return None
 
 
 def _get_signing_key(token: str):
-    """Return the correct public key from the JWKS for the given token."""
     jwks_data = _get_jwks_sync()
     if not jwks_data:
         return None
     from jwt import PyJWKSet
+
     jwks = PyJWKSet.from_dict(jwks_data)
     header = jwt.get_unverified_header(token)
     kid = header.get("kid")
+
     for key in jwks.keys:
         if key.key_id == kid:
             return key.key
-    # If no kid match, return the first RS256 key
+
     for key in jwks.keys:
-        if key.key_type == "RSA":
+        if getattr(key, "key_type", None) == "RSA":
             return key.key
     return None
 
 
-# --- JWT Validation Logic ---
-def validate_jwt_token(token: str):
-    """Validate a Keycloak-issued JWT using the realm's JWKS endpoint.
-
-    The public key is fetched dynamically from Keycloak and cached.
-    The audience is derived from the OIDC_RP_CLIENT_ID environment variable.
+def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Validate a Keycloak-issued JWT using the realm JWKS.
+    Audience is checked against client_id plus common Keycloak audiences.
+    Issuer check is optional (JWT_VERIFY_ISSUER=true).
     """
     try:
         signing_key = _get_signing_key(token)
         if not signing_key:
-            print("JWT validation failed: could not obtain signing key from Keycloak JWKS")
+            print("[proxy] JWT validation failed: no signing key")
             return None
 
         client_id = os.getenv("OIDC_RP_CLIENT_ID", "")
-        # Keycloak tokens may have 'account' and 'broker' as additional audiences
-        audiences = [aud for aud in [client_id, "broker", "account"] if aud]
+        audiences = [aud for aud in (client_id, "broker", "account") if aud]
+
+        kwargs: Dict[str, Any] = {}
+        if JWT_VERIFY_ISSUER and EXPECTED_ISSUER:
+            kwargs["issuer"] = EXPECTED_ISSUER
 
         payload = jwt.decode(
             token,
             signing_key,
-            algorithms=["RS256"],
-            options={
-                "require": ["exp"],
-                "verify_signature": True,
-            },
+            algorithms=[JWT_ALG],
+            options={"require": ["exp"], "verify_signature": True},
             leeway=30,
             audience=audiences,
+            **kwargs,
         )
         return payload
     except jwt.ExpiredSignatureError:
-        print("JWT token expired")
+        print("[proxy] JWT token expired")
         return None
     except jwt.InvalidTokenError as e:
-        print(f"JWT validation failed: {e}")
+        print(f"[proxy] JWT validation failed: {e}")
         return None
-# ------------------- Auth routes -------------------
+
+
+def _claims_from_token_set(tokens: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Prefer id_token (has better identity claims), fall back to access_token.
+    Returns {} if validation fails.
+    """
+    for key in ("id_token", "access_token"):
+        tok = tokens.get(key)
+        if isinstance(tok, str) and tok:
+            payload = validate_jwt_token(tok)
+            if payload:
+                return payload
+    return {}
+
+
+# -----------------------------------------------------------------------------
+# URL helpers
+# -----------------------------------------------------------------------------
+def _external_base_url(request: Request) -> str:
+    """
+    Prefer explicit PUBLIC_URL (STREAMLIT_URL/BASE_URL).
+    If not set, build from request + ProxyHeadersMiddleware (X-Forwarded-Proto/Host).
+    """
+    if PUBLIC_URL:
+        return PUBLIC_URL
+    return str(request.base_url).rstrip("/")
+
+
+def _callback_url(request: Request) -> str:
+    return f"{_external_base_url(request)}/auth/callback"
+
+
+# -----------------------------------------------------------------------------
+# Auth routes
+# -----------------------------------------------------------------------------
 async def login(request: Request):
-    return await oauth.oidc.authorize_redirect(request, CALLBACK_URL)
+    return await oauth.oidc.authorize_redirect(request, _callback_url(request))
 
 
 async def auth_callback(request: Request):
     token = await oauth.oidc.authorize_access_token(request)
     userinfo = token.get("userinfo") or await oauth.oidc.userinfo(token=token)
+
     sid = secrets.token_urlsafe(16)
     email = userinfo.get("email") or ""
-    _put_tokens(sid, email, token)
-    # tiny client-side session
+
+    await _put_tokens(sid, email, token)
+
+    # Tiny session: only email + sid (tokens stay server-side)
     request.session["user"] = {"email": email, "sid": sid}
-    return RedirectResponse(url="/", status_code=303)
-    # # opportunistic GC
-    # _gc_tokens()
-    # resp = RedirectResponse(url="/", status_code=303)
-    # # short-lived access token for WS, httpOnly so JS can’t read it
-    # resp.set_cookie("st_access", token["access_token"], httponly=True, samesite="lax", secure=False)
-    # # optional: httpOnly refresh token if you want server to refresh on WS
-    # if token.get("refresh_token"):
-    #     resp.set_cookie("st_refresh", token["refresh_token"], httponly=True, samesite="lax", secure=False)
-    # return resp
+
+    resp = RedirectResponse(url="/", status_code=303)
+
+    # Optional short-lived access cookie for WS auth (httpOnly so JS can't read it)
+    if SET_ST_ACCESS_COOKIE and token.get("access_token"):
+        resp.set_cookie(
+            "st_access",
+            token["access_token"],
+            httponly=True,
+            secure=SESSION_HTTPS_ONLY,
+            samesite=SESSION_SAMESITE,
+            max_age=ST_ACCESS_COOKIE_MAX_AGE,
+            path="/",
+        )
+    return resp
 
 
-
-# Local-only logout (like oauth2-proxy /oauth2/logout)
 async def oauth2_logout(request: Request):
     sid = (request.session.get("user") or {}).get("sid")
     if sid:
-        _drop_tokens(sid)
+        await _drop_tokens(sid)
     request.session.clear()
-    return RedirectResponse(url="/")
+
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.delete_cookie("st_access", path="/")
+    return resp
+
+
 async def oauth2_sign_out(request: Request):
-    # Always land here after IdP logout
-    rd = BASE_URL
-    # grab id_token from our server-side store
+    rd = _external_base_url(request)
+
     sid = (request.session.get("user") or {}).get("sid")
-    t = _get_tokens(sid) if sid else None
+    t = await _get_tokens(sid) if sid else None
     id_token = (t or {}).get("id_token")
-    # clear local session & tokens first
+
+    # Clear local session/tokens first
     if sid:
-        _drop_tokens(sid)
+        await _drop_tokens(sid)
     request.session.clear()
-    # if we don't have an id_token, just go straight to BASE_URL
+
     if not id_token:
-        return RedirectResponse(url=rd, status_code=303)
-    # build Keycloak RP-initiated logout URL
+        resp = RedirectResponse(url=rd, status_code=303)
+        resp.delete_cookie("st_access", path="/")
+        return resp
+
     endpoints = await _get_oidc_endpoints()
-    end_session_endpoint = (
-        endpoints.get("end_session_endpoint")
-        or (endpoints.get("issuer", "").rstrip("/") + "/protocol/openid-connect/logout")
+    end_session_endpoint = endpoints.get("end_session_endpoint") or (
+        endpoints.get("issuer", "").rstrip("/") + "/protocol/openid-connect/logout"
     )
-    qp = httpx.QueryParams({
-        "id_token_hint": id_token,
-        "post_logout_redirect_uri": rd,
-        "client_id": os.getenv("OIDC_RP_CLIENT_ID"),
-    })
-    # redirect to Keycloak; Keycloak will return the browser to BASE_URL
+
+    qp = httpx.QueryParams(
+        {
+            "id_token_hint": id_token,
+            "post_logout_redirect_uri": rd,
+            "client_id": os.getenv("OIDC_RP_CLIENT_ID") or "",
+        }
+    )
     logout_url = f"{end_session_endpoint}?{qp}"
     return RedirectResponse(url=logout_url, status_code=302)
+
+
 # Back-compat
 async def logout(request: Request):
     return await oauth2_logout(request)
-# ------------------- HTTP proxy -------------------
+
+
+# -----------------------------------------------------------------------------
+# WebSocket proxy
+# -----------------------------------------------------------------------------
+def _ws_header_kwarg() -> Optional[str]:
+    params = signature(ws_connect).parameters
+    for name in ("extra_headers", "additional_headers", "headers"):
+        if name in params:
+            return name
+    return None
+
+
+WS_HEADER_KWARG = _ws_header_kwarg()
+WS_HAS_ORIGIN = "origin" in signature(ws_connect).parameters
+WS_HAS_SUBPROTOCOLS = "subprotocols" in signature(ws_connect).parameters
+
+
+def _upstream_ws_url_and_origin(client_ws_url: str) -> Tuple[str, str]:
+    base = httpx.URL(UPSTREAM)
+    ws_scheme = "wss" if base.scheme == "https" else "ws"
+    target = base.copy_with(
+        scheme=ws_scheme,
+        path=httpx.URL(client_ws_url).path,
+        query=httpx.URL(client_ws_url).query,
+    )
+
+    origin = f"{base.scheme}://{base.host}"
+    if base.port:
+        origin += f":{base.port}"
+    return str(target), origin
+
+
 async def ws_proxy(websocket: WebSocket):
     scope_session = websocket.scope.get("session") or {}
-    user_payload = None
+    user_payload: Optional[Dict[str, Any]] = None
     auth_method = "none"
-    # 1. Check for JWT token first (iframe scenario)
+
+    # 1) JWT auth (iframe / external token)
     auth_header = websocket.query_params.get("auth_token", "") or websocket.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
         jwt_token = auth_header[7:]
     elif auth_header:
         jwt_token = auth_header
     else:
-        jwt_token = websocket.cookies.get("st_access")  # auto-sent by browser
+        jwt_token = websocket.cookies.get("st_access")
 
     if jwt_token:
         payload = validate_jwt_token(jwt_token)
-        print("Payload", payload)
         if payload:
             user_payload = {
-                'sub': payload.get('sub'),
-                'email': payload.get('email'),
-                'preferred_username': payload.get('preferred_username'),
-                'permissions': payload.get('permissions', {})
+                "sub": payload.get("sub"),
+                "email": payload.get("email"),
+                "preferred_username": payload.get("preferred_username"),
+                "permissions": payload.get("permissions", {}),
+                "access_token": jwt_token,
             }
             auth_method = "jwt"
-            user_payload['access_token'] = jwt_token
-    # 2. Fall back to session authentication if no JWT
+
+    # 2) Session auth (browser session cookie -> server-side tokens)
     if not user_payload and "user" in scope_session:
         tokens = await _ensure_valid_access_token({"user": scope_session.get("user")})
         if tokens:
-            user = scope_session["user"]
-            # Fix: Extract user info from userinfo if available, otherwise use what we have
-            userinfo = user.get('userinfo', {})
+            claims = _claims_from_token_set(tokens)
+            session_email = (scope_session.get("user") or {}).get("email") or ""
             user_payload = {
-                'sub': userinfo.get('sub') or user.get('sub') or tokens.get('userinfo', {}).get('sub'),
-                'email': userinfo.get('email') or user.get('email') or tokens.get('userinfo', {}).get('email'),
-                'preferred_username': (userinfo.get('preferred_username') or
-                                       user.get('preferred_username') or
-                                       tokens.get('userinfo', {}).get('preferred_username')),
-                'access_token': tokens.get('access_token'),
-                'id_token': tokens.get('id_token'),
-                'refresh_token': tokens.get('refresh_token'),  # NEW
-
+                "sub": claims.get("sub") or "",
+                "email": claims.get("email") or session_email or tokens.get("email") or "",
+                "preferred_username": claims.get("preferred_username") or claims.get("name") or "",
+                "access_token": tokens.get("access_token"),
+                "id_token": tokens.get("id_token"),
+                "refresh_token": tokens.get("refresh_token"),
+                "permissions": {},
             }
             auth_method = "session"
-    # 3. Reject if no authentication
+
     if not user_payload:
         with suppress(Exception):
             if websocket.client_state != WebSocketState.DISCONNECTED:
                 await websocket.close(code=4401)
         return
+
     target_url, upstream_origin = _upstream_ws_url_and_origin(str(websocket.url))
+
     excluded = {
-        "connection", "upgrade", "sec-websocket-key", "sec-websocket-version",
-        "sec-websocket-protocol", "te", "proxy-authorization", "proxy-authenticate", "keep-alive", "host", "origin",
-        "authorization"  # Remove original auth header
+        "connection",
+        "upgrade",
+        "sec-websocket-key",
+        "sec-websocket-version",
+        "sec-websocket-protocol",
+        "te",
+        "proxy-authorization",
+        "proxy-authenticate",
+        "keep-alive",
+        "host",
+        "origin",
+        "authorization",
     }
-    fwd = [(k, v) for k, v in websocket.headers.items() if k.lower() not in excluded]
-    # Add Streamlit authentication headers
+    fwd: List[Tuple[str, str]] = [(k, v) for k, v in websocket.headers.items() if k.lower() not in excluded]
+
     fwd.append(("X-Streamlit-User-ID", str(user_payload.get("sub") or "")))
     fwd.append(("X-Streamlit-User-Email", user_payload.get("email") or ""))
     fwd.append(("X-Streamlit-User-Username", user_payload.get("preferred_username") or ""))
     fwd.append(("X-Streamlit-Auth-Method", auth_method))
     fwd.append(("X-Streamlit-User-Permissions", json.dumps(user_payload.get("permissions", {}))))
-    # Add legacy headers for backward compatibility
     fwd.append(("X-Forwarded-User", user_payload.get("email") or ""))
-    # Add tokens if available (session auth)
+
     if user_payload.get("access_token"):
         fwd.append(("Authorization", f"Bearer {user_payload['access_token']}"))
         fwd.append(("X-Forwarded-Access-Token", user_payload["access_token"]))
     if user_payload.get("id_token"):
         fwd.append(("X-Forwarded-Id-Token", user_payload["id_token"]))
-    if user_payload.get("refresh_token"):  # NEW
-        fwd.append(("x-streamlit-refresh-token", user_payload["refresh_token"]))
-    # Debug print
-    print(f"WS Headers being forwarded: {dict(fwd)}")
+    if user_payload.get("refresh_token"):
+        fwd.append(("X-Streamlit-Refresh-Token", user_payload["refresh_token"]))
+
     raw_subprotos = websocket.headers.get("sec-websocket-protocol")
     client_subprotocols = [p.strip() for p in raw_subprotos.split(",")] if raw_subprotos else []
-    kwargs = {}
+
+    kwargs: Dict[str, Any] = {}
     if WS_HEADER_KWARG:
         if not WS_HAS_ORIGIN:
             fwd.append(("Origin", upstream_origin))
@@ -431,11 +653,13 @@ async def ws_proxy(websocket: WebSocket):
         kwargs["subprotocols"] = client_subprotocols
     if "max_size" in signature(ws_connect).parameters:
         kwargs["max_size"] = None
+
     try:
         async with ws_connect(target_url, **kwargs) as upstream:
             chosen = getattr(upstream, "subprotocol", None)
             if websocket.client_state == WebSocketState.CONNECTING:
                 await websocket.accept(subprotocol=chosen)
+
             async def pump_client_to_upstream():
                 try:
                     while True:
@@ -449,8 +673,10 @@ async def ws_proxy(websocket: WebSocket):
                             await upstream.send(msg["bytes"])
                 except WebSocketDisconnect:
                     pass
+
             async def pump_upstream_to_client():
                 import websockets
+
                 try:
                     while True:
                         data = await upstream.recv()
@@ -460,9 +686,10 @@ async def ws_proxy(websocket: WebSocket):
                             await websocket.send_text(data)
                 except websockets.exceptions.ConnectionClosed:
                     pass
+
             t1 = asyncio.create_task(pump_client_to_upstream())
             t2 = asyncio.create_task(pump_upstream_to_client())
-            done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+            _, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
             for t in pending:
                 t.cancel()
                 with suppress(asyncio.CancelledError):
@@ -471,87 +698,104 @@ async def ws_proxy(websocket: WebSocket):
         with suppress(Exception):
             if websocket.client_state != WebSocketState.DISCONNECTED:
                 await websocket.close()
-async def proxy(request: Request):
-    user_payload = None
-    auth_method = "none"
-    # 1. Check for JWT token first (iframe scenario)
-    auth_header = request.cookies.get('st_access', "") or request.query_params.get("auth_token", "") or request.headers.get("auth_token", "") or request.headers.get("authorization", "")
 
+
+# -----------------------------------------------------------------------------
+# HTTP proxy
+# -----------------------------------------------------------------------------
+async def proxy(request: Request):
+    user_payload: Optional[Dict[str, Any]] = None
+    auth_method = "none"
+
+    auth_header = (
+        request.cookies.get("st_access", "")
+        or request.query_params.get("auth_token", "")
+        or request.headers.get("auth_token", "")
+        or request.headers.get("authorization", "")
+    )
+
+    # 1) JWT auth
     if auth_header:
-        if auth_header.startswith("Bearer "):
-            jwt_token = auth_header[7:]
-        else:
-            jwt_token = auth_header[:]
+        jwt_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
         payload = validate_jwt_token(jwt_token)
         if payload:
             user_payload = {
-                'sub': payload.get('sub'),
-                'email': payload.get('email'),
-                'preferred_username': payload.get('preferred_username'),
-                'permissions': payload.get('permissions', {})
+                "sub": payload.get("sub"),
+                "email": payload.get("email"),
+                "preferred_username": payload.get("preferred_username"),
+                "permissions": payload.get("permissions", {}),
             }
             auth_method = "jwt"
-    # 2. Fall back to session authentication if no JWT
+
+    # 2) Session auth
     if not user_payload and "user" in request.session:
         tokens = await _ensure_valid_access_token(request.session)
         if tokens:
-            user = request.session["user"]
-            # Fix: Extract user info from userinfo if available, otherwise use what we have
-            userinfo = user.get('userinfo', {})
+            claims = _claims_from_token_set(tokens)
+            session_email = (request.session.get("user") or {}).get("email") or ""
             user_payload = {
-                'sub': userinfo.get('sub') or user.get('sub') or tokens.get('userinfo', {}).get('sub'),
-                'email': userinfo.get('email') or user.get('email') or tokens.get('userinfo', {}).get('email'),
-                'preferred_username': (userinfo.get('preferred_username') or
-                                       user.get('preferred_username') or
-                                       tokens.get('userinfo', {}).get('preferred_username')),
-                'access_token': tokens.get('access_token'),
-                'id_token': tokens.get('id_token'),
-                'refresh_token': tokens.get('refresh_token'),  # NEW
+                "sub": claims.get("sub") or "",
+                "email": claims.get("email") or session_email or tokens.get("email") or "",
+                "preferred_username": claims.get("preferred_username") or claims.get("name") or "",
+                "permissions": {},
+                "access_token": tokens.get("access_token"),
+                "id_token": tokens.get("id_token"),
+                "refresh_token": tokens.get("refresh_token"),
             }
             auth_method = "session"
-    # 3. Deny access if no authentication
+
+    # 3) Deny
     if not user_payload:
-        if 'text/html' in request.headers.get('accept', ''):
+        if "text/html" in request.headers.get("accept", ""):
             return RedirectResponse(url="/auth/login")
-        return JSONResponse({'error': 'Authentication required'}, status_code=401)
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+
     method = request.method
     url = httpx.URL(UPSTREAM + request.url.path)
     if request.url.query:
         url = url.copy_with(query=request.url.query.encode("utf-8"))
-    # Drop hop-by-hop headers
+
     hop_by_hop = {
-        "host", "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-        "te", "trailers", "transfer-encoding", "upgrade", "authorization"
+        "host",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+        "authorization",
     }
     fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in hop_by_hop}
-    # Add Streamlit authentication headers
+
     fwd_headers["X-Streamlit-User-ID"] = str(user_payload.get("sub") or "")
     fwd_headers["X-Streamlit-User-Email"] = user_payload.get("email") or ""
     fwd_headers["X-Streamlit-User-Username"] = user_payload.get("preferred_username") or ""
     fwd_headers["X-Streamlit-Auth-Method"] = auth_method
     fwd_headers["X-Streamlit-User-Permissions"] = json.dumps(user_payload.get("permissions", {}))
-    # Add legacy headers for backward compatibility
     fwd_headers["X-Forwarded-User"] = user_payload.get("email") or ""
-    # Add tokens if available (session auth)
+
     if user_payload.get("access_token"):
         fwd_headers["Authorization"] = f"Bearer {user_payload['access_token']}"
         fwd_headers["X-Forwarded-Access-Token"] = user_payload["access_token"]
     if user_payload.get("id_token"):
         fwd_headers["X-Forwarded-Id-Token"] = user_payload["id_token"]
-    if user_payload.get("refresh_token"):  # NEW
-        fwd_headers["x-streamlit-refresh-token"] = user_payload["refresh_token"]
+    if user_payload.get("refresh_token"):
+        fwd_headers["X-Streamlit-Refresh-Token"] = user_payload["refresh_token"]
 
-    # Debug print
-    print(f"HTTP Headers being forwarded: {fwd_headers}")
     body = await request.body()
     timeout = httpx.Timeout(30.0)
+
     async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
         upstream_resp = await client.request(method, url, content=body, headers=fwd_headers)
-    drop = hop_by_hop | {"content-length", "content-encoding", "transfer-encoding", "set-cookie"}
+
+    drop = hop_by_hop | {"content-length", "content-encoding", "transfer-encoding"}
     resp_headers = {k: v for k, v in upstream_resp.headers.items() if k.lower() not in drop}
-    response = Response(content=upstream_resp.content,
-                        status_code=upstream_resp.status_code,
-                        headers=resp_headers)
+
+    response = Response(content=upstream_resp.content, status_code=upstream_resp.status_code, headers=resp_headers)
+
+    # Preserve upstream Set-Cookie headers (Streamlit sets a few)
     get_list = getattr(upstream_resp.headers, "get_list", None)
     if callable(get_list):
         for c in upstream_resp.headers.get_list("set-cookie"):
@@ -560,40 +804,34 @@ async def proxy(request: Request):
         for k, v in upstream_resp.headers.items():
             if k.lower() == "set-cookie":
                 response.headers.append("set-cookie", v)
-    return response
-# ------------------- WebSocket proxy -------------------
-def _ws_header_kwarg():
-    params = signature(ws_connect).parameters
-    for name in ("extra_headers","additional_headers","headers"):
-        if name in params:
-            return name
-    return None
-WS_HEADER_KWARG = _ws_header_kwarg()
-WS_HAS_ORIGIN = "origin" in signature(ws_connect).parameters
-WS_HAS_SUBPROTOCOLS = "subprotocols" in signature(ws_connect).parameters
-def _upstream_ws_url_and_origin(client_ws_url: str) -> tuple[str, str]:
-    base = httpx.URL(UPSTREAM)
-    ws_scheme = "wss" if base.scheme == "https" else "ws"
-    target = base.copy_with(
-        scheme=ws_scheme,
-        path=httpx.URL(client_ws_url).path,
-        query=httpx.URL(client_ws_url).query,
-    )
-    origin = f"{base.scheme}://{base.host}"
-    if base.port:
-        origin += f":{base.port}"
-    return str(target), origin
-# ------------------- Routing -------------------
-routes = [
-    Route("/auth/login", login),
-    Route("/auth/callback", auth_callback),
-    # Streamlit-compatible logout endpoints
-    Route("/oauth2/logout", oauth2_logout),     # local-only
-    Route("/oauth2/sign_out", oauth2_sign_out), # RP-initiated (Keycloak)
-    Route("/auth/logout", oauth2_logout),       # back-compat
-    WebSocketRoute("/{path:path}", ws_proxy),
-    Route("/{path:path}", proxy, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]),  # catch-all
-]
-app = Starlette(routes=routes)
-app.add_middleware(SessionMiddleware, secret_key=SECRET, https_only=False, same_site="lax")
 
+    return response
+
+
+# -----------------------------------------------------------------------------
+# Routing / app
+# -----------------------------------------------------------------------------
+routes = [
+    Route("/auth/login", login, methods=["GET"]),
+    Route("/auth/callback", auth_callback, methods=["GET"]),
+    Route("/oauth2/logout", oauth2_logout, methods=["GET"]),
+    Route("/oauth2/sign_out", oauth2_sign_out, methods=["GET"]),
+    Route("/auth/logout", oauth2_logout, methods=["GET"]),
+    WebSocketRoute("/{path:path}", ws_proxy),
+    Route("/{path:path}", proxy, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]),
+]
+
+app = Starlette(routes=routes)
+
+# Honor X-Forwarded-* headers when available (ingress / LB in front).
+if ProxyHeadersMiddleware is not None:
+    trusted_hosts = os.getenv("TRUSTED_PROXY_HOSTS", "*")
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_hosts)
+
+# Session cookies (secure in prod)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    https_only=SESSION_HTTPS_ONLY,
+    same_site=SESSION_SAMESITE,
+)
