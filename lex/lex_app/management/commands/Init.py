@@ -406,7 +406,7 @@ class KeycloakSyncManager:
             return self.exported_configs
         cfg = self.kc_manager.export_authorization_settings()
         if not cfg:
-            raise CommandError("Failed to export Keycloak authorization settings (empty/None).")
+            raise Exception("Failed to export Keycloak authorization settings (empty/None).")
         self.exported_configs = cfg
         return cfg
 
@@ -819,7 +819,7 @@ class KeycloakSyncManager:
                 logger.error(f"Failed to restore Keycloak client settings snapshot: {restore_err}")
                 logger.error(traceback.format_exc())
                 if had_primary_error is not None:
-                    raise CommandError(
+                    raise Exception(
                         f"Primary failure occurred and snapshot restore ALSO failed: {restore_err}"
                     ) from had_primary_error
                 raise
