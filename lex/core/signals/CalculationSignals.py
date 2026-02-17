@@ -1,5 +1,6 @@
 import logging
 import sys
+from typing import Optional
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -33,7 +34,11 @@ def save_profile(sender, instance, **kwargs):
 
 
 
-def update_calculation_status(instance):
+def update_calculation_status(
+    instance,
+    exception_details: Optional[str] = None,
+    stack_trace: Optional[str] = None,
+):
     from lex.core.models.CalculationModel import CalculationModel
 
     if issubclass(instance.__class__, CalculationModel):
@@ -53,12 +58,23 @@ def update_calculation_status(instance):
             # Perform cache cleanup for aborted calculations
             _perform_cache_cleanup_for_status_update(instance, "ABORTED")
 
+        if not message_type or not channel_layer:
+            return
+
+        payload = {
+            "record": str(instance),
+            "record_id": f"{instance._meta.model_name}_{instance.id}",
+        }
+
+        # Keep websocket error payload aligned with API exception payloads.
+        if exception_details:
+            payload["message"] = exception_details
+        if stack_trace:
+            payload["traceback"] = stack_trace
+
         message = {
             "type": message_type,  # This is the correct naming convention
-            "payload": {
-                "record": str(instance),
-                "record_id": f"{instance._meta.model_name}_{instance.id}",
-            },
+            "payload": payload,
         }
         # notification = Notifications(message="Calculation is finished", timestamp=datetime.now())
         # notification.save()

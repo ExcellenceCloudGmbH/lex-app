@@ -106,6 +106,7 @@ class CallbackTask(Task):
                         model_instance,
                         CalculationModel.ERROR,
                         error_message=str(exc),
+                        stack_trace=str(einfo) if einfo else None,
                         task_id=task_id
                     )
         except Exception as callback_error:
@@ -130,6 +131,7 @@ class CallbackTask(Task):
             model_instance: CalculationModel,
             status: str,
             error_message: Optional[str] = None,
+            stack_trace: Optional[str] = None,
             task_id: Optional[str] = None
     ) -> None:
         """Update model status and notify connected systems."""
@@ -142,7 +144,11 @@ class CallbackTask(Task):
                     model_instance.task_id = task_id
                 model_instance.save(skip_hooks=True)
                 logger.warning(f"Updating status for {model_instance.__class__.__name__} task {task_id}")
-                update_calculation_status(model_instance)
+                update_calculation_status(
+                    model_instance,
+                    exception_details=error_message,
+                    stack_trace=stack_trace,
+                )
         except Exception as update_error:
             logger.error(
                 f"Failed to update model status for {model_instance}: {update_error}",

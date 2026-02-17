@@ -161,6 +161,8 @@ class CalculationModel(LexModel):
         from lex.core.signals.CalculationSignals import update_calculation_status
 
         func = self.lex_func()
+        exception_details = None
+        stack_trace = None
         try:
             if hasattr(self, "is_atomic") and not self.is_atomic:
                 func()
@@ -173,16 +175,16 @@ class CalculationModel(LexModel):
         except Exception as e:
             # Store error details
             error_details = f"{str(e)}\n\n{traceback.format_exc()}"
+            exception_details = str(e)
+            stack_trace = traceback.format_exc()
+            self.is_calculated = self.ERROR
+
             if hasattr(self, 'calculation_error_message'):
                 self.calculation_error_message = error_details
             elif hasattr(self, 'error_message'):
                 self.error_message = error_details
 
-            raise e
-
-
-            logger.error(f"Calculation failed in execute_calculation_sync: {e}", exc_info=True)
-            # Do NOT re-raise. We want to commit the ERROR state.
+            raise
         finally:
             # Clean up cache if context is available
             try:
@@ -217,7 +219,11 @@ class CalculationModel(LexModel):
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
 
             self.save(skip_hooks=True)
-            update_calculation_status(self)
+            update_calculation_status(
+                self,
+                exception_details=exception_details,
+                stack_trace=stack_trace,
+            )
 
     @hook(AFTER_UPDATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     @hook(AFTER_CREATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
@@ -256,6 +262,7 @@ class CalculationModel(LexModel):
         except Exception as e:
             # Handle any errors in task dispatch or synchronous execution                                                        
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
+            status_was_error = self.is_calculated == self.ERROR
             self.is_calculated = self.ERROR
 
             # Store error message if the model has an error_message field                                                        
@@ -287,5 +294,21 @@ class CalculationModel(LexModel):
 
             except Exception as cleanup_error:
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
+
+            # Dispatch failures do not pass through execute_calculation_sync(), so persist
+            # ERROR state and notify websocket clients from here.
+            if not status_was_error:
+                try:
+                    self.save(skip_hooks=True)
+                    update_calculation_status(
+                        self,
+                        exception_details=exception_details,
+                        stack_trace=stack_trace,
+                    )
+                except Exception as status_update_error:
+                    logger.error(
+                        f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
+                        exc_info=True,
+                    )
 
             raise CalculationModelException(calc_obj=self, exception_details=exception_details, stack_trace=stack_trace)
