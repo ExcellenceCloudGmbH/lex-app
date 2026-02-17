@@ -4,7 +4,7 @@ authlib
 itsdangerous
 django
 django-cors-headers
-djangorestframework-api-key
+exc-djangorestframework-api-key
 django-filter
 XlsxWriter
 pandas

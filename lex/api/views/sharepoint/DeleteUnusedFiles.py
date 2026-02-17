@@ -21,10 +21,8 @@ class DeleteUnusedFiles(APIView):
     permission_classes = [HasAPIKey | IsAuthenticated]
 
     def print_failure(self, retry_number, ex):
-        shrp_ctx = SharePointContext()
         print(f"{retry_number}: {ex}")
-        if retry_number == 5:
-            shrp_ctx.ctx._queries.pop()
+        if retry_number == 15:
             raise ex
 
     def cleanup_unused_files(self, dry_run: bool = True):
@@ -62,9 +60,9 @@ class DeleteUnusedFiles(APIView):
             failed_files = []
             for file in unused_files:
                 try:
-                    file_obj = shrp_ctx.ctx.web.get_file_by_server_relative_path(file).execute_query_retry(max_retry=5, timeout_secs=5,
+                    file_obj = shrp_ctx.ctx.web.get_file_by_server_relative_path(file).execute_query_retry(max_retry=15, timeout_secs=5,
                                                                         failure_callback=self.print_failure)
-                    file_obj.recycle().execute_query_retry(max_retry=5, timeout_secs=5,
+                    file_obj.recycle().execute_query_retry(max_retry=15, timeout_secs=5,
                                                   failure_callback=self.print_failure)
                     deleted_files.append(str(file))
                 except Exception as e:
