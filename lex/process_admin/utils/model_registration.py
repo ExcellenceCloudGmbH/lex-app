@@ -88,6 +88,37 @@ class ModelRegistration:
         processAdminSite.register([model])
 
     @classmethod
+    def _validate_model_definition(cls, model: Type[models.Model]) -> None:
+        """
+        Ensure model does not use reserved names or fields.
+        """
+        model_name = model.__name__
+
+        # 1. Check Reserved Class Names
+        reserved_names = {'History', 'MetaHistory', 'LexModel'}
+        if model_name in reserved_names:
+            raise ValueError(
+                f"Model name '{model_name}' is reserved by the framework."
+            )
+
+        if model_name.startswith("Historical"):
+            raise ValueError(
+                f"Model name '{model_name}' cannot start with 'Historical' "
+                "as it conflicts with simple_history naming conventions."
+            )
+
+        # 2. Check Reserved Field Names
+        reserved_fields = {'valid_from', 'valid_to', 'sys_from', 'sys_to'}
+        model_fields = {f.name for f in model._meta.fields}
+        conflicting_fields = reserved_fields.intersection(model_fields)
+
+        if conflicting_fields:
+            raise ValueError(
+                f"Model '{model_name}' defines reserved fields: {conflicting_fields}. "
+                "These are automatically managed by the framework's history tracking."
+            )
+
+    @classmethod
     def _register_standard_model(
         cls, model: Type[models.Model], untracked_models: List[str]
     ) -> None:
@@ -99,6 +130,9 @@ class ModelRegistration:
           2. Level 2: Meta History      (sys_from / sys_to)
           3. Signal handlers for chaining, sync, and scheduling
         """
+        # Validate model definition before registration
+        # cls._validate_model_definition(model)
+
         from lex.process_admin.settings import processAdminSite, adminSite
         from simple_history import register
         from simple_history.exceptions import MultipleRegistrationsError
