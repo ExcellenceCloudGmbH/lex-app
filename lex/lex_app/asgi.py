@@ -1,42 +1,51 @@
 """
 ASGI config for lex_app project.
-
-It exposes the ASGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/3.0/howto/deployment/asgi/
 """
-import asyncio
-import atexit
-import os
 
+import os
+# MUST be set before importing anything that may touch Django settings/apps
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
+
+import atexit
+
+from django.core.asgi import get_asgi_application
+
+# This initializes Django (calls django.setup() internally)
+django_asgi_app = get_asgi_application()
+
+# Only import Channels + your routing AFTER Django is ready
+from asgiref.sync import async_to_sync
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
-from django.core.asgi import get_asgi_application
 
 from lex.lex_app import routing
-from lex.api.consumers.BackendHealthConsumer import BackendHealthConsumer
-from lex.api.consumers.CalculationLogConsumer import CalculationLogConsumer
-from lex.api.consumers.CalculationsConsumer import CalculationsConsumer
-from lex.api.consumers.UpdateCalculationStatusConsumer import UpdateCalculationStatusConsumer
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
-django_asgi_app = get_asgi_application()
+
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
         "websocket": AllowedHostsOriginValidator(
-            AuthMiddlewareStack(URLRouter(routing.websocket_urlpatterns))
+            AuthMiddlewareStack(
+                URLRouter(routing.websocket_urlpatterns())
+            )
         ),
     }
 )
+
+
 def on_server_shutdown(*args, **kwargs):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(BackendHealthConsumer.disconnect_all())
-    loop.run_until_complete(CalculationLogConsumer.disconnect_all())
-    loop.run_until_complete(CalculationsConsumer.disconnect_all())
-    loop.run_until_complete(UpdateCalculationStatusConsumer.disconnect_all())
-    # loop.run_until_complete(LogConsumer.disconnect_all())
+    # Import consumers lazily (and only after Django is initialized)
+    from lex.api.consumers.BackendHealthConsumer import BackendHealthConsumer
+    from lex.api.consumers.CalculationLogConsumer import CalculationLogConsumer
+    from lex.api.consumers.CalculationsConsumer import CalculationsConsumer
+    from lex.api.consumers.UpdateCalculationStatusConsumer import UpdateCalculationStatusConsumer
+
+    # async_to_sync avoids "no current event loop" issues in Python 3.12 at exit
+    async_to_sync(BackendHealthConsumer.disconnect_all)()
+    async_to_sync(CalculationLogConsumer.disconnect_all)()
+    async_to_sync(CalculationsConsumer.disconnect_all)()
+    async_to_sync(UpdateCalculationStatusConsumer.disconnect_all)()
+
 
 atexit.register(on_server_shutdown)

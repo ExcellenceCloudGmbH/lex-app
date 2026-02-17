@@ -4,11 +4,9 @@ from typing import Optional
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from django.db.models.signals import post_save
-from django.dispatch import receiver, Signal
+from django.dispatch import Signal
 
 from lex.api.utils import operation_context
-from lex.authentication.models.Profile import Profile
 from lex.core.calculated_updates.update_handler import CalculatedModelUpdateHandler
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
