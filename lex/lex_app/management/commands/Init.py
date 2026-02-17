@@ -326,6 +326,35 @@ class KeycloakSyncManager:
         self.default_scopes = ["list", "read", "create", "edit", "delete", "export"]
         self.exported_configs = None
 
+    def _snapshot_client_settings(self) -> dict:
+        client_id = self.kc_manager.client_uuid
+        rep = self.kc_manager.admin.get_client(client_id)
+
+        keep = [
+            "authorizationServicesEnabled",
+            "redirectUris",
+            "webOrigins",
+            "authenticationFlowBindingOverrides",
+            "protocol",
+            "publicClient",
+            "serviceAccountsEnabled",
+            "standardFlowEnabled",
+            "directAccessGrantsEnabled",
+        ]
+        return {k: deepcopy(rep.get(k)) for k in keep if k in rep}
+
+    def _restore_client_settings(self, snapshot: dict) -> None:
+        client_id = self.kc_manager.client_uuid
+        rep = self.kc_manager.admin.get_client(client_id)
+
+        changed = False
+        for k, v in snapshot.items():
+            if rep.get(k) != v:
+                rep[k] = v
+                changed = True
+
+        if changed:
+            self.kc_manager.admin.update_client(client_id, rep)
 
     def get_all_django_models(self) -> Set[str]:
         """
@@ -377,7 +406,7 @@ class KeycloakSyncManager:
             return self.exported_configs
         cfg = self.kc_manager.export_authorization_settings()
         if not cfg:
-            raise Exception("Failed to export Keycloak authorization settings (empty/None).")
+            raise CommandError("Failed to export Keycloak authorization settings (empty/None).")
         self.exported_configs = cfg
         return cfg
 
@@ -585,6 +614,7 @@ class KeycloakSyncManager:
           - Any error raises (no silent return False)
           - Always attempts to restore client snapshot in finally
         """
+        client_snapshot = self._snapshot_client_settings()
         had_primary_error: Exception | None = None
 
         try:
@@ -781,6 +811,18 @@ class KeycloakSyncManager:
             logger.error(f"Error processing model changes: {e}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
             raise
+        finally:
+            # Always try to restore client settings snapshot
+            try:
+                self._restore_client_settings(client_snapshot)
+            except Exception as restore_err:
+                logger.error(f"Failed to restore Keycloak client settings snapshot: {restore_err}")
+                logger.error(traceback.format_exc())
+                if had_primary_error is not None:
+                    raise CommandError(
+                        f"Primary failure occurred and snapshot restore ALSO failed: {restore_err}"
+                    ) from had_primary_error
+                raise
 
 
 class Command(BaseCommand):
