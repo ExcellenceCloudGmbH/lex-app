@@ -1055,23 +1055,44 @@ class Command(BaseCommand):
                 return
 
             # Check missing
+            # Check missing
             missing_models: Set[str] = set()
             if check_missing:
-                auth_config = sync_manager.export_configs()
-                all_django_models = sync_manager.get_all_django_models()
-                existing_keycloak_resources = sync_manager.get_existing_keycloak_resources(auth_config)
-                missing_models = sync_manager.find_missing_models(all_django_models, existing_keycloak_resources, set())
+                # Phase 1: Check missing models with retry
+                self.stdout.write("Checking for missing models...")
+                for attempt in range(1, sync_retries + 1):
+                    try:
+                        auth_config = sync_manager.export_configs()
+                        all_django_models = sync_manager.get_all_django_models()
+                        existing_keycloak_resources = sync_manager.get_existing_keycloak_resources(auth_config)
+                        missing_models = sync_manager.find_missing_models(
+                            all_django_models, existing_keycloak_resources, set()
+                        )
 
-                # if rename exists, don't double-add the new name as "missing"
-                for app_name, old_name, new_name in renames:
-                    missing_models.discard(f"{app_name}.{new_name}")
+                        # if rename exists, don't double-add the new name as "missing"
+                        for app_name, old_name, new_name in renames:
+                            missing_models.discard(f"{app_name}.{new_name}")
 
-                if missing_models:
-                    self.stdout.write(f"Would add {len(missing_models)} missing models:")
-                    for model_name in sorted(missing_models):
-                        self.stdout.write(f"  WOULD ADD: {model_name}")
-                else:
-                    self.stdout.write("No missing models found.")
+                        if missing_models:
+                            self.stdout.write(f"Would add {len(missing_models)} missing models:")
+                            for model_name in sorted(missing_models):
+                                self.stdout.write(f"  WOULD ADD: {model_name}")
+                        else:
+                            self.stdout.write("No missing models found.")
+                        
+                        break  # Success
+                    except Exception as e:
+                        if attempt >= sync_retries:
+                            raise CommandError(
+                                f"Failed to check missing models after {sync_retries} attempt(s): {e}"
+                            ) from e
+                        
+                        wait = 2 ** attempt
+                        self.stderr.write(
+                            f"Check missing models attempt {attempt}/{sync_retries} failed: {e}\n"
+                            f"  Retrying in {wait}s..."
+                        )
+                        time.sleep(wait)
 
             # Sync to Keycloak
             self.stdout.write("\nSyncing changes to Keycloak...")
