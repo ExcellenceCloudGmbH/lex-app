@@ -206,8 +206,8 @@ class LexManager(models.Manager):
             )
 
         created = []
-        with transaction.atomic():
-            for obj in objs:
+        for obj in objs:
+            with transaction.atomic():
                 obj.save()
                 created.append(obj)
 

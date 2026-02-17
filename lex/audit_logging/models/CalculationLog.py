@@ -7,11 +7,8 @@ from lex.core.mixins.ModelModificationRestriction import (
     AdminReportsModificationRestriction,
 )
 from django.contrib.contenttypes.fields import GenericForeignKey
-from lex.core.models.LexModel import LexModel
 from django.contrib.contenttypes.models import ContentType
-from lex.audit_logging.utils.ContextResolver import ContextResolver
 from lex.audit_logging.utils.CacheManager import CacheManager
-from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.audit_logging.utils.DataModels import (
     CalculationLogError,
     ContextResolutionError,
@@ -79,6 +76,7 @@ class CalculationLog(models.Model):
         try:
             # 1) Resolve context using ContextResolver
 
+            from lex.audit_logging.utils.ContextResolver import ContextResolver
             context_info = ContextResolver.resolve()
             # logger.warning(f"Context: {context_info}")
 

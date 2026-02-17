@@ -9,6 +9,7 @@ for use in calculation logging operations.
 import logging
 from typing import Optional
 
+from audit_logging.mixins.AuditLogMixin import _safe_get_content_type
 from django.contrib.contenttypes.models import ContentType
 
 from lex.api.utils import operation_context
@@ -91,7 +92,7 @@ class ContextResolver:
             # Process current model if it exists
             if current_model:
                 try:
-                    content_type = ContentType.objects.get_for_model(current_model)
+                    content_type = _safe_get_content_type(current_model)
                     current_record = f"{current_model._meta.model_name}_{current_model.pk}"
                 except Exception as e:
                     logger.warning(
@@ -110,7 +111,7 @@ class ContextResolver:
             # Process parent model if it exists
             if parent_model:
                 try:
-                    parent_content_type = ContentType.objects.get_for_model(parent_model)
+                    parent_content_type = _safe_get_content_type(parent_model)
                     parent_record = f"{parent_model._meta.model_name}_{parent_model.pk}"
                 except Exception as e:
                     logger.warning(

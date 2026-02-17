@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import TestCase
 
 import dateutil.parser
+from audit_logging.mixins.AuditLogMixin import _safe_get_content_type
 from django.apps import apps
 from django.core.cache import cache
 from django.core.files import File
@@ -85,7 +86,7 @@ class ProcessAdminTestCase(TestCase):
                     instance = self.tagged_objects[tag]
                     if audit_enabled and CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
                         audit_log.calculation_id = None
-                        audit_log.content_type = ContentType.objects.get_for_model(instance.__class__)
+                        audit_log.content_type = _safe_get_content_type(instance.__class__)
                         audit_log.save()
                     # Mark audit log as successful if audit logging is enabled
                     if audit_enabled and audit_log:
@@ -124,7 +125,7 @@ class ProcessAdminTestCase(TestCase):
                         # Mark audit log as successful if audit logging is enabled
                         if audit_enabled and CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
                             audit_log.calculation_id = None
-                            audit_log.content_type = ContentType.objects.get_for_model(instance.__class__)
+                            audit_log.content_type = _safe_get_content_type(instance.__class__)
                             audit_log.save()
                         if audit_enabled and audit_log:
                             audit_logger.mark_operation_success(audit_log)
@@ -199,7 +200,7 @@ class ProcessAdminTestCase(TestCase):
                     if audit_enabled:
                         if CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
                             audit_log.calculation_id = None
-                        audit_log.content_type = ContentType.objects.get_for_model(instance.__class__)
+                        audit_log.content_type = _safe_get_content_type(instance.__class__)
                         audit_log.object_id = instance.pk
                         payload = audit_log.payload
                         payload['id'] = instance.pk
@@ -232,7 +233,7 @@ class ProcessAdminTestCase(TestCase):
                         if audit_enabled:
                             if CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
                                 audit_log.calculation_id = None
-                            audit_log.content_type = ContentType.objects.get_for_model(instance.__class__)
+                            audit_log.content_type = _safe_get_content_type(instance.__class__)
                             audit_log.object_id = instance.pk
                             audit_log.save()
                             # Mark audit log as successful if audit logging is enabled
@@ -250,7 +251,7 @@ class ProcessAdminTestCase(TestCase):
                             audit_log = audit_logger.log_object_deletion(instance, object['filter_parameters'], tag)
 
                         if audit_enabled:
-                            audit_log.content_type = ContentType.objects.get_for_model(klass)
+                            audit_log.content_type = _safe_get_content_type(klass)
                             audit_log.object_id = instance.pk
                             audit_log.save()
 
