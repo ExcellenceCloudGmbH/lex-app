@@ -17,8 +17,7 @@ from starlette.responses import RedirectResponse, Response, JSONResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-# If you're behind an ingress / reverse proxy, it's useful to respect X-Forwarded-*.
-# Starlette doesn't always ship ProxyHeadersMiddleware, so we fall back to Uvicorn's.
+# Respect X-Forwarded-* when behind ingress/LB
 try:
     from starlette.middleware.proxy_headers import ProxyHeadersMiddleware  # type: ignore
 except Exception:  # pragma: no cover
@@ -27,7 +26,7 @@ except Exception:  # pragma: no cover
     except Exception:  # pragma: no cover
         ProxyHeadersMiddleware = None  # type: ignore
 
-# Optional dependency (recommended for multi-replica production deployments)
+# Optional Redis token store for production replicas
 try:
     import redis.asyncio as redis  # type: ignore
 except Exception:  # pragma: no cover
@@ -43,7 +42,7 @@ except Exception:
 
 
 # -----------------------------------------------------------------------------
-# Config
+# Config helpers
 # -----------------------------------------------------------------------------
 def _env_bool(name: str, default: bool) -> bool:
     val = os.getenv(name)
@@ -52,43 +51,43 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-# Public (external) URL of THIS proxy.
-# In production you said STREAMLIT_URL is the real Streamlit domain users hit.
+def _now() -> int:
+    return int(time.time())
+
+
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
 PUBLIC_URL = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").rstrip("/")
 PUBLIC_URL_OBJ = httpx.URL(PUBLIC_URL) if PUBLIC_URL else None
 PUBLIC_IS_HTTPS = (PUBLIC_URL_OBJ.scheme == "https") if PUBLIC_URL_OBJ else False
 
-# Upstream Streamlit server URL (internal service / localhost / cluster DNS).
-# Keep your original default (8080) to avoid surprises.
 UPSTREAM = (os.environ.get("UPSTREAM") or os.environ.get("STREAMLIT_UPSTREAM") or "http://localhost:8080").rstrip("/")
 
-# Session secret: MUST be set in prod and shared across replicas.
 SESSION_SECRET = os.environ.get("SESSION_SECRET") or os.environ.get("SESSION_KEY") or os.environ.get("SESSION_SECRET_KEY")
 if not SESSION_SECRET:
-    # dev-friendly fallback, but DO NOT use in production
     SESSION_SECRET = "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32)
 
-# Cookie flags (override via env if needed)
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", PUBLIC_IS_HTTPS)
-SESSION_SAMESITE = (os.getenv("SESSION_SAMESITE") or "lax").lower()  # "lax" | "strict" | "none"
-# If embedding in an iframe on a different site, you typically need:
-#   SESSION_SAMESITE=none  AND  SESSION_HTTPS_ONLY=true
+SESSION_SAMESITE = (os.getenv("SESSION_SAMESITE") or "lax").lower()  # lax | strict | none
 
-# OIDC / Keycloak SSL verification (keep True in prod)
 OIDC_VERIFY_SSL = _env_bool("OIDC_VERIFY_SSL", True)
 
-# Token store: Redis recommended for production if you run >1 worker/replica.
 TOKEN_REDIS_URL = os.getenv("TOKEN_REDIS_URL") or os.getenv("REDIS_URL") or ""
-TOKEN_IDLE_TTL_SECONDS = int(os.getenv("TOKEN_IDLE_TTL_SECONDS", str(60 * 60 * 8)))  # 8 hours idle window
+TOKEN_IDLE_TTL_SECONDS = int(os.getenv("TOKEN_IDLE_TTL_SECONDS", str(60 * 60 * 8)))  # 8 hours idle
 TOKEN_EXPIRY_SKEW_SECONDS = int(os.getenv("TOKEN_EXPIRY_SKEW_SECONDS", "30"))
 
-# Optional: set short-lived httpOnly cookie for WS auth (useful if iframe can't send session cookie)
-SET_ST_ACCESS_COOKIE = _env_bool("SET_ST_ACCESS_COOKIE", False)
-ST_ACCESS_COOKIE_MAX_AGE = int(os.getenv("ST_ACCESS_COOKIE_MAX_AGE", "300"))  # 5 minutes
+# NEW: issue cookies when auth_token is seen (recommended for embed)
+# - Enables persistence for Streamlit follow-up requests that don't carry auth_token
+PERSIST_JWT_AUTH_TO_SESSION = _env_bool("PERSIST_JWT_AUTH_TO_SESSION", True)
 
-# JWT verification knobs
+# Optional: set short-lived access token cookie too (helps WS when query param not repeated)
+SET_ST_ACCESS_COOKIE = _env_bool("SET_ST_ACCESS_COOKIE", True)
+ST_ACCESS_COOKIE_MAX_AGE = int(os.getenv("ST_ACCESS_COOKIE_MAX_AGE", "600"))  # 10 minutes
+
 JWT_ALG = os.getenv("JWT_ALG", "RS256")
 JWT_VERIFY_ISSUER = _env_bool("JWT_VERIFY_ISSUER", False)
+
 KEYCLOAK_URL = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM") or ""
 EXPECTED_ISSUER = os.getenv("OIDC_ISSUER") or (
@@ -108,12 +107,8 @@ oauth.register(
 )
 
 # -----------------------------------------------------------------------------
-# Token store (memory for dev, Redis for production)
+# Token store
 # -----------------------------------------------------------------------------
-def _now() -> int:
-    return int(time.time())
-
-
 def _compute_expires_at(token: Dict[str, Any]) -> int:
     if token.get("expires_at"):
         with suppress(Exception):
@@ -234,7 +229,7 @@ async def _drop_tokens(sid: str) -> None:
 
 
 # -----------------------------------------------------------------------------
-# OIDC metadata & refresh
+# OIDC endpoints + refresh
 # -----------------------------------------------------------------------------
 _OIDC_META: Optional[Dict[str, Any]] = None
 
@@ -324,7 +319,7 @@ async def _ensure_valid_access_token(session: Dict[str, Any]) -> Optional[Dict[s
 
 
 # -----------------------------------------------------------------------------
-# Dynamic JWKS fetching + JWT validation
+# JWKS + JWT validation
 # -----------------------------------------------------------------------------
 _JWKS_CACHE: Optional[Dict[str, Any]] = None
 _JWKS_CACHE_TIME: float = 0.0
@@ -375,11 +370,6 @@ def _get_signing_key(token: str):
 
 
 def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
-    """
-    Validate a Keycloak-issued JWT using the realm JWKS.
-    Audience is checked against client_id plus common Keycloak audiences.
-    Issuer check is optional (JWT_VERIFY_ISSUER=true).
-    """
     try:
         signing_key = _get_signing_key(token)
         if not signing_key:
@@ -412,10 +402,6 @@ def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 def _claims_from_token_set(tokens: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Prefer id_token (has better identity claims), fall back to access_token.
-    Returns {} if validation fails.
-    """
     for key in ("id_token", "access_token"):
         tok = tokens.get(key)
         if isinstance(tok, str) and tok:
@@ -429,10 +415,6 @@ def _claims_from_token_set(tokens: Dict[str, Any]) -> Dict[str, Any]:
 # URL helpers
 # -----------------------------------------------------------------------------
 def _external_base_url(request: Request) -> str:
-    """
-    Prefer explicit PUBLIC_URL (STREAMLIT_URL/BASE_URL).
-    If not set, build from request + ProxyHeadersMiddleware (X-Forwarded-Proto/Host).
-    """
     if PUBLIC_URL:
         return PUBLIC_URL
     return str(request.base_url).rstrip("/")
@@ -440,6 +422,44 @@ def _external_base_url(request: Request) -> str:
 
 def _callback_url(request: Request) -> str:
     return f"{_external_base_url(request)}/auth/callback"
+
+
+# -----------------------------------------------------------------------------
+# NEW: persist auth_token login to session
+# -----------------------------------------------------------------------------
+async def _persist_jwt_to_session_if_needed(request: Request, jwt_token: str, payload: Dict[str, Any], token_source: str) -> None:
+    """
+    Streamlit embedded mode often sends auth_token only on the initial iframe URL.
+    Follow-up requests won't include it, so we persist the validated JWT into our session/token store.
+
+    token_source: "query" | "header" | "cookie"
+    """
+    if not PERSIST_JWT_AUTH_TO_SESSION:
+        return
+
+    # If we already have a session sid, don't overwrite.
+    if (request.session.get("user") or {}).get("sid"):
+        return
+
+    sid = secrets.token_urlsafe(16)
+
+    # Keycloak access tokens don't always include email; use best-effort identity.
+    email = payload.get("email") or payload.get("preferred_username") or ""
+
+    # Store this access token as if it were our "session token set".
+    # expires_at taken from JWT exp so _ensure_valid_access_token can enforce expiry.
+    token_set = {
+        "access_token": jwt_token,
+        "expires_at": int(payload.get("exp") or 0),
+        "id_token": None,
+        "refresh_token": None,
+    }
+    await _put_tokens(sid, email, token_set)
+
+    # Tiny session cookie
+    request.session["user"] = {"email": email, "sid": sid}
+
+    # NOTE: SessionMiddleware will set Set-Cookie automatically because session changed.
 
 
 # -----------------------------------------------------------------------------
@@ -457,13 +477,11 @@ async def auth_callback(request: Request):
     email = userinfo.get("email") or ""
 
     await _put_tokens(sid, email, token)
-
-    # Tiny session: only email + sid (tokens stay server-side)
     request.session["user"] = {"email": email, "sid": sid}
 
     resp = RedirectResponse(url="/", status_code=303)
 
-    # Optional short-lived access cookie for WS auth (httpOnly so JS can't read it)
+    # Optional short-lived access cookie
     if SET_ST_ACCESS_COOKIE and token.get("access_token"):
         resp.set_cookie(
             "st_access",
@@ -495,7 +513,6 @@ async def oauth2_sign_out(request: Request):
     t = await _get_tokens(sid) if sid else None
     id_token = (t or {}).get("id_token")
 
-    # Clear local session/tokens first
     if sid:
         await _drop_tokens(sid)
     request.session.clear()
@@ -521,7 +538,6 @@ async def oauth2_sign_out(request: Request):
     return RedirectResponse(url=logout_url, status_code=302)
 
 
-# Back-compat
 async def logout(request: Request):
     return await oauth2_logout(request)
 
@@ -562,7 +578,6 @@ async def ws_proxy(websocket: WebSocket):
     user_payload: Optional[Dict[str, Any]] = None
     auth_method = "none"
 
-    # 1) JWT auth (iframe / external token)
     auth_header = websocket.query_params.get("auth_token", "") or websocket.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
         jwt_token = auth_header[7:]
@@ -583,7 +598,6 @@ async def ws_proxy(websocket: WebSocket):
             }
             auth_method = "jwt"
 
-    # 2) Session auth (browser session cookie -> server-side tokens)
     if not user_payload and "user" in scope_session:
         tokens = await _ensure_valid_access_token({"user": scope_session.get("user")})
         if tokens:
@@ -707,6 +721,9 @@ async def proxy(request: Request):
     user_payload: Optional[Dict[str, Any]] = None
     auth_method = "none"
 
+    # Track where token came from (important to decide whether to set cookie)
+    token_source = "none"
+
     auth_header = (
         request.cookies.get("st_access", "")
         or request.query_params.get("auth_token", "")
@@ -714,20 +731,33 @@ async def proxy(request: Request):
         or request.headers.get("authorization", "")
     )
 
+    if request.cookies.get("st_access"):
+        token_source = "cookie"
+    elif request.query_params.get("auth_token"):
+        token_source = "query"
+    elif request.headers.get("auth_token") or request.headers.get("authorization"):
+        token_source = "header"
+
     # 1) JWT auth
+    jwt_token = ""
+    jwt_payload: Optional[Dict[str, Any]] = None
     if auth_header:
         jwt_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
-        payload = validate_jwt_token(jwt_token)
-        if payload:
+        jwt_payload = validate_jwt_token(jwt_token)
+        if jwt_payload:
             user_payload = {
-                "sub": payload.get("sub"),
-                "email": payload.get("email"),
-                "preferred_username": payload.get("preferred_username"),
-                "permissions": payload.get("permissions", {}),
+                "sub": jwt_payload.get("sub"),
+                "email": jwt_payload.get("email"),
+                "preferred_username": jwt_payload.get("preferred_username"),
+                "permissions": jwt_payload.get("permissions", {}),
+                "access_token": jwt_token,  # keep so we can forward Authorization if desired
             }
             auth_method = "jwt"
 
-    # 2) Session auth
+            # ✅ FIX: persist this one-off auth_token into a real session/token-store entry
+            await _persist_jwt_to_session_if_needed(request, jwt_token, jwt_payload, token_source)
+
+    # 2) Session auth (cookie from SessionMiddleware -> server-side tokens)
     if not user_payload and "user" in request.session:
         tokens = await _ensure_valid_access_token(request.session)
         if tokens:
@@ -776,9 +806,11 @@ async def proxy(request: Request):
     fwd_headers["X-Streamlit-User-Permissions"] = json.dumps(user_payload.get("permissions", {}))
     fwd_headers["X-Forwarded-User"] = user_payload.get("email") or ""
 
+    # Forward access token if present (either from JWT auth or session)
     if user_payload.get("access_token"):
         fwd_headers["Authorization"] = f"Bearer {user_payload['access_token']}"
         fwd_headers["X-Forwarded-Access-Token"] = user_payload["access_token"]
+
     if user_payload.get("id_token"):
         fwd_headers["X-Forwarded-Id-Token"] = user_payload["id_token"]
     if user_payload.get("refresh_token"):
@@ -795,7 +827,7 @@ async def proxy(request: Request):
 
     response = Response(content=upstream_resp.content, status_code=upstream_resp.status_code, headers=resp_headers)
 
-    # Preserve upstream Set-Cookie headers (Streamlit sets a few)
+    # Preserve upstream Set-Cookie headers (Streamlit sets cookies)
     get_list = getattr(upstream_resp.headers, "get_list", None)
     if callable(get_list):
         for c in upstream_resp.headers.get_list("set-cookie"):
@@ -804,6 +836,19 @@ async def proxy(request: Request):
         for k, v in upstream_resp.headers.items():
             if k.lower() == "set-cookie":
                 response.headers.append("set-cookie", v)
+
+    # ✅ Also set a short-lived st_access cookie when token came from query/header
+    # (helps WS + follow-up requests where query param isn't repeated)
+    if SET_ST_ACCESS_COOKIE and auth_method == "jwt" and token_source in ("query", "header") and jwt_token:
+        response.set_cookie(
+            "st_access",
+            jwt_token,
+            httponly=True,
+            secure=SESSION_HTTPS_ONLY,
+            samesite=SESSION_SAMESITE,
+            max_age=ST_ACCESS_COOKIE_MAX_AGE,
+            path="/",
+        )
 
     return response
 
@@ -823,12 +868,10 @@ routes = [
 
 app = Starlette(routes=routes)
 
-# Honor X-Forwarded-* headers when available (ingress / LB in front).
 if ProxyHeadersMiddleware is not None:
     trusted_hosts = os.getenv("TRUSTED_PROXY_HOSTS", "*")
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=trusted_hosts)
 
-# Session cookies (secure in prod)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
