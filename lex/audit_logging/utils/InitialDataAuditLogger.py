@@ -21,50 +21,48 @@ logger = logging.getLogger('lex_app.audit.initial_data')
 class InitialDataAuditLogger:
     """
     Audit logger for initial data upload operations.
-    
+
     This class provides audit logging functionality for data operations that occur
     during initial data upload, ensuring consistency with the existing audit trail
     while supporting batch operations for performance.
     """
-    
+
     def __init__(self, calculation_id: Optional[str] = None):
         """
         Initialize the audit logger.
-        
+
         Args:
             calculation_id: Optional calculation ID. If not provided, a unique ID will be generated.
         """
         # self.batch_manager = AuditLogBatchManager()  # TODO: Implement AuditLogBatchManager
         self.batch_manager = None  # Placeholder until AuditLogBatchManager is implemented
+
     def generate_calculation_id(self) -> str:
         return self._generate_calculation_id()
-
 
     def _generate_calculation_id(self) -> str:
         """Generate a unique calculation ID for initial data upload sessions."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         return f"initial_data_upload_{timestamp}_{unique_id}"
-    
-    def log_object_creation(self, model_class: Type[Model], instance_data: Dict[str, Any], 
-                          tag: Optional[str] = None, calculation_id=None) -> Optional[AuditLog]:
+
+    def log_object_creation(self, model_class: Type[Model], instance_data: Dict[str, Any],
+                            tag: Optional[str] = None, calculation_id=None) -> Optional[AuditLog]:
         """
         Log object creation operation.
-        
+
         Args:
             model_class: The Django model class being created
             instance_data: Dictionary containing the data used to create the instance
             tag: Optional tag to identify this operation in the audit trail
-            
+
         Returns:
             AuditLog: The created audit log entry, or None if logging failed
         """
 
-
-
         try:
             resource = model_class.__name__.lower()
-            
+
             # Safely serialize payload with error handling
             try:
                 payload = _serialize_payload(instance_data)
@@ -82,11 +80,10 @@ class InitialDataAuditLogger:
                 # Fallback to basic serialization
                 payload = {'_serialization_error': str(e), '_original_keys': list(instance_data.keys())}
 
-
             # Add tag information to payload if provided
             if tag:
                 payload['_audit_tag'] = tag
-            
+
             # Create audit log with transaction safety
             with transaction.atomic():
                 audit_log = AuditLog.objects.create(
@@ -96,12 +93,12 @@ class InitialDataAuditLogger:
                     payload=payload,
                     calculation_id=calculation_id
                 )
-                
+
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
                 if self.batch_manager:
                     self.batch_manager.add_pending_log(audit_log)
-            
+
             logger.debug(
                 f"Successfully created audit log for {resource} creation",
                 extra={
@@ -112,9 +109,9 @@ class InitialDataAuditLogger:
                     'tag': tag
                 }
             )
-            
+
             return audit_log
-            
+
         except Exception as e:
             error_msg = f"Failed to create audit log for {model_class.__name__} creation: {e}"
             logger.error(
@@ -130,18 +127,19 @@ class InitialDataAuditLogger:
             )
             # Don't raise exception to avoid breaking data upload process
             return None
-    
-    def log_object_update(self, model_class: Type[Model], instance: Model, 
-                         update_data: Dict[str, Any], tag: Optional[str] = None, calculation_id=None) -> Optional[AuditLog]:
+
+    def log_object_update(self, model_class: Type[Model], instance: Model,
+                          update_data: Dict[str, Any], tag: Optional[str] = None, calculation_id=None) -> Optional[
+        AuditLog]:
         """
         Log object update operation.
-        
+
         Args:
             model_class: The Django model class being updated
             instance: The model instance being updated
             update_data: Dictionary containing the update data
             tag: Optional tag to identify this operation in the audit trail
-            
+
         Returns:
             AuditLog: The created audit log entry, or None if logging failed
         """
@@ -163,7 +161,7 @@ class InitialDataAuditLogger:
                     }
                 )
                 instance_pk = 'unknown'
-            
+
             # Safely serialize update data
             try:
                 serialized_updates = _serialize_payload(update_data)
@@ -181,7 +179,7 @@ class InitialDataAuditLogger:
                 )
                 # Fallback to basic serialization
                 serialized_updates = {'_serialization_error': str(e), '_original_keys': list(update_data.keys())}
-            
+
             # Create payload with both old and new values for better audit trail
 
             serialized_updates['id'] = instance_pk
@@ -192,7 +190,7 @@ class InitialDataAuditLogger:
             # Add tag information to payload if provided
             if tag:
                 payload['_audit_tag'] = tag
-            
+
             # Create audit log with transaction safety
             with transaction.atomic():
                 audit_log = AuditLog.objects.create(
@@ -202,12 +200,12 @@ class InitialDataAuditLogger:
                     payload=payload,
                     calculation_id=calculation_id
                 )
-                
+
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
                 if self.batch_manager:
                     self.batch_manager.add_pending_log(audit_log)
-            
+
             logger.debug(
                 f"Successfully created audit log for {resource} update",
                 extra={
@@ -219,9 +217,9 @@ class InitialDataAuditLogger:
                     'tag': tag
                 }
             )
-            
+
             return audit_log
-            
+
         except Exception as e:
             error_msg = f"Failed to create audit log for {model_class.__name__} update: {e}"
             logger.error(
@@ -237,24 +235,22 @@ class InitialDataAuditLogger:
             )
             # Don't raise exception to avoid breaking data upload process
             return None
-    
+
     def log_object_deletion(self, instance: Model, filter_params: Dict[str, Any],
-                          tag: Optional[str] = None) -> Optional[AuditLog]:
+                            tag: Optional[str] = None) -> Optional[AuditLog]:
         """
         Log object deletion operation.
-        
+
         Args:
             model_class: The Django model class being deleted from
             filter_params: Dictionary containing the filter parameters used for deletion
             tag: Optional tag to identify this operation in the audit trail
-            
+
         Returns:
             AuditLog: The created audit log entry, or None if logging failed
         """
         model_class = instance.__class__
         payload = {}
-
-
 
         resource = model_class.__name__.lower()
         try:
@@ -277,16 +273,16 @@ class InitialDataAuditLogger:
                 )
                 # Fallback to basic serialization
                 serialized_filters = {'_serialization_error': str(e), '_original_keys': list(filter_params.keys())}
-            
+
             # payload = {
             #     'id': instance.pk,
             #     'filter_parameters': serialized_filters
             # }
-            
+
             # Add tag information to payload if provided
             if tag:
                 payload['_audit_tag'] = tag
-            
+
             # Create audit log with transaction safety
             with transaction.atomic():
                 audit_log = AuditLog.objects.create(
@@ -296,12 +292,12 @@ class InitialDataAuditLogger:
                     payload=payload,
                     calculation_id=None
                 )
-                
+
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
                 if self.batch_manager:
                     self.batch_manager.add_pending_log(audit_log)
-            
+
             logger.debug(
                 f"Successfully created audit log for {resource} deletion",
                 extra={
@@ -312,9 +308,9 @@ class InitialDataAuditLogger:
                     'tag': tag
                 }
             )
-            
+
             return audit_log
-            
+
         except Exception as e:
             error_msg = f"Failed to create audit log for {model_class.__name__} deletion: {e}"
             logger.error(
@@ -330,11 +326,11 @@ class InitialDataAuditLogger:
             )
             # Don't raise exception to avoid breaking data upload process
             return None
-    
+
     def mark_operation_success(self, audit_log: AuditLog) -> None:
         """
         Mark an audit log operation as successful.
-        
+
         Args:
             audit_log: The audit log to mark as successful
         """
@@ -346,6 +342,17 @@ class InitialDataAuditLogger:
         try:
             if self.batch_manager:
                 self.batch_manager.mark_success(audit_log)
+            else:
+                updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
+                    status='success',
+                    error_traceback=None
+                )
+                if updated_count == 0:
+                    AuditLogStatus.objects.create(
+                        audit_log=audit_log,
+                        status='success',
+                        error_traceback=None
+                    )
             logger.debug(
                 f"Marked audit log {audit_log.id} as successful",
                 extra={
@@ -366,11 +373,11 @@ class InitialDataAuditLogger:
                 }
             )
             # Don't raise exception to avoid breaking data upload process
-    
+
     def mark_operation_failure(self, audit_log: AuditLog, error_msg: str) -> None:
         """
         Mark an audit log operation as failed.
-        
+
         Args:
             audit_log: The audit log to mark as failed
             error_msg: Error message or traceback
@@ -379,12 +386,22 @@ class InitialDataAuditLogger:
             logger.debug("Skipping failure marking for None audit log")
             return
 
-
         calculation_id = audit_log.calculation_id
 
         try:
             if self.batch_manager:
                 self.batch_manager.mark_failure(audit_log, error_msg)
+            else:
+                updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
+                    status='failure',
+                    error_traceback=error_msg
+                )
+                if updated_count == 0:
+                    AuditLogStatus.objects.create(
+                        audit_log=audit_log,
+                        status='failure',
+                        error_traceback=error_msg
+                    )
             logger.warning(
                 f"Marked audit log {audit_log.id} as failed: {error_msg}",
                 extra={
@@ -407,11 +424,11 @@ class InitialDataAuditLogger:
                 }
             )
             # Don't raise exception to avoid breaking data upload process
-    
+
     def finalize_batch(self) -> Dict[str, Any]:
         """
         Finalize the batch and return summary statistics.
-        
+
         Returns:
             Dict containing summary statistics of the audit logging session
         """
@@ -440,7 +457,7 @@ class InitialDataAuditLogger:
                         'traceback': traceback.format_exc()
                     }
                 )
-            
+
             # Generate summary statistics with error handling
             summary = {
                 'calculation_id': calculation_id,

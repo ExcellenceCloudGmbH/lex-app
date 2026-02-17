@@ -539,6 +539,7 @@ def load_data(test, generic_app_models, audit_logging_enabled=None, initial_data
     from lex.lex_app.apps import should_load_data, _create_audit_logger_for_task
 
     audit_logger = _create_audit_logger_for_task(audit_logging_enabled)
+    finalization_error = None
 
     try:
         test.test_path = initial_data_load
@@ -561,21 +562,24 @@ def load_data(test, generic_app_models, audit_logging_enabled=None, initial_data
             else:
                 asyncio.run(sync_to_async(test.setUpCloudStorage)(generic_app_models, audit_logger))
 
-        # Finalize audit logging if enabled
-        if audit_logger:
-            try:
-                summary = audit_logger.finalize_batch()
-                print(f"Audit logging summary: {summary}")
-            except Exception as e:
-                print(f"Warning: Failed to finalize audit logging: {e}")
-
         print("Initial Data Fill completed Successfully")
     except Exception as e:
+        finalization_error = (
+            f"Initial data upload failed with {type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+        )
         print("Initial Data Fill aborted with Exception:")
         print(f"Error type: {type(e).__name__}")
         print(f"Error message: {str(e)}")
         traceback.print_exc()
         raise e
+    finally:
+        # Always finalize audit logging to prevent lingering pending statuses.
+        if audit_logger:
+            try:
+                summary = audit_logger.finalize_batch(failure_error=finalization_error)
+                print(f"Audit logging summary: {summary}")
+            except Exception as e:
+                print(f"Warning: Failed to finalize audit logging: {e}")
 
 
 @lex_shared_task

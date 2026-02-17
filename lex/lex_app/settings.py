@@ -477,7 +477,7 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
-# OIDC_MIDDLEWARE_LOGIN_REQUIRED_REDIRECT = True
+OIDC_UNUSABLE_PASSWORD = False
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -562,25 +562,31 @@ if os.getenv("STORAGE_TYPE") == "LEGACY" or not os.getenv("STORAGE_TYPE"):
 
         USER_REPORT_ROOT = "/app/storage/reports/"
 
+IS_DEPLOYED = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
+
+# Console: no DEBUG in deployed envs
+CONSOLE_LEVEL = "INFO" if IS_DEPLOYED else "DEBUG"
+
+# oauth2_authcodeflow: also no DEBUG in deployed envs (since it only uses console)
+OAUTH2_LEVEL = "INFO" if IS_DEPLOYED else "DEBUG"
+
+# root: keep LOG_LEVEL locally, but if deployed and it resolves to DEBUG, bump it to INFO
+ROOT_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+if IS_DEPLOYED and ROOT_LEVEL == "DEBUG":
+    ROOT_LEVEL = "INFO"
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        # Console stays plain
-        "default": {
-            "format": "{levelname} {asctime} {message}",
-            "style": "{",
-        },
-        # Markdown formatter for WS – header in Markdown, message as-is
-        "ws_md": {
-            "format": ("\n{message}"),
-            "style": "{",
-        },
+        "default": {"format": "{levelname} {asctime} {message}", "style": "{"},
+        "ws_md": {"format": "\n{message}", "style": "{"},
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "default",
+            "level": CONSOLE_LEVEL,
         },
         "ws": {
             "()": "lex.audit_logging.handlers.WebSocketHandler.WebSocketHandler",
@@ -594,22 +600,21 @@ LOGGING = {
             "level": "DEBUG",
             "propagate": False,
         },
-        'oauth2_authcodeflow': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': True,
+        "oauth2_authcodeflow": {
+            "handlers": ["console"],
+            "level": OAUTH2_LEVEL,
+            "propagate": False,
         },
-
     },
     "root": {
         "handlers": ["console"],
-        "level": os.getenv("LOG_LEVEL", "DEBUG"),
+        "level": ROOT_LEVEL,
     },
 }
 
 INSTANCE_CONTROLLER_BASE_URL = os.getenv(
     "INSTANCE_CONTROLLER_BASE_URL",
-    "https://hazem.excellence-cloud.dev",
+    "https://test.excellence-cloud.dev",
 )
 
 KEYCLOAK_SETUP_CALLBACK_URL = os.getenv(
