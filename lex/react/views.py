@@ -8,7 +8,9 @@ from django.views.static import serve as static_serve
 
 from lex.lex_app import settings
 
+from django.views.decorators.clickjacking import xframe_options_exempt
 
+@xframe_options_exempt
 def serve_react(request, path, document_root=None):
     path = posixpath.normpath(path).lstrip("/")
 

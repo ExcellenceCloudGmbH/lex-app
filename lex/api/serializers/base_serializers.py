@@ -93,6 +93,30 @@ class LexSerializer(serializers.ModelSerializer):
     _base_user_context = None      # Cached UserContext without keycloak scopes
     _meta_fields_cache: dict = {}  # { model_class: set_of_field_names }
 
+    def to_internal_value(self, data):
+        """
+        Normalize frontend multipart FK markers like "undefined"/"null" by
+        dropping those keys so nullable relations can remain empty.
+        """
+        if data is None:
+            return super().to_internal_value(data)
+
+        cleaned_data = data.copy() if hasattr(data, "copy") else dict(data)
+        changed = False
+
+        for field_name, field in self.fields.items():
+            if field_name not in cleaned_data:
+                continue
+            if not isinstance(field, serializers.PrimaryKeyRelatedField):
+                continue
+
+            raw_value = cleaned_data.get(field_name)
+            if isinstance(raw_value, str) and raw_value.strip().lower() in {"undefined", "null"}:
+                cleaned_data.pop(field_name, None)
+                changed = True
+
+        return super().to_internal_value(cleaned_data if changed else data)
+
     def _get_base_user_context(self, request):
         """Get or create a base UserContext cached on this serializer instance."""
         if self._base_user_context is None:
