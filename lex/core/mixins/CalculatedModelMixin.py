@@ -1142,8 +1142,9 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
         pass
 
     def lex_func(self):
-        return self.calculate_mixin if hasattr(self, "calculate_mixin") else self.calculate
-
+        if self.calculate_mixin.__func__ is not CalculatedModelMixin.calculate_mixin:
+            return self.calculate_mixin
+        return self.calculate
 
     # def get_func(self):
     #     return self.
