@@ -40,7 +40,9 @@ class OneModelEntry(
     RetrieveUpdateDestroyAPIView,
     CreateAPIView,
 ):
-    permission_classes = [IsAuthenticated]
+    # Keep parity with ModelEntryProviderMixin defaults so model-level
+    # modification_restriction rules (e.g. legacy read-only) are enforced.
+    permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
 
     def create(self, request, *args, **kwargs):
         model_container = self.kwargs["model_container"]

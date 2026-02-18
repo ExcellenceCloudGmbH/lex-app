@@ -599,7 +599,6 @@ def calc_and_save(models: List[Model], *args, **kwargs):
     for model in models:
         try:
             logger.info(f"Processing model {model}")
-            model.save()
             model.lex_func()()
             logger.info(f"Finished calculating model {model}")
             model.save()

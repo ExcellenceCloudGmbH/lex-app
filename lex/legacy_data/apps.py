@@ -1,82 +1,271 @@
+import json
+import keyword
+import os
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
 from django.contrib import admin
+from django.core.exceptions import SynchronousOnlyOperation
+from django.db import connection, models
+
 from lex.lex_app.apps import LexAppConfig
-from process_admin.utils import ModelRegistration
+
+
+def _safe_attr_name(column_name: str, used_names: set[str]) -> str:
+    candidate = re.sub(r"\W+", "_", column_name.strip().lower())
+    candidate = candidate.strip("_") or "column"
+    if candidate[0].isdigit():
+        candidate = f"f_{candidate}"
+    if keyword.iskeyword(candidate):
+        candidate = f"{candidate}_field"
+
+    base = candidate
+    idx = 1
+    while candidate in used_names:
+        idx += 1
+        candidate = f"{base}_{idx}"
+    used_names.add(candidate)
+    return candidate
+
+
+def _map_db_field(column, introspection, pk_column: str) -> Tuple[str, models.Field]:
+    try:
+        db_field_type = introspection.get_field_type(column.type_code, column)
+    except Exception:
+        db_field_type = "TextField"
+    field_kwargs: Dict[str, object] = {
+        "null": bool(getattr(column, "null_ok", True)),
+        "blank": bool(getattr(column, "null_ok", True)),
+    }
+    if column.name == pk_column:
+        field_kwargs["primary_key"] = True
+        field_kwargs.pop("null", None)
+        field_kwargs.pop("blank", None)
+
+    if db_field_type in {"AutoField", "SmallAutoField", "BigAutoField"}:
+        field_cls = {
+            "AutoField": models.AutoField,
+            "SmallAutoField": models.SmallAutoField,
+            "BigAutoField": models.BigAutoField,
+        }[db_field_type]
+        return db_field_type, field_cls(**field_kwargs)
+
+    if db_field_type in {"BigIntegerField", "IntegerField", "SmallIntegerField"}:
+        return db_field_type, getattr(models, db_field_type)(**field_kwargs)
+    if db_field_type in {"BooleanField", "NullBooleanField"}:
+        return "BooleanField", models.BooleanField(**field_kwargs)
+    if db_field_type in {"DateTimeField", "DateField", "TimeField", "DurationField"}:
+        return db_field_type, getattr(models, db_field_type)(**field_kwargs)
+    if db_field_type == "DecimalField":
+        precision = getattr(column, "precision", None) or 38
+        scale = getattr(column, "scale", None) or 18
+        return db_field_type, models.DecimalField(
+            max_digits=precision,
+            decimal_places=scale,
+            **field_kwargs,
+        )
+    if db_field_type == "FloatField":
+        return db_field_type, models.FloatField(**field_kwargs)
+    if db_field_type == "UUIDField":
+        return db_field_type, models.UUIDField(**field_kwargs)
+    if db_field_type == "BinaryField":
+        return db_field_type, models.BinaryField(**field_kwargs)
+    if db_field_type == "JSONField":
+        return db_field_type, models.JSONField(**field_kwargs)
+    if db_field_type == "CharField":
+        max_length = getattr(column, "internal_size", None)
+        if not max_length or max_length <= 0:
+            return "TextField", models.TextField(**field_kwargs)
+        return db_field_type, models.CharField(max_length=max_length, **field_kwargs)
+
+    # Safe fallback for unknown/custom DB types.
+    return "TextField", models.TextField(**field_kwargs)
+
+
+def _deny_legacy_save(self, *args, **kwargs):
+    raise NotImplementedError("This is a legacy archive model. Edits are not allowed.")
+
+
+def _deny_legacy_delete(self, *args, **kwargs):
+    raise NotImplementedError("This is a legacy archive model. Deletions are not allowed.")
 
 
 class LegacyDataConfig(LexAppConfig):
-    name = 'lex.legacy_data'
-    verbose_name = 'Legacy Data (V1 Archive)'
+    name = "lex.legacy_data"
+    verbose_name = "Legacy Data (V1 Archive)"
 
-    def register_models(self):
-        # We override register_models to provide custom Read-Only Admin for legacy data
-        # avoiding the standard ModelRegistration which assumes standard permissions.
-        
-        from django.db import connection
-        from django.core.exceptions import SynchronousOnlyOperation
-        
-        # Helper to check if a table exists
-        def table_exists(table_name):
-            try:
-                # Try standard synchronous check
-                return table_name in connection.introspection.table_names()
-            except SynchronousOnlyOperation:
-                # If we are in an async context (e.g. ASGI startup), we can't safely 
-                # check the DB synchronously. We assume True to allow registration.
-                # If the table doesn't exist, accessing the admin page will error, 
-                # but startup won't crash. This is better than omitting them entirely.
-                return True
-            except Exception:
-                # Fallback for other DB errors (e.g. not ready)
-                return False
+    def _table_names(self) -> List[str]:
+        try:
+            return connection.introspection.table_names()
+        except SynchronousOnlyOperation:
+            # Avoid startup crash in async lifecycle. No dynamic table discovery here.
+            return []
+        except Exception:
+            return []
 
-        from lex.legacy_data.models import LegacyCalculationLog, LegacyUserChangeLog, LegacyCalculationId
-        from lex.legacy_data.admin import LegacyCalculationLogAdmin, LegacyUserChangeLogAdmin, LegacyCalculationIdAdmin
-        from lex.process_admin.settings import processAdminSite
-        from lex.legacy_data.serializers.legacy_data_serializers import (
-            LegacyCalculationLogSerializer, 
-            LegacyUserChangeLogSerializer, 
-            LegacyCalculationIdSerializer
+    def _table_exists(self, table_name: str) -> bool:
+        return table_name in self._table_names()
+
+    def _manifest_path(self) -> Path:
+        override = os.getenv("LEX_LEGACY_FREEZE_MANIFEST_PATH")
+        if override:
+            return Path(override).expanduser().resolve()
+        project_root = Path(os.getenv("PROJECT_ROOT", os.getcwd()))
+        return (project_root / ".lex_legacy_freeze_manifest.json").resolve()
+
+    def _load_manifest_tables(self) -> List[str]:
+        path = self._manifest_path()
+        if not path.exists():
+            return []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return []
+        tables = payload.get("freeze_tables") or []
+        return [str(table_name) for table_name in tables if str(table_name).strip()]
+
+    def _get_table_pk_column(self, table_name: str) -> Optional[str]:
+        with connection.cursor() as cursor:
+            constraints = connection.introspection.get_constraints(cursor, table_name)
+        pk_columns = []
+        for data in constraints.values():
+            if data.get("primary_key"):
+                pk_columns.extend(data.get("columns") or [])
+        pk_columns = list(dict.fromkeys(pk_columns))
+        if len(pk_columns) != 1:
+            return None
+        return pk_columns[0]
+
+    def _build_dynamic_model(self, table_name: str):
+        pk_column = self._get_table_pk_column(table_name)
+        if not pk_column:
+            return None
+
+        with connection.cursor() as cursor:
+            table_description = connection.introspection.get_table_description(
+                cursor, table_name
+            )
+
+        used_names: set[str] = set()
+        attrs: Dict[str, object] = {
+            "__module__": self.__module__,
+            "_is_dynamic_legacy_archive": True,
+            "_legacy_archive_table_name": table_name,
+            "can_create": lambda self, request=None: False,
+            "can_delete": lambda self, request=None: False,
+            "can_edit": lambda self, request=None: set(),
+            "save": _deny_legacy_save,
+            "delete": _deny_legacy_delete,
+        }
+
+        for column in table_description:
+            db_type, field = _map_db_field(column, connection.introspection, pk_column)
+            attr_name = _safe_attr_name(column.name, used_names)
+            if attr_name != column.name:
+                field.db_column = column.name
+            attrs[attr_name] = field
+
+        class Meta:
+            managed = False
+            app_label = "legacy_data"
+            db_table = table_name
+            verbose_name = f"Legacy {table_name}"
+            verbose_name_plural = f"Legacy {table_name}"
+
+        attrs["Meta"] = Meta
+
+        class_name = "LegacyDynamic" + "".join(
+            token.capitalize() for token in re.split(r"[^a-zA-Z0-9]+", table_name) if token
         )
-        from lex.core.mixins.ModelModificationRestriction import AdminReportsModificationRestriction
+        return type(class_name, (models.Model,), attrs)
 
-        # Inject custom read-only serializers onto the models dynamically
-        # This avoids circular imports in models.py while ensuring the API uses our restricted serializers.
+    def _register_static_legacy_models(self, processAdminSite, read_only_restriction):
+        from lex.legacy_data.admin import (
+            LegacyCalculationIdAdmin,
+            LegacyCalculationLogAdmin,
+            LegacyUserChangeLogAdmin,
+        )
+        from lex.legacy_data.models import (
+            LegacyCalculationId,
+            LegacyCalculationLog,
+            LegacyUserChangeLog,
+        )
+        from lex.legacy_data.serializers.legacy_data_serializers import (
+            LegacyCalculationIdSerializer,
+            LegacyCalculationLogSerializer,
+            LegacyUserChangeLogSerializer,
+        )
+
         LegacyCalculationLog.api_serializers = {"default": LegacyCalculationLogSerializer}
         LegacyUserChangeLog.api_serializers = {"default": LegacyUserChangeLogSerializer}
         LegacyCalculationId.api_serializers = {"default": LegacyCalculationIdSerializer}
 
-        # Inject strict modification restrictions to prevent DELETE operations gracefully (HTTP 403)
-        # instead of crashing with HTTP 500 at the model level.
-        read_only_restriction = AdminReportsModificationRestriction()
         LegacyCalculationLog.modification_restriction = read_only_restriction
         LegacyUserChangeLog.modification_restriction = read_only_restriction
         LegacyCalculationId.modification_restriction = read_only_restriction
 
-        # Explicitly disable history tracking for these models
-        # (This adds them to the ignore list used by ModelRegistration if standard registration runs)
-        if not hasattr(self, 'untracked_models'):
-             self.untracked_models = []
-        self.untracked_models.extend(["legacycalculationlog", "legacyuserchangelog", "legacycalculationid"])
+        static_models = [
+            (LegacyCalculationLog, LegacyCalculationLogAdmin),
+            (LegacyUserChangeLog, LegacyUserChangeLogAdmin),
+            (LegacyCalculationId, LegacyCalculationIdAdmin),
+        ]
 
-        # Only register the model in Admin if its underlying table actually exists in the DB.
-        # This prevents the "V1 Archive" section from appearing on fresh installs 
-        # or environments where legacy data was never migrated.
+        for model, admin_model in static_models:
+            if not self._table_exists(model._meta.db_table):
+                continue
+            if not admin.site.is_registered(model):
+                admin.site.register(model, admin_model)
+            processAdminSite.register([model])
+            self.untracked_models.append(model._meta.model_name)
 
-        if table_exists(LegacyCalculationLog._meta.db_table):
-            if not admin.site.is_registered(LegacyCalculationLog):
-                admin.site.register(LegacyCalculationLog, LegacyCalculationLogAdmin)
-            processAdminSite.register([LegacyCalculationLog])
-        
-        if table_exists(LegacyUserChangeLog._meta.db_table):
-            if not admin.site.is_registered(LegacyUserChangeLog):
-                admin.site.register(LegacyUserChangeLog, LegacyUserChangeLogAdmin)
-            processAdminSite.register([LegacyUserChangeLog])
-        
-        if table_exists(LegacyCalculationId._meta.db_table):
-            if not admin.site.is_registered(LegacyCalculationId):
-                admin.site.register(LegacyCalculationId, LegacyCalculationIdAdmin)
-            processAdminSite.register([LegacyCalculationId])
+    def _register_dynamic_legacy_models(self, processAdminSite, read_only_restriction):
+        from lex.legacy_data.admin.read_only_admin import ReadOnlyAdmin
 
+        if not hasattr(self, "_dynamic_model_cache"):
+            self._dynamic_model_cache = {}
 
-        # 3. Call parent just in case there are other models (though we don't expect any)
-        # super().register_models()
+        for table_name in self._load_manifest_tables():
+            if not self._table_exists(table_name):
+                continue
+
+            dynamic_model = self._dynamic_model_cache.get(table_name)
+            if dynamic_model is None:
+                dynamic_model = self._build_dynamic_model(table_name)
+                if dynamic_model is not None:
+                    self._dynamic_model_cache[table_name] = dynamic_model
+            if dynamic_model is None:
+                continue
+
+            dynamic_model.modification_restriction = read_only_restriction
+
+            model_fields = [f.name for f in dynamic_model._meta.fields]
+            list_display = model_fields[:8] if model_fields else []
+            search_fields = [model_fields[0]] if model_fields else []
+            dynamic_admin = type(
+                f"{dynamic_model.__name__}Admin",
+                (ReadOnlyAdmin,),
+                {
+                    "list_display": tuple(list_display),
+                    "search_fields": tuple(search_fields),
+                },
+            )
+
+            if not admin.site.is_registered(dynamic_model):
+                admin.site.register(dynamic_model, dynamic_admin)
+            processAdminSite.register([dynamic_model])
+            self.untracked_models.append(dynamic_model._meta.model_name)
+
+    def register_models(self):
+        from lex.core.mixins.ModelModificationRestriction import (
+            AdminReportsModificationRestriction,
+        )
+        from lex.process_admin.settings import processAdminSite
+
+        if not hasattr(self, "untracked_models"):
+            self.untracked_models = []
+
+        read_only_restriction = AdminReportsModificationRestriction()
+        self._register_static_legacy_models(processAdminSite, read_only_restriction)
+        self._register_dynamic_legacy_models(processAdminSite, read_only_restriction)

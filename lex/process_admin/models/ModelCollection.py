@@ -2,7 +2,6 @@ from copy import deepcopy
 from typing import Dict, Any, Set, Type, Union
 from django.db.models import Model
 
-from legacy_data.models import LegacyUserChangeLog, LegacyCalculationId, LegacyCalculationLog
 from lex.process_admin.models.ModelContainer import ModelContainer
 from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
 from process_admin.utils import ModelStructureBuilder
@@ -69,16 +68,22 @@ class ModelCollection:
         self.ids2containers = _create_model_containers(models_to_admins)
         set_of_ids_container = [c.id for c in self.all_containers]
 
-        # Build the "Legacy Generic App (Archive)" folder from whatever legacy
-        # models were actually registered by LegacyDataConfig (which already
-        # performed the authoritative table-exists check at startup).
-        legacy_models = [LegacyCalculationLog, LegacyUserChangeLog, LegacyCalculationId]
+        # Build the legacy archive folder from all registered models flagged
+        # as legacy_data (including dynamic frozen tables).
         temp = {}
-        for lm in legacy_models:
-            lm_id = lm.__name__.lower()
-            if lm_id in set_of_ids_container:
-                set_of_ids_container.remove(lm_id)
-                temp[lm_id] = None
+        for container in self.all_containers:
+            model_class = container.model_class
+            app_label = getattr(getattr(model_class, "_meta", None), "app_label", None)
+            is_legacy = (
+                getattr(model_class, "_is_dynamic_legacy_archive", False)
+                or app_label == "legacy_data"
+            )
+            if not is_legacy:
+                continue
+            model_id = container.id
+            if model_id in set_of_ids_container:
+                set_of_ids_container.remove(model_id)
+                temp[model_id] = None
 
         if temp:
             model_structure["Legacy Generic App (Archive)"] = temp

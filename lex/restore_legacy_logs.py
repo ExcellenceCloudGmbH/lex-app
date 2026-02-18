@@ -161,7 +161,7 @@ def restore_legacy_logs():
     
     print("\n" + "=" * 60)
     print("✅ Restore Complete!")
-    print("   Next: python scripts/backfill_history_sql.py")
+    print("   Next: lex backfill_bitemporal_history --reason 'V1 migration snapshot'")
     print("=" * 60)
     
     return True
