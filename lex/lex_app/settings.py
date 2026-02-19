@@ -248,10 +248,10 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
-    "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
     "oauth2_authcodeflow.middleware.LoginRequiredMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
+    "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
 ]
 
 ROOT_URLCONF = "lex_app.urls"
