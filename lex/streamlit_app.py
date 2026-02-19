@@ -1,4 +1,3 @@
-import base64
 import json
 import os
 import traceback
@@ -6,16 +5,12 @@ import urllib.parse
 import threading
 import time
 import logging
-from datetime import datetime, timezone
 from typing import Optional, Dict
 
 import jwt
 import requests
 import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-
-from lex.api.views.authentication.KeycloakManager import KeycloakManager
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 log = logging.getLogger(__name__)
@@ -28,6 +23,7 @@ TOKEN_SKEW_SECONDS = 10          # refresh 10s before exp
 REFRESH_MIN_INTERVAL = 15        # floor sleep
 REFRESH_MAX_BACKOFF = 300        # cap backoff to 5 minutes
 
+st.set_page_config(layout="wide")
 
 def _oidc_token_endpoint() -> str:
     base = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")

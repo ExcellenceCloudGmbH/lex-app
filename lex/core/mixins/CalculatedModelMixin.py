@@ -860,7 +860,7 @@ def calc_and_save_sync(models, *args):
             
             # Calculate the model
             try:
-                model.save()
+                # model.save()
                 model.lex_func()(*args)
                 logger.debug(f"Calculation completed for model {i + 1}")
             except Exception as calc_error:
