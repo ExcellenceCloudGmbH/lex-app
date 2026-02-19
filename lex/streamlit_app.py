@@ -1,4 +1,3 @@
-import json
 import os
 import traceback
 import urllib.parse
@@ -208,6 +207,39 @@ def get_user_info(access_token: str):
         return None
 
 
+def sync_keycloak_context_from_access_token() -> None:
+    access_token = (st.session_state.get("access_token") or "").strip()
+    if not access_token:
+        return
+
+    if st.session_state.get("keycloak_context_token") == access_token:
+        return
+
+    user_info = get_user_info(access_token)
+    if isinstance(user_info, dict) and user_info:
+        st.session_state.user_info = user_info
+        st.session_state.user_id = user_info.get("sub") or st.session_state.get("user_id", "")
+        st.session_state.user_email = user_info.get("email") or st.session_state.get("user_email", "")
+        username = (
+            user_info.get("preferred_username")
+            or user_info.get("name")
+            or st.session_state.get("user_username", "")
+        )
+        st.session_state.user_username = username
+
+    try:
+        from lex.api.views.authentication.KeycloakManager import KeycloakManager
+
+        kc_manager = KeycloakManager()
+        permissions = kc_manager.get_uma_permissions(access_token)
+        st.session_state.permissions = permissions if isinstance(permissions, list) else []
+    except Exception as e:
+        logger.error(f"Failed to get UMA permissions via KeycloakManager: {e}")
+        st.session_state.permissions = []
+
+    st.session_state.keycloak_context_token = access_token
+
+
 # -------------------------
 # Logout helpers (form-safe)
 # -------------------------
@@ -315,9 +347,11 @@ def init_session_state() -> None:
     if "user_username" not in st.session_state:
         st.session_state.user_username = ""
     if "permissions" not in st.session_state:
-        st.session_state.permissions = {}
+        st.session_state.permissions = []
     if "user_info" not in st.session_state:
         st.session_state.user_info = {"sub": "", "email": "", "preferred_username": ""}
+    if "keycloak_context_token" not in st.session_state:
+        st.session_state.keycloak_context_token = ""
 
 
 # -------------------------
@@ -325,6 +359,7 @@ def init_session_state() -> None:
 # -------------------------
 def authenticate_from_proxy_or_jwt() -> None:
     if st.session_state.authenticated:
+        sync_keycloak_context_from_access_token()
         return
 
     headers = getattr(st.context, "headers", {}) or {}
@@ -351,11 +386,6 @@ def authenticate_from_proxy_or_jwt() -> None:
         or headers.get("X-Streamlit-Auth-Method", "")
         or ""
     )
-    perms_raw = (
-        h.get("x-streamlit-user-permissions")
-        or headers.get("X-Streamlit-User-Permissions", "")
-        or ""
-    )
 
     if not user_id:
         token = bearer_from_headers(h)
@@ -370,20 +400,12 @@ def authenticate_from_proxy_or_jwt() -> None:
     if not user_id and user_email:
         user_id = user_email
 
-    permissions = {}
-    if perms_raw:
-        try:
-            permissions = json.loads(perms_raw)
-        except Exception:
-            permissions = {}
-
     if user_id:
         st.session_state.authenticated = True
         st.session_state.auth_method = auth_method or ("session" if not bearer_from_headers(h) else "jwt")
         st.session_state.user_id = user_id
         st.session_state.user_email = user_email
         st.session_state.user_username = user_username or (user_email.split("@")[0] if user_email else "")
-        st.session_state.permissions = permissions
         st.session_state.user_info = {
             "sub": st.session_state.user_id,
             "email": st.session_state.user_email,
@@ -398,6 +420,7 @@ def authenticate_from_proxy_or_jwt() -> None:
         if rt_hdr:
             st.session_state.refresh_token = rt_hdr
 
+        sync_keycloak_context_from_access_token()
         start_token_refresh_thread_if_needed()
 
         logger.info(

@@ -11,7 +11,8 @@ class KeycloakPermissionsMiddleware:
     This middleware is responsible for fetching a user's complete set of UMA (User-Managed Access)
     permissions from Keycloak once per authenticated request.
 
-    It attaches the list of permissions to the `request` object as `request.user_permissions`.
+    It attaches the list of permissions to the `request` object as `request.user_permissions`,
+    and user profile data as `request.userinfo`/`request.client_roles`.
     This creates a single, consistent source of truth for permissions that can be used
     by DRF Permission classes, filters, and serializers throughout the request lifecycle,
     avoiding redundant API calls to Keycloak.
@@ -46,29 +47,56 @@ class KeycloakPermissionsMiddleware:
         # First, clean up any None tokens to prevent JWT parsing errors
         # self.cleanup_invalid_tokens(request)
         
-        # We only need to fetch permissions for authenticated users who have a Keycloak token.
-        # The `hasattr` check provides a safeguard in case the user object is not standard.
+        # Always provide defaults so downstream code can safely access these attributes.
+        request.user_permissions = []
+        request.userinfo = {}
+        request.client_roles = []
+
         access_token = request.session.get("oidc_access_token")
         if access_token:
+            kc_manager = KeycloakManager()
             try:
                 # Fetch all permissions once and attach them to the request.
                 # This list will be the single source of truth for the rest of the request.
-                kc_manager = KeycloakManager()
                 permissions = kc_manager.get_uma_permissions(access_token)
                 request.user_permissions = permissions if permissions is not None else []
             except Exception as e:
                 # Log any unexpected errors during permission fetching but don't crash the request.
                 # Default to no permissions in case of an error.
                 logger.error(f"Failed to fetch Keycloak UMA permissions: {e}")
-                request.user_permissions = []
-        else:
-            # Handle the case where the token is present but empty.
-            request.user_permissions = []
+
+            try:
+                if kc_manager.oidc:
+                    userinfo = kc_manager.oidc.userinfo(access_token)
+                    if isinstance(userinfo, dict):
+                        request.userinfo = userinfo
+                        request.client_roles = self._extract_client_roles(userinfo)
+            except Exception as e:
+                logger.warning(f"Failed to fetch Keycloak userinfo: {e}")
 
         # Pass control to the next middleware or the view.
         response = self.get_response(request)
 
         return response
+
+    @staticmethod
+    def _extract_client_roles(userinfo):
+        raw_roles = userinfo.get("client_roles")
+        if not raw_roles:
+            return []
+        if isinstance(raw_roles, str):
+            return [raw_roles]
+        if isinstance(raw_roles, (list, tuple, set, frozenset)):
+            return [role for role in raw_roles if isinstance(role, str)]
+        if isinstance(raw_roles, dict):
+            roles = []
+            for value in raw_roles.values():
+                if isinstance(value, str):
+                    roles.append(value)
+                elif isinstance(value, (list, tuple, set, frozenset)):
+                    roles.extend([role for role in value if isinstance(role, str)])
+            return roles
+        return []
 
     def cleanup_invalid_tokens(self, request):
         """Remove None or empty tokens from session to prevent JWT parsing errors."""

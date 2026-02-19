@@ -2,9 +2,8 @@ import logging
 from abc import ABCMeta
 
 import streamlit as st
-from typing import Set, Dict, Any, Union, Optional
 from dataclasses import dataclass
-from typing import FrozenSet, Optional, Mapping, Any, Literal
+from typing import Any, Dict, FrozenSet, Literal, Mapping, Optional, Set, Union
 
 from django.db import models, transaction
 from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
@@ -17,13 +16,111 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class UserContext:
-    """Clean user context for authorization methods"""
+    """Clean user context for authorization methods.
+
+    Note:
+        `user_permissions` here represents Keycloak UMA permissions taken from
+        `request.user_permissions` (middleware), not Django's built-in
+        `user.user_permissions` many-to-many relation.
+    """
     user: Any  # Django User instance
     email: str
     is_authenticated: bool
     is_superuser: bool
     groups: Set[str]
     keycloak_scopes: Set[str]  # Available Keycloak scopes for this resource
+    user_permissions: tuple[Mapping[str, Any], ...] = tuple()
+    client_roles: FrozenSet[str] = frozenset()
+
+    @staticmethod
+    def _normalize_permissions(raw_permissions: Any) -> tuple[Mapping[str, Any], ...]:
+        if not raw_permissions:
+            return tuple()
+        if not isinstance(raw_permissions, (list, tuple, set, frozenset)):
+            return tuple()
+        normalized = []
+        for perm in raw_permissions:
+            if isinstance(perm, Mapping):
+                normalized.append(dict(perm))
+        return tuple(normalized)
+
+    @staticmethod
+    def _normalize_roles(raw_roles: Any) -> FrozenSet[str]:
+        if raw_roles is None:
+            return frozenset()
+        if isinstance(raw_roles, str):
+            return frozenset({raw_roles}) if raw_roles else frozenset()
+        if isinstance(raw_roles, Mapping):
+            role_set = set()
+            for value in raw_roles.values():
+                role_set.update(UserContext._normalize_roles(value))
+            return frozenset(role_set)
+        if isinstance(raw_roles, (list, tuple, set, frozenset)):
+            role_set = set()
+            for value in raw_roles:
+                role_set.update(UserContext._normalize_roles(value))
+            return frozenset(role_set)
+        return frozenset()
+
+    @classmethod
+    def _extract_client_roles(cls, request, user) -> FrozenSet[str]:
+        role_sources = []
+
+        request_userinfo = getattr(request, "userinfo", None)
+        if isinstance(request_userinfo, Mapping):
+            role_sources.append(request_userinfo.get("client_roles"))
+
+        session = getattr(request, "session", None)
+        if session:
+            session_userinfo = session.get("oidc_userinfo")
+            if isinstance(session_userinfo, Mapping):
+                role_sources.append(session_userinfo.get("client_roles"))
+
+        role_sources.append(getattr(request, "client_roles", None))
+        role_sources.append(getattr(user, "client_roles", None))
+        role_sources.append(getattr(user, "roles", None))
+
+        roles = set()
+        for role_source in role_sources:
+            roles.update(cls._normalize_roles(role_source))
+        return frozenset(roles)
+
+    @staticmethod
+    def _resolve_keycloak_scopes(
+        user_permissions: tuple[Mapping[str, Any], ...],
+        instance=None,
+    ) -> Set[str]:
+        keycloak_scopes = set()
+        if not instance:
+            return keycloak_scopes
+
+        resource_name = f"{instance._meta.app_label}.{instance.__class__.__name__}"
+        instance_pk = str(instance.pk) if getattr(instance, "pk", None) else None
+        for perm in user_permissions:
+            if perm.get("rsname") != resource_name:
+                continue
+            resource_set_id = perm.get("resource_set_id")
+            if instance_pk and resource_set_id is not None and instance_pk == str(resource_set_id):
+                keycloak_scopes.update(perm.get("scopes", []))
+            elif resource_set_id is None:
+                keycloak_scopes.update(perm.get("scopes", []))
+        return keycloak_scopes
+
+    @staticmethod
+    def _enrich_user(user, user_permissions: tuple[Mapping[str, Any], ...], client_roles: FrozenSet[str]) -> None:
+        # Keep this best-effort and non-fatal; user object mutability depends on backend.
+        try:
+            setattr(user, "keycloak_user_permissions", user_permissions)
+        except Exception:
+            pass
+        try:
+            setattr(user, "client_roles", sorted(client_roles))
+        except Exception:
+            pass
+        try:
+            setattr(user, "roles", sorted(client_roles))
+        except Exception:
+            pass
     
     @classmethod
     def from_request(cls, request, instance=None):
@@ -32,17 +129,10 @@ class UserContext:
             return cls.anonymous()
         
         user = request.user
-        keycloak_scopes = set()
-        
-        # Extract Keycloak scopes if available
-        if hasattr(request, 'user_permissions') and instance:
-            resource_name = f"{instance._meta.app_label}.{instance.__class__.__name__}"
-            for perm in request.user_permissions:
-                if perm.get("rsname") == resource_name:
-                    if instance.pk and str(instance.pk) == perm.get("resource_set_id"):
-                        keycloak_scopes.update(perm.get("scopes", []))
-                    elif perm.get("resource_set_id") is None:
-                        keycloak_scopes.update(perm.get("scopes", []))
+        user_permissions = cls._normalize_permissions(getattr(request, "user_permissions", ()))
+        keycloak_scopes = cls._resolve_keycloak_scopes(user_permissions, instance)
+        client_roles = cls._extract_client_roles(request, user)
+        cls._enrich_user(user, user_permissions, client_roles)
         
         return cls(
             user=user,
@@ -50,7 +140,9 @@ class UserContext:
             is_authenticated=user.is_authenticated,
             is_superuser=getattr(user, 'is_superuser', False),
             groups=set(user.groups.values_list('name', flat=True)) if hasattr(user, 'groups') else set(),
-            keycloak_scopes=keycloak_scopes
+            keycloak_scopes=keycloak_scopes,
+            user_permissions=user_permissions,
+            client_roles=client_roles,
         )
     
     @classmethod
@@ -61,27 +153,24 @@ class UserContext:
             return cls.anonymous()
         
         user = request.user
+        user_permissions = cls._normalize_permissions(getattr(request, "user_permissions", ()))
+        client_roles = cls._extract_client_roles(request, user)
+        cls._enrich_user(user, user_permissions, client_roles)
         return cls(
             user=user,
             email=getattr(user, 'email', ''),
             is_authenticated=user.is_authenticated,
             is_superuser=getattr(user, 'is_superuser', False),
             groups=set(user.groups.values_list('name', flat=True)) if hasattr(user, 'groups') else set(),
-            keycloak_scopes=frozenset()
+            keycloak_scopes=frozenset(),
+            user_permissions=user_permissions,
+            client_roles=client_roles,
         )
 
     def with_instance(self, request, instance):
         """Create a new UserContext with keycloak scopes resolved for the given instance.
         Reuses cached user/email/groups/is_superuser from the base context."""
-        keycloak_scopes = set()
-        if hasattr(request, 'user_permissions') and instance:
-            resource_name = f"{instance._meta.app_label}.{instance.__class__.__name__}"
-            for perm in request.user_permissions:
-                if perm.get("rsname") == resource_name:
-                    if instance.pk and str(instance.pk) == perm.get("resource_set_id"):
-                        keycloak_scopes.update(perm.get("scopes", []))
-                    elif perm.get("resource_set_id") is None:
-                        keycloak_scopes.update(perm.get("scopes", []))
+        keycloak_scopes = self._resolve_keycloak_scopes(self.user_permissions, instance)
         
         return UserContext(
             user=self.user,
@@ -89,7 +178,9 @@ class UserContext:
             is_authenticated=self.is_authenticated,
             is_superuser=self.is_superuser,
             groups=self.groups,
-            keycloak_scopes=keycloak_scopes
+            keycloak_scopes=keycloak_scopes,
+            user_permissions=self.user_permissions,
+            client_roles=self.client_roles,
         )
 
     @classmethod
@@ -101,7 +192,9 @@ class UserContext:
             is_authenticated=False,
             is_superuser=False,
             groups=set(),
-            keycloak_scopes=set()
+            keycloak_scopes=set(),
+            user_permissions=tuple(),
+            client_roles=frozenset(),
         )
 
 

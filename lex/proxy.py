@@ -593,7 +593,6 @@ async def ws_proxy(websocket: WebSocket):
                 "sub": payload.get("sub"),
                 "email": payload.get("email"),
                 "preferred_username": payload.get("preferred_username"),
-                "permissions": payload.get("permissions", {}),
                 "access_token": jwt_token,
             }
             auth_method = "jwt"
@@ -610,7 +609,6 @@ async def ws_proxy(websocket: WebSocket):
                 "access_token": tokens.get("access_token"),
                 "id_token": tokens.get("id_token"),
                 "refresh_token": tokens.get("refresh_token"),
-                "permissions": {},
             }
             auth_method = "session"
 
@@ -642,7 +640,6 @@ async def ws_proxy(websocket: WebSocket):
     fwd.append(("X-Streamlit-User-Email", user_payload.get("email") or ""))
     fwd.append(("X-Streamlit-User-Username", user_payload.get("preferred_username") or ""))
     fwd.append(("X-Streamlit-Auth-Method", auth_method))
-    fwd.append(("X-Streamlit-User-Permissions", json.dumps(user_payload.get("permissions", {}))))
     fwd.append(("X-Forwarded-User", user_payload.get("email") or ""))
 
     if user_payload.get("access_token"):
@@ -749,7 +746,6 @@ async def proxy(request: Request):
                 "sub": jwt_payload.get("sub"),
                 "email": jwt_payload.get("email"),
                 "preferred_username": jwt_payload.get("preferred_username"),
-                "permissions": jwt_payload.get("permissions", {}),
                 "access_token": jwt_token,  # keep so we can forward Authorization if desired
             }
             auth_method = "jwt"
@@ -767,7 +763,6 @@ async def proxy(request: Request):
                 "sub": claims.get("sub") or "",
                 "email": claims.get("email") or session_email or tokens.get("email") or "",
                 "preferred_username": claims.get("preferred_username") or claims.get("name") or "",
-                "permissions": {},
                 "access_token": tokens.get("access_token"),
                 "id_token": tokens.get("id_token"),
                 "refresh_token": tokens.get("refresh_token"),
@@ -803,7 +798,6 @@ async def proxy(request: Request):
     fwd_headers["X-Streamlit-User-Email"] = user_payload.get("email") or ""
     fwd_headers["X-Streamlit-User-Username"] = user_payload.get("preferred_username") or ""
     fwd_headers["X-Streamlit-Auth-Method"] = auth_method
-    fwd_headers["X-Streamlit-User-Permissions"] = json.dumps(user_payload.get("permissions", {}))
     fwd_headers["X-Forwarded-User"] = user_payload.get("email") or ""
 
     # Forward access token if present (either from JWT auth or session)
