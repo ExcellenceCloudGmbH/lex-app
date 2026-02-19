@@ -1,5 +1,10 @@
 from rest_framework import serializers
-from lex.legacy_data.models import LegacyCalculationLog, LegacyUserChangeLog, LegacyCalculationId
+from lex.legacy_data.models import (
+    LegacyCalculationLog,
+    LegacyUserChangeLog,
+    LegacyCalculationId,
+    LegacyLog,
+)
 
 class LegacyReadOnlySerializerMixin:
     """
@@ -32,3 +37,10 @@ class LegacyCalculationIdSerializer(LegacyReadOnlySerializerMixin, serializers.M
         model = LegacyCalculationId
         fields = '__all__'
         read_only_fields = [f.name for f in LegacyCalculationId._meta.fields]
+
+
+class LegacyLogSerializer(LegacyReadOnlySerializerMixin, serializers.ModelSerializer):
+    class Meta:
+        model = LegacyLog
+        fields = '__all__'
+        read_only_fields = [f.name for f in LegacyLog._meta.fields]

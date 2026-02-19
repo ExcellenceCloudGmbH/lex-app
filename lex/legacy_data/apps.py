@@ -185,31 +185,37 @@ class LegacyDataConfig(LexAppConfig):
         from lex.legacy_data.admin import (
             LegacyCalculationIdAdmin,
             LegacyCalculationLogAdmin,
+            LegacyLogAdmin,
             LegacyUserChangeLogAdmin,
         )
         from lex.legacy_data.models import (
             LegacyCalculationId,
             LegacyCalculationLog,
+            LegacyLog,
             LegacyUserChangeLog,
         )
         from lex.legacy_data.serializers.legacy_data_serializers import (
             LegacyCalculationIdSerializer,
             LegacyCalculationLogSerializer,
+            LegacyLogSerializer,
             LegacyUserChangeLogSerializer,
         )
 
         LegacyCalculationLog.api_serializers = {"default": LegacyCalculationLogSerializer}
         LegacyUserChangeLog.api_serializers = {"default": LegacyUserChangeLogSerializer}
         LegacyCalculationId.api_serializers = {"default": LegacyCalculationIdSerializer}
+        LegacyLog.api_serializers = {"default": LegacyLogSerializer}
 
         LegacyCalculationLog.modification_restriction = read_only_restriction
         LegacyUserChangeLog.modification_restriction = read_only_restriction
         LegacyCalculationId.modification_restriction = read_only_restriction
+        LegacyLog.modification_restriction = read_only_restriction
 
         static_models = [
             (LegacyCalculationLog, LegacyCalculationLogAdmin),
             (LegacyUserChangeLog, LegacyUserChangeLogAdmin),
             (LegacyCalculationId, LegacyCalculationIdAdmin),
+            (LegacyLog, LegacyLogAdmin),
         ]
 
         for model, admin_model in static_models:
@@ -268,4 +274,5 @@ class LegacyDataConfig(LexAppConfig):
 
         read_only_restriction = AdminReportsModificationRestriction()
         self._register_static_legacy_models(processAdminSite, read_only_restriction)
-        self._register_dynamic_legacy_models(processAdminSite, read_only_restriction)
+        # Static archive mode: only fixed legacy tables are exposed.
+        # Dynamic manifest-based table registration is intentionally disabled.
