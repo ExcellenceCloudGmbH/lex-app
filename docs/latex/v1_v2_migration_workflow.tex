@@ -39,6 +39,9 @@ The workflow now follows these defaults:
   in the refactored V2 project under \texttt{migrations/} and runs in-place.
   \item Migration sanitization is optional and disabled by default.
   \item Full migration is performed with \texttt{lex migrate} across all installed apps.
+  \item This branch uses \textbf{static archive mode} with four known legacy tables:
+  \texttt{generic\_app\_calculationlog}, \texttt{generic\_app\_userchangelog},
+  \texttt{generic\_app\_calculationids}, and \texttt{generic\_app\_log}.
 \end{itemize}
 
 \section{Invocation Modes and Defaults}
@@ -74,6 +77,12 @@ The workflow now follows these defaults:
 \newpage
 \section{Dynamic vs Static Legacy Registration}
 \subsection*{Decision statement}
+This document keeps the strategic comparison because it explains architectural tradeoffs.
+However, this branch intentionally implements the static variant because the archive scope
+is fixed and known in advance (four tables). The script and app registration code are
+aligned to that static scope.
+
+\subsection*{General architectural recommendation}
 For this V1 to V2 migration architecture, static read-only legacy models do not work
 reliably at scale. They can work for a tiny, frozen, one-off table set, but they break
 down as soon as table inventory differs between projects or evolves over time. Dynamic
@@ -338,8 +347,8 @@ representative migrations manually when introducing new rewrite rules.
 \subsection*{What the step does}
 If \texttt{--enable-sanitization} is provided, the workflow runs:
 \begin{verbatim}
-lex generate_legacy_freeze_manifest --before .lex_tables_before.json \
-  --output .lex_legacy_freeze_manifest.pre_migrate.json
+<workflow internal> build .lex_legacy_freeze_manifest.pre_migrate.json
+from the fixed static table set intersected with .lex_tables_before.json
 \end{verbatim}
 If sanitization is disabled (default), this step is intentionally skipped.
 
@@ -352,9 +361,9 @@ When sanitization is disabled, this manifest has no downstream consumer in the s
 therefore skipped to reduce noise and avoid giving a false sense of protection.
 
 \subsection*{Operational details and invariants}
-The manifest logic computes table diffs against current V2 model tables and known exclusions.
-The invariant is that this pre-manifest reflects intended protected tables at the exact point
-before new migration files are sanitized.
+In static mode, the pre-manifest is derived from a fixed allow-list of legacy archive tables
+and filtered by actual presence in the captured pre-migration snapshot. The invariant is that
+the sanitize step only protects known static archive targets that actually exist.
 
 \subsection*{Failure modes and diagnosis}
 The main risks are stale snapshot input and incorrect exclusion lists. If the pre-manifest
@@ -484,22 +493,22 @@ migration state and do not blindly rerun until the root cause is fixed.
 \subsection*{What the step does}
 The workflow runs:
 \begin{verbatim}
-lex generate_legacy_freeze_manifest --before .lex_tables_before.json \
-  --output .lex_legacy_freeze_manifest.json
+lex capture_db_tables --output .lex_tables_after.json
+<workflow internal> build .lex_legacy_freeze_manifest.json
+from fixed static table set intersected with .lex_tables_after.json
 \end{verbatim}
-This final manifest is consumed at runtime by legacy dynamic model registration.
+In static mode, runtime registration is hardcoded in Django model/admin wiring. The final
+manifest is generated for workflow reporting, consistency checks, and CI/log audit trails.
 
 \subsection*{Why this step is required}
 The final freeze manifest is the contract between migration-time analysis and runtime
-exposure. Without this artifact, legacy read-only table registration is either static
-(incomplete) or heuristic (unsafe). The manifest makes legacy visibility explicit and
-repeatable.
+exposure in dynamic systems. In this static branch, it instead acts as an auditable record of
+which static archive tables actually survived post-migration and are expected to remain visible.
 
 \subsection*{Operational details and invariants}
-The command computes legacy table candidates by DB diff and model exclusions, then filters
-invalid entries (for example, tables lacking a suitable primary key). The invariant is that
-tables listed in this manifest are expected to exist post-migration and be safe for dynamic
-unmanaged model registration.
+The final manifest is built from the same static table set used by the script and filtered by
+post-migration table existence. The invariant is that the output represents \textit{actual}
+remaining static archive tables after migrate has completed.
 
 \subsection*{Failure modes and diagnosis}
 If the manifest is empty when legacy tables are expected, inspect the initial snapshot and

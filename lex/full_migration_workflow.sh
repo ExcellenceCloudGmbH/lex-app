@@ -94,8 +94,56 @@ SCRIPT_DIR=$(dirname "$(realpath "$0")")
 APP_NAME=$(basename "$V2_ROOT")
 V2_MIGRATIONS_DIR="$V2_ROOT/migrations"
 TABLE_SNAPSHOT_FILE=".lex_tables_before.json"
+TABLE_SNAPSHOT_AFTER_FILE=".lex_tables_after.json"
 PRE_FREEZE_MANIFEST_FILE=".lex_legacy_freeze_manifest.pre_migrate.json"
 FREEZE_MANIFEST_FILE=".lex_legacy_freeze_manifest.json"
+ARCHIVE_MODE="static"
+STATIC_ARCHIVE_TABLES=(
+  "generic_app_calculationlog"
+  "generic_app_userchangelog"
+  "generic_app_calculationids"
+  "generic_app_log"
+)
+
+generate_static_manifest_from_snapshot() {
+    local snapshot_file="$1"
+    local output_file="$2"
+    shift 2
+    python - "$snapshot_file" "$output_file" "$@" <<'PY'
+import json
+import os
+import sys
+
+snapshot_path = sys.argv[1]
+output_path = sys.argv[2]
+candidate_tables = [x for x in sys.argv[3:] if x.strip()]
+
+if not os.path.exists(snapshot_path):
+    print(f"❌ Snapshot file not found: {snapshot_path}")
+    sys.exit(1)
+
+with open(snapshot_path, "r", encoding="utf-8") as fh:
+    payload = json.load(fh)
+
+all_tables = set(payload.get("tables") or [])
+freeze_tables = [t for t in candidate_tables if t in all_tables]
+missing_tables = [t for t in candidate_tables if t not in all_tables]
+
+manifest = {
+    "freeze_tables": freeze_tables,
+    "missing_static_tables": missing_tables,
+    "source": "static_archive_tables",
+}
+
+with open(output_path, "w", encoding="utf-8") as fh:
+    json.dump(manifest, fh, indent=2)
+
+print(f"✅ Wrote static freeze manifest to {output_path}")
+print(f"   Included tables: {len(freeze_tables)}")
+if missing_tables:
+    print(f"   Missing static tables: {', '.join(missing_tables)}")
+PY
+}
 
 echo "========================================================"
 echo "🚀 Starting Full End-to-End Migration Workflow"
@@ -112,6 +160,8 @@ echo "Timestamp: ${MIGRATION_TIMESTAMP:-AUTO}"
 echo "ChunkSize: $CHUNK_SIZE"
 echo "DryBackfill: $DRY_RUN_BACKFILL"
 echo "SanitizeGeneratedMigrations: $ENABLE_SANITIZATION"
+echo "ArchiveMode: $ARCHIVE_MODE"
+echo "StaticArchiveTables: ${STATIC_ARCHIVE_TABLES[*]}"
 
 # 0. Environment Setup
 if [ -d "$V2_ROOT/.venv" ]; then
@@ -194,12 +244,12 @@ echo "--------------------------------------------------------"
 # Pass the V2 migrations directory to the python script
 python "$SCRIPT_DIR/fix_v1_migration.py" "$V2_MIGRATIONS_DIR"
 
-# 4. Build pre-migrate freeze manifest (used to preserve V1-only tables)
+# 4. Build pre-migrate freeze manifest (used by sanitize step if enabled)
 echo "--------------------------------------------------------"
-echo "🧊 Step 4: Generating Pre-Migrate Freeze Manifest..."
+echo "🧊 Step 4: Generating Static Pre-Migrate Freeze Manifest..."
 echo "--------------------------------------------------------"
 if [ "$ENABLE_SANITIZATION" = true ]; then
-    lex generate_legacy_freeze_manifest --before "$TABLE_SNAPSHOT_FILE" --output "$PRE_FREEZE_MANIFEST_FILE"
+    generate_static_manifest_from_snapshot "$TABLE_SNAPSHOT_FILE" "$PRE_FREEZE_MANIFEST_FILE" "${STATIC_ARCHIVE_TABLES[@]}"
 else
     echo "ℹ️  Sanitization disabled (default); pre-migrate manifest generation skipped."
 fi
@@ -253,11 +303,12 @@ echo "--------------------------------------------------------"
 # Apply all pending migrations across all installed apps.
 lex migrate
 
-# 8. Generate dynamic legacy-freeze manifest
+# 8. Generate final static legacy-freeze manifest (for workflow reporting/audit)
 echo "--------------------------------------------------------"
-echo "🧊 Step 8: Generating Legacy Freeze Manifest..."
+echo "🧊 Step 8: Generating Static Legacy Freeze Manifest..."
 echo "--------------------------------------------------------"
-lex generate_legacy_freeze_manifest --before "$TABLE_SNAPSHOT_FILE" --output "$FREEZE_MANIFEST_FILE"
+lex capture_db_tables --output "$TABLE_SNAPSHOT_AFTER_FILE"
+generate_static_manifest_from_snapshot "$TABLE_SNAPSHOT_AFTER_FILE" "$FREEZE_MANIFEST_FILE" "${STATIC_ARCHIVE_TABLES[@]}"
 
 # 9. Initialize History (Backfill via ORM/signal path)
 echo "--------------------------------------------------------"
@@ -275,7 +326,7 @@ fi
 
 echo "MIGRATION_WORKFLOW_SUMMARY_START"
 cat <<EOF
-{"snapshot_file":"$TABLE_SNAPSHOT_FILE","freeze_manifest_file":"$FREEZE_MANIFEST_FILE","migration_timestamp":"${MIGRATION_TIMESTAMP:-AUTO}","chunk_size":$CHUNK_SIZE,"dry_run_backfill":$DRY_RUN_BACKFILL,"sanitization_enabled":$ENABLE_SANITIZATION}
+{"archive_mode":"$ARCHIVE_MODE","snapshot_file":"$TABLE_SNAPSHOT_FILE","snapshot_after_file":"$TABLE_SNAPSHOT_AFTER_FILE","freeze_manifest_file":"$FREEZE_MANIFEST_FILE","migration_timestamp":"${MIGRATION_TIMESTAMP:-AUTO}","chunk_size":$CHUNK_SIZE,"dry_run_backfill":$DRY_RUN_BACKFILL,"sanitization_enabled":$ENABLE_SANITIZATION}
 EOF
 echo "MIGRATION_WORKFLOW_SUMMARY_END"
 
