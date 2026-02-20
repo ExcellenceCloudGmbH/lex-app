@@ -21,6 +21,7 @@ logging.basicConfig(level=logging.INFO)
 TOKEN_SKEW_SECONDS = 10          # refresh 10s before exp
 REFRESH_MIN_INTERVAL = 15        # floor sleep
 REFRESH_MAX_BACKOFF = 300        # cap backoff to 5 minutes
+_TOKEN_REFRESH_LOCK = threading.Lock()
 
 st.set_page_config(layout="wide")
 
@@ -58,7 +59,7 @@ def _post_refresh(refresh_token: str) -> dict | None:
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-        "client_id": client_id,
+        "client_id": client_id or "",
     }
     if client_secret:
         data["client_secret"] = client_secret
@@ -86,6 +87,75 @@ def _update_tokens_from_response(tok: dict) -> None:
     st.session_state.expires_in = expires_in
 
 
+def _token_exp_from_state_or_decode(access: str) -> int:
+    exp = int(st.session_state.get("token_exp") or 0) if access else 0
+    if not exp and access:
+        exp = _decode_exp_no_verify(access)
+        if exp:
+            st.session_state.token_exp = exp
+    return exp
+
+
+def _is_token_valid(access: str, skew_seconds: int = TOKEN_SKEW_SECONDS) -> bool:
+    access = (access or "").strip()
+    if not access:
+        return False
+    exp = _token_exp_from_state_or_decode(access)
+    if not exp:
+        # If exp is unavailable, keep token as usable and rely on server responses.
+        return True
+    return _now() < (exp - skew_seconds)
+
+
+def _sync_tokens_from_headers(h: Dict[str, str]) -> None:
+    token_from_header = (bearer_from_headers(h) or "").strip()
+    current_access = (st.session_state.get("access_token") or "").strip()
+    if token_from_header and (token_from_header != current_access or not st.session_state.get("token_exp")):
+        st.session_state.access_token = token_from_header
+        st.session_state.token_exp = _decode_exp_no_verify(token_from_header)
+        st.session_state.expires_in = None
+
+    rt_hdr = (h.get("x-streamlit-refresh-token") or "").strip()
+    if rt_hdr:
+        st.session_state.refresh_token = rt_hdr
+
+
+def ensure_valid_access_token(allow_refresh: bool = True) -> bool:
+    access = (st.session_state.get("access_token") or "").strip()
+    if _is_token_valid(access):
+        return True
+
+    refresh = (st.session_state.get("refresh_token") or "").strip()
+    if allow_refresh and refresh:
+        with _TOKEN_REFRESH_LOCK:
+            access = (st.session_state.get("access_token") or "").strip()
+            if _is_token_valid(access):
+                return True
+            tok = _post_refresh(refresh)
+            if tok and tok.get("access_token"):
+                _update_tokens_from_response(tok)
+                return _is_token_valid(st.session_state.get("access_token") or "", skew_seconds=0)
+
+    # Final strict check without skew to avoid dropping a token that is still valid for a few seconds.
+    return _is_token_valid(st.session_state.get("access_token") or "", skew_seconds=0)
+
+
+def _invalidate_local_auth(reason: str) -> None:
+    logger.warning(reason)
+    st.session_state.authenticated = False
+    st.session_state.auth_method = ""
+    st.session_state.user_id = ""
+    st.session_state.user_email = ""
+    st.session_state.user_username = ""
+    st.session_state.access_token = ""
+    st.session_state.refresh_token = ""
+    st.session_state.token_exp = 0
+    st.session_state.expires_in = None
+    st.session_state.keycloak_context_token = ""
+    st.session_state.permissions = []
+    st.session_state.user_info = {"sub": "", "email": "", "preferred_username": ""}
+
+
 def _token_refresher(stop_key: str = "stop_token_refresher") -> None:
     backoff = 5
     while not st.session_state.get(stop_key, False):
@@ -111,18 +181,41 @@ def _token_refresher(stop_key: str = "stop_token_refresher") -> None:
             time.sleep(backoff)
             continue
 
-        tok = _post_refresh(refresh)
-        if tok and tok.get("access_token"):
-            _update_tokens_from_response(tok)
-            backoff = 5
-        else:
-            backoff = min(REFRESH_MAX_BACKOFF, backoff * 2)
-            time.sleep(backoff)
+        with _TOKEN_REFRESH_LOCK:
+            # Another thread/run may have refreshed while we were sleeping.
+            latest_access = st.session_state.get("access_token") or ""
+            if _is_token_valid(latest_access):
+                backoff = 5
+                continue
+
+            refresh = st.session_state.get("refresh_token") or ""
+            if refresh:
+                tok = _post_refresh(refresh)
+                if tok and tok.get("access_token"):
+                    _update_tokens_from_response(tok)
+                    backoff = 5
+                    continue
+
+        backoff = min(REFRESH_MAX_BACKOFF, backoff * 2)
+        time.sleep(backoff)
 
 
 def start_token_refresh_thread_if_needed() -> None:
-    if st.session_state.get("token_refresher_started"):
+    # Session auth is proxy-managed; local refresh can race with proxy refresh-token rotation.
+    if (st.session_state.get("auth_method") or "").strip().lower() == "session":
+        st.session_state.stop_token_refresher = True
+        old_th = st.session_state.get("token_refresher_thread")
+        if old_th and getattr(old_th, "is_alive", lambda: False)():
+            old_th.join(timeout=1.0)
+        st.session_state.token_refresher_started = False
+        st.session_state.token_refresher_thread = None
         return
+
+    th = st.session_state.get("token_refresher_thread")
+    if th and getattr(th, "is_alive", lambda: False)():
+        st.session_state.token_refresher_started = True
+        return
+    st.session_state.token_refresher_started = False
 
     if not st.session_state.get("refresh_token"):
         headers = getattr(st.context, "headers", {}) or {}
@@ -132,7 +225,7 @@ def start_token_refresh_thread_if_needed() -> None:
             st.session_state.refresh_token = rt
 
     if not st.session_state.get("refresh_token"):
-        st.session_state.token_refresher_started = True
+        st.session_state.token_refresher_thread = None
         return
 
     st.session_state.stop_token_refresher = False
@@ -161,7 +254,7 @@ def strip_bearer(value: str) -> str:
 
 def get_bearer_token(headers: Dict[str, str]) -> Optional[str]:
     h = normalize_headers(headers)
-    for name in ("authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
+    for name in ("x-streamlit-access-token", "authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
         val = h.get(name)
         if not val:
             continue
@@ -170,7 +263,7 @@ def get_bearer_token(headers: Dict[str, str]) -> Optional[str]:
 
 
 def bearer_from_headers(h: Dict[str, str]) -> Optional[str]:
-    for name in ("authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
+    for name in ("x-streamlit-access-token", "authorization", "x-forwarded-access-token", "x-auth-request-access-token"):
         v = h.get(name)
         if not v:
             continue
@@ -208,6 +301,10 @@ def get_user_info(access_token: str):
 
 
 def sync_keycloak_context_from_access_token() -> None:
+    allow_refresh = (st.session_state.get("auth_method") or "").strip().lower() != "session"
+    if not ensure_valid_access_token(allow_refresh=allow_refresh):
+        return
+
     access_token = (st.session_state.get("access_token") or "").strip()
     if not access_token:
         return
@@ -352,18 +449,38 @@ def init_session_state() -> None:
         st.session_state.user_info = {"sub": "", "email": "", "preferred_username": ""}
     if "keycloak_context_token" not in st.session_state:
         st.session_state.keycloak_context_token = ""
+    if "access_token" not in st.session_state:
+        st.session_state.access_token = ""
+    if "refresh_token" not in st.session_state:
+        st.session_state.refresh_token = ""
+    if "token_exp" not in st.session_state:
+        st.session_state.token_exp = 0
+    if "expires_in" not in st.session_state:
+        st.session_state.expires_in = None
+    if "token_refresher_started" not in st.session_state:
+        st.session_state.token_refresher_started = False
+    if "token_refresher_thread" not in st.session_state:
+        st.session_state.token_refresher_thread = None
+    if "stop_token_refresher" not in st.session_state:
+        st.session_state.stop_token_refresher = False
 
 
 # -------------------------
 # Authentication
 # -------------------------
 def authenticate_from_proxy_or_jwt() -> None:
-    if st.session_state.authenticated:
-        sync_keycloak_context_from_access_token()
-        return
-
     headers = getattr(st.context, "headers", {}) or {}
     h = normalize_headers(headers)
+    _sync_tokens_from_headers(h)
+
+    if st.session_state.authenticated:
+        allow_refresh = (st.session_state.get("auth_method") or "").strip().lower() != "session"
+        if not ensure_valid_access_token(allow_refresh=allow_refresh):
+            _invalidate_local_auth("Access token expired and refresh failed; forcing re-authentication.")
+            return
+        start_token_refresh_thread_if_needed()
+        sync_keycloak_context_from_access_token()
+        return
 
     user_id = (
         h.get("x-streamlit-user-id")
@@ -412,16 +529,14 @@ def authenticate_from_proxy_or_jwt() -> None:
             "preferred_username": st.session_state.user_username,
         }
 
-        token_from_header = bearer_from_headers(h)
-        st.session_state.access_token = token_from_header
-        st.session_state.token_exp = _decode_exp_no_verify(token_from_header) if token_from_header else 0
+        _sync_tokens_from_headers(h)
+        allow_refresh = (st.session_state.get("auth_method") or "").strip().lower() != "session"
+        if not ensure_valid_access_token(allow_refresh=allow_refresh):
+            _invalidate_local_auth("Authenticated identity received without a valid access token.")
+            return
 
-        rt_hdr = h.get("x-streamlit-refresh-token")
-        if rt_hdr:
-            st.session_state.refresh_token = rt_hdr
-
-        sync_keycloak_context_from_access_token()
         start_token_refresh_thread_if_needed()
+        sync_keycloak_context_from_access_token()
 
         logger.info(
             f"Authenticated via {st.session_state.auth_method} as "

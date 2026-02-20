@@ -55,6 +55,16 @@ def _now() -> int:
     return int(time.time())
 
 
+def _decode_exp_no_verify(token: Any) -> int:
+    if not isinstance(token, str) or not token:
+        return 0
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+        return int(payload.get("exp") or 0)
+    except Exception:
+        return 0
+
+
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
@@ -87,6 +97,7 @@ ST_ACCESS_COOKIE_MAX_AGE = int(os.getenv("ST_ACCESS_COOKIE_MAX_AGE", "600"))  # 
 
 JWT_ALG = os.getenv("JWT_ALG", "RS256")
 JWT_VERIFY_ISSUER = _env_bool("JWT_VERIFY_ISSUER", False)
+JWT_LEEWAY_SECONDS = int(os.getenv("JWT_LEEWAY_SECONDS", "2"))
 
 KEYCLOAK_URL = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM") or ""
@@ -116,6 +127,13 @@ def _compute_expires_at(token: Dict[str, Any]) -> int:
     if token.get("expires_in"):
         with suppress(Exception):
             return _now() + int(token["expires_in"])
+    # Some refresh responses omit expires_in; fall back to JWT exp when available.
+    exp_from_access = _decode_exp_no_verify(token.get("access_token"))
+    if exp_from_access:
+        return exp_from_access
+    exp_from_id = _decode_exp_no_verify(token.get("id_token"))
+    if exp_from_id:
+        return exp_from_id
     return 0
 
 
@@ -283,9 +301,11 @@ async def _refresh_access_token(sid: str) -> bool:
     data = {
         "grant_type": "refresh_token",
         "refresh_token": t["refresh_token"],
-        "client_id": os.getenv("OIDC_RP_CLIENT_ID"),
-        "client_secret": os.getenv("OIDC_RP_CLIENT_SECRET"),
+        "client_id": os.getenv("OIDC_RP_CLIENT_ID") or "",
     }
+    client_secret = os.getenv("OIDC_RP_CLIENT_SECRET")
+    if client_secret:
+        data["client_secret"] = client_secret
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     async with httpx.AsyncClient(timeout=10.0, verify=OIDC_VERIFY_SSL) as client:
@@ -296,6 +316,14 @@ async def _refresh_access_token(sid: str) -> bool:
             new_token = resp.json()
         except Exception:
             return False
+
+    if not new_token.get("access_token"):
+        return False
+    # Preserve values that some providers omit on refresh responses.
+    if not new_token.get("refresh_token") and t.get("refresh_token"):
+        new_token["refresh_token"] = t["refresh_token"]
+    if not new_token.get("id_token") and t.get("id_token"):
+        new_token["id_token"] = t["id_token"]
 
     await _put_tokens(sid, t.get("email", ""), new_token)
     return True
@@ -315,7 +343,18 @@ async def _ensure_valid_access_token(session: Dict[str, Any]) -> Optional[Dict[s
         return t
 
     ok = await _refresh_access_token(sid)
-    return await _get_tokens(sid) if ok else None
+    if ok:
+        return await _get_tokens(sid)
+
+    # Refresh can fail transiently; keep using token until it is truly expired.
+    latest = await _get_tokens(sid) or t
+    latest_exp = int(latest.get("expires_at") or 0)
+    if latest_exp and _now() < latest_exp:
+        return latest
+
+    # Expired + not refreshable: drop stale store entry.
+    await _drop_tokens(sid)
+    return None
 
 
 # -----------------------------------------------------------------------------
@@ -388,7 +427,7 @@ def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
             signing_key,
             algorithms=[JWT_ALG],
             options={"require": ["exp"], "verify_signature": True},
-            leeway=30,
+            leeway=JWT_LEEWAY_SECONDS,
             audience=audiences,
             **kwargs,
         )
@@ -437,9 +476,14 @@ async def _persist_jwt_to_session_if_needed(request: Request, jwt_token: str, pa
     if not PERSIST_JWT_AUTH_TO_SESSION:
         return
 
-    # If we already have a session sid, don't overwrite.
-    if (request.session.get("user") or {}).get("sid"):
-        return
+    # Reuse existing valid server-side session if available; otherwise replace stale one.
+    existing_sid = (request.session.get("user") or {}).get("sid")
+    if existing_sid:
+        existing = await _get_tokens(existing_sid)
+        existing_exp = int((existing or {}).get("expires_at") or 0)
+        if existing and existing.get("access_token") and (not existing_exp or _now() < (existing_exp - TOKEN_EXPIRY_SKEW_SECONDS)):
+            return
+        await _drop_tokens(existing_sid)
 
     sid = secrets.token_urlsafe(16)
 
@@ -645,6 +689,7 @@ async def ws_proxy(websocket: WebSocket):
     if user_payload.get("access_token"):
         fwd.append(("Authorization", f"Bearer {user_payload['access_token']}"))
         fwd.append(("X-Forwarded-Access-Token", user_payload["access_token"]))
+        fwd.append(("X-Streamlit-Access-Token", user_payload["access_token"]))
     if user_payload.get("id_token"):
         fwd.append(("X-Forwarded-Id-Token", user_payload["id_token"]))
     if user_payload.get("refresh_token"):
@@ -804,6 +849,7 @@ async def proxy(request: Request):
     if user_payload.get("access_token"):
         fwd_headers["Authorization"] = f"Bearer {user_payload['access_token']}"
         fwd_headers["X-Forwarded-Access-Token"] = user_payload["access_token"]
+        fwd_headers["X-Streamlit-Access-Token"] = user_payload["access_token"]
 
     if user_payload.get("id_token"):
         fwd_headers["X-Forwarded-Id-Token"] = user_payload["id_token"]

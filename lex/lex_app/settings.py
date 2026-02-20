@@ -245,6 +245,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "oauth2_authcodeflow.middleware.BearerAuthMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
@@ -358,7 +359,7 @@ DATABASES = {
         },
     },
 }
-DATABASE_DEPLOYMENT_TARGET = os.getenv("DATABASE_DEPLOYMENT_TARGET", "local")
+DATABASE_DEPLOYMENT_TARGET = os.getenv("DATABASE_DEPLOYMENT_TARGET", "default")
 if DATABASE_DEPLOYMENT_TARGET != "local":
     DATABASES["default"] = DATABASES[DATABASE_DEPLOYMENT_TARGET]
 else:
@@ -463,6 +464,7 @@ OIDC_OP_USER_ENDPOINT          = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protoc
 OIDC_OP_DISCOVERY_DOCUMENT_URL = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
 AUTHENTICATION_BACKENDS = (
     "oauth2_authcodeflow.auth.AuthenticationBackend",
+    "oauth2_authcodeflow.auth.BearerAuthenticationBackend",
 )
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
@@ -496,6 +498,7 @@ CORS_ALLOWED_ORIGINS = [
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "lex.authentication.authentication_backends.BearerMiddlewareAuthentication.BearerMiddlewareAuthentication",
         "rest_framework.authentication.SessionAuthentication",
         # other authentication classes, if needed
     ],
