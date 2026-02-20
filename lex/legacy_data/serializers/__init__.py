@@ -1,1 +1,6 @@
-from lex.legacy_data.serializers.legacy_data_serializers import LegacyCalculationLogSerializer, LegacyUserChangeLogSerializer, LegacyCalculationIdSerializer
+from lex.legacy_data.serializers.legacy_data_serializers import (
+    LegacyCalculationLogSerializer,
+    LegacyUserChangeLogSerializer,
+    LegacyCalculationIdSerializer,
+    LegacyLogSerializer,
+)

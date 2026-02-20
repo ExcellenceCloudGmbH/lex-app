@@ -42,25 +42,38 @@ The workflow now follows these defaults:
 \end{itemize}
 
 \section{Invocation Modes and Defaults}
+\subsection*{CLI wrapper command}
+The workflow is also exposed as a lex CLI management command and can be called from any path:
+\begin{verbatim}
+lex full_migration_workflow --db-name <DB_NAME> [--project-root <PATH>] [--v1-source <PATH>] ...
+\end{verbatim}
+When \texttt{--project-root} is omitted, the current working directory is used.
+
 \subsection*{Mode A: External V1 migrations source (explicit copy mode)}
 \begin{verbatim}
 ./lex/full_migration_workflow.sh <V1_MIGRATIONS_SOURCE> <V2_PROJECT_ROOT> <DB_NAME> \
   [--migration-timestamp <ISO8601>] [--chunk-size <INT>] [--dry-run-backfill] \
-  [--enable-sanitization]
+  [--enable-sanitization] [--backfill-only] [--pre-clean-jsons] \
+  [--rollback-on-failure] [--rollback-only] [--rollback-state-file <PATH>] \
+  [--skip-auditlog-backfill]
 \end{verbatim}
 
 \subsection*{Mode B: Refactored V2 project path + DB name (in-place mode)}
 \begin{verbatim}
 ./lex/full_migration_workflow.sh <V2_PROJECT_ROOT> <DB_NAME> \
   [--migration-timestamp <ISO8601>] [--chunk-size <INT>] [--dry-run-backfill] \
-  [--enable-sanitization]
+  [--enable-sanitization] [--backfill-only] [--pre-clean-jsons] \
+  [--rollback-on-failure] [--rollback-only] [--rollback-state-file <PATH>] \
+  [--skip-auditlog-backfill]
 \end{verbatim}
 
 \subsection*{Mode C: DB name only from inside V2 project root (default local mode)}
 \begin{verbatim}
 ./lex/full_migration_workflow.sh <DB_NAME> \
   [--migration-timestamp <ISO8601>] [--chunk-size <INT>] [--dry-run-backfill] \
-  [--enable-sanitization]
+  [--enable-sanitization] [--backfill-only] [--pre-clean-jsons] \
+  [--rollback-on-failure] [--rollback-only] [--rollback-state-file <PATH>] \
+  [--skip-auditlog-backfill]
 \end{verbatim}
 
 \subsection*{Important defaults}
@@ -69,6 +82,10 @@ The workflow now follows these defaults:
   \item If sanitization is off, pre-migrate manifest generation for sanitization is skipped.
   \item Backfill chunk size defaults to 500.
   \item If no migration timestamp is provided, the backfill command uses its internal default.
+  \item \texttt{--backfill-only} runs only normalization + bitemporal backfill + audit-log backfill.
+  \item \texttt{--pre-clean-jsons} removes workflow JSON artifacts before execution.
+  \item \texttt{--rollback-on-failure} restores migrations to pre-run captured state.
+  \item \texttt{--rollback-only} performs only rollback from captured migration-state file.
 \end{itemize}
 
 \newpage
@@ -519,11 +536,15 @@ actual migration side effects.
 \subsection*{What the step does}
 The workflow executes:
 \begin{verbatim}
+lex normalize_is_calculated --chunk-size <N>
 lex backfill_bitemporal_history --chunk-size <N> --reason "V1 migration snapshot" \
   [--timestamp <ISO8601>] [--dry-run]
+lex backfill_audit_logging --chunk-size <N> --reason "V1 audit log migration snapshot" \
+  [--dry-run]
 \end{verbatim}
-The command iterates target V2 models and creates baseline history/meta-history rows through
-backend logic pathways.
+The workflow first normalizes legacy boolean-like \texttt{is\_calculated} values to
+\texttt{SUCCESS}/\texttt{ERROR}, then backfills bitemporal rows, and finally backfills
+audit logging rows from legacy archive tables.
 
 \subsection*{Why this step is required}
 V2 history and meta-history tables are central to bitemporal behavior. A migrated database

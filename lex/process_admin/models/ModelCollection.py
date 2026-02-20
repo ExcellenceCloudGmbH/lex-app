@@ -25,7 +25,8 @@ def _create_model_containers(models_to_admins: Dict[Type[Model], Any]) -> Dict[s
     for model_class, process_admin in models_to_admins.items():
         from lex.core.models.HTMLReport import HTMLReport
         if not issubclass(model_class, HTMLReport):
-            if model_class._meta.abstract:
+            has_meta = hasattr(model_class, "_meta")
+            if has_meta and model_class._meta.abstract:
                 raise ValueError(
                     f'The model {model_class._meta.model_name} is abstract, but only concrete models can be registered'
                 )
