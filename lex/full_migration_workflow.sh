@@ -353,7 +353,10 @@ echo "--------------------------------------------------------"
 echo "📦 Step 5: Running makemigrations for $APP_NAME..."
 echo "--------------------------------------------------------"
 if [ "$ENABLE_SANITIZATION" = true ]; then
-    mapfile -t PRE_MAKEMIGRATION_FILES < <(find "$V2_MIGRATIONS_DIR" -maxdepth 1 -type f -name "*.py" ! -name "__init__.py" -printf "%f\n" | sort)
+    PRE_MAKEMIGRATION_LIST=$(mktemp)
+    POST_MAKEMIGRATION_LIST=$(mktemp)
+    NEW_MIGRATION_LIST=$(mktemp)
+    find "$V2_MIGRATIONS_DIR" -maxdepth 1 -type f -name "*.py" ! -name "__init__.py" -exec basename {} \; | sort > "$PRE_MAKEMIGRATION_LIST"
 fi
 lex makemigrations $APP_NAME
 
@@ -362,20 +365,14 @@ echo "--------------------------------------------------------"
 echo "🛡️  Step 6: Sanitizing Generated Migrations..."
 echo "--------------------------------------------------------"
 if [ "$ENABLE_SANITIZATION" = true ]; then
-    mapfile -t POST_MAKEMIGRATION_FILES < <(find "$V2_MIGRATIONS_DIR" -maxdepth 1 -type f -name "*.py" ! -name "__init__.py" -printf "%f\n" | sort)
+    find "$V2_MIGRATIONS_DIR" -maxdepth 1 -type f -name "*.py" ! -name "__init__.py" -exec basename {} \; | sort > "$POST_MAKEMIGRATION_LIST"
+    comm -13 "$PRE_MAKEMIGRATION_LIST" "$POST_MAKEMIGRATION_LIST" > "$NEW_MIGRATION_LIST"
+
     NEW_MIGRATION_FILES=()
-    for file in "${POST_MAKEMIGRATION_FILES[@]}"; do
-        is_preexisting=false
-        for pre_file in "${PRE_MAKEMIGRATION_FILES[@]}"; do
-            if [ "$file" = "$pre_file" ]; then
-                is_preexisting=true
-                break
-            fi
-        done
-        if [ "$is_preexisting" = false ]; then
-            NEW_MIGRATION_FILES+=("$file")
-        fi
-    done
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        NEW_MIGRATION_FILES+=("$file")
+    done < "$NEW_MIGRATION_LIST"
 
     if [ "${#NEW_MIGRATION_FILES[@]}" -gt 0 ]; then
         python "$SCRIPT_DIR/sanitize_v2_migrations.py" \
@@ -386,6 +383,8 @@ if [ "$ENABLE_SANITIZATION" = true ]; then
     else
         echo "ℹ️  No newly generated migration files detected; sanitize step skipped."
     fi
+
+    rm -f "$PRE_MAKEMIGRATION_LIST" "$POST_MAKEMIGRATION_LIST" "$NEW_MIGRATION_LIST"
 else
     echo "ℹ️  Sanitization disabled (default); generated migrations left unchanged."
 fi
