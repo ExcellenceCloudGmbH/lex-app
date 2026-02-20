@@ -1,14 +1,14 @@
 from django.db import models
-from django_lifecycle import BEFORE_UPDATE, hook
 
 
-class LegacyCalculationId(models.Model):
-    context_id = models.TextField()
-    calculation_record = models.TextField()
-    calculation_id = models.TextField()
+class LegacyLog(models.Model):
+    id = models.AutoField(primary_key=True)
+    group = models.TextField(blank=True, null=True)
+    logfile = models.TextField(blank=True, null=True)
+    input_validation = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return self.calculation_id
+        return f"LegacyLog({self.id})"
 
     def can_delete(self, request=None):
         return False
@@ -31,9 +31,8 @@ class LegacyCalculationId(models.Model):
     def delete(self, *args, **kwargs):
         raise NotImplementedError("This is a legacy archive model. Deletions are not allowed.")
 
-
     class Meta:
         managed = False
-        db_table = 'generic_app_calculationids'
-        verbose_name = 'Generic Calculation ID'
-        verbose_name_plural = 'Generic Calculation IDs'
+        db_table = "generic_app_log"
+        verbose_name = "Generic Log"
+        verbose_name_plural = "Generic Logs"

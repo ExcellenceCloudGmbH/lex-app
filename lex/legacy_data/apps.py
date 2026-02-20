@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from django.contrib import admin
+from django.conf import settings
 from django.core.exceptions import SynchronousOnlyOperation
 from django.db import connection, models
 
@@ -96,23 +97,58 @@ class LegacyDataConfig(LexAppConfig):
     verbose_name = "Legacy Data (V1 Archive)"
 
     def _table_names(self) -> List[str]:
+        if hasattr(self, "_table_names_cache"):
+            return self._table_names_cache
         try:
-            return connection.introspection.table_names()
+            table_names = connection.introspection.table_names()
+            self._table_introspection_unavailable = False
         except SynchronousOnlyOperation:
-            # Avoid startup crash in async lifecycle. No dynamic table discovery here.
-            return []
+            # Avoid startup crash in async lifecycle.
+            table_names = []
+            self._table_introspection_unavailable = True
         except Exception:
-            return []
+            table_names = []
+            self._table_introspection_unavailable = True
+        self._table_names_cache = table_names
+        return table_names
 
     def _table_exists(self, table_name: str) -> bool:
         return table_name in self._table_names()
+
+    def _has_table_introspection(self) -> bool:
+        self._table_names()
+        return not getattr(self, "_table_introspection_unavailable", False)
 
     def _manifest_path(self) -> Path:
         override = os.getenv("LEX_LEGACY_FREEZE_MANIFEST_PATH")
         if override:
             return Path(override).expanduser().resolve()
-        project_root = Path(os.getenv("PROJECT_ROOT", os.getcwd()))
-        return (project_root / ".lex_legacy_freeze_manifest.json").resolve()
+
+        manifest_name = ".lex_legacy_freeze_manifest.json"
+        candidates: List[Path] = []
+
+        env_project_root = os.getenv("PROJECT_ROOT")
+        if env_project_root:
+            candidates.append(Path(env_project_root).expanduser() / manifest_name)
+
+        base_dir = getattr(settings, "BASE_DIR", None)
+        if base_dir:
+            base_dir_path = Path(base_dir).expanduser()
+            candidates.append(base_dir_path / manifest_name)
+            candidates.append(base_dir_path.parent / manifest_name)
+
+        cwd = Path(os.getcwd()).resolve()
+        candidates.append(cwd / manifest_name)
+        for parent in cwd.parents:
+            candidates.append(parent / manifest_name)
+
+        # Prefer the first existing manifest.
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.resolve()
+
+        # Fallback path for environments where file is generated later.
+        return (candidates[0] if candidates else (cwd / manifest_name)).resolve()
 
     def _load_manifest_tables(self) -> List[str]:
         path = self._manifest_path()
@@ -185,43 +221,89 @@ class LegacyDataConfig(LexAppConfig):
         from lex.legacy_data.admin import (
             LegacyCalculationIdAdmin,
             LegacyCalculationLogAdmin,
+            LegacyLogAdmin,
             LegacyUserChangeLogAdmin,
         )
         from lex.legacy_data.models import (
             LegacyCalculationId,
             LegacyCalculationLog,
+            LegacyLog,
             LegacyUserChangeLog,
         )
         from lex.legacy_data.serializers.legacy_data_serializers import (
             LegacyCalculationIdSerializer,
             LegacyCalculationLogSerializer,
+            LegacyLogSerializer,
             LegacyUserChangeLogSerializer,
         )
 
         LegacyCalculationLog.api_serializers = {"default": LegacyCalculationLogSerializer}
         LegacyUserChangeLog.api_serializers = {"default": LegacyUserChangeLogSerializer}
         LegacyCalculationId.api_serializers = {"default": LegacyCalculationIdSerializer}
+        LegacyLog.api_serializers = {"default": LegacyLogSerializer}
 
         LegacyCalculationLog.modification_restriction = read_only_restriction
         LegacyUserChangeLog.modification_restriction = read_only_restriction
         LegacyCalculationId.modification_restriction = read_only_restriction
+        LegacyLog.modification_restriction = read_only_restriction
 
         static_models = [
             (LegacyCalculationLog, LegacyCalculationLogAdmin),
             (LegacyUserChangeLog, LegacyUserChangeLogAdmin),
             (LegacyCalculationId, LegacyCalculationIdAdmin),
+            (LegacyLog, LegacyLogAdmin),
         ]
+        table_introspection_available = self._has_table_introspection()
+        table_aliases = {
+            LegacyCalculationLog: [
+                "generic_app_calculationlog",
+                "generic_app_calculation_log",
+                "generic_calculation_log",
+            ],
+            LegacyUserChangeLog: [
+                "generic_app_userchangelog",
+                "generic_app_user_change_log",
+                "generic_user_change_log",
+            ],
+            LegacyCalculationId: [
+                "generic_app_calculationids",
+                "generic_app_calculation_ids",
+                "generic_calculation_ids",
+            ],
+            LegacyLog: [
+                "generic_app_log",
+                "generic_log",
+            ],
+        }
 
         for model, admin_model in static_models:
-            if not self._table_exists(model._meta.db_table):
-                continue
+            preferred = model._meta.db_table
+            selected_table = preferred
+            if table_introspection_available:
+                if not self._table_exists(preferred):
+                    selected_table = None
+                    for alias in table_aliases.get(model, []):
+                        if self._table_exists(alias):
+                            selected_table = alias
+                            break
+                if not selected_table:
+                    continue
+
+            if model._meta.db_table != selected_table:
+                # Runtime alias to cope with project-specific legacy naming differences.
+                model._meta.db_table = selected_table
+
             if not admin.site.is_registered(model):
                 admin.site.register(model, admin_model)
             processAdminSite.register([model])
-            self.untracked_models.append(model._meta.model_name)
+            if model._meta.model_name not in self.untracked_models:
+                self.untracked_models.append(model._meta.model_name)
 
     def _register_dynamic_legacy_models(self, processAdminSite, read_only_restriction):
         from lex.legacy_data.admin.read_only_admin import ReadOnlyAdmin
+
+        if not self._has_table_introspection():
+            return
 
         if not hasattr(self, "_dynamic_model_cache"):
             self._dynamic_model_cache = {}
@@ -255,7 +337,8 @@ class LegacyDataConfig(LexAppConfig):
             if not admin.site.is_registered(dynamic_model):
                 admin.site.register(dynamic_model, dynamic_admin)
             processAdminSite.register([dynamic_model])
-            self.untracked_models.append(dynamic_model._meta.model_name)
+            if dynamic_model._meta.model_name not in self.untracked_models:
+                self.untracked_models.append(dynamic_model._meta.model_name)
 
     def register_models(self):
         from lex.core.mixins.ModelModificationRestriction import (

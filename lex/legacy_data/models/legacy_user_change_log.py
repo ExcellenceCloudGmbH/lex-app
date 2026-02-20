@@ -17,6 +17,9 @@ class LegacyUserChangeLog(models.Model):
     def can_create(self, request=None):
         return False
 
+    def can_edit(self, request=None):
+        return set()
+
     def track(self):
         pass
 
