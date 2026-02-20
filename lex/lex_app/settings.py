@@ -2,6 +2,7 @@ from __future__ import absolute_import
 
 import sys
 import warnings
+import re
 from pathlib import Path
 
 from django.core.cache import CacheKeyWarning
@@ -238,6 +239,16 @@ if not repo_name.startswith("lex"):
 
 CRISPY_FAIL_SILENTLY = not DEBUG
 
+OIDC_ENABLED = all(
+    os.getenv(key)
+    for key in (
+        "KEYCLOAK_URL",
+        "KEYCLOAK_REALM",
+        "OIDC_RP_CLIENT_ID",
+        "OIDC_RP_CLIENT_SECRET",
+    )
+)
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -460,23 +471,57 @@ KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM")
 OIDC_RP_CLIENT_ID = os.getenv("OIDC_RP_CLIENT_ID")
 OIDC_RP_CLIENT_SECRET = os.getenv("OIDC_RP_CLIENT_SECRET")
 OIDC_RP_CLIENT_UUID = os.getenv("OIDC_RP_CLIENT_UUID")
-OIDC_OP_USER_ENDPOINT          = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo"
-OIDC_OP_DISCOVERY_DOCUMENT_URL = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
-AUTHENTICATION_BACKENDS = (
-    "oauth2_authcodeflow.auth.AuthenticationBackend",
-    "oauth2_authcodeflow.auth.BearerAuthenticationBackend",
-)
+if OIDC_ENABLED:
+    OIDC_OP_USER_ENDPOINT = (
+        f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo"
+    )
+    OIDC_OP_DISCOVERY_DOCUMENT_URL = (
+        f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+    )
+    AUTHENTICATION_BACKENDS = (
+        "oauth2_authcodeflow.auth.AuthenticationBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    )
+else:
+    OIDC_OP_USER_ENDPOINT = ""
+    OIDC_OP_DISCOVERY_DOCUMENT_URL = ""
+    AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
 
 OIDC_RP_SCOPES = ["openid", "email", "profile"]
-OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = ["/manifest.json", "manifest.json", "/health", "/favicon.ico", "api/user/", "/api/user", "api/health", "api/favicon.ico", "api/api/user/", "api/api/user"]# NEW: endpoints that should not trigger session/access-token refresh checks
-# (do NOT include /api/user here)
+_django_base_path = os.getenv("DJANGO_BASE_PATH", "").strip().strip("/")
+_admin_exempt_patterns = [
+    r"^/admin(?:/|$)",
+    r"^/static-django/admin(?:/|$)",
+]
+if _django_base_path:
+    _escaped_base_path = re.escape(_django_base_path)
+    _admin_exempt_patterns.extend(
+        [
+            rf"^/{_escaped_base_path}/admin(?:/|$)",
+            rf"^/{_escaped_base_path}/static-django/admin(?:/|$)",
+        ]
+    )
+
+OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = [
+    "/manifest.json",
+    "manifest.json",
+    "/health",
+    "/favicon.ico",
+    "api/user/",
+    "/api/user",
+    "api/health",
+    "api/favicon.ico",
+    "api/api/user/",
+    "api/api/user",
+] + _admin_exempt_patterns
+
 OIDC_MIDDLEWARE_NO_REFRESH_URL_PATTERNS = [
     r"^/health$",
     r"^/favicon\.ico$",
-]
+] + _admin_exempt_patterns
 OIDC_RP_USE_PKCE = False
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
+CSRF_COOKIE_SECURE = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 OIDC_UNUSABLE_PASSWORD = False

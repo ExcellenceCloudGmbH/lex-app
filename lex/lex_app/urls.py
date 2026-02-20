@@ -14,8 +14,10 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 import os
+import re
 
 from django.urls import path, include, re_path
+from django.contrib.staticfiles.views import serve as staticfiles_serve
 from lex.react.views import serve_react
 
 from lex.lex_app import settings
@@ -25,17 +27,36 @@ from . import views
 from lex.process_admin.settings import processAdminSite, adminSite
 from lex.authentication.views.user_api import CurrentUser
 
-url_prefix = (
-    os.getenv("DJANGO_BASE_PATH") if os.getenv("DJANGO_BASE_PATH") is not None else ""
-)
+_raw_base_path = os.getenv("DJANGO_BASE_PATH")
+url_prefix = _raw_base_path.strip("/") if _raw_base_path else ""
+admin_route = f"{url_prefix}/admin/" if url_prefix else "admin/"
+process_admin_route = f"{url_prefix}/" if url_prefix else ""
 
 urlpatterns = [
     path("health", views.HealthCheck.as_view(), name="health_view"),
+    path("api/health", views.HealthCheck.as_view(), name="api_health_view"),
     path("api/user/", CurrentUser.as_view(), name="current-user"),
-    path(url_prefix + "admin/", adminSite.urls),
-    path(url_prefix, processAdminSite.urls),
+    path(admin_route, adminSite.urls),
+    path(process_admin_route, processAdminSite.urls),
     # path("oidc/", include("mozilla_django_oidc.urls")),
     path("oidc/", include("oauth2_authcodeflow.urls")),
+    re_path(
+        r"^static-django/(?P<path>.*)$",
+        staticfiles_serve,
+        {"insecure": True},
+    ),
+]
+
+if url_prefix:
+    urlpatterns.append(
+        re_path(
+            rf"^{re.escape(url_prefix)}/static-django/(?P<path>.*)$",
+            staticfiles_serve,
+            {"insecure": True},
+        )
+    )
+
+urlpatterns += [
     re_path(
         r"^(?P<path>.*)$", serve_react, {"document_root": settings.REACT_APP_BUILD_PATH}
     ),

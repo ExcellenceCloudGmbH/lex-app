@@ -1,14 +1,20 @@
 import os
-import subprocess
 from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from lex.full_migration_workflow import (
+    WorkflowCommandError,
+    WorkflowOptions,
+    WorkflowUsageError,
+    run_full_migration_workflow,
+)
+
 
 class Command(BaseCommand):
     help = (
-        "Run lex/full_migration_workflow.sh from the lex CLI with a stable interface, "
+        "Run the full migration workflow from the lex CLI with a stable interface, "
         "usable from any working directory."
     )
 
@@ -79,49 +85,39 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        script_path = (
-            Path(__file__).resolve().parents[3] / "full_migration_workflow.sh"
-        ).resolve()
-        if not script_path.exists():
-            raise CommandError(f"Workflow script not found: {script_path}")
-
         project_root = (
             Path(options["project_root"]).expanduser().resolve()
             if options["project_root"]
             else self._infer_project_root()
         )
         db_name = options["db_name"] or self._infer_db_name()
-        v1_source = options["v1_source"]
+        v1_source = (
+            Path(options["v1_source"]).expanduser().resolve()
+            if options["v1_source"]
+            else None
+        )
 
-        cmd = [str(script_path)]
-        if v1_source:
-            cmd.extend([str(Path(v1_source).expanduser().resolve()), str(project_root), db_name])
-        else:
-            cmd.extend([str(project_root), db_name])
+        workflow_options = WorkflowOptions(
+            v2_root=project_root,
+            db_name=db_name,
+            v1_source=v1_source,
+            migration_timestamp=options["migration_timestamp"],
+            chunk_size=options["chunk_size"],
+            dry_run_backfill=options["dry_run_backfill"],
+            enable_sanitization=options["enable_sanitization"],
+            backfill_only=options["backfill_only"],
+            pre_clean_jsons=options["pre_clean_jsons"],
+            rollback_on_failure=options["rollback_on_failure"],
+            rollback_only=options["rollback_only"],
+            rollback_state_file=options["rollback_state_file"],
+            skip_auditlog_backfill=options["skip_auditlog_backfill"],
+        )
 
-        if options["migration_timestamp"]:
-            cmd.extend(["--migration-timestamp", options["migration_timestamp"]])
-        if options["chunk_size"] is not None:
-            cmd.extend(["--chunk-size", str(options["chunk_size"])])
-        if options["dry_run_backfill"]:
-            cmd.append("--dry-run-backfill")
-        if options["enable_sanitization"]:
-            cmd.append("--enable-sanitization")
-        if options["backfill_only"]:
-            cmd.append("--backfill-only")
-        if options["pre_clean_jsons"]:
-            cmd.append("--pre-clean-jsons")
-        if options["rollback_on_failure"]:
-            cmd.append("--rollback-on-failure")
-        if options["rollback_only"]:
-            cmd.append("--rollback-only")
-        if options["rollback_state_file"]:
-            cmd.extend(["--rollback-state-file", options["rollback_state_file"]])
-        if options["skip_auditlog_backfill"]:
-            cmd.append("--skip-auditlog-backfill")
-
-        result = subprocess.run(cmd, cwd=str(project_root), check=False)
-        if result.returncode != 0:
+        try:
+            run_full_migration_workflow(workflow_options)
+        except WorkflowCommandError as exc:
             raise CommandError(
-                f"full_migration_workflow failed with exit code {result.returncode}"
-            )
+                f"full_migration_workflow failed with exit code {exc.exit_code}"
+            ) from exc
+        except WorkflowUsageError as exc:
+            raise CommandError(str(exc)) from exc

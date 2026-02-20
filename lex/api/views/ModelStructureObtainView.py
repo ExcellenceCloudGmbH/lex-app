@@ -1,6 +1,4 @@
 import copy
-
-import copy
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -47,7 +45,7 @@ class ModelStructureObtainView(APIView):
                         del tree[key]
                         continue
 
-                except Exception as e:
+                except Exception:
                     # If we can't get a container or check permissions, remove it for safety
                     del tree[key]
                     continue
@@ -57,6 +55,9 @@ class ModelStructureObtainView(APIView):
                 self.delete_restricted_nodes_from_model_structure(
                     node["children"], request
                 )
+                # Remove folders that no longer contain any visible descendants.
+                if not node["children"]:
+                    del tree[key]
 
     def get(self, request, *args, **kwargs):
         # 1) Copy the raw tree

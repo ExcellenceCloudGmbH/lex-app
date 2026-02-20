@@ -3,6 +3,7 @@ ASGI config for lex_app project.
 """
 
 import os
+
 # MUST be set before importing anything that may touch Django settings/apps
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
 
@@ -20,11 +21,20 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
 
 from lex.lex_app import routing
+from lex.lex_app.fast_health import health_asgi_app, is_fast_health_path
+
+
+async def http_application(scope, receive, send):
+    path = scope.get("path", "")
+    if scope.get("type") == "http" and is_fast_health_path(path):
+        await health_asgi_app(scope, receive, send)
+        return
+    await django_asgi_app(scope, receive, send)
 
 
 application = ProtocolTypeRouter(
     {
-        "http": django_asgi_app,
+        "http": http_application,
         "websocket": AllowedHostsOriginValidator(
             AuthMiddlewareStack(
                 URLRouter(routing.websocket_urlpatterns())

@@ -1,16 +1,27 @@
 import json
 
 from django.apps import apps
+from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from lex.audit_logging.serializers.AuditLogMixinSerializer import generic_instance_payload
+from lex.audit_logging.utils.legacy_audit_payload import (
+    build_legacy_calculation_payload,
+    build_legacy_user_change_payload,
+    merge_model_and_legacy_payload,
+)
 
 
 def _table_exists(table_name: str) -> bool:
     return table_name in set(connection.introspection.table_names())
+
+
+def _build_model_lookup():
+    return {model._meta.model_name.lower(): model for model in apps.get_models()}
 
 
 class Command(BaseCommand):
@@ -48,6 +59,32 @@ class Command(BaseCommand):
         chunk_size = max(1, int(options["chunk_size"]))
         dry_run = options["dry_run"]
         force = options["force"]
+        model_lookup = _build_model_lookup()
+        content_type_cache = {}
+
+        def resolve_content_type(resource_name: str | None):
+            if not resource_name:
+                return None
+            if resource_name not in content_type_cache:
+                model_class = model_lookup.get(resource_name)
+                content_type_cache[resource_name] = (
+                    ContentType.objects.get_for_model(model_class)
+                    if model_class is not None
+                    else None
+                )
+            return content_type_cache[resource_name]
+
+        def resolve_model_snapshot(resource_name: str | None, record_id):
+            if not resource_name or record_id is None:
+                return None, None
+            model_class = model_lookup.get(resource_name)
+            if model_class is None:
+                return None, None
+            try:
+                instance = model_class._default_manager.filter(pk=record_id).first()
+            except Exception:
+                return model_class, None
+            return model_class, instance
 
         existing_audit = AuditLog.objects.count()
         existing_calc = CalculationLog.objects.count()
@@ -101,22 +138,31 @@ class Command(BaseCommand):
                 with transaction.atomic():
                     qs = LegacyCalculationLog.objects.all().order_by("timestamp")
                     for row in qs.iterator(chunk_size=chunk_size):
-                        payload = {
-                            "legacy_source": LegacyCalculationLog._meta.db_table,
-                            "reason": reason,
-                            "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                            "message_type": row.message_type,
-                            "message": row.message,
-                            "method": row.method,
-                            "is_notification": bool(row.is_notification),
-                            "calculation_record": row.calculation_record,
-                        }
+                        legacy_payload, resource_name, record_id = build_legacy_calculation_payload(row, reason)
+                        model_class, instance = resolve_model_snapshot(
+                            resource_name, record_id
+                        )
+                        model_payload = (
+                            generic_instance_payload(instance)
+                            if instance is not None
+                            else ({"id": record_id} if record_id is not None else {})
+                        )
+                        payload = merge_model_and_legacy_payload(
+                            model_payload, legacy_payload
+                        )
+                        content_type = (
+                            resolve_content_type(resource_name)
+                            if model_class is not None and isinstance(record_id, int)
+                            else None
+                        )
                         audit_log = AuditLog.objects.create(
                             author=(row.trigger_name or "legacy_migration"),
-                            resource=(row.calculation_record or "legacy_calculation"),
+                            resource=(resource_name or "legacy_calculation"),
                             action="update",
                             payload=payload,
                             calculation_id=row.calculationId,
+                            content_type=content_type,
+                            object_id=record_id if isinstance(record_id, int) else None,
                         )
                         AuditLogStatus.objects.create(audit_log=audit_log, status="success")
                         CalculationLog.objects.create(
@@ -147,20 +193,31 @@ class Command(BaseCommand):
                 with transaction.atomic():
                     qs = LegacyUserChangeLog.objects.all().order_by("timestamp")
                     for row in qs.iterator(chunk_size=chunk_size):
-                        payload = {
-                            "legacy_source": LegacyUserChangeLog._meta.db_table,
-                            "reason": reason,
-                            "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                            "message": row.message,
-                            "traceback": row.traceback,
-                            "calculation_record": row.calculation_record,
-                        }
+                        legacy_payload, resource_name, record_id = build_legacy_user_change_payload(row, reason)
+                        model_class, instance = resolve_model_snapshot(
+                            resource_name, record_id
+                        )
+                        model_payload = (
+                            generic_instance_payload(instance)
+                            if instance is not None
+                            else ({"id": record_id} if record_id is not None else {})
+                        )
+                        payload = merge_model_and_legacy_payload(
+                            model_payload, legacy_payload
+                        )
+                        content_type = (
+                            resolve_content_type(resource_name)
+                            if model_class is not None and isinstance(record_id, int)
+                            else None
+                        )
                         audit_log = AuditLog.objects.create(
                             author=(row.user_name or "legacy_user"),
-                            resource=(row.calculation_record or "legacy_user_change"),
+                            resource=(resource_name or "legacy_user_change"),
                             action="update",
                             payload=payload,
                             calculation_id=row.calculationId,
+                            content_type=content_type,
+                            object_id=record_id if isinstance(record_id, int) else None,
                         )
                         AuditLogStatus.objects.create(audit_log=audit_log, status="success")
                         created_user_audit += 1
