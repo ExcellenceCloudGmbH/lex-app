@@ -136,10 +136,21 @@ def _resolve_runtime(options: WorkflowOptions) -> WorkflowRuntime:
             f"❌ Error: Virtual environment (.venv or venv) not found in {v2_root}"
         )
 
-    python_executable = venv_root / "bin" / "python"
-    if not python_executable.exists():
+    python_candidates = [
+        venv_root / "Scripts" / "python.exe",  # Windows virtualenv/venv
+        venv_root / "Scripts" / "python",  # Some Windows setups
+        venv_root / "bin" / "python",  # Unix virtualenv/venv
+        venv_root / "bin" / "python3",
+    ]
+    python_executable = next(
+        (candidate for candidate in python_candidates if candidate.is_file()),
+        None,
+    )
+    if python_executable is None:
+        checked_paths = ", ".join(str(path) for path in python_candidates)
         raise WorkflowUsageError(
-            f"❌ Error: Python executable not found in virtual environment: {python_executable}"
+            "❌ Error: Python executable not found in virtual environment. "
+            f"Checked: {checked_paths}"
         )
 
     return WorkflowRuntime(
@@ -358,7 +369,8 @@ def run_full_migration_workflow(options: WorkflowOptions) -> None:
     env = os.environ.copy()
     env["DATABASE_DEPLOYMENT_TARGET"] = "default"
     env["DB_NAME"] = options.db_name
-    env["PROJECT_ROOT"] = str(runtime.v2_root)
+    # Normalize path separators so settings code that splits on "/" stays stable on Windows.
+    env["PROJECT_ROOT"] = runtime.v2_root.as_posix()
 
     if options.pre_clean_jsons:
         _cleanup_json_artifacts(runtime, options)
