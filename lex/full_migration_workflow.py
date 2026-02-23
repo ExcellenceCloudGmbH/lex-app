@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -131,9 +132,23 @@ def _resolve_runtime(options: WorkflowOptions) -> WorkflowRuntime:
         venv_root = v2_root / ".venv"
     elif (v2_root / "venv").is_dir():
         venv_root = v2_root / "venv"
-    else:
-        raise WorkflowUsageError(
-            f"❌ Error: Virtual environment (.venv or venv) not found in {v2_root}"
+    if venv_root is None:
+        python_executable = Path(sys.executable).expanduser().resolve()
+        if not python_executable.is_file():
+            raise WorkflowUsageError(
+                f"❌ Error: Virtual environment (.venv or venv) not found in {v2_root} "
+                "and current Python interpreter is unavailable."
+            )
+        print(
+            "ℹ️  Virtual environment (.venv or venv) not found in "
+            f"{v2_root}; using current interpreter {python_executable}"
+        )
+        return WorkflowRuntime(
+            script_dir=Path(__file__).resolve().parent,
+            v2_root=v2_root,
+            v2_migrations_dir=v2_root / "migrations",
+            app_name=v2_root.name,
+            python_executable=python_executable,
         )
 
     python_candidates = [
