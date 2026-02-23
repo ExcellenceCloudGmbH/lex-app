@@ -41,6 +41,15 @@ class Command(BaseCommand):
             default=None,
             help="Optional external V1 migration source path.",
         )
+        parser.add_argument(
+            "--database-deployment-target",
+            type=str,
+            default=None,
+            help=(
+                "Value for DATABASE_DEPLOYMENT_TARGET for workflow subprocesses "
+                "(for example: GCP, K8S, DOCKER-COMPOSE, local, default)."
+            ),
+        )
         parser.add_argument("--migration-timestamp", type=str, default=None)
         parser.add_argument("--chunk-size", type=int, default=500)
         parser.add_argument("--dry-run-backfill", action="store_true")
@@ -101,6 +110,7 @@ class Command(BaseCommand):
             v2_root=project_root,
             db_name=db_name,
             v1_source=v1_source,
+            database_deployment_target=options["database_deployment_target"],
             migration_timestamp=options["migration_timestamp"],
             chunk_size=options["chunk_size"],
             dry_run_backfill=options["dry_run_backfill"],
