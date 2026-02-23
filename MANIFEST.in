@@ -2,3 +2,5 @@ recursive-include lex/react *
 recursive-include lex/assets *
 include requirements*.txt
 include generate_pycharm_configs.py
+global-exclude __pycache__ *.py[cod] .DS_Store
+recursive-exclude * __pycache__
