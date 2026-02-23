@@ -13,6 +13,55 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 
+def create_standard_history_record(
+    history_manager,
+    instance,
+    history_type,
+    using=None,
+    history_user=None,
+):
+    """
+    Create a level-1 history row for ``instance`` with API compatibility
+    across django-simple-history versions.
+    """
+    creator = getattr(history_manager, "create_historical_record", None)
+    if callable(creator):
+        return creator(instance, history_type, using=using)
+
+    history_model = history_manager.model
+
+    attrs = {}
+    for field in getattr(history_model, "tracked_fields", ()):
+        attrs[field.attname] = getattr(instance, field.attname)
+
+    if history_user is None:
+        history_user = getattr(instance, "_history_user", None)
+
+    history_instance = history_model(
+        valid_from=getattr(instance, "_history_date", timezone.now()),
+        history_type=history_type,
+        history_change_reason=getattr(
+            instance, "_history_change_reason", ""
+        ),
+        history_user=history_user,
+        **attrs,
+    )
+    history_instance.save(using=using)
+
+    from simple_history.signals import post_create_historical_record
+
+    post_create_historical_record.send(
+        sender=history_model,
+        instance=instance,
+        history_instance=history_instance,
+        history_date=history_instance.valid_from,
+        history_user=history_instance.history_user,
+        history_change_reason=history_instance.history_change_reason,
+        using=using,
+    )
+    return history_instance
+
+
 class StandardHistory(HistoricalRecords):
     """
     Historical records provider that uses bitemporal naming:
@@ -76,43 +125,13 @@ class StandardHistory(HistoricalRecords):
     def create_historical_record(self, instance, history_type, using=None):
         """Create a history record, mapping ``_history_date`` → ``valid_from``."""
         manager = getattr(instance, self.manager_name)
-
-        # Control fields we set explicitly — skip them from copied attrs
-        # to avoid "multiple values for keyword argument" if the tracked
-        # model happens to have a field with the same name.
-        CONTROL_FIELDS = {
-            "valid_from", "valid_to", "history_type",
-            "history_change_reason", "history_user", "history_user_id",
-        }
-
-        attrs = {}
-        for field in self.fields_included(instance):
-            if field.attname not in CONTROL_FIELDS and field.name not in CONTROL_FIELDS:
-                attrs[field.attname] = getattr(instance, field.attname)
-
-        history_instance = manager.model(
-            valid_from=getattr(instance, "_history_date", timezone.now()),
-            history_type=history_type,
-            history_change_reason=getattr(
-                instance, "_history_change_reason", ""
-            ),
-            history_user=self.get_history_user(instance),
-            **attrs,
-        )
-        history_instance.save(using=using)
-
-        # Emit signal so chaining / meta-history handlers fire
-        from simple_history.signals import post_create_historical_record
-
-        post_create_historical_record.send(
-            sender=manager.model,
+        return create_standard_history_record(
+            history_manager=manager,
             instance=instance,
-            history_instance=history_instance,
-            history_date=history_instance.valid_from,
-            history_user=history_instance.history_user,
+            history_type=history_type,
             using=using,
+            history_user=self.get_history_user(instance),
         )
-        return history_instance
 
     @classmethod
     def get_default_history_user(cls, instance):

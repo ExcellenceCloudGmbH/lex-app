@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from lex.audit_logging.models.CalculationLog import (
     CalculationLog,
 )  # Import your CalculationLog model
+from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.permissions.UserPermission import UserPermission
 
 
@@ -25,7 +26,6 @@ class ModelEntryProviderMixin:
 
     def get_queryset(self):
         from lex.core.services.Bitemporal import get_queryset_as_of
-        from django.utils.dateparse import parse_datetime
         from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
         from lex.process_admin.utils.temporal_reconciler import TemporalReconciler
         from django.utils import timezone
@@ -35,7 +35,7 @@ class ModelEntryProviderMixin:
         
         as_of_param = self.request.query_params.get("as_of")
         if as_of_param:
-            as_of_date = parse_datetime(as_of_param)
+            as_of_date = parse_as_of_datetime(as_of_param)
             if as_of_date:
                 # Use the bitemporal helper to get the historical snapshot
                 queryset = get_queryset_as_of(model_class, as_of_date)

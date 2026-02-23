@@ -21,6 +21,56 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def create_meta_history_record(
+    meta_manager,
+    instance,
+    history_type,
+    using=None,
+    meta_history_user=None,
+):
+    """
+    Create a level-2 (meta) history row with compatibility for manager APIs.
+    """
+    creator = getattr(meta_manager, "create_historical_record", None)
+    if callable(creator):
+        return creator(instance, history_type, using=using)
+
+    meta_model = meta_manager.model
+
+    attrs = {}
+    for field in getattr(meta_model, "tracked_fields", ()):
+        attrs[field.attname] = getattr(instance, field.attname)
+
+    # Strict-chaining in-place update
+    if getattr(instance, "_strict_chaining_update", False):
+        latest = (
+            meta_model.objects.filter(history_object=instance)
+            .order_by("-sys_from", "-meta_history_id")
+            .first()
+        )
+        if latest and latest.sys_to is None:
+            for field_name, value in attrs.items():
+                setattr(latest, field_name, value)
+            latest.save(using=using)
+            return latest
+
+    if meta_history_user is None:
+        meta_history_user = getattr(instance, "_history_user", None)
+
+    history_instance = meta_model(
+        sys_from=getattr(instance, "_history_date", timezone.now()),
+        meta_history_type=history_type,
+        meta_history_change_reason=getattr(
+            instance, "_history_change_reason", ""
+        ),
+        meta_history_user=meta_history_user,
+        history_object=instance,
+        **attrs,
+    )
+    history_instance.save(using=using)
+    return history_instance
+
+
 class MetaLevelHistoricalRecords(HistoricalRecords):
     """
     History-on-History provider.
@@ -133,32 +183,10 @@ class MetaLevelHistoricalRecords(HistoricalRecords):
         ``valid_to`` from one value to another value).
         """
         manager = getattr(instance, self.manager_name)
-        attrs = {}
-        for field in self.fields_included(instance):
-            attrs[field.attname] = getattr(instance, field.attname)
-
-        # ── Strict-chaining in-place update ──
-        if getattr(instance, "_strict_chaining_update", False):
-            latest = (
-                manager.all().order_by("-sys_from", "-meta_history_id").first()
-            )
-            if latest and latest.sys_to is None:
-                for field in self.fields_included(instance):
-                    setattr(latest, field.attname, getattr(instance, field.attname))
-                # sys_from intentionally NOT updated (original creation time)
-                latest.save(using=using)
-                return latest
-
-        # ── Normal creation ──
-        history_instance = manager.model(
-            sys_from=getattr(instance, "_history_date", timezone.now()),
-            meta_history_type=history_type,
-            meta_history_change_reason=getattr(
-                instance, "_history_change_reason", ""
-            ),
+        return create_meta_history_record(
+            meta_manager=manager,
+            instance=instance,
+            history_type=history_type,
+            using=using,
             meta_history_user=self.get_history_user(instance),
-            history_object=instance,
-            **attrs,
         )
-        history_instance.save(using=using)
-        return history_instance

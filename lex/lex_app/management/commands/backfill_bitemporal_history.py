@@ -9,6 +9,8 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from lex.core.services.MetaHistory import create_meta_history_record
+from lex.core.services.StandardHistory import create_standard_history_record
 from lex.core.services.bitemporal_signals import suppress_main_table_sync
 
 EXCLUDED_APP_LABELS = {
@@ -55,6 +57,15 @@ def _missing_history_queryset(model, history_model, pk_name: str):
     return model._default_manager.annotate(
         _has_history=Exists(history_exists)
     ).filter(_has_history=False)
+
+
+def _missing_meta_queryset(history_model, meta_model):
+    meta_exists = meta_model._default_manager.filter(
+        history_object_id=OuterRef("pk")
+    )
+    return history_model._default_manager.annotate(
+        _has_meta=Exists(meta_exists)
+    ).filter(_has_meta=False)
 
 
 class Command(BaseCommand):
@@ -165,8 +176,9 @@ class Command(BaseCommand):
                     pk_name=pk_name,
                     chunk_size=chunk_size,
                 )
-                created_meta = history_model._default_manager.filter(
-                    meta_history__isnull=True
+                created_meta = _missing_meta_queryset(
+                    history_model=history_model,
+                    meta_model=meta_model,
                 ).count()
             else:
                 with transaction.atomic():
@@ -177,7 +189,11 @@ class Command(BaseCommand):
                         ):
                             obj._history_date = timestamp
                             obj._history_change_reason = reason
-                            history_manager.create_historical_record(obj, "+")
+                            create_standard_history_record(
+                                history_manager=history_manager,
+                                instance=obj,
+                                history_type="+",
+                            )
                             created += 1
 
                         repaired_history_type = self._repair_history_type_markers(
@@ -188,12 +204,10 @@ class Command(BaseCommand):
 
                         meta_manager = getattr(history_model, "meta_history", None)
                         if meta_manager:
-                            missing_meta_qs = (
-                                history_model._default_manager.filter(
-                                    meta_history__isnull=True
-                                )
-                                .order_by(pk_name, "history_id")
-                            )
+                            missing_meta_qs = _missing_meta_queryset(
+                                history_model=history_model,
+                                meta_model=meta_model,
+                            ).order_by(pk_name, "history_id")
                             for history_row in missing_meta_qs.iterator(
                                 chunk_size=chunk_size
                             ):
@@ -206,7 +220,11 @@ class Command(BaseCommand):
                                     )
                                     or reason
                                 )
-                                meta_manager.create_historical_record(history_row, "+")
+                                create_meta_history_record(
+                                    meta_manager=meta_manager,
+                                    instance=history_row,
+                                    history_type="+",
+                                )
                                 created_meta += 1
 
             summary["processed_models"].append(

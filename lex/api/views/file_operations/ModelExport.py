@@ -10,12 +10,12 @@ from django.core.exceptions import FieldDoesNotExist
 from django.db.models import Q
 from django.db.models import QuerySet
 from django.http import FileResponse, JsonResponse
-from django.utils.dateparse import parse_datetime
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_api_key.permissions import HasAPIKey
 
 from lex.api.filters import UserReadRestrictionFilterBackend, ForeignKeyFilterBackend
+from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend
 from lex.process_admin.models.utils import get_relation_fields
@@ -618,7 +618,7 @@ class ModelExportView(GenericAPIView):
         queryset = model.objects.all()
         as_of_param = request.query_params.get("as_of")
         if as_of_param:
-            as_of_date = parse_datetime(as_of_param)
+            as_of_date = parse_as_of_datetime(as_of_param)
             if as_of_date:
                 from lex.core.services.Bitemporal import get_queryset_as_of
                 queryset = get_queryset_as_of(model, as_of_date)

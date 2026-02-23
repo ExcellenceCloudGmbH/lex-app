@@ -22,6 +22,8 @@ from contextvars import ContextVar
 
 from django.utils import timezone
 
+from lex.core.services.MetaHistory import create_meta_history_record
+
 logger = logging.getLogger(__name__)
 
 _suppress_main_table_sync = ContextVar(
@@ -119,8 +121,10 @@ def on_history_saved__create_meta(
             # Use the meta_history manager to create the initial record
             history_manager = getattr(sender, 'meta_history', None)
             if history_manager:
-                meta_instance = history_manager.create_historical_record(
-                    history_instance, "+"
+                meta_instance = create_meta_history_record(
+                    meta_manager=history_manager,
+                    instance=history_instance,
+                    history_type="+",
                 )
             else:
                 return
