@@ -114,7 +114,10 @@ if os.getenv("STORAGE_TYPE") == "SHAREPOINT":
     STORAGES = {
         "default": {
             "BACKEND": "django_sharepoint_storage.SharePointCloudStorageUtils.Media",
-        }
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
     }
     MEDIA_ROOT = "uploads/"
 
@@ -122,7 +125,10 @@ if os.getenv("STORAGE_TYPE") == "GCS":
     STORAGES = {
         "default": {
             "BACKEND": "lex.utilities.utils.gcs_utils.Media",
-        }
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
     }
     GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME")
     GS_CREDENTIALS = service_account.Credentials.from_service_account_file(

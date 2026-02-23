@@ -1,8 +1,15 @@
 from datetime import datetime
 from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 
 from django.db import models
+from django.db.models.fields.files import FieldFile
+
+from lex.audit_logging.serializers.AuditLogMixinSerializer import (
+    _serialize_payload,
+    generic_instance_payload,
+)
 
 from lex.audit_logging.utils.legacy_audit_payload import (
     build_legacy_calculation_payload,
@@ -25,6 +32,12 @@ class _FakeManager:
         if self._pk in self._existing_ids:
             return SimpleNamespace(pk=self._pk)
         return None
+
+
+class _FakeFileField:
+    def __init__(self, name="investment_data"):
+        self.name = name
+        self.storage = SimpleNamespace(url=lambda value: f"/media/{value}")
 
 
 class BackfillAuditLogPayloadTest(TestCase):
@@ -130,3 +143,41 @@ class BackfillAuditLogPayloadTest(TestCase):
         self.assertEqual(merged["timestamp"], "2026-02-20T10:00:00")
         self.assertEqual(merged["legacy_timestamp"], "2026-02-20T12:00:00")
         self.assertEqual(merged["message"], "legacy update")
+
+    @staticmethod
+    def _build_field_file(name=None):
+        return FieldFile(
+            instance=SimpleNamespace(),
+            field=_FakeFileField(),
+            name=name,
+        )
+
+    def test_generic_instance_payload_handles_field_file_without_attached_file(self):
+        field_file = self._build_field_file(name=None)
+        fake_instance = SimpleNamespace(
+            pk=7,
+            _meta=SimpleNamespace(
+                concrete_fields=[SimpleNamespace(name="investment_data")]
+            ),
+        )
+
+        with patch(
+            "lex.audit_logging.serializers.AuditLogMixinSerializer.model_to_dict",
+            return_value={"investment_data": field_file},
+        ):
+            payload = generic_instance_payload(fake_instance)
+
+        self.assertEqual(
+            payload["investment_data"],
+            {"name": None, "url": None},
+        )
+
+    def test_serialize_payload_handles_field_file_without_attached_file(self):
+        field_file = self._build_field_file(name=None)
+
+        payload = _serialize_payload({"investment_data": field_file})
+
+        self.assertEqual(
+            payload["investment_data"],
+            {"name": None, "url": None},
+        )

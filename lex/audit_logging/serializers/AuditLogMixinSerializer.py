@@ -17,6 +17,15 @@ def _iso_seconds(dt: datetime.datetime | None) -> str | None:
         dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
     return dt.replace(microsecond=0).isoformat()
 
+
+def _serialize_file_reference(value) -> dict:
+    name = getattr(value, "name", None)
+    try:
+        url = value.url if name else None
+    except (AttributeError, ValueError):
+        url = None
+    return {"name": name, "url": url}
+
 def generic_instance_payload(instance: Model) -> dict:
     # Concrete DB fields as base
     field_names = [f.name for f in instance._meta.concrete_fields]
@@ -36,7 +45,7 @@ def generic_instance_payload(instance: Model) -> dict:
         elif isinstance(v, UUID):
             data[k] = str(v)
         elif isinstance(v, FieldFile):
-            data[k] = {"name": v.name, "url": getattr(v, "url", None)}
+            data[k] = _serialize_file_reference(v)
         # ForeignKeys are already pk values via model_to_dict
 
     # Common computed attribute if present
@@ -88,8 +97,10 @@ def _serialize_payload(data):
             'size': getattr(data, 'size', 0),
             'content_type': getattr(data, 'content_type', 'unknown')
         }
-    elif hasattr(data, 'url') and hasattr(data, 'name'):  # Catch generic FieldFiles
-        return {'name': data.name, 'url': data.url}
+    elif isinstance(data, FieldFile):
+        return _serialize_file_reference(data)
+    elif hasattr(data, "name") and hasattr(type(data), "url"):
+        return _serialize_file_reference(data)
 
     elif isinstance(data, Model):
         return {'id': data.pk, 'display': str(data)}
