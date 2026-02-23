@@ -5,7 +5,7 @@ Returns the full history of a record, optionally time-travelling to
 a specific system-time snapshot using the ``?as_of`` query parameter.
 """
 
-from django.contrib.auth import get_user_model
+from django.db.models import Prefetch
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.generics import ListAPIView
@@ -39,6 +39,13 @@ class HistoryModelEntry(ListAPIView):
 
         HistoryModel = model_class.history.model
         pk_name = model_class._meta.pk.name
+        serializers_map = (
+            model_container.get_serializers_map()
+            if hasattr(model_container, "get_serializers_map")
+            else model_container.serializers_map
+        )
+        serializer_class = serializers_map.get("default")
+        serializer_context = {"request": request, "view": self} if serializer_class else None
 
         # ── Fetch records ──
         history_qs = self._get_history_queryset(
@@ -49,7 +56,9 @@ class HistoryModelEntry(ListAPIView):
         data = []
         for record in history_qs:
             entry = self._serialize_record(
-                record, request, model_container, pk_name
+                record,
+                serializer_class=serializer_class,
+                serializer_context=serializer_context,
             )
             data.append(entry)
 
@@ -70,15 +79,40 @@ class HistoryModelEntry(ListAPIView):
 
                 try:
                     qs = get_queryset_as_of(HistoryModel, as_of_date)
-                    return qs.filter(**{pk_name: pk}).order_by("-valid_from")
+                    qs = qs.filter(**{pk_name: pk}).order_by("-valid_from")
+                    return self._optimize_history_queryset(qs)
                 except ValueError:
                     return HistoryModel.objects.none()
 
-        return HistoryModel.objects.filter(**{pk_name: pk}).order_by(
+        qs = HistoryModel.objects.filter(**{pk_name: pk}).order_by(
             "-valid_from", "-history_id"
         )
+        return self._optimize_history_queryset(qs)
 
-    def _serialize_record(self, record, request, model_container, pk_name):
+    def _optimize_history_queryset(self, queryset):
+        model = queryset.model
+
+        try:
+            model._meta.get_field("history_user")
+            queryset = queryset.select_related("history_user")
+        except Exception:
+            pass
+
+        try:
+            relation = model._meta.get_field("meta_history")
+            meta_model = relation.related_model
+            queryset = queryset.prefetch_related(
+                Prefetch(
+                    "meta_history",
+                    queryset=meta_model.objects.order_by("-sys_from"),
+                )
+            )
+        except Exception:
+            pass
+
+        return queryset
+
+    def _serialize_record(self, record, serializer_class=None, serializer_context=None):
         """Serialize a single history or meta-history record."""
 
         # Determine effective record (meta wraps history, but copies fields)
@@ -88,7 +122,11 @@ class HistoryModelEntry(ListAPIView):
         user_info = self._get_user_info(effective_record)
 
         # ── Snapshot data ──
-        snapshot = self._get_snapshot(effective_record, request, model_container)
+        snapshot = self._get_snapshot(
+            effective_record,
+            serializer_class=serializer_class,
+            serializer_context=serializer_context,
+        )
 
         # ── System history (Level 2 meta records) ──
         system_history = self._get_system_history(record)
@@ -132,13 +170,10 @@ class HistoryModelEntry(ListAPIView):
             "name": name,
         }
 
-    def _get_snapshot(self, record, request, model_container):
+    def _get_snapshot(self, record, serializer_class=None, serializer_context=None):
         """Serialize the data fields of a history record."""
-        serializer_class = model_container.serializers_map.get("default")
-
         if serializer_class:
-            context = {"request": request, "view": self}
-            serializer = serializer_class(record, context=context)
+            serializer = serializer_class(record, context=serializer_context or {})
             return serializer.data
 
         # Fallback: manual field serialization
@@ -180,5 +215,5 @@ class HistoryModelEntry(ListAPIView):
                     meta, "meta_history_change_reason", None
                 ),
             }
-            for meta in record.meta_history.all().order_by("-sys_from")
+            for meta in record.meta_history.all()
         ]

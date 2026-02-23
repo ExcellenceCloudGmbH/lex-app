@@ -39,7 +39,6 @@ class ModelRegistration:
             untracked_models: Optional list of model names (lowercase) that should
                             not have history tracking. Defaults to empty list.
         """
-        from lex.process_admin.settings import processAdminSite
         from lex.core.models.Process import Process
         from lex.core.models.HTMLReport import HTMLReport
         from lex.core.models.CalculationModel import CalculationModel
@@ -53,7 +52,6 @@ class ModelRegistration:
             return f"{self.first_name} {self.last_name}"
 
         User.add_to_class("__str__", get_username)
-        processAdminSite.register([User])
 
         for model in models:
             try:

@@ -94,7 +94,11 @@ class Fields(APIView):
         container = kwargs["model_container"]
         model = container.model_class
         serializer_name = request.query_params.get("serializer", "default")
-        serializers_map = container.serializers_map
+        serializers_map = (
+            container.get_serializers_map()
+            if hasattr(container, "get_serializers_map")
+            else container.serializers_map
+        )
 
         if serializer_name not in serializers_map:
             raise APIException(

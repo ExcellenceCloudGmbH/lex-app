@@ -78,7 +78,11 @@ class ModelEntryProviderMixin:
         """
         container = self.kwargs["model_container"]
         choice = self.request.query_params.get("serializer", "default")
-        mapping = container.serializers_map
+        mapping = (
+            container.get_serializers_map()
+            if hasattr(container, "get_serializers_map")
+            else container.serializers_map
+        )
         
         if issubclass(container.model_class, User):
             return UserModelSerializer

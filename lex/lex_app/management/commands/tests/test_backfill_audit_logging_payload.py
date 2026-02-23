@@ -2,12 +2,29 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest import TestCase
 
+from django.db import models
+
 from lex.audit_logging.utils.legacy_audit_payload import (
     build_legacy_calculation_payload,
     build_legacy_user_change_payload,
     extract_resource_and_record_id,
     merge_model_and_legacy_payload,
 )
+
+
+class _FakeManager:
+    def __init__(self, existing_ids):
+        self._existing_ids = set(existing_ids)
+        self._pk = None
+
+    def filter(self, **kwargs):
+        self._pk = kwargs.get("pk")
+        return self
+
+    def first(self):
+        if self._pk in self._existing_ids:
+            return SimpleNamespace(pk=self._pk)
+        return None
 
 
 class BackfillAuditLogPayloadTest(TestCase):
@@ -25,6 +42,38 @@ class BackfillAuditLogPayloadTest(TestCase):
 
     def test_extract_resource_and_record_id_rejects_non_identifier_suffix(self):
         resource, record_id = extract_resource_and_record_id("legacy_user_change")
+        self.assertEqual(resource, "legacy_user_change")
+        self.assertIsNone(record_id)
+
+    def test_extract_resource_and_record_id_recovers_text_pk_with_model_lookup(self):
+        fake_model = SimpleNamespace(
+            _meta=SimpleNamespace(
+                model_name="textpkmodel",
+                pk=models.CharField(max_length=64),
+            ),
+            _default_manager=_FakeManager({"AB-42"}),
+        )
+
+        resource, record_id = extract_resource_and_record_id(
+            "textpkmodel_AB-42",
+            model_lookup={"textpkmodel": fake_model},
+        )
+        self.assertEqual(resource, "textpkmodel")
+        self.assertEqual(record_id, "AB-42")
+
+    def test_extract_resource_and_record_id_does_not_guess_text_pk_without_instance(self):
+        fake_model = SimpleNamespace(
+            _meta=SimpleNamespace(
+                model_name="legacy_user",
+                pk=models.CharField(max_length=64),
+            ),
+            _default_manager=_FakeManager(set()),
+        )
+
+        resource, record_id = extract_resource_and_record_id(
+            "legacy_user_change",
+            model_lookup={"legacy_user": fake_model},
+        )
         self.assertEqual(resource, "legacy_user_change")
         self.assertIsNone(record_id)
 

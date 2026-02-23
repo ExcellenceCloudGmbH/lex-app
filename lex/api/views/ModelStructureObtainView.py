@@ -74,8 +74,13 @@ class ModelStructureObtainView(APIView):
                 except Exception:
                     container = None
                 if container and hasattr(container, "serializers_map"):
+                    serializers_map = (
+                        container.get_serializers_map()
+                        if hasattr(container, "get_serializers_map")
+                        else container.serializers_map
+                    )
                     node["available_serializers"] = list(
-                        container.serializers_map.keys()
+                        serializers_map.keys()
                     )
                 children = node.get("children")
                 if isinstance(children, dict):

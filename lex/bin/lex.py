@@ -139,11 +139,19 @@ def streamlit(ctx):
         pass
     # ───────────────────────────────────────────────────────────────────
 
+    # Keep streamlit startup non-interactive in terminal/CI sessions.
+    os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
+    os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
+
     from streamlit.web.cli import main as streamlit_main
-    streamlit_args = ctx.args
+    streamlit_args = list(ctx.args)
+    if not streamlit_args:
+        streamlit_args = ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"]
     file_index = next((i for i, item in enumerate(streamlit_args) if 'streamlit_app.py' in item), None)
     if file_index is not None:
-        streamlit_args[file_index] = f"{LEX_APP_PACKAGE_ROOT}/{streamlit_args[file_index]}"
+        streamlit_app_path = streamlit_args[file_index]
+        if not os.path.isabs(streamlit_app_path):
+            streamlit_args[file_index] = f"{LEX_APP_PACKAGE_ROOT}/{streamlit_app_path}"
 
     def run_uvicorn():
         loop = asyncio.new_event_loop()
@@ -153,7 +161,7 @@ def streamlit(ctx):
     t = threading.Thread(target=run_uvicorn, daemon=True)
     t.start()
 
-    streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"] or ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"])
+    streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"])
 
 @lex.command(name="start", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context

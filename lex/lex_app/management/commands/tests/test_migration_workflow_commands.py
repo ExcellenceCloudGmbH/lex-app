@@ -29,6 +29,7 @@ if "celery" not in sys.modules:
 from django.core.management import call_command
 from django.db import connection
 from django.test import TransactionTestCase
+from django.utils import timezone
 
 from lex.process_admin.utils.model_registration import ModelRegistration
 from lex.core.models.LexModel import LexModel
@@ -180,3 +181,63 @@ class BackfillBitemporalHistoryCommandTest(TransactionTestCase):
         call_command("backfill_bitemporal_history", dry_run=True)
         self.assertEqual(self.HistoryModel.objects.count(), 0)
         self.assertEqual(self.MetaModel.objects.count(), 0)
+
+    def test_backfill_repairs_missing_create_marker_and_fills_missing_rows(self):
+        BackfillCommandModel.objects.bulk_create(
+            [
+                BackfillCommandModel(name="has_history", amount=1),
+                BackfillCommandModel(name="missing_history", amount=2),
+            ],
+            skip_history=True,
+        )
+        first = BackfillCommandModel.objects.get(name="has_history")
+        second = BackfillCommandModel.objects.get(name="missing_history")
+        ts = timezone.now()
+
+        # Simulate a partially migrated state: one object has only "~" history.
+        self.HistoryModel.objects.create(
+            id=first.id,
+            name=first.name,
+            amount=first.amount,
+            valid_from=ts,
+            valid_to=None,
+            history_type="~",
+            history_change_reason="legacy import",
+            history_user_id=None,
+        )
+
+        call_command(
+            "backfill_bitemporal_history",
+            timestamp=ts.isoformat(),
+            reason="V1 migration snapshot",
+            chunk_size=10,
+        )
+
+        first_rows = list(
+            self.HistoryModel.objects.filter(id=first.id).order_by(
+                "valid_from", "history_id"
+            )
+        )
+        self.assertTrue(first_rows)
+        self.assertEqual(first_rows[0].history_type, "+")
+
+        second_rows = list(self.HistoryModel.objects.filter(id=second.id))
+        self.assertEqual(len(second_rows), 1)
+        self.assertEqual(second_rows[0].history_type, "+")
+
+    def test_backfill_with_future_timestamp_keeps_live_rows(self):
+        BackfillCommandModel.objects.bulk_create(
+            [BackfillCommandModel(name="future_case", amount=1)],
+            skip_history=True,
+        )
+        obj = BackfillCommandModel.objects.get(name="future_case")
+        future_ts = (timezone.now() + timezone.timedelta(days=1)).isoformat()
+
+        call_command(
+            "backfill_bitemporal_history",
+            timestamp=future_ts,
+            reason="V1 migration snapshot",
+            chunk_size=10,
+        )
+
+        self.assertTrue(BackfillCommandModel.objects.filter(pk=obj.pk).exists())

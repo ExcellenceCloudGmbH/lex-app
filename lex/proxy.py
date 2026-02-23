@@ -859,8 +859,19 @@ async def proxy(request: Request):
     body = await request.body()
     timeout = httpx.Timeout(30.0)
 
-    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
-        upstream_resp = await client.request(method, url, content=body, headers=fwd_headers)
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+            upstream_resp = await client.request(method, url, content=body, headers=fwd_headers)
+    except httpx.ConnectError:
+        return JSONResponse(
+            {"error": f"Upstream unavailable: {UPSTREAM}. Streamlit may still be starting."},
+            status_code=503,
+        )
+    except httpx.TimeoutException:
+        return JSONResponse(
+            {"error": f"Upstream timeout after 30s: {UPSTREAM}"},
+            status_code=504,
+        )
 
     drop = hop_by_hop | {"content-length", "content-encoding", "transfer-encoding"}
     resp_headers = {k: v for k, v in upstream_resp.headers.items() if k.lower() not in drop}

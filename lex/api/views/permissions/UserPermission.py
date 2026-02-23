@@ -2,7 +2,7 @@ import inspect
 
 from rest_framework.permissions import BasePermission
 
-READ_METHODS = {'GET'}
+READ_METHODS = {'GET', 'HEAD', 'OPTIONS'}
 CREATE_METHODS = {'POST'}
 MODIFY_METHODS = {'PUT', 'PATCH'}
 DELETE_METHOD = 'DELETE'
@@ -28,12 +28,19 @@ class UserPermission(BasePermission):
 
     # TODO: this class can easily extended to also consider permissions set via Django admin
 
+    @staticmethod
+    def _is_read_method(request, view):
+        if request.method in READ_METHODS:
+            return True
+        # Some read-only endpoints (e.g. AG Grid server-side model) use POST to carry complex filter/group payloads.
+        return request.method == 'POST' and bool(getattr(view, 'post_as_read', False))
+
     def has_permission(self, request, view):
         model_container = view.kwargs['model_container']
         user = request.user
         modification_restriction = model_container.get_modification_restriction()
 
-        if request.method in READ_METHODS:
+        if self._is_read_method(request, view):
             violations = []
             if modification_restriction.can_read_in_general(user, violations):
                 return True
@@ -68,7 +75,7 @@ class UserPermission(BasePermission):
         user = request.user
         modification_restriction = model_container.get_modification_restriction()
 
-        if request.method in READ_METHODS:
+        if self._is_read_method(request, view):
             violations = []
             if modification_restriction.can_be_read(obj, user, violations):
                 return True

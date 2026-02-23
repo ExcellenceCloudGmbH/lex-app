@@ -3,12 +3,15 @@ from django.db.models import Model, ForeignKey
 from django.db.models.fields import DateTimeField, DateField, TimeField
 from django.apps import apps
 from rest_framework import serializers, viewsets
+import logging
 
 from datetime import datetime, date, time
 from uuid import UUID
 from decimal import Decimal
 
 from lex.core.models.LexModel import LexModel, UserContext
+
+logger = logging.getLogger(__name__)
 
 # Field-names that React-Admin expects
 ID_FIELD_NAME = "id_field"
@@ -110,9 +113,26 @@ class LexSerializer(serializers.ModelSerializer):
         """Return cached set of field names for a model class."""
         fields = cls._meta_fields_cache.get(model_class)
         if fields is None:
-            fields = {f.name for f in model_class._meta.fields}
+            fields = {
+                f.name
+                for f in model_class._meta.get_fields()
+                if not (f.auto_created and not f.concrete)
+            }
             cls._meta_fields_cache[model_class] = fields
         return fields
+
+    @staticmethod
+    def _normalize_field_names(fields) -> set[str]:
+        """
+        Normalize field collections returned by legacy/new permission APIs.
+        """
+        if fields is None:
+            return set()
+        if isinstance(fields, str):
+            return {fields}
+        if isinstance(fields, (set, frozenset, list, tuple)):
+            return {f for f in fields if isinstance(f, str)}
+        return set()
 
     # ------------------------------------------------------------------
     # Helper: unwrap history/meta wrappers to get the real model instance
@@ -190,9 +210,20 @@ class LexSerializer(serializers.ModelSerializer):
             # Get permissions
             if target_caps['has_permission_edit']:
                 edit_result = target_instance.permission_edit(user_context)
-                edit_fields = edit_result.get_fields(all_fields)
+                if hasattr(edit_result, "get_fields"):
+                    edit_fields = self._normalize_field_names(edit_result.get_fields(all_fields))
+                elif edit_result:
+                    edit_fields = set(all_fields)
+                else:
+                    edit_fields = set()
             elif target_caps['has_can_edit']:
-                edit_fields = target_instance.can_edit(request)
+                raw_edit_fields = target_instance.can_edit(request)
+                if raw_edit_fields is True:
+                    edit_fields = set(all_fields)
+                elif raw_edit_fields is False:
+                    edit_fields = set()
+                else:
+                    edit_fields = self._normalize_field_names(raw_edit_fields)
             else:
                 edit_fields = set()
 
@@ -376,21 +407,34 @@ class LexSerializer(serializers.ModelSerializer):
         
         # 1. Try Legacy 'can_read'
         if target_caps['has_can_read']:
-            visible_fields = target_instance.can_read(request)
+            raw_visible_fields = target_instance.can_read(request)
+            if raw_visible_fields is False:
+                return {}
+            if raw_visible_fields is True:
+                visible_fields = self._get_cached_field_names(type(target_instance))
+            else:
+                visible_fields = self._normalize_field_names(raw_visible_fields)
             
         # 2. Try New System 'permission_read'
         elif target_caps['has_permission_read']:
              user_context = self._get_user_context(request, target_instance)
              result = target_instance.permission_read(user_context)
-             if not result.allowed:
+             if hasattr(result, "allowed") and not result.allowed:
                  return {}  # Hide entirely
              
              all_fields = self._get_cached_field_names(type(target_instance))
-             visible_fields = result.get_fields(all_fields)
+             if hasattr(result, "get_fields"):
+                 visible_fields = self._normalize_field_names(result.get_fields(all_fields))
+             elif result:
+                 visible_fields = set(all_fields)
+             else:
+                 visible_fields = set()
 
         # 3. Fallback: All fields
         if visible_fields is None:
              visible_fields = self._get_cached_field_names(type(instance))
+        else:
+            visible_fields = self._normalize_field_names(visible_fields)
 
         if not visible_fields:
             return {}
@@ -398,10 +442,12 @@ class LexSerializer(serializers.ModelSerializer):
         representation = super().to_representation(instance)
         
         # Filter non-AuditLog outputs by visible fields
-        system_fields = self._SYSTEM_FIELDS
+        model_field_names = self._get_cached_field_names(type(target_instance))
+        serializer_only_fields = set(self.fields.keys()) - model_field_names
+        allowed_non_model_fields = self._SYSTEM_FIELDS | serializer_only_fields
         
         for field_name in list(representation.keys()):
-            if field_name not in visible_fields and field_name not in system_fields:
+            if field_name not in visible_fields and field_name not in allowed_non_model_fields:
                 representation.pop(field_name, None)
 
         # AuditLog payload filtering using target model can_read
@@ -520,11 +566,22 @@ def _wrap_custom_serializer(custom_cls, model_class):
 
 
 def get_serializer_map_for_model(model_class, default_fields=None):
+    serializers_map = {}
+
+    auto_default = model2serializer(model_class, default_fields)
+    if auto_default is not None:
+        serializers_map["default"] = auto_default
+
     custom = getattr(model_class, "api_serializers", None)
     if isinstance(custom, dict) and custom:
-        wrapped = {}
         for name, cls in custom.items():
-            wrapped[name] = _wrap_custom_serializer(cls, model_class)
-        return wrapped
-    auto = model2serializer(model_class, default_fields)
-    return {"default": auto}
+            try:
+                serializers_map[name] = _wrap_custom_serializer(cls, model_class)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping serializer '%s' for model '%s' due to wrapping error: %s",
+                    name,
+                    getattr(model_class, "__name__", model_class),
+                    exc,
+                )
+    return serializers_map

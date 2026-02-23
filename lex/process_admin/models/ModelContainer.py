@@ -4,6 +4,9 @@ from lex.core.mixins.ModelModificationRestriction import (
     ModelModificationRestriction,
 )
 from lex.api.serializers import get_serializer_map_for_model
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ModelContainer:
@@ -49,29 +52,67 @@ class ModelContainer:
         self.dependent_model_containers: Set["ModelContainer"] = set()
         self.serializers_map: Optional[Dict[str, Any]] = None
         self.obj_serializer: Optional[Any] = None
+        self._serializer_signature: Optional[tuple] = None
 
         if hasattr(model_class, "_meta"):
-            try:
-                # Build and store all serializers for this model
-                default_fields = process_admin.get_fields_in_table_view(model_class)
-                self.serializers_map = get_serializer_map_for_model(
-                    model_class, default_fields
-                )
-
-                # The one used by default in list/detail endpoints
-                self.obj_serializer = self.serializers_map.get("default") if self.serializers_map else None
-            except Exception as e:
-                # Log the error but don't fail initialization
-                # This allows the container to be created even if serializer creation fails
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to create serializers for {model_class}: {e}")
-                self.serializers_map = {}
-                self.obj_serializer = None
+            self.get_serializers_map(force_refresh=True)
         else:
             # Ensure serializers_map is always a dict, never None
             self.serializers_map = {}
             self.obj_serializer = None
+
+    @staticmethod
+    def _custom_serializer_signature(custom_serializers: Any) -> Optional[tuple]:
+        if not isinstance(custom_serializers, dict):
+            return None
+        return tuple(
+            sorted(
+                (str(name), id(serializer_cls))
+                for name, serializer_cls in custom_serializers.items()
+            )
+        )
+
+    def _build_serializer_signature(self, default_fields: Optional[list]) -> tuple:
+        default_signature = None if default_fields is None else tuple(default_fields)
+        custom_signature = self._custom_serializer_signature(
+            getattr(self.model_class, "api_serializers", None)
+        )
+        return default_signature, custom_signature
+
+    def get_serializers_map(self, force_refresh: bool = False) -> Dict[str, Any]:
+        """
+        Return serializers for this model and refresh lazily when the model's
+        custom serializer registration changed at runtime.
+        """
+        if not hasattr(self.model_class, "_meta"):
+            self.serializers_map = {}
+            self.obj_serializer = None
+            return self.serializers_map
+
+        default_fields = self.process_admin.get_fields_in_table_view(self.model_class)
+        signature = self._build_serializer_signature(default_fields)
+
+        if (
+            not force_refresh
+            and self.serializers_map is not None
+            and self._serializer_signature == signature
+        ):
+            return self.serializers_map
+
+        try:
+            self.serializers_map = get_serializer_map_for_model(
+                self.model_class, default_fields
+            )
+            self.obj_serializer = (
+                self.serializers_map.get("default") if self.serializers_map else None
+            )
+            self._serializer_signature = signature
+        except Exception as e:
+            logger.warning(f"Failed to create serializers for {self.model_class}: {e}")
+            self.serializers_map = {}
+            self.obj_serializer = None
+
+        return self.serializers_map
 
     @property
     def model_id(self) -> str:

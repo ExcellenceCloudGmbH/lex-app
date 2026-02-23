@@ -4,20 +4,12 @@ from typing import Dict, Iterable, List, Tuple
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-
-CONTROL_FIELDS = {
-    "history_id",
-    "valid_from",
-    "valid_to",
-    "history_type",
-    "history_change_reason",
-    "history_user",
-    "history_user_id",
-}
+from lex.core.services.bitemporal_signals import suppress_main_table_sync
 
 EXCLUDED_APP_LABELS = {
     "legacy_data",
@@ -56,29 +48,13 @@ def _iter_tracked_models() -> Iterable[Tuple[type, type, type]]:
         yield model, history_model, meta_model
 
 
-def _build_history_row(instance, history_model, timestamp, reason):
-    history_row = history_model()
-
-    history_fields = {field.attname for field in history_model._meta.fields}
-    for field in instance._meta.fields:
-        if field.attname in CONTROL_FIELDS or field.name in CONTROL_FIELDS:
-            continue
-        if field.attname in history_fields:
-            setattr(history_row, field.attname, getattr(instance, field.attname))
-        elif field.name in history_fields:
-            setattr(history_row, field.name, getattr(instance, field.name))
-
-    history_row.valid_from = timestamp
-    history_row.valid_to = None
-    history_row.history_type = "+"
-    history_row.history_change_reason = reason
-    if hasattr(history_row, "history_user_id"):
-        history_row.history_user_id = None
-
-    # Ensures MetaHistory sys_from uses the same migration timestamp.
-    history_row._history_date = timestamp
-    history_row._history_change_reason = reason
-    return history_row
+def _missing_history_queryset(model, history_model, pk_name: str):
+    history_exists = history_model._default_manager.filter(
+        **{pk_name: OuterRef(pk_name)}
+    )
+    return model._default_manager.annotate(
+        _has_history=Exists(history_exists)
+    ).filter(_has_history=False)
 
 
 class Command(BaseCommand):
@@ -145,6 +121,8 @@ class Command(BaseCommand):
             "reason": reason,
             "dry_run": dry_run,
             "created_total": 0,
+            "repaired_history_type_total": 0,
+            "created_meta_total": 0,
             "processed_models": [],
             "skipped_models": [],
         }
@@ -153,25 +131,10 @@ class Command(BaseCommand):
             _iter_tracked_models(), key=lambda item: item[0]._meta.label_lower
         ):
             label = model._meta.label
+            pk_name = model._meta.pk.name
             main_count = model._default_manager.count()
             history_count = history_model._default_manager.count()
             meta_count = meta_model._default_manager.count()
-
-            if history_count > 0 or meta_count > 0:
-                summary["skipped_models"].append(
-                    {
-                        "model": label,
-                        "reason": "history_or_meta_not_empty",
-                        "main_count": main_count,
-                        "history_count": history_count,
-                        "meta_count": meta_count,
-                    }
-                )
-                self.stdout.write(
-                    f"Skipping {label}: history/meta already populated "
-                    f"(history={history_count}, meta={meta_count})"
-                )
-                continue
 
             if main_count == 0:
                 summary["skipped_models"].append(
@@ -187,32 +150,141 @@ class Command(BaseCommand):
                 continue
 
             created = 0
+            repaired_history_type = 0
+            created_meta = 0
+            missing_history_qs = _missing_history_queryset(
+                model=model,
+                history_model=history_model,
+                pk_name=pk_name,
+            )
+
             if dry_run:
-                created = main_count
+                created = missing_history_qs.count()
+                repaired_history_type = self._count_history_type_repairs(
+                    history_model=history_model,
+                    pk_name=pk_name,
+                    chunk_size=chunk_size,
+                )
+                created_meta = history_model._default_manager.filter(
+                    meta_history__isnull=True
+                ).count()
             else:
                 with transaction.atomic():
-                    queryset = model._default_manager.all().order_by(model._meta.pk.name)
-                    for obj in queryset.iterator(chunk_size=chunk_size):
-                        history_row = _build_history_row(
-                            obj,
+                    with suppress_main_table_sync():
+                        history_manager = model.history
+                        for obj in missing_history_qs.order_by(pk_name).iterator(
+                            chunk_size=chunk_size
+                        ):
+                            obj._history_date = timestamp
+                            obj._history_change_reason = reason
+                            history_manager.create_historical_record(obj, "+")
+                            created += 1
+
+                        repaired_history_type = self._repair_history_type_markers(
                             history_model=history_model,
-                            timestamp=timestamp,
-                            reason=reason,
+                            pk_name=pk_name,
+                            chunk_size=chunk_size,
                         )
-                        history_row.save()
-                        created += 1
+
+                        meta_manager = getattr(history_model, "meta_history", None)
+                        if meta_manager:
+                            missing_meta_qs = (
+                                history_model._default_manager.filter(
+                                    meta_history__isnull=True
+                                )
+                                .order_by(pk_name, "history_id")
+                            )
+                            for history_row in missing_meta_qs.iterator(
+                                chunk_size=chunk_size
+                            ):
+                                history_row._history_date = (
+                                    getattr(history_row, "valid_from", None) or timestamp
+                                )
+                                history_row._history_change_reason = (
+                                    getattr(
+                                        history_row, "history_change_reason", None
+                                    )
+                                    or reason
+                                )
+                                meta_manager.create_historical_record(history_row, "+")
+                                created_meta += 1
 
             summary["processed_models"].append(
                 {
                     "model": label,
                     "main_count": main_count,
+                    "history_count_before": history_count,
+                    "meta_count_before": meta_count,
                     "created_history_rows": created,
+                    "repaired_history_type_rows": repaired_history_type,
+                    "created_meta_rows": created_meta,
                 }
             )
             summary["created_total"] += created
-            action = "Would backfill" if dry_run else "Backfilled"
-            self.stdout.write(f"{action} {label}: {created} rows")
+            summary["repaired_history_type_total"] += repaired_history_type
+            summary["created_meta_total"] += created_meta
+            action = "Would process" if dry_run else "Processed"
+            self.stdout.write(
+                f"{action} {label}: "
+                f"history+={created}, repaired+={repaired_history_type}, meta+={created_meta}"
+            )
 
         self.stdout.write("BITEMPORAL_BACKFILL_SUMMARY_START")
         self.stdout.write(json.dumps(summary, sort_keys=True))
         self.stdout.write("BITEMPORAL_BACKFILL_SUMMARY_END")
+
+    def _iter_pks_without_create_marker(
+        self, history_model, pk_name: str, chunk_size: int
+    ):
+        qs = (
+            history_model._default_manager.exclude(history_type="+")
+            .values_list(pk_name, flat=True)
+            .distinct()
+            .order_by(pk_name)
+        )
+        return qs.iterator(chunk_size=chunk_size)
+
+    def _count_history_type_repairs(
+        self, history_model, pk_name: str, chunk_size: int
+    ) -> int:
+        repairs = 0
+        for pk_val in self._iter_pks_without_create_marker(
+            history_model, pk_name, chunk_size
+        ):
+            if history_model._default_manager.filter(
+                **{pk_name: pk_val}, history_type="+"
+            ).exists():
+                continue
+            first_non_delete = (
+                history_model._default_manager.filter(**{pk_name: pk_val})
+                .exclude(history_type="-")
+                .order_by("valid_from", "history_id")
+                .first()
+            )
+            if first_non_delete and first_non_delete.history_type != "+":
+                repairs += 1
+        return repairs
+
+    def _repair_history_type_markers(
+        self, history_model, pk_name: str, chunk_size: int
+    ) -> int:
+        repairs = 0
+        for pk_val in self._iter_pks_without_create_marker(
+            history_model, pk_name, chunk_size
+        ):
+            if history_model._default_manager.filter(
+                **{pk_name: pk_val}, history_type="+"
+            ).exists():
+                continue
+            first_non_delete = (
+                history_model._default_manager.filter(**{pk_name: pk_val})
+                .exclude(history_type="-")
+                .order_by("valid_from", "history_id")
+                .first()
+            )
+            if first_non_delete and first_non_delete.history_type != "+":
+                history_model._default_manager.filter(
+                    history_id=first_non_delete.history_id
+                ).update(history_type="+")
+                repairs += 1
+        return repairs

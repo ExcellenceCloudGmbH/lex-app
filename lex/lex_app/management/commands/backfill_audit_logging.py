@@ -21,7 +21,16 @@ def _table_exists(table_name: str) -> bool:
 
 
 def _build_model_lookup():
-    return {model._meta.model_name.lower(): model for model in apps.get_models()}
+    lookup = {}
+    for model in apps.get_models():
+        aliases = {
+            model._meta.model_name.lower(),
+            model.__name__.lower(),
+            model._meta.object_name.lower(),
+        }
+        for alias in aliases:
+            lookup[alias] = model
+    return lookup
 
 
 class Command(BaseCommand):
@@ -62,24 +71,24 @@ class Command(BaseCommand):
         model_lookup = _build_model_lookup()
         content_type_cache = {}
 
-        def resolve_content_type(resource_name: str | None):
-            if not resource_name:
+        def resolve_content_type(model_class):
+            if model_class is None:
                 return None
-            if resource_name not in content_type_cache:
-                model_class = model_lookup.get(resource_name)
-                content_type_cache[resource_name] = (
-                    ContentType.objects.get_for_model(model_class)
-                    if model_class is not None
-                    else None
+            cache_key = model_class._meta.label_lower
+            if cache_key not in content_type_cache:
+                content_type_cache[cache_key] = ContentType.objects.get_for_model(
+                    model_class
                 )
-            return content_type_cache[resource_name]
+            return content_type_cache[cache_key]
 
         def resolve_model_snapshot(resource_name: str | None, record_id):
-            if not resource_name or record_id is None:
+            if not resource_name:
                 return None, None
             model_class = model_lookup.get(resource_name)
             if model_class is None:
                 return None, None
+            if record_id is None:
+                return model_class, None
             try:
                 instance = model_class._default_manager.filter(pk=record_id).first()
             except Exception:
@@ -138,10 +147,20 @@ class Command(BaseCommand):
                 with transaction.atomic():
                     qs = LegacyCalculationLog.objects.all().order_by("timestamp")
                     for row in qs.iterator(chunk_size=chunk_size):
-                        legacy_payload, resource_name, record_id = build_legacy_calculation_payload(row, reason)
+                        legacy_payload, resource_name, record_id = (
+                            build_legacy_calculation_payload(
+                                row,
+                                reason,
+                                model_lookup=model_lookup,
+                            )
+                        )
                         model_class, instance = resolve_model_snapshot(
                             resource_name, record_id
                         )
+                        if model_class is not None:
+                            resource_name = model_class._meta.model_name.lower()
+                            if instance is not None:
+                                record_id = instance.pk
                         model_payload = (
                             generic_instance_payload(instance)
                             if instance is not None
@@ -151,7 +170,7 @@ class Command(BaseCommand):
                             model_payload, legacy_payload
                         )
                         content_type = (
-                            resolve_content_type(resource_name)
+                            resolve_content_type(model_class)
                             if model_class is not None and isinstance(record_id, int)
                             else None
                         )
@@ -193,10 +212,20 @@ class Command(BaseCommand):
                 with transaction.atomic():
                     qs = LegacyUserChangeLog.objects.all().order_by("timestamp")
                     for row in qs.iterator(chunk_size=chunk_size):
-                        legacy_payload, resource_name, record_id = build_legacy_user_change_payload(row, reason)
+                        legacy_payload, resource_name, record_id = (
+                            build_legacy_user_change_payload(
+                                row,
+                                reason,
+                                model_lookup=model_lookup,
+                            )
+                        )
                         model_class, instance = resolve_model_snapshot(
                             resource_name, record_id
                         )
+                        if model_class is not None:
+                            resource_name = model_class._meta.model_name.lower()
+                            if instance is not None:
+                                record_id = instance.pk
                         model_payload = (
                             generic_instance_payload(instance)
                             if instance is not None
@@ -206,7 +235,7 @@ class Command(BaseCommand):
                             model_payload, legacy_payload
                         )
                         content_type = (
-                            resolve_content_type(resource_name)
+                            resolve_content_type(model_class)
                             if model_class is not None and isinstance(record_id, int)
                             else None
                         )

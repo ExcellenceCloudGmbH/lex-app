@@ -17,10 +17,33 @@ Level 2 (MetaHistory → MetaHistory):
 
 import os
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+_suppress_main_table_sync = ContextVar(
+    "suppress_main_table_sync",
+    default=False,
+)
+
+
+@contextmanager
+def suppress_main_table_sync():
+    """
+    Suppress main-table synchronization while executing bulk history maintenance.
+
+    Backfill commands already copy from the live table into history, so syncing
+    history back into the live table is redundant and can cause unintended
+    side-effects when timestamps are not "currently valid".
+    """
+    token = _suppress_main_table_sync.set(True)
+    try:
+        yield
+    finally:
+        _suppress_main_table_sync.reset(token)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -127,6 +150,8 @@ def on_history_saved__sync_main_table(
     Delegates to ``BitemporalSynchronizer``.
     """
     if sender != historical_model:
+        return
+    if _suppress_main_table_sync.get():
         return
 
     from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
