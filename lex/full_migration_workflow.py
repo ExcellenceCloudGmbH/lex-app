@@ -44,6 +44,7 @@ class WorkflowOptions:
     v2_root: Path
     db_name: str
     v1_source: Path | None = None
+    database_deployment_target: str | None = None
     migration_timestamp: str | None = None
     chunk_size: int = 500
     dry_run_backfill: bool = False
@@ -70,16 +71,19 @@ def _render_usage(program_name: str) -> str:
         [
             "Usage:",
             f"  {program_name} <V1_MIGRATIONS_SOURCE> <V2_PROJECT_ROOT> <DB_NAME> "
+            "[--database-deployment-target <TARGET>] "
             "[--migration-timestamp <ISO8601>] [--chunk-size <INT>] "
             "[--dry-run-backfill] [--enable-sanitization] [--backfill-only] "
             "[--pre-clean-jsons] [--rollback-on-failure] [--rollback-only] "
             "[--rollback-state-file <PATH>] [--skip-auditlog-backfill]",
             f"  {program_name} <V2_PROJECT_ROOT> <DB_NAME> "
+            "[--database-deployment-target <TARGET>] "
             "[--migration-timestamp <ISO8601>] [--chunk-size <INT>] "
             "[--dry-run-backfill] [--enable-sanitization] [--backfill-only] "
             "[--pre-clean-jsons] [--rollback-on-failure] [--rollback-only] "
             "[--rollback-state-file <PATH>] [--skip-auditlog-backfill]",
             f"  {program_name} <DB_NAME> "
+            "[--database-deployment-target <TARGET>] "
             "[--migration-timestamp <ISO8601>] [--chunk-size <INT>] "
             "[--dry-run-backfill] [--enable-sanitization] [--backfill-only] "
             "[--pre-clean-jsons] [--rollback-on-failure] [--rollback-only] "
@@ -382,7 +386,11 @@ def run_full_migration_workflow(options: WorkflowOptions) -> None:
     print(f"SkipAuditLogBackfill: {options.skip_auditlog_backfill}")
 
     env = os.environ.copy()
-    env["DATABASE_DEPLOYMENT_TARGET"] = "default"
+    if options.database_deployment_target:
+        env["DATABASE_DEPLOYMENT_TARGET"] = options.database_deployment_target
+    else:
+        env.setdefault("DATABASE_DEPLOYMENT_TARGET", "default")
+    print(f"DatabaseTarget: {env['DATABASE_DEPLOYMENT_TARGET']}")
     env["DB_NAME"] = options.db_name
     # Normalize path separators so settings code that splits on "/" stays stable on Windows.
     env["PROJECT_ROOT"] = runtime.v2_root.as_posix()
@@ -546,6 +554,15 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> WorkflowOptions:
         epilog=_render_usage("full_migration_workflow.py"),
     )
     parser.add_argument("positionals", nargs="*")
+    parser.add_argument(
+        "--database-deployment-target",
+        type=str,
+        default=None,
+        help=(
+            "Value for DATABASE_DEPLOYMENT_TARGET during workflow subprocesses "
+            "(for example: GCP, K8S, DOCKER-COMPOSE, local, default)."
+        ),
+    )
     parser.add_argument("--migration-timestamp", type=str, default=None)
     parser.add_argument("--chunk-size", type=int, default=500)
     parser.add_argument("--dry-run-backfill", action="store_true")
@@ -582,6 +599,7 @@ def parse_cli_args(argv: Sequence[str] | None = None) -> WorkflowOptions:
         v2_root=v2_root,
         db_name=db_name,
         v1_source=v1_source,
+        database_deployment_target=args.database_deployment_target,
         migration_timestamp=args.migration_timestamp,
         chunk_size=args.chunk_size,
         dry_run_backfill=args.dry_run_backfill,

@@ -1,4 +1,5 @@
 import os
+import inspect
 from pathlib import Path
 
 from django.conf import settings
@@ -106,11 +107,10 @@ class Command(BaseCommand):
             else None
         )
 
-        workflow_options = WorkflowOptions(
+        workflow_kwargs = dict(
             v2_root=project_root,
             db_name=db_name,
             v1_source=v1_source,
-            database_deployment_target=options["database_deployment_target"],
             migration_timestamp=options["migration_timestamp"],
             chunk_size=options["chunk_size"],
             dry_run_backfill=options["dry_run_backfill"],
@@ -122,6 +122,21 @@ class Command(BaseCommand):
             rollback_state_file=options["rollback_state_file"],
             skip_auditlog_backfill=options["skip_auditlog_backfill"],
         )
+        target_arg = options["database_deployment_target"]
+        workflow_fields = inspect.signature(WorkflowOptions).parameters
+        supports_target = "database_deployment_target" in workflow_fields
+        if supports_target:
+            workflow_kwargs["database_deployment_target"] = target_arg
+        elif target_arg:
+            raise CommandError(
+                "This runtime has mismatched lex modules: the command accepts "
+                "--database-deployment-target, but WorkflowOptions does not. "
+                "Deploy a single version containing both "
+                "lex/lex_app/management/commands/full_migration_workflow.py and "
+                "lex/full_migration_workflow.py."
+            )
+
+        workflow_options = WorkflowOptions(**workflow_kwargs)
 
         try:
             run_full_migration_workflow(workflow_options)
