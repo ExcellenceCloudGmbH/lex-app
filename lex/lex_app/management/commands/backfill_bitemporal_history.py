@@ -2,16 +2,18 @@ import json
 from typing import Dict, Iterable, List, Tuple
 
 from django.apps import apps
-from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
-from django.db.models import Exists, OuterRef
 from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
+from django.db import connection, transaction
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from lex.core.services.MetaHistory import create_meta_history_record
 from lex.core.services.StandardHistory import create_standard_history_record
-from lex.core.services.bitemporal_signals import suppress_main_table_sync
+from lex.core.services.bitemporal_signals import (
+    suppress_main_table_sync,
+    suppress_meta_sys_to_chaining,
+)
 
 EXCLUDED_APP_LABELS = {
     "legacy_data",
@@ -50,27 +52,29 @@ def _iter_tracked_models() -> Iterable[Tuple[type, type, type]]:
         yield model, history_model, meta_model
 
 
-def _missing_history_queryset(model, history_model, pk_name: str):
+def _missing_history_queryset(model, history_model, pk_lookup: str):
     history_exists = history_model._default_manager.filter(
-        **{pk_name: OuterRef(pk_name)}
+        **{pk_lookup: OuterRef(pk_lookup)}
     )
     return model._default_manager.annotate(
         _has_history=Exists(history_exists)
     ).filter(_has_history=False)
 
 
-def _missing_meta_queryset(history_model, meta_model):
-    meta_exists = meta_model._default_manager.filter(
-        history_object_id=OuterRef("pk")
-    )
-    return history_model._default_manager.annotate(
-        _has_meta=Exists(meta_exists)
-    ).filter(_has_meta=False)
+def _dedupe(values: Iterable[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
 
 
 class Command(BaseCommand):
     help = (
-        "Backfill bitemporal history (History + MetaHistory) through ORM/signal paths "
+        "Backfill bitemporal history (History + MetaHistory) through SQL bulk operations "
         "using a single migration timestamp."
     )
 
@@ -85,7 +89,7 @@ class Command(BaseCommand):
             "--chunk-size",
             type=int,
             default=500,
-            help="Iterator chunk size for main-table scan (default: 500).",
+            help="Iterator chunk size for fallback ORM path (default: 500).",
         )
         parser.add_argument(
             "--reason",
@@ -117,6 +121,421 @@ class Command(BaseCommand):
                 parsed = timezone.make_naive(parsed, current_tz)
         return parsed
 
+    def _is_future_backfill(self, timestamp) -> bool:
+        now = timezone.now()
+        current_tz = timezone.get_current_timezone()
+
+        if settings.USE_TZ:
+            if timezone.is_naive(timestamp):
+                timestamp = timezone.make_aware(timestamp, current_tz)
+            if timezone.is_naive(now):
+                now = timezone.make_aware(now, current_tz)
+        else:
+            if timezone.is_aware(timestamp):
+                timestamp = timezone.make_naive(timestamp, current_tz)
+            if timezone.is_aware(now):
+                now = timezone.make_naive(now, current_tz)
+
+        return timestamp > now + timezone.timedelta(seconds=5)
+
+    def _q(self, identifier: str) -> str:
+        return connection.ops.quote_name(identifier)
+
+    def _history_copy_attnames(self, model, history_model) -> List[str]:
+        main_attnames = {field.attname for field in model._meta.concrete_fields}
+
+        attnames = [
+            field.attname
+            for field in getattr(history_model, "tracked_fields", ())
+            if field.attname in main_attnames
+        ]
+        if not attnames:
+            history_attnames = {
+                field.attname for field in history_model._meta.concrete_fields
+            }
+            attnames = [
+                field.attname
+                for field in model._meta.concrete_fields
+                if field.attname in history_attnames
+            ]
+
+        attnames = _dedupe(attnames)
+        if not attnames:
+            raise CommandError(
+                f"Unable to infer history copy columns for {model._meta.label}."
+            )
+        return attnames
+
+    def _meta_copy_attnames(self, history_model, meta_model) -> List[str]:
+        history_attnames = {field.attname for field in history_model._meta.concrete_fields}
+
+        attnames = [
+            field.attname
+            for field in getattr(meta_model, "tracked_fields", ())
+            if field.attname in history_attnames
+        ]
+        if not attnames:
+            meta_attnames = {field.attname for field in meta_model._meta.concrete_fields}
+            attnames = [
+                field.attname
+                for field in history_model._meta.concrete_fields
+                if field.attname in meta_attnames
+            ]
+
+        attnames = _dedupe(attnames)
+        return attnames
+
+    def _append_required_defaults(
+        self,
+        *,
+        model_class,
+        insert_cols: List[str],
+        select_exprs: List[str],
+        params: List[object],
+    ) -> None:
+        """
+        Fill non-null fields that are omitted from SQL inserts with model defaults.
+
+        Django model defaults are not always reflected as DB-level defaults, so
+        raw INSERT statements must provide these values explicitly.
+        """
+        inserted = set(insert_cols)
+        for field in model_class._meta.concrete_fields:
+            attname = field.attname
+            if attname in inserted:
+                continue
+            if field.primary_key or field.auto_created:
+                continue
+            if field.null:
+                continue
+            if not field.has_default():
+                continue
+
+            insert_cols.append(attname)
+            select_exprs.append("%s")
+            params.append(field.get_default())
+            inserted.add(attname)
+
+    def _validate_sql_schema(
+        self,
+        *,
+        model,
+        history_model,
+        meta_model,
+    ) -> None:
+        history_cols = {field.attname for field in history_model._meta.concrete_fields}
+        meta_cols = {field.attname for field in meta_model._meta.concrete_fields}
+        pk_attname = model._meta.pk.attname
+
+        required_history = {
+            pk_attname,
+            history_model._meta.pk.attname,
+            "valid_from",
+            "history_type",
+            "history_change_reason",
+        }
+        required_meta = {
+            meta_model._meta.pk.attname,
+            "sys_from",
+            "meta_history_type",
+            "meta_history_change_reason",
+            "history_object_id",
+        }
+
+        missing_history = sorted(required_history - history_cols)
+        missing_meta = sorted(required_meta - meta_cols)
+        if missing_history or missing_meta:
+            raise CommandError(
+                "Unsupported bitemporal schema for "
+                f"{model._meta.label}: "
+                f"missing history columns={missing_history}, "
+                f"missing meta columns={missing_meta}"
+            )
+
+    def _count_missing_history_rows_sql(
+        self,
+        cursor,
+        *,
+        model,
+        history_model,
+    ) -> int:
+        main_table = self._q(model._meta.db_table)
+        history_table = self._q(history_model._meta.db_table)
+        pk_col = self._q(model._meta.pk.attname)
+
+        sql = f"""
+        SELECT COUNT(*)
+        FROM {main_table} m
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM {history_table} h
+            WHERE h.{pk_col} = m.{pk_col}
+        )
+        """
+        cursor.execute(sql)
+        return int(cursor.fetchone()[0])
+
+    def _insert_missing_history_rows_sql(
+        self,
+        cursor,
+        *,
+        model,
+        history_model,
+        timestamp,
+        reason: str,
+    ) -> int:
+        main_table = self._q(model._meta.db_table)
+        history_table = self._q(history_model._meta.db_table)
+        pk_col = self._q(model._meta.pk.attname)
+        history_pk_col = self._q(history_model._meta.pk.attname)
+
+        history_attnames = {
+            field.attname for field in history_model._meta.concrete_fields
+        }
+        has_history_user_id = "history_user_id" in history_attnames
+
+        copy_cols = self._history_copy_attnames(model, history_model)
+
+        insert_cols = [
+            *copy_cols,
+            "valid_from",
+            "valid_to",
+            "history_type",
+            "history_change_reason",
+        ]
+        select_exprs = [
+            *(f"m.{self._q(col)}" for col in copy_cols),
+            "%s",
+            "NULL",
+            "%s",
+            "%s",
+        ]
+        params: List[object] = [timestamp, "+", reason]
+
+        if has_history_user_id:
+            insert_cols.append("history_user_id")
+            select_exprs.append("NULL")
+
+        self._append_required_defaults(
+            model_class=history_model,
+            insert_cols=insert_cols,
+            select_exprs=select_exprs,
+            params=params,
+        )
+
+        insert_cols_sql = ", ".join(self._q(col) for col in insert_cols)
+        select_exprs_sql = ", ".join(select_exprs)
+
+        sql = f"""
+        WITH inserted AS (
+            INSERT INTO {history_table} ({insert_cols_sql})
+            SELECT {select_exprs_sql}
+            FROM {main_table} m
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM {history_table} h
+                WHERE h.{pk_col} = m.{pk_col}
+            )
+            RETURNING {history_pk_col}
+        )
+        SELECT COUNT(*)
+        FROM inserted
+        """
+        cursor.execute(sql, params)
+        return int(cursor.fetchone()[0])
+
+    def _history_type_repair_candidates_cte(self, history_model, pk_attname: str) -> str:
+        history_table = self._q(history_model._meta.db_table)
+        history_pk_col = self._q(history_model._meta.pk.attname)
+        pk_col = self._q(pk_attname)
+        history_type_col = self._q("history_type")
+        valid_from_col = self._q("valid_from")
+
+        return f"""
+        WITH ranked AS (
+            SELECT
+                h.{history_pk_col} AS history_id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY h.{pk_col}
+                    ORDER BY h.{valid_from_col}, h.{history_pk_col}
+                ) AS row_num,
+                MAX(CASE WHEN h.{history_type_col} = %s THEN 1 ELSE 0 END)
+                    OVER (PARTITION BY h.{pk_col}) AS has_create
+            FROM {history_table} h
+            WHERE h.{history_type_col} <> %s
+        ),
+        repair_candidates AS (
+            SELECT history_id
+            FROM ranked
+            WHERE row_num = 1 AND has_create = 0
+        )
+        """
+
+    def _count_history_type_repairs_sql(
+        self,
+        cursor,
+        *,
+        history_model,
+        pk_attname: str,
+    ) -> int:
+        cte = self._history_type_repair_candidates_cte(history_model, pk_attname)
+        sql = cte + "SELECT COUNT(*) FROM repair_candidates"
+        cursor.execute(sql, ["+", "-"])
+        return int(cursor.fetchone()[0])
+
+    def _repair_history_type_markers_sql(
+        self,
+        cursor,
+        *,
+        history_model,
+        pk_attname: str,
+    ) -> int:
+        cte = self._history_type_repair_candidates_cte(history_model, pk_attname)
+        history_table = self._q(history_model._meta.db_table)
+        history_pk_col = self._q(history_model._meta.pk.attname)
+        history_type_col = self._q("history_type")
+
+        sql = cte + f"""
+        , updated AS (
+            UPDATE {history_table} h
+            SET {history_type_col} = %s
+            FROM repair_candidates c
+            WHERE h.{history_pk_col} = c.history_id
+            RETURNING 1
+        )
+        SELECT COUNT(*)
+        FROM updated
+        """
+        cursor.execute(sql, ["+", "-", "+"])
+        return int(cursor.fetchone()[0])
+
+    def _count_missing_meta_rows_sql(
+        self,
+        cursor,
+        *,
+        history_model,
+        meta_model,
+    ) -> int:
+        history_table = self._q(history_model._meta.db_table)
+        meta_table = self._q(meta_model._meta.db_table)
+        history_pk_col = self._q(history_model._meta.pk.attname)
+        history_object_col = self._q("history_object_id")
+
+        sql = f"""
+        SELECT COUNT(*)
+        FROM {history_table} h
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM {meta_table} m
+            WHERE m.{history_object_col} = h.{history_pk_col}
+        )
+        """
+        cursor.execute(sql)
+        return int(cursor.fetchone()[0])
+
+    def _insert_missing_meta_rows_sql(
+        self,
+        cursor,
+        *,
+        history_model,
+        meta_model,
+        timestamp,
+        reason: str,
+    ) -> int:
+        history_table = self._q(history_model._meta.db_table)
+        meta_table = self._q(meta_model._meta.db_table)
+        history_pk_col = self._q(history_model._meta.pk.attname)
+        meta_pk_col = self._q(meta_model._meta.pk.attname)
+        history_object_col = self._q("history_object_id")
+
+        meta_attnames = {field.attname for field in meta_model._meta.concrete_fields}
+        has_meta_user_id = "meta_history_user_id" in meta_attnames
+
+        copy_cols = self._meta_copy_attnames(history_model, meta_model)
+
+        insert_cols = [
+            *copy_cols,
+            "sys_from",
+            "sys_to",
+            "meta_history_change_reason",
+            "meta_history_type",
+            "history_object_id",
+        ]
+        select_exprs = [
+            *(f"h.{self._q(col)}" for col in copy_cols),
+            f"COALESCE(h.{self._q('valid_from')}, %s)",
+            "NULL",
+            f"COALESCE(NULLIF(h.{self._q('history_change_reason')}, ''), %s)",
+            "%s",
+            f"h.{history_pk_col}",
+        ]
+        params: List[object] = [timestamp, reason, "+"]
+
+        if has_meta_user_id:
+            insert_cols.append("meta_history_user_id")
+            select_exprs.append("NULL")
+
+        self._append_required_defaults(
+            model_class=meta_model,
+            insert_cols=insert_cols,
+            select_exprs=select_exprs,
+            params=params,
+        )
+
+        insert_cols_sql = ", ".join(self._q(col) for col in insert_cols)
+        select_exprs_sql = ", ".join(select_exprs)
+
+        sql = f"""
+        WITH inserted AS (
+            INSERT INTO {meta_table} ({insert_cols_sql})
+            SELECT {select_exprs_sql}
+            FROM {history_table} h
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM {meta_table} m
+                WHERE m.{history_object_col} = h.{history_pk_col}
+            )
+            RETURNING {meta_pk_col}
+        )
+        SELECT COUNT(*)
+        FROM inserted
+        """
+        cursor.execute(sql, params)
+        return int(cursor.fetchone()[0])
+
+    def _create_missing_history_rows_via_orm(
+        self,
+        *,
+        model,
+        history_model,
+        pk_lookup: str,
+        order_field: str,
+        chunk_size: int,
+        timestamp,
+        reason: str,
+    ) -> int:
+        created = 0
+        history_manager = model.history
+        missing_history_qs = _missing_history_queryset(
+            model=model,
+            history_model=history_model,
+            pk_lookup=pk_lookup,
+        )
+
+        for obj in missing_history_qs.order_by(order_field).iterator(
+            chunk_size=chunk_size
+        ):
+            obj._history_date = timestamp
+            obj._history_change_reason = reason
+            create_standard_history_record(
+                history_manager=history_manager,
+                instance=obj,
+                history_type="+",
+            )
+            created += 1
+
+        return created
+
     def handle(self, *args, **options):
         timestamp = self._resolve_timestamp(options["timestamp"])
         chunk_size = options["chunk_size"]
@@ -125,6 +544,8 @@ class Command(BaseCommand):
 
         if chunk_size <= 0:
             raise CommandError("--chunk-size must be a positive integer")
+
+        future_backfill = self._is_future_backfill(timestamp)
 
         summary: Dict[str, List[Dict[str, object]] | str | int | bool] = {
             "timestamp": timestamp.isoformat(),
@@ -141,7 +562,14 @@ class Command(BaseCommand):
         for model, history_model, meta_model in sorted(
             _iter_tracked_models(), key=lambda item: item[0]._meta.label_lower
         ):
+            self._validate_sql_schema(
+                model=model,
+                history_model=history_model,
+                meta_model=meta_model,
+            )
+
             label = model._meta.label
+            pk_attname = model._meta.pk.attname
             pk_name = model._meta.pk.name
             main_count = model._default_manager.count()
             history_count = history_model._default_manager.count()
@@ -163,69 +591,72 @@ class Command(BaseCommand):
             created = 0
             repaired_history_type = 0
             created_meta = 0
-            missing_history_qs = _missing_history_queryset(
-                model=model,
-                history_model=history_model,
-                pk_name=pk_name,
-            )
 
             if dry_run:
-                created = missing_history_qs.count()
-                repaired_history_type = self._count_history_type_repairs(
-                    history_model=history_model,
-                    pk_name=pk_name,
-                    chunk_size=chunk_size,
-                )
-                created_meta = _missing_meta_queryset(
-                    history_model=history_model,
-                    meta_model=meta_model,
-                ).count()
+                with connection.cursor() as cursor:
+                    created = self._count_missing_history_rows_sql(
+                        cursor,
+                        model=model,
+                        history_model=history_model,
+                    )
+                    repaired_history_type = self._count_history_type_repairs_sql(
+                        cursor,
+                        history_model=history_model,
+                        pk_attname=pk_attname,
+                    )
+                    created_meta = self._count_missing_meta_rows_sql(
+                        cursor,
+                        history_model=history_model,
+                        meta_model=meta_model,
+                    )
             else:
                 with transaction.atomic():
-                    with suppress_main_table_sync():
-                        history_manager = model.history
-                        for obj in missing_history_qs.order_by(pk_name).iterator(
-                            chunk_size=chunk_size
-                        ):
-                            obj._history_date = timestamp
-                            obj._history_change_reason = reason
-                            create_standard_history_record(
-                                history_manager=history_manager,
-                                instance=obj,
-                                history_type="+",
+                    if future_backfill:
+                        with suppress_main_table_sync(), suppress_meta_sys_to_chaining():
+                            created = self._create_missing_history_rows_via_orm(
+                                model=model,
+                                history_model=history_model,
+                                pk_lookup=pk_attname,
+                                order_field=pk_name,
+                                chunk_size=chunk_size,
+                                timestamp=timestamp,
+                                reason=reason,
                             )
-                            created += 1
 
-                        repaired_history_type = self._repair_history_type_markers(
-                            history_model=history_model,
-                            pk_name=pk_name,
-                            chunk_size=chunk_size,
-                        )
-
-                        meta_manager = getattr(history_model, "meta_history", None)
-                        if meta_manager:
-                            missing_meta_qs = _missing_meta_queryset(
+                        with connection.cursor() as cursor:
+                            repaired_history_type = self._repair_history_type_markers_sql(
+                                cursor,
+                                history_model=history_model,
+                                pk_attname=pk_attname,
+                            )
+                            created_meta = self._insert_missing_meta_rows_sql(
+                                cursor,
                                 history_model=history_model,
                                 meta_model=meta_model,
-                            ).order_by(pk_name, "history_id")
-                            for history_row in missing_meta_qs.iterator(
-                                chunk_size=chunk_size
-                            ):
-                                history_row._history_date = (
-                                    getattr(history_row, "valid_from", None) or timestamp
-                                )
-                                history_row._history_change_reason = (
-                                    getattr(
-                                        history_row, "history_change_reason", None
-                                    )
-                                    or reason
-                                )
-                                create_meta_history_record(
-                                    meta_manager=meta_manager,
-                                    instance=history_row,
-                                    history_type="+",
-                                )
-                                created_meta += 1
+                                timestamp=timestamp,
+                                reason=reason,
+                            )
+                    else:
+                        with connection.cursor() as cursor:
+                            created = self._insert_missing_history_rows_sql(
+                                cursor,
+                                model=model,
+                                history_model=history_model,
+                                timestamp=timestamp,
+                                reason=reason,
+                            )
+                            repaired_history_type = self._repair_history_type_markers_sql(
+                                cursor,
+                                history_model=history_model,
+                                pk_attname=pk_attname,
+                            )
+                            created_meta = self._insert_missing_meta_rows_sql(
+                                cursor,
+                                history_model=history_model,
+                                meta_model=meta_model,
+                                timestamp=timestamp,
+                                reason=reason,
+                            )
 
             summary["processed_models"].append(
                 {
@@ -250,59 +681,3 @@ class Command(BaseCommand):
         self.stdout.write("BITEMPORAL_BACKFILL_SUMMARY_START")
         self.stdout.write(json.dumps(summary, sort_keys=True))
         self.stdout.write("BITEMPORAL_BACKFILL_SUMMARY_END")
-
-    def _iter_pks_without_create_marker(
-        self, history_model, pk_name: str, chunk_size: int
-    ):
-        qs = (
-            history_model._default_manager.exclude(history_type="+")
-            .values_list(pk_name, flat=True)
-            .distinct()
-            .order_by(pk_name)
-        )
-        return qs.iterator(chunk_size=chunk_size)
-
-    def _count_history_type_repairs(
-        self, history_model, pk_name: str, chunk_size: int
-    ) -> int:
-        repairs = 0
-        for pk_val in self._iter_pks_without_create_marker(
-            history_model, pk_name, chunk_size
-        ):
-            if history_model._default_manager.filter(
-                **{pk_name: pk_val}, history_type="+"
-            ).exists():
-                continue
-            first_non_delete = (
-                history_model._default_manager.filter(**{pk_name: pk_val})
-                .exclude(history_type="-")
-                .order_by("valid_from", "history_id")
-                .first()
-            )
-            if first_non_delete and first_non_delete.history_type != "+":
-                repairs += 1
-        return repairs
-
-    def _repair_history_type_markers(
-        self, history_model, pk_name: str, chunk_size: int
-    ) -> int:
-        repairs = 0
-        for pk_val in self._iter_pks_without_create_marker(
-            history_model, pk_name, chunk_size
-        ):
-            if history_model._default_manager.filter(
-                **{pk_name: pk_val}, history_type="+"
-            ).exists():
-                continue
-            first_non_delete = (
-                history_model._default_manager.filter(**{pk_name: pk_val})
-                .exclude(history_type="-")
-                .order_by("valid_from", "history_id")
-                .first()
-            )
-            if first_non_delete and first_non_delete.history_type != "+":
-                history_model._default_manager.filter(
-                    history_id=first_non_delete.history_id
-                ).update(history_type="+")
-                repairs += 1
-        return repairs

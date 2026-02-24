@@ -30,6 +30,10 @@ _suppress_main_table_sync = ContextVar(
     "suppress_main_table_sync",
     default=False,
 )
+_suppress_meta_sys_to_chaining = ContextVar(
+    "suppress_meta_sys_to_chaining",
+    default=False,
+)
 
 
 @contextmanager
@@ -46,6 +50,22 @@ def suppress_main_table_sync():
         yield
     finally:
         _suppress_main_table_sync.reset(token)
+
+
+@contextmanager
+def suppress_meta_sys_to_chaining():
+    """
+    Suppress MetaHistory sys_to strict chaining during bulk backfills.
+
+    Backfill inserts are typically first-time MetaHistory rows for each
+    history_object; recalculating sys_to on every row save is redundant and
+    creates high query volume.
+    """
+    token = _suppress_meta_sys_to_chaining.set(True)
+    try:
+        yield
+    finally:
+        _suppress_meta_sys_to_chaining.reset(token)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -248,13 +268,15 @@ def on_meta_saved__chain_sys_to(
     """
     if sender != meta_historical_model:
         return
+    if _suppress_meta_sys_to_chaining.get():
+        return
 
     MetaModel = instance.__class__
     history_object_id = instance.history_object_id
 
     all_meta = list(
         MetaModel.objects.filter(history_object_id=history_object_id)
-        .order_by("sys_from", "id")
+        .order_by("sys_from", "meta_history_id")
     )
 
     for i, record in enumerate(all_meta):
