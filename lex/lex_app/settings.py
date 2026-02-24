@@ -223,7 +223,7 @@ INSTALLED_APPS = [
     "simple_history",
     "celery",
     "django_celery_beat",
-    "react",
+    "lex.react.apps.ReactConfig",
     "markdown",
     "lex.lex_app.apps.CustomAdminConfig",  # Custom admin config to prevent auth admin conflicts
     "django.contrib.auth",
