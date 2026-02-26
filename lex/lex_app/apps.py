@@ -151,7 +151,8 @@ class LexAppConfig(GenericAppConfig):
                 continue
 
             # Skip Django built-in models
-            if model._meta.app_label in ['auth', 'contenttypes', 'sessions', 'admin']:
+            model_meta = getattr(model, "_meta", None)
+            if model_meta is not None and model_meta.app_label in ['auth', 'contenttypes', 'sessions', 'admin']:
                 continue
 
             models_to_register.append(model)

@@ -213,10 +213,27 @@ class ModelRegistration:
 
         @sync_to_async
         def reset_instances_with_aborted_calculations():
-            aborted = model.objects.filter(
-                is_calculated=CalculationModel.IN_PROGRESS
+            in_progress_instances = list(
+                model.objects.filter(
+                    is_calculated=CalculationModel.IN_PROGRESS
+                ).order_by(model._meta.pk.name)
             )
-            aborted.update(is_calculated=CalculationModel.ABORTED)
+            if not in_progress_instances:
+                return
+
+            for instance in in_progress_instances:
+                try:
+                    instance.is_calculated = CalculationModel.ABORTED
+                    # Keep history rows while avoiding lifecycle hooks.
+                    instance.save(skip_hooks=True)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to mark %s(pk=%s) as ABORTED during startup reset: %s",
+                        model.__name__,
+                        getattr(instance, model._meta.pk.name, None),
+                        exc,
+                        exc_info=True,
+                    )
 
         nest_asyncio.apply()
         loop = asyncio.get_event_loop()

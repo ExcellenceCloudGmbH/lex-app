@@ -1,4 +1,3 @@
-import sys
 import traceback
 import logging
 
@@ -8,13 +7,12 @@ from rest_framework_api_key.permissions import HasAPIKey
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from rest_framework.exceptions import APIException
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
-from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
+from rest_framework.mixins import CreateModelMixin
 
 from rest_framework.response import Response
 from rest_framework import status
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 
-from lex.core.signals import update_calculation_status
 from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.api.utils.Context import OperationContext
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
@@ -89,30 +87,18 @@ class OneModelEntry(
 
         model_container = self.kwargs["model_container"]
         calculationId = self.kwargs["calculationId"]
-        instance = model_container.model_class()
+        partial = kwargs.pop("partial", False)
 
         with OperationContext(request, calculationId):
-            instance = model_container.model_class.objects.filter(
-                pk=self.kwargs["pk"]
-            ).first()
+            instance = self.get_object()
             with model_logging_context(instance):
-                if "calculate" in request.data and request.data["calculate"] == "true":
-                    # instance = model_container.model_class.objects.filter(pk=self.kwargs["pk"]).first()
-                    instance.untrack()
-                    instance.is_calculated = CalculationModel.IN_PROGRESS
-                    instance.save(skip_hooks=True)
-                    calculation_id = calculationId
-                    calculation_record = f"{instance._meta.model_name}_{instance.pk}"
-                    WebSocketNotifier.send_calculation_update(
-                        calculation_id=calculationId,
-                        calculation_record=f"{instance._meta.model_name}_{instance.pk}"
-                    )
-                    cache_key = CacheManager.build_cache_key(
-                        calculation_record,
-                        calculation_id
-                    )
-                    CacheManager.store_message(cache_key, "")
-                    update_calculation_status(instance)
+                calculate_requested = str(request.data.get("calculate", "")).lower() == "true"
+                update_payload = (
+                    request.data.copy()
+                    if hasattr(request.data, "copy")
+                    else dict(request.data)
+                )
+                update_payload.pop("calculate", None)
 
                 # TODO: For sharepoint preview, find a new way to create an audit log with the new structure
                 # if "edited_file" not in request.data:
@@ -137,9 +123,14 @@ class OneModelEntry(
                     # 3. Close the previous Meta Record (System Time End).
                     
                     try:
-                        # STANDARD UPDATE (with Meta History tracking implicitly)
-                        response = UpdateModelMixin.update(self, request, *args, **kwargs)
-                        return response
+                        serializer = self.get_serializer(
+                            instance, data=update_payload, partial=partial
+                        )
+                        serializer.is_valid(raise_exception=True)
+                        updated_instance = self.perform_update(serializer)
+                        if getattr(updated_instance, "_prefetched_objects_cache", None):
+                            updated_instance._prefetched_objects_cache = {}
+                        return Response(serializer.data)
 
                     except Exception as e:
                         raise APIException(
@@ -149,13 +140,33 @@ class OneModelEntry(
                 # STANDARD UPDATE LOGIC (Main Models)
                 try:
                     instance.track()
-                    response = UpdateModelMixin.update(self, request, *args, **kwargs)
+                    serializer = self.get_serializer(
+                        instance, data=update_payload, partial=partial
+                    )
+                    serializer.is_valid(raise_exception=True)
 
-                except CalculationModelException as e:
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    calc_obj = exc_value.calc_obj
-                    exception_details = exc_value.exception_details
-                    stack_trace = exc_value.stack_trace
+                    if calculate_requested:
+                        serializer.instance.is_calculated = CalculationModel.IN_PROGRESS
+                        calculation_record = f"{instance._meta.model_name}_{instance.pk}"
+                        WebSocketNotifier.send_calculation_update(
+                            calculation_id=calculationId,
+                            calculation_record=calculation_record,
+                        )
+                        cache_key = CacheManager.build_cache_key(
+                            calculation_record,
+                            calculationId,
+                        )
+                        CacheManager.store_message(cache_key, "")
+
+                    updated_instance = self.perform_update(serializer)
+                    if getattr(updated_instance, "_prefetched_objects_cache", None):
+                        updated_instance._prefetched_objects_cache = {}
+                    return Response(serializer.data)
+
+                except CalculationModelException as exc:
+                    calc_obj = exc.calc_obj
+                    exception_details = exc.exception_details
+                    stack_trace = exc.stack_trace
                     if calc_obj:
                         calc_obj.is_calculated = CalculationModel.ERROR
                         calc_obj.save(skip_hooks=True)
@@ -168,5 +179,3 @@ class OneModelEntry(
                     raise APIException(
                         {"error": f"{e} ", "traceback": traceback.format_exc()}
                     )
-
-                return response

@@ -241,6 +241,16 @@ class CalculationModel(LexModel):
         logger = logging.getLogger(__name__)
 
         try:
+            try:
+                # Always emit IN_PROGRESS here so chained child calculations
+                # become visible to websocket subscribers.
+                update_calculation_status(self)
+            except Exception as status_error:
+                logger.warning(
+                    f"Failed to publish IN_PROGRESS status for {self}: {status_error}",
+                    exc_info=True,
+                )
+
             if self.should_use_celery():
                 # Dispatch to Celery worker                                                                                      
                 logger.info(f"Dispatching calculation for {self} to Celery worker")

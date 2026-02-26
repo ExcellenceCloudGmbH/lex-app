@@ -23,11 +23,18 @@ def update_calculation_status(
 
     channel_layer = get_channel_layer()
     message_type = ""
+    should_broadcast = True
     record_id = f"{instance._meta.model_name}_{instance.id}"
     calculation_id = _resolve_calculation_id(instance, record_id)
 
     if instance.is_calculated == CalculationModel.IN_PROGRESS:
         message_type = "calculation_in_progress"
+        previous_entry = ActiveCalculationStateStore.get_entry(record_id)
+        previous_calculation_id = previous_entry.get("calculation_id", "")
+        next_calculation_id = calculation_id or ""
+        should_broadcast = not (
+            previous_entry and previous_calculation_id == next_calculation_id
+        )
         ActiveCalculationStateStore.mark_in_progress(
             record_id=record_id,
             calculation_id=calculation_id,
@@ -47,7 +54,7 @@ def update_calculation_status(
         ActiveCalculationStateStore.clear(record_id)
         _perform_cache_cleanup_for_status_update(instance, "ABORTED")
 
-    if not message_type or not channel_layer:
+    if not message_type or not channel_layer or not should_broadcast:
         return
 
     payload = {

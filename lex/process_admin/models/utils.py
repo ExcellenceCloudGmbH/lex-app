@@ -37,7 +37,12 @@ def enrich_model_structure_with_readable_names_and_types(node_name, model_tree, 
 
     if not model_tree:
         model_class = model_collection.get_container(node_name).model_class
-        node_type = "HTMLReport" if HTMLReport in model_class.__bases__ else "Process" if Process in model_class.__bases__ else "Model"
+        node_type = "Model"
+        if isinstance(model_class, type):
+            if issubclass(model_class, HTMLReport):
+                node_type = "HTMLReport"
+            elif issubclass(model_class, Process):
+                node_type = "Process"
         return {'readable_name': readable_name, 'type': node_type}
 
     return {

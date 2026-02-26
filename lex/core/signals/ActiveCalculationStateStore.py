@@ -61,6 +61,16 @@ class ActiveCalculationStateStore:
         return None
 
     @classmethod
+    def get_entry(cls, record_id: str) -> Dict[str, str]:
+        if not record_id:
+            return {}
+        state_map = cls._load_state_map()
+        entry = state_map.get(record_id, {})
+        if isinstance(entry, dict):
+            return dict(entry)
+        return {}
+
+    @classmethod
     def snapshot(cls) -> List[Dict[str, str]]:
         """
         Return active calculations and prune stale cache entries.

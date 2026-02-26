@@ -102,16 +102,30 @@ class GenericAppConfig(AppConfig):
         self.load_models_from_module(full_module_name)
 
     def load_models_from_module(self, full_module_name):
+        from lex.core.models.HTMLReport import HTMLReport
+
         try:
             if not full_module_name.startswith('.'):
                 # Import will use custom system if installed, otherwise standard import
                 module = importlib.import_module(full_module_name)
 
                 for name, obj in module.__dict__.items():
-                    if (isinstance(obj, type)
-                            and issubclass(obj, models.Model)
-                            and hasattr(obj, '_meta')
-                            and not obj._meta.abstract):
+                    if not isinstance(obj, type):
+                        continue
+
+                    # Keep discovery local to this module and avoid re-registering imports.
+                    if getattr(obj, "__module__", None) != module.__name__:
+                        continue
+
+                    is_django_model = issubclass(obj, models.Model) and hasattr(obj, "_meta")
+                    is_html_report = issubclass(obj, HTMLReport)
+
+                    if is_django_model:
+                        if not obj._meta.abstract:
+                            self.add_model(name, obj)
+                        continue
+
+                    if is_html_report:
                         self.add_model(name, obj)
         except (RuntimeError, AttributeError, ImportError) as e:
             print(f"Error importing {full_module_name}: {e}")
