@@ -20,6 +20,7 @@ import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+from django.db import transaction
 from django.utils import timezone
 
 from lex.core.services.MetaHistory import create_meta_history_record
@@ -97,20 +98,24 @@ def on_history_saved__chain_valid_to(
     pk_name = main_model._meta.pk.name
     pk_val = getattr(history_instance, pk_name)
 
-    all_records = list(
-        HistoryModel.objects.filter(**{pk_name: pk_val})
-        .order_by("valid_from", "history_id")
-    )
+    with transaction.atomic():
+        # Acquire all relevant history rows in deterministic order to avoid
+        # opposite lock acquisition across concurrent writers.
+        all_records = list(
+            HistoryModel.objects.select_for_update()
+            .filter(**{pk_name: pk_val})
+            .order_by("valid_from", "history_id")
+        )
 
-    for i, record in enumerate(all_records):
-        next_record = all_records[i + 1] if i < len(all_records) - 1 else None
-        new_valid_to = next_record.valid_from if next_record else None
+        for i, record in enumerate(all_records):
+            next_record = all_records[i + 1] if i < len(all_records) - 1 else None
+            new_valid_to = next_record.valid_from if next_record else None
 
-        if record.valid_to != new_valid_to:
-            is_refinement = (record.valid_to is not None) and (new_valid_to is not None)
-            record.valid_to = new_valid_to
-            record._strict_chaining_update = is_refinement
-            record.save(update_fields=["valid_to"])
+            if record.valid_to != new_valid_to:
+                is_refinement = (record.valid_to is not None) and (new_valid_to is not None)
+                record.valid_to = new_valid_to
+                record._strict_chaining_update = is_refinement
+                record.save(update_fields=["valid_to"])
 
 
 def on_history_saved__create_meta(
@@ -182,7 +187,11 @@ def on_history_saved__sync_main_table(
 
     pk_name = main_model._meta.pk.name
     pk_val = getattr(instance, pk_name)
-    BitemporalSynchronizer.sync_record_for_model(main_model, pk_val, sender)
+    # Run synchronization after commit so lock acquisition on main/history rows
+    # happens outside the current history write transaction.
+    transaction.on_commit(
+        lambda: BitemporalSynchronizer.sync_record_for_model(main_model, pk_val, sender)
+    )
 
 
 def on_history_pre_delete__cancel_schedules(
@@ -231,26 +240,30 @@ def on_history_post_delete__repair_chain(
     HistoryModel = sender
     pk_name = main_model._meta.pk.name
     pk_val = getattr(instance, pk_name)
-
-    previous_record = (
-        HistoryModel.objects.filter(
-            **{pk_name: pk_val}, valid_from__lt=instance.valid_from
+    with transaction.atomic():
+        # Lock the chain in deterministic order before repairing links.
+        all_records = list(
+            HistoryModel.objects.select_for_update()
+            .filter(**{pk_name: pk_val})
+            .order_by("valid_from", "history_id")
         )
-        .order_by("-valid_from")
-        .first()
-    )
 
-    if previous_record:
-        next_record = (
-            HistoryModel.objects.filter(
-                **{pk_name: pk_val}, valid_from__gt=instance.valid_from
-            )
-            .order_by("valid_from")
-            .first()
-        )
-        new_valid_to = next_record.valid_from if next_record else None
-        previous_record.valid_to = new_valid_to
-        previous_record.save(update_fields=["valid_to"])
+        previous_record = None
+        next_record = None
+        deleted_key = (instance.valid_from, getattr(instance, "history_id", 0))
+        for record in all_records:
+            record_key = (record.valid_from, getattr(record, "history_id", 0))
+            if record_key < deleted_key:
+                previous_record = record
+                continue
+            if record_key > deleted_key:
+                next_record = record
+                break
+
+        if previous_record:
+            new_valid_to = next_record.valid_from if next_record else None
+            previous_record.valid_to = new_valid_to
+            previous_record.save(update_fields=["valid_to"])
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -274,18 +287,21 @@ def on_meta_saved__chain_sys_to(
     MetaModel = instance.__class__
     history_object_id = instance.history_object_id
 
-    all_meta = list(
-        MetaModel.objects.filter(history_object_id=history_object_id)
-        .order_by("sys_from", "meta_history_id")
-    )
+    with transaction.atomic():
+        # Lock meta rows in deterministic order to reduce deadlock cycles.
+        all_meta = list(
+            MetaModel.objects.select_for_update()
+            .filter(history_object_id=history_object_id)
+            .order_by("sys_from", "meta_history_id")
+        )
 
-    for i, record in enumerate(all_meta):
-        next_record = all_meta[i + 1] if i < len(all_meta) - 1 else None
-        new_sys_to = next_record.sys_from if next_record else None
+        for i, record in enumerate(all_meta):
+            next_record = all_meta[i + 1] if i < len(all_meta) - 1 else None
+            new_sys_to = next_record.sys_from if next_record else None
 
-        if record.sys_to != new_sys_to:
-            record.sys_to = new_sys_to
-            record.save(update_fields=["sys_to"])
+            if record.sys_to != new_sys_to:
+                record.sys_to = new_sys_to
+                record.save(update_fields=["sys_to"])
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

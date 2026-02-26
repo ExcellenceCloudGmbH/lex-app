@@ -12,7 +12,7 @@ The control fields are prefixed with ``meta_`` to avoid collisions with
 the Level 1 fields that are copied into the MetaHistory model.
 """
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
@@ -43,16 +43,19 @@ def create_meta_history_record(
 
     # Strict-chaining in-place update
     if getattr(instance, "_strict_chaining_update", False):
-        latest = (
-            meta_model.objects.filter(history_object=instance)
-            .order_by("-sys_from", "-meta_history_id")
-            .first()
-        )
-        if latest and latest.sys_to is None:
-            for field_name, value in attrs.items():
-                setattr(latest, field_name, value)
-            latest.save(using=using)
-            return latest
+        with transaction.atomic():
+            # Lock the latest row for deterministic strict-chaining refinement.
+            latest = (
+                meta_model.objects.select_for_update()
+                .filter(history_object=instance)
+                .order_by("-sys_from", "-meta_history_id")
+                .first()
+            )
+            if latest and latest.sys_to is None:
+                for field_name, value in attrs.items():
+                    setattr(latest, field_name, value)
+                latest.save(using=using)
+                return latest
 
     if meta_history_user is None:
         meta_history_user = getattr(instance, "_history_user", None)

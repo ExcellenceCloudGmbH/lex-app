@@ -10,6 +10,7 @@ table row is removed.
 """
 
 from django.db import models
+from django.db import transaction
 from django.utils import timezone
 import logging
 
@@ -42,44 +43,51 @@ class BitemporalSynchronizer:
         pk_name = model_class._meta.pk.name
         now = timezone.now()
 
-        # ── Find the effective record ──
-        effective_record = (
-            history_model.objects.filter(**{pk_name: pk_val})
-            .filter(valid_from__lte=now)
-            .filter(
-                models.Q(valid_to__gt=now) | models.Q(valid_to__isnull=True)
+        with transaction.atomic():
+            # ── Find the effective record ──
+            effective_record = (
+                history_model.objects.select_for_update()
+                .filter(**{pk_name: pk_val})
+                .filter(valid_from__lte=now)
+                .filter(
+                    models.Q(valid_to__gt=now) | models.Q(valid_to__isnull=True)
+                )
+                .order_by("-valid_from", "-history_id")
+                .first()
             )
-            .order_by("-valid_from", "-history_id")
-            .first()
-        )
 
-        is_valid = effective_record and effective_record.history_type != "-"
+            is_valid = effective_record and effective_record.history_type != "-"
 
-        if is_valid:
-            # ── Upsert main table ──
-            try:
-                main_instance = model_class.objects.get(pk=pk_val)
-            except model_class.DoesNotExist:
-                main_instance = model_class(pk=pk_val)
+            if is_valid:
+                # ── Upsert main table ──
+                main_instance = (
+                    model_class.objects.select_for_update()
+                    .filter(pk=pk_val)
+                    .first()
+                )
+                if main_instance is None:
+                    main_instance = model_class(pk=pk_val)
 
-            changed = False
-            for field in model_class._meta.fields:
-                if field.attname == model_class._meta.pk.attname:
-                    continue
-                if hasattr(effective_record, field.attname):
-                    new_val = getattr(effective_record, field.attname)
-                    if getattr(main_instance, field.attname) != new_val:
-                        setattr(main_instance, field.attname, new_val)
-                        changed = True
+                changed = False
+                for field in model_class._meta.fields:
+                    if field.attname == model_class._meta.pk.attname:
+                        continue
+                    if hasattr(effective_record, field.attname):
+                        new_val = getattr(effective_record, field.attname)
+                        if getattr(main_instance, field.attname) != new_val:
+                            setattr(main_instance, field.attname, new_val)
+                            changed = True
 
-            if changed or main_instance._state.adding:
-                main_instance.skip_history_when_saving = True
-                main_instance.save()
-        else:
-            # ── Remove stale main table row ──
-            try:
-                main_instance = model_class.objects.get(pk=pk_val)
-                main_instance.skip_history_when_saving = True
-                main_instance.delete()
-            except model_class.DoesNotExist:
-                pass
+                if changed or main_instance._state.adding:
+                    main_instance.skip_history_when_saving = True
+                    main_instance.save()
+            else:
+                # ── Remove stale main table row ──
+                main_instance = (
+                    model_class.objects.select_for_update()
+                    .filter(pk=pk_val)
+                    .first()
+                )
+                if main_instance is not None:
+                    main_instance.skip_history_when_saving = True
+                    main_instance.delete()

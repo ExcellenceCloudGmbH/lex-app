@@ -1,5 +1,6 @@
 import traceback
 import logging
+import time
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 
@@ -8,6 +9,73 @@ from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_pay
 
 
 logger = logging.getLogger(__name__)
+
+RETRYABLE_SQLSTATE_CODES = {"40P01", "40001"}
+RETRYABLE_DB_ERROR_MESSAGES = (
+    "deadlock detected",
+    "could not serialize access due to concurrent update",
+    "could not serialize access due to read/write dependencies among transactions",
+)
+MAX_UPDATE_RETRIES = 3
+BASE_RETRY_DELAY_SECONDS = 0.05
+
+
+def _iter_exception_chain(exception):
+    current = exception
+    seen = set()
+    while current and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+
+def _is_retryable_db_error(exception):
+    for chained_exception in _iter_exception_chain(exception):
+        pg_code = getattr(chained_exception, "pgcode", None)
+        if pg_code in RETRYABLE_SQLSTATE_CODES:
+            return True
+
+        message = str(chained_exception).lower()
+        if any(token in message for token in RETRYABLE_DB_ERROR_MESSAGES):
+            return True
+
+    return False
+
+
+def _execute_with_retry(callable_obj, *, max_retries=MAX_UPDATE_RETRIES, operation_name="database operation"):
+    for attempt in range(1, max_retries + 1):
+        try:
+            return callable_obj()
+        except Exception as exc:
+            if attempt >= max_retries or not _is_retryable_db_error(exc):
+                raise
+
+            delay_seconds = BASE_RETRY_DELAY_SECONDS * (2 ** (attempt - 1))
+            logger.warning(
+                "Retrying %s after transient DB error "
+                "(attempt %s/%s): %s",
+                operation_name,
+                attempt,
+                max_retries,
+                exc,
+            )
+            time.sleep(delay_seconds)
+
+
+def _save_with_retry(serializer, *, max_retries=MAX_UPDATE_RETRIES):
+    return _execute_with_retry(
+        serializer.save,
+        max_retries=max_retries,
+        operation_name="serializer save",
+    )
+
+
+def _delete_with_retry(instance, *, max_retries=MAX_UPDATE_RETRIES):
+    return _execute_with_retry(
+        instance.delete,
+        max_retries=max_retries,
+        operation_name="instance delete",
+    )
 
 def _safe_get_content_type(model_class):
     """Get ContentType with stale-cache resilience.
@@ -53,7 +121,7 @@ class AuditLogMixin:
         payload = _serialize_payload(serializer.validated_data) or {}
         audit_log = self.log_change("create", serializer.Meta.model, payload=payload)
         try:
-            instance = serializer.save()
+            instance = _save_with_retry(serializer)
             payload['id'] = instance.pk
             audit_log.payload = payload
             audit_log.content_type = _safe_get_content_type(instance.__class__)
@@ -71,7 +139,7 @@ class AuditLogMixin:
         initial_payload = _serialize_payload(serializer.validated_data)
         audit_log = self.log_change("update", serializer.Meta.model, payload=initial_payload)
         try:
-            instance = serializer.save()
+            instance = _save_with_retry(serializer)
             updated_payload = _serialize_payload(self.get_serializer(instance).data)
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
@@ -90,7 +158,7 @@ class AuditLogMixin:
         payload = _serialize_payload(serializer.data)
         audit_log = self.log_change("delete", instance, payload=payload)
         try:
-            instance.delete()
+            _delete_with_retry(instance)
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
             audit_log.save()

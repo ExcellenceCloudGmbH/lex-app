@@ -7,7 +7,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from rest_framework.exceptions import APIException
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
-from rest_framework.mixins import CreateModelMixin
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 
 from rest_framework.response import Response
 from rest_framework import status
@@ -41,6 +41,23 @@ class OneModelEntry(
     # Keep parity with ModelEntryProviderMixin defaults so model-level
     # modification_restriction rules (e.g. legacy read-only) are enforced.
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
+
+    def _prepare_update_request(self, request):
+        payload = (
+            request.data.copy()
+            if hasattr(request.data, "copy")
+            else dict(request.data)
+        )
+        payload.pop("calculate", None)
+        request._data = payload
+        request._full_data = payload
+        return request
+
+    def perform_update(self, serializer):
+        if getattr(self, "_calculate_requested", False):
+            if isinstance(serializer.instance, CalculationModel):
+                serializer.instance.is_calculated = CalculationModel.IN_PROGRESS
+        return super().perform_update(serializer)
 
     def create(self, request, *args, **kwargs):
         model_container = self.kwargs["model_container"]
@@ -87,18 +104,14 @@ class OneModelEntry(
 
         model_container = self.kwargs["model_container"]
         calculationId = self.kwargs["calculationId"]
-        partial = kwargs.pop("partial", False)
 
         with OperationContext(request, calculationId):
             instance = self.get_object()
             with model_logging_context(instance):
-                calculate_requested = str(request.data.get("calculate", "")).lower() == "true"
-                update_payload = (
-                    request.data.copy()
-                    if hasattr(request.data, "copy")
-                    else dict(request.data)
+                self._calculate_requested = (
+                    isinstance(instance, CalculationModel)
+                    and str(request.data.get("calculate", "")).lower() == "true"
                 )
-                update_payload.pop("calculate", None)
 
                 # TODO: For sharepoint preview, find a new way to create an audit log with the new structure
                 # if "edited_file" not in request.data:
@@ -123,14 +136,8 @@ class OneModelEntry(
                     # 3. Close the previous Meta Record (System Time End).
                     
                     try:
-                        serializer = self.get_serializer(
-                            instance, data=update_payload, partial=partial
-                        )
-                        serializer.is_valid(raise_exception=True)
-                        updated_instance = self.perform_update(serializer)
-                        if getattr(updated_instance, "_prefetched_objects_cache", None):
-                            updated_instance._prefetched_objects_cache = {}
-                        return Response(serializer.data)
+                        prepared_request = self._prepare_update_request(request)
+                        return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
 
                     except Exception as e:
                         raise APIException(
@@ -140,13 +147,7 @@ class OneModelEntry(
                 # STANDARD UPDATE LOGIC (Main Models)
                 try:
                     instance.track()
-                    serializer = self.get_serializer(
-                        instance, data=update_payload, partial=partial
-                    )
-                    serializer.is_valid(raise_exception=True)
-
-                    if calculate_requested:
-                        serializer.instance.is_calculated = CalculationModel.IN_PROGRESS
+                    if self._calculate_requested:
                         calculation_record = f"{instance._meta.model_name}_{instance.pk}"
                         WebSocketNotifier.send_calculation_update(
                             calculation_id=calculationId,
@@ -157,11 +158,8 @@ class OneModelEntry(
                             calculationId,
                         )
                         CacheManager.store_message(cache_key, "")
-
-                    updated_instance = self.perform_update(serializer)
-                    if getattr(updated_instance, "_prefetched_objects_cache", None):
-                        updated_instance._prefetched_objects_cache = {}
-                    return Response(serializer.data)
+                    prepared_request = self._prepare_update_request(request)
+                    return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
 
                 except CalculationModelException as exc:
                     calc_obj = exc.calc_obj
@@ -179,3 +177,5 @@ class OneModelEntry(
                     raise APIException(
                         {"error": f"{e} ", "traceback": traceback.format_exc()}
                     )
+                finally:
+                    self._calculate_requested = False
