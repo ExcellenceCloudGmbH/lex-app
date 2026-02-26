@@ -3,7 +3,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 
 from lex.api.utils import operation_context
-from lex.core.models.CalculationModel import CalculationModel
+from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 from lex.core.signals.CalculationSignals import update_calculation_status
 
@@ -127,3 +127,26 @@ class CalculationStatusSignalTests(SimpleTestCase):
 
         update_status_mock.assert_called_once_with(instance)
         execute_sync_mock.assert_called_once_with()
+
+    def test_calculate_hook_does_not_rewrap_existing_calculation_exception(self):
+        instance = self._build_instance(4)
+        existing_exception = CalculationModelException(
+            calc_obj=instance,
+            exception_details="inner-failure",
+            stack_trace="stack",
+        )
+
+        with patch.object(
+            DummyCalculationModel, "should_use_celery", return_value=False
+        ), patch.object(
+            DummyCalculationModel, "execute_calculation_sync", side_effect=existing_exception
+        ), patch(
+            "lex.core.signals.CalculationSignals.update_calculation_status"
+        ), patch.object(
+            DummyCalculationModel, "save"
+        ) as save_mock:
+            with self.assertRaises(CalculationModelException) as raised:
+                DummyCalculationModel.calculate_hook(instance)
+
+        self.assertIs(raised.exception, existing_exception)
+        save_mock.assert_not_called()

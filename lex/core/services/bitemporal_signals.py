@@ -31,6 +31,10 @@ _suppress_main_table_sync = ContextVar(
     "suppress_main_table_sync",
     default=False,
 )
+_suppress_history_valid_to_chaining = ContextVar(
+    "suppress_history_valid_to_chaining",
+    default=False,
+)
 _suppress_meta_sys_to_chaining = ContextVar(
     "suppress_meta_sys_to_chaining",
     default=False,
@@ -51,6 +55,21 @@ def suppress_main_table_sync():
         yield
     finally:
         _suppress_main_table_sync.reset(token)
+
+
+@contextmanager
+def suppress_history_valid_to_chaining():
+    """
+    Suppress recursive strict-chaining while valid_to links are being repaired.
+
+    Without this guard, each internal ``record.save(update_fields=["valid_to"])``
+    retriggers this same handler and can recurse deeply on long timelines.
+    """
+    token = _suppress_history_valid_to_chaining.set(True)
+    try:
+        yield
+    finally:
+        _suppress_history_valid_to_chaining.reset(token)
 
 
 @contextmanager
@@ -93,29 +112,37 @@ def on_history_saved__chain_valid_to(
     history_instance = history_instance or instance
     if sender != historical_model or not history_instance:
         return
+    if _suppress_history_valid_to_chaining.get():
+        return
 
     HistoryModel = history_instance.__class__
     pk_name = main_model._meta.pk.name
     pk_val = getattr(history_instance, pk_name)
 
-    with transaction.atomic():
-        # Acquire all relevant history rows in deterministic order to avoid
-        # opposite lock acquisition across concurrent writers.
-        all_records = list(
-            HistoryModel.objects.select_for_update()
-            .filter(**{pk_name: pk_val})
-            .order_by("valid_from", "history_id")
-        )
+    with suppress_history_valid_to_chaining():
+        with transaction.atomic():
+            # Acquire all relevant history rows in deterministic order to avoid
+            # opposite lock acquisition across concurrent writers.
+            all_records = list(
+                HistoryModel.objects.select_for_update()
+                .filter(**{pk_name: pk_val})
+                .order_by("valid_from", "history_id")
+            )
 
-        for i, record in enumerate(all_records):
-            next_record = all_records[i + 1] if i < len(all_records) - 1 else None
-            new_valid_to = next_record.valid_from if next_record else None
+            for i, record in enumerate(all_records):
+                next_record = all_records[i + 1] if i < len(all_records) - 1 else None
+                new_valid_to = next_record.valid_from if next_record else None
 
-            if record.valid_to != new_valid_to:
-                is_refinement = (record.valid_to is not None) and (new_valid_to is not None)
-                record.valid_to = new_valid_to
-                record._strict_chaining_update = is_refinement
-                record.save(update_fields=["valid_to"])
+                if record.valid_to != new_valid_to:
+                    is_refinement = (record.valid_to is not None) and (new_valid_to is not None)
+                    record.valid_to = new_valid_to
+                    record._strict_chaining_update = is_refinement
+                    try:
+                        record.save(update_fields=["valid_to"])
+                    finally:
+                        # Keep refinement marker scoped to this internal save.
+                        if hasattr(record, "_strict_chaining_update"):
+                            delattr(record, "_strict_chaining_update")
 
 
 def on_history_saved__create_meta(
@@ -287,21 +314,22 @@ def on_meta_saved__chain_sys_to(
     MetaModel = instance.__class__
     history_object_id = instance.history_object_id
 
-    with transaction.atomic():
-        # Lock meta rows in deterministic order to reduce deadlock cycles.
-        all_meta = list(
-            MetaModel.objects.select_for_update()
-            .filter(history_object_id=history_object_id)
-            .order_by("sys_from", "meta_history_id")
-        )
+    with suppress_meta_sys_to_chaining():
+        with transaction.atomic():
+            # Lock meta rows in deterministic order to reduce deadlock cycles.
+            all_meta = list(
+                MetaModel.objects.select_for_update()
+                .filter(history_object_id=history_object_id)
+                .order_by("sys_from", "meta_history_id")
+            )
 
-        for i, record in enumerate(all_meta):
-            next_record = all_meta[i + 1] if i < len(all_meta) - 1 else None
-            new_sys_to = next_record.sys_from if next_record else None
+            for i, record in enumerate(all_meta):
+                next_record = all_meta[i + 1] if i < len(all_meta) - 1 else None
+                new_sys_to = next_record.sys_from if next_record else None
 
-            if record.sys_to != new_sys_to:
-                record.sys_to = new_sys_to
-                record.save(update_fields=["sys_to"])
+                if record.sys_to != new_sys_to:
+                    record.sys_to = new_sys_to
+                    record.save(update_fields=["sys_to"])
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -270,6 +270,12 @@ class CalculationModel(LexModel):
                 self.execute_calculation_sync()
 
         except Exception as e:
+            # Nested hook invocations may already normalize failures into
+            # CalculationModelException. Re-raise as-is to avoid noisy
+            # re-wrapping and duplicated error handling.
+            if isinstance(e, CalculationModelException):
+                raise
+
             # Handle any errors in task dispatch or synchronous execution                                                        
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
             status_was_error = self.is_calculated == self.ERROR
