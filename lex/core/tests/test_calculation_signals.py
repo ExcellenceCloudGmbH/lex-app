@@ -150,3 +150,22 @@ class CalculationStatusSignalTests(SimpleTestCase):
 
         self.assertIs(raised.exception, existing_exception)
         save_mock.assert_not_called()
+
+    def test_calculate_hook_skips_reentrant_invocation(self):
+        instance = self._build_instance(5)
+
+        def simulate_internal_save_reentry():
+            DummyCalculationModel.calculate_hook(instance)
+
+        with patch.object(
+            DummyCalculationModel, "should_use_celery", return_value=False
+        ), patch.object(
+            DummyCalculationModel, "execute_calculation_sync", side_effect=simulate_internal_save_reentry
+        ) as execute_sync_mock, patch(
+            "lex.core.signals.CalculationSignals.update_calculation_status"
+        ) as update_status_mock:
+            DummyCalculationModel.calculate_hook(instance)
+
+        # Outer invocation executes exactly once; nested invocation returns early.
+        self.assertEqual(execute_sync_mock.call_count, 1)
+        update_status_mock.assert_called_once_with(instance)

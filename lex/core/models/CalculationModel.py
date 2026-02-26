@@ -240,6 +240,13 @@ class CalculationModel(LexModel):
 
         logger = logging.getLogger(__name__)
 
+        # Prevent recursive execution when internal save paths (e.g. FileField.save)
+        # call self.save() while this hook is already processing the same instance.
+        if getattr(self, "_calculation_hook_in_progress", False):
+            logger.debug(f"Skipping re-entrant calculate_hook for {self}")
+            return
+
+        self._calculation_hook_in_progress = True
         try:
             try:
                 # Always emit IN_PROGRESS here so chained child calculations
@@ -328,3 +335,7 @@ class CalculationModel(LexModel):
                     )
 
             raise CalculationModelException(calc_obj=self, exception_details=exception_details, stack_trace=stack_trace)
+        finally:
+            # Ensure the guard does not leak across future independent saves.
+            if hasattr(self, "_calculation_hook_in_progress"):
+                delattr(self, "_calculation_hook_in_progress")

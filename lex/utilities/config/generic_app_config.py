@@ -126,6 +126,8 @@ class GenericAppConfig(AppConfig):
                         continue
 
                     if is_html_report:
+                        if getattr(obj, "__name__", None) == "HTMLReport":
+                            continue
                         self.add_model(name, obj)
         except (RuntimeError, AttributeError, ImportError) as e:
             print(f"Error importing {full_module_name}: {e}")

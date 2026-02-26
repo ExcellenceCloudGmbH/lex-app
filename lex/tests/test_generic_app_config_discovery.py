@@ -36,6 +36,11 @@ class GenericAppConfigDiscoveryTests(TestCase):
             (base_report,),
             {"__module__": module.__name__},
         )
+        local_html_report = type(
+            "HTMLReport",
+            (HTMLReport,),
+            {"__module__": module.__name__},
+        )
         imported_report = type(
             "ImportedReport",
             (HTMLReport,),
@@ -44,6 +49,7 @@ class GenericAppConfigDiscoveryTests(TestCase):
 
         module.BaseReport = base_report
         module.ConcreteReport = concrete_report
+        module.LocalHTMLReport = local_html_report
         module.ImportedReport = imported_report
         module.HTMLReport = HTMLReport
         mocked_import.return_value = module
@@ -52,5 +58,6 @@ class GenericAppConfigDiscoveryTests(TestCase):
 
         self.assertIn("BaseReport", self.config.discovered_models)
         self.assertIn("ConcreteReport", self.config.discovered_models)
-        self.assertNotIn("ImportedReport", self.config.discovered_models)
         self.assertNotIn("HTMLReport", self.config.discovered_models)
+        self.assertNotIn("LocalHTMLReport", self.config.discovered_models)
+        self.assertNotIn("ImportedReport", self.config.discovered_models)
