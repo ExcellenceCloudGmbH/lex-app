@@ -99,7 +99,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
 
         request = self.factory.patch(
             "/api/model_entries/calculationhistorytestmodel/calc-1/1/",
-            {"calculate": "true", "name": "trigger"},
+            {"calculate": "true", "is_calculated": True, "name": "trigger"},
             format="json",
         )
         force_authenticate(request, user=self.user)

@@ -48,6 +48,13 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
             'payload': payload
         }))
 
+    async def calculation_aborted(self, event):
+        payload = event['payload']
+        await self.send(text_data=json.dumps({
+            'type': 'calculation_aborted',
+            'payload': payload
+        }))
+
     @classmethod
     async def disconnect_all(cls):
         for consumer in cls.active_consumers.copy():

@@ -128,12 +128,13 @@ class LexAppConfig(GenericAppConfig):
         when registering repo models, but include Historical models for repo models.
         """
         from django.contrib import admin
+        from django.contrib.auth import get_user_model
         from lex.process_admin.utils.model_registration import ModelRegistration
         from lex.lex_app.streamlit.Streamlit import Streamlit
 
         # Models to explicitly exclude (shouldn't show in frontend)
         # REMOVED Profile from exclusion to allow history tracking demo
-        excluded_model_names = {'Profile', 'HistoricalProfile', 'User'}
+        excluded_model_names = {'Profile', 'HistoricalProfile'}
 
         # Filter models appropriately
         models_to_register = []
@@ -173,6 +174,7 @@ class LexAppConfig(GenericAppConfig):
         if self.model_structure_builder.widget_structure:
             ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
         ModelRegistration.register_models([Streamlit], self.untracked_models)
+        ModelRegistration.register_models([get_user_model()], self.untracked_models)
 
     def is_running_in_celery(self):
         # from celery import current_task

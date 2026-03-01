@@ -56,8 +56,12 @@ class OneModelEntry(
     def perform_update(self, serializer):
         if getattr(self, "_calculate_requested", False):
             if isinstance(serializer.instance, CalculationModel):
-                serializer.instance.is_calculated = CalculationModel.IN_PROGRESS
-        return super().perform_update(serializer)
+                # Inject the IN_PROGRESS status into validated_data so
+                # AuditLogMixin.perform_update() saves it naturally.
+                # AuditLogMixin.log_change() already stores the audit_log
+                # in operation_context['audit_log_temp'] for ContextResolver.
+                serializer.validated_data['is_calculated'] = CalculationModel.IN_PROGRESS
+        super().perform_update(serializer)
 
     def create(self, request, *args, **kwargs):
         model_container = self.kwargs["model_container"]
@@ -147,30 +151,53 @@ class OneModelEntry(
                 # STANDARD UPDATE LOGIC (Main Models)
                 try:
                     instance.track()
+
                     if self._calculate_requested:
                         calculation_record = f"{instance._meta.model_name}_{instance.pk}"
+
+                        # ── Early registration ──────────────────────────────
+                        # Register the calculation in the authoritative cache
+                        # store and broadcast IN_PROGRESS **before** entering
+                        # the atomic transaction.  This guarantees that:
+                        #   a) A page-refresh during the calculation will see
+                        #      the IN_PROGRESS entry in the reconciliation
+                        #      snapshot (no DB read needed).
+                        #   b) Other users/tabs receive the IN_PROGRESS
+                        #      WebSocket message immediately.
+                        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+                        ActiveCalculationStateStore.mark_in_progress(
+                            record_id=calculation_record,
+                            calculation_id=calculationId,
+                            record=str(instance),
+                            model_label=instance._meta.label_lower,
+                            record_pk=instance.pk,
+                        )
+
+                        # Notify the "calculations" group (GenericSocket) so
+                        # the triggering client can pair its temp ID with the
+                        # server-side calculation_id.
                         WebSocketNotifier.send_calculation_update(
                             calculation_id=calculationId,
                             calculation_record=calculation_record,
                         )
+
                         cache_key = CacheManager.build_cache_key(
                             calculation_record,
                             calculationId,
                         )
                         CacheManager.store_message(cache_key, "")
+
                     prepared_request = self._prepare_update_request(request)
                     return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
 
                 except CalculationModelException as exc:
-                    calc_obj = exc.calc_obj
-                    exception_details = exc.exception_details
-                    stack_trace = exc.stack_trace
-                    if calc_obj:
-                        calc_obj.is_calculated = CalculationModel.ERROR
-                        calc_obj.save(skip_hooks=True)
-
+                    # CalculationModel's own exception path already:
+                    #   1. set is_calculated = ERROR
+                    #   2. saved with skip_hooks=True
+                    #   3. broadcast the ERROR status via WebSocket
+                    # We only need to surface the error to the API caller.
                     raise APIException(
-                        {"message": f"{exception_details} ", "traceback": stack_trace}
+                        {"message": f"{exc.exception_details} ", "traceback": exc.stack_trace}
                     )
 
                 except Exception as e:

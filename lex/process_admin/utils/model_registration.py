@@ -62,8 +62,8 @@ class ModelRegistration:
                 elif not issubclass(model, type) and not model._meta.abstract:
                     cls._register_standard_model(model, untracked_models)
 
-                    if issubclass(model, CalculationModel):
-                        cls._handle_calculation_model_reset(model)
+                if issubclass(model, CalculationModel):
+                    cls._handle_calculation_model_reset(model)
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to register model {model.__name__}: {str(e)}"
@@ -204,15 +204,20 @@ class ModelRegistration:
     @classmethod
     def _handle_calculation_model_reset(cls, model: Type[models.Model]) -> None:
         """
-        Reset CalculationModel instances left in IN_PROGRESS state on startup.
+        Reset CalculationModel instances left in IN_PROGRESS state on startup
+        and clear stale cache entries in ActiveCalculationStateStore.
         """
         from lex.core.models.CalculationModel import CalculationModel
+        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 
         if not os.getenv("CALLED_FROM_START_COMMAND"):
             return
 
         @sync_to_async
         def reset_instances_with_aborted_calculations():
+            # Clear any stale cache entries left from the previous server run.
+            ActiveCalculationStateStore.clear_all()
+
             in_progress_instances = list(
                 model.objects.filter(
                     is_calculated=CalculationModel.IN_PROGRESS

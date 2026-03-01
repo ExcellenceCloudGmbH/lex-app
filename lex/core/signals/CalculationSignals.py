@@ -13,28 +13,43 @@ from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateS
 
 logger = logging.getLogger(__name__)
 
+
 def update_calculation_status(
     instance,
     exception_details: Optional[str] = None,
     stack_trace: Optional[str] = None,
 ):
+    """
+    Broadcast the current ``is_calculated`` state of *instance* to all connected
+    WebSocket clients via the ``update_calculation_status`` channel group.
+
+    This is the **single authoritative function** for propagating calculation
+    state changes.  It is called from:
+
+    * ``calculate_hook``        – when the calculation starts (IN_PROGRESS)
+    * ``execute_calculation_sync`` – when the calculation finishes (SUCCESS / ERROR)
+    * ``One.py`` exception path – on dispatch failure (ERROR)
+    * Startup reset             – when leftover IN_PROGRESS rows are set to ABORTED
+
+    Design rules
+    ------------
+    1. IN_PROGRESS  → register in ActiveCalculationStateStore, broadcast.
+    2. SUCCESS/ERROR → clear from ActiveCalculationStateStore, broadcast.
+    3. ABORTED      → clear from ActiveCalculationStateStore, broadcast.
+    4. **Never** suppress a broadcast — the frontend idempotently handles
+       duplicates and needs every signal to stay in sync (especially across
+       multiple browser tabs / users).
+    """
     if not issubclass(instance.__class__, CalculationModel):
         return
 
     channel_layer = get_channel_layer()
-    message_type = ""
-    should_broadcast = True
     record_id = f"{instance._meta.model_name}_{instance.id}"
     calculation_id = _resolve_calculation_id(instance, record_id)
+    message_type = ""
 
     if instance.is_calculated == CalculationModel.IN_PROGRESS:
         message_type = "calculation_in_progress"
-        previous_entry = ActiveCalculationStateStore.get_entry(record_id)
-        previous_calculation_id = previous_entry.get("calculation_id", "")
-        next_calculation_id = calculation_id or ""
-        should_broadcast = not (
-            previous_entry and previous_calculation_id == next_calculation_id
-        )
         ActiveCalculationStateStore.mark_in_progress(
             record_id=record_id,
             calculation_id=calculation_id,
@@ -42,19 +57,20 @@ def update_calculation_status(
             model_label=instance._meta.label_lower,
             record_pk=instance.pk,
         )
+
     elif instance.is_calculated == CalculationModel.SUCCESS:
         message_type = "calculation_success"
         ActiveCalculationStateStore.clear(record_id)
-        _perform_cache_cleanup_for_status_update(instance, "SUCCESS")
+
     elif instance.is_calculated == CalculationModel.ERROR:
         message_type = "calculation_error"
         ActiveCalculationStateStore.clear(record_id)
-        _perform_cache_cleanup_for_status_update(instance, "ERROR")
-    elif instance.is_calculated == CalculationModel.ABORTED:
-        ActiveCalculationStateStore.clear(record_id)
-        _perform_cache_cleanup_for_status_update(instance, "ABORTED")
 
-    if not message_type or not channel_layer or not should_broadcast:
+    elif instance.is_calculated == CalculationModel.ABORTED:
+        message_type = "calculation_aborted"
+        ActiveCalculationStateStore.clear(record_id)
+
+    if not message_type or not channel_layer:
         return
 
     payload = {
@@ -64,7 +80,6 @@ def update_calculation_status(
     if calculation_id:
         payload["calculation_id"] = calculation_id
 
-    # Keep websocket error payload aligned with API exception payloads.
     if exception_details:
         payload["message"] = exception_details
     if stack_trace:
@@ -74,49 +89,42 @@ def update_calculation_status(
         "type": message_type,
         "payload": payload,
     }
-    async_to_sync(channel_layer.group_send)("update_calculation_status", message)
+
+    try:
+        async_to_sync(channel_layer.group_send)("update_calculation_status", message)
+    except Exception:
+        logger.exception("Failed to broadcast calculation status via WebSocket")
 
 
 def _resolve_calculation_id(instance, record_id: str) -> Optional[str]:
+    """
+    Resolve the ``calculation_id`` for this instance in order of priority:
+
+    1. The current ``operation_context`` (set by the API view).
+    2. The ActiveCalculationStateStore (set when the calculation was registered).
+    3. An explicit ``calculation_id`` attribute on the instance.
+    """
+    # 1. Operation context (set by One.py / OperationContext)
     try:
-        context_calculation_id = operation_context.get().get("calculation_id")
-        if context_calculation_id:
-            return context_calculation_id
+        ctx_calc_id = operation_context.get().get("calculation_id")
+        if ctx_calc_id:
+            return ctx_calc_id
     except Exception:
         pass
 
-    tracked_calculation_id = ActiveCalculationStateStore.get_calculation_id(record_id)
-    if tracked_calculation_id:
-        return tracked_calculation_id
+    # 2. Cache store
+    tracked = ActiveCalculationStateStore.get_calculation_id(record_id)
+    if tracked:
+        return tracked
 
+    # 3. Instance attribute (rare fallback)
     if hasattr(instance, "calculation_id"):
-        instance_calculation_id = getattr(instance, "calculation_id")
-        if isinstance(instance_calculation_id, str) and instance_calculation_id:
-            return instance_calculation_id
+        val = getattr(instance, "calculation_id")
+        if isinstance(val, str) and val:
+            return val
 
     return None
 
-
-def _perform_cache_cleanup_for_status_update(instance, status):
-    """
-    Perform cache cleanup when calculation status is updated to a completed state.
-    
-    Args:
-        instance: The CalculationModel instance
-        status: The status that triggered the cleanup (SUCCESS, ERROR, or ABORTED)
-    """
-    pass
-    # try:
-    #     calc_id = operation_context.get()["calculation_id"]
-    #     cleanup_result = CacheManager.cleanup_calculation(calc_id)
-    #
-    #     if cleanup_result.success:
-    #         logger.info(f"Cache cleanup successful for calculation {calc_id} status update to {status}")
-    #     else:
-    #         logger.warning(f"Cache cleanup had errors for calculation {calc_id} status update to {status}: {cleanup_result.errors}")
-    #
-    # except Exception as e:
-    #     logger.error(f"Cache cleanup failed for calculation status update to {status}: {str(e)}")
 
 
 def do_post_save(sender, **kwargs):

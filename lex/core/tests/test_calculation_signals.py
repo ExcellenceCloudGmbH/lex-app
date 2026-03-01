@@ -113,6 +113,30 @@ class CalculationStatusSignalTests(SimpleTestCase):
         self.assertNotIn("calculation_id", first_event["payload"])
         self.assertEqual(second_event["payload"]["calculation_id"], "calc-2")
 
+    def test_in_progress_without_context_keeps_existing_calculation_id(self):
+        instance = self._build_instance(6)
+        channel_layer = DummyChannelLayer()
+
+        with patch(
+            "lex.core.signals.CalculationSignals.get_channel_layer",
+            return_value=channel_layer,
+        ), patch(
+            "lex.core.signals.CalculationSignals.async_to_sync",
+            side_effect=lambda fn: fn,
+        ):
+            self._set_context("calc-6")
+            update_calculation_status(instance)
+
+            self._set_context("")
+            update_calculation_status(instance)
+
+        self.assertEqual(len(channel_layer.messages), 1)
+        record_id = f"{instance._meta.model_name}_{instance.id}"
+        self.assertEqual(
+            ActiveCalculationStateStore.get_entry(record_id).get("calculation_id"),
+            "calc-6",
+        )
+
     def test_calculate_hook_emits_in_progress_before_sync_execution(self):
         instance = self._build_instance(3)
 

@@ -163,10 +163,20 @@ def streamlit(ctx):
 
     streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"])
 
+
+def _collect_static_if_deployed():
+    if not os.getenv("DEPLOYMENT_ENVIRONMENT"):
+        return
+
+    _, call_command = _bootstrap_django()
+    call_command("collectstatic", interactive=False, verbosity=0)
+
+
 @lex.command(name="start", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def start(ctx):
     os.environ.setdefault("CALLED_FROM_START_COMMAND", "True")
+    _collect_static_if_deployed()
     uvicorn.main(ctx.args)
 
 @lex.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -174,6 +184,7 @@ def start(ctx):
 def init(ctx):
     for command in ["createcachetable", "makemigrations", "migrate"]:
         _forward_to_django(command, ctx.args)
+    _collect_static_if_deployed()
 
 # ---------- New: setup (never bootstraps Django) ----------
 
@@ -192,6 +203,10 @@ def main():
     if argv and argv[0] == "setup":
         # Register only built-ins (already registered above), do not install dynamic commands
         return lex(prog_name="lex")
+    elif argv and argv[0] == "start":
+        # For 'start', we want to ensure static files are collected before starting the server, but without bootstrapping all of Django commands.
+        os.environ.setdefault("CALLED_FROM_START_COMMAND", "True")
+
     # Otherwise, install dynamic Django commands and dispatch
     _install_dynamic_commands()
     return lex(prog_name="lex")

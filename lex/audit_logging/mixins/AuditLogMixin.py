@@ -115,6 +115,20 @@ class AuditLogMixin:
             calculation_id=self.kwargs.get('calculationId'),
         )
         AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
+
+        # Make the audit_log immediately available to ContextResolver so
+        # that CalculationLog.log() can find it without a DB query — which
+        # would fail inside an atomic() block where the row hasn't been
+        # committed yet.
+        try:
+            from lex.api.utils import operation_context
+            ctx = operation_context.get()
+            if ctx and isinstance(ctx, dict):
+                ctx['audit_log_temp'] = audit_log
+                operation_context.set(ctx)
+        except Exception:
+            pass  # operation_context may not be active (e.g. management commands)
+
         return audit_log
 
     def perform_create(self, serializer):

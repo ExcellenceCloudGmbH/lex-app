@@ -1,23 +1,46 @@
 import logging
+import threading
 from typing import Any, Dict, List, Optional, Tuple
-
-from django.apps import apps
-from django.core.cache import cache
-
-from lex.core.models.CalculationModel import CalculationModel
 
 logger = logging.getLogger(__name__)
 
 
 class ActiveCalculationStateStore:
     """
-    Stores active calculations for websocket reconciliation.
+    Authoritative store of active (in-progress) calculations.
 
-    The store is intentionally cache-backed so reconnecting websocket clients can
-    receive authoritative in-progress state even if they missed earlier events.
+    The store is **in-memory** (process-global, protected by a lock) so
+    that writes are immediately visible to every part of the application,
+    including WebSocket consumers that handle reconnection reconciliation.
+
+    Previous implementation used Django's DatabaseCache, but that caused a
+    critical bug: cache writes performed inside ``transaction.atomic()``
+    were invisible to other database connections (like the ASGI WebSocket
+    handler) until the transaction committed.  Since calculations run
+    inside atomic blocks, the reconciliation snapshot would miss entries
+    that were written but not yet committed — causing child calculations
+    (and sometimes parent calculations) to lose their state on page
+    refresh.
+
+    Design principles
+    -----------------
+    * **Write-through**: ``mark_in_progress`` / ``clear`` are the *only* mutators.
+    * **No DB queries during snapshot**: The store is the single source of
+      truth.  Entries are added when a calculation starts and removed when
+      it finishes (SUCCESS / ERROR / ABORTED).
+    * **Thread-safe**: All access is serialised via a ``threading.Lock``.
+    * **Transient**: The store is empty on server start.  Stale DB rows
+      in IN_PROGRESS are reset to ABORTED by ``model_registration`` during
+      startup.
     """
 
-    CACHE_KEY = "active_calculation_states_v1"
+    _lock = threading.Lock()
+    _state_map: Dict[str, Dict[str, str]] = {}
+    _shutting_down: bool = False
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     @classmethod
     def mark_in_progress(
@@ -29,32 +52,47 @@ class ActiveCalculationStateStore:
         model_label: Optional[str] = None,
         record_pk: Optional[Any] = None,
     ) -> None:
+        """Register a record as having an active calculation."""
         if not record_id:
             return
 
-        state_map = cls._load_state_map()
-        state_map[record_id] = {
-            "record_id": record_id,
-            "record": record or record_id,
-            "calculation_id": calculation_id or "",
-            "model_label": model_label or "",
-            "record_pk": str(record_pk) if record_pk is not None else "",
-        }
-        cls._save_state_map(state_map)
+        with cls._lock:
+            cls._state_map[record_id] = {
+                "record_id": record_id,
+                "record": record or record_id,
+                "calculation_id": calculation_id or "",
+                "model_label": model_label or "",
+                "record_pk": str(record_pk) if record_pk is not None else "",
+            }
 
     @classmethod
     def clear(cls, record_id: str) -> None:
+        """Remove a record from the active-calculations store (terminal state reached)."""
         if not record_id:
             return
-        state_map = cls._load_state_map()
-        if record_id in state_map:
-            del state_map[record_id]
-            cls._save_state_map(state_map)
+        with cls._lock:
+            cls._state_map.pop(record_id, None)
+
+    @classmethod
+    def clear_all(cls) -> None:
+        """Remove every entry (used at server startup)."""
+        with cls._lock:
+            cls._state_map.clear()
+
+    @classmethod
+    def set_shutting_down(cls) -> None:
+        """Signal that the server is shutting down."""
+        cls._shutting_down = True
+
+    @classmethod
+    def is_shutting_down(cls) -> bool:
+        """Return True if the server is in the process of shutting down."""
+        return cls._shutting_down
 
     @classmethod
     def get_calculation_id(cls, record_id: str) -> Optional[str]:
-        state_map = cls._load_state_map()
-        entry = state_map.get(record_id, {})
+        with cls._lock:
+            entry = cls._state_map.get(record_id, {})
         calculation_id = entry.get("calculation_id")
         if isinstance(calculation_id, str) and calculation_id:
             return calculation_id
@@ -64,8 +102,8 @@ class ActiveCalculationStateStore:
     def get_entry(cls, record_id: str) -> Dict[str, str]:
         if not record_id:
             return {}
-        state_map = cls._load_state_map()
-        entry = state_map.get(record_id, {})
+        with cls._lock:
+            entry = cls._state_map.get(record_id, {})
         if isinstance(entry, dict):
             return dict(entry)
         return {}
@@ -73,19 +111,17 @@ class ActiveCalculationStateStore:
     @classmethod
     def snapshot(cls) -> List[Dict[str, str]]:
         """
-        Return active calculations and prune stale cache entries.
+        Return the current set of active calculations.
+
+        This is called by ``UpdateCalculationStatusConsumer.connect()`` to
+        send the reconciliation payload to a (re)connecting WebSocket
+        client.  No DB queries — just returns whatever is in the store.
         """
-        state_map = cls._load_state_map()
-        if not state_map:
+        with cls._lock:
+            entries = list(cls._state_map.values())
+
+        if not entries:
             return []
-
-        pruned_map: Dict[str, Dict[str, str]] = {}
-        for record_id, entry in state_map.items():
-            if cls._is_entry_in_progress(entry):
-                pruned_map[record_id] = entry
-
-        if pruned_map != state_map:
-            cls._save_state_map(pruned_map)
 
         return [
             {
@@ -93,33 +129,66 @@ class ActiveCalculationStateStore:
                 "record": entry.get("record", entry.get("record_id", "")),
                 "calculation_id": entry.get("calculation_id", ""),
             }
-            for entry in sorted(pruned_map.values(), key=lambda item: item.get("record_id", ""))
+            for entry in sorted(entries, key=lambda item: item.get("record_id", ""))
         ]
 
+    # ------------------------------------------------------------------
+    # Startup-only validation
+    # ------------------------------------------------------------------
+
     @classmethod
-    def _is_entry_in_progress(cls, entry: Dict[str, str]) -> bool:
-        model_class, record_pk = cls._resolve_model_and_pk(entry)
-        if model_class is None or record_pk is None:
-            return False
+    def validate_and_prune(cls) -> None:
+        """
+        Prune entries whose DB row is no longer IN_PROGRESS.
 
-        try:
-            instance = model_class.objects.filter(pk=record_pk).only("is_calculated").first()
-        except Exception:
-            logger.exception(
-                "Failed to validate active calculation entry",
-                extra={"entry": entry},
-            )
-            return False
+        Intended to be called **once at server startup** only.
+        """
+        from django.apps import apps
+        from lex.core.models.CalculationModel import CalculationModel
 
-        return (
-            instance is not None
-            and getattr(instance, "is_calculated", None) == CalculationModel.IN_PROGRESS
-        )
+        with cls._lock:
+            entries = dict(cls._state_map)
+
+        if not entries:
+            return
+
+        pruned: Dict[str, Dict[str, str]] = {}
+        for record_id, entry in entries.items():
+            model_class, record_pk = cls._resolve_model_and_pk(entry)
+            if model_class is None or record_pk is None:
+                continue
+            try:
+                instance = (
+                    model_class.objects.filter(pk=record_pk)
+                    .only("is_calculated")
+                    .first()
+                )
+                if (
+                    instance is not None
+                    and getattr(instance, "is_calculated", None)
+                    == CalculationModel.IN_PROGRESS
+                ):
+                    pruned[record_id] = entry
+            except Exception:
+                logger.exception(
+                    "Failed to validate active calculation entry during startup prune",
+                    extra={"entry": entry},
+                )
+
+        with cls._lock:
+            cls._state_map = pruned
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     @classmethod
     def _resolve_model_and_pk(
         cls, entry: Dict[str, str]
     ) -> Tuple[Optional[type], Optional[str]]:
+        from django.apps import apps
+        from lex.core.models.CalculationModel import CalculationModel
+
         record_id = entry.get("record_id", "")
         model_label = entry.get("model_label", "")
         record_pk = entry.get("record_pk")
@@ -166,6 +235,9 @@ class ActiveCalculationStateStore:
 
     @staticmethod
     def _find_model_by_name(model_name: str) -> Optional[type]:
+        from django.apps import apps
+        from lex.core.models.CalculationModel import CalculationModel
+
         for model_class in apps.get_models():
             if (
                 getattr(model_class, "_meta", None) is not None
@@ -175,13 +247,3 @@ class ActiveCalculationStateStore:
                 return model_class
         return None
 
-    @classmethod
-    def _load_state_map(cls) -> Dict[str, Dict[str, str]]:
-        stored = cache.get(cls.CACHE_KEY, {})
-        if isinstance(stored, dict):
-            return stored
-        return {}
-
-    @classmethod
-    def _save_state_map(cls, state_map: Dict[str, Dict[str, str]]) -> None:
-        cache.set(cls.CACHE_KEY, state_map, timeout=None)

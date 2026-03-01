@@ -186,6 +186,13 @@ class CalculationModel(LexModel):
 
             raise
         finally:
+            # If the server is shutting down, override whatever status was
+            # set (SUCCESS / ERROR) to ABORTED so the record correctly
+            # reflects that the calculation was interrupted.
+            from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+            if ActiveCalculationStateStore.is_shutting_down():
+                self.is_calculated = self.ABORTED
+
             # Clean up cache if context is available
             try:
                 context = ContextResolver.resolve()
@@ -236,8 +243,9 @@ class CalculationModel(LexModel):
         management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.                                                             
         """
         from lex.core.signals.CalculationSignals import update_calculation_status
+        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
         import logging
-
+        self.save(skip_hooks=True)
         logger = logging.getLogger(__name__)
 
         # Prevent recursive execution when internal save paths (e.g. FileField.save)
@@ -248,9 +256,37 @@ class CalculationModel(LexModel):
 
         self._calculation_hook_in_progress = True
         try:
+            # ── Ensure this record is registered in the cache store ──
+            # For child calculations (triggered from within a parent's
+            # calculate()), the API-level early registration in One.py didn't
+            # run.  Register here so the reconciliation snapshot includes
+            # child records and page-refresh shows the correct spinner.
+            #
+            # IMPORTANT: Child calculations MUST use the parent's
+            # calculation_id from operation_context to preserve the
+            # parent→child hierarchy that the AuditLog/ContextResolver
+            # system depends on.  We must NOT generate synthetic IDs.
+            record_id = f"{self._meta.model_name}_{self.pk}"
+            existing_calc_id = ActiveCalculationStateStore.get_calculation_id(record_id)
+
+            if not existing_calc_id:
+                from lex.api.utils import operation_context as _op_ctx
+                try:
+                    calc_id = _op_ctx.get().get("calculation_id") or ""
+                except Exception:
+                    calc_id = ""
+
+                ActiveCalculationStateStore.mark_in_progress(
+                    record_id=record_id,
+                    calculation_id=calc_id,
+                    record=str(self),
+                    model_label=self._meta.label_lower,
+                    record_pk=self.pk,
+                )
+
             try:
-                # Always emit IN_PROGRESS here so chained child calculations
-                # become visible to websocket subscribers.
+                # Broadcast IN_PROGRESS so all WebSocket subscribers see
+                # this calculation as active immediately.
                 update_calculation_status(self)
             except Exception as status_error:
                 logger.warning(
