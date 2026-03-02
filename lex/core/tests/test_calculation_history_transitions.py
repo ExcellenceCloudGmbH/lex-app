@@ -10,6 +10,7 @@ from lex.api.views.model_entries.One import OneModelEntry
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import PermissionResult
 from lex.core.mixins.ModelModificationRestriction import ModelModificationRestriction
+from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 from lex.process_admin.utils.model_registration import ModelRegistration
 
 
@@ -57,6 +58,8 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
         if CalculationHistoryTestModel in registered_models:
             del registered_models[CalculationHistoryTestModel]
 
+        ActiveCalculationStateStore.clear_all()
+
         ModelRegistration._register_standard_model(CalculationHistoryTestModel, [])
         self.HistoryModel = CalculationHistoryTestModel.history.model
         self.MetaModel = self.HistoryModel.meta_history.model
@@ -79,6 +82,8 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
 
     def tearDown(self):
         from simple_history.models import registered_models
+
+        ActiveCalculationStateStore.clear_all()
 
         if CalculationHistoryTestModel in registered_models:
             del registered_models[CalculationHistoryTestModel]
@@ -131,6 +136,38 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
                 "history_id", flat=True
             )
+        )
+
+        with patch.dict("os.environ", {"CALLED_FROM_START_COMMAND": "1"}):
+            ModelRegistration._handle_calculation_model_reset(CalculationHistoryTestModel)
+
+        self.obj.refresh_from_db()
+        self.assertEqual(self.obj.is_calculated, CalculationModel.ABORTED)
+
+        new_rows = list(
+            self.HistoryModel.objects.filter(id=self.obj.pk)
+            .exclude(history_id__in=existing_ids)
+            .order_by("history_id")
+        )
+        self.assertEqual(len(new_rows), 1)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.ABORTED)
+
+    def test_startup_abort_reset_uses_active_state_store_when_db_is_not_in_progress(self):
+        self.obj.is_calculated = CalculationModel.NOT_CALCULATED
+        self.obj.save(skip_hooks=True)
+
+        existing_ids = set(
+            self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
+                "history_id", flat=True
+            )
+        )
+
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id=f"{self.obj._meta.model_name}_{self.obj.pk}",
+            calculation_id="calc-1",
+            record=str(self.obj),
+            model_label=self.obj._meta.label_lower,
+            record_pk=self.obj.pk,
         )
 
         with patch.dict("os.environ", {"CALLED_FROM_START_COMMAND": "1"}):

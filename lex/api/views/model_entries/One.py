@@ -53,16 +53,6 @@ class OneModelEntry(
         request._full_data = payload
         return request
 
-    def perform_update(self, serializer):
-        if getattr(self, "_calculate_requested", False):
-            if isinstance(serializer.instance, CalculationModel):
-                # Inject the IN_PROGRESS status into validated_data so
-                # AuditLogMixin.perform_update() saves it naturally.
-                # AuditLogMixin.log_change() already stores the audit_log
-                # in operation_context['audit_log_temp'] for ContextResolver.
-                serializer.validated_data['is_calculated'] = CalculationModel.IN_PROGRESS
-        super().perform_update(serializer)
-
     def create(self, request, *args, **kwargs):
         model_container = self.kwargs["model_container"]
         instance = model_container.model_class()
@@ -75,7 +65,7 @@ class OneModelEntry(
             else:
                 # Fallback to legacy method
                 can_create = instance.can_create(request)
-                
+
             if not can_create:
                 return Response(
                     {
@@ -113,8 +103,8 @@ class OneModelEntry(
             instance = self.get_object()
             with model_logging_context(instance):
                 self._calculate_requested = (
-                    isinstance(instance, CalculationModel)
-                    and str(request.data.get("calculate", "")).lower() == "true"
+                        isinstance(instance, CalculationModel)
+                        and str(request.data.get("calculate", "")).lower() == "true"
                 )
 
                 # TODO: For sharepoint preview, find a new way to create an audit log with the new structure
@@ -123,7 +113,8 @@ class OneModelEntry(
                 # BITEMPORAL UPDATE LOGIC
                 # Check if this is a Historical Model (but not a Meta Historical Model)
                 # Note: history_date is renamed to valid_from in registration
-                is_historical = (hasattr(model_container.model_class, 'valid_from') or hasattr(model_container.model_class, 'history_date')) and hasattr(model_container.model_class, 'history_id')
+                is_historical = (hasattr(model_container.model_class, 'valid_from') or hasattr(
+                    model_container.model_class, 'history_date')) and hasattr(model_container.model_class, 'history_id')
                 is_meta = hasattr(model_container.model_class, 'meta_history_id')
 
                 if is_meta:
@@ -131,14 +122,14 @@ class OneModelEntry(
 
                 if is_historical:
                     # Bitemporal Correction:
-                    # We are correcting a specific "Reality Slice". 
+                    # We are correcting a specific "Reality Slice".
                     # The Historical Record represents {Valid From, Valid To, Data}.
                     # We allow updating this record directly.
                     # The 'Meta History' system (Level 2) will automatically:
                     # 1. Detect the change (via post_save signal).
                     # 2. Create a new Meta Record (New System Version).
                     # 3. Close the previous Meta Record (System Time End).
-                    
+
                     try:
                         prepared_request = self._prepare_update_request(request)
                         return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
@@ -150,11 +141,12 @@ class OneModelEntry(
 
                 # STANDARD UPDATE LOGIC (Main Models)
                 try:
-                    instance.track()
 
                     if self._calculate_requested:
                         calculation_record = f"{instance._meta.model_name}_{instance.pk}"
-
+                        instance.untrack()
+                        instance.is_calculated = CalculationModel.IN_PROGRESS
+                        instance.save(skip_hooks=True)
                         # ── Early registration ──────────────────────────────
                         # Register the calculation in the authoritative cache
                         # store and broadcast IN_PROGRESS **before** entering
@@ -186,7 +178,6 @@ class OneModelEntry(
                             calculationId,
                         )
                         CacheManager.store_message(cache_key, "")
-
                     prepared_request = self._prepare_update_request(request)
                     return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
 

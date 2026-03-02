@@ -36,7 +36,6 @@ class ActiveCalculationStateStore:
 
     _lock = threading.Lock()
     _state_map: Dict[str, Dict[str, str]] = {}
-    _shutting_down: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -79,15 +78,6 @@ class ActiveCalculationStateStore:
         with cls._lock:
             cls._state_map.clear()
 
-    @classmethod
-    def set_shutting_down(cls) -> None:
-        """Signal that the server is shutting down."""
-        cls._shutting_down = True
-
-    @classmethod
-    def is_shutting_down(cls) -> bool:
-        """Return True if the server is in the process of shutting down."""
-        return cls._shutting_down
 
     @classmethod
     def get_calculation_id(cls, record_id: str) -> Optional[str]:
@@ -135,6 +125,7 @@ class ActiveCalculationStateStore:
     # ------------------------------------------------------------------
     # Startup-only validation
     # ------------------------------------------------------------------
+
 
     @classmethod
     def validate_and_prune(cls) -> None:
