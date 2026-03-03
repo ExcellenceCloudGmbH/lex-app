@@ -183,6 +183,10 @@ class OneModelEntry(
 
                 except CalculationModelException as exc:
                     # CalculationModel's own exception path already:
+                    calc_obj = exc.calc_obj
+                    if calc_obj:
+                        calc_obj.is_calculatedd = CalculationModel.ERROR
+                        calc_obj.save(skip_hooks=True)
                     #   1. set is_calculated = ERROR
                     #   2. saved with skip_hooks=True
                     #   3. broadcast the ERROR status via WebSocket

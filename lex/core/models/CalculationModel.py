@@ -186,14 +186,6 @@ class CalculationModel(LexModel):
 
             raise
         finally:
-            # If the server is shutting down, override whatever status was
-            # set (SUCCESS / ERROR) to ABORTED so the record correctly
-            # reflects that the calculation was interrupted.
-            from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
-            if ActiveCalculationStateStore.is_shutting_down():
-                self.is_calculated = self.ABORTED
-
-            # Clean up cache if context is available
             try:
                 context = ContextResolver.resolve()
 
@@ -245,7 +237,6 @@ class CalculationModel(LexModel):
         from lex.core.signals.CalculationSignals import update_calculation_status
         from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
         import logging
-        self.save(skip_hooks=True)
         logger = logging.getLogger(__name__)
 
         # Prevent recursive execution when internal save paths (e.g. FileField.save)
