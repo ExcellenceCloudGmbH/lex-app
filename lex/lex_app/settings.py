@@ -590,7 +590,7 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = True if DATABASE_DEPLOYMENT_TARGET != "default" else False
+USE_TZ = True if DATABASE_DEPLOYMENT_TARGET not in ("default", "GCP") else False
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
 TIME_ZONE = "Europe/Berlin"
