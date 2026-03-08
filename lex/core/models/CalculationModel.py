@@ -307,8 +307,7 @@ class CalculationModel(LexModel):
             # Nested hook invocations may already normalize failures into
             # CalculationModelException. Re-raise as-is to avoid noisy
             # # re-wrapping and duplicated error handling.
-            # if isinstance(e, CalculationModelException):
-            #     raise
+
 
             # Handle any errors in task dispatch or synchronous execution                                                        
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
@@ -360,8 +359,9 @@ class CalculationModel(LexModel):
                         f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
                         exc_info=True,
                     )
-
-            raise CalculationModelException(calc_obj=self, exception_details=exception_details, stack_trace=stack_trace)
+            raise CalculationModelException(calc_obj=e.calc_obj + [self] if hasattr(e, "calc_obj") else [self],
+                                            exception_details=e.exception_details + [exception_details] if hasattr(e, "exception_details") else [exception_details],
+                                            stack_trace=e.stack_trace + [stack_trace] if hasattr(e, "stack_trace") else [stack_trace])
         finally:
             # Ensure the guard does not leak across future independent saves.
             if hasattr(self, "_calculation_hook_in_progress"):
