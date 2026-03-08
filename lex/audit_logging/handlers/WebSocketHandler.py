@@ -1,6 +1,7 @@
 import logging
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
+
+from lex.utilities.channel_layer import sync_channel_group_send
+
 
 class WebSocketHandler(logging.Handler):
     """
@@ -25,10 +26,6 @@ class WebSocketHandler(logging.Handler):
                 "payload": formatted,
             }
 
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"{calc_record}",
-                payload
-            )
+            sync_channel_group_send(f"{calc_record}", payload)
         except Exception:
             self.handleError(record)

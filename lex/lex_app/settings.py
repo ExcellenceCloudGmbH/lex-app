@@ -66,13 +66,17 @@ sys.path.append(NEW_BASE_DIR)
 
 ASGI_APPLICATION = "lex_app.asgi.application"
 
-if os.getenv("DEPLOYMENT_ENVIRONMENT") is None:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer",
-        },
-    }
-else:
+# Use Redis channel layer when deployed OR when Celery is active.
+# InMemoryChannelLayer is per-process, so Celery workers (separate processes)
+# cannot send WebSocket messages to the ASGI server's consumers.
+# Since Celery already requires Redis as its broker, we reuse it here.
+_use_redis_channel_layer = (
+    os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
+    or os.getenv("CELERY_ACTIVE", "False").lower() == "true"
+    or os.getenv("C_FORCE_ROOT") == "True"
+)
+
+if _use_redis_channel_layer:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.pubsub.RedisPubSubChannelLayer",
@@ -88,6 +92,12 @@ else:
                 "expiry": 10,
                 "prefix": f"{os.getenv('INSTANCE_RESOURCE_IDENTIFIER', 'local')}:",
             },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
         },
     }
 

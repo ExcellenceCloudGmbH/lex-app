@@ -36,7 +36,16 @@ class CacheManager:
     """
     
     CACHE_TIMEOUT = 60 * 60 * 24 * 7  # Cache for one week
-    CALC_CACHE_NAME = "redis" if os.getenv("DEPLOYMENT_ENVIRONMENT") else "local"
+    # Use Redis cache when deployed OR when Celery is active.
+    # LocMemCache is per-process, so Celery workers (separate processes)
+    # cannot share cached calculation logs with the ASGI/Django server.
+    CALC_CACHE_NAME = (
+        "redis"
+        if os.getenv("DEPLOYMENT_ENVIRONMENT")
+        or os.getenv("CELERY_ACTIVE", "False").lower() == "true"
+        or os.getenv("C_FORCE_ROOT") == "True"
+        else "local"
+    )
 
     @staticmethod
     def store_message(cache_key: str, message: str) -> bool:
