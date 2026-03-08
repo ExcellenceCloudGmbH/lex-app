@@ -53,6 +53,118 @@ class OneModelEntry(
         request._full_data = payload
         return request
 
+    @staticmethod
+    def _fail_calculation_chain(
+        calculation_id: str,
+        triggering_obj,
+        exception_details: str,
+        stack_trace: str,
+    ):
+        """
+        Mark every CalculationModel in the same calculation chain as ERROR.
+
+        The chain is discovered via ``CalculationLog`` entries that share the
+        same ``calculationId``.  Each log entry references a concrete model
+        instance through its ``content_type`` / ``object_id`` generic FK.
+        We walk the entire set (root, parents, children) so that no orphaned
+        IN_PROGRESS spinners remain in the frontend.
+
+        Steps
+        -----
+        1. Mark the *triggering* object as ERROR (the one that raised).
+        2. Query all ``CalculationLog`` rows for this ``calculationId``.
+        3. For each referenced ``CalculationModel`` instance that is still
+           IN_PROGRESS, set ``is_calculated = ERROR``, persist, and broadcast.
+        4. Clean up ``ActiveCalculationStateStore`` entries.
+        """
+        from lex.core.signals.CalculationSignals import update_calculation_status
+        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+        from lex.audit_logging.models.CalculationLog import CalculationLog
+
+        already_handled = set()
+
+        def _mark_error(instance):
+            """Set ERROR on a single CalculationModel instance & broadcast."""
+            record_id = f"{instance._meta.model_name}_{instance.pk}"
+            if record_id in already_handled:
+                return
+            already_handled.add(record_id)
+
+            if getattr(instance, "is_calculated", None) in (
+                CalculationModel.IN_PROGRESS,
+                CalculationModel.NOT_CALCULATED,
+            ):
+                instance.is_calculated = CalculationModel.ERROR
+                try:
+                    instance.save(skip_hooks=True)
+                except Exception as save_err:
+                    logger.error(
+                        f"Failed to persist ERROR for {record_id}: {save_err}",
+                        exc_info=True,
+                    )
+
+            # Always broadcast so the frontend clears the spinner.
+            try:
+                update_calculation_status(
+                    instance,
+                    exception_details=exception_details,
+                    stack_trace=stack_trace,
+                )
+            except Exception as ws_err:
+                logger.error(
+                    f"Failed to broadcast ERROR for {record_id}: {ws_err}",
+                    exc_info=True,
+                )
+
+            # Ensure the state-store entry is cleared.
+            ActiveCalculationStateStore.clear(record_id)
+
+        # --- 1. Handle the triggering object first ----------------------
+        if triggering_obj and isinstance(triggering_obj, CalculationModel):
+            _mark_error(triggering_obj)
+
+        # --- 2. Walk the CalculationLog hierarchy -----------------------
+        try:
+            chain_logs = CalculationLog.objects.filter(
+                calculationId=calculation_id,
+            ).select_related("content_type")
+
+            for log_entry in chain_logs:
+                if log_entry.content_type and log_entry.object_id:
+                    model_class = log_entry.content_type.model_class()
+                    if model_class and issubclass(model_class, CalculationModel):
+                        try:
+                            related_instance = model_class.objects.get(
+                                pk=log_entry.object_id
+                            )
+                            _mark_error(related_instance)
+                        except model_class.DoesNotExist:
+                            logger.debug(
+                                f"CalculationLog references missing "
+                                f"{model_class.__name__} pk={log_entry.object_id}"
+                            )
+                        except Exception as fetch_err:
+                            logger.error(
+                                f"Error fetching chain member from log "
+                                f"entry {log_entry.pk}: {fetch_err}",
+                                exc_info=True,
+                            )
+        except Exception as chain_err:
+            logger.error(
+                f"Failed to walk CalculationLog chain for "
+                f"calculationId={calculation_id}: {chain_err}",
+                exc_info=True,
+            )
+
+        # --- 3. Final cache cleanup for the whole calculation -----------
+        try:
+            CacheManager.cleanup_calculation(calculation_id=calculation_id)
+        except Exception as cache_err:
+            logger.error(
+                f"Cache cleanup failed for calculationId={calculation_id}: {cache_err}",
+                exc_info=True,
+            )
+
     def create(self, request, *args, **kwargs):
         model_container = self.kwargs["model_container"]
         instance = model_container.model_class()
@@ -182,15 +294,16 @@ class OneModelEntry(
                     return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
 
                 except CalculationModelException as exc:
-                    # CalculationModel's own exception path already:
-                    calc_obj = exc.calc_obj
-                    if calc_obj:
-                        calc_obj.is_calculated = CalculationModel.ERROR
-                        calc_obj.save(skip_hooks=True)
-                    #   1. set is_calculated = ERROR
-                    #   2. saved with skip_hooks=True
-                    #   3. broadcast the ERROR status via WebSocket
-                    # We only need to surface the error to the API caller.
+                    # Handle the entire calculation chain: when a calculation
+                    # fails, all objects in the same parent-child hierarchy
+                    # (tracked via CalculationLog.parent_log) must be marked
+                    # as ERROR so the frontend shows a consistent state.
+                    self._fail_calculation_chain(
+                        calculationId,
+                        exc.calc_obj,
+                        exc.exception_details,
+                        exc.stack_trace,
+                    )
                     raise APIException(
                         {"message": f"{exc.exception_details} ", "traceback": exc.stack_trace}
                     )
