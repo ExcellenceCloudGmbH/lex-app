@@ -51,26 +51,18 @@ class HistoryChainLockingTests(TestCase):
         self.assertEqual(first.valid_to, 2)
         second.save.assert_not_called()
 
-    def test_sync_main_is_deferred_to_on_commit(self):
+    def test_sync_main_runs_inline(self):
         main_model = _build_main_model()
         historical_model = object()
         instance = SimpleNamespace(id=55)
-        captured_callbacks = []
 
-        def capture_callback(callback):
-            captured_callbacks.append(callback)
-
-        with patch("lex.core.services.bitemporal_signals.transaction.on_commit", side_effect=capture_callback), \
-             patch("lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model") as sync_mock:
+        with patch("lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model") as sync_mock:
             on_history_saved__sync_main_table(
                 sender=historical_model,
                 instance=instance,
                 main_model=main_model,
                 historical_model=historical_model,
             )
-
-            self.assertEqual(len(captured_callbacks), 1)
-            captured_callbacks[0]()
 
         sync_mock.assert_called_once_with(main_model, 55, historical_model)
 

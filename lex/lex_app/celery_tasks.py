@@ -7,11 +7,11 @@ This module provides enhanced Celery task integration with proper lifecycle
 management, status tracking, and error handling for calculation models.
 
 Key context managers:
-- ``AwaitDispatch``  — dispatch children to Celery and block until they finish.
-- ``FireAndForget``  — dispatch children without waiting (overrides AwaitDispatch).
+- ``WaitForTasks``   — dispatch children to Celery and block until they finish.
+- ``FireAndForget``  — dispatch children without waiting (overrides WaitForTasks).
 
-Legacy aliases ``RunInCelery`` and ``UnblockCelery`` are kept for backward
-compatibility but should not be used in new code.
+Legacy aliases ``RunInCelery`` / ``AwaitDispatch`` and ``UnblockCelery`` are
+kept for backward compatibility but should not be used in new code.
 """
 
 import asyncio
@@ -181,18 +181,27 @@ class FireAndForget:
     """
     Dispatch child tasks to Celery **without** waiting for them.
 
-    When nested inside an :class:`AwaitDispatch` block, ``FireAndForget``
-    overrides the blocking behaviour and lets tasks run asynchronously.
+    Use this for side-effects that don't affect the caller's correctness:
+    notifications, cache warming, analytics, etc.
 
-    Usage::
+    Standalone usage::
 
-        with AwaitDispatch():          # parent blocks on exit
-            my_task(data)              # dispatched, parent will wait
+        with FireAndForget():
+            send_report_email(report)       # dispatched, nobody waits
+            notify_slack_channel(report)    # dispatched, nobody waits
+        # execution continues immediately
 
-            with FireAndForget():      # override — don't wait
-                my_task(data)          # dispatched, fire-and-forget
+    When nested inside a :class:`WaitForTasks` block, ``FireAndForget``
+    overrides the blocking behaviour for the enclosed calls::
 
-            my_task(data)              # back to blocking
+        with WaitForTasks():
+            compute_nav.delay(q1)               # parent WILL wait
+
+            with FireAndForget():               # override — don't wait
+                send_report_email(report)       # parent WON'T wait
+
+            compute_nav.delay(q2)               # parent WILL wait
+        # blocks until q1 and q2 finish; email may still be in flight
 
     No-op when ``CELERY_ACTIVE`` is not set.
     """
@@ -202,7 +211,7 @@ class FireAndForget:
         """
         Args:
             force_tasks: Task names to force-dispatch (``None`` = all).
-            exclude_tasks: Task names that should follow AwaitDispatch rules.
+            exclude_tasks: Task names that should follow WaitForTasks rules.
         """
         self.force_tasks = force_tasks
         self.exclude_tasks = exclude_tasks or set()
@@ -227,7 +236,7 @@ class FireAndForget:
         logger.debug(f"FireAndForget exited. Dispatched {len(self.dispatched_results)} tasks.")
 
     def should_force_dispatch(self, task_name: str) -> bool:
-        """Return True if *task_name* should bypass AwaitDispatch blocking."""
+        """Return True if *task_name* should bypass WaitForTasks blocking."""
         if task_name in self.exclude_tasks:
             return False
         if self.force_tasks is None:
@@ -238,7 +247,7 @@ class FireAndForget:
         self.dispatched_results.append(result)
 
     def wait_for_completion(self):
-        """Wait for all dispatched tasks (rarely needed — prefer AwaitDispatch)."""
+        """Wait for all dispatched tasks (rarely needed — prefer WaitForTasks)."""
         if not self.dispatched_results:
             return
         logger.info(f"FireAndForget: Waiting for {len(self.dispatched_results)} tasks")
@@ -261,20 +270,31 @@ class FireAndForget:
         return None
 
 
-class AwaitDispatch:
+class WaitForTasks:
     """
     Dispatch child ``@lex_shared_task`` calls to Celery and **block** until
     every dispatched task has finished.
 
-    Use this when a parent calculation triggers a child calculation and
-    must wait for the child to complete before continuing.
+    Use this when a parent calculation triggers child calculations and
+    must wait for all children to complete before continuing.
 
-    Usage::
+    Basic usage::
 
-        with AwaitDispatch():
+        with WaitForTasks():
             child.is_calculated = "IN_PROGRESS"
             child.save()          # dispatched to Celery
         # ← execution resumes here only after child finishes
+
+    Nesting is supported — each scope tracks its own tasks independently::
+
+        with WaitForTasks():                    # outer scope
+            compute_portfolio.delay(fund_a)     # tracked by outer
+            with WaitForTasks():                # inner scope
+                compute_nav.delay(q1)           # tracked by inner
+                compute_nav.delay(q2)           # tracked by inner
+            # ← blocks until q1 and q2 finish
+            generate_report.delay(fund_a)       # tracked by outer
+        # ← blocks until fund_a and the report finish
 
     No-op when ``CELERY_ACTIVE`` is not set.
     """
@@ -319,7 +339,7 @@ class AwaitDispatch:
         """Block until every dispatched task has finished."""
         if not self.dispatched_results:
             return
-        logger.info(f"AwaitDispatch: waiting for {len(self.dispatched_results)} tasks")
+        logger.info(f"WaitForTasks: waiting for {len(self.dispatched_results)} tasks")
         # If a FireAndForget context is active, skip blocking.
         if FireAndForget.get_current_context():
             return
@@ -327,16 +347,16 @@ class AwaitDispatch:
             try:
                 with allow_join_result():
                     result.get()
-                logger.debug(f"AwaitDispatch: task {result.id} completed")
+                logger.debug(f"WaitForTasks: task {result.id} completed")
             except Exception as e:
-                logger.error(f"AwaitDispatch: task {result.id} failed: {e}")
+                logger.error(f"WaitForTasks: task {result.id} failed: {e}")
                 raise
         self.dispatched_results.clear()
-        logger.info("AwaitDispatch: all tasks completed")
+        logger.info("WaitForTasks: all tasks completed")
 
     @classmethod
-    def get_current_context(cls) -> Optional['AwaitDispatch']:
-        """Return the innermost active ``AwaitDispatch`` context, or ``None``."""
+    def get_current_context(cls) -> Optional['WaitForTasks']:
+        """Return the innermost active ``WaitForTasks`` context, or ``None``."""
         if tasks_context.get().get('task_context_stack'):
             return tasks_context.get().get('task_context_stack')[-1]
         return None
@@ -356,11 +376,11 @@ unblock_tasks_context: contextvars.ContextVar[Dict[str, Any]] = contextvars.Cont
 
 class EnhancedBoundTaskMethod:
     """
-    Respects :class:`AwaitDispatch` and :class:`FireAndForget` contexts.
+    Respects :class:`WaitForTasks` and :class:`FireAndForget` contexts.
 
     Priority hierarchy:
     1. ``FireAndForget`` — forces async dispatch (highest priority)
-    2. ``AwaitDispatch``  — dispatches and registers for blocking wait
+    2. ``WaitForTasks``  — dispatches and registers for blocking wait
     3. No context         — runs synchronously (default)
     """
 
@@ -382,8 +402,8 @@ class EnhancedBoundTaskMethod:
             ff_ctx.add_dispatched_result(result)
             return result
 
-        # PRIORITY 2: AwaitDispatch
-        await_ctx = AwaitDispatch.get_current_context()
+        # PRIORITY 2: WaitForTasks
+        await_ctx = WaitForTasks.get_current_context()
         if await_ctx is None:
             logger.debug(f"No dispatch context — running {task_name} synchronously")
             return self.task(self.instance, *args, **kwargs)
@@ -393,12 +413,12 @@ class EnhancedBoundTaskMethod:
             return self.task(self.instance, *args, **kwargs)
 
         if await_ctx.should_dispatch(task_name):
-            logger.debug(f"AwaitDispatch: dispatching {task_name}")
+            logger.debug(f"WaitForTasks: dispatching {task_name}")
             result = self.task.delay(self.instance, *args, **kwargs)
             await_ctx.add_dispatched_result(result)
             return result
         else:
-            logger.debug(f"AwaitDispatch: running {task_name} synchronously")
+            logger.debug(f"WaitForTasks: running {task_name} synchronously")
             return self.task(self.instance, *args, **kwargs)
 
     def delay(self, *args, **kwargs):
@@ -434,7 +454,7 @@ class EnhancedTaskMethodDescriptor:
             ff_ctx.add_dispatched_result(result)
             return result
 
-        await_ctx = AwaitDispatch.get_current_context()
+        await_ctx = WaitForTasks.get_current_context()
         if await_ctx is None:
             return self.task(*args, **kwargs)
 
@@ -442,12 +462,12 @@ class EnhancedTaskMethodDescriptor:
             return self.task(*args, **kwargs)
 
         if await_ctx.should_dispatch(task_name):
-            logger.debug(f"AwaitDispatch: dispatching {task_name}")
+            logger.debug(f"WaitForTasks: dispatching {task_name}")
             result = self.task.delay(*args, **kwargs)
             await_ctx.add_dispatched_result(result)
             return result
         else:
-            logger.debug(f"AwaitDispatch: running {task_name} synchronously")
+            logger.debug(f"WaitForTasks: running {task_name} synchronously")
             return self.task(*args, **kwargs)
 
     def __getattr__(self, name):
@@ -457,7 +477,7 @@ class EnhancedTaskMethodDescriptor:
 def lex_shared_task(_func=None, **task_opts):
     """
     Decorator that makes a method Celery-capable, respecting
-    :class:`AwaitDispatch` and :class:`FireAndForget` contexts.
+    :class:`WaitForTasks` and :class:`FireAndForget` contexts.
     """
 
     def decorator(func):
@@ -516,14 +536,14 @@ def register_task_with_context(task_result):
     """
     Register a task result with the active dispatch context.
 
-    Checks :class:`FireAndForget` first, then :class:`AwaitDispatch`.
+    Checks :class:`FireAndForget` first, then :class:`WaitForTasks`.
     """
     ff_ctx = FireAndForget.get_current_context()
     if ff_ctx is not None:
         ff_ctx.add_dispatched_result(task_result)
         return task_result
 
-    await_ctx = AwaitDispatch.get_current_context()
+    await_ctx = WaitForTasks.get_current_context()
     if await_ctx is not None:
         await_ctx.add_dispatched_result(task_result)
 
@@ -717,7 +737,8 @@ def print_context_state(location: str = "Unknown"):
 
 
 # ── Backward-compatible aliases ──────────────────────────────────────────
-RunInCelery = AwaitDispatch
+AwaitDispatch = WaitForTasks
+RunInCelery = WaitForTasks
 UnblockCelery = FireAndForget
 
 
@@ -726,13 +747,14 @@ __all__ = [
     'CallbackTask',
     'calc_and_save',
     'get_calc_and_save_task',
-    # New names
-    'AwaitDispatch',
+    # Current names
+    'WaitForTasks',
     'FireAndForget',
     'is_in_fire_and_forget_context',
     'register_task_with_context',
     'respect_fire_and_forget',
     # Backward-compatible aliases
+    'AwaitDispatch',
     'RunInCelery',
     'UnblockCelery',
     'is_in_unblock_context',

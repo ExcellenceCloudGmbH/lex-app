@@ -63,7 +63,16 @@ class ModelRegistration:
             try:
                 # Validate before any registration work
                 if not (issubclass(model, HTMLReport) or issubclass(model, Process)):
-                    cls._validate_model_definition(model)
+                    _model_name = model.__name__.lower()
+                    _exclusion = get_model_exclusion_reason(model)
+                    _is_already_tracked = _exclusion == "Already has history tracking"
+                    _will_track = (
+                        (_exclusion is None or _is_already_tracked)
+                        and _model_name not in (untracked_models or [])
+                    )
+                    cls._validate_model_definition(
+                        model, will_track_history=_will_track,
+                    )
 
                 if issubclass(model, HTMLReport):
                     cls._register_html_report(model)
@@ -125,30 +134,82 @@ class ModelRegistration:
     # Prefixes that collide with auto-generated history model names.
     _RESERVED_CLASS_PREFIXES = ('Historical', 'MetaHistorical', 'Meta')
 
-    # Field names injected by LexModel, StandardHistory, MetaHistory,
-    # and CalculationModel — user models must not declare these.
-    _RESERVED_FIELD_NAMES = frozenset({
-        # LexModel
-        'created_by', 'edited_by',
-        # StandardHistory (Level 1 — valid time)
-        'valid_from', 'valid_to',
-        'history_id', 'history_type', 'history_change_reason',
-        'history_user', 'history_user_id',
-        # MetaLevelHistoricalRecords (Level 2 — system time)
-        'sys_from', 'sys_to',
-        'meta_history_id', 'meta_history_type',
-        'meta_history_change_reason', 'meta_task_name', 'meta_task_status',
-        'meta_history_user', 'meta_history_user_id',
-        'history_object',
-        # CalculationModel
-        'is_calculated',
-    })
+    # ── Dynamic reserved-field introspection ──
+    # Instead of hardcoding field names, we pull them from the actual
+    # framework classes so that implementation changes stay in sync.
 
     @classmethod
-    def _validate_model_definition(cls, model: Type[models.Model]) -> None:
+    def _get_base_model_fields(cls) -> frozenset:
+        """Fields defined on LexModel (always reserved for every user model)."""
+        from lex.core.models.LexModel import LexModel
+        return frozenset(
+            f.name for f in LexModel._meta.local_fields
+            if f.name != 'id'
+        )
+
+    @classmethod
+    def _get_calculation_model_fields(cls) -> frozenset:
+        """Extra fields added by CalculationModel on top of LexModel."""
+        from lex.core.models.CalculationModel import CalculationModel
+        from lex.core.models.LexModel import LexModel
+        calc_fields = {f.name for f in CalculationModel._meta.local_fields}
+        base_fields = {f.name for f in LexModel._meta.local_fields}
+        return frozenset(calc_fields - base_fields)
+
+    @classmethod
+    def _get_history_fields(cls) -> frozenset:
+        """Control fields injected by StandardHistory (Level 1 — valid time)."""
+        from lex.core.services.StandardHistory import StandardHistory
+        from django.contrib.auth.models import User  # any concrete model works
+        history = StandardHistory()
+        extra = history.get_extra_fields(model=User, fields={})
+        return frozenset(extra.keys())
+
+    @classmethod
+    def _get_meta_history_fields(cls) -> frozenset:
+        """Control fields injected by MetaLevelHistoricalRecords (Level 2 — system time)."""
+        from lex.core.services.MetaHistory import MetaLevelHistoricalRecords
+        from django.contrib.auth.models import User  # any concrete model works
+        meta = MetaLevelHistoricalRecords()
+        extra = meta.get_extra_fields(model=User, fields={})
+        return frozenset(extra.keys())
+
+    @classmethod
+    def _get_reserved_field_names(cls, *, include_history: bool = True) -> frozenset:
+        """
+        Dynamically compute the set of reserved field names.
+
+        Args:
+            include_history: When False, history (Level 1) and meta-history
+                (Level 2) fields are excluded.  This is used for models that
+                will not have bitemporal history tracking.
+        """
+        reserved = set(cls._get_base_model_fields())
+        reserved |= cls._get_calculation_model_fields()
+        if include_history:
+            reserved |= cls._get_history_fields()
+            reserved |= cls._get_meta_history_fields()
+        # Remove property/non-field entries that leak from get_extra_fields
+        reserved.discard('instance')
+        reserved.discard('instance_type')
+        return frozenset(reserved)
+
+    @classmethod
+    def _validate_model_definition(
+        cls,
+        model: Type[models.Model],
+        *,
+        will_track_history: bool = True,
+    ) -> None:
         """
         Ensure a user-defined model does not collide with framework-managed
         class names or field names.
+
+        Args:
+            model: The Django model class to validate.
+            will_track_history: Whether this model will have bitemporal
+                history tracking.  When False, history / meta-history
+                field names are **not** treated as reserved.
 
         Raises ``ValueError`` with an actionable message on violation.
         """
@@ -169,13 +230,17 @@ class ModelRegistration:
                     f"that prefix is reserved for auto-generated history models."
                 )
 
-        # 3. Reserved field names
+        # 3. Reserved field names — dynamically computed
+        reserved = cls._get_reserved_field_names(
+            include_history=will_track_history,
+        )
+
         #    Only check concrete fields explicitly declared on *this* class,
         #    not inherited ones from LexModel/CalculationModel.
         own_fields = {
             f.name
             for f in model._meta.local_fields
-            if f.name in cls._RESERVED_FIELD_NAMES
+            if f.name in reserved
         }
         # Exclude fields that actually come from an abstract parent the user
         # subclassed (LexModel, CalculationModel) — those are expected.

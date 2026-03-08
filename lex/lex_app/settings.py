@@ -407,6 +407,10 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # Result expiration (Redis cleanup)
 CELERY_RESULT_EXPIRES = 3600  # 1 hour
 
+# Use django-celery-beat's DatabaseScheduler so `celery beat` reads
+# PeriodicTask / ClockedSchedule rows from the DB by default.
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
 # Enhanced Celery Active Configuration
 # Support both CELERY_ACTIVE and legacy C_FORCE_ROOT for backward compatibility
 CELERY_ACTIVE = os.getenv("CELERY_ACTIVE", "False").lower() == "true"
