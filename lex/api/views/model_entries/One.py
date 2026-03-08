@@ -63,25 +63,28 @@ class OneModelEntry(
         """
         Mark every CalculationModel in the same calculation chain as ERROR.
 
-        The chain is discovered via ``CalculationLog`` entries that share the
-        same ``calculationId``.  Each log entry references a concrete model
-        instance through its ``content_type`` / ``object_id`` generic FK.
-        We walk the entire set (root, parents, children) so that no orphaned
-        IN_PROGRESS spinners remain in the frontend.
+        Discovery of chain members uses **two** sources in priority order:
 
-        Steps
-        -----
-        1. Mark the *triggering* object as ERROR (the one that raised).
-        2. Query all ``CalculationLog`` rows for this ``calculationId``.
-        3. For each referenced ``CalculationModel`` instance that is still
-           IN_PROGRESS, set ``is_calculated = ERROR``, persist, and broadcast.
-        4. Clean up ``ActiveCalculationStateStore`` entries.
+        1. ``ActiveCalculationStateStore`` — in-memory, so it is **not**
+           affected by ``transaction.atomic()`` rollbacks.  Every
+           parent/child that entered ``calculate_hook`` registered itself
+           here with the shared ``calculation_id``.
+        2. ``CalculationLog`` — DB-based parent→child hierarchy.  These
+           rows *may* have been rolled back by the enclosing atomic block,
+           so this is only a secondary fallback.
+
+        For each discovered ``CalculationModel`` instance we:
+        * refresh from the DB (to see the *persisted* state, post-rollback),
+        * set ``is_calculated = ERROR`` if it is not already a terminal state,
+        * ``save(skip_hooks=True)``,
+        * broadcast via ``update_calculation_status``,
+        * clear its ``ActiveCalculationStateStore`` entry.
         """
         from lex.core.signals.CalculationSignals import update_calculation_status
         from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
         from lex.audit_logging.models.CalculationLog import CalculationLog
 
-        already_handled = set()
+        already_handled: set = set()
 
         def _mark_error(instance):
             """Set ERROR on a single CalculationModel instance & broadcast."""
@@ -90,9 +93,16 @@ class OneModelEntry(
                 return
             already_handled.add(record_id)
 
-            if getattr(instance, "is_calculated", None) in (
-                CalculationModel.IN_PROGRESS,
-                CalculationModel.NOT_CALCULATED,
+            # Refresh from DB to see what actually persisted (atomic blocks
+            # may have rolled back earlier in-memory changes).
+            try:
+                instance.refresh_from_db()
+            except Exception:
+                pass  # instance may have been deleted; proceed with stale copy
+
+            if instance.is_calculated not in (
+                CalculationModel.SUCCESS,
+                CalculationModel.ABORTED,
             ):
                 instance.is_calculated = CalculationModel.ERROR
                 try:
@@ -103,7 +113,9 @@ class OneModelEntry(
                         exc_info=True,
                     )
 
-            # Always broadcast so the frontend clears the spinner.
+            # Always broadcast so the frontend clears the spinner — even
+            # if the instance was already ERROR (the earlier broadcast may
+            # have been lost due to the transaction rollback path).
             try:
                 update_calculation_status(
                     instance,
@@ -116,14 +128,47 @@ class OneModelEntry(
                     exc_info=True,
                 )
 
-            # Ensure the state-store entry is cleared.
+            # Ensure the in-memory state-store entry is cleared.
             ActiveCalculationStateStore.clear(record_id)
 
-        # --- 1. Handle the triggering object first ----------------------
+        # ── 1. Handle the triggering object first ───────────────────────
         if triggering_obj and isinstance(triggering_obj, CalculationModel):
             _mark_error(triggering_obj)
 
-        # --- 2. Walk the CalculationLog hierarchy -----------------------
+        # ── 2. Primary: walk ActiveCalculationStateStore ────────────────
+        #    This is in-memory, so it survives transaction rollbacks.
+        try:
+            chain_entries = ActiveCalculationStateStore.get_entries_by_calculation_id(
+                calculation_id
+            )
+            for entry in chain_entries:
+                model_class, record_pk = ActiveCalculationStateStore._resolve_model_and_pk(entry)
+                if model_class is None or record_pk is None:
+                    continue
+                try:
+                    related_instance = model_class.objects.get(pk=record_pk)
+                    _mark_error(related_instance)
+                except model_class.DoesNotExist:
+                    logger.debug(
+                        f"StateStore references missing "
+                        f"{model_class.__name__} pk={record_pk}"
+                    )
+                    # Still clear the stale state-store entry
+                    ActiveCalculationStateStore.clear(entry.get("record_id", ""))
+                except Exception as fetch_err:
+                    logger.error(
+                        f"Error fetching chain member from state store "
+                        f"entry {entry}: {fetch_err}",
+                        exc_info=True,
+                    )
+        except Exception as store_err:
+            logger.error(
+                f"Failed to walk ActiveCalculationStateStore for "
+                f"calculationId={calculation_id}: {store_err}",
+                exc_info=True,
+            )
+
+        # ── 3. Secondary: walk CalculationLog (may be empty after rollback)
         try:
             chain_logs = CalculationLog.objects.filter(
                 calculationId=calculation_id,
@@ -156,7 +201,7 @@ class OneModelEntry(
                 exc_info=True,
             )
 
-        # --- 3. Final cache cleanup for the whole calculation -----------
+        # ── 4. Final cache cleanup for the whole calculation ────────────
         try:
             CacheManager.cleanup_calculation(calculation_id=calculation_id)
         except Exception as cache_err:

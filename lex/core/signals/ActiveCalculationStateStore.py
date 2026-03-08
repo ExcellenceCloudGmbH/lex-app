@@ -99,6 +99,24 @@ class ActiveCalculationStateStore:
         return {}
 
     @classmethod
+    def get_entries_by_calculation_id(cls, calculation_id: str) -> List[Dict[str, str]]:
+        """
+        Return every entry that shares the given *calculation_id*.
+
+        This is the primary mechanism for discovering all members of a
+        calculation chain because it is in-memory and therefore immune to
+        ``transaction.atomic()`` rollbacks (unlike CalculationLog rows).
+        """
+        if not calculation_id:
+            return []
+        with cls._lock:
+            return [
+                dict(entry)
+                for entry in cls._state_map.values()
+                if entry.get("calculation_id") == calculation_id
+            ]
+
+    @classmethod
     def snapshot(cls) -> List[Dict[str, str]]:
         """
         Return the current set of active calculations.
