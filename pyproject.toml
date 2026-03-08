@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lex-app"
-version = "2.0.0rc79"
+version = "2.0.0rc80"
 description = "A Python / Django library to create business applications easily with complex logic"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE.txt"}
-requires-python = "==3.12"
+requires-python = ">=3.12,<3.13"
 authors = [
     {name = "Melih Sünbül", email = "m.sunbul@excellence-cloud.com"},
 ]
