@@ -1,10 +1,9 @@
-from copy import deepcopy
 from typing import Dict, Any, Set, Type, Union
 from django.db.models import Model
 
 from lex.process_admin.models.ModelContainer import ModelContainer
 from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
-from process_admin.utils import ModelStructureBuilder
+from lex.process_admin.utils import ModelStructureBuilder
 
 
 def _create_model_containers(models_to_admins: Dict[Type[Model], Any]) -> Dict[str, ModelContainer]:
@@ -89,7 +88,41 @@ class ModelCollection:
         if temp:
             model_structure["Legacy Generic App (Archive)"] = temp
 
-        self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml({"Models": {c: None for c in set_of_ids_container if not c.startswith("historical") and not c.startswith("metahistorical")}}, model_structure)
+        # Build a nested "Models" fallback structure from filesystem paths
+        # instead of dumping everything flat.  For a model with
+        #   __module__ == "ArmiraCashflowDB.Upload.UploadCashflow.UploadCashflow"
+        # the container id "uploadcashflow" will be placed under
+        #   Models → Upload → uploadcashflow: None
+        unplaced = {}
+        for container in self.all_containers:
+            cid = container.id
+            if cid not in set_of_ids_container:
+                continue  # already claimed by legacy or removed
+            if cid.startswith("historical") or cid.startswith("metahistorical"):
+                continue
+            model_class = container.model_class
+            module = getattr(model_class, "__module__", "") or ""
+            parts = module.split(".")
+            # Try to find the repo segment and derive the subfolder path
+            # e.g. ["ArmiraCashflowDB", "Upload", "UploadCashflow", "UploadCashflow"]
+            #        repo_index=0        → path parts = ["Upload", "UploadCashflow"]
+            #        we drop the last part (filename == class name) → ["Upload"]
+            repo_name_local = parts[0] if parts else ""
+            try:
+                repo_idx = parts.index(repo_name_local)
+                path_parts = parts[repo_idx + 1 : -1]  # folders between repo and filename
+            except (ValueError, IndexError):
+                path_parts = []
+
+            # Walk into the nested dict, creating intermediate folders
+            current = unplaced
+            for folder in path_parts:
+                if folder not in current:
+                    current[folder] = {}
+                current = current[folder]
+            current[cid] = None
+
+        self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml(unplaced, model_structure)
         self.model_styling = model_styling
 
         self.model_structure_with_readable_names = {

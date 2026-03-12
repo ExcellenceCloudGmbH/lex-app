@@ -174,39 +174,8 @@ LEGACY_MEDIA_ROOT = os.path.join(NEW_BASE_DIR, f"{repo_name}/")
 LOG_FILE_PATH = os.path.join(NEW_BASE_DIR, f"{repo_name}/{repo_name}.log")
 
 
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {
-            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "file": {
-            "level": "DEBUG",
-            "class": "logging.FileHandler",
-            "filename": LOG_FILE_PATH,
-            "formatter": "verbose",
-        },
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "simple",
-        },
-        "websocket": {
-            "level": "DEBUG",
-            "class": "lex.audit_logging.handlers.WebSocketHandler.WebSocketHandler",
-        },
-    },
-    "loggers": {
-        "LexLogger": {
-            "handlers": ["file"],
-            "level": "DEBUG",
-            "propagate": True,
-        },
-    },
-}
+# Note: LOGGING is configured at the bottom of this file, after all env-dependent
+# variables (IS_DEPLOYED, CONSOLE_LEVEL, ROOT_LEVEL) have been resolved.
 
 
 # Application definition
@@ -563,7 +532,6 @@ API_KEY_CUSTOM_HEADER = "HTTP_API_KEY"
 if os.getenv("SENDGRID_API_KEY", "envvar_not_existing") != "envvar_not_existing":
     SENDGRID_API_KEY = os.environ["SENDGRID_API_KEY"]
 else:
-    print("SENDGRID_API_KEY not found in environmental variables.")
     SENDGRID_API_KEY = "improperlyConfigured"
 
 EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
@@ -618,16 +586,17 @@ if os.getenv("STORAGE_TYPE") == "LEGACY" or not os.getenv("STORAGE_TYPE"):
 
 IS_DEPLOYED = os.getenv("DEPLOYMENT_ENVIRONMENT") is not None
 
-# Console: no DEBUG in deployed envs
-CONSOLE_LEVEL = "INFO" if IS_DEPLOYED else "DEBUG"
+# Console handler level: INFO by default everywhere.
+# Override locally with LOG_LEVEL=DEBUG if you need third-party debug output.
+CONSOLE_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# oauth2_authcodeflow: also no DEBUG in deployed envs (since it only uses console)
-OAUTH2_LEVEL = "INFO" if IS_DEPLOYED else "DEBUG"
+# oauth2_authcodeflow: keep quiet unless explicitly requested
+OAUTH2_LEVEL = "INFO" if IS_DEPLOYED else os.getenv("LOG_LEVEL", "INFO").upper()
 
-# root: keep LOG_LEVEL locally, but if deployed and it resolves to DEBUG, bump it to INFO
-ROOT_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
-if IS_DEPLOYED and ROOT_LEVEL == "DEBUG":
-    ROOT_LEVEL = "INFO"
+# Root logger level: respect LOG_LEVEL env var, default to INFO.
+# This prevents django-lifecycle, OpenTelemetry, OIDC middleware etc.
+# from flooding the console with DEBUG messages during local development.
+ROOT_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 LOGGING = {
     "version": 1,
@@ -657,6 +626,22 @@ LOGGING = {
         "oauth2_authcodeflow": {
             "handlers": ["console"],
             "level": OAUTH2_LEVEL,
+            "propagate": False,
+        },
+        # Silence noisy third-party DEBUG output
+        "django_lifecycle": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "opentelemetry": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "azure": {
+            "handlers": ["console"],
+            "level": "WARNING",
             "propagate": False,
         },
     },

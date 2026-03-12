@@ -55,6 +55,10 @@ class ModelRegistration:
         User.add_to_class("__str__", get_username)
         processAdminSite.register([User])
 
+        history_ok = []
+        history_skipped = []
+        history_failed = []
+
         for model in models:
             try:
                 if issubclass(model, HTMLReport):
@@ -62,7 +66,13 @@ class ModelRegistration:
                 elif issubclass(model, Process):
                     cls._register_process_model(model)
                 elif not issubclass(model, type) and not model._meta.abstract:
-                    cls._register_standard_model(model, untracked_models)
+                    result = cls._register_standard_model(model, untracked_models)
+                    if result == "ok":
+                        history_ok.append(model.__name__)
+                    elif result == "skipped":
+                        history_skipped.append(model.__name__)
+                    elif result == "failed":
+                        history_failed.append(model.__name__)
 
                     if issubclass(model, CalculationModel):
                         cls._handle_calculation_model_reset(model)
@@ -70,6 +80,19 @@ class ModelRegistration:
                 raise RuntimeError(
                     f"Failed to register model {model.__name__}: {str(e)}"
                 ) from e
+
+        # One-line summary instead of per-model print spam
+        if history_ok or history_failed:
+            logger.info(
+                f"History tracking: {len(history_ok)} enabled, "
+                f"{len(history_skipped)} skipped, {len(history_failed)} failed"
+            )
+        if history_ok:
+            logger.debug(f"History enabled for: {', '.join(history_ok)}")
+        if history_skipped:
+            logger.debug(f"History skipped for: {', '.join(history_skipped)}")
+        if history_failed:
+            logger.warning(f"History FAILED for: {', '.join(history_failed)}")
 
     @classmethod
     def _register_html_report(cls, model: Type[models.Model]) -> None:
@@ -90,14 +113,12 @@ class ModelRegistration:
     @classmethod
     def _register_standard_model(
         cls, model: Type[models.Model], untracked_models: List[str]
-    ) -> None:
+    ) -> str:
         """
         Register a standard model with both admin sites and bitemporal history.
 
-        This sets up the full 3-layer architecture:
-          1. Level 1: Standard History  (valid_from / valid_to)
-          2. Level 2: Meta History      (sys_from / sys_to)
-          3. Signal handlers for chaining, sync, and scheduling
+        Returns:
+            'ok' if history was enabled, 'skipped' if excluded, 'failed' on error.
         """
         from lex.process_admin.settings import processAdminSite, adminSite
         from simple_history import register
@@ -107,6 +128,7 @@ class ModelRegistration:
         from lex.core.services.signal_registry import connect_bitemporal_signals
 
         model_name = model.__name__.lower()
+        result = "skipped"
         processAdminSite.register([model])
 
         exclusion_reason = get_model_exclusion_reason(model)
@@ -129,7 +151,7 @@ class ModelRegistration:
                         f"Failed to retrieve history model for {model.__name__} "
                         f"after registration attempt."
                     )
-                    return
+                    return "failed"
 
                 historical_model = model.history.model
                 processAdminSite.register([historical_model])
@@ -167,41 +189,27 @@ class ModelRegistration:
                 )
 
                 processAdminSite.register([meta_historical_model])
-
-                if is_already_tracked:
-                    print(
-                        f"✓ History hooks attached to existing history "
-                        f"for: {model.__name__}"
-                    )
-                else:
-                    print(
-                        f"✓ History and Meta-History enabled "
-                        f"for: {model.__name__}"
-                    )
+                result = "ok"
 
             except Exception as e:
-                print(
-                    f"⚠ Failed to register history for {model.__name__}: "
+                logger.warning(
+                    f"Failed to register history for {model.__name__}: "
                     f"{type(e).__name__} - {e}"
                 )
+                result = "failed"
         else:
-            exclusion_reason = get_model_exclusion_reason(model)
-            if exclusion_reason:
-                print(
-                    f"⊘ History tracking skipped for {model.__name__}: "
-                    f"{exclusion_reason}"
-                )
-            elif model_name in untracked_models:
-                print(
-                    f"⊘ History tracking skipped for {model.__name__}: "
-                    f"In untracked_models list"
-                )
+            reason = exclusion_reason or "In untracked_models list"
+            logger.debug(
+                f"History tracking skipped for {model.__name__}: {reason}"
+            )
 
         if not adminSite.is_registered(model):
             try:
                 adminSite.register([model])
             except admin.exceptions.AlreadyRegistered:
                 pass
+
+        return result
 
     @classmethod
     def _handle_calculation_model_reset(cls, model: Type[models.Model]) -> None:

@@ -17,7 +17,12 @@ LEX_APP_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.as_posix()
 PROJECT_ROOT_DIR = Path(os.getcwd()).resolve()
 sys.path.append(LEX_APP_PACKAGE_ROOT)
 
-# KEEP: do not set DJANGO_SETTINGS_MODULE or call django.setup() here
+# Set essential env vars early so they are available when any downstream code
+# (celery.py, settings.py, asgi.py) eventually triggers Django setup.
+# This is cheap — the expensive part (django.setup()) remains deferred.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
+os.environ.setdefault("PROJECT_ROOT", PROJECT_ROOT_DIR.as_posix())
+os.environ.setdefault("LEX_APP_PACKAGE_ROOT", LEX_APP_PACKAGE_ROOT)
 
 lex = click.Group(help="lex-app Command Line Interface")
 
@@ -73,10 +78,7 @@ def _bootstrap_django():
     global _DJANGO_READY, _GET_COMMANDS, _CALL_COMMAND
     if _DJANGO_READY:
         return _GET_COMMANDS, _CALL_COMMAND
-    # Configure env only now
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
-    os.environ.setdefault("PROJECT_ROOT", PROJECT_ROOT_DIR.as_posix())
-    os.environ.setdefault("LEX_APP_PACKAGE_ROOT", LEX_APP_PACKAGE_ROOT)
+    # Env vars are already set at module level; just call setup.
     import django
     django.setup()
     from django.core.management import get_commands, call_command
@@ -197,16 +199,25 @@ def setup(project_root):
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
     click.echo(f".run: {os.path.join(root, '.run')} (updated)")
 
-def main():
-    # Detect if the first arg is 'setup'; if so, register only setup and dispatch without Django
-    argv = sys.argv[1:]
-    if argv and argv[0] == "setup":
-        # Register only built-ins (already registered above), do not install dynamic commands
-        return lex(prog_name="lex")
-    elif argv and argv[0] == "start":
-        # For 'start', we want to ensure static files are collected before starting the server, but without bootstrapping all of Django commands.
-        os.environ.setdefault("CALLED_FROM_START_COMMAND", "True")
+# Commands that have dedicated handlers and do NOT need Django management
+# command enumeration.  For these, _bootstrap_django() is skipped so that
+# django.setup() (and every AppConfig.ready()) only fires once — inside
+# the actual server process (uvicorn / celery worker / streamlit).
+_SKIP_BOOTSTRAP_COMMANDS = frozenset({"start", "celery", "streamlit", "setup", "init"})
 
-    # Otherwise, install dynamic Django commands and dispatch
+
+def main():
+    argv = sys.argv[1:]
+    first_arg = argv[0] if argv else None
+
+    if first_arg in _SKIP_BOOTSTRAP_COMMANDS:
+        # These commands have dedicated Click handlers registered above.
+        # Do NOT call _install_dynamic_commands() — that would trigger
+        # django.setup() in the CLI process, causing every AppConfig.ready()
+        # to fire twice (once here, once when the real server starts).
+        return lex(prog_name="lex")
+
+    # All other commands (init, migrate, makemigrations, …) need the full
+    # set of Django management commands registered as Click sub-commands.
     _install_dynamic_commands()
     return lex(prog_name="lex")
