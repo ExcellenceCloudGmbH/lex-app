@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import sys
 import threading
@@ -10,11 +11,14 @@ from celery import shared_task
 from django.apps import apps
 from django.contrib.admin.apps import AdminConfig
 
-from core.config import LexProjectConfig
+
 from lex.authentication.utils.lex_authentication import LexAuthentication
+from lex.core.config import LexProjectConfig
 from lex.lex_app.settings import repo_name, CELERY_ACTIVE
 from lex.utilities.config.generic_app_config import GenericAppConfig
 from lex.audit_logging.utils.config import is_audit_logging_enabled, get_audit_logging_config
+
+logger = logging.getLogger(__name__)
 
 
 class CustomAdminConfig(AdminConfig):
@@ -58,14 +62,13 @@ def _create_audit_logger():
         return None
 
 
-def _create_audit_logger_for_task(audit_logging_enabled=None, calculation_id=None):
+def _create_audit_logger_for_task(audit_logging_enabled=None):
     """
     Create an audit logger instance for Celery task context.
     
     Args:
         audit_logging_enabled: Optional override for audit logging enablement
-        calculation_id: Optional calculation ID for audit logging continuity
-        
+
     Returns:
         InitialDataAuditLogger instance if enabled, None otherwise
     """
@@ -159,15 +162,16 @@ class LexAppConfig(GenericAppConfig):
             models_to_register.append(model)
 
         if models_to_register:
-            print(f"Registering {len(models_to_register)} models from {repo_name}: {[m.__name__ for m in models_to_register]}")
+            logger.info(f"Registering {len(models_to_register)} models from {repo_name}")
+            logger.debug(f"Models: {[m.__name__ for m in models_to_register]}")
             ModelRegistration.register_models(models_to_register, self.untracked_models)
         else:
-            print(f"No new models to register from {repo_name}")
+            logger.debug(f"No new models to register from {repo_name}")
 
         # Register model structure and styling if available
         # This provides the organized structure in the frontend
         if self.model_structure_builder.model_structure:
-            print(f"Registering model structure for {repo_name}")
+            logger.debug(f"Registering model structure for {repo_name}")
             ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
         if self.model_structure_builder.model_styling:
             ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
@@ -202,15 +206,9 @@ class LexAppConfig(GenericAppConfig):
         try:
             config = get_audit_logging_config()
             config_summary = config.get_configuration_summary()
-            print(f"Audit logging configuration - Enabled: {config.audit_logging_enabled}, Batch size: {config.batch_size}")
+            print(f"Audit logging configuration - Enabled: {config.audit_logging_enabled}")
             print(f"Configuration details: {config_summary}")
-            
-            # Validate configuration and warn about potential issues
-            if config.batch_size > 1000:
-                print(f"Warning: Large batch size ({config.batch_size}) may impact performance")
-            if config.batch_size < 10:
-                print(f"Warning: Small batch size ({config.batch_size}) may reduce efficiency")
-                
+
         except ValueError as e:
             print(f"Error: Invalid audit logging configuration: {e}")
             print("Initial data upload will continue with audit logging disabled")
@@ -227,19 +225,6 @@ class LexAppConfig(GenericAppConfig):
         if await are_all_models_empty(test, generic_app_models):
             # Prepare audit logging parameters for task execution
             audit_enabled = is_audit_logging_enabled()
-            calculation_id = None
-            
-            # if audit_enabled:
-                # # Generate calculation ID for continuity between async_ready and task execution
-                # try:
-                #     from lex.audit_logging.utils.initial_data_logger import InitialDataAuditLogger
-                #     temp_logger = InitialDataAuditLogger()
-                #     print(f"Generated calculation ID for task execution: {calculation_id}")
-                # except Exception as e:
-                #     print(f"Warning: Failed to generate calculation ID for task execution: {e}")
-                #     print("Task will generate its own calculation ID")
-                #     traceback.print_exc()
-                #     calculation_id = None
 
             # TODO
             if False or (os.getenv("DEPLOYMENT_ENVIRONMENT")

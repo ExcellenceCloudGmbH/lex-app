@@ -1,4 +1,8 @@
+import logging
+
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class ModelStructure:
@@ -20,16 +24,16 @@ class ModelStructure:
         try:
             self.structure = data["model_structure"]
         except (KeyError, TypeError):
-            print("Error: Structure is not defined in the model info file")
+            logger.warning("Structure is not defined in the model info file")
         try:
             self.styling = data["model_styling"]
         except (KeyError, TypeError):
-            print("Error: Styling is not defined in the model info file")
+            logger.debug("Styling is not defined in the model info file")
         # Try to load the untracked models list, default to empty list if not found
         try:
             self.untracked_models = data["untracked_models"]
         except (KeyError, TypeError):
-            # It's okay if this is not defined, so we don't print an error
+            # It's okay if this is not defined
             pass
 
     def structure_is_defined(self):
@@ -45,6 +49,6 @@ class ModelStructure:
             data = yaml.safe_load(f)
         try:
             cls.UNTRACKED_MODELS = data["untracked_models"]
-            print(f"Static UNTRACKED_MODELS updated to: {cls.UNTRACKED_MODELS}")
+            logger.debug(f"UNTRACKED_MODELS loaded: {cls.UNTRACKED_MODELS}")
         except (KeyError, TypeError):
-            print("Warning: 'untracked_models' not found in the YAML file.")
+            logger.debug("'untracked_models' not found in the YAML file.")

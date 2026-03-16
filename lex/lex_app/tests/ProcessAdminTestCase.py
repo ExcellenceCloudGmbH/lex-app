@@ -60,10 +60,11 @@ class ProcessAdminTestCase(TestCase):
                 if action == 'create':
                     object['parameters'] = self.replace_tagged_parameters(object['parameters'])
                     
-                    # Log audit entry before creation if audit logging is enabled
+                    # Generate calculation_id and log audit entry before creation
+                    calculation_id = audit_logger.generate_calculation_id() if audit_enabled else None
                     if audit_enabled:
-                        audit_log = audit_logger.log_object_creation(klass, object['parameters'], tag)
-                    
+                        audit_log = audit_logger.log_object_creation(klass, object['parameters'], tag, calculation_id)
+
                     self.tagged_objects[tag] = klass(**object['parameters'])
                     for parameter in object['parameters'].keys():
                         if (isinstance(self.tagged_objects[tag]._meta.get_field(parameter), (models.FileField))):
@@ -79,14 +80,20 @@ class ProcessAdminTestCase(TestCase):
                             self.tagged_objects[tag].__dict__[parameter] = new_file_name
 
                     cache.set(threading.get_ident(), str(object['class']) + "_" + action)
-                    self.tagged_objects[tag].save()
 
-                    calculation_id = audit_log.calculation_id if audit_enabled else None
+                    with OperationContext({}, calculation_id, audit_log=audit_log):
+                        with model_logging_context(self.tagged_objects[tag]):
+                            self.tagged_objects[tag].save()
 
                     instance = self.tagged_objects[tag]
-                    if audit_enabled and CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
-                        audit_log.calculation_id = None
+                    if audit_enabled:
+                        if CalculationLog.objects.filter(calculationId=calculation_id).count() == 0:
+                            audit_log.calculation_id = None
                         audit_log.content_type = _safe_get_content_type(instance.__class__)
+                        audit_log.object_id = instance.pk
+                        payload = audit_log.payload
+                        payload['id'] = instance.pk
+                        audit_log.payload = payload
                         audit_log.save()
                     # Mark audit log as successful if audit logging is enabled
                     if audit_enabled and audit_log:
@@ -96,10 +103,11 @@ class ProcessAdminTestCase(TestCase):
                     object['filter_parameters'] = self.replace_tagged_parameters(object['filter_parameters'])
                     self.tagged_objects[tag] = klass.objects.filter(**object['filter_parameters']).first()
                     if self.tagged_objects[tag] is not None:
-                        # Log audit entry before update if audit logging is enabled
+                        # Generate calculation_id and log audit entry before update
+                        calculation_id = audit_logger.generate_calculation_id() if audit_enabled else None
                         if audit_enabled:
-                            audit_log = audit_logger.log_object_update(klass, self.tagged_objects[tag], object['parameters'], tag)
-                        
+                            audit_log = audit_logger.log_object_update(klass, self.tagged_objects[tag], object['parameters'], tag, calculation_id)
+
                         for key in object['parameters']:
                             if isinstance(self.tagged_objects[tag]._meta.get_field(key), (models.FileField)):
                                 upload_to = self.tagged_objects[tag]._meta.get_field(key).upload_to
@@ -118,29 +126,41 @@ class ProcessAdminTestCase(TestCase):
                         cache.set(threading.get_ident(),
                                   str(object['class']) + "_" + action + "_" + str(self.tagged_objects[tag].pk))
 
-                        calculation_id = audit_log.calculation_id if audit_enabled else None
-                        with OperationContext({}, calculation_id):
-                            self.tagged_objects[tag].save()
+                        with OperationContext({}, calculation_id, audit_log=audit_log):
+                            with model_logging_context(self.tagged_objects[tag]):
+                                self.tagged_objects[tag].save()
                         instance = self.tagged_objects[tag]
-                        # Mark audit log as successful if audit logging is enabled
-                        if audit_enabled and CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
-                            audit_log.calculation_id = None
+                        if audit_enabled:
+                            if CalculationLog.objects.filter(calculationId=calculation_id).count() == 0:
+                                audit_log.calculation_id = None
                             audit_log.content_type = _safe_get_content_type(instance.__class__)
+                            audit_log.object_id = instance.pk
                             audit_log.save()
+                        # Mark audit log as successful if audit logging is enabled
                         if audit_enabled and audit_log:
                             audit_logger.mark_operation_success(audit_log)
                             
                 elif action == 'delete':
                     # Log audit entry before deletion if audit logging is enabled
-                    if audit_enabled:
-                        audit_log = audit_logger.log_object_deletion(klass, object['filter_parameters'], tag)
-                    
-                    klass.objects.filter(**object['filter_parameters']).delete()
-                    
-                    # Mark audit log as successful if audit logging is enabled
-                    if audit_enabled and audit_log:
-                        audit_logger.mark_operation_success(audit_log)
-                        
+                    instances = klass.objects.filter(**object['filter_parameters'])
+
+                    for instance in instances:
+                        if audit_enabled:
+                            audit_log = audit_logger.log_object_deletion(instance, object['filter_parameters'], tag)
+                            audit_log.content_type = _safe_get_content_type(klass)
+                            audit_log.object_id = instance.pk
+                            audit_log.save()
+
+                        instance.delete()
+
+                        # Mark audit log as successful if audit logging is enabled
+                        if audit_enabled and audit_log:
+                            audit_logger.mark_operation_success(audit_log)
+
+                    # If no instances matched, still do the (no-op) delete for consistency
+                    if not instances.exists():
+                        klass.objects.filter(**object['filter_parameters']).delete()
+
             except Exception as e:
                 # Mark audit log as failed if audit logging is enabled and an error occurred
                 if audit_enabled and audit_log:
@@ -178,27 +198,22 @@ class ProcessAdminTestCase(TestCase):
                 if action == 'create':
                     object['parameters'] = self.replace_tagged_parameters(object['parameters'])
                     
-                    # Log audit entry before creation if audit logging is enabled
-                    calculation_id = audit_logger.generate_calculation_id()
+                    # Generate calculation_id and log audit entry before creation
+                    calculation_id = audit_logger.generate_calculation_id() if audit_enabled else None
                     if audit_enabled:
-                        audit_log = audit_logger.log_object_creation(klass, object['parameters'], tag, None)
-                    
+                        audit_log = audit_logger.log_object_creation(klass, object['parameters'], tag, calculation_id)
+
                     self.tagged_objects[tag] = klass(**object['parameters'])
                     cache.set(threading.get_ident(), str(object['class']) + "_" + action)
-
-                    if "Investor" in klass.__name__ and "Track" in klass.__name__:
-                        print("Break here")
 
                     with OperationContext({}, calculation_id, audit_log=audit_log):
                         with model_logging_context(self.tagged_objects[tag]):
                             self.tagged_objects[tag].save()
 
                     instance = self.tagged_objects[tag]
-                    # Mark audit log as successful if audit logging is enabled
-
 
                     if audit_enabled:
-                        if CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
+                        if CalculationLog.objects.filter(calculationId=calculation_id).count() == 0:
                             audit_log.calculation_id = None
                         audit_log.content_type = _safe_get_content_type(instance.__class__)
                         audit_log.object_id = instance.pk
@@ -214,11 +229,11 @@ class ProcessAdminTestCase(TestCase):
                     object['filter_parameters'] = self.replace_tagged_parameters(object['filter_parameters'])
                     self.tagged_objects[tag] = klass.objects.filter(**object['filter_parameters']).first()
                     if self.tagged_objects[tag] is not None:
-                        # Log audit entry before update if audit logging is enabled
-                        calculation_id = audit_logger.generate_calculation_id()
+                        # Generate calculation_id and log audit entry before update
+                        calculation_id = audit_logger.generate_calculation_id() if audit_enabled else None
                         if audit_enabled:
-                            audit_log = audit_logger.log_object_update(klass, self.tagged_objects[tag], object['parameters'], tag, None)
-                        
+                            audit_log = audit_logger.log_object_update(klass, self.tagged_objects[tag], object['parameters'], tag, calculation_id)
+
                         for key in object['parameters']:
                             setattr(self.tagged_objects[tag], key, object['parameters'][key])
 
@@ -231,12 +246,12 @@ class ProcessAdminTestCase(TestCase):
 
                         instance = self.tagged_objects[tag]
                         if audit_enabled:
-                            if CalculationLog.objects.filter(calculationId=calculation_id).count() < 0:
+                            if CalculationLog.objects.filter(calculationId=calculation_id).count() == 0:
                                 audit_log.calculation_id = None
                             audit_log.content_type = _safe_get_content_type(instance.__class__)
                             audit_log.object_id = instance.pk
                             audit_log.save()
-                            # Mark audit log as successful if audit logging is enabled
+                        # Mark audit log as successful if audit logging is enabled
                         if audit_enabled and audit_log:
                             audit_logger.mark_operation_success(audit_log)
                             

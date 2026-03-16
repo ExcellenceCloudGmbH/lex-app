@@ -1,18 +1,14 @@
 import logging
 import traceback
 import uuid
-from copy import deepcopy
 from datetime import datetime
-from typing import Dict, Any, Optional, Type
+from typing import Dict, Any, Optional, Type, List
 from django.db import models, transaction
 from django.db.models import Model
 
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload, generic_instance_payload
-# from lex.audit_logging.models.audit_logBatchManager import AuditLogBatchManager  # TODO: This class doesn't exist
-from lex.process_admin.settings import processAdminSite
-from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 
 # Configure logger for audit operations
 logger = logging.getLogger('lex_app.audit.initial_data')
@@ -23,19 +19,15 @@ class InitialDataAuditLogger:
     Audit logger for initial data upload operations.
 
     This class provides audit logging functionality for data operations that occur
-    during initial data upload, ensuring consistency with the existing audit trail
-    while supporting batch operations for performance.
+    during initial data upload, ensuring consistency with the existing audit trail.
+
+    Each create/update/delete operation produces one AuditLog + AuditLogStatus pair,
+    matching the per-operation approach used by AuditLogMixin for API requests.
     """
 
-    def __init__(self, calculation_id: Optional[str] = None):
-        """
-        Initialize the audit logger.
-
-        Args:
-            calculation_id: Optional calculation ID. If not provided, a unique ID will be generated.
-        """
-        # self.batch_manager = AuditLogBatchManager()  # TODO: Implement AuditLogBatchManager
-        self.batch_manager = None  # Placeholder until AuditLogBatchManager is implemented
+    def __init__(self):
+        """Initialize the audit logger with an empty tracking list."""
+        self._logged_ids: List[int] = []
 
     def generate_calculation_id(self) -> str:
         return self._generate_calculation_id()
@@ -96,8 +88,8 @@ class InitialDataAuditLogger:
 
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
-                if self.batch_manager:
-                    self.batch_manager.add_pending_log(audit_log)
+
+            self._logged_ids.append(audit_log.id)
 
             logger.debug(
                 f"Successfully created audit log for {resource} creation",
@@ -180,12 +172,9 @@ class InitialDataAuditLogger:
                 # Fallback to basic serialization
                 serialized_updates = {'_serialization_error': str(e), '_original_keys': list(update_data.keys())}
 
-            # Create payload with both old and new values for better audit trail
-
+            # Create payload from serialized data for JSON safety
             serialized_updates['id'] = instance_pk
-            payload = deepcopy(update_data)
-            payload['id'] = instance_pk
-            payload['updates'] = serialized_updates
+            payload = serialized_updates
 
             # Add tag information to payload if provided
             if tag:
@@ -203,8 +192,8 @@ class InitialDataAuditLogger:
 
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
-                if self.batch_manager:
-                    self.batch_manager.add_pending_log(audit_log)
+
+            self._logged_ids.append(audit_log.id)
 
             logger.debug(
                 f"Successfully created audit log for {resource} update",
@@ -256,9 +245,6 @@ class InitialDataAuditLogger:
         try:
             # Safely serialize filter parameters
             try:
-                # model_container = processAdminSite.get_container_func(model_class.__name__)
-                # mapping = model_container.serializers_map
-                # serializer = mapping['default']
                 payload = generic_instance_payload(instance)
             except Exception as e:
                 logger.warning(
@@ -273,11 +259,7 @@ class InitialDataAuditLogger:
                 )
                 # Fallback to basic serialization
                 serialized_filters = {'_serialization_error': str(e), '_original_keys': list(filter_params.keys())}
-
-            # payload = {
-            #     'id': instance.pk,
-            #     'filter_parameters': serialized_filters
-            # }
+                payload = serialized_filters
 
             # Add tag information to payload if provided
             if tag:
@@ -295,8 +277,8 @@ class InitialDataAuditLogger:
 
                 # Create initial status record
                 AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
-                if self.batch_manager:
-                    self.batch_manager.add_pending_log(audit_log)
+
+            self._logged_ids.append(audit_log.id)
 
             logger.debug(
                 f"Successfully created audit log for {resource} deletion",
@@ -340,19 +322,16 @@ class InitialDataAuditLogger:
 
         calculation_id = audit_log.calculation_id
         try:
-            if self.batch_manager:
-                self.batch_manager.mark_success(audit_log)
-            else:
-                updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
+            updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
+                status='success',
+                error_traceback=None
+            )
+            if updated_count == 0:
+                AuditLogStatus.objects.create(
+                    audit_log=audit_log,
                     status='success',
                     error_traceback=None
                 )
-                if updated_count == 0:
-                    AuditLogStatus.objects.create(
-                        audit_log=audit_log,
-                        status='success',
-                        error_traceback=None
-                    )
             logger.debug(
                 f"Marked audit log {audit_log.id} as successful",
                 extra={
@@ -389,19 +368,16 @@ class InitialDataAuditLogger:
         calculation_id = audit_log.calculation_id
 
         try:
-            if self.batch_manager:
-                self.batch_manager.mark_failure(audit_log, error_msg)
-            else:
-                updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
+            updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
+                status='failure',
+                error_traceback=error_msg
+            )
+            if updated_count == 0:
+                AuditLogStatus.objects.create(
+                    audit_log=audit_log,
                     status='failure',
                     error_traceback=error_msg
                 )
-                if updated_count == 0:
-                    AuditLogStatus.objects.create(
-                        audit_log=audit_log,
-                        status='failure',
-                        error_traceback=error_msg
-                    )
             logger.warning(
                 f"Marked audit log {audit_log.id} as failed: {error_msg}",
                 extra={
@@ -425,120 +401,94 @@ class InitialDataAuditLogger:
             )
             # Don't raise exception to avoid breaking data upload process
 
-    def finalize_batch(self) -> Dict[str, Any]:
+    def finalize_batch(self, failure_error=None) -> Dict[str, Any]:
         """
-        Finalize the batch and return summary statistics.
+        Finalize the audit logging session.
+
+        Resolves any remaining ``pending`` AuditLogStatus rows that were not
+        explicitly marked during operation (safety net for crashes) and returns
+        summary statistics for the entire initial-data-upload run.
+
+        Args:
+            failure_error: If set, all remaining pending statuses are marked
+                           as ``failure`` with this message.  Otherwise they
+                           are marked ``success``.
 
         Returns:
-            Dict containing summary statistics of the audit logging session
+            Dict containing summary statistics of the audit logging session.
         """
-        calculation_id = None
         try:
+            logged_ids = list(self._logged_ids)
             logger.info(
-                f"Finalizing audit logging batch for calculation ID: {calculation_id}",
-                extra={'calculation_id': calculation_id}
+                f"Finalizing audit logging session — {len(logged_ids)} operations tracked",
             )
 
-            # Flush any remaining batch operations
-            updated_count = 0
+            # Safety net: resolve any remaining pending statuses
+            pending_resolved = 0
             try:
-                if self.batch_manager:
-                    updated_count = self.batch_manager.flush_batch()
-                logger.debug(
-                    f"Flushed {updated_count} batch operations",
-                    extra={'calculation_id': calculation_id, 'updated_count': updated_count}
+                pending_qs = AuditLogStatus.objects.filter(
+                    audit_log_id__in=logged_ids,
+                    status='pending',
                 )
+                if failure_error:
+                    pending_resolved = pending_qs.update(
+                        status='failure',
+                        error_traceback=failure_error,
+                    )
+                else:
+                    pending_resolved = pending_qs.update(
+                        status='success',
+                        error_traceback=None,
+                    )
+                if pending_resolved:
+                    logger.warning(
+                        f"Resolved {pending_resolved} lingering pending status(es) "
+                        f"as {'failure' if failure_error else 'success'}"
+                    )
             except Exception as e:
-                logger.error(
-                    f"Failed to flush batch operations: {e}",
-                    extra={
-                        'calculation_id': calculation_id,
-                        'error': str(e),
-                        'traceback': traceback.format_exc()
-                    }
-                )
+                logger.error(f"Failed to resolve pending statuses: {e}", exc_info=True)
 
-            # Generate summary statistics with error handling
-            summary = {
-                'calculation_id': calculation_id,
-                'total_audit_logs': 0,
+            # Gather summary statistics
+            summary: Dict[str, Any] = {
+                'total_audit_logs': len(logged_ids),
                 'successful_operations': 0,
                 'failed_operations': 0,
                 'pending_operations': 0,
-                'batch_updates_processed': updated_count,
-                'statistics_errors': []
+                'pending_resolved': pending_resolved,
             }
+
+            try:
+                status_counts = (
+                    AuditLogStatus.objects
+                    .filter(audit_log_id__in=logged_ids)
+                    .values('status')
+                    .annotate(count=models.Count('id'))
+                )
+                for entry in status_counts:
+                    if entry['status'] == 'success':
+                        summary['successful_operations'] = entry['count']
+                    elif entry['status'] == 'failure':
+                        summary['failed_operations'] = entry['count']
+                    elif entry['status'] == 'pending':
+                        summary['pending_operations'] = entry['count']
+            except Exception as e:
+                logger.error(f"Failed to compute summary statistics: {e}", exc_info=True)
+                summary['statistics_error'] = str(e)
+
+            logger.info(
+                f"Audit logging finalization complete. "
+                f"Total: {summary['total_audit_logs']}, "
+                f"Success: {summary['successful_operations']}, "
+                f"Failed: {summary['failed_operations']}, "
+                f"Pending: {summary['pending_operations']}"
+            )
+
             return summary
 
-        #     try:
-        #         summary['total_audit_logs'] = AuditLog.objects.filter(calculation_id=calculation_id).count()
-        #     except Exception as e:
-        #         error_msg = f"Failed to count total audit logs: {e}"
-        #         summary['statistics_errors'].append(error_msg)
-        #         logger.error(error_msg, extra={'calculation_id': calculation_id})
-        #
-        #     try:
-        #         summary['successful_operations'] = AuditLogStatus.objects.filter(
-        #             audit_log=calculation_id,
-        #             status='success'
-        #         ).count()
-        #     except Exception as e:
-        #         error_msg = f"Failed to count successful operations: {e}"
-        #         summary['statistics_errors'].append(error_msg)
-        #         logger.error(error_msg, extra={'calculation_id': calculation_id})
-        #
-        #     try:
-        #         summary['failed_operations'] = AuditLogStatus.objects.filter(
-        #             audit_log=calculation_id,
-        #             status='failure'
-        #         ).count()
-        #     except Exception as e:
-        #         error_msg = f"Failed to count failed operations: {e}"
-        #         summary['statistics_errors'].append(error_msg)
-        #         logger.error(error_msg, extra={'calculation_id': calculation_id})
-        #
-        #     try:
-        #         summary['pending_operations'] = AuditLogStatus.objects.filter(
-        #             audit_log=calculation_id,
-        #             status='pending'
-        #         ).count()
-        #     except Exception as e:
-        #         error_msg = f"Failed to count pending operations: {e}"
-        #         summary['statistics_errors'].append(error_msg)
-        #         logger.error(error_msg, extra={'calculation_id': calculation_id})
-        #
-        #     # Log summary
-        #     logger.info(
-        #         f"Audit logging finalization complete. "
-        #         f"Total: {summary['total_audit_logs']}, "
-        #         f"Success: {summary['successful_operations']}, "
-        #         f"Failed: {summary['failed_operations']}, "
-        #         f"Pending: {summary['pending_operations']}",
-        #         extra={
-        #             'calculation_id': calculation_id,
-        #             'summary': summary
-        #         }
-        #     )
-        #
-        #     # Remove empty statistics_errors list for cleaner output
-        #     if not summary['statistics_errors']:
-        #         del summary['statistics_errors']
-        #
-        #     return summary
-
         except Exception as e:
-            error_msg = f"Critical error during batch finalization: {e}"
-            logger.error(
-                error_msg,
-                extra={
-                    'calculation_id': calculation_id,
-                    'error': str(e),
-                    'traceback': traceback.format_exc()
-                }
-            )
-            # Return minimal summary on critical error
+            error_msg = f"Critical error during finalization: {e}"
+            logger.error(error_msg, exc_info=True)
             return {
-                'calculation_id': calculation_id,
+                'total_audit_logs': len(self._logged_ids),
                 'finalization_error': error_msg,
-                'batch_updates_processed': 0
             }

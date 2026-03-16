@@ -38,11 +38,11 @@ def validate_celery_redis_config():
         result_backend = app.conf.result_backend
         
         if not broker_url.startswith('redis://'):
-            logger.warning(f"Celery broker is not using Redis: {broker_url}")
+            logger.debug(f"Celery broker is not using Redis: {broker_url}")
             return False
             
         if not result_backend.startswith('redis://'):
-            logger.warning(f"Celery result backend is not using Redis: {result_backend}")
+            logger.debug(f"Celery result backend is not using Redis: {result_backend}")
             return False
             
         logger.info(f"Celery Redis configuration validated - Broker: {broker_url}, Backend: {result_backend}")
