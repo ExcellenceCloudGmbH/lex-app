@@ -208,6 +208,48 @@ class ModelContainer:
             self.model_class, "modification_restriction", ModelModificationRestriction()
         )
 
+    @staticmethod
+    def _permission_result_to_bool(result: Any) -> bool:
+        """
+        Normalize both legacy and new permission return types to a boolean.
+        """
+        if hasattr(result, "allowed"):
+            return bool(getattr(result, "allowed"))
+        if isinstance(result, (set, list, tuple, frozenset, dict)):
+            return len(result) > 0
+        return bool(result)
+
+    def _evaluate_request_permission(
+        self,
+        request: Any,
+        instance: Any,
+        user_context: Any,
+        legacy_allowed: bool,
+        *,
+        new_method_names: tuple[str, ...],
+        legacy_method_names: tuple[str, ...] = (),
+    ) -> bool:
+        """
+        Combine legacy model restrictions with request-scoped permission methods.
+        """
+        if not legacy_allowed or instance is None:
+            return bool(legacy_allowed)
+
+        try:
+            for method_name in new_method_names:
+                method = getattr(instance, method_name, None)
+                if callable(method):
+                    return self._permission_result_to_bool(method(user_context))
+
+            for method_name in legacy_method_names:
+                method = getattr(instance, method_name, None)
+                if callable(method):
+                    return self._permission_result_to_bool(method(request))
+        except Exception:
+            return bool(legacy_allowed)
+
+        return bool(legacy_allowed)
+
     def get_permission_restrictions_for_user(self, user: Any) -> Dict[str, bool]:
         """
         Get user permission restrictions for this model with better method naming.
@@ -231,6 +273,64 @@ class ModelContainer:
             "can_modify_in_general": restriction.can_modify_in_general(user, None),
             "can_create_in_general": restriction.can_create_in_general(user, None),
             "can_delete_in_general": restriction.can_delete_in_general(user, None),
+        }
+
+    def get_permission_restrictions_for_request(self, request: Any) -> Dict[str, bool]:
+        """
+        Resolve general permissions using both legacy restrictions and request-scoped
+        Keycloak/new permission methods when available.
+        """
+        user = getattr(request, "user", None)
+        legacy_permissions = self.get_permission_restrictions_for_user(user)
+
+        if request is None:
+            return legacy_permissions
+
+        try:
+            instance = self.model_class()
+        except Exception:
+            return legacy_permissions
+
+        try:
+            from lex.core.models.LexModel import UserContext
+
+            user_context = UserContext.from_request(request, instance)
+        except Exception:
+            return legacy_permissions
+
+        return {
+            "can_read_in_general": self._evaluate_request_permission(
+                request,
+                instance,
+                user_context,
+                legacy_permissions["can_read_in_general"],
+                new_method_names=("permission_list", "permission_read"),
+                legacy_method_names=("can_list", "can_read"),
+            ),
+            "can_modify_in_general": self._evaluate_request_permission(
+                request,
+                instance,
+                user_context,
+                legacy_permissions["can_modify_in_general"],
+                new_method_names=("permission_edit",),
+                legacy_method_names=("can_edit",),
+            ),
+            "can_create_in_general": self._evaluate_request_permission(
+                request,
+                instance,
+                user_context,
+                legacy_permissions["can_create_in_general"],
+                new_method_names=("permission_create",),
+                legacy_method_names=("can_create",),
+            ),
+            "can_delete_in_general": self._evaluate_request_permission(
+                request,
+                instance,
+                user_context,
+                legacy_permissions["can_delete_in_general"],
+                new_method_names=("permission_delete",),
+                legacy_method_names=("can_delete",),
+            ),
         }
 
     def get_general_modification_restrictions_for_user(self, user: Any) -> Dict[str, bool]:
