@@ -183,11 +183,7 @@ class OneModelEntry(
 
                 except CalculationModelException as exc:
                     # CalculationModel's own exception path already:
-                    calc_obj = exc.calc_obj
-                    if calc_obj:
-                        for obj in calc_obj:
-                            obj.is_calculated = CalculationModel.ERROR
-                            obj.save(skip_hooks=True)
+                    CalculationModel.persist_error_state(exc.calc_obj)
 
                     raise APIException(
                         {"message": f"{exc.exception_details[0]} ", "traceback": exc.stack_trace[0]}
