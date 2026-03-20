@@ -11,6 +11,8 @@ INSTALLED_APPS = [
     "rest_framework_api_key",
 ]
 
+API_KEY_CUSTOM_HEADER = "HTTP_API_KEY"
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

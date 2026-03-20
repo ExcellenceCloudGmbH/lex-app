@@ -9,13 +9,15 @@ all correctly trigger the full bitemporal pipeline:
 """
 
 import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection, models
 from django.test import TransactionTestCase
 
-from lex.core.models.LexModel import LexModel
-from lex.process_admin.utils.model_registration import ModelRegistration
+from api.utils import OperationContext
+from core.models.LexModel import LexModel
+from process_admin.utils.model_registration import ModelRegistration
 
 
 # ── Test Model ──────────────────────────────────────────────────────
@@ -272,3 +274,72 @@ class ProgrammaticCreationTest(TransactionTestCase):
         types = [r.history_type for r in h_records]
         self.assertIn("+", types, "Should have a creation record")
         self.assertIn("-", types, "Should have a deletion record")
+
+    def test_create_preserves_explicit_created_by_override(self):
+        obj = ProgrammaticTestModel.objects.create(
+            name="manual_created_by",
+            value=1,
+            created_by="Streamlit Override",
+        )
+
+        self.assertEqual(obj.created_by, "Streamlit Override")
+        self.assertEqual(
+            ProgrammaticTestModel.objects.get(pk=obj.pk).created_by,
+            "Streamlit Override",
+        )
+
+    def test_update_preserves_explicit_edited_by_override(self):
+        obj = ProgrammaticTestModel.objects.create(name="manual_edited_by", value=1)
+
+        obj.value = 2
+        obj.edited_by = "Streamlit Override"
+        obj.save()
+
+        self.assertEqual(obj.edited_by, "Streamlit Override")
+        self.assertEqual(
+            ProgrammaticTestModel.objects.get(pk=obj.pk).edited_by,
+            "Streamlit Override",
+        )
+
+    def test_operation_context_actor_populates_programmatic_audit_fields(self):
+        with OperationContext(actor="Streamlit User"):
+            obj = ProgrammaticTestModel.objects.create(
+                name="context_actor_create",
+                value=1,
+            )
+
+        self.assertEqual(obj.created_by, "Streamlit User")
+
+        with OperationContext(actor="Streamlit User"):
+            obj.value = 2
+            obj.save()
+
+        self.assertEqual(obj.edited_by, "Streamlit User")
+
+    def test_explicit_override_takes_precedence_over_context_actor(self):
+        with OperationContext(actor="Context Actor"):
+            obj = ProgrammaticTestModel.objects.create(
+                name="explicit_wins_on_create",
+                value=1,
+                created_by="Manual Actor",
+            )
+
+        self.assertEqual(obj.created_by, "Manual Actor")
+
+        with OperationContext(actor="Context Actor"):
+            obj.value = 2
+            obj.edited_by = "Manual Actor"
+            obj.save()
+
+        self.assertEqual(obj.edited_by, "Manual Actor")
+
+    def test_request_context_still_populates_audit_actor(self):
+        request = SimpleNamespace(user="Request User")
+
+        with OperationContext(request=request):
+            obj = ProgrammaticTestModel.objects.create(
+                name="request_actor_create",
+                value=1,
+            )
+
+        self.assertEqual(obj.created_by, "Request User")

@@ -44,8 +44,10 @@ class ModelStructureBuilder:
     def merge_predefined_and_yaml(predefined: Dict, yaml_data: Dict) -> Dict:
         """
         Merges YAML structure on top of Predefined structure.
-        Crucially: If a model (leaf node) exists in YAML, it is REMOVED from its 
+        Crucially: If a model (leaf node) exists in YAML, it is REMOVED from its
         original location in Predefined to allow the YAML to 'move' it.
+        The YAML-defined order is preserved: YAML items appear first, followed by
+        any remaining predefined items not covered by YAML.
         """
         # Start with a clean copy of predefined so we don't mutate the source
         base = copy.deepcopy(predefined)
@@ -56,8 +58,10 @@ class ModelStructureBuilder:
         # B. Remove those models from the base structure (and clean up empty parents)
         ModelStructureBuilder._prune_structure(base, yaml_leaves)
 
-        # C. Deep merge YAML into the pruned base
-        return ModelStructureBuilder._deep_merge(base, yaml_data)
+        # C. Start from YAML structure to preserve its order, then append
+        #    remaining predefined items without overriding YAML-defined nodes.
+        result = copy.deepcopy(yaml_data)
+        return ModelStructureBuilder._deep_merge(result, base)
 
     @staticmethod
     def _get_all_leaves(d: Dict) -> Set[str]:
@@ -93,12 +97,16 @@ class ModelStructureBuilder:
 
     @staticmethod
     def _deep_merge(base: Dict, update: Dict) -> Dict:
-        """Recursively merges dictionary 'update' into 'base'."""
+        """
+        Recursively append dictionary 'update' into 'base' without overriding
+        existing values already defined in 'base', except when both values are dicts.
+        """
         for k, v in update.items():
-            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
-                ModelStructureBuilder._deep_merge(base[k], v)
-            else:
+            if k not in base:
                 base[k] = v
+                continue
+            if isinstance(base[k], dict) and isinstance(v, dict):
+                ModelStructureBuilder._deep_merge(base[k], v)
         return base
 
     def extract_and_save_structure(self, full_module_name: str) -> None:

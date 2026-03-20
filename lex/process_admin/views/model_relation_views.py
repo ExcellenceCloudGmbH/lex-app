@@ -15,6 +15,7 @@ class ModelStructureObtainView(APIView):
     model_collection = None
     get_model_structure_func = None
     get_container_func = None
+    get_hidden_historical_models_func = None
 
     def delete_restricted_nodes_from_model_structure(self, tree, request):
         """
@@ -62,9 +63,15 @@ class ModelStructureObtainView(APIView):
     def get(self, request, *args, **kwargs):
         # 1) Copy the raw tree
         structure = copy.deepcopy(self.get_model_structure_func())
+        historical_models = copy.deepcopy(
+            self.get_hidden_historical_models_func()
+            if self.get_hidden_historical_models_func
+            else {}
+        )
 
         # 2) Prune nodes the user is not authorized to see
         self.delete_restricted_nodes_from_model_structure(structure, request)
+        self.delete_restricted_nodes_from_model_structure(historical_models, request)
 
         # 3) Annotate with serializers (this logic remains the same)
         def annotate(subtree):
@@ -87,8 +94,14 @@ class ModelStructureObtainView(APIView):
                     annotate(children)
 
         annotate(structure)
+        annotate(historical_models)
 
-        return Response(structure)
+        return Response(
+            {
+                "modelHierarchy": structure,
+                "historicalModels": historical_models,
+            }
+        )
 
 
 class ModelStylingObtainView(APIView):

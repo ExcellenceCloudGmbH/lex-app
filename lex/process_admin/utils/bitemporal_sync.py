@@ -80,7 +80,11 @@ class BitemporalSynchronizer:
 
                 if changed or main_instance._state.adding:
                     main_instance.skip_history_when_saving = True
-                    main_instance.save()
+                    main_instance.save(skip_hooks=True)
+                    logger.debug(
+                        f"Updated main table row for {model_class.__name__} "
+                        f"({pk_val}) to reflect effective history record."
+                    )
             else:
                 # ── Remove stale main table row ──
                 main_instance = (
