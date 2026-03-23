@@ -119,8 +119,8 @@ class CalculationLog(models.Model):
             )
 
 
-            logger.info(f"Log: {log_debug}")
-            logger.info(f"Parent: {parent_debug}")
+            logger.debug(f"Log: {log_debug}")
+            logger.debug(f"Parent: {parent_debug}")
             # 4) Append message and save
             log_entry.calculation_log = (log_entry.calculation_log or "") + f"\n{message}"
             log_entry.save()
@@ -168,9 +168,9 @@ class CalculationLog(models.Model):
             
         except Exception as e:
             # Handle any other unexpected errors
-            logger.info(f"ERROR IN CALCULATION LOG")
-            logger.info(f"Log: {log_debug}")
-            logger.info(f"Parent: {parent_debug}")
+            logger.error(f"ERROR IN CALCULATION LOG")
+            logger.error(f"Log: {log_debug}")
+            logger.error(f"Parent: {parent_debug}")
             logger.error(
                 f"Unexpected error in CalculationLog.log() for message: {message}. Error: {str(e)}",
                 exc_info=True

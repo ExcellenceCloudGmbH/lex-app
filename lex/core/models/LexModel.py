@@ -529,7 +529,7 @@ class LexModel(LifecycleModel):
             return
 
         context = operation_context.get()
-        logger.info(f"Request object: {context['request_obj']}")
+        logger.debug(f"Request object: {context['request_obj']}")
         if context and hasattr(context['request_obj'], 'user'):
             # self.created_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
             self.created_by = str(context['request_obj'].user)

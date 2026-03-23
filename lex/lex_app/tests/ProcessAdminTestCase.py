@@ -21,7 +21,6 @@ from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.audit_logging.utils.ModelContext import model_logging_context
 
 from lex.lex_app import settings
-from lex.lex_app.celery_tasks import lex_shared_task
 
 
 class ProcessAdminTestCase(TestCase):

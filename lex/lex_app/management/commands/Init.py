@@ -29,7 +29,7 @@ from django.db.migrations.operations.models import CreateModel, DeleteModel, Ren
 from django.db.migrations.questioner import MigrationQuestioner
 from django.db.migrations.state import ProjectState
 
-from core.management.commands.bootstrap_callback_server import start_callback_server
+from lex.core.management.commands.bootstrap_callback_server import start_callback_server
 
 logger = logging.getLogger(__name__)
 
