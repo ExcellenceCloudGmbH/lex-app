@@ -116,6 +116,10 @@ def _install_dynamic_commands():
 @lex.command(name="celery", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def celery(ctx):
+    # Celery needs Django bootstrapped so that lex_app.celery can load
+    # broker/backend settings from django.conf:settings.  Without this,
+    # Celery falls back to its default AMQP broker (RabbitMQ).
+    _bootstrap_django()
     from celery.bin.celery import celery as celery_main
     celery_main(ctx.args)
 
