@@ -225,12 +225,22 @@ def on_history_pre_delete__cancel_schedules(
     sender, instance, *,
     historical_model, **kwargs
 ):
-    """Cancel any scheduled Celery tasks before a History row is deleted."""
+    """
+    Before a History row is deleted:
+    1. Cancel any scheduled Celery tasks.
+    2. Close all open MetaHistory records (set sys_to = now).
+    3. Create a MetaHistory "-" record so the deletion is visible
+       to system-time (as_of) queries.
+    """
     if sender != historical_model:
         return
 
+    now = timezone.now()
+
     try:
         MetaModel = sender.meta_history.model
+
+        # ── Cancel scheduled tasks ──
         scheduled = MetaModel.objects.filter(
             history_object_id=instance.pk,
             meta_task_status="SCHEDULED",
@@ -245,10 +255,39 @@ def on_history_pre_delete__cancel_schedules(
                 meta_log.meta_task_status = "CANCELLED"
                 meta_log.save(update_fields=["meta_task_status"])
         except ImportError:
-            # Celery beat not installed, just mark as cancelled
             scheduled.update(meta_task_status="CANCELLED")
-    except Exception:
-        pass
+
+        # ── Close any open meta records for this history row ──
+        open_meta = MetaModel.objects.filter(
+            history_object_id=instance.pk,
+            sys_to__isnull=True,
+        )
+        open_meta.update(sys_to=now)
+
+        # ── Record the deletion in MetaHistory ("-" marker) ──
+        # This ensures as_of queries can distinguish "the system knew
+        # about this history row" from "the history row was removed".
+        with suppress_meta_sys_to_chaining():
+            meta_deletion = MetaModel(
+                sys_from=now,
+                sys_to=now,  # Immediately closed — the row ceases to exist
+                meta_history_type="-",
+                meta_history_change_reason="History record deleted",
+                history_object=instance,
+                meta_task_status="NONE",
+            )
+            # Copy tracked fields from the history instance
+            for field in getattr(MetaModel, "tracked_fields", ()):
+                if hasattr(instance, field.attname):
+                    setattr(meta_deletion, field.attname, getattr(instance, field.attname))
+
+            meta_deletion.save()
+
+    except Exception as e:
+        logger.warning(
+            f"Failed to record MetaHistory deletion for "
+            f"{sender.__name__} pk={instance.pk}: {e}"
+        )
 
 
 def on_history_post_delete__repair_chain(
@@ -291,6 +330,15 @@ def on_history_post_delete__repair_chain(
             new_valid_to = next_record.valid_from if next_record else None
             previous_record.valid_to = new_valid_to
             previous_record.save(update_fields=["valid_to"])
+
+    # Sync the main table after the chain is repaired — the deleted
+    # row may have been the currently-effective version.
+    from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
+    transaction.on_commit(
+        lambda: BitemporalSynchronizer.sync_record_for_model(
+            main_model, pk_val, HistoryModel
+        )
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
