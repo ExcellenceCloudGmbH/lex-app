@@ -34,12 +34,16 @@ class KeycloakManager:
         """
         self.realm_name = None
         self.client_uuid = None
+        self.last_authz_import_error: dict[str, Any] | None = None
         self.oidc = None
         self.admin = None
         self.conn = None
         self.uma = None
 
         self.initialize()
+
+    def _record_authz_import_error(self, kind: str, **details: Any) -> None:
+        self.last_authz_import_error = {"kind": kind, **details}
 
     def initialize(self):
         self.realm_name = os.getenv("KEYCLOAK_REALM")
@@ -166,19 +170,24 @@ class KeycloakManager:
             success = keycloak_manager.import_authorization_settings(json_str)
         """
         try:
+            self.last_authz_import_error = None
+
             # Validate that we have admin client and realm
             if not self.admin:
                 logger.error("Keycloak admin client not initialized")
+                self._record_authz_import_error("not_initialized")
                 return False
 
             if not self.realm_name:
                 logger.error("Realm name not configured")
+                self._record_authz_import_error("missing_realm")
                 return False
 
             # Determine client UUID to use
             target_client_uuid = client_uuid or self.client_uuid
             if not target_client_uuid:
                 logger.error("Client UUID not provided and not configured")
+                self._record_authz_import_error("missing_client_uuid")
                 return False
 
             # Parse the payload into a dictionary
@@ -190,6 +199,7 @@ class KeycloakManager:
                     # Read from file
                     if not payload.exists():
                         logger.error(f"File not found: {payload}")
+                        self._record_authz_import_error("missing_payload_file", payload=str(payload))
                         return False
                     with open(payload, 'r', encoding='utf-8') as f:
                         auth_config = json.load(f)
@@ -235,14 +245,21 @@ class KeycloakManager:
                 logger.info("Authorization configuration imported successfully")
                 return True
             else:
+                error_kind = "gateway_timeout" if response.status_code == 504 else "http_error"
+                self._record_authz_import_error(
+                    error_kind,
+                    status_code=response.status_code,
+                )
                 logger.error(
                     f"Failed to import authorization configuration. Status: {response.status_code}, Response: {response.text}")
                 return False
 
         except json.JSONDecodeError as e:
+            self._record_authz_import_error("invalid_json", error=str(e))
             logger.error(f"Invalid JSON in payload: {e}")
             return False
         except requests.Timeout as e:
+            self._record_authz_import_error("timeout", timeout=timeout, error=str(e))
             logger.error(
                 "Keycloak authorization import timed out after %s: %s",
                 timeout,
@@ -250,9 +267,11 @@ class KeycloakManager:
             )
             return False
         except requests.RequestException as e:
+            self._record_authz_import_error("request_exception", error=str(e))
             logger.error(f"HTTP request failed: {e}")
             return False
         except Exception as e:
+            self._record_authz_import_error("unexpected_error", error=str(e))
             logger.error(f"Unexpected error during authorization import: {e}")
             return False
 

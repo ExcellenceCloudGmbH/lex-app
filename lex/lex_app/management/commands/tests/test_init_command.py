@@ -6,6 +6,8 @@ from unittest import TestCase
 from unittest.mock import patch, MagicMock, call
 from io import StringIO
 
+from django.core.management.base import CommandError
+
 from lex.lex_app.management.commands.Init import Command, KeycloakSyncManager
 
 
@@ -232,6 +234,112 @@ class ExecuteMigrationsForwardingTest(TestCase):
         mock_call.side_effect = Exception('migration boom')
         result = self.cmd.execute_migrations(verbosity=1, create_new=True)
         self.assertFalse(result)
+
+
+class InitCommandKeycloakRetryBehaviorTest(TestCase):
+    def setUp(self):
+        self.cmd = Command()
+        self.cmd.stdout = StringIO()
+        self.cmd.stderr = StringIO()
+
+    @patch("lex.lex_app.management.commands.Init.KeycloakSyncManager")
+    @patch("lex.lex_app.management.commands.Init.MigrationAutodetector")
+    @patch("lex.lex_app.management.commands.Init.MigrationLoader")
+    @patch("lex.lex_app.management.commands.Init.ProjectState.from_apps")
+    def test_handle_continues_after_max_retries_on_gateway_timeout(
+        self,
+        mock_from_apps,
+        mock_loader_cls,
+        mock_autodetector_cls,
+        mock_manager_cls,
+    ):
+        mock_manager = MagicMock()
+        mock_manager.kc_manager.last_authz_import_error = {
+            "kind": "gateway_timeout",
+            "status_code": 504,
+        }
+        mock_manager.process_model_changes.side_effect = [
+            Exception("Keycloak import_authorization_settings returned False"),
+            Exception("Keycloak import_authorization_settings returned False"),
+        ]
+        mock_manager_cls.return_value = mock_manager
+
+        mock_loader = MagicMock()
+        mock_loader.graph = MagicMock()
+        mock_loader.project_state.return_value = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_from_apps.return_value = MagicMock()
+
+        mock_autodetector = MagicMock()
+        mock_autodetector.changes.return_value = {}
+        mock_autodetector_cls.return_value = mock_autodetector
+
+        self.cmd.handle(
+            dry_run=False,
+            preserve_renamed_permissions=True,
+            check_missing=False,
+            bootstrap=False,
+            skip_migrations=True,
+            migration_verbosity=1,
+            no_makemigrations=True,
+            ensure_default_authz=False,
+            sync_retries=2,
+            makemigrations_args="",
+            migrate_args="",
+        )
+
+        self.assertEqual(mock_manager.process_model_changes.call_count, 2)
+        self.assertIn(
+            "continuing Init without aborting",
+            self.cmd.stderr.getvalue(),
+        )
+
+    @patch("lex.lex_app.management.commands.Init.KeycloakSyncManager")
+    @patch("lex.lex_app.management.commands.Init.MigrationAutodetector")
+    @patch("lex.lex_app.management.commands.Init.MigrationLoader")
+    @patch("lex.lex_app.management.commands.Init.ProjectState.from_apps")
+    def test_handle_still_raises_for_non_timeout_sync_failures(
+        self,
+        mock_from_apps,
+        mock_loader_cls,
+        mock_autodetector_cls,
+        mock_manager_cls,
+    ):
+        mock_manager = MagicMock()
+        mock_manager.kc_manager.last_authz_import_error = {
+            "kind": "http_error",
+            "status_code": 500,
+        }
+        mock_manager.process_model_changes.side_effect = [
+            Exception("sync failed"),
+            Exception("sync failed"),
+        ]
+        mock_manager_cls.return_value = mock_manager
+
+        mock_loader = MagicMock()
+        mock_loader.graph = MagicMock()
+        mock_loader.project_state.return_value = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_from_apps.return_value = MagicMock()
+
+        mock_autodetector = MagicMock()
+        mock_autodetector.changes.return_value = {}
+        mock_autodetector_cls.return_value = mock_autodetector
+
+        with self.assertRaises(CommandError):
+            self.cmd.handle(
+                dry_run=False,
+                preserve_renamed_permissions=True,
+                check_missing=False,
+                bootstrap=False,
+                skip_migrations=True,
+                migration_verbosity=1,
+                no_makemigrations=True,
+                ensure_default_authz=False,
+                sync_retries=2,
+                makemigrations_args="",
+                migrate_args="",
+            )
 
 
 class KeycloakSyncManagerRolePolicyTest(TestCase):

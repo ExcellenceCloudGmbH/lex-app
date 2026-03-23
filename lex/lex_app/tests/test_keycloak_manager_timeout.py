@@ -58,3 +58,16 @@ class KeycloakManagerTimeoutTests(SimpleTestCase):
 
         self.assertTrue(success)
         self.assertEqual(mock_post.call_args.kwargs["timeout"], 180.0)
+
+    @patch("lex.api.views.authentication.KeycloakManager.requests.post")
+    def test_import_authorization_settings_records_gateway_timeout_error_details(self, mock_post):
+        manager = self.build_manager()
+        mock_post.return_value = MagicMock(status_code=504, text="Gateway time-out")
+
+        success = manager.import_authorization_settings({"resources": [], "policies": []})
+
+        self.assertFalse(success)
+        self.assertEqual(
+            manager.last_authz_import_error,
+            {"kind": "gateway_timeout", "status_code": 504},
+        )

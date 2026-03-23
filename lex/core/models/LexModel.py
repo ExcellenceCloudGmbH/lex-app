@@ -1,5 +1,6 @@
 import logging
 from abc import ABCMeta
+from contextlib import nullcontext
 
 import streamlit as st
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Any, Dict, FrozenSet, Literal, Mapping, Optional, Set, Union
 from django.db import models, transaction
 from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
     BEFORE_UPDATE
+from django_lifecycle.mixins import LifecycleModelMixin, _bypass_state
 
 try:
     from api.utils import operation_context
@@ -408,6 +410,43 @@ class LexModel(LifecycleModel):
         super().__init__(*args, **kwargs)
         self._pre_validation_snapshot = None
         self._validation_in_progress = False
+
+    def _should_use_atomic_save(self) -> bool:
+        return not (hasattr(self, "is_atomic") and not self.is_atomic)
+
+    def save(self, *args, **kwargs):
+        """
+        Mirror django-lifecycle's hook-aware save flow while preserving the
+        legacy ``is_atomic = False`` opt-out used by CalculationModel subclasses.
+        """
+        base_save = super(LifecycleModelMixin, self).save
+        atomic_context = transaction.atomic() if self._should_use_atomic_save() else nullcontext()
+
+        with atomic_context:
+            skip_hooks = kwargs.pop("skip_hooks", False)
+            skip_hooks_from_cm = _bypass_state.is_bypassed_for(self.__class__)
+            if skip_hooks or skip_hooks_from_cm:
+                return base_save(*args, **kwargs)
+
+            self._clear_watched_fk_model_cache()
+            is_new = self._state.adding
+
+            if is_new:
+                self._run_hooked_methods(BEFORE_CREATE, **kwargs)
+            else:
+                self._run_hooked_methods(BEFORE_UPDATE, **kwargs)
+
+            self._run_hooked_methods(BEFORE_SAVE, **kwargs)
+            result = base_save(*args, **kwargs)
+            self._run_hooked_methods(AFTER_SAVE, **kwargs)
+
+            if is_new:
+                self._run_hooked_methods(AFTER_CREATE, **kwargs)
+            else:
+                self._run_hooked_methods(AFTER_UPDATE, **kwargs)
+
+            transaction.on_commit(self._reset_initial_state)
+            return result
 
     def _capture_snapshot(self) -> Dict[str, Any]:
         """Capture current model field state for rollback"""
