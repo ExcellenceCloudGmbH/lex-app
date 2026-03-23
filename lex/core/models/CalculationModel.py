@@ -226,7 +226,7 @@ class CalculationModel(LexModel):
         # Dispatch the task
         task_result = func.delay(context=new_context, model_context=model_context)
 
-        # Register with RunInCelery context if one exists
+        # Register with AwaitDispatch context if one exists
         from lex.lex_app.celery_tasks import register_task_with_context
         return register_task_with_context(task_result)
 
@@ -365,7 +365,7 @@ class CalculationModel(LexModel):
                 # Dispatch to Celery worker
                 logger.info(f"Dispatching calculation for {self} to Celery worker")
 
-                # IMPORTANT: Do NOT use RunInCelery() here (which block-waits
+                # IMPORTANT: Do NOT use AwaitDispatch() here (which block-waits
                 # for the child task in __exit__).  We are still inside the
                 # parent's save() transaction that set is_calculated=IN_PROGRESS.
                 # Blocking here while holding that DB lock causes a deadlock
