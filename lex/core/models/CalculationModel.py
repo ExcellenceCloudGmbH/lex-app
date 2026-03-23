@@ -140,15 +140,38 @@ class CalculationModel(LexModel):
     def lex_func(self):
         """
         Dynamically selects the overridden calculation method ('calculate' or 'update').
-        It compares the function object of the instance's method with the function
-        object on the base class to detect an override.
+
+        A subclass may override ``calculate`` or ``update`` with a plain method
+        **or** with a ``@lex_shared_task``-decorated method.  In the latter case
+        the attribute on the instance is an ``EnhancedBoundTaskMethod`` proxy
+        (from celery_tasks.py) which does **not** expose ``__func__``.
+
+        Detection strategy:
+        1. If the attribute has ``__func__``, compare it to the base-class
+           implementation (the classic plain-method path).
+        2. If ``__func__`` is missing, the attribute is a task proxy — which
+           means the subclass *did* override the method with a Celery task.
         """
-        # CORRECT: Compare the bound method's function with the base class's function
-        if self.calculate.__func__ is not CalculationModel.calculate:
-            return self.calculate
-        # CORRECT: Do the same for the 'update' method
-        elif self.update.__func__ is not CalculationModel.update:
-            return self.update
+        calculate_attr = self.calculate
+        update_attr = self.update
+
+        # Check 'calculate' first
+        func = getattr(calculate_attr, '__func__', None)
+        if func is not None:
+            # Plain method — check if it was overridden
+            if func is not CalculationModel.calculate:
+                return calculate_attr
+        else:
+            # No __func__ → task-wrapped descriptor → subclass overrode it
+            return calculate_attr
+
+        # Then check 'update'
+        func = getattr(update_attr, '__func__', None)
+        if func is not None:
+            if func is not CalculationModel.update:
+                return update_attr
+        else:
+            return update_attr
 
         # Fallback will raise NotImplementedError when called
         return self.calculate
@@ -166,7 +189,7 @@ class CalculationModel(LexModel):
         from lex.lex_app import settings
 
         # Check if Celery is enabled in setting
-        if not os.getenv("CELERY_ACTIVE", None) == 'true' or not hasattr(self.lex_func(), 'delay'):
+        if not os.getenv("CELERY_ACTIVE", "").lower() == 'true' or not hasattr(self.lex_func(), 'delay'):
             return False
 
         # Check if Celery is available by trying to import and test connection
@@ -197,8 +220,8 @@ class CalculationModel(LexModel):
         func = self.lex_func()
 
         # Dispatch single model calculation to Celery with calculation_id
-        from lex.audit_logging.utils.ModelContext import model_logging_context
-        model_context = deepcopy(model_logging_context.get()['model_context'])
+        from lex.audit_logging.utils.ModelContext import _model_context
+        model_context = deepcopy(_model_context.get()['model_context'])
 
         # Dispatch the task
         task_result = func.delay(context=new_context, model_context=model_context)
@@ -342,10 +365,15 @@ class CalculationModel(LexModel):
                 # Dispatch to Celery worker
                 logger.info(f"Dispatching calculation for {self} to Celery worker")
 
-                task_result = None
-                from lex.lex_app.celery_tasks import RunInCelery
-                with RunInCelery():
-                    task_result = self.dispatch_calculation_task()
+                # IMPORTANT: Do NOT use RunInCelery() here (which block-waits
+                # for the child task in __exit__).  We are still inside the
+                # parent's save() transaction that set is_calculated=IN_PROGRESS.
+                # Blocking here while holding that DB lock causes a deadlock
+                # when the child task tries to write back to the same row.
+                #
+                # Instead, dispatch fire-and-forget.  The child task reports
+                # its own SUCCESS/ERROR via CallbackTask.on_success/on_failure.
+                task_result = self.dispatch_calculation_task()
 
                     # Note: Status will be updated by CallbackTask.on_success/on_failure
                 # Model remains in IN_PROGRESS state until task completes
