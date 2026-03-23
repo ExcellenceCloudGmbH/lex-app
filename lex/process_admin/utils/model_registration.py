@@ -133,10 +133,13 @@ class ModelRegistration:
         # StandardHistory (Level 1 — valid time)
         'valid_from', 'valid_to',
         'history_id', 'history_type', 'history_change_reason',
+        'history_user', 'history_user_id',
         # MetaLevelHistoricalRecords (Level 2 — system time)
         'sys_from', 'sys_to',
         'meta_history_id', 'meta_history_type',
         'meta_history_change_reason', 'meta_task_name', 'meta_task_status',
+        'meta_history_user', 'meta_history_user_id',
+        'history_object',
         # CalculationModel
         'is_calculated',
     })

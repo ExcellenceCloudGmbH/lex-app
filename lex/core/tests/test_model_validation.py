@@ -89,6 +89,24 @@ class ModelValidationTest(SimpleTestCase):
         with self.assertRaisesMessage(ValueError, "reserved field(s)"):
             ModelRegistration._validate_model_definition(BadMetaFieldModel)
 
+    def test_reserved_field_history_user(self):
+        class BadHistoryUserModel(LexModel):
+            history_user = models.CharField(max_length=100)
+            class Meta:
+                app_label = 'lex_core'
+
+        with self.assertRaisesMessage(ValueError, "reserved field(s)"):
+            ModelRegistration._validate_model_definition(BadHistoryUserModel)
+
+    def test_reserved_field_history_object(self):
+        class BadHistoryObjectModel(LexModel):
+            history_object = models.IntegerField()
+            class Meta:
+                app_label = 'lex_core'
+
+        with self.assertRaisesMessage(ValueError, "reserved field(s)"):
+            ModelRegistration._validate_model_definition(BadHistoryObjectModel)
+
     # ── Inherited fields from abstract parents are allowed ────────────────
 
     def test_inherited_created_by_not_flagged(self):
