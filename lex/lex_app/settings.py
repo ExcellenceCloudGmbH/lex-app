@@ -235,7 +235,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
-    "oauth2_authcodeflow.middleware.LoginRequiredMiddleware",
+    "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
     "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",

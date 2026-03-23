@@ -11,16 +11,19 @@ class UserPermissionsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
-        perms = getattr(request.user.profile, "uma_permissions", []) or []
+        perms = getattr(request, "user_permissions", None)
+        if perms is None:
+            perms = getattr(request.user.profile, "uma_permissions", []) or []
         ra_perms = []
         for p in perms:
+            resource_name = p.get("rsname")
+            if not resource_name:
+                continue
             for scope in p.get("scopes", []):
                 action = "read" if scope == "read" else scope
                 ra = {
                     "action": action,
-                    "resource": p.get("rsname")
-                    .split(".")[-1]
-                    .lower(),  # use the last part of the resource name
+                    "resource": resource_name.split(".")[-1].lower(),
                 }
                 if p.get("resource_set_id"):
                     ra["record"] = {"id": p["resource_set_id"]}

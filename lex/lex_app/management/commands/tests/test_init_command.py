@@ -1,11 +1,12 @@
 """
 Tests for the Init management command's argument parsing and migration forwarding.
 """
+import json
 from unittest import TestCase
 from unittest.mock import patch, MagicMock, call
 from io import StringIO
 
-from lex.lex_app.management.commands.Init import Command
+from lex.lex_app.management.commands.Init import Command, KeycloakSyncManager
 
 
 # ---------------------------------------------------------------------------
@@ -231,3 +232,172 @@ class ExecuteMigrationsForwardingTest(TestCase):
         mock_call.side_effect = Exception('migration boom')
         result = self.cmd.execute_migrations(verbosity=1, create_new=True)
         self.assertFalse(result)
+
+
+class KeycloakSyncManagerRolePolicyTest(TestCase):
+    def build_manager(self):
+        manager = KeycloakSyncManager.__new__(KeycloakSyncManager)
+        manager.kc_manager = MagicMock()
+        manager.kc_manager.client_uuid = "client-uuid"
+        manager.default_scopes = ["list", "read", "create", "edit", "delete", "export"]
+        manager.exported_configs = None
+        return manager
+
+    def test_ensure_client_role_policies_includes_extra_client_roles(self):
+        manager = self.build_manager()
+        manager.kc_manager.admin.get_client_roles.return_value = [
+            {"name": "admin", "id": "role-admin"},
+            {"name": "standard", "id": "role-standard"},
+            {"name": "view-only", "id": "role-view"},
+            {"name": "auditor", "id": "role-auditor"},
+            {"name": "manage-client", "id": "role-manage-client"},
+            {"name": "uma_protection", "id": "role-uma-protection"},
+        ]
+
+        auth_config = {"policies": []}
+        role_names = manager.ensure_client_role_policies(auth_config)
+
+        self.assertEqual(role_names, ["admin", "standard", "view-only", "auditor"])
+        self.assertCountEqual(
+            [policy["name"] for policy in auth_config["policies"]],
+            ["Policy - admin", "Policy - standard", "Policy - view-only", "Policy - auditor"],
+        )
+        manager.kc_manager.admin.create_client_role.assert_not_called()
+
+    def test_process_model_changes_applies_standard_mapping_to_extra_roles(self):
+        manager = self.build_manager()
+        manager.kc_manager.admin.get_client.return_value = {
+            "authorizationServicesEnabled": True,
+            "redirectUris": [],
+            "webOrigins": [],
+            "authenticationFlowBindingOverrides": {},
+            "protocol": "openid-connect",
+            "publicClient": False,
+            "serviceAccountsEnabled": True,
+            "standardFlowEnabled": True,
+            "directAccessGrantsEnabled": True,
+        }
+        manager.kc_manager.admin.get_client_roles.return_value = [
+            {"name": "admin", "id": "role-admin"},
+            {"name": "standard", "id": "role-standard"},
+            {"name": "view-only", "id": "role-view"},
+            {"name": "auditor", "id": "role-auditor"},
+            {"name": "manage-client", "id": "role-manage-client"},
+            {"name": "uma_protection", "id": "role-uma-protection"},
+        ]
+        manager.kc_manager.admin.get_client_authz_resources.return_value = []
+        manager.kc_manager.export_authorization_settings.return_value = {"resources": [], "policies": []}
+        manager.kc_manager.import_authorization_settings.return_value = True
+
+        manager.process_model_changes(
+            adds=[("billing", "Invoice")],
+            deletes=[],
+            renames=[],
+        )
+
+        imported_config = manager.kc_manager.import_authorization_settings.call_args.args[0]
+        scope_permissions = {
+            json.loads(policy["config"]["scopes"])[0]: json.loads(policy["config"]["applyPolicies"])
+            for policy in imported_config["policies"]
+            if policy["type"] == "scope"
+        }
+
+        self.assertEqual(
+            scope_permissions["list"],
+            ["Policy - admin", "Policy - standard", "Policy - auditor", "Policy - view-only"],
+        )
+        self.assertEqual(
+            scope_permissions["read"],
+            ["Policy - admin", "Policy - standard", "Policy - auditor", "Policy - view-only"],
+        )
+        self.assertEqual(scope_permissions["create"], ["Policy - admin"])
+        self.assertEqual(
+            scope_permissions["edit"],
+            ["Policy - admin", "Policy - standard", "Policy - auditor"],
+        )
+        self.assertEqual(scope_permissions["delete"], ["Policy - admin"])
+        self.assertEqual(
+            scope_permissions["export"],
+            ["Policy - admin", "Policy - standard", "Policy - auditor"],
+        )
+
+        imported_policy_names = [policy["name"] for policy in imported_config["policies"]]
+        self.assertNotIn("Policy - manage-client", imported_policy_names)
+        self.assertNotIn("Policy - uma_protection", imported_policy_names)
+
+    def test_process_model_changes_updates_existing_standard_permissions_for_extra_roles(self):
+        manager = self.build_manager()
+        manager.kc_manager.admin.get_client.return_value = {
+            "authorizationServicesEnabled": True,
+            "redirectUris": [],
+            "webOrigins": [],
+            "authenticationFlowBindingOverrides": {},
+            "protocol": "openid-connect",
+            "publicClient": False,
+            "serviceAccountsEnabled": True,
+            "standardFlowEnabled": True,
+            "directAccessGrantsEnabled": True,
+        }
+        manager.kc_manager.admin.get_client_roles.return_value = [
+            {"name": "admin", "id": "role-admin"},
+            {"name": "standard", "id": "role-standard"},
+            {"name": "view-only", "id": "role-view"},
+            {"name": "auditor", "id": "role-auditor"},
+            {"name": "manage-client", "id": "role-manage-client"},
+            {"name": "uma_protection", "id": "role-uma-protection"},
+        ]
+        manager.kc_manager.admin.get_client_authz_resources.return_value = []
+        manager.kc_manager.export_authorization_settings.return_value = {
+            "resources": [
+                {
+                    "name": "billing.Invoice",
+                    "ownerManagedAccess": False,
+                    "attributes": {},
+                    "uris": [],
+                    "scopes": [{"name": "edit"}, {"name": "create"}],
+                }
+            ],
+            "policies": [
+                {
+                    "name": "Permission - billing.Invoice - edit",
+                    "type": "scope",
+                    "config": {
+                        "resources": json.dumps(["billing.Invoice"]),
+                        "scopes": json.dumps(["edit"]),
+                        "applyPolicies": json.dumps(["Policy - admin", "Policy - standard"]),
+                    },
+                },
+                {
+                    "name": "Permission - billing.Invoice - create",
+                    "type": "scope",
+                    "config": {
+                        "resources": json.dumps(["billing.Invoice"]),
+                        "scopes": json.dumps(["create"]),
+                        "applyPolicies": json.dumps(["Policy - admin"]),
+                    },
+                },
+            ],
+        }
+        manager.kc_manager.import_authorization_settings.return_value = True
+
+        manager.process_model_changes(
+            adds=[],
+            deletes=[],
+            renames=[],
+        )
+
+        imported_config = manager.kc_manager.import_authorization_settings.call_args.args[0]
+        permission_policies = {
+            policy["name"]: json.loads(policy["config"]["applyPolicies"])
+            for policy in imported_config["policies"]
+            if policy["name"].startswith("Permission - ")
+        }
+
+        self.assertEqual(
+            permission_policies["Permission - billing.Invoice - edit"],
+            ["Policy - admin", "Policy - standard", "Policy - auditor"],
+        )
+        self.assertEqual(
+            permission_policies["Permission - billing.Invoice - create"],
+            ["Policy - admin"],
+        )

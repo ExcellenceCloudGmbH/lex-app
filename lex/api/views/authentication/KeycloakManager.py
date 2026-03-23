@@ -1,25 +1,20 @@
 import json
 import logging
 import os
+from pathlib import Path
+from typing import Any, Dict, Union
 
+import requests
 from django.apps.registry import apps
 from django.conf import settings
-from keycloak import (
-    KeycloakAdmin,
-    KeycloakOpenIDConnection,
-    KeycloakUMA,
-)
-from keycloak.exceptions import KeycloakPostError, KeycloakGetError
-import json
-import requests
-from typing import Union, Dict, Any
-from pathlib import Path
-import logging
+from keycloak import KeycloakAdmin, KeycloakOpenIDConnection, KeycloakUMA
+from keycloak.exceptions import KeycloakGetError, KeycloakPostError
 
 from lex.utilities.decorators.singleton import LexSingleton
 
 # It's good practice to have a dedicated logger
 logger = logging.getLogger(__name__)
+DEFAULT_KEYCLOAK_AUTHZ_REQUEST_TIMEOUT = (10.0, 120.0)
 
 
 @LexSingleton
@@ -67,6 +62,67 @@ class KeycloakManager:
         except Exception as e:
             logger.error(f"Failed to initialize Keycloak OIDC client: {e}")
             self.oidc = None
+
+    def _get_authz_request_timeout(self) -> Union[float, tuple[float, float], None]:
+        """
+        Parse the Keycloak authz admin request timeout.
+
+        Supported values:
+        - single number: total/connect+read timeout in seconds
+        - "connect,read": requests tuple timeout
+        - tuple/list: (connect_timeout, read_timeout)
+        - None / "none": disable timeout
+        """
+
+        raw_timeout = getattr(
+            settings,
+            "KEYCLOAK_AUTHZ_REQUEST_TIMEOUT",
+            os.getenv(
+                "KEYCLOAK_AUTHZ_REQUEST_TIMEOUT",
+                ",".join(str(part) for part in DEFAULT_KEYCLOAK_AUTHZ_REQUEST_TIMEOUT),
+            ),
+        )
+
+        def _coerce_positive_timeout(value: Any) -> float:
+            timeout = float(value)
+            if timeout <= 0:
+                raise ValueError("Timeout values must be greater than zero")
+            return timeout
+
+        try:
+            if raw_timeout is None:
+                return None
+
+            if isinstance(raw_timeout, str):
+                normalized = raw_timeout.strip()
+                if not normalized or normalized.lower() == "none":
+                    return None
+                if "," in normalized:
+                    parts = [part.strip() for part in normalized.split(",")]
+                    if len(parts) != 2:
+                        raise ValueError("Expected 'connect,read' timeout format")
+                    return (
+                        _coerce_positive_timeout(parts[0]),
+                        _coerce_positive_timeout(parts[1]),
+                    )
+                return _coerce_positive_timeout(normalized)
+
+            if isinstance(raw_timeout, (tuple, list)):
+                if len(raw_timeout) != 2:
+                    raise ValueError("Expected exactly two timeout values")
+                return (
+                    _coerce_positive_timeout(raw_timeout[0]),
+                    _coerce_positive_timeout(raw_timeout[1]),
+                )
+
+            return _coerce_positive_timeout(raw_timeout)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid KEYCLOAK_AUTHZ_REQUEST_TIMEOUT=%r. Falling back to %s.",
+                raw_timeout,
+                DEFAULT_KEYCLOAK_AUTHZ_REQUEST_TIMEOUT,
+            )
+            return DEFAULT_KEYCLOAK_AUTHZ_REQUEST_TIMEOUT
 
 
     def import_authorization_settings(self, payload: Union[Dict[str, Any], str, Path], client_uuid: str = None) -> bool:
@@ -158,15 +214,20 @@ class KeycloakManager:
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             }
+            timeout = self._get_authz_request_timeout()
 
             # Make the import request
-            logger.info(f"Importing authorization configuration for client {target_client_uuid}")
+            logger.info(
+                "Importing authorization configuration for client %s with timeout %s",
+                target_client_uuid,
+                timeout,
+            )
             response = requests.post(
                 import_url,
                 json=auth_config,
                 headers=headers,
                 # verify=getattr(self.admin.connection, 'verify', True),
-                timeout=30
+                timeout=timeout
             )
 
             # Check response status
@@ -180,6 +241,13 @@ class KeycloakManager:
 
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in payload: {e}")
+            return False
+        except requests.Timeout as e:
+            logger.error(
+                "Keycloak authorization import timed out after %s: %s",
+                timeout,
+                e,
+            )
             return False
         except requests.RequestException as e:
             logger.error(f"HTTP request failed: {e}")
@@ -237,14 +305,19 @@ class KeycloakManager:
                 'Authorization': f'Bearer {admin_token}',
                 'Accept': 'application/json'
             }
+            timeout = self._get_authz_request_timeout()
 
             # Make the export request
-            logger.info(f"Exporting authorization configuration for client {target_client_uuid}")
+            logger.info(
+                "Exporting authorization configuration for client %s with timeout %s",
+                target_client_uuid,
+                timeout,
+            )
             response = requests.get(
                 export_url,
                 headers=headers,
                 # verify=getattr(self.admin.connection, 'verify', True),
-                timeout=30
+                timeout=timeout
             )
 
             # Check response status
@@ -256,6 +329,13 @@ class KeycloakManager:
                     f"Failed to export authorization configuration. Status: {response.status_code}, Response: {response.text}")
                 return None
 
+        except requests.Timeout as e:
+            logger.error(
+                "Keycloak authorization export timed out after %s: %s",
+                timeout,
+                e,
+            )
+            return None
         except requests.RequestException as e:
             logger.error(f"HTTP request failed: {e}")
             return None

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import secrets
 import time
@@ -39,6 +40,8 @@ except Exception:
         from websockets.client import connect as ws_connect  # websockets 10/11
     except Exception:
         from websockets import connect as ws_connect  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 
 # -----------------------------------------------------------------------------
@@ -94,6 +97,14 @@ PERSIST_JWT_AUTH_TO_SESSION = _env_bool("PERSIST_JWT_AUTH_TO_SESSION", True)
 # Optional: set short-lived access token cookie too (helps WS when query param not repeated)
 SET_ST_ACCESS_COOKIE = _env_bool("SET_ST_ACCESS_COOKIE", True)
 ST_ACCESS_COOKIE_MAX_AGE = int(os.getenv("ST_ACCESS_COOKIE_MAX_AGE", "600"))  # 10 minutes
+
+# The proxy talks to an internal Streamlit upstream (typically localhost), so
+# avoid sending those hops through system proxy settings unless explicitly
+# requested.
+UPSTREAM_USE_SYSTEM_PROXY = _env_bool(
+    "UPSTREAM_USE_SYSTEM_PROXY",
+    _env_bool("WS_UPSTREAM_USE_SYSTEM_PROXY", False),
+)
 
 JWT_ALG = os.getenv("JWT_ALG", "RS256")
 JWT_VERIFY_ISSUER = _env_bool("JWT_VERIFY_ISSUER", False)
@@ -600,6 +611,25 @@ def _ws_header_kwarg() -> Optional[str]:
 WS_HEADER_KWARG = _ws_header_kwarg()
 WS_HAS_ORIGIN = "origin" in signature(ws_connect).parameters
 WS_HAS_SUBPROTOCOLS = "subprotocols" in signature(ws_connect).parameters
+WS_HAS_PROXY = "proxy" in signature(ws_connect).parameters
+WS_HAS_MAX_SIZE = "max_size" in signature(ws_connect).parameters
+
+
+def _build_upstream_ws_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    resolved = dict(kwargs)
+    if WS_HAS_PROXY and not UPSTREAM_USE_SYSTEM_PROXY:
+        resolved["proxy"] = None
+    if WS_HAS_MAX_SIZE:
+        resolved["max_size"] = None
+    return resolved
+
+
+def _upstream_http_client_kwargs(timeout: httpx.Timeout) -> Dict[str, Any]:
+    return {
+        "follow_redirects": False,
+        "timeout": timeout,
+        "trust_env": UPSTREAM_USE_SYSTEM_PROXY,
+    }
 
 
 def _upstream_ws_url_and_origin(client_ws_url: str) -> Tuple[str, str]:
@@ -707,8 +737,7 @@ async def ws_proxy(websocket: WebSocket):
         kwargs["origin"] = upstream_origin
     if WS_HAS_SUBPROTOCOLS and client_subprotocols:
         kwargs["subprotocols"] = client_subprotocols
-    if "max_size" in signature(ws_connect).parameters:
-        kwargs["max_size"] = None
+    kwargs = _build_upstream_ws_kwargs(kwargs)
 
     try:
         async with ws_connect(target_url, **kwargs) as upstream:
@@ -750,6 +779,9 @@ async def ws_proxy(websocket: WebSocket):
                 t.cancel()
                 with suppress(asyncio.CancelledError):
                     await t
+    except Exception as exc:
+        logger.warning("Upstream websocket connection failed for %s: %s", target_url, exc)
+        raise
     finally:
         with suppress(Exception):
             if websocket.client_state != WebSocketState.DISCONNECTED:
@@ -860,7 +892,7 @@ async def proxy(request: Request):
     timeout = httpx.Timeout(30.0)
 
     try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+        async with httpx.AsyncClient(**_upstream_http_client_kwargs(timeout)) as client:
             upstream_resp = await client.request(method, url, content=body, headers=fwd_headers)
     except httpx.ConnectError:
         return JSONResponse(

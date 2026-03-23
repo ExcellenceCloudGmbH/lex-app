@@ -137,6 +137,9 @@ class ProcessAdminSite:
     def get_model_structure_func(self):
         return self.model_collection.model_structure_with_readable_names
 
+    def get_hidden_historical_models_func(self):
+        return self.model_collection.hidden_historical_models_with_readable_names
+
     def get_model_styling_func(self):
         return self.model_collection.model_styling
 
@@ -158,6 +161,7 @@ class ProcessAdminSite:
                 "api/model-structure",
                 ModelStructureObtainView.as_view(
                     get_container_func=self.get_container_func,
+                    get_hidden_historical_models_func=self.get_hidden_historical_models_func,
                     get_model_structure_func=self.get_model_structure_func,
                 ),
                 name="model-structure",

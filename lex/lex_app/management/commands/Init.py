@@ -42,6 +42,17 @@ KEYCLOAK_ENV_VARS = [
     "OIDC_RP_CLIENT_UUID",
 ]
 
+DEFAULT_CLIENT_ROLES = ("admin", "standard", "view-only")
+IGNORED_CLIENT_ROLES = frozenset({"manage-client", "uma_protection"})
+DEFAULT_SCOPE_POLICY_MAPPING = {
+    "list": ["Policy - admin", "Policy - standard", "Policy - view-only"],
+    "read": ["Policy - admin", "Policy - standard", "Policy - view-only"],
+    "create": ["Policy - admin"],
+    "edit": ["Policy - admin", "Policy - standard"],
+    "delete": ["Policy - admin"],
+    "export": ["Policy - admin", "Policy - standard"],
+}
+
 STATE_FILE = Path(
     getattr(
         settings,
@@ -551,44 +562,134 @@ class KeycloakSyncManager:
                 }
             )
 
-    def ensure_core_role_policies(self, auth_config: Dict) -> None:
-        """
-        Fail-fast: any Keycloak admin API error raises.
-        """
-        policies = auth_config.setdefault("policies", [])
-        core_roles = ["admin", "standard", "view-only"]
-        existing_policy_names = {p.get("name") for p in policies}
+    def _ordered_client_role_names(self, role_names: Set[str]) -> List[str]:
+        ordered = [role_name for role_name in DEFAULT_CLIENT_ROLES if role_name in role_names]
+        ordered.extend(sorted(role_name for role_name in role_names if role_name not in DEFAULT_CLIENT_ROLES))
+        return ordered
 
-        for role_name in core_roles:
-            full_policy_name = f"Policy - {role_name}"
-            if full_policy_name in existing_policy_names:
-                logger.info(f"   ✓ Core policy already exists: {full_policy_name}")
+    def get_client_roles(self) -> Dict[str, Dict[str, Any]]:
+        client_roles = {
+            role["name"]: role
+            for role in self.kc_manager.admin.get_client_roles(client_id=self.kc_manager.client_uuid)
+            if role.get("name") and role["name"] not in IGNORED_CLIENT_ROLES
+        }
+
+        for role_name in DEFAULT_CLIENT_ROLES:
+            if role_name in client_roles:
                 continue
 
+            logger.warning(f"Default role '{role_name}' not found - creating it first")
+            role_payload = {
+                "name": role_name,
+                "description": f"Role for {role_name} policy",
+                "clientRole": True,
+                "composite": False,
+            }
+            self.kc_manager.admin.create_client_role(
+                client_role_id=self.kc_manager.client_uuid,
+                payload=role_payload,
+                skip_exists=True,
+            )
             role = self.kc_manager.admin.get_client_role(
                 client_id=self.kc_manager.client_uuid, role_name=role_name
             )
             role_id = role.get("id")
-
             if not role_id:
-                logger.warning(f"Role '{role_name}' not found - creating it first")
-                role_payload = {
-                    "name": role_name,
-                    "description": f"Role for {role_name} policy",
-                    "clientRole": True,
-                    "composite": False,
-                }
-                self.kc_manager.admin.create_client_role(
-                    client_role_id=self.kc_manager.client_uuid,
-                    payload=role_payload,
-                    skip_exists=True,
-                )
-                role = self.kc_manager.admin.get_client_role(
-                    client_id=self.kc_manager.client_uuid, role_name=role_name
-                )
-                role_id = role.get("id")
-                if not role_id:
-                    raise CommandError(f"Failed to create/fetch client role '{role_name}'")
+                raise CommandError(f"Failed to create/fetch client role '{role_name}'")
+            client_roles[role_name] = role
+
+        return client_roles
+
+    def build_scope_policy_mapping(self, role_names: List[str]) -> Dict[str, List[str]]:
+        scope_policy_mapping = {
+            scope: list(policy_names) for scope, policy_names in DEFAULT_SCOPE_POLICY_MAPPING.items()
+        }
+        extra_policy_names = [
+            f"Policy - {role_name}" for role_name in role_names if role_name not in DEFAULT_CLIENT_ROLES
+        ]
+
+        if extra_policy_names:
+            for scope, policy_names in scope_policy_mapping.items():
+                if "Policy - standard" not in policy_names:
+                    continue
+
+                updated_policy_names = []
+                for policy_name in policy_names:
+                    if policy_name not in updated_policy_names:
+                        updated_policy_names.append(policy_name)
+                    if policy_name == "Policy - standard":
+                        for extra_policy_name in extra_policy_names:
+                            if extra_policy_name not in updated_policy_names:
+                                updated_policy_names.append(extra_policy_name)
+                scope_policy_mapping[scope] = updated_policy_names
+
+        return scope_policy_mapping
+
+    def sync_standard_client_role_permissions(self, auth_config: Dict, role_names: List[str]) -> None:
+        extra_policy_names = [
+            f"Policy - {role_name}" for role_name in role_names if role_name not in DEFAULT_CLIENT_ROLES
+        ]
+        if not extra_policy_names:
+            return
+
+        available_policy_names = {p.get("name") for p in auth_config.get("policies", []) if p.get("name")}
+        extra_policy_names = [policy_name for policy_name in extra_policy_names if policy_name in available_policy_names]
+        if not extra_policy_names:
+            return
+
+        updated_permissions = 0
+        for policy in auth_config.get("policies", []):
+            config = policy.get("config")
+            if not isinstance(config, dict) or "applyPolicies" not in config:
+                continue
+
+            apply_policy_names = self._parse_json_maybe(
+                config.get("applyPolicies", "[]"),
+                f"policy.config.applyPolicies for {policy.get('name')}",
+            )
+            if "Policy - standard" not in apply_policy_names:
+                continue
+
+            updated_apply_policy_names = []
+            for policy_name in apply_policy_names:
+                if policy_name not in updated_apply_policy_names:
+                    updated_apply_policy_names.append(policy_name)
+                if policy_name == "Policy - standard":
+                    for extra_policy_name in extra_policy_names:
+                        if extra_policy_name not in updated_apply_policy_names:
+                            updated_apply_policy_names.append(extra_policy_name)
+
+            if updated_apply_policy_names == apply_policy_names:
+                continue
+
+            config["applyPolicies"] = json.dumps(updated_apply_policy_names)
+            updated_permissions += 1
+
+        if updated_permissions:
+            logger.info(
+                "   ✓ Updated %s permission(s) to inherit the standard-role configuration",
+                updated_permissions,
+            )
+
+    def ensure_client_role_policies(self, auth_config: Dict) -> List[str]:
+        """
+        Fail-fast: any Keycloak admin API error raises.
+        """
+        policies = auth_config.setdefault("policies", [])
+        existing_policy_names = {p.get("name") for p in policies}
+        client_roles = self.get_client_roles()
+        ordered_role_names = self._ordered_client_role_names(set(client_roles))
+
+        for role_name in ordered_role_names:
+            full_policy_name = f"Policy - {role_name}"
+            if full_policy_name in existing_policy_names:
+                logger.info(f"   ✓ Client role policy already exists: {full_policy_name}")
+                continue
+
+            role = client_roles[role_name]
+            role_id = role.get("id")
+            if not role_id:
+                raise CommandError(f"Client role '{role_name}' is missing an id")
 
             policies.append(
                 {
@@ -599,7 +700,10 @@ class KeycloakSyncManager:
                     "config": {"roles": json.dumps([{"id": role_id, "required": True}])},
                 }
             )
-            logger.info(f"   ✓ Added core policy to config: {full_policy_name}")
+            existing_policy_names.add(full_policy_name)
+            logger.info(f"   ✓ Added client role policy to config: {full_policy_name}")
+
+        return ordered_role_names
 
     def process_model_changes(
         self,
@@ -693,25 +797,18 @@ class KeycloakSyncManager:
                 logger.info(f"Deleting {len(to_delete_set)} resources individually...")
                 self.delete_resources_individual(to_delete_set, all_resources)
 
-            logger.info("Ensuring core role-based policies exist before adding resources...")
-            self.ensure_core_role_policies(auth_config)
+            logger.info("Ensuring client role-based policies exist before adding resources...")
+            managed_role_names = self.ensure_client_role_policies(auth_config)
 
             # add resources + permissions
             if to_add_set:
+                managed_policy_names = {f"Policy - {role_name}" for role_name in managed_role_names}
                 available_policy_names = {
                     p.get("name")
                     for p in auth_config.get("policies", [])
-                    if p.get("name") in ["Policy - admin", "Policy - standard", "Policy - view-only"]
+                    if p.get("name") in managed_policy_names
                 }
-
-                scope_policy_mapping = {
-                    "list": ["Policy - admin", "Policy - standard", "Policy - view-only"],
-                    "read": ["Policy - admin", "Policy - standard", "Policy - view-only"],
-                    "create": ["Policy - admin"],
-                    "edit": ["Policy - admin", "Policy - standard"],
-                    "delete": ["Policy - admin"],
-                    "export": ["Policy - admin", "Policy - standard"],
-                }
+                scope_policy_mapping = self.build_scope_policy_mapping(managed_role_names)
 
                 for resource_name in to_add_set:
                     if any(r.get("name") == resource_name for r in auth_config["resources"]):
@@ -791,6 +888,8 @@ class KeycloakSyncManager:
                         )
 
                     logger.info(f"  ✓ Added new resource {resource_name} with default permissions")
+
+            self.sync_standard_client_role_permissions(auth_config, managed_role_names)
 
             if ensure_default_authz:
                 logger.info("Ensuring default authorization settings...")

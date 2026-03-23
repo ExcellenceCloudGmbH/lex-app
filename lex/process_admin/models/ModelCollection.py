@@ -6,6 +6,19 @@ from lex.process_admin.models.utils import enrich_model_structure_with_readable_
 from lex.process_admin.utils import ModelStructureBuilder
 
 
+def _sort_structure_recursive(d: Dict) -> Dict:
+    """
+    Sort nested dict keys alphabetically at every level for deterministic output.
+    """
+    sorted_dict = {}
+    for key in sorted(d.keys()):
+        value = d[key]
+        sorted_dict[key] = (
+            _sort_structure_recursive(value) if isinstance(value, dict) else value
+        )
+    return sorted_dict
+
+
 def _create_model_containers(models_to_admins: Dict[Type[Model], Any]) -> Dict[str, ModelContainer]:
     """
     Create ModelContainer instances from model classes and their admin configurations.
@@ -86,7 +99,7 @@ class ModelCollection:
                 temp[model_id] = None
 
         if temp:
-            model_structure["Legacy Generic App (Archive)"] = temp
+            model_structure["Legacy Generic App (Archive)"] = dict(sorted(temp.items()))
 
         # Build a nested "Models" fallback structure from filesystem paths
         # instead of dumping everything flat.  For a model with
@@ -102,6 +115,8 @@ class ModelCollection:
                 continue
             model_class = container.model_class
             module = getattr(model_class, "__module__", "") or ""
+            if module.startswith("django.contrib"):
+                continue
             parts = module.split(".")
             # Try to find the repo segment and derive the subfolder path
             # e.g. ["ArmiraCashflowDB", "Upload", "UploadCashflow", "UploadCashflow"]
@@ -122,6 +137,8 @@ class ModelCollection:
                 current = current[folder]
             current[cid] = None
 
+        unplaced = _sort_structure_recursive(unplaced)
+
         self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml(unplaced, model_structure)
         self.model_styling = model_styling
 
@@ -129,6 +146,38 @@ class ModelCollection:
             node: enrich_model_structure_with_readable_names_and_types(node, sub_tree, self) 
             for node, sub_tree in self.model_structure.items()
         }
+
+        visible_model_ids = self._get_structure_leaf_ids(self.model_structure)
+        self.hidden_historical_models_with_readable_names = {
+            container.id: enrich_model_structure_with_readable_names_and_types(
+                container.id,
+                None,
+                self,
+            )
+            for container in self.all_containers
+            if self._is_hidden_historical_container(container.id, visible_model_ids)
+        }
+
+    @staticmethod
+    def _get_structure_leaf_ids(structure: Dict[str, Any]) -> Set[str]:
+        leaf_ids = set()
+        for node_name, sub_tree in structure.items():
+            if sub_tree is None:
+                leaf_ids.add(node_name)
+                continue
+            if isinstance(sub_tree, dict):
+                leaf_ids.update(ModelCollection._get_structure_leaf_ids(sub_tree))
+        return leaf_ids
+
+    @staticmethod
+    def _is_hidden_historical_container(container_id: str, visible_model_ids: Set[str]) -> bool:
+        return (
+            container_id not in visible_model_ids
+            and (
+                container_id.startswith("historical")
+                or container_id.startswith("metahistorical")
+            )
+        )
 
     @property
     def all_containers(self) -> Set[ModelContainer]:

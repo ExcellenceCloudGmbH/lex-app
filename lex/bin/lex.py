@@ -207,7 +207,7 @@ def setup(project_root):
 # command enumeration.  For these, _bootstrap_django() is skipped so that
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
-_SKIP_BOOTSTRAP_COMMANDS = frozenset({"start", "celery", "streamlit", "setup", "init"})
+_SKIP_BOOTSTRAP_COMMANDS = frozenset({"start", "celery", "setup", "init"})
 
 
 def main():

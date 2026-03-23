@@ -23,11 +23,21 @@ from lex.audit_logging.utils.ContextResolver import ContextResolver
 logger = logging.getLogger(__name__)
 
 class CalculationModelException(APIException):
+        @staticmethod
+        def _ensure_list(value):
+            if value is None:
+                return []
+            if isinstance(value, list):
+                return value
+            if isinstance(value, tuple):
+                return list(value)
+            return [value]
+
         def __init__(self, *args, **kwargs):
             super().__init__(*args)
-            self.calc_obj = kwargs.get("calc_obj", None)
-            self.exception_details = kwargs.get("exception_details", None)
-            self.stack_trace = kwargs.get("stack_trace", None)
+            self.calc_obj = self._ensure_list(kwargs.get("calc_obj", None))
+            self.exception_details = self._ensure_list(kwargs.get("exception_details", None))
+            self.stack_trace = self._ensure_list(kwargs.get("stack_trace", None))
 
 
 class CalculationModel(LexModel):
@@ -51,6 +61,49 @@ class CalculationModel(LexModel):
 
     class Meta:
         abstract = True
+
+    @staticmethod
+    def persist_error_state(calc_objs):
+        persisted_objects = []
+        seen_objects = set()
+
+        for obj in CalculationModelException._ensure_list(calc_objs):
+            if obj is None:
+                continue
+
+            object_identity = id(obj)
+            if object_identity in seen_objects:
+                continue
+            seen_objects.add(object_identity)
+
+            try:
+                obj.is_calculated = CalculationModel.ERROR
+                obj.save(skip_hooks=True)
+                persisted_objects.append(obj)
+            except Exception:
+                logger.error(
+                    f"Failed to persist calculation ERROR state for {obj}",
+                    exc_info=True,
+                )
+
+        return persisted_objects
+
+    @staticmethod
+    def build_exception_chain(exception, current_obj=None):
+        calc_obj = CalculationModelException._ensure_list(
+            getattr(exception, "calc_obj", None)
+        )
+        exception_details = CalculationModelException._ensure_list(
+            getattr(exception, "exception_details", None)
+        )
+        stack_trace = CalculationModelException._ensure_list(
+            getattr(exception, "stack_trace", None)
+        )
+
+        if current_obj is not None and (not calc_obj or calc_obj[-1] is not current_obj):
+            calc_obj = calc_obj + [current_obj]
+
+        return calc_obj, exception_details, stack_trace
 
 
     def update(self):
@@ -250,12 +303,12 @@ class CalculationModel(LexModel):
     @hook(AFTER_UPDATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     @hook(AFTER_CREATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     def calculate_hook(self):
-        """                                                                                                                      
-        Enhanced calculation hook with Celery integration.                                                                       
+        """
+        Enhanced calculation hook with Celery integration.
 
-        Dispatches calculations to Celery workers when celery_active=True and Celery                                             
-        is available, otherwise falls back to synchronous execution. Proper status                                               
-        management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.                                                             
+        Dispatches calculations to Celery workers when celery_active=True and Celery
+        is available, otherwise falls back to synchronous execution. Proper status
+        management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.
         """
         from lex.core.signals.CalculationSignals import update_calculation_status
         from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
@@ -322,10 +375,12 @@ class CalculationModel(LexModel):
                 # its own SUCCESS/ERROR via CallbackTask.on_success/on_failure.
                 task_result = self.dispatch_calculation_task()
 
+                    # Note: Status will be updated by CallbackTask.on_success/on_failure
+                # Model remains in IN_PROGRESS state until task completes
                 logger.info(f"Calculation task {task_result.id} dispatched for {self}")
 
             else:
-                # Execute synchronously as fallback                                                                              
+                # Execute synchronously as fallback
                 logger.info(f"Executing calculation for {self} synchronously (Celery not available)")
                 self.execute_calculation_sync()
 
@@ -335,19 +390,19 @@ class CalculationModel(LexModel):
             # # re-wrapping and duplicated error handling.
 
 
-            # Handle any errors in task dispatch or synchronous execution                                                        
+            # Handle any errors in task dispatch or synchronous execution
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
             status_was_error = self.is_calculated == self.ERROR
             self.is_calculated = self.ERROR
 
-            # Store error message if the model has an error_message field                                                        
+            # Store error message if the model has an error_message field
             stack_trace = f"{traceback.format_exc()}"
             exception_details = str(e)
                 # Clean up cache and save error state
             try:
                 context = ContextResolver.resolve()
 
-                # Only perform cleanup if this is the ROOT process                                                               
+                # Only perform cleanup if this is the ROOT process
                 is_root = False
                 if context.root_record and context.current_record:
                     if context.root_record == context.current_record:
@@ -357,7 +412,7 @@ class CalculationModel(LexModel):
 
                 if is_root:
                     calc_id = context.calculation_id
-                    # Clean up all keys associated with this calculation ID                                                      
+                    # Clean up all keys associated with this calculation ID
                     cleanup_result = CacheManager.cleanup_calculation(calculation_id=calc_id)
 
                     if cleanup_result.success:
@@ -385,9 +440,18 @@ class CalculationModel(LexModel):
                         f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
                         exc_info=True,
                     )
-            raise CalculationModelException(calc_obj=e.calc_obj + [self] if hasattr(e, "calc_obj") else [self],
-                                            exception_details=e.exception_details + [exception_details] if hasattr(e, "exception_details") else [exception_details],
-                                            stack_trace=e.stack_trace + [stack_trace] if hasattr(e, "stack_trace") else [stack_trace])
+
+            calc_obj, exception_chain, stack_trace_chain = self.build_exception_chain(
+                e,
+                current_obj=self,
+            )
+            calc_obj_to_persist = calc_obj[:-1] if calc_obj and calc_obj[-1] is self else calc_obj
+            self.persist_error_state(calc_obj_to_persist)
+            raise CalculationModelException(
+                calc_obj=calc_obj,
+                exception_details=exception_chain + [exception_details],
+                stack_trace=stack_trace_chain + [stack_trace],
+            )
         finally:
             # Ensure the guard does not leak across future independent saves.
             if hasattr(self, "_calculation_hook_in_progress"):

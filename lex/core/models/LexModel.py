@@ -9,7 +9,10 @@ from django.db import models, transaction
 from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
     BEFORE_UPDATE
 
-from lex.api.utils import operation_context
+try:
+    from api.utils import operation_context
+except ImportError:
+    from lex.api.utils import operation_context
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +126,41 @@ class UserContext:
             pass
     
     @classmethod
+    def _api_key_context(cls, request):
+        if not request:
+            return None
+
+        user = getattr(request, "user", None)
+        if getattr(user, "is_authenticated", False):
+            return None
+
+        try:
+            from api.utils.api_key_requests import get_api_key_request_identity
+        except ImportError:
+            from lex.api.utils.api_key_requests import get_api_key_request_identity
+
+        identity = get_api_key_request_identity(request)
+        if not identity:
+            return None
+
+        return cls(
+            user=identity.user,
+            email=identity.email,
+            is_authenticated=True,
+            is_superuser=False,
+            groups=set(),
+            keycloak_scopes=set(identity.scopes),
+            user_permissions=tuple(),
+            client_roles=frozenset({"api_key"}),
+        )
+
+    @classmethod
     def from_request(cls, request, instance=None):
         """Create UserContext from Django request"""
+        api_key_context = cls._api_key_context(request)
+        if api_key_context is not None:
+            return api_key_context
+
         if not request or not hasattr(request, 'user'):
             return cls.anonymous()
         
@@ -149,6 +185,10 @@ class UserContext:
     def from_request_base(cls, request):
         """Create a base UserContext without instance-specific keycloak scopes.
         Use with_instance() to efficiently add scopes for each record."""
+        api_key_context = cls._api_key_context(request)
+        if api_key_context is not None:
+            return api_key_context
+
         if not request or not hasattr(request, 'user'):
             return cls.anonymous()
         
@@ -354,6 +394,8 @@ class LexModel(LifecycleModel):
     """
 
     objects = LexManager()
+    FALLBACK_AUDIT_ACTOR = 'Initial Data Upload'
+    API_KEY_AUDIT_ACTOR = 'Technical User'
 
     created_by = models.TextField(null=True, blank=True, editable=False)
     edited_by = models.TextField(null=True, blank=True, editable=False)
@@ -503,24 +545,77 @@ class LexModel(LifecycleModel):
                 f"Transaction error during rollback: {transaction_error}"
             ) from transaction_error
 
+    @staticmethod
+    def _normalize_audit_actor(actor: Any) -> Optional[str]:
+        if actor is None:
+            return None
+        actor_str = str(actor).strip()
+        return actor_str or None
+
+    @staticmethod
+    def _get_operation_context() -> Dict[str, Any]:
+        context = operation_context.get()
+        return context if isinstance(context, dict) else {}
+
+    def _resolve_request_audit_actor(self, request) -> Optional[str]:
+        if not request:
+            return None
+
+        user = getattr(request, 'user', None)
+        if user is not None:
+            is_authenticated = getattr(user, 'is_authenticated', None)
+            if is_authenticated is not False:
+                return self._normalize_audit_actor(user)
+
+        try:
+            try:
+                from api.utils.api_key_requests import get_api_key_request_identity
+            except ImportError:
+                from lex.api.utils.api_key_requests import get_api_key_request_identity
+
+            api_key_identity = get_api_key_request_identity(request)
+        except Exception:
+            api_key_identity = None
+
+        if api_key_identity is not None:
+            return self.API_KEY_AUDIT_ACTOR
+
+        header_names = {
+            str(header_name).lower()
+            for header_name in (getattr(request, 'headers', {}) or {})
+        }
+        if 'api-key' in header_names:
+            return self.API_KEY_AUDIT_ACTOR
+        return None
+
+    def _resolve_audit_actor(self) -> str:
+        context = self._get_operation_context()
+        explicit_actor = self._normalize_audit_actor(context.get('actor'))
+        if explicit_actor:
+            return explicit_actor
+
+        request_actor = self._resolve_request_audit_actor(context.get('request_obj'))
+        if request_actor:
+            return request_actor
+
+        return self.FALLBACK_AUDIT_ACTOR
+
+    def _has_explicit_created_by_override(self) -> bool:
+        return self._normalize_audit_actor(self.created_by) is not None
+
+    def _has_explicit_edited_by_override(self) -> bool:
+        return self.has_changed('edited_by') and self._normalize_audit_actor(self.edited_by) is not None
+
     @hook(BEFORE_UPDATE)
     def update_edited_by(self):
         # Skip if we are syncing from history (bitemporal sync)
         if getattr(self, 'skip_history_when_saving', False):
             return
 
-        # self.track()
-        context = operation_context.get()
-        # from lex_app.celery_tasks import print_context_state
-        # print_context_state()
-        if context and hasattr(context['request_obj'], 'user'):
-            # self.edited_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
-            self.edited_by = str(context['request_obj'].user)
-        elif context.get('request_obj') and "api-key" in [h.lower() for h in getattr(context['request_obj'], 'headers', {})]:
-            self.edited_by = "Technical User"
-        else:
-            self.edited_by = 'Initial Data Upload'
-        # self.save_without_historical_record(skip_hooks=True)
+        if self._has_explicit_edited_by_override():
+            return
+
+        self.edited_by = self._resolve_audit_actor()
 
     @hook(BEFORE_CREATE)
     def update_created_by(self):
@@ -528,16 +623,10 @@ class LexModel(LifecycleModel):
         if getattr(self, 'skip_history_when_saving', False):
             return
 
-        context = operation_context.get()
-        logger.debug(f"Request object: {context['request_obj']}")
-        if context and hasattr(context['request_obj'], 'user'):
-            # self.created_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
-            self.created_by = str(context['request_obj'].user)
-        elif context.get('request_obj') and "api-key" in [h.lower() for h in getattr(context['request_obj'], 'headers', {})]:
-            self.edited_by = "Technical User"
-        else:
-            self.created_by = 'Initial Data Upload'
-        # self.save_without_historical_record(skip_hooks=True)
+        if self._has_explicit_created_by_override():
+            return
+
+        self.created_by = self._resolve_audit_actor()
 
 
     def track(self):

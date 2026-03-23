@@ -9,8 +9,13 @@ class ModelPermissions(APIView):
 
     def get(self, request, *args, **kwargs):
         model_container = self.kwargs['model_container']
-        user = request.user
+        if hasattr(model_container, "get_permission_restrictions_for_request"):
+            restrictions = model_container.get_permission_restrictions_for_request(request)
+        else:
+            restrictions = model_container.get_general_modification_restrictions_for_user(
+                request.user
+            )
 
-        model_restrictions = {model_container.id: model_container.get_general_modification_restrictions_for_user(user)}
+        model_restrictions = {model_container.id: restrictions}
 
         return Response(model_restrictions)

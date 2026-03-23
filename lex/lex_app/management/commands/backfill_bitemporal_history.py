@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
 from django.apps import apps
@@ -72,6 +73,13 @@ def _dedupe(values: Iterable[str]) -> List[str]:
     return out
 
 
+@dataclass(frozen=True)
+class _CopyColumn:
+    attname: str
+    source_column: str
+    target_column: str
+
+
 class Command(BaseCommand):
     help = (
         "Backfill bitemporal history (History + MetaHistory) through SQL bulk operations "
@@ -102,6 +110,12 @@ class Command(BaseCommand):
             action="store_true",
             help="Compute and report actions without writing history rows.",
         )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._table_description_cache: Dict[str, Dict[str, object]] = {}
+        self._table_columns_cache: Dict[str, set[str]] = {}
+        self._runtime_schema_warnings: set[tuple[str, str, str]] = set()
 
     def _resolve_timestamp(self, raw_timestamp: str | None):
         if raw_timestamp is None:
@@ -141,7 +155,209 @@ class Command(BaseCommand):
     def _q(self, identifier: str) -> str:
         return connection.ops.quote_name(identifier)
 
-    def _history_copy_attnames(self, model, history_model) -> List[str]:
+    def _table_description_map(self, table_name: str) -> Dict[str, object]:
+        cached = self._table_description_cache.get(table_name)
+        if cached is not None:
+            return cached
+
+        with connection.cursor() as cursor:
+            description = {
+                column.name: column
+                for column in connection.introspection.get_table_description(
+                    cursor, table_name
+                )
+            }
+        self._table_description_cache[table_name] = description
+        return description
+
+    def _table_attnames(self, table_name: str) -> set[str]:
+        cached = self._table_columns_cache.get(table_name)
+        if cached is not None:
+            return cached
+
+        columns = set(self._table_description_map(table_name))
+        self._table_columns_cache[table_name] = columns
+        return columns
+
+    def _validate_required_table_columns(
+        self,
+        *,
+        label: str,
+        table_name: str,
+        required_columns: Iterable[str],
+    ) -> None:
+        actual = self._table_attnames(table_name)
+        missing = sorted(set(required_columns) - actual)
+        if missing:
+            raise CommandError(
+                f"Unsupported runtime schema for {label}: "
+                f'table "{table_name}" is missing required columns {missing}.'
+            )
+
+    def _field_by_attname(self, model_class, attname: str):
+        for field in model_class._meta.concrete_fields:
+            if field.attname == attname:
+                return field
+        raise CommandError(
+            f"Unable to resolve field {attname!r} on {model_class._meta.label}."
+        )
+
+    def _field_column_by_attname(self, model_class, attname: str) -> str:
+        return self._field_by_attname(model_class, attname).column
+
+    def _validate_omitted_copy_columns(
+        self,
+        *,
+        label: str,
+        source_table: str,
+        target_table: str,
+        target_model,
+        missing_source: Iterable[str],
+    ) -> None:
+        required_missing: List[str] = []
+        target_description = self._table_description_map(target_table)
+
+        for attname in missing_source:
+            field = self._field_by_attname(target_model, attname)
+            if field.column not in target_description:
+                continue
+
+            if field.primary_key or field.auto_created:
+                continue
+            if field.has_default():
+                continue
+
+            column = target_description[field.column]
+            if getattr(column, "null_ok", False):
+                continue
+            if getattr(column, "default", None) is not None:
+                continue
+
+            required_missing.append(attname)
+
+        if required_missing:
+            raise CommandError(
+                f"Unsupported runtime schema for {label}: cannot backfill into "
+                f'"{target_table}" because required columns {sorted(required_missing)} '
+                f'are missing from source table "{source_table}" and target table '
+                f'"{target_table}" cannot supply defaults for them.'
+            )
+
+    def _warn_runtime_schema_drift(
+        self,
+        *,
+        label: str,
+        source_table: str,
+        target_table: str,
+        missing_source: List[str],
+        missing_target: List[str],
+    ) -> None:
+        if not missing_source and not missing_target:
+            return
+
+        warning_key = (
+            label,
+            ",".join(missing_source),
+            ",".join(missing_target),
+        )
+        if warning_key in self._runtime_schema_warnings:
+            return
+        self._runtime_schema_warnings.add(warning_key)
+
+        parts: List[str] = []
+        if missing_source:
+            parts.append(f'{source_table} missing {missing_source}')
+        if missing_target:
+            parts.append(f'{target_table} missing {missing_target}')
+        self.stdout.write(
+            self.style.WARNING(
+                f"{label}: omitting schema-drifted columns during backfill "
+                f"({'; '.join(parts)})"
+            )
+        )
+
+    def _runtime_copy_columns(
+        self,
+        *,
+        label: str,
+        source_table: str,
+        target_table: str,
+        source_model,
+        target_model,
+        attnames: List[str],
+    ) -> List[_CopyColumn]:
+        source_columns = self._table_attnames(source_table)
+        target_columns = self._table_attnames(target_table)
+
+        missing_source: List[str] = []
+        missing_target: List[str] = []
+        copy_columns: List[_CopyColumn] = []
+
+        for attname in attnames:
+            source_field = self._field_by_attname(source_model, attname)
+            target_field = self._field_by_attname(target_model, attname)
+            source_missing = source_field.column not in source_columns
+            target_missing = target_field.column not in target_columns
+            if source_missing:
+                missing_source.append(attname)
+            if target_missing:
+                missing_target.append(attname)
+            if source_missing or target_missing:
+                continue
+            copy_columns.append(
+                _CopyColumn(
+                    attname=attname,
+                    source_column=source_field.column,
+                    target_column=target_field.column,
+                )
+            )
+
+        missing_source = sorted(_dedupe(missing_source))
+        missing_target = sorted(_dedupe(missing_target))
+        omitted_attnames = _dedupe([*missing_source, *missing_target])
+
+        self._validate_omitted_copy_columns(
+            label=label,
+            source_table=source_table,
+            target_table=target_table,
+            target_model=target_model,
+            missing_source=missing_source,
+        )
+        self._warn_runtime_schema_drift(
+            label=label,
+            source_table=source_table,
+            target_table=target_table,
+            missing_source=missing_source,
+            missing_target=missing_target,
+        )
+        return copy_columns
+
+    def _history_backfill_requires_orm(self, model) -> bool:
+        return any(not parent._meta.abstract for parent in model._meta.parents)
+
+    def _orm_backfill_supported(
+        self,
+        *,
+        model,
+        history_model,
+        meta_model,
+    ) -> bool:
+        for field in model._meta.concrete_fields:
+            if field.column not in self._table_attnames(field.model._meta.db_table):
+                return False
+
+        expected_history = {
+            field.column for field in history_model._meta.concrete_fields
+        }
+        if not expected_history.issubset(
+            self._table_attnames(history_model._meta.db_table)
+        ):
+            return False
+
+        expected_meta = {field.column for field in meta_model._meta.concrete_fields}
+        return expected_meta.issubset(self._table_attnames(meta_model._meta.db_table))
+
+    def _history_copy_columns(self, model, history_model) -> List[_CopyColumn]:
         main_attnames = {field.attname for field in model._meta.concrete_fields}
 
         attnames = [
@@ -164,9 +380,16 @@ class Command(BaseCommand):
             raise CommandError(
                 f"Unable to infer history copy columns for {model._meta.label}."
             )
-        return attnames
+        return self._runtime_copy_columns(
+            label=model._meta.label,
+            source_table=model._meta.db_table,
+            target_table=history_model._meta.db_table,
+            source_model=model,
+            target_model=history_model,
+            attnames=attnames,
+        )
 
-    def _meta_copy_attnames(self, history_model, meta_model) -> List[str]:
+    def _meta_copy_columns(self, history_model, meta_model) -> List[_CopyColumn]:
         history_attnames = {field.attname for field in history_model._meta.concrete_fields}
 
         attnames = [
@@ -183,12 +406,20 @@ class Command(BaseCommand):
             ]
 
         attnames = _dedupe(attnames)
-        return attnames
+        return self._runtime_copy_columns(
+            label=history_model._meta.label,
+            source_table=history_model._meta.db_table,
+            target_table=meta_model._meta.db_table,
+            source_model=history_model,
+            target_model=meta_model,
+            attnames=attnames,
+        )
 
     def _append_required_defaults(
         self,
         *,
         model_class,
+        table_name: str,
         insert_cols: List[str],
         select_exprs: List[str],
         params: List[object],
@@ -200,21 +431,23 @@ class Command(BaseCommand):
         raw INSERT statements must provide these values explicitly.
         """
         inserted = set(insert_cols)
+        actual_columns = self._table_attnames(table_name)
         for field in model_class._meta.concrete_fields:
-            attname = field.attname
-            if attname in inserted:
+            if field.column in inserted:
                 continue
             if field.primary_key or field.auto_created:
+                continue
+            if field.column not in actual_columns:
                 continue
             if field.null:
                 continue
             if not field.has_default():
                 continue
 
-            insert_cols.append(attname)
+            insert_cols.append(field.column)
             select_exprs.append("%s")
             params.append(field.get_default())
-            inserted.add(attname)
+            inserted.add(field.column)
 
     def _validate_sql_schema(
         self,
@@ -223,23 +456,23 @@ class Command(BaseCommand):
         history_model,
         meta_model,
     ) -> None:
-        history_cols = {field.attname for field in history_model._meta.concrete_fields}
-        meta_cols = {field.attname for field in meta_model._meta.concrete_fields}
-        pk_attname = model._meta.pk.attname
+        history_cols = {field.column for field in history_model._meta.concrete_fields}
+        meta_cols = {field.column for field in meta_model._meta.concrete_fields}
+        pk_column = model._meta.pk.column
 
         required_history = {
-            pk_attname,
-            history_model._meta.pk.attname,
-            "valid_from",
-            "history_type",
-            "history_change_reason",
+            pk_column,
+            history_model._meta.pk.column,
+            history_model._meta.get_field("valid_from").column,
+            history_model._meta.get_field("history_type").column,
+            history_model._meta.get_field("history_change_reason").column,
         }
         required_meta = {
-            meta_model._meta.pk.attname,
-            "sys_from",
-            "meta_history_type",
-            "meta_history_change_reason",
-            "history_object_id",
+            meta_model._meta.pk.column,
+            meta_model._meta.get_field("sys_from").column,
+            meta_model._meta.get_field("meta_history_type").column,
+            meta_model._meta.get_field("meta_history_change_reason").column,
+            self._field_column_by_attname(meta_model, "history_object_id"),
         }
 
         missing_history = sorted(required_history - history_cols)
@@ -252,6 +485,36 @@ class Command(BaseCommand):
                 f"missing meta columns={missing_meta}"
             )
 
+        self._validate_required_table_columns(
+            label=model._meta.label,
+            table_name=model._meta.db_table,
+            required_columns={pk_column},
+        )
+        self._validate_required_table_columns(
+            label=history_model._meta.label,
+            table_name=history_model._meta.db_table,
+            required_columns={
+                pk_column,
+                history_model._meta.pk.column,
+                history_model._meta.get_field("valid_from").column,
+                history_model._meta.get_field("valid_to").column,
+                history_model._meta.get_field("history_type").column,
+                history_model._meta.get_field("history_change_reason").column,
+            },
+        )
+        self._validate_required_table_columns(
+            label=meta_model._meta.label,
+            table_name=meta_model._meta.db_table,
+            required_columns={
+                meta_model._meta.pk.column,
+                meta_model._meta.get_field("sys_from").column,
+                meta_model._meta.get_field("sys_to").column,
+                meta_model._meta.get_field("meta_history_type").column,
+                meta_model._meta.get_field("meta_history_change_reason").column,
+                self._field_column_by_attname(meta_model, "history_object_id"),
+            },
+        )
+
     def _count_missing_history_rows_sql(
         self,
         cursor,
@@ -261,7 +524,7 @@ class Command(BaseCommand):
     ) -> int:
         main_table = self._q(model._meta.db_table)
         history_table = self._q(history_model._meta.db_table)
-        pk_col = self._q(model._meta.pk.attname)
+        pk_col = self._q(model._meta.pk.column)
 
         sql = f"""
         SELECT COUNT(*)
@@ -286,25 +549,29 @@ class Command(BaseCommand):
     ) -> int:
         main_table = self._q(model._meta.db_table)
         history_table = self._q(history_model._meta.db_table)
-        pk_col = self._q(model._meta.pk.attname)
-        history_pk_col = self._q(history_model._meta.pk.attname)
+        pk_col = self._q(model._meta.pk.column)
+        history_pk_col = self._q(history_model._meta.pk.column)
+        valid_from_col = history_model._meta.get_field("valid_from").column
+        valid_to_col = history_model._meta.get_field("valid_to").column
+        history_type_col = history_model._meta.get_field("history_type").column
+        history_reason_col = history_model._meta.get_field("history_change_reason").column
 
         history_attnames = {
             field.attname for field in history_model._meta.concrete_fields
         }
         has_history_user_id = "history_user_id" in history_attnames
 
-        copy_cols = self._history_copy_attnames(model, history_model)
+        copy_cols = self._history_copy_columns(model, history_model)
 
         insert_cols = [
-            *copy_cols,
-            "valid_from",
-            "valid_to",
-            "history_type",
-            "history_change_reason",
+            *(column.target_column for column in copy_cols),
+            valid_from_col,
+            valid_to_col,
+            history_type_col,
+            history_reason_col,
         ]
         select_exprs = [
-            *(f"m.{self._q(col)}" for col in copy_cols),
+            *(f"m.{self._q(column.source_column)}" for column in copy_cols),
             "%s",
             "NULL",
             "%s",
@@ -313,11 +580,14 @@ class Command(BaseCommand):
         params: List[object] = [timestamp, "+", reason]
 
         if has_history_user_id:
-            insert_cols.append("history_user_id")
+            insert_cols.append(
+                self._field_column_by_attname(history_model, "history_user_id")
+            )
             select_exprs.append("NULL")
 
         self._append_required_defaults(
             model_class=history_model,
+            table_name=history_model._meta.db_table,
             insert_cols=insert_cols,
             select_exprs=select_exprs,
             params=params,
@@ -346,10 +616,10 @@ class Command(BaseCommand):
 
     def _history_type_repair_candidates_cte(self, history_model, pk_attname: str) -> str:
         history_table = self._q(history_model._meta.db_table)
-        history_pk_col = self._q(history_model._meta.pk.attname)
-        pk_col = self._q(pk_attname)
-        history_type_col = self._q("history_type")
-        valid_from_col = self._q("valid_from")
+        history_pk_col = self._q(history_model._meta.pk.column)
+        pk_col = self._q(self._field_column_by_attname(history_model, pk_attname))
+        history_type_col = self._q(history_model._meta.get_field("history_type").column)
+        valid_from_col = self._q(history_model._meta.get_field("valid_from").column)
 
         return f"""
         WITH ranked AS (
@@ -392,8 +662,8 @@ class Command(BaseCommand):
     ) -> int:
         cte = self._history_type_repair_candidates_cte(history_model, pk_attname)
         history_table = self._q(history_model._meta.db_table)
-        history_pk_col = self._q(history_model._meta.pk.attname)
-        history_type_col = self._q("history_type")
+        history_pk_col = self._q(history_model._meta.pk.column)
+        history_type_col = self._q(history_model._meta.get_field("history_type").column)
 
         sql = cte + f"""
         , updated AS (
@@ -418,8 +688,10 @@ class Command(BaseCommand):
     ) -> int:
         history_table = self._q(history_model._meta.db_table)
         meta_table = self._q(meta_model._meta.db_table)
-        history_pk_col = self._q(history_model._meta.pk.attname)
-        history_object_col = self._q("history_object_id")
+        history_pk_col = self._q(history_model._meta.pk.column)
+        history_object_col = self._q(
+            self._field_column_by_attname(meta_model, "history_object_id")
+        )
 
         sql = f"""
         SELECT COUNT(*)
@@ -444,39 +716,54 @@ class Command(BaseCommand):
     ) -> int:
         history_table = self._q(history_model._meta.db_table)
         meta_table = self._q(meta_model._meta.db_table)
-        history_pk_col = self._q(history_model._meta.pk.attname)
-        meta_pk_col = self._q(meta_model._meta.pk.attname)
-        history_object_col = self._q("history_object_id")
+        history_pk_col = self._q(history_model._meta.pk.column)
+        meta_pk_col = self._q(meta_model._meta.pk.column)
+        history_object_col = self._q(
+            self._field_column_by_attname(meta_model, "history_object_id")
+        )
+        valid_from_col = history_model._meta.get_field("valid_from").column
+        history_reason_col = history_model._meta.get_field(
+            "history_change_reason"
+        ).column
+        sys_from_col = meta_model._meta.get_field("sys_from").column
+        sys_to_col = meta_model._meta.get_field("sys_to").column
+        meta_reason_col = meta_model._meta.get_field(
+            "meta_history_change_reason"
+        ).column
+        meta_type_col = meta_model._meta.get_field("meta_history_type").column
 
         meta_attnames = {field.attname for field in meta_model._meta.concrete_fields}
         has_meta_user_id = "meta_history_user_id" in meta_attnames
 
-        copy_cols = self._meta_copy_attnames(history_model, meta_model)
+        copy_cols = self._meta_copy_columns(history_model, meta_model)
 
         insert_cols = [
-            *copy_cols,
-            "sys_from",
-            "sys_to",
-            "meta_history_change_reason",
-            "meta_history_type",
-            "history_object_id",
+            *(column.target_column for column in copy_cols),
+            sys_from_col,
+            sys_to_col,
+            meta_reason_col,
+            meta_type_col,
+            self._field_column_by_attname(meta_model, "history_object_id"),
         ]
         select_exprs = [
-            *(f"h.{self._q(col)}" for col in copy_cols),
-            f"COALESCE(h.{self._q('valid_from')}, %s)",
+            *(f"h.{self._q(column.source_column)}" for column in copy_cols),
+            f"COALESCE(h.{self._q(valid_from_col)}, %s)",
             "NULL",
-            f"COALESCE(NULLIF(h.{self._q('history_change_reason')}, ''), %s)",
+            f"COALESCE(NULLIF(h.{self._q(history_reason_col)}, ''), %s)",
             "%s",
             f"h.{history_pk_col}",
         ]
         params: List[object] = [timestamp, reason, "+"]
 
         if has_meta_user_id:
-            insert_cols.append("meta_history_user_id")
+            insert_cols.append(
+                self._field_column_by_attname(meta_model, "meta_history_user_id")
+            )
             select_exprs.append("NULL")
 
         self._append_required_defaults(
             model_class=meta_model,
+            table_name=meta_model._meta.db_table,
             insert_cols=insert_cols,
             select_exprs=select_exprs,
             params=params,
@@ -611,7 +898,21 @@ class Command(BaseCommand):
                     )
             else:
                 with transaction.atomic():
-                    if future_backfill:
+                    use_orm_history_backfill = future_backfill or self._history_backfill_requires_orm(
+                        model
+                    )
+                    if use_orm_history_backfill and self._orm_backfill_supported(
+                        model=model,
+                        history_model=history_model,
+                        meta_model=meta_model,
+                    ):
+                        if not future_backfill:
+                            self.stdout.write(
+                                self.style.WARNING(
+                                    f"{label}: model spans multiple concrete tables; "
+                                    "using ORM history backfill path."
+                                )
+                            )
                         with suppress_main_table_sync(), suppress_meta_sys_to_chaining():
                             created = self._create_missing_history_rows_via_orm(
                                 model=model,
@@ -637,6 +938,19 @@ class Command(BaseCommand):
                                 reason=reason,
                             )
                     else:
+                        if future_backfill or use_orm_history_backfill:
+                            reason_text = (
+                                "future timestamp requested"
+                                if future_backfill
+                                else "model spans multiple concrete tables"
+                            )
+                            self.stdout.write(
+                                self.style.WARNING(
+                                    f"{label}: {reason_text}, but runtime schema "
+                                    "does not support the ORM path; using SQL "
+                                    "backfill path instead."
+                                )
+                            )
                         with connection.cursor() as cursor:
                             created = self._insert_missing_history_rows_sql(
                                 cursor,
