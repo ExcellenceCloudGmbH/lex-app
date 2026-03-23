@@ -36,6 +36,11 @@ from lex.core.models.CalculationModel import CalculationModel
 logger = logging.getLogger(__name__)
 
 
+def _celery_is_active() -> bool:
+    """Return True when Celery dispatch is enabled via environment."""
+    return os.getenv("CELERY_ACTIVE", "False").lower() == "true"
+
+
 class CeleryCalculationContext:
     """
     Context manager to set calculation_id for Celery tasks.
@@ -47,6 +52,8 @@ class CeleryCalculationContext:
     def __init__(self, context, model_context):
         self.context = context
         self.model_context = model_context
+        self._op_token = None
+        self._model_context_backup = None
 
     def __enter__(self):
         if self.context:
@@ -56,15 +63,24 @@ class CeleryCalculationContext:
             new_context['operation_id'] = str(uuid4())
             new_context["celery_task"] = True
             new_context["task_name"] = "calc_and_save"
-            operation_context.set(new_context)
+            self._op_token = operation_context.set(new_context)
+        else:
+            logger.warning(
+                "CeleryCalculationContext entered with context=None — "
+                "operation_context will NOT be set. Logging may be degraded."
+            )
         if self.model_context:
+            self._model_context_backup = _model_context.get()['model_context']
             _model_context.get()['model_context'] = self.model_context
             logger.warning(f"Operation Context {self.model_context}")
             logger.warning(f"Saved context {_model_context.get()['model_context']}")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        if self._op_token is not None:
+            operation_context.reset(self._op_token)
+        if self._model_context_backup is not None:
+            _model_context.get()['model_context'] = self._model_context_backup
 
 
 class CallbackTask(Task):
@@ -190,8 +206,12 @@ class UnblockCelery:
         self.force_tasks = force_tasks
         self.exclude_tasks = exclude_tasks or set()
         self.dispatched_results: List[Any] = []
+        # When Celery is not active, the context manager is a no-op
+        self._active = _celery_is_active()
 
     def __enter__(self):
+        if not self._active:
+            return self
         # Store the unblock context
         unblock_context = unblock_tasks_context.get()
         unblock_context['unblock_context_stack'].append(self)
@@ -201,6 +221,8 @@ class UnblockCelery:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self._active:
+            return
         # Remove this context from storage
         unblock_context = unblock_tasks_context.get()
         if unblock_context['unblock_context_stack']:
@@ -269,12 +291,17 @@ class RunInCelery:
         self.exclude_tasks = exclude_tasks or set()
         self.dispatched_results: List[Any] = []
         self.block = True
+        # When Celery is not active, the context manager is a no-op
+        self._active = _celery_is_active()
 
     def __enter__(self):
-        tasks_context.get().get('task_context_stack').append(self)
+        if self._active:
+            tasks_context.get().get('task_context_stack').append(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self._active:
+            return
         if tasks_context.get().get('task_context_stack'):
             tasks_context.get().get('task_context_stack').pop()
         self.wait_for_completion()
@@ -345,6 +372,10 @@ class EnhancedBoundTaskMethod:
         """Handles direct calls - checks contexts to decide sync vs async execution."""
         task_name = getattr(self.task, 'name', self.task.__name__)
 
+        # When Celery is not active, always run synchronously
+        if not _celery_is_active():
+            return self.task(self.instance, *args, **kwargs)
+
         # PRIORITY 1: Check UnblockCelery context first (highest priority)
         unblock_context = UnblockCelery.get_current_context()
         if unblock_context and unblock_context.should_force_dispatch(task_name):
@@ -400,6 +431,10 @@ class EnhancedTaskMethodDescriptor:
     def __call__(self, *args, **kwargs):
         """Handle direct calls on class-level access."""
         task_name = getattr(self.task, 'name', self.task.__name__)
+
+        # When Celery is not active, always run synchronously
+        if not _celery_is_active():
+            return self.task(*args, **kwargs)
 
         # Check UnblockCelery context first
         unblock_context = UnblockCelery.get_current_context()

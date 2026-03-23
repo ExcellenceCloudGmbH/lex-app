@@ -1,9 +1,12 @@
 import json
+import logging
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+
+logger = logging.getLogger(__name__)
 
 
 class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
@@ -29,6 +32,10 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
 
     async def calculation_success(self, event):
         payload = event['payload']
+        # Keep ASGI-process state store in sync (event may originate from a Celery worker)
+        record_id = payload.get('record_id')
+        if record_id:
+            await sync_to_async(ActiveCalculationStateStore.clear)(record_id)
         await self.send(text_data=json.dumps({
             'type': 'calculation_success',
             'payload': payload
@@ -36,6 +43,10 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
 
     async def calculation_error(self, event):
         payload = event['payload']
+        # Keep ASGI-process state store in sync (event may originate from a Celery worker)
+        record_id = payload.get('record_id')
+        if record_id:
+            await sync_to_async(ActiveCalculationStateStore.clear)(record_id)
         await self.send(text_data=json.dumps({
             'type': 'calculation_error',
             'payload': payload
@@ -43,6 +54,14 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
 
     async def calculation_in_progress(self, event):
         payload = event['payload']
+        # Keep ASGI-process state store in sync (event may originate from a Celery worker)
+        record_id = payload.get('record_id')
+        if record_id:
+            await sync_to_async(ActiveCalculationStateStore.mark_in_progress)(
+                record_id=record_id,
+                calculation_id=payload.get('calculation_id'),
+                record=payload.get('record'),
+            )
         await self.send(text_data=json.dumps({
             'type': 'calculation_in_progress',
             'payload': payload
@@ -50,6 +69,10 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
 
     async def calculation_aborted(self, event):
         payload = event['payload']
+        # Keep ASGI-process state store in sync (event may originate from a Celery worker)
+        record_id = payload.get('record_id')
+        if record_id:
+            await sync_to_async(ActiveCalculationStateStore.clear)(record_id)
         await self.send(text_data=json.dumps({
             'type': 'calculation_aborted',
             'payload': payload

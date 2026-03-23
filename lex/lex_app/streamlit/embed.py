@@ -72,6 +72,9 @@ def lex_view(
     scrolling: bool = _DEFAULT_SCROLLING,
     hide_toolbar: bool = False,
     hide_actions: bool = False,
+    redirect_after: Optional[str] = None,
+    redirect_after_create: Optional[str] = None,
+    redirect_after_update: Optional[str] = None,
     extra_params: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
 ) -> None:
@@ -103,6 +106,16 @@ def lex_view(
         If ``True``, hides the top actions bar (Create button, Refresh,
         Export).  Maps to the ``?hide_actions=true`` query parameter
         read by ``CustomListActions``.
+    redirect_after : str, optional
+        React route to navigate to after *any* successful create or update.
+        Supports ``{resource}`` and ``{id}`` template tokens.
+        Example: ``"/{resource}/{id}"`` → show the record after save.
+    redirect_after_create : str, optional
+        Override ``redirect_after`` for create operations only.
+        Example: ``"/{resource}"`` → go back to the list after creation.
+    redirect_after_update : str, optional
+        Override ``redirect_after`` for update operations only.
+        Example: ``"/{resource}/{id}"`` → show the record after editing.
     extra_params : dict, optional
         Arbitrary extra query parameters forwarded to the React app.
         Useful for future extensions or custom frontend logic.
@@ -131,6 +144,14 @@ def lex_view(
     Custom width in pixels::
 
         lex_view("nav_overview", width=1200)
+
+    Redirect to the record detail page after create::
+
+        lex_view("investor/create", redirect_after_create="/{resource}/{id}")
+
+    Redirect to a different model's list after update::
+
+        lex_view("cashflow/42/edit", redirect_after_update="/investor")
     """
     resolved_base = base_url.rstrip("/") if base_url else _resolve_base_url()
 
@@ -152,6 +173,14 @@ def lex_view(
         params["hide_toolbar"] = ["true"]
     if hide_actions:
         params["hide_actions"] = ["true"]
+
+    # Post-operation redirect overrides
+    if redirect_after:
+        params["redirect_after"] = [redirect_after]
+    if redirect_after_create:
+        params["redirect_after_create"] = [redirect_after_create]
+    if redirect_after_update:
+        params["redirect_after_update"] = [redirect_after_update]
 
     # Extra user-supplied params
     if extra_params:

@@ -61,6 +61,10 @@ class ModelRegistration:
 
         for model in models:
             try:
+                # Validate before any registration work
+                if not (issubclass(model, HTMLReport) or issubclass(model, Process)):
+                    cls._validate_model_definition(model)
+
                 if issubclass(model, HTMLReport):
                     cls._register_html_report(model)
                 elif issubclass(model, Process):
@@ -109,6 +113,88 @@ class ModelRegistration:
         model_name = model.__name__.lower()
         processAdminSite.registerProcess(model_name, model)
         processAdminSite.register([model])
+
+    # ── Reserved names managed by the framework ──
+    # Class names that user models must not use.
+    _RESERVED_CLASS_NAMES = frozenset({
+        'LexModel', 'LexManager', 'CalculationModel',
+        'History', 'MetaHistory', 'StandardHistory',
+        'Process', 'HTMLReport', 'PermissionResult', 'UserContext',
+    })
+
+    # Prefixes that collide with auto-generated history model names.
+    _RESERVED_CLASS_PREFIXES = ('Historical', 'MetaHistorical', 'Meta')
+
+    # Field names injected by LexModel, StandardHistory, MetaHistory,
+    # and CalculationModel — user models must not declare these.
+    _RESERVED_FIELD_NAMES = frozenset({
+        # LexModel
+        'created_by', 'edited_by',
+        # StandardHistory (Level 1 — valid time)
+        'valid_from', 'valid_to',
+        'history_id', 'history_type', 'history_change_reason',
+        'history_user', 'history_user_id',
+        # MetaLevelHistoricalRecords (Level 2 — system time)
+        'sys_from', 'sys_to',
+        'meta_history_id', 'meta_history_type',
+        'meta_history_change_reason', 'meta_task_name', 'meta_task_status',
+        'meta_history_user', 'meta_history_user_id',
+        'history_object',
+        # CalculationModel
+        'is_calculated',
+    })
+
+    @classmethod
+    def _validate_model_definition(cls, model: Type[models.Model]) -> None:
+        """
+        Ensure a user-defined model does not collide with framework-managed
+        class names or field names.
+
+        Raises ``ValueError`` with an actionable message on violation.
+        """
+        name = model.__name__
+
+        # 1. Exact reserved class names
+        if name in cls._RESERVED_CLASS_NAMES:
+            raise ValueError(
+                f"Model name '{name}' is reserved by the LEX framework. "
+                f"Please choose a different class name."
+            )
+
+        # 2. Prefixes used by auto-generated history models
+        for prefix in cls._RESERVED_CLASS_PREFIXES:
+            if name.startswith(prefix):
+                raise ValueError(
+                    f"Model name '{name}' must not start with '{prefix}' — "
+                    f"that prefix is reserved for auto-generated history models."
+                )
+
+        # 3. Reserved field names
+        #    Only check concrete fields explicitly declared on *this* class,
+        #    not inherited ones from LexModel/CalculationModel.
+        own_fields = {
+            f.name
+            for f in model._meta.local_fields
+            if f.name in cls._RESERVED_FIELD_NAMES
+        }
+        # Exclude fields that actually come from an abstract parent the user
+        # subclassed (LexModel, CalculationModel) — those are expected.
+        inherited_fields: set = set()
+        for parent in model.__mro__[1:]:
+            if parent is model:
+                continue
+            meta = getattr(parent, '_meta', None)
+            if meta and getattr(meta, 'abstract', False):
+                inherited_fields |= {f.name for f in meta.local_fields}
+
+        user_conflicts = own_fields - inherited_fields
+        if user_conflicts:
+            raise ValueError(
+                f"Model '{name}' declares reserved field(s): "
+                f"{', '.join(sorted(user_conflicts))}. "
+                f"These are automatically managed by the LEX framework's "
+                f"history tracking and must not be redefined."
+            )
 
     @classmethod
     def _register_standard_model(
