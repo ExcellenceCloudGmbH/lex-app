@@ -225,12 +225,30 @@ def on_history_pre_delete__cancel_schedules(
     sender, instance, *,
     historical_model, **kwargs
 ):
-    """Cancel any scheduled Celery tasks before a History row is deleted."""
+    """Cancel scheduled tasks and close open meta records before deletion.
+
+    This runs *before* the DB delete, so the FK (history_object_id) is
+    still intact.  We must close all open meta records here because once
+    Django executes the DELETE, the FK is SET_NULL and sys_to chaining
+    can no longer find them.
+    """
     if sender != historical_model:
         return
 
     try:
         MetaModel = sender.meta_history.model
+        now = timezone.now()
+
+        # ── Close all open meta records for this history row ──
+        # This ensures system-time queries after the deletion no longer
+        # see the old meta versions (their sys_to window is closed).
+        open_metas = MetaModel.objects.filter(
+            history_object_id=instance.pk,
+            sys_to__isnull=True,
+        )
+        open_metas.update(sys_to=now)
+
+        # ── Cancel scheduled tasks ──
         scheduled = MetaModel.objects.filter(
             history_object_id=instance.pk,
             meta_task_status="SCHEDULED",

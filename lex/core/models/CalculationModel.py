@@ -224,7 +224,9 @@ class CalculationModel(LexModel):
         model_context = deepcopy(_model_context.get()['model_context'])
 
         # Dispatch the task
-        task_result = func.delay(context=new_context, model_context=model_context)
+        from lex.lex_app.celery_tasks import AwaitDispatch
+        with AwaitDispatch():
+            task_result = func.delay(context=new_context, model_context=model_context)
 
         # Register with AwaitDispatch context if one exists
         from lex.lex_app.celery_tasks import register_task_with_context
