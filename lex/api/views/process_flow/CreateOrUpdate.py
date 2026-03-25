@@ -1,5 +1,6 @@
 import traceback
 from datetime import datetime
+from contextlib import nullcontext
 
 from django.db import transaction
 from django.db.models.signals import post_save
@@ -9,6 +10,7 @@ from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import DestroyOneWithPayloadMixin
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
+from lex.core.models.LexModel import should_use_atomic_model_operations
 
 
 class CreateOrUpdate(ModelEntryProviderMixin, DestroyOneWithPayloadMixin, RetrieveUpdateDestroyAPIView, CreateAPIView):
@@ -20,7 +22,13 @@ class CreateOrUpdate(ModelEntryProviderMixin, DestroyOneWithPayloadMixin, Retrie
         try:
             if "next_step" in request.data:
                 post_save.disconnect(update_handler)
-            with transaction.atomic():
+            atomic_target = instance or model_container.model_class
+            atomic_context = (
+                transaction.atomic()
+                if should_use_atomic_model_operations(atomic_target)
+                else nullcontext()
+            )
+            with atomic_context:
                 if instance:
                     response = UpdateModelMixin.update(self, request, *args, **kwargs)
                 else:

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from lex.audit_logging.utils.content_types import safe_get_generic_related_object
 
 
 class CalculationLogDefaultSerializer(serializers.ModelSerializer):
@@ -23,9 +24,11 @@ class CalculationLogDefaultSerializer(serializers.ModelSerializer):
         Return a JSON-serializable representation (for example, a flag) derived from the generically related object.
         In this case, we're using a property named 'is_calculated' from the linked object.
         """
-        if obj.content_type and obj.object_id:
-            return str(obj.calculatable_object)
-            # return obj.calculatable_object.is_calculated
+        if getattr(obj, "content_type_id", None) and obj.object_id:
+            target = safe_get_generic_related_object(obj)
+            if target is not None:
+                return str(target)
+            # return target.is_calculated
         return None
 
 

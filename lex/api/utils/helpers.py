@@ -75,6 +75,8 @@ from django.apps import apps
 from django.db.models import Model
 from django.db.models.fields import DateField, DateTimeField, TimeField
 
+from lex.audit_logging.utils.content_types import safe_get_content_type
+
 ISO_PARSE = ("%Y-%m-%dT%H:%M:%S",)
 
 _MODEL_LOOKUP = None
@@ -122,7 +124,7 @@ def _parse_value(field, value):
     return value
 
 
-def _get_model_lookup():
+def _get_model_lookup() -> dict[str, type[Model]]:
     global _MODEL_LOOKUP
     if _MODEL_LOOKUP is None:
         lookup = {}
@@ -161,9 +163,13 @@ def resolve_target_model(audit_log):
         Django model class or None if not found
     """
     # Prefer content_type when present (most reliable)
-    ct = getattr(audit_log, "content_type", None)
-    if ct:
+    content_type_id = getattr(audit_log, "content_type_id", None)
+    if content_type_id:
         try:
+            ct = safe_get_content_type(
+                content_type_id=content_type_id,
+                using=getattr(getattr(audit_log, "_state", None), "db", None),
+            )
             return ct.model_class()
         except Exception:
             pass

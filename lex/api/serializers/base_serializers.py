@@ -9,6 +9,7 @@ from datetime import datetime, date, time
 from uuid import UUID
 from decimal import Decimal
 
+from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.core.models.LexModel import LexModel, UserContext
 
 logger = logging.getLogger(__name__)
@@ -347,9 +348,13 @@ class LexSerializer(serializers.ModelSerializer):
     @staticmethod
     def _resolve_target_model(audit_log) -> type[Model] | None:
         # Prefer content_type if present
-        ct = getattr(audit_log, "content_type", None)
-        if ct:
+        content_type_id = getattr(audit_log, "content_type_id", None)
+        if content_type_id:
             try:
+                ct = safe_get_content_type(
+                    content_type_id=content_type_id,
+                    using=getattr(getattr(audit_log, "_state", None), "db", None),
+                )
                 return ct.model_class()
             except Exception:
                 pass

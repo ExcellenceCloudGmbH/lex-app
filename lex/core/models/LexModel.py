@@ -9,7 +9,12 @@ from typing import Any, Dict, FrozenSet, Literal, Mapping, Optional, Set, Union
 from django.db import models, transaction
 from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
     BEFORE_UPDATE
-from django_lifecycle.mixins import LifecycleModelMixin, _bypass_state
+try:
+    from django_lifecycle.mixins import LifecycleModelMixin, _bypass_state as lifecycle_bypass_state
+except ImportError:
+    from django_lifecycle.mixins import LifecycleModelMixin
+
+    lifecycle_bypass_state = None
 
 try:
     from api.utils import operation_context
@@ -17,6 +22,13 @@ except ImportError:
     from lex.api.utils import operation_context
 
 logger = logging.getLogger(__name__)
+
+
+def should_use_atomic_model_operations(model_or_class) -> bool:
+    return not (
+        hasattr(model_or_class, "is_atomic")
+        and not getattr(model_or_class, "is_atomic")
+    )
 
 
 @dataclass(frozen=True)
@@ -412,7 +424,7 @@ class LexModel(LifecycleModel):
         self._validation_in_progress = False
 
     def _should_use_atomic_save(self) -> bool:
-        return not (hasattr(self, "is_atomic") and not self.is_atomic)
+        return should_use_atomic_model_operations(self)
 
     def save(self, *args, **kwargs):
         """
@@ -424,7 +436,11 @@ class LexModel(LifecycleModel):
 
         with atomic_context:
             skip_hooks = kwargs.pop("skip_hooks", False)
-            skip_hooks_from_cm = _bypass_state.is_bypassed_for(self.__class__)
+            skip_hooks_from_cm = (
+                lifecycle_bypass_state.is_bypassed_for(self.__class__)
+                if lifecycle_bypass_state is not None
+                else False
+            )
             if skip_hooks or skip_hooks_from_cm:
                 return base_save(*args, **kwargs)
 
