@@ -23,11 +23,21 @@ from lex.audit_logging.utils.ContextResolver import ContextResolver
 logger = logging.getLogger(__name__)
 
 class CalculationModelException(APIException):
+        @staticmethod
+        def _ensure_list(value):
+            if value is None:
+                return []
+            if isinstance(value, list):
+                return value
+            if isinstance(value, tuple):
+                return list(value)
+            return [value]
+
         def __init__(self, *args, **kwargs):
             super().__init__(*args)
-            self.calc_obj = kwargs.get("calc_obj", None)
-            self.exception_details = kwargs.get("exception_details", None)
-            self.stack_trace = kwargs.get("stack_trace", None)
+            self.calc_obj = self._ensure_list(kwargs.get("calc_obj", None))
+            self.exception_details = self._ensure_list(kwargs.get("exception_details", None))
+            self.stack_trace = self._ensure_list(kwargs.get("stack_trace", None))
 
 
 class CalculationModel(LexModel):
@@ -51,6 +61,49 @@ class CalculationModel(LexModel):
 
     class Meta:
         abstract = True
+
+    @staticmethod
+    def persist_error_state(calc_objs):
+        persisted_objects = []
+        seen_objects = set()
+
+        for obj in CalculationModelException._ensure_list(calc_objs):
+            if obj is None:
+                continue
+
+            object_identity = id(obj)
+            if object_identity in seen_objects:
+                continue
+            seen_objects.add(object_identity)
+
+            try:
+                obj.is_calculated = CalculationModel.ERROR
+                obj.save(skip_hooks=True)
+                persisted_objects.append(obj)
+            except Exception:
+                logger.error(
+                    f"Failed to persist calculation ERROR state for {obj}",
+                    exc_info=True,
+                )
+
+        return persisted_objects
+
+    @staticmethod
+    def build_exception_chain(exception, current_obj=None):
+        calc_obj = CalculationModelException._ensure_list(
+            getattr(exception, "calc_obj", None)
+        )
+        exception_details = CalculationModelException._ensure_list(
+            getattr(exception, "exception_details", None)
+        )
+        stack_trace = CalculationModelException._ensure_list(
+            getattr(exception, "stack_trace", None)
+        )
+
+        if current_obj is not None and (not calc_obj or calc_obj[-1] is not current_obj):
+            calc_obj = calc_obj + [current_obj]
+
+        return calc_obj, exception_details, stack_trace
 
 
     def update(self):
@@ -87,15 +140,38 @@ class CalculationModel(LexModel):
     def lex_func(self):
         """
         Dynamically selects the overridden calculation method ('calculate' or 'update').
-        It compares the function object of the instance's method with the function
-        object on the base class to detect an override.
+
+        A subclass may override ``calculate`` or ``update`` with a plain method
+        **or** with a ``@lex_shared_task``-decorated method.  In the latter case
+        the attribute on the instance is an ``EnhancedBoundTaskMethod`` proxy
+        (from celery_tasks.py) which does **not** expose ``__func__``.
+
+        Detection strategy:
+        1. If the attribute has ``__func__``, compare it to the base-class
+           implementation (the classic plain-method path).
+        2. If ``__func__`` is missing, the attribute is a task proxy — which
+           means the subclass *did* override the method with a Celery task.
         """
-        # CORRECT: Compare the bound method's function with the base class's function
-        if self.calculate.__func__ is not CalculationModel.calculate:
-            return self.calculate
-        # CORRECT: Do the same for the 'update' method
-        elif self.update.__func__ is not CalculationModel.update:
-            return self.update
+        calculate_attr = self.calculate
+        update_attr = self.update
+
+        # Check 'calculate' first
+        func = getattr(calculate_attr, '__func__', None)
+        if func is not None:
+            # Plain method — check if it was overridden
+            if func is not CalculationModel.calculate:
+                return calculate_attr
+        else:
+            # No __func__ → task-wrapped descriptor → subclass overrode it
+            return calculate_attr
+
+        # Then check 'update'
+        func = getattr(update_attr, '__func__', None)
+        if func is not None:
+            if func is not CalculationModel.update:
+                return update_attr
+        else:
+            return update_attr
 
         # Fallback will raise NotImplementedError when called
         return self.calculate
@@ -113,7 +189,7 @@ class CalculationModel(LexModel):
         from lex.lex_app import settings
 
         # Check if Celery is enabled in setting
-        if not os.getenv("CELERY_ACTIVE", None) == 'true' or not hasattr(self.lex_func(), 'delay'):
+        if not os.getenv("CELERY_ACTIVE", "").lower() == 'true' or not hasattr(self.lex_func(), 'delay'):
             return False
 
         # Check if Celery is available by trying to import and test connection
@@ -144,13 +220,15 @@ class CalculationModel(LexModel):
         func = self.lex_func()
 
         # Dispatch single model calculation to Celery with calculation_id
-        from lex.audit_logging.utils.ModelContext import model_logging_context
-        model_context = deepcopy(model_logging_context.get()['model_context'])
+        from lex.audit_logging.utils.ModelContext import _model_context
+        model_context = deepcopy(_model_context.get()['model_context'])
 
         # Dispatch the task
-        task_result = func.delay(context=new_context, model_context=model_context)
+        from lex.lex_app.celery_tasks import WaitForTasks
+        with WaitForTasks():
+            task_result = func.delay(context=new_context, model_context=model_context)
 
-        # Register with RunInCelery context if one exists
+        # Register with WaitForTasks context if one exists
         from lex.lex_app.celery_tasks import register_task_with_context
         return register_task_with_context(task_result)
 
@@ -227,12 +305,12 @@ class CalculationModel(LexModel):
     @hook(AFTER_UPDATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     @hook(AFTER_CREATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     def calculate_hook(self):
-        """                                                                                                                      
-        Enhanced calculation hook with Celery integration.                                                                       
+        """
+        Enhanced calculation hook with Celery integration.
 
-        Dispatches calculations to Celery workers when celery_active=True and Celery                                             
-        is available, otherwise falls back to synchronous execution. Proper status                                               
-        management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.                                                             
+        Dispatches calculations to Celery workers when celery_active=True and Celery
+        is available, otherwise falls back to synchronous execution. Proper status
+        management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.
         """
         from lex.core.signals.CalculationSignals import update_calculation_status
         from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
@@ -286,20 +364,27 @@ class CalculationModel(LexModel):
                 )
 
             if self.should_use_celery():
-                # Dispatch to Celery worker                                                                                      
+                # Dispatch to Celery worker
                 logger.info(f"Dispatching calculation for {self} to Celery worker")
 
-                task_result = None
-                from lex.lex_app.celery_tasks import RunInCelery
-                with RunInCelery():
+                # IMPORTANT: Do NOT use WaitForTasks() here (which block-waits
+                # for the child task in __exit__).  We are still inside the
+                # parent's save() transaction that set is_calculated=IN_PROGRESS.
+                # Blocking here while holding that DB lock causes a deadlock
+                # when the child task tries to write back to the same row.
+                #
+                # Instead, dispatch fire-and-forget.  The child task reports
+                # its own SUCCESS/ERROR via CallbackTask.on_success/on_failure.
+                from lex.lex_app.celery_tasks import WaitForTasks
+                with WaitForTasks():
                     task_result = self.dispatch_calculation_task()
 
-                    # Note: Status will be updated by CallbackTask.on_success/on_failure                                             
-                # Model remains in IN_PROGRESS state until task completes                                                        
+                    # Note: Status will be updated by CallbackTask.on_success/on_failure
+                # Model remains in IN_PROGRESS state until task completes
                 logger.info(f"Calculation task {task_result.id} dispatched for {self}")
 
             else:
-                # Execute synchronously as fallback                                                                              
+                # Execute synchronously as fallback
                 logger.info(f"Executing calculation for {self} synchronously (Celery not available)")
                 self.execute_calculation_sync()
 
@@ -309,19 +394,19 @@ class CalculationModel(LexModel):
             # # re-wrapping and duplicated error handling.
 
 
-            # Handle any errors in task dispatch or synchronous execution                                                        
+            # Handle any errors in task dispatch or synchronous execution
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
             status_was_error = self.is_calculated == self.ERROR
             self.is_calculated = self.ERROR
 
-            # Store error message if the model has an error_message field                                                        
+            # Store error message if the model has an error_message field
             stack_trace = f"{traceback.format_exc()}"
             exception_details = str(e)
                 # Clean up cache and save error state
             try:
                 context = ContextResolver.resolve()
 
-                # Only perform cleanup if this is the ROOT process                                                               
+                # Only perform cleanup if this is the ROOT process
                 is_root = False
                 if context.root_record and context.current_record:
                     if context.root_record == context.current_record:
@@ -331,7 +416,7 @@ class CalculationModel(LexModel):
 
                 if is_root:
                     calc_id = context.calculation_id
-                    # Clean up all keys associated with this calculation ID                                                      
+                    # Clean up all keys associated with this calculation ID
                     cleanup_result = CacheManager.cleanup_calculation(calculation_id=calc_id)
 
                     if cleanup_result.success:
@@ -363,9 +448,18 @@ class CalculationModel(LexModel):
                     exc_info=True,
                 )
 
-            raise CalculationModelException(calc_obj=e.calc_obj + [self] if hasattr(e, "calc_obj") else [self],
-                                            exception_details=e.exception_details + [exception_details] if hasattr(e, "exception_details") else [exception_details],
-                                            stack_trace=e.stack_trace + [stack_trace] if hasattr(e, "stack_trace") else [stack_trace])
+
+            calc_obj, exception_chain, stack_trace_chain = self.build_exception_chain(
+                e,
+                current_obj=self,
+            )
+            calc_obj_to_persist = calc_obj[:-1] if calc_obj and calc_obj[-1] is self else calc_obj
+            self.persist_error_state(calc_obj_to_persist)
+            raise CalculationModelException(
+                calc_obj=calc_obj,
+                exception_details=exception_chain + [exception_details],
+                stack_trace=stack_trace_chain + [stack_trace],
+            )
         finally:
             # Ensure the guard does not leak across future independent saves.
             if hasattr(self, "_calculation_hook_in_progress"):

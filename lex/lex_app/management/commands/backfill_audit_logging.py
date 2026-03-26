@@ -2,7 +2,6 @@ import json
 from types import SimpleNamespace
 
 from django.apps import apps
-from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 from django.utils import timezone
@@ -11,6 +10,7 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.audit_logging.serializers.AuditLogMixinSerializer import generic_instance_payload
+from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.audit_logging.utils.legacy_audit_payload import (
     build_legacy_calculation_payload,
     build_legacy_user_change_payload,
@@ -186,9 +186,7 @@ class Command(BaseCommand):
                 return None
             cache_key = model_class._meta.label_lower
             if cache_key not in content_type_cache:
-                content_type_cache[cache_key] = ContentType.objects.get_for_model(
-                    model_class
-                )
+                content_type_cache[cache_key] = safe_get_content_type(model_class)
             return content_type_cache[cache_key]
 
         def resolve_model_snapshot(resource_name: str | None, record_id):

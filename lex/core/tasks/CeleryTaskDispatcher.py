@@ -86,8 +86,8 @@ class CeleryTaskDispatcher:
             group_mapping = {}  # Map task results to their corresponding groups
             failed_dispatch_count = 0
 
-            from lex.lex_app.celery_tasks import RunInCelery
-            with RunInCelery():
+            from lex.lex_app.celery_tasks import WaitForTasks
+            with WaitForTasks():
                 for i, group in enumerate(non_empty_groups):
                     try:
 

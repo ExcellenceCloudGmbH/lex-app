@@ -119,8 +119,8 @@ class CalculationLog(models.Model):
             )
 
 
-            logger.info(f"Log: {log_debug}")
-            logger.info(f"Parent: {parent_debug}")
+            logger.debug(f"Log: {log_debug}")
+            logger.debug(f"Parent: {parent_debug}")
             # 4) Append message and save
             log_entry.calculation_log = (log_entry.calculation_log or "") + f"\n{message}"
             log_entry.save()
@@ -144,7 +144,8 @@ class CalculationLog(models.Model):
                 )
                 CacheManager.store_message(cache_key, message)
 
-            # 7) Log to standard logger
+            # 7) Log to standard logger (sends to WebSocket via WebSocketHandler)
+            # Send to current record's WebSocket group
             logger.debug(
                 message,
                 extra={
@@ -152,25 +153,60 @@ class CalculationLog(models.Model):
                     "calculationId": context_info.calculation_id,
                 },
             )
+
+            # Also send to root record's WebSocket group so parent calculations
+            # receive child logs in real-time (mirrors the cache store pattern above)
+            if context_info.root_record and context_info.root_record != context_info.current_record:
+                logger.debug(
+                    message,
+                    extra={
+                        "calculation_record": context_info.root_record,
+                        "calculationId": context_info.calculation_id,
+                    },
+                )
             
         except ContextResolutionError as e:
-            # Handle context resolution errors gracefully
-            logger.error(
-                f"Context resolution failed for log message: {message}. Error: {str(e)}",
-                extra={
-                    "calculation_id": getattr(e, 'calculation_id', None),
-                    "stack_length": getattr(e, 'stack_length', None),
-                },
-                exc_info=True
+            # Context resolution failed (e.g. missing calculation_id in a Celery
+            # worker where operation_context was not propagated).  We still want
+            # real-time log streaming to work, so fall back to the model_context
+            # stack for WebSocket routing — just skip DB persistence.
+            logger.debug(
+                f"Context resolution incomplete, using model-context fallback: {e}",
             )
-            # Continue with minimal logging to ensure message is not lost
-            logger.warning(f"Fallback logging: {message}")
+            try:
+                from lex.audit_logging.utils.ModelContext import _model_context as _mc
+                model_ctx = _mc.get()['model_context']
+                current = model_ctx.current
+                root = model_ctx.get_root()
+                current_record = f"{current._meta.model_name}_{current.pk}" if current else None
+                root_record = f"{root._meta.model_name}_{root.pk}" if root else None
+
+                # Send to WebSocket even without full context
+                if current_record:
+                    logger.debug(
+                        message,
+                        extra={
+                            "calculation_record": current_record,
+                            "calculationId": "",
+                        },
+                    )
+                if root_record and root_record != current_record:
+                    logger.debug(
+                        message,
+                        extra={
+                            "calculation_record": root_record,
+                            "calculationId": "",
+                        },
+                    )
+            except Exception:
+                logger.debug(f"Model-context fallback also failed for: {message}")
+            
             
         except Exception as e:
             # Handle any other unexpected errors
-            logger.info(f"ERROR IN CALCULATION LOG")
-            logger.info(f"Log: {log_debug}")
-            logger.info(f"Parent: {parent_debug}")
+            logger.error(f"ERROR IN CALCULATION LOG")
+            logger.error(f"Log: {log_debug}")
+            logger.error(f"Parent: {parent_debug}")
             logger.error(
                 f"Unexpected error in CalculationLog.log() for message: {message}. Error: {str(e)}",
                 exc_info=True

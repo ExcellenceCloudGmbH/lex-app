@@ -29,7 +29,7 @@ from django.db.migrations.operations.models import CreateModel, DeleteModel, Ren
 from django.db.migrations.questioner import MigrationQuestioner
 from django.db.migrations.state import ProjectState
 
-from core.management.commands.bootstrap_callback_server import start_callback_server
+from lex.core.management.commands.bootstrap_callback_server import start_callback_server
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ DEFAULT_SCOPE_POLICY_MAPPING = {
     "delete": ["Policy - admin"],
     "export": ["Policy - admin", "Policy - standard"],
 }
+NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS = frozenset({"timeout", "gateway_timeout"})
 
 STATE_FILE = Path(
     getattr(
@@ -61,6 +62,33 @@ STATE_FILE = Path(
     )
 )
 ENV_FILE = Path((Path.cwd() if str(Path.cwd()) else settings.BASE_DIR)) / ".env"
+
+
+def _get_keycloak_import_error_details(sync_manager: "KeycloakSyncManager") -> dict[str, Any] | None:
+    error = getattr(getattr(sync_manager, "kc_manager", None), "last_authz_import_error", None)
+    return error if isinstance(error, dict) else None
+
+
+def _format_keycloak_import_error_details(error: dict[str, Any] | None) -> str | None:
+    if not error:
+        return None
+
+    kind = error.get("kind")
+    if kind == "timeout":
+        timeout = error.get("timeout")
+        return f"request timed out after {timeout}" if timeout is not None else "request timed out"
+    if kind == "gateway_timeout":
+        status_code = error.get("status_code", 504)
+        return f"Keycloak returned HTTP {status_code}"
+    if kind == "http_error":
+        status_code = error.get("status_code")
+        return f"Keycloak returned HTTP {status_code}" if status_code is not None else None
+    return None
+
+
+def _is_non_fatal_keycloak_import_timeout(sync_manager: "KeycloakSyncManager") -> bool:
+    error = _get_keycloak_import_error_details(sync_manager)
+    return bool(error and error.get("kind") in NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS)
 
 
 def get_missing_keycloak_env() -> list[str]:
@@ -718,6 +746,7 @@ class KeycloakSyncManager:
           - Any error raises (no silent return False)
           - Always attempts to restore client snapshot in finally
         """
+        self.kc_manager.last_authz_import_error = None
         client_snapshot = self._snapshot_client_settings()
         had_primary_error: Exception | None = None
 
@@ -901,6 +930,13 @@ class KeycloakSyncManager:
             logger.info("Importing updated authorization settings...")
             success = self.kc_manager.import_authorization_settings(auth_config)
             if not success:
+                error_details = _format_keycloak_import_error_details(
+                    _get_keycloak_import_error_details(self)
+                )
+                if error_details:
+                    raise CommandError(
+                        f"Keycloak import_authorization_settings returned False ({error_details})"
+                    )
                 raise CommandError("Keycloak import_authorization_settings returned False")
 
             logger.info("Successfully imported updated authorization settings")
@@ -1256,6 +1292,21 @@ class Command(BaseCommand):
                 except Exception as e:
                     last_err = e
                     if attempt >= sync_retries:
+                        if _is_non_fatal_keycloak_import_timeout(sync_manager):
+                            error_details = _format_keycloak_import_error_details(
+                                _get_keycloak_import_error_details(sync_manager)
+                            )
+                            warning = (
+                                "Keycloak authorization import did not complete after "
+                                f"{sync_retries} attempt(s)"
+                            )
+                            if error_details:
+                                warning = f"{warning} ({error_details})"
+                            warning = f"{warning}; continuing Init without aborting."
+                            logger.warning(warning)
+                            self.stderr.write(warning)
+                            return
+
                         raise CommandError(
                             f"Keycloak sync failed after {sync_retries} attempt(s): {e}"
                         ) from e

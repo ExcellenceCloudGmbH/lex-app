@@ -1,5 +1,6 @@
 import logging
 from abc import ABCMeta
+from contextlib import nullcontext
 
 import streamlit as st
 from dataclasses import dataclass
@@ -8,6 +9,12 @@ from typing import Any, Dict, FrozenSet, Literal, Mapping, Optional, Set, Union
 from django.db import models, transaction
 from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
     BEFORE_UPDATE
+try:
+    from django_lifecycle.mixins import LifecycleModelMixin, _bypass_state as lifecycle_bypass_state
+except ImportError:
+    from django_lifecycle.mixins import LifecycleModelMixin
+
+    lifecycle_bypass_state = None
 
 try:
     from api.utils import operation_context
@@ -15,6 +22,13 @@ except ImportError:
     from lex.api.utils import operation_context
 
 logger = logging.getLogger(__name__)
+
+
+def should_use_atomic_model_operations(model_or_class) -> bool:
+    return not (
+        hasattr(model_or_class, "is_atomic")
+        and not getattr(model_or_class, "is_atomic")
+    )
 
 
 @dataclass(frozen=True)
@@ -92,6 +106,7 @@ class UserContext:
     def _resolve_keycloak_scopes(
         user_permissions: tuple[Mapping[str, Any], ...],
         instance=None,
+        original_instance=None,
     ) -> Set[str]:
         keycloak_scopes = set()
         if not instance:
@@ -99,8 +114,22 @@ class UserContext:
 
         resource_name = f"{instance._meta.app_label}.{instance.__class__.__name__}"
         instance_pk = str(instance.pk) if getattr(instance, "pk", None) else None
+
+        # Build set of resource names to match against.  When the instance
+        # was unwrapped from a historical record the Keycloak permissions
+        # may be registered under the *historical* resource name
+        # (e.g. "core.HistoricalQuarter") rather than the main model name
+        # ("core.Quarter").  Check both so scopes resolve either way.
+        resource_names = {resource_name}
+        if original_instance is not None and original_instance is not instance:
+            original_name = (
+                f"{original_instance._meta.app_label}."
+                f"{original_instance.__class__.__name__}"
+            )
+            resource_names.add(original_name)
+
         for perm in user_permissions:
-            if perm.get("rsname") != resource_name:
+            if perm.get("rsname") not in resource_names:
                 continue
             resource_set_id = perm.get("resource_set_id")
             if instance_pk and resource_set_id is not None and instance_pk == str(resource_set_id):
@@ -207,10 +236,20 @@ class UserContext:
             client_roles=client_roles,
         )
 
-    def with_instance(self, request, instance):
+    def with_instance(self, request, instance, original_instance=None):
         """Create a new UserContext with keycloak scopes resolved for the given instance.
-        Reuses cached user/email/groups/is_superuser from the base context."""
-        keycloak_scopes = self._resolve_keycloak_scopes(self.user_permissions, instance)
+        Reuses cached user/email/groups/is_superuser from the base context.
+
+        Args:
+            request: The Django request.
+            instance: The (possibly unwrapped) model instance to resolve scopes for.
+            original_instance: The pre-unwrap instance (e.g. HistoricalQuarter) so
+                that keycloak scopes registered under the historical resource name
+                are also matched.
+        """
+        keycloak_scopes = self._resolve_keycloak_scopes(
+            self.user_permissions, instance, original_instance=original_instance,
+        )
         
         return UserContext(
             user=self.user,
@@ -408,6 +447,47 @@ class LexModel(LifecycleModel):
         super().__init__(*args, **kwargs)
         self._pre_validation_snapshot = None
         self._validation_in_progress = False
+
+    def _should_use_atomic_save(self) -> bool:
+        return should_use_atomic_model_operations(self)
+
+    def save(self, *args, **kwargs):
+        """
+        Mirror django-lifecycle's hook-aware save flow while preserving the
+        legacy ``is_atomic = False`` opt-out used by CalculationModel subclasses.
+        """
+        base_save = super(LifecycleModelMixin, self).save
+        atomic_context = transaction.atomic() if self._should_use_atomic_save() else nullcontext()
+
+        with atomic_context:
+            skip_hooks = kwargs.pop("skip_hooks", False)
+            skip_hooks_from_cm = (
+                lifecycle_bypass_state.is_bypassed_for(self.__class__)
+                if lifecycle_bypass_state is not None
+                else False
+            )
+            if skip_hooks or skip_hooks_from_cm:
+                return base_save(*args, **kwargs)
+
+            self._clear_watched_fk_model_cache()
+            is_new = self._state.adding
+
+            if is_new:
+                self._run_hooked_methods(BEFORE_CREATE, **kwargs)
+            else:
+                self._run_hooked_methods(BEFORE_UPDATE, **kwargs)
+
+            self._run_hooked_methods(BEFORE_SAVE, **kwargs)
+            result = base_save(*args, **kwargs)
+            self._run_hooked_methods(AFTER_SAVE, **kwargs)
+
+            if is_new:
+                self._run_hooked_methods(AFTER_CREATE, **kwargs)
+            else:
+                self._run_hooked_methods(AFTER_UPDATE, **kwargs)
+
+            transaction.on_commit(self._reset_initial_state)
+            return result
 
     def _capture_snapshot(self) -> Dict[str, Any]:
         """Capture current model field state for rollback"""

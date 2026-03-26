@@ -55,8 +55,12 @@ def get_queryset_as_of(model_class, as_of):
                 f"History model {model_class.__name__} has no meta_history tracking."
             )
         MetaModel = model_class.meta_history.model
-        return MetaModel.objects.filter(sys_from__lte=as_of).filter(
-            models.Q(sys_to__gt=as_of) | models.Q(sys_to__isnull=True)
+        return (
+            MetaModel.objects.filter(sys_from__lte=as_of)
+            .filter(
+                models.Q(sys_to__gt=as_of) | models.Q(sys_to__isnull=True)
+            )
+            .exclude(meta_history_type="-")
         )
 
     raise ValueError(

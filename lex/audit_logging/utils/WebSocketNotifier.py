@@ -8,7 +8,7 @@ and graceful degradation when WebSocket operations fail.
 import logging
 from typing import Optional
 from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
+from lex.utilities.channel_layer import sync_channel_group_send
 # from lex.logging.utils.data_models import WebSocketError
 
 
@@ -64,7 +64,7 @@ class WebSocketNotifier:
             }
             
             # Send to the "calculations" group to maintain compatibility
-            async_to_sync(channel_layer.group_send)("calculations", calc_id_message)
+            sync_channel_group_send("calculations", calc_id_message)
             
             logger.debug(
                 "WebSocket notification sent successfully",
@@ -123,7 +123,7 @@ class WebSocketNotifier:
                 "payload": payload
             }
             
-            async_to_sync(channel_layer.group_send)(group, message)
+            sync_channel_group_send(group, message)
             
             logger.debug(
                 f"Calculation notification sent to group '{group}'",

@@ -1,15 +1,13 @@
 import logging
 from typing import Optional
 
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
-
 from django.dispatch import Signal
 
 from lex.api.utils import operation_context
 from lex.core.calculated_updates.update_handler import CalculatedModelUpdateHandler
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+from lex.utilities.channel_layer import sync_channel_group_send
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +41,6 @@ def update_calculation_status(
     if not issubclass(instance.__class__, CalculationModel):
         return
 
-    channel_layer = get_channel_layer()
     record_id = f"{instance._meta.model_name}_{instance.id}"
     calculation_id = _resolve_calculation_id(instance, record_id)
     message_type = ""
@@ -70,7 +67,7 @@ def update_calculation_status(
         message_type = "calculation_aborted"
         ActiveCalculationStateStore.clear(record_id)
 
-    if not message_type or not channel_layer:
+    if not message_type:
         return
 
     payload = {
@@ -90,10 +87,7 @@ def update_calculation_status(
         "payload": payload,
     }
 
-    try:
-        async_to_sync(channel_layer.group_send)("update_calculation_status", message)
-    except Exception:
-        logger.exception("Failed to broadcast calculation status via WebSocket")
+    sync_channel_group_send("update_calculation_status", message)
 
 
 def _resolve_calculation_id(instance, record_id: str) -> Optional[str]:

@@ -1,5 +1,6 @@
 import traceback
 import logging
+from contextlib import nullcontext
 
 from django.db import transaction
 from rest_framework_api_key.permissions import HasAPIKey
@@ -27,6 +28,7 @@ from rest_framework.exceptions import PermissionDenied
 from lex.api.views.permissions.UserPermission import UserPermission
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
+from lex.core.models.LexModel import should_use_atomic_model_operations
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +99,12 @@ class OneModelEntry(
         with OperationContext(request, calculationId) as context_id:
 
             try:
-                with transaction.atomic():
+                atomic_context = (
+                    transaction.atomic()
+                    if should_use_atomic_model_operations(model_container.model_class)
+                    else nullcontext()
+                )
+                with atomic_context:
                     response = CreateModelMixin.create(self, request, *args, **kwargs)
 
             except Exception as e:
@@ -211,11 +218,7 @@ class OneModelEntry(
 
                 except CalculationModelException as exc:
                     # CalculationModel's own exception path already:
-                    calc_obj = exc.calc_obj
-                    if calc_obj:
-                        for obj in calc_obj:
-                            obj.is_calculated = CalculationModel.ERROR
-                            obj.save(skip_hooks=True)
+                    CalculationModel.persist_error_state(exc.calc_obj)
 
                     raise APIException(
                         {"message": f"{exc.exception_details[0]} ", "traceback": exc.stack_trace[0]}

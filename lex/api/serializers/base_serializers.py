@@ -9,6 +9,7 @@ from datetime import datetime, date, time
 from uuid import UUID
 from decimal import Decimal
 
+from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.core.models.LexModel import LexModel, UserContext
 
 logger = logging.getLogger(__name__)
@@ -103,10 +104,17 @@ class LexSerializer(serializers.ModelSerializer):
             self._base_user_context = UserContext.from_request_base(request)
         return self._base_user_context
 
-    def _get_user_context(self, request, target_instance):
-        """Create an instance-specific UserContext from the cached base."""
+    def _get_user_context(self, request, target_instance, original_instance=None):
+        """Create an instance-specific UserContext from the cached base.
+
+        Args:
+            request: The Django request.
+            target_instance: The unwrapped LexModel instance.
+            original_instance: The pre-unwrap instance (e.g. HistoricalQuarter)
+                so keycloak scopes registered under either resource name are matched.
+        """
         base = self._get_base_user_context(request)
-        return base.with_instance(request, target_instance)
+        return base.with_instance(request, target_instance, original_instance=original_instance)
 
     @classmethod
     def _get_cached_field_names(cls, model_class) -> set:
@@ -190,7 +198,12 @@ class LexSerializer(serializers.ModelSerializer):
 
             caps = _get_capabilities(type(instance))
 
-            # Resolve the underlying model instance for permission checks
+            # Resolve the underlying model instance for permission checks.
+            # Keep a reference to the original instance so that keycloak
+            # scopes registered under the historical resource name
+            # (e.g. "core.HistoricalQuarter") are still matched after
+            # unwrapping to the main model ("core.Quarter").
+            original_instance = instance
             if not caps['has_permission_edit']:
                 target_instance = self._unwrap_instance(instance)
                 target_caps = _get_capabilities(type(target_instance))
@@ -202,7 +215,10 @@ class LexSerializer(serializers.ModelSerializer):
                 target_caps = caps
 
             # Create user context (reuses cached base)
-            user_context = self._get_user_context(request, target_instance)
+            user_context = self._get_user_context(
+                request, target_instance,
+                original_instance=original_instance if original_instance is not target_instance else None,
+            )
 
             # Get all field names (cached per model class)
             all_fields = self._get_cached_field_names(type(target_instance))
@@ -347,9 +363,13 @@ class LexSerializer(serializers.ModelSerializer):
     @staticmethod
     def _resolve_target_model(audit_log) -> type[Model] | None:
         # Prefer content_type if present
-        ct = getattr(audit_log, "content_type", None)
-        if ct:
+        content_type_id = getattr(audit_log, "content_type_id", None)
+        if content_type_id:
             try:
+                ct = safe_get_content_type(
+                    content_type_id=content_type_id,
+                    using=getattr(getattr(audit_log, "_state", None), "db", None),
+                )
                 return ct.model_class()
             except Exception:
                 pass

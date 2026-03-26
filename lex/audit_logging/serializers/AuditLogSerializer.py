@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from lex.audit_logging.models.AuditLog import AuditLog
+from lex.audit_logging.utils.content_types import safe_get_content_type, safe_get_generic_related_object
 
 
 class AuditLogReadOnlySerializerMixin:
@@ -42,14 +43,27 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
         1. Render a clickable link (using id/model).
         2. Populate a 'Master/Detail' expandable row with the 'details' dict.
         """
-        target = obj.calculatable_object
+        using = getattr(getattr(obj, "_state", None), "db", None)
+        target = safe_get_generic_related_object(obj)
+        content_type = None
 
-        if target and obj.content_type:
+        if target is not None:
+            try:
+                content_type = safe_get_content_type(target, using=using)
+            except Exception:
+                content_type = None
+        elif getattr(obj, "content_type_id", None):
+            try:
+                content_type = safe_get_content_type(content_type_id=obj.content_type_id, using=using)
+            except Exception:
+                content_type = None
+
+        if target and content_type:
             return {
                 # Metadata for Navigation/Routing
                 "id": obj.object_id,
-                "app_label": obj.content_type.app_label,
-                "model": obj.content_type.model,
+                "app_label": content_type.app_label,
+                "model": content_type.model,
 
                 # Display text for the Cell Renderer
                 "display_name": str(target),

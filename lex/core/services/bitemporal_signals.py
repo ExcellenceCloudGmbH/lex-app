@@ -119,7 +119,7 @@ def on_history_saved__chain_valid_to(
     pk_name = main_model._meta.pk.name
     pk_val = getattr(history_instance, pk_name)
 
-    with suppress_history_valid_to_chaining():
+    with suppress_history_valid_to_chaining(), suppress_main_table_sync():
         with transaction.atomic():
             # Acquire all relevant history rows in deterministic order to avoid
             # opposite lock acquisition across concurrent writers.
@@ -214,23 +214,46 @@ def on_history_saved__sync_main_table(
 
     pk_name = main_model._meta.pk.name
     pk_val = getattr(instance, pk_name)
-    # Run synchronization after commit so lock acquisition on main/history rows
-    # happens outside the current history write transaction.
-    transaction.on_commit(
-        lambda: BitemporalSynchronizer.sync_record_for_model(main_model, pk_val, sender)
-    )
+
+    # Run synchronization inline so the main table is consistent before
+    # the transaction commits.  This avoids race conditions with Celery
+    # tasks that read the main table immediately after dispatch.
+    # Re-entrancy is prevented by the _suppress_main_table_sync guard:
+    # BitemporalSynchronizer saves the main model with
+    # skip_history_when_saving=True, so no new history record is created
+    # and this handler is not re-triggered.
+    with suppress_main_table_sync():
+        BitemporalSynchronizer.sync_record_for_model(main_model, pk_val, sender)
 
 
 def on_history_pre_delete__cancel_schedules(
     sender, instance, *,
     historical_model, **kwargs
 ):
-    """Cancel any scheduled Celery tasks before a History row is deleted."""
+    """Cancel scheduled tasks and close open meta records before deletion.
+
+    This runs *before* the DB delete, so the FK (history_object_id) is
+    still intact.  We must close all open meta records here because once
+    Django executes the DELETE, the FK is SET_NULL and sys_to chaining
+    can no longer find them.
+    """
     if sender != historical_model:
         return
 
     try:
         MetaModel = sender.meta_history.model
+        now = timezone.now()
+
+        # ── Close all open meta records for this history row ──
+        # This ensures system-time queries after the deletion no longer
+        # see the old meta versions (their sys_to window is closed).
+        open_metas = MetaModel.objects.filter(
+            history_object_id=instance.pk,
+            sys_to__isnull=True,
+        )
+        open_metas.update(sys_to=now)
+
+        # ── Cancel scheduled tasks ──
         scheduled = MetaModel.objects.filter(
             history_object_id=instance.pk,
             meta_task_status="SCHEDULED",

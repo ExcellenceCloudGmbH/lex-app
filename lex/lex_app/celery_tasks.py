@@ -1,4 +1,4 @@
-# Enhanced Celery Task Infrastructure with UnblockCelery Context Manager
+# Enhanced Celery Task Infrastructure
 
 """
 Celery task infrastructure with custom decorators and callback handling.
@@ -6,7 +6,12 @@ Celery task infrastructure with custom decorators and callback handling.
 This module provides enhanced Celery task integration with proper lifecycle
 management, status tracking, and error handling for calculation models.
 
-NEW: UnblockCelery context manager that reverses RunInCelery blocking behavior.
+Key context managers:
+- ``WaitForTasks``   — dispatch children to Celery and block until they finish.
+- ``FireAndForget``  — dispatch children without waiting (overrides WaitForTasks).
+
+Legacy aliases ``RunInCelery`` / ``AwaitDispatch`` and ``UnblockCelery`` are
+kept for backward compatibility but should not be used in new code.
 """
 
 import asyncio
@@ -36,6 +41,11 @@ from lex.core.models.CalculationModel import CalculationModel
 logger = logging.getLogger(__name__)
 
 
+def _celery_is_active() -> bool:
+    """Return True when Celery dispatch is enabled via environment."""
+    return os.getenv("CELERY_ACTIVE", "False").lower() == "true"
+
+
 class CeleryCalculationContext:
     """
     Context manager to set calculation_id for Celery tasks.
@@ -47,6 +57,8 @@ class CeleryCalculationContext:
     def __init__(self, context, model_context):
         self.context = context
         self.model_context = model_context
+        self._op_token = None
+        self._model_context_backup = None
 
     def __enter__(self):
         if self.context:
@@ -56,15 +68,24 @@ class CeleryCalculationContext:
             new_context['operation_id'] = str(uuid4())
             new_context["celery_task"] = True
             new_context["task_name"] = "calc_and_save"
-            operation_context.set(new_context)
+            self._op_token = operation_context.set(new_context)
+        else:
+            logger.warning(
+                "CeleryCalculationContext entered with context=None — "
+                "operation_context will NOT be set. Logging may be degraded."
+            )
         if self.model_context:
+            self._model_context_backup = _model_context.get()['model_context']
             _model_context.get()['model_context'] = self.model_context
             logger.warning(f"Operation Context {self.model_context}")
             logger.warning(f"Saved context {_model_context.get()['model_context']}")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        if self._op_token is not None:
+            operation_context.reset(self._op_token)
+        if self._model_context_backup is not None:
+            _model_context.get()['model_context'] = self._model_context_backup
 
 
 class CallbackTask(Task):
@@ -156,62 +177,66 @@ class CallbackTask(Task):
             )
 
 
-class UnblockCelery:
+class FireAndForget:
     """
-    Context manager that disables the blocking mechanism of RunInCelery,
-    allowing tasks to be dispatched to Celery workers even when inside a RunInCelery context.
+    Dispatch child tasks to Celery **without** waiting for them.
 
-    This is the reverse of RunInCelery - it forces asynchronous execution by overriding
-    the blocking behavior of any active RunInCelery contexts.
+    Use this for side-effects that don't affect the caller's correctness:
+    notifications, cache warming, analytics, etc.
 
-    Usage:
-        # Inside a RunInCelery context, tasks would normally be blocked (sync)
-        with RunInCelery():
-            # This would run synchronously normally
-            my_task(data)
+    Standalone usage::
 
-            # But with UnblockCelery, we can force async execution
-            with UnblockCelery():
-                my_task(data)  # This will be dispatched to Celery
+        with FireAndForget():
+            send_report_email(report)       # dispatched, nobody waits
+            notify_slack_channel(report)    # dispatched, nobody waits
+        # execution continues immediately
 
-            # Back to synchronous execution
-            my_task(data)
+    When nested inside a :class:`WaitForTasks` block, ``FireAndForget``
+    overrides the blocking behaviour for the enclosed calls::
+
+        with WaitForTasks():
+            compute_nav.delay(q1)               # parent WILL wait
+
+            with FireAndForget():               # override — don't wait
+                send_report_email(report)       # parent WON'T wait
+
+            compute_nav.delay(q2)               # parent WILL wait
+        # blocks until q1 and q2 finish; email may still be in flight
+
+    No-op when ``CELERY_ACTIVE`` is not set.
     """
 
     def __init__(self, force_tasks: Optional[Set[str]] = None,
                  exclude_tasks: Optional[Set[str]] = None):
         """
-        Initialize the UnblockCelery context manager.
-
         Args:
-            force_tasks: Set of task names to force dispatch (if None, force all tasks)
-            exclude_tasks: Set of task names to keep following RunInCelery rules
+            force_tasks: Task names to force-dispatch (``None`` = all).
+            exclude_tasks: Task names that should follow WaitForTasks rules.
         """
         self.force_tasks = force_tasks
         self.exclude_tasks = exclude_tasks or set()
         self.dispatched_results: List[Any] = []
+        self._active = _celery_is_active()
 
     def __enter__(self):
-        # Store the unblock context
+        if not self._active:
+            return self
         unblock_context = unblock_tasks_context.get()
         unblock_context['unblock_context_stack'].append(self)
         unblock_tasks_context.set(unblock_context)
-        logger.debug(f"UnblockCelery context entered. Force tasks: {self.force_tasks}, "
-                     f"Exclude tasks: {self.exclude_tasks}")
+        logger.debug(f"FireAndForget entered. force={self.force_tasks}, exclude={self.exclude_tasks}")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Remove this context from storage
+        if not self._active:
+            return
         unblock_context = unblock_tasks_context.get()
         if unblock_context['unblock_context_stack']:
             unblock_context['unblock_context_stack'].pop()
-
-        # Wait for completion of forced tasks
-        # self.wait_for_completion()
-        logger.debug(f"UnblockCelery context exited. Dispatched {len(self.dispatched_results)} tasks.")
+        logger.debug(f"FireAndForget exited. Dispatched {len(self.dispatched_results)} tasks.")
 
     def should_force_dispatch(self, task_name: str) -> bool:
-        """Determine if a task should be forced to dispatch despite RunInCelery context."""
+        """Return True if *task_name* should bypass WaitForTasks blocking."""
         if task_name in self.exclude_tasks:
             return False
         if self.force_tasks is None:
@@ -219,68 +244,88 @@ class UnblockCelery:
         return task_name in self.force_tasks
 
     def add_dispatched_result(self, result):
-        """Add a dispatched task result to track for completion."""
         self.dispatched_results.append(result)
 
     def wait_for_completion(self):
-        """Wait for all dispatched tasks to complete."""
+        """Wait for all dispatched tasks (rarely needed — prefer WaitForTasks)."""
         if not self.dispatched_results:
             return
-
-        logger.info(f"UnblockCelery: Waiting for {len(self.dispatched_results)} forced tasks to complete")
-
+        logger.info(f"FireAndForget: Waiting for {len(self.dispatched_results)} tasks")
         for result in self.dispatched_results:
             try:
                 with allow_join_result():
                     result.get()
-                logger.debug(f"UnblockCelery: Task {result.id} completed successfully")
             except Exception as e:
-                logger.error(f"UnblockCelery: Task {result.id} failed: {e}")
+                logger.error(f"FireAndForget: Task {result.id} failed: {e}")
                 raise
-        logger.info("UnblockCelery: All forced tasks completed")
+        self.dispatched_results.clear()
+        logger.info("FireAndForget: All tasks completed")
 
     @classmethod
-    def get_current_context(cls) -> Optional['UnblockCelery']:
-        """Get the current active UnblockCelery context."""
+    def get_current_context(cls) -> Optional['FireAndForget']:
+        """Return the innermost active ``FireAndForget`` context, or ``None``."""
         unblock_context = unblock_tasks_context.get()
         if unblock_context['unblock_context_stack']:
             return unblock_context['unblock_context_stack'][-1]
         return None
 
 
-class RunInCelery:
+class WaitForTasks:
     """
-    Context manager that selectively dispatches lex_shared_task decorated functions
-    to Celery workers while keeping others synchronous.
+    Dispatch child ``@lex_shared_task`` calls to Celery and **block** until
+    every dispatched task has finished.
 
-    Now checks for UnblockCelery contexts that can override its blocking behavior.
+    Use this when a parent calculation triggers child calculations and
+    must wait for all children to complete before continuing.
+
+    Basic usage::
+
+        with WaitForTasks():
+            child.is_calculated = "IN_PROGRESS"
+            child.save()          # dispatched to Celery
+        # ← execution resumes here only after child finishes
+
+    Nesting is supported — each scope tracks its own tasks independently::
+
+        with WaitForTasks():                    # outer scope
+            compute_portfolio.delay(fund_a)     # tracked by outer
+            with WaitForTasks():                # inner scope
+                compute_nav.delay(q1)           # tracked by inner
+                compute_nav.delay(q2)           # tracked by inner
+            # ← blocks until q1 and q2 finish
+            generate_report.delay(fund_a)       # tracked by outer
+        # ← blocks until fund_a and the report finish
+
+    No-op when ``CELERY_ACTIVE`` is not set.
     """
 
     def __init__(self, include_tasks: Optional[Set[str]] = None,
                  exclude_tasks: Optional[Set[str]] = None):
         """
-        Initialize the context manager.
-
         Args:
-            include_tasks: Set of task names to dispatch (if None, dispatch all lex_shared_tasks)
-            exclude_tasks: Set of task names to keep synchronous (overrides include_tasks)
+            include_tasks: Task names to dispatch (``None`` = all).
+            exclude_tasks: Task names to keep synchronous (overrides *include_tasks*).
         """
         self.include_tasks = include_tasks
         self.exclude_tasks = exclude_tasks or set()
         self.dispatched_results: List[Any] = []
         self.block = True
+        self._active = _celery_is_active()
 
     def __enter__(self):
-        tasks_context.get().get('task_context_stack').append(self)
+        if self._active:
+            tasks_context.get().get('task_context_stack').append(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self._active:
+            return
         if tasks_context.get().get('task_context_stack'):
             tasks_context.get().get('task_context_stack').pop()
         self.wait_for_completion()
 
     def should_dispatch(self, task_name: str) -> bool:
-        """Determine if a task should be dispatched based on include/exclude rules."""
+        """Return True if *task_name* should be dispatched to a Celery worker."""
         if task_name in self.exclude_tasks:
             return False
         if self.include_tasks is None:
@@ -288,28 +333,30 @@ class RunInCelery:
         return task_name in self.include_tasks
 
     def add_dispatched_result(self, result):
-        """Add a dispatched task result to track for completion."""
         self.dispatched_results.append(result)
 
     def wait_for_completion(self):
-        """Wait for all dispatched tasks to complete."""
-        logger.info(f"Waiting for {len(self.dispatched_results)} dispatched tasks to complete")
-        context = UnblockCelery.get_current_context()
-        if context:
+        """Block until every dispatched task has finished."""
+        if not self.dispatched_results:
+            return
+        logger.info(f"WaitForTasks: waiting for {len(self.dispatched_results)} tasks")
+        # If a FireAndForget context is active, skip blocking.
+        if FireAndForget.get_current_context():
             return
         for result in self.dispatched_results:
             try:
                 with allow_join_result():
                     result.get()
-                logger.debug(f"Task {result.id} completed successfully")
+                logger.debug(f"WaitForTasks: task {result.id} completed")
             except Exception as e:
-                logger.error(f"Task {result.id} failed: {e}")
+                logger.error(f"WaitForTasks: task {result.id} failed: {e}")
                 raise
-        logger.info("All dispatched tasks completed")
+        self.dispatched_results.clear()
+        logger.info("WaitForTasks: all tasks completed")
 
     @classmethod
-    def get_current_context(cls) -> Optional['RunInCelery']:
-        """Get the current active context from thread-local storage."""
+    def get_current_context(cls) -> Optional['WaitForTasks']:
+        """Return the innermost active ``WaitForTasks`` context, or ``None``."""
         if tasks_context.get().get('task_context_stack'):
             return tasks_context.get().get('task_context_stack')[-1]
         return None
@@ -329,12 +376,12 @@ unblock_tasks_context: contextvars.ContextVar[Dict[str, Any]] = contextvars.Cont
 
 class EnhancedBoundTaskMethod:
     """
-    Enhanced version that respects both RunInCelery and UnblockCelery contexts.
+    Respects :class:`WaitForTasks` and :class:`FireAndForget` contexts.
 
     Priority hierarchy:
-    1. UnblockCelery context (forces async) - HIGHEST PRIORITY
-    2. RunInCelery context (forces sync unless overridden)
-    3. Default behavior (sync)
+    1. ``FireAndForget`` — forces async dispatch (highest priority)
+    2. ``WaitForTasks``  — dispatches and registers for blocking wait
+    3. No context         — runs synchronously (default)
     """
 
     def __init__(self, instance, task):
@@ -342,37 +389,36 @@ class EnhancedBoundTaskMethod:
         self.task = task
 
     def __call__(self, *args, **kwargs):
-        """Handles direct calls - checks contexts to decide sync vs async execution."""
         task_name = getattr(self.task, 'name', self.task.__name__)
 
-        # PRIORITY 1: Check UnblockCelery context first (highest priority)
-        unblock_context = UnblockCelery.get_current_context()
-        if unblock_context and unblock_context.should_force_dispatch(task_name):
-            logger.debug(f"UnblockCelery forcing task {task_name} to Celery (overriding RunInCelery)")
+        if not _celery_is_active():
+            return self.task(self.instance, *args, **kwargs)
+
+        # PRIORITY 1: FireAndForget (highest)
+        ff_ctx = FireAndForget.get_current_context()
+        if ff_ctx and ff_ctx.should_force_dispatch(task_name):
+            logger.debug(f"FireAndForget: dispatching {task_name}")
             result = self.task.delay(self.instance, *args, **kwargs)
-            unblock_context.add_dispatched_result(result)
+            ff_ctx.add_dispatched_result(result)
             return result
 
-        # PRIORITY 2: Check RunInCelery context
-        run_context = RunInCelery.get_current_context()
-        if run_context is None:
-            # No context - default behavior (sync)
-            logger.debug(f"No context: Running task {task_name} synchronously")
+        # PRIORITY 2: WaitForTasks
+        await_ctx = WaitForTasks.get_current_context()
+        if await_ctx is None:
+            logger.debug(f"No dispatch context — running {task_name} synchronously")
             return self.task(self.instance, *args, **kwargs)
 
-        # Check if UnblockCelery excludes this task from forced dispatch
-        if unblock_context and task_name in unblock_context.exclude_tasks:
-            logger.debug(f"UnblockCelery excluding task {task_name} from forced dispatch")
+        if ff_ctx and task_name in ff_ctx.exclude_tasks:
+            logger.debug(f"FireAndForget excluding {task_name}")
             return self.task(self.instance, *args, **kwargs)
 
-        # Follow RunInCelery rules
-        if run_context.should_dispatch(task_name):
-            logger.debug(f"RunInCelery dispatching task {task_name} to Celery")
+        if await_ctx.should_dispatch(task_name):
+            logger.debug(f"WaitForTasks: dispatching {task_name}")
             result = self.task.delay(self.instance, *args, **kwargs)
-            run_context.add_dispatched_result(result)
+            await_ctx.add_dispatched_result(result)
             return result
         else:
-            logger.debug(f"RunInCelery running task {task_name} synchronously")
+            logger.debug(f"WaitForTasks: running {task_name} synchronously")
             return self.task(self.instance, *args, **kwargs)
 
     def delay(self, *args, **kwargs):
@@ -385,9 +431,7 @@ class EnhancedBoundTaskMethod:
 
 
 class EnhancedTaskMethodDescriptor:
-    """
-    Enhanced version that uses EnhancedBoundTaskMethod with UnblockCelery support.
-    """
+    """Descriptor that uses :class:`EnhancedBoundTaskMethod` for dispatch logic."""
 
     def __init__(self, task):
         self.task = task
@@ -398,43 +442,42 @@ class EnhancedTaskMethodDescriptor:
         return EnhancedBoundTaskMethod(instance, self.task)
 
     def __call__(self, *args, **kwargs):
-        """Handle direct calls on class-level access."""
         task_name = getattr(self.task, 'name', self.task.__name__)
 
-        # Check UnblockCelery context first
-        unblock_context = UnblockCelery.get_current_context()
-        if unblock_context and unblock_context.should_force_dispatch(task_name):
-            logger.debug(f"UnblockCelery forcing task {task_name} to Celery")
+        if not _celery_is_active():
+            return self.task(*args, **kwargs)
+
+        ff_ctx = FireAndForget.get_current_context()
+        if ff_ctx and ff_ctx.should_force_dispatch(task_name):
+            logger.debug(f"FireAndForget: dispatching {task_name}")
             result = self.task.delay(*args, **kwargs)
-            unblock_context.add_dispatched_result(result)
+            ff_ctx.add_dispatched_result(result)
             return result
 
-        # Check RunInCelery context
-        run_context = RunInCelery.get_current_context()
-        if run_context is None:
+        await_ctx = WaitForTasks.get_current_context()
+        if await_ctx is None:
             return self.task(*args, **kwargs)
 
-        # Check UnblockCelery exclusions
-        if unblock_context and task_name in unblock_context.exclude_tasks:
+        if ff_ctx and task_name in ff_ctx.exclude_tasks:
             return self.task(*args, **kwargs)
 
-        if run_context.should_dispatch(task_name):
-            logger.debug(f"RunInCelery dispatching task {task_name} to Celery")
+        if await_ctx.should_dispatch(task_name):
+            logger.debug(f"WaitForTasks: dispatching {task_name}")
             result = self.task.delay(*args, **kwargs)
-            run_context.add_dispatched_result(result)
+            await_ctx.add_dispatched_result(result)
             return result
         else:
-            logger.debug(f"RunInCelery running task {task_name} synchronously")
+            logger.debug(f"WaitForTasks: running {task_name} synchronously")
             return self.task(*args, **kwargs)
 
     def __getattr__(self, name):
-        """Proxy attribute access to the underlying task."""
         return getattr(self.task, name)
 
 
 def lex_shared_task(_func=None, **task_opts):
     """
-    Enhanced version of lex_shared_task that works with both RunInCelery and UnblockCelery contexts.
+    Decorator that makes a method Celery-capable, respecting
+    :class:`WaitForTasks` and :class:`FireAndForget` contexts.
     """
 
     def decorator(func):
@@ -474,60 +517,53 @@ def lex_shared_task(_func=None, **task_opts):
         return decorator
 
 
-# Utility functions
-def is_in_unblock_context(task_name: str = None) -> bool:
-    """
-    Check if we're currently in an UnblockCelery context that would force dispatch.
+# ── Utility functions ────────────────────────────────────────────────────
 
-    Args:
-        task_name: Optional task name to check specifically
-
-    Returns:
-        bool: True if in UnblockCelery context and task should be forced to dispatch
-    """
-    unblock_context = UnblockCelery.get_current_context()
-    if not unblock_context:
+def is_in_fire_and_forget_context(task_name: str = None) -> bool:
+    """True when inside a :class:`FireAndForget` that would force dispatch."""
+    ctx = FireAndForget.get_current_context()
+    if not ctx:
         return False
-
     if task_name is None:
         return True
+    return ctx.should_force_dispatch(task_name)
 
-    return unblock_context.should_force_dispatch(task_name)
+# Backward-compatible alias
+is_in_unblock_context = is_in_fire_and_forget_context
 
 
 def register_task_with_context(task_result):
     """
-    Register a task result with the current contexts.
-    Checks UnblockCelery first, then RunInCelery.
+    Register a task result with the active dispatch context.
+
+    Checks :class:`FireAndForget` first, then :class:`WaitForTasks`.
     """
-    # Register with UnblockCelery if present (highest priority)
-    unblock_context = UnblockCelery.get_current_context()
-    if unblock_context is not None:
-        unblock_context.add_dispatched_result(task_result)
+    ff_ctx = FireAndForget.get_current_context()
+    if ff_ctx is not None:
+        ff_ctx.add_dispatched_result(task_result)
         return task_result
 
-    # Otherwise register with RunInCelery if present
-    run_context = RunInCelery.get_current_context()
-    if run_context is not None:
-        run_context.add_dispatched_result(task_result)
+    await_ctx = WaitForTasks.get_current_context()
+    if await_ctx is not None:
+        await_ctx.add_dispatched_result(task_result)
 
     return task_result
 
 
-def respect_unblock_celery(func):
-    """
-    Decorator that makes a function respect UnblockCelery context.
-    Useful for methods that dispatch Celery tasks internally.
-    """
+def respect_fire_and_forget(func):
+    """Decorator that injects ``_force_async=True`` when inside a FireAndForget."""
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if is_in_unblock_context(func.__name__):
-            logger.debug(f"UnblockCelery context detected for {func.__name__}, forcing async behavior")
+        if is_in_fire_and_forget_context(func.__name__):
+            logger.debug(f"FireAndForget detected for {func.__name__}")
             kwargs['_force_async'] = True
         return func(*args, **kwargs)
 
     return wrapper
+
+# Backward-compatible alias
+respect_unblock_celery = respect_fire_and_forget
 
 
 # Task definitions (your existing tasks)
@@ -700,18 +736,29 @@ def print_context_state(location: str = "Unknown"):
     print("=" * 50)
 
 
-# Export everything
+# ── Backward-compatible aliases ──────────────────────────────────────────
+AwaitDispatch = WaitForTasks
+RunInCelery = WaitForTasks
+UnblockCelery = FireAndForget
+
+
 __all__ = [
     'lex_shared_task',
     'CallbackTask',
     'calc_and_save',
     'get_calc_and_save_task',
+    # Current names
+    'WaitForTasks',
+    'FireAndForget',
+    'is_in_fire_and_forget_context',
+    'register_task_with_context',
+    'respect_fire_and_forget',
+    # Backward-compatible aliases
+    'AwaitDispatch',
     'RunInCelery',
     'UnblockCelery',
     'is_in_unblock_context',
-    'register_task_with_context',
-    'respect_unblock_celery'
-    'respect_unblock_celery'
+    'respect_unblock_celery',
 ]
 
 @lex_shared_task(name="activate_history_version")

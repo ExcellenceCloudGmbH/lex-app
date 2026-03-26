@@ -4,8 +4,8 @@ import time
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 
-from django.contrib.contenttypes.models import ContentType
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload
+from lex.audit_logging.utils.content_types import safe_get_content_type as _safe_get_content_type
 
 
 logger = logging.getLogger(__name__)
@@ -77,28 +77,6 @@ def _delete_with_retry(instance, *, max_retries=MAX_UPDATE_RETRIES):
         operation_name="instance delete",
     )
 
-def _safe_get_content_type(model_class):
-    """Get ContentType with stale-cache resilience.
-    Django caches ContentType objects in-memory.  If the
-    ``django_content_type`` table is modified externally (migration,
-    DB restore, manual cleanup) the cache may reference a row that no
-    longer exists, causing an FK violation when the id is written to
-    ``audit_logging_auditlog``.
-    This helper verifies the cached object still exists in the DB and,
-    if not, clears the cache and retries.
-    """
-    ct = ContentType.objects.get_for_model(model_class)
-    try:
-        ContentType.objects.get(pk=ct.pk)
-        return ct
-    except ContentType.DoesNotExist:
-        logger.warning(
-            "Stale ContentType cache detected for %s (pk=%s). "
-            "Clearing cache and retrying.",
-            model_class.__name__, ct.pk,
-        )
-        ContentType.objects.clear_cache()
-        return ContentType.objects.get_for_model(model_class)
 
 class AuditLogMixin:
     

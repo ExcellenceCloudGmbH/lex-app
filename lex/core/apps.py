@@ -1,5 +1,5 @@
 from lex.utilities.config.generic_app_config import GenericAppConfig
-from lex_app.apps import LexAppConfig
+from lex.lex_app.apps import LexAppConfig
 
 
 class CoreConfig(LexAppConfig):
