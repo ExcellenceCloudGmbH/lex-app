@@ -225,8 +225,7 @@ class CalculationModel(LexModel):
 
         # Dispatch the task
         from lex.lex_app.celery_tasks import WaitForTasks
-        with WaitForTasks():
-            task_result = func.delay(context=new_context, model_context=model_context)
+        task_result = func.delay(context=new_context, model_context=model_context)
 
         # Register with WaitForTasks context if one exists
         from lex.lex_app.celery_tasks import register_task_with_context
