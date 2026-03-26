@@ -10,6 +10,7 @@ class ModelStructure:
     def __init__(self, path: str):
         self.path = path
         self.structure = {}
+        self._structure_defined = False
         self.styling = {}
         # Add the new attribute for untracked models
         self.untracked_models = []
@@ -23,6 +24,7 @@ class ModelStructure:
             data = yaml.safe_load(f)
         try:
             self.structure = data["model_structure"]
+            self._structure_defined = True
         except (KeyError, TypeError):
             logger.warning("Structure is not defined in the model info file")
         try:
@@ -37,7 +39,7 @@ class ModelStructure:
             pass
 
     def structure_is_defined(self):
-        return bool(self.structure)
+        return self._structure_defined
 
     @classmethod
     def load_untracked_models_globally(cls, path: str):

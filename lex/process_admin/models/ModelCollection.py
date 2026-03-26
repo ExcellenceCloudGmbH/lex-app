@@ -1,3 +1,4 @@
+import copy
 from typing import Dict, Any, Set, Type, Union
 from django.db.models import Model
 
@@ -68,7 +69,13 @@ class ModelCollection:
         model_styling: Configuration for customizing model display
         model_structure_with_readable_names: Enriched structure with display names
     """
-    def __init__(self, models_to_admins: Dict[Type[Model], Any], model_structure: Dict[str, Any], model_styling: Dict[str, Any]) -> None:
+    def __init__(
+        self,
+        models_to_admins: Dict[Type[Model], Any],
+        model_structure: Dict[str, Any],
+        model_styling: Dict[str, Any],
+        auto_include_missing_models: bool = True,
+    ) -> None:
         """
         Initialize the ModelCollection with models, structure, and styling configuration.
         
@@ -79,67 +86,73 @@ class ModelCollection:
             model_styling: Configuration dictionary for customizing model display properties
         """
         self.ids2containers = _create_model_containers(models_to_admins)
+        model_structure = copy.deepcopy(model_structure)
         set_of_ids_container = [c.id for c in self.all_containers]
 
         # Build the legacy archive folder from all registered models flagged
         # as legacy_data (including dynamic frozen tables).
-        temp = {}
-        for container in self.all_containers:
-            model_class = container.model_class
-            app_label = getattr(getattr(model_class, "_meta", None), "app_label", None)
-            is_legacy = (
-                getattr(model_class, "_is_dynamic_legacy_archive", False)
-                or app_label == "legacy_data"
-            )
-            if not is_legacy:
-                continue
-            model_id = container.id
-            if model_id in set_of_ids_container:
-                set_of_ids_container.remove(model_id)
-                temp[model_id] = None
+        if auto_include_missing_models:
+            temp = {}
+            for container in self.all_containers:
+                model_class = container.model_class
+                app_label = getattr(getattr(model_class, "_meta", None), "app_label", None)
+                is_legacy = (
+                    getattr(model_class, "_is_dynamic_legacy_archive", False)
+                    or app_label == "legacy_data"
+                )
+                if not is_legacy:
+                    continue
+                model_id = container.id
+                if model_id in set_of_ids_container:
+                    set_of_ids_container.remove(model_id)
+                    temp[model_id] = None
 
-        if temp:
-            model_structure["Legacy Generic App (Archive)"] = dict(sorted(temp.items()))
+            if temp:
+                model_structure["Legacy Generic App (Archive)"] = dict(sorted(temp.items()))
 
         # Build a nested "Models" fallback structure from filesystem paths
         # instead of dumping everything flat.  For a model with
         #   __module__ == "ArmiraCashflowDB.Upload.UploadCashflow.UploadCashflow"
         # the container id "uploadcashflow" will be placed under
         #   Models → Upload → uploadcashflow: None
-        unplaced = {}
-        for container in self.all_containers:
-            cid = container.id
-            if cid not in set_of_ids_container:
-                continue  # already claimed by legacy or removed
-            if cid.startswith("historical") or cid.startswith("metahistorical"):
-                continue
-            model_class = container.model_class
-            module = getattr(model_class, "__module__", "") or ""
-            if module.startswith("django.contrib"):
-                continue
-            parts = module.split(".")
-            # Try to find the repo segment and derive the subfolder path
-            # e.g. ["ArmiraCashflowDB", "Upload", "UploadCashflow", "UploadCashflow"]
-            #        repo_index=0        → path parts = ["Upload", "UploadCashflow"]
-            #        we drop the last part (filename == class name) → ["Upload"]
-            repo_name_local = parts[0] if parts else ""
-            try:
-                repo_idx = parts.index(repo_name_local)
-                path_parts = parts[repo_idx + 1 : -1]  # folders between repo and filename
-            except (ValueError, IndexError):
-                path_parts = []
+        if auto_include_missing_models:
+            unplaced = {}
+            for container in self.all_containers:
+                cid = container.id
+                if cid not in set_of_ids_container:
+                    continue  # already claimed by legacy or removed
+                if cid.startswith("historical") or cid.startswith("metahistorical"):
+                    continue
+                model_class = container.model_class
+                module = getattr(model_class, "__module__", "") or ""
+                if module.startswith("django.contrib"):
+                    continue
+                parts = module.split(".")
+                # Try to find the repo segment and derive the subfolder path
+                # e.g. ["ArmiraCashflowDB", "Upload", "UploadCashflow", "UploadCashflow"]
+                #        repo_index=0        → path parts = ["Upload", "UploadCashflow"]
+                #        we drop the last part (filename == class name) → ["Upload"]
+                repo_name_local = parts[0] if parts else ""
+                try:
+                    repo_idx = parts.index(repo_name_local)
+                    path_parts = parts[repo_idx + 1 : -1]  # folders between repo and filename
+                except (ValueError, IndexError):
+                    path_parts = []
 
-            # Walk into the nested dict, creating intermediate folders
-            current = unplaced
-            for folder in path_parts:
-                if folder not in current:
-                    current[folder] = {}
-                current = current[folder]
-            current[cid] = None
+                # Walk into the nested dict, creating intermediate folders
+                current = unplaced
+                for folder in path_parts:
+                    if folder not in current:
+                        current[folder] = {}
+                    current = current[folder]
+                current[cid] = None
 
-        unplaced = _sort_structure_recursive(unplaced)
-
-        self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml(unplaced, model_structure)
+            unplaced = _sort_structure_recursive(unplaced)
+            self.model_structure = ModelStructureBuilder.merge_predefined_and_yaml(
+                unplaced, model_structure
+            )
+        else:
+            self.model_structure = model_structure
         self.model_styling = model_styling
 
         self.model_structure_with_readable_names = {

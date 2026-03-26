@@ -15,10 +15,24 @@ def title_for_model(model: Model) -> str:
     """Get the title for a model."""
     return model._meta.verbose_name.title()
 
-def get_readable_name_for(node_name, model_collection, parent_styling):
+
+def get_node_styling(node_name, model_collection, parent_styling):
     node_styling = parent_styling.get(node_name)
 
-    if isinstance(node_styling, dict) and 'name' in node_styling:
+    if isinstance(node_styling, dict):
+        return node_styling
+
+    global_node_styling = model_collection.model_styling.get(node_name)
+    if isinstance(global_node_styling, dict):
+        return global_node_styling
+
+    return {}
+
+
+def get_readable_name_for(node_name, model_collection, parent_styling):
+    node_styling = get_node_styling(node_name, model_collection, parent_styling)
+
+    if 'name' in node_styling:
         return node_styling['name']
 
     if node_name in model_collection.all_model_ids:
@@ -33,7 +47,7 @@ def enrich_model_structure_with_readable_names_and_types(node_name, model_tree, 
 
     readable_name = get_readable_name_for(node_name, model_collection, parent_styling)
 
-    current_node_styling = parent_styling.get(node_name, {})
+    current_node_styling = get_node_styling(node_name, model_collection, parent_styling)
 
     if not model_tree:
         model_class = model_collection.get_container(node_name).model_class

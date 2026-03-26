@@ -81,3 +81,60 @@ class ModelCollectionStructureTests(TestCase):
             collection.model_structure["App"],
             {"appmodel": None},
         )
+
+    def test_explicit_structure_can_exclude_unmentioned_models(self):
+        alpha_model = type(
+            "AlphaModel",
+            (),
+            {"__module__": "Repo.Alpha.AlphaModel"},
+        )
+        beta_model = type(
+            "BetaModel",
+            (),
+            {"__module__": "Repo.Beta.BetaModel"},
+        )
+
+        collection = ModelCollection(
+            {
+                alpha_model: _ProcessAdmin(),
+                beta_model: _ProcessAdmin(),
+            },
+            {"Custom": {"alphamodel": None}},
+            {},
+            auto_include_missing_models=False,
+        )
+
+        self.assertEqual(
+            collection.model_structure,
+            {"Custom": {"alphamodel": None}},
+        )
+
+    def test_explicit_structure_skips_legacy_archive_autofolder(self):
+        alpha_model = type(
+            "AlphaModel",
+            (),
+            {"__module__": "Repo.Alpha.AlphaModel"},
+        )
+        archive_model = type(
+            "ArchiveModel",
+            (),
+            {
+                "__module__": "Repo.Legacy.ArchiveModel",
+                "_is_dynamic_legacy_archive": True,
+            },
+        )
+
+        collection = ModelCollection(
+            {
+                alpha_model: _ProcessAdmin(),
+                archive_model: _ProcessAdmin(),
+            },
+            {"Custom": {"alphamodel": None}},
+            {},
+            auto_include_missing_models=False,
+        )
+
+        self.assertEqual(
+            collection.model_structure,
+            {"Custom": {"alphamodel": None}},
+        )

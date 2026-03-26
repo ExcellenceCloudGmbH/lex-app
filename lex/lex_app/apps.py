@@ -170,9 +170,15 @@ class LexAppConfig(GenericAppConfig):
 
         # Register model structure and styling if available
         # This provides the organized structure in the frontend
-        if self.model_structure_builder.model_structure:
+        if (
+            self.model_structure_builder.model_structure
+            or self.model_structure_builder.model_structure_is_defined_in_yaml
+        ):
             logger.debug(f"Registering model structure for {repo_name}")
-            ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
+            ModelRegistration.register_model_structure(
+                self.model_structure_builder.model_structure,
+                auto_include_missing_models=not self.model_structure_builder.model_structure_is_defined_in_yaml,
+            )
         if self.model_structure_builder.model_styling:
             ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         if self.model_structure_builder.widget_structure:

@@ -154,10 +154,11 @@ class CalculationStatusSignalTests(SimpleTestCase):
 
     def test_calculate_hook_does_not_rewrap_existing_calculation_exception(self):
         instance = self._build_instance(4)
+        child_instance = self._build_instance(40)
         existing_exception = CalculationModelException(
-            calc_obj=instance,
-            exception_details="inner-failure",
-            stack_trace="stack",
+            calc_obj=[child_instance],
+            exception_details=["inner-failure"],
+            stack_trace=["stack"],
         )
 
         with patch.object(
@@ -172,8 +173,13 @@ class CalculationStatusSignalTests(SimpleTestCase):
             with self.assertRaises(CalculationModelException) as raised:
                 DummyCalculationModel.calculate_hook(instance)
 
-        self.assertIs(raised.exception, existing_exception)
-        save_mock.assert_not_called()
+        exc = raised.exception
+        # The parent wraps the child chain: calc_obj accumulates [child, parent]
+        self.assertEqual(exc.calc_obj, [child_instance, instance])
+        self.assertEqual(exc.exception_details[0], "inner-failure")
+        # Parent must persist its own ERROR state
+        save_mock.assert_called_once_with(skip_hooks=True)
+        self.assertEqual(instance.is_calculated, CalculationModel.ERROR)
 
     def test_calculate_hook_skips_reentrant_invocation(self):
         instance = self._build_instance(5)

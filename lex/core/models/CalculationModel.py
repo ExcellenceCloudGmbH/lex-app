@@ -428,21 +428,25 @@ class CalculationModel(LexModel):
             except Exception as cleanup_error:
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
 
-            # Dispatch failures do not pass through execute_calculation_sync(), so persist
-            # ERROR state and notify websocket clients from here.
-            if not status_was_error:
-                try:
-                    self.save(skip_hooks=True)
+            # Persist ERROR state and notify websocket clients.
+            # Always save self to ERROR — even when execute_calculation_sync
+            # already did — to cover cases where the error originated in
+            # calculate_hook itself (e.g. dispatch failure) or where the
+            # parent's own calculate() raised directly.
+            try:
+                self.save(skip_hooks=True)
+                if not status_was_error:
                     update_calculation_status(
                         self,
                         exception_details=exception_details,
                         stack_trace=stack_trace,
                     )
-                except Exception as status_update_error:
-                    logger.error(
-                        f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
-                        exc_info=True,
-                    )
+            except Exception as status_update_error:
+                logger.error(
+                    f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
+                    exc_info=True,
+                )
+
 
             calc_obj, exception_chain, stack_trace_chain = self.build_exception_chain(
                 e,

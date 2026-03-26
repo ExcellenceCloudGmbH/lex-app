@@ -64,7 +64,11 @@ class GenericAppConfig(AppConfig):
 
         self.discover_models(self.project_path, repo=repo)
 
-        if not self.model_structure_builder.model_structure and not is_lex:
+        if (
+            not self.model_structure_builder.model_structure
+            and not self.model_structure_builder.model_structure_is_defined_in_yaml
+            and not is_lex
+        ):
             self.model_structure_builder.build_structure(self.discovered_models)
 
         self.untracked_models += self.model_structure_builder.untracked_models
@@ -146,7 +150,14 @@ class GenericAppConfig(AppConfig):
             [o for o in self.discovered_models.values() if not admin.site.is_registered(o)],
             self.untracked_models
        )
-        ModelRegistration.register_model_structure(self.model_structure_builder.model_structure)
+        if (
+            self.model_structure_builder.model_structure
+            or self.model_structure_builder.model_structure_is_defined_in_yaml
+        ):
+            ModelRegistration.register_model_structure(
+                self.model_structure_builder.model_structure,
+                auto_include_missing_models=not self.model_structure_builder.model_structure_is_defined_in_yaml,
+            )
         ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
         ModelRegistration.register_models([Streamlit], self.untracked_models)
