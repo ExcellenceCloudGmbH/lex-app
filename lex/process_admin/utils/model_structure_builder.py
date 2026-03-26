@@ -12,6 +12,7 @@ class ModelStructureBuilder:
         # Store the raw predefined structure
         self.predefined_structure = predefined_structure or {}
         self.model_structure_is_defined_in_yaml = False
+        self.model_structure_is_explicitly_defined = False
 
         # Initialize active structure as a deep copy of predefined
         # This ensures defaults exist even if no YAML is loaded.
@@ -35,6 +36,7 @@ class ModelStructureBuilder:
         yaml_styling = info.styling
         self.untracked_models = info.untracked_models
         self.model_structure_is_defined_in_yaml = info.structure_is_defined()
+        self.model_structure_is_explicitly_defined = info.structure_is_defined()
 
         # 2. Merge YAML structure into Predefined structure (with override logic)
         self.model_structure = self.merge_predefined_and_yaml(self.predefined_structure, yaml_structure)
@@ -126,7 +128,10 @@ class ModelStructureBuilder:
         for attr, method_name in structure_methods.items():
             if hasattr(module, method_name):
                 try:
-                    setattr(self, attr, getattr(module, method_name)())
+                    value = getattr(module, method_name)()
+                    setattr(self, attr, value)
+                    if attr == "model_structure":
+                        self.model_structure_is_explicitly_defined = True
                 except Exception as e:
                     print(f"Error calling {method_name}: {e}")
             else:

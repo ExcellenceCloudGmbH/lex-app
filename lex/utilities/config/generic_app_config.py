@@ -66,7 +66,7 @@ class GenericAppConfig(AppConfig):
 
         if (
             not self.model_structure_builder.model_structure
-            and not self.model_structure_builder.model_structure_is_defined_in_yaml
+            and not self.model_structure_builder.model_structure_is_explicitly_defined
             and not is_lex
         ):
             self.model_structure_builder.build_structure(self.discovered_models)
@@ -90,6 +90,8 @@ class GenericAppConfig(AppConfig):
 
                 if _is_structure_yaml_file(file):
                     self.model_structure_builder.extract_from_yaml(absolute_path)
+                elif _is_structure_file(file):
+                    self._process_module(rel_module_name, file)
                 elif self._is_valid_module(module_name, file):
                     self._process_module(rel_module_name, file)
 
@@ -103,6 +105,10 @@ class GenericAppConfig(AppConfig):
                 and not module_name.startswith(self._EXCLUDED_PREFIXES))
 
     def _process_module(self, full_module_name, file):
+        if _is_structure_file(file):
+            self.model_structure_builder.extract_and_save_structure(full_module_name)
+            return
+
         self.load_models_from_module(full_module_name)
 
     def load_models_from_module(self, full_module_name):
@@ -152,11 +158,11 @@ class GenericAppConfig(AppConfig):
        )
         if (
             self.model_structure_builder.model_structure
-            or self.model_structure_builder.model_structure_is_defined_in_yaml
+            or self.model_structure_builder.model_structure_is_explicitly_defined
         ):
             ModelRegistration.register_model_structure(
                 self.model_structure_builder.model_structure,
-                auto_include_missing_models=not self.model_structure_builder.model_structure_is_defined_in_yaml,
+                auto_include_missing_models=not self.model_structure_builder.model_structure_is_explicitly_defined,
             )
         ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)

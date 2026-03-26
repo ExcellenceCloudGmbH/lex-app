@@ -1,4 +1,5 @@
 from unittest import TestCase
+from unittest.mock import patch
 
 from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
 
@@ -55,3 +56,19 @@ class ModelStructureBuilderMergeTests(TestCase):
 
         self.assertIsNone(merged["Section"])
         self.assertEqual(merged["Other"], {"other_model": None})
+
+    @patch("lex.process_admin.utils.model_structure_builder.importlib.import_module")
+    def test_extract_and_save_structure_marks_structure_as_explicit(self, mocked_import):
+        class Module:
+            @staticmethod
+            def get_model_structure():
+                return {}
+
+        mocked_import.return_value = Module()
+
+        builder = ModelStructureBuilder()
+        builder.extract_and_save_structure("external_app.external_app_model_structure")
+
+        self.assertTrue(builder.model_structure_is_explicitly_defined)
+        self.assertFalse(builder.model_structure_is_defined_in_yaml)
+        self.assertEqual(builder.model_structure, {})

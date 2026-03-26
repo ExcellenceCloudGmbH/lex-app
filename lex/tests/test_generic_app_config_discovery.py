@@ -4,7 +4,7 @@ import sys
 import types
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import django
 from django.apps import apps
@@ -61,3 +61,17 @@ class GenericAppConfigDiscoveryTests(TestCase):
         self.assertNotIn("HTMLReport", self.config.discovered_models)
         self.assertNotIn("LocalHTMLReport", self.config.discovered_models)
         self.assertNotIn("ImportedReport", self.config.discovered_models)
+
+    def test_process_module_extracts_structure_from_structure_file(self):
+        self.config.model_structure_builder = Mock()
+
+        with patch.object(self.config, "load_models_from_module") as load_models:
+            self.config._process_module(
+                "external_app.external_app_model_structure",
+                "external_app_model_structure.py",
+            )
+
+        self.config.model_structure_builder.extract_and_save_structure.assert_called_once_with(
+            "external_app.external_app_model_structure"
+        )
+        load_models.assert_not_called()
