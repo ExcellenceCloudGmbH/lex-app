@@ -384,10 +384,17 @@ class ModelRegistration:
         loop.run_until_complete(reset_instances_with_aborted_calculations())
 
     @classmethod
-    def register_model_structure(cls, structure: dict):
+    def register_model_structure(
+        cls,
+        structure: dict,
+        auto_include_missing_models: bool = True,
+    ):
         from lex.process_admin.settings import processAdminSite
-        if structure:
-            processAdminSite.register_model_structure(structure)
+        if structure is not None:
+            processAdminSite.register_model_structure(
+                structure,
+                auto_include_missing_models=auto_include_missing_models,
+            )
 
     @classmethod
     def register_model_styling(cls, styling: dict):

@@ -52,6 +52,7 @@ class ProcessAdminSite:
 
         self.registered_models = {}  # Model-classes to ModelProcessAdmin-instances
         self.model_structure = {}
+        self.auto_include_missing_models_in_structure = True
         self.model_styling = {}
         self.html_reports = {}
         self.processes = {}
@@ -78,7 +79,11 @@ class ProcessAdminSite:
     def registerProcess(self, name, process):
         self.processes[name] = process
 
-    def register_model_structure(self, model_structure):
+    def register_model_structure(
+        self,
+        model_structure,
+        auto_include_missing_models=True,
+    ):
         """
         :param model_structure: multiple trees that structure the registered models, i.e. the leaves of the trees
         must correspond to the model-names, and all other nodes are interpreted as model categories.
@@ -107,6 +112,7 @@ class ProcessAdminSite:
         :return:
         """
         self.model_structure = model_structure
+        self.auto_include_missing_models_in_structure = auto_include_missing_models
 
     def register(self, model_or_iterable, process_admin=None):
         if process_admin is None:
@@ -302,7 +308,10 @@ class ProcessAdminSite:
         # TODO: remove tree induction
         if not self.initialized:
             self.model_collection = ModelCollection(
-                self.registered_models, self.model_structure, self.model_styling
+                self.registered_models,
+                self.model_structure,
+                self.model_styling,
+                auto_include_missing_models=self.auto_include_missing_models_in_structure,
             )
             self.initialized = True
 

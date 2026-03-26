@@ -11,6 +11,7 @@ class ModelStructureBuilder:
         self.repo = repo
         # Store the raw predefined structure
         self.predefined_structure = predefined_structure or {}
+        self.model_structure_is_defined_in_yaml = False
 
         # Initialize active structure as a deep copy of predefined
         # This ensures defaults exist even if no YAML is loaded.
@@ -33,6 +34,7 @@ class ModelStructureBuilder:
         yaml_structure = info.structure
         yaml_styling = info.styling
         self.untracked_models = info.untracked_models
+        self.model_structure_is_defined_in_yaml = info.structure_is_defined()
 
         # 2. Merge YAML structure into Predefined structure (with override logic)
         self.model_structure = self.merge_predefined_and_yaml(self.predefined_structure, yaml_structure)
