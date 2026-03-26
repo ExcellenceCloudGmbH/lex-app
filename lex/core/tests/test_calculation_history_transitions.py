@@ -128,6 +128,32 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             [CalculationModel.IN_PROGRESS, CalculationModel.SUCCESS],
         )
 
+    def test_regular_update_resets_is_calculated_even_when_payload_is_unchanged(self):
+        self.obj.is_calculated = CalculationModel.SUCCESS
+        self.obj.save(skip_hooks=True)
+
+        request = self.factory.patch(
+            f"/api/model_entries/calculationhistorytestmodel/edit-1/{self.obj.pk}/",
+            {
+                "name": self.obj.name,
+                "computed": self.obj.computed,
+                "is_calculated": CalculationModel.SUCCESS,
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = OneModelEntry.as_view()(
+            request,
+            model_container=self.container,
+            calculationId="edit-1",
+            pk=self.obj.pk,
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.obj.refresh_from_db()
+        self.assertEqual(self.obj.is_calculated, CalculationModel.NOT_CALCULATED)
+
     def test_startup_abort_reset_persists_aborted_history_row(self):
         self.obj.is_calculated = CalculationModel.IN_PROGRESS
         self.obj.save(skip_hooks=True)

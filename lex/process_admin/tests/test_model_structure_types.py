@@ -24,9 +24,9 @@ class _Container:
 
 
 class _Collection:
-    def __init__(self, containers):
+    def __init__(self, containers, model_styling=None):
         self._containers = containers
-        self.model_styling = {}
+        self.model_styling = model_styling or {}
 
     @property
     def all_model_ids(self):
@@ -55,3 +55,48 @@ class ModelStructureTypeTests(TestCase):
         )
 
         self.assertEqual(node["type"], "HTMLReport")
+
+    def test_nested_nodes_can_use_global_styling_entries(self):
+        class StreamlitReport(HTMLReport):
+            pass
+
+        collection = _Collection(
+            {"streamlit": _Container(StreamlitReport, "Default Streamlit Title")},
+            model_styling={
+                "Streamlit": {"name": "Interactive analysis"},
+                "streamlit": {"name": "Interactive analysis"},
+            },
+        )
+
+        node = enrich_model_structure_with_readable_names_and_types(
+            "Streamlit",
+            {"streamlit": None},
+            collection,
+        )
+
+        self.assertEqual(node["readable_name"], "Interactive analysis")
+        self.assertEqual(
+            node["children"]["streamlit"]["readable_name"],
+            "Interactive analysis",
+        )
+
+    def test_nested_folder_can_use_global_styling_entries(self):
+        collection = _Collection(
+            {"period": _Container(object, "Default Period Title")},
+            model_styling={
+                "A_Period": {"name": "Period"},
+                "S_Period_Information": {"name": "Period Information"},
+            },
+        )
+
+        node = enrich_model_structure_with_readable_names_and_types(
+            "A_Period",
+            {"S_Period_Information": {"period": None}},
+            collection,
+        )
+
+        self.assertEqual(node["readable_name"], "Period")
+        self.assertEqual(
+            node["children"]["S_Period_Information"]["readable_name"],
+            "Period Information",
+        )

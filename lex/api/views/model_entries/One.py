@@ -42,13 +42,26 @@ class OneModelEntry(
     # modification_restriction rules (e.g. legacy read-only) are enforced.
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
 
-    def _prepare_update_request(self, request):
+    def _reset_instance_is_calculated(self, response):
+        instance = self.get_object()
+        if not isinstance(instance, CalculationModel):
+            return response
+        if instance.is_calculated != CalculationModel.NOT_CALCULATED:
+            instance.is_calculated = CalculationModel.NOT_CALCULATED
+            instance.save(skip_hooks=True)
+        if isinstance(getattr(response, "data", None), dict):
+            response.data["is_calculated"] = CalculationModel.NOT_CALCULATED
+        return response
+
+    def _prepare_update_request(self, request, *, reset_is_calculated=False):
         payload = (
             request.data.copy()
             if hasattr(request.data, "copy")
             else dict(request.data)
         )
         payload.pop("calculate", None)
+        if reset_is_calculated:
+            payload["is_calculated"] = CalculationModel.NOT_CALCULATED
         request._data = payload
         request._full_data = payload
         return request
@@ -106,6 +119,9 @@ class OneModelEntry(
                         isinstance(instance, CalculationModel)
                         and str(request.data.get("calculate", "")).lower() == "true"
                 )
+                should_reset_is_calculated = (
+                    isinstance(instance, CalculationModel) and not self._calculate_requested
+                )
 
                 # TODO: For sharepoint preview, find a new way to create an audit log with the new structure
                 # if "edited_file" not in request.data:
@@ -131,8 +147,14 @@ class OneModelEntry(
                     # 3. Close the previous Meta Record (System Time End).
 
                     try:
-                        prepared_request = self._prepare_update_request(request)
-                        return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
+                        prepared_request = self._prepare_update_request(
+                            request,
+                            reset_is_calculated=should_reset_is_calculated,
+                        )
+                        response = UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
+                        if should_reset_is_calculated:
+                            return self._reset_instance_is_calculated(response)
+                        return response
 
                     except Exception as e:
                         raise APIException(
@@ -178,8 +200,14 @@ class OneModelEntry(
                             calculationId,
                         )
                         CacheManager.store_message(cache_key, "")
-                    prepared_request = self._prepare_update_request(request)
-                    return UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
+                    prepared_request = self._prepare_update_request(
+                        request,
+                        reset_is_calculated=should_reset_is_calculated,
+                    )
+                    response = UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
+                    if should_reset_is_calculated:
+                        return self._reset_instance_is_calculated(response)
+                    return response
 
                 except CalculationModelException as exc:
                     # CalculationModel's own exception path already:
