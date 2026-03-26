@@ -860,8 +860,12 @@ def calc_and_save_sync(models, *args):
             
             # Calculate the model
             try:
-                # model.save()
-                model.lex_func()(*args)
+                # Push the child model onto the model_context stack so that
+                # LexLogger / CalculationLog can identify it as the *current*
+                # model while the trigger remains visible as the *parent*.
+                from lex.audit_logging.utils.ModelContext import model_logging_context
+                with model_logging_context(model):
+                    model.lex_func()(*args)
                 logger.debug(f"Calculation completed for model {i + 1}")
             except Exception as calc_error:
                 raise CalculatedModelError(
@@ -1577,7 +1581,7 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
         
         try:
             # Determine processing mode based on Celery configuration
-            celery_active = os.getenv('CELERY_ACTIVE', None) == 'true' and hasattr(cls.calculate, 'delay')
+            celery_active = os.getenv('CELERY_ACTIVE', "").lower() == 'true' and hasattr(cls.calculate, 'delay')
             
             if celery_active:
                 logger.info(f"Celery is active, dispatching {cls.__name__} models to parallel processing")

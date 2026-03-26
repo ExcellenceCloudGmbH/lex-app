@@ -70,9 +70,9 @@ class CeleryCalculationContext:
             new_context["task_name"] = "calc_and_save"
             self._op_token = operation_context.set(new_context)
         else:
-            logger.warning(
+            logger.debug(
                 "CeleryCalculationContext entered with context=None — "
-                "operation_context will NOT be set. Logging may be degraded."
+                "operation_context will NOT be set (expected in synchronous mode)."
             )
         if self.model_context:
             self._model_context_backup = _model_context.get()['model_context']
@@ -491,7 +491,16 @@ def lex_shared_task(_func=None, **task_opts):
                 if model_context:
                     kwargs.pop('model_context')
 
-                with CeleryCalculationContext(context, model_context):
+                # Only enter CeleryCalculationContext when we actually have
+                # context to set (i.e. running inside a Celery worker).
+                # In synchronous mode the operation_context already exists
+                # on the calling thread from the parent CalculationModel,
+                # so wrapping again with None would just spam warnings and
+                # break the logging chain.
+                if context or model_context:
+                    with CeleryCalculationContext(context, model_context):
+                        result = func(*args, **kwargs)
+                else:
                     result = func(*args, **kwargs)
 
                 return result, args
@@ -635,7 +644,9 @@ def calc_and_save(models: List[Model], *args, **kwargs):
     for model in models:
         try:
             logger.info(f"Processing model {model}")
-            model.lex_func()()
+            from lex.audit_logging.utils.ModelContext import model_logging_context
+            with model_logging_context(model):
+                model.lex_func()()
             logger.info(f"Finished calculating model {model}")
             model.save()
             summary["processed_successfully"] += 1
