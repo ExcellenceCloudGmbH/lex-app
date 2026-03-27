@@ -47,7 +47,11 @@ class GenericAppConfig(AppConfig):
         },
         "CalculationLog" : {
             "calculationlog": None,
-        }}
+        },
+        "Streamlit":{
+            "streamlit": None
+        }
+        }
 
         self.model_structure_builder = ModelStructureBuilder(repo=repo, predefined_structure= predefined_structure)
 
@@ -71,7 +75,9 @@ class GenericAppConfig(AppConfig):
         ):
             self.model_structure_builder.build_structure(self.discovered_models)
 
-        self.untracked_models += self.model_structure_builder.untracked_models
+        self.untracked_models += self.model_structure_builder.resolve_untracked_models(
+            self.discovered_models.keys()
+        )
         self.register_models()
 
     def discover_models(self, path, repo):

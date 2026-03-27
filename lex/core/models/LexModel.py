@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from abc import ABCMeta
 from contextlib import nullcontext
 
@@ -6,7 +7,9 @@ import streamlit as st
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Literal, Mapping, Optional, Set, Union
 
+from django.conf import settings
 from django.db import models, transaction
+from django.utils import timezone
 from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
     BEFORE_UPDATE
 try:
@@ -22,6 +25,14 @@ except ImportError:
     from lex.api.utils import operation_context
 
 logger = logging.getLogger(__name__)
+
+
+def lex_datetime_now() -> datetime:
+    """Return a datetime.now()-based timestamp compatible with Django timezone settings."""
+    if getattr(settings, "USE_TZ", False):
+        return timezone.now()
+
+    return datetime.now(timezone.get_default_timezone()).replace(tzinfo=None)
 
 
 def should_use_atomic_model_operations(model_or_class) -> bool:
@@ -436,6 +447,8 @@ class LexModel(LifecycleModel):
     FALLBACK_AUDIT_ACTOR = 'Initial Data Upload'
     API_KEY_AUDIT_ACTOR = 'Technical User'
 
+    created_at = models.DateTimeField(default=lex_datetime_now, editable=False)
+    edited_at = models.DateTimeField(default=lex_datetime_now, editable=False)
     created_by = models.TextField(null=True, blank=True, editable=False)
     edited_by = models.TextField(null=True, blank=True, editable=False)
 
@@ -444,6 +457,10 @@ class LexModel(LifecycleModel):
         app_label = 'core'
 
     def __init__(self, *args, **kwargs):
+        self._explicit_timestamp_overrides = {
+            'created_at': kwargs.get('created_at') is not None,
+            'edited_at': kwargs.get('edited_at') is not None,
+        }
         super().__init__(*args, **kwargs)
         self._pre_validation_snapshot = None
         self._validation_in_progress = False
@@ -683,8 +700,39 @@ class LexModel(LifecycleModel):
     def _has_explicit_created_by_override(self) -> bool:
         return self._normalize_audit_actor(self.created_by) is not None
 
+    def _has_explicit_created_at_override(self) -> bool:
+        return self._explicit_timestamp_overrides.get('created_at', False) and self.created_at is not None
+
     def _has_explicit_edited_by_override(self) -> bool:
         return self.has_changed('edited_by') and self._normalize_audit_actor(self.edited_by) is not None
+
+    def _has_explicit_edited_at_override(self) -> bool:
+        return self.has_changed('edited_at') and self.edited_at is not None
+
+    @hook(BEFORE_CREATE)
+    def update_timestamps_on_create(self):
+        # Skip if we are syncing from history (bitemporal sync)
+        if getattr(self, 'skip_history_when_saving', False):
+            return
+
+        current_timestamp = lex_datetime_now()
+
+        if not self._has_explicit_created_at_override():
+            self.created_at = current_timestamp
+
+        if not self._explicit_timestamp_overrides.get('edited_at', False):
+            self.edited_at = current_timestamp
+
+    @hook(BEFORE_UPDATE)
+    def update_edited_at(self):
+        # Skip if we are syncing from history (bitemporal sync)
+        if getattr(self, 'skip_history_when_saving', False):
+            return
+
+        if self._has_explicit_edited_at_override():
+            return
+
+        self.edited_at = lex_datetime_now()
 
     @hook(BEFORE_UPDATE)
     def update_edited_by(self):
@@ -882,7 +930,7 @@ class LexModel(LifecycleModel):
 
     def allow_public_fields(self, user_context: UserContext, reason: str = None) -> PermissionResult:
         """Helper: Allow only commonly public fields"""
-        public_fields = {'id', 'name', 'title', 'description', 'created_at', 'updated_at'}
+        public_fields = {'id', 'name', 'title', 'description', 'created_at', 'edited_at', 'updated_at'}
         return PermissionResult.allow_fields(public_fields, reason or "Public fields only")
 
     def allow_basic_fields(self, user_context: UserContext, reason: str = None) -> PermissionResult:

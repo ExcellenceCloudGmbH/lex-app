@@ -1,7 +1,7 @@
 import importlib
 import os
 import copy
-from typing import Dict, Set
+from typing import Dict, Iterable, List, Set
 
 from lex.process_admin.utils.model_structure import ModelStructure
 
@@ -21,6 +21,8 @@ class ModelStructureBuilder:
         self.model_styling = {}
         self.widget_structure = []
         self.untracked_models = []
+        self.tracked_models = []
+        self.tracked_models_defined = False
 
     def extract_from_yaml(self, path: str):
         if not os.path.exists(path):
@@ -35,6 +37,8 @@ class ModelStructureBuilder:
         yaml_structure = info.structure
         yaml_styling = info.styling
         self.untracked_models = info.untracked_models
+        self.tracked_models = info.tracked_models
+        self.tracked_models_defined = info.tracked_models_defined
         self.model_structure_is_defined_in_yaml = info.structure_is_defined()
         self.model_structure_is_explicitly_defined = info.structure_is_defined()
 
@@ -143,7 +147,19 @@ class ModelStructureBuilder:
             "widget_structure": self.widget_structure,
             "model_styling": self.model_styling,
             "untracked_models": self.untracked_models,
+            "tracked_models": self.tracked_models,
         }
+
+    def resolve_untracked_models(self, model_names: Iterable[str]) -> List[str]:
+        if not self.tracked_models_defined:
+            return list(self.untracked_models)
+
+        tracked_models = set(self.tracked_models)
+        return [
+            str(model_name).lower()
+            for model_name in model_names
+            if str(model_name).lower() not in tracked_models
+        ]
 
     def build_structure(self, models) -> Dict:
         # TODO: Filter models by repo

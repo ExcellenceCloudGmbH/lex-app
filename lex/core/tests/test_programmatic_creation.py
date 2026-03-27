@@ -11,13 +11,27 @@ all correctly trigger the full bitemporal pipeline:
 import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import connection, models
 from django.test import TransactionTestCase
 
 from api.utils import OperationContext
 from core.models.LexModel import LexModel
 from process_admin.utils.model_registration import ModelRegistration
+
+
+def project_timestamp(year, month, day, hour, minute=0, second=0):
+    if settings.USE_TZ:
+        return datetime.datetime(
+            year, month, day, hour, minute, second, tzinfo=datetime.timezone.utc,
+        )
+
+    configured_tz = ZoneInfo(getattr(settings, "TIME_ZONE", "UTC"))
+    return datetime.datetime(
+        year, month, day, hour, minute, second, tzinfo=configured_tz,
+    ).replace(tzinfo=None)
 
 
 # ── Test Model ──────────────────────────────────────────────────────
@@ -300,6 +314,62 @@ class ProgrammaticCreationTest(TransactionTestCase):
             ProgrammaticTestModel.objects.get(pk=obj.pk).edited_by,
             "Streamlit Override",
         )
+
+    def test_create_sets_created_and_edited_at(self):
+        created_ts = project_timestamp(2025, 6, 1, 17, 0, 0)
+
+        with patch("core.models.LexModel.lex_datetime_now", return_value=created_ts):
+            obj = ProgrammaticTestModel.objects.create(name="timestamped", value=1)
+
+        self.assertEqual(obj.created_at, created_ts)
+        self.assertEqual(obj.edited_at, created_ts)
+
+        stored = ProgrammaticTestModel.objects.get(pk=obj.pk)
+        self.assertEqual(stored.created_at, created_ts)
+        self.assertEqual(stored.edited_at, created_ts)
+
+    def test_update_refreshes_edited_at_without_changing_created_at(self):
+        created_ts = project_timestamp(2025, 6, 1, 18, 0, 0)
+        edited_ts = project_timestamp(2025, 6, 1, 18, 5, 0)
+
+        with patch("core.models.LexModel.lex_datetime_now", return_value=created_ts):
+            obj = ProgrammaticTestModel.objects.create(name="timestamp_update", value=1)
+
+        with patch("core.models.LexModel.lex_datetime_now", return_value=edited_ts):
+            obj.value = 2
+            obj.save()
+
+        self.assertEqual(obj.created_at, created_ts)
+        self.assertEqual(obj.edited_at, edited_ts)
+
+        stored = ProgrammaticTestModel.objects.get(pk=obj.pk)
+        self.assertEqual(stored.created_at, created_ts)
+        self.assertEqual(stored.edited_at, edited_ts)
+
+    def test_explicit_timestamp_overrides_are_preserved(self):
+        explicit_created_ts = project_timestamp(2024, 1, 1, 8, 0, 0)
+        explicit_edited_ts = project_timestamp(2024, 1, 1, 9, 0, 0)
+        later_ts = project_timestamp(2025, 6, 1, 19, 0, 0)
+
+        with patch("core.models.LexModel.lex_datetime_now", return_value=later_ts):
+            obj = ProgrammaticTestModel.objects.create(
+                name="manual_timestamps",
+                value=1,
+                created_at=explicit_created_ts,
+                edited_at=explicit_edited_ts,
+            )
+
+        self.assertEqual(obj.created_at, explicit_created_ts)
+        self.assertEqual(obj.edited_at, explicit_edited_ts)
+
+        manual_edit_ts = project_timestamp(2025, 6, 1, 19, 5, 0)
+        with patch("core.models.LexModel.lex_datetime_now", return_value=later_ts):
+            obj.value = 2
+            obj.edited_at = manual_edit_ts
+            obj.save()
+
+        self.assertEqual(obj.created_at, explicit_created_ts)
+        self.assertEqual(obj.edited_at, manual_edit_ts)
 
     def test_operation_context_actor_populates_programmatic_audit_fields(self):
         with OperationContext(actor="Streamlit User"):
