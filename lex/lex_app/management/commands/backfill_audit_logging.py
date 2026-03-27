@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from django.apps import apps
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 from django.utils import timezone
@@ -56,6 +57,21 @@ class Command(BaseCommand):
 
         if batch:
             yield batch
+
+    @staticmethod
+    def _normalize_legacy_timestamp(value):
+        if value is None:
+            return timezone.now()
+
+        current_tz = timezone.get_current_timezone()
+        if settings.USE_TZ:
+            if timezone.is_naive(value):
+                return timezone.make_aware(value, current_tz)
+            return value
+
+        if timezone.is_aware(value):
+            return timezone.make_naive(value, current_tz)
+        return value
 
     def _insert_rows(self, cursor, table_name, columns, rows, returning_column=None):
         rows = list(rows)
@@ -155,6 +171,8 @@ class Command(BaseCommand):
         payload_field = AuditLog._meta.get_field("payload")
 
         audit_columns = [
+            AuditLog._meta.get_field("created_at").column,
+            AuditLog._meta.get_field("edited_at").column,
             AuditLog._meta.get_field("date").column,
             AuditLog._meta.get_field("author").column,
             AuditLog._meta.get_field("resource").column,
@@ -170,6 +188,7 @@ class Command(BaseCommand):
             AuditLogStatus._meta.get_field("error_traceback").column,
             AuditLogStatus._meta.get_field("created_at").column,
             AuditLogStatus._meta.get_field("updated_at").column,
+            AuditLogStatus._meta.get_field("edited_at").column,
         ]
         calculation_log_columns = [
             CalculationLog._meta.get_field("timestamp").column,
@@ -306,11 +325,14 @@ class Command(BaseCommand):
                             ],
                             chunk_size,
                         ):
-                            created_at = timezone.now()
                             audit_rows = []
                             calc_rows = []
+                            status_timestamps = []
 
                             for row in batch:
+                                event_timestamp = self._normalize_legacy_timestamp(
+                                    row.timestamp
+                                )
                                 legacy_payload, resource_name, record_id = (
                                     build_legacy_calculation_payload(
                                         row,
@@ -330,7 +352,9 @@ class Command(BaseCommand):
                                 )
                                 audit_rows.append(
                                     (
-                                        created_at,
+                                        event_timestamp,
+                                        event_timestamp,
+                                        event_timestamp,
                                         (row.trigger_name or "legacy_migration"),
                                         (resource_name or "legacy_calculation"),
                                         "update",
@@ -346,7 +370,7 @@ class Command(BaseCommand):
                                 )
                                 calc_rows.append(
                                     (
-                                        created_at,
+                                        event_timestamp,
                                         row.calculationId,
                                         f"[LEGACY:{row.message_type}] {row.message}",
                                         None,
@@ -355,6 +379,7 @@ class Command(BaseCommand):
                                         None,
                                     )
                                 )
+                                status_timestamps.append(event_timestamp)
 
                             audit_ids = self._insert_rows(
                                 cursor,
@@ -368,10 +393,14 @@ class Command(BaseCommand):
                                     audit_id,
                                     "success",
                                     None,
-                                    created_at,
-                                    created_at,
+                                    status_timestamp,
+                                    status_timestamp,
+                                    status_timestamp,
                                 )
-                                for audit_id in audit_ids
+                                for audit_id, status_timestamp in zip(
+                                    audit_ids,
+                                    status_timestamps,
+                                )
                             ]
                             self._insert_rows(
                                 cursor,
@@ -433,10 +462,13 @@ class Command(BaseCommand):
                             ],
                             chunk_size,
                         ):
-                            created_at = timezone.now()
                             audit_rows = []
+                            status_timestamps = []
 
                             for row in batch:
+                                event_timestamp = self._normalize_legacy_timestamp(
+                                    row.timestamp
+                                )
                                 legacy_payload, resource_name, record_id = (
                                     build_legacy_user_change_payload(
                                         row,
@@ -456,7 +488,9 @@ class Command(BaseCommand):
                                 )
                                 audit_rows.append(
                                     (
-                                        created_at,
+                                        event_timestamp,
+                                        event_timestamp,
+                                        event_timestamp,
                                         (row.user_name or "legacy_user"),
                                         (resource_name or "legacy_user_change"),
                                         "update",
@@ -470,6 +504,7 @@ class Command(BaseCommand):
                                         record_id if isinstance(record_id, int) else None,
                                     )
                                 )
+                                status_timestamps.append(event_timestamp)
 
                             audit_ids = self._insert_rows(
                                 cursor,
@@ -483,10 +518,14 @@ class Command(BaseCommand):
                                     audit_id,
                                     "success",
                                     None,
-                                    created_at,
-                                    created_at,
+                                    status_timestamp,
+                                    status_timestamp,
+                                    status_timestamp,
                                 )
-                                for audit_id in audit_ids
+                                for audit_id, status_timestamp in zip(
+                                    audit_ids,
+                                    status_timestamps,
+                                )
                             ]
                             self._insert_rows(
                                 cursor,

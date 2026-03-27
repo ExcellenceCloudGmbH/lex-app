@@ -171,9 +171,9 @@ def migrate_user_change_logs(cursor):
         
         cursor.execute('''
             INSERT INTO "audit_logging_auditlog" 
-            ("date", "author", "resource", "action", "payload", "calculation_id")
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', [date, author, resource, action, payload, calc_id])
+            ("created_at", "edited_at", "date", "author", "resource", "action", "payload", "calculation_id")
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ''', [date, date, date, author, resource, action, payload, calc_id])
         inserted += 1
     
     return inserted

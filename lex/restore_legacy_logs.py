@@ -127,9 +127,11 @@ def restore_legacy_logs():
                     
                     cursor.execute('''
                         INSERT INTO "audit_logging_auditlog" 
-                        ("date", "author", "resource", "action", "payload", "calculation_id")
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ("created_at", "edited_at", "date", "author", "resource", "action", "payload", "calculation_id")
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ''', [
+                        timestamp,
+                        timestamp,
                         timestamp,
                         str(log.get('user', 'Unknown')),
                         'Legacy',
