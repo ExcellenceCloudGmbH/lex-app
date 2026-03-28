@@ -103,6 +103,14 @@ def _run_celery_command(args):
     celery_main(list(args))
 
 
+def _should_use_threads_pool():
+    """
+    Use a non-prefork worker pool on platforms where Celery's default billiard
+    pool is unreliable for local development.
+    """
+    return platform.system() in {"Darwin", "Windows"}
+
+
 def build_celery_worker_command(worker_number, extra_args=()):
     command = [
         sys.executable,
@@ -117,7 +125,7 @@ def build_celery_worker_command(worker_number, extra_args=()):
         "--prefetch-multiplier=1",
     ]
 
-    if platform.system() == "Darwin":
+    if _should_use_threads_pool():
         command.extend(["-P", "threads"])
 
     command.extend(["-n", f"worker{worker_number}@%h", *extra_args])

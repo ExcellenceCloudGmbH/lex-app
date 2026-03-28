@@ -76,7 +76,15 @@ class LexFlowerCommandTests(TestCase):
         self.assertIn("threads", command)
         self.assertEqual(command[-2:], ["-n", "worker3@%h"])
 
-    def test_build_celery_worker_command_skips_threads_pool_off_macos(self):
+    def test_build_celery_worker_command_uses_threads_pool_on_windows(self):
+        with patch("lex.bin.lex.platform.system", return_value="Windows"):
+            command = build_celery_worker_command(4)
+
+        self.assertIn("-P", command)
+        self.assertIn("threads", command)
+        self.assertEqual(command[-2:], ["-n", "worker4@%h"])
+
+    def test_build_celery_worker_command_skips_threads_pool_on_linux(self):
         with patch("lex.bin.lex.platform.system", return_value="Linux"):
             command = build_celery_worker_command(2)
 
