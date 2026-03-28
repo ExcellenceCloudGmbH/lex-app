@@ -93,7 +93,7 @@ class Command(BaseCommand):
         return a set of model identifiers (``app_label.ModelName``) that are
         present in Django but absent from Keycloak.
         """
-        from lex_app.management.commands.Init import KeycloakSyncManager
+        from lex_app.management.commands.init import KeycloakSyncManager
 
         sync_manager = KeycloakSyncManager()
         auth_config = sync_manager.export_configs()

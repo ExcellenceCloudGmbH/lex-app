@@ -2,11 +2,17 @@ from __future__ import absolute_import
 
 import os
 import logging
+from typing import Optional
 
 from celery import Celery
+from celery.app.control import Control
+from celery.signals import task_postrun
+from django.apps import apps
 
 # set the default Django settings module for the 'celery' program.
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'lex_app.settings')
+
+logger = logging.getLogger(__name__)
 
 app = Celery('lex_app')
 
@@ -20,9 +26,64 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 #     accept_content='dill',
 # )
 
-# Load task modules from all registered Django app configs.
-from django.apps import apps
 app.autodiscover_tasks(lambda: [n.name for n in apps.get_app_configs()])
+
+
+def _is_non_local_deployment_target() -> bool:
+    """
+    Return True when worker auto-shutdown should be active.
+
+    Treat an unset/empty deployment target the same as local execution so the
+    behavior stays opt-in for deployed environments.
+    """
+    deployment_target = os.getenv("DEPLOYMENT_TARGET", "").strip().lower()
+    return deployment_target not in {"", "local"}
+
+
+def _get_worker_hostname(task) -> Optional[str]:
+    request = getattr(task, "request", None)
+    hostname = getattr(request, "hostname", None)
+    return hostname or None
+
+
+@task_postrun.connect
+def shutdown_worker_after_task_completion(
+    sender=None,
+    task_id=None,
+    task=None,
+    args=None,
+    kwargs=None,
+    **extra,
+):
+    """
+    Shut down only the worker that completed the task in non-local deployments.
+
+    Workers in this project run with concurrency/prefetch set to 1, so once the
+    current task finishes there is no additional in-flight work reserved on that
+    worker. Targeting the current hostname avoids broadcasting shutdown to other
+    workers that may still be busy.
+    """
+    if not _is_non_local_deployment_target() or task is None:
+        return
+
+    hostname = _get_worker_hostname(task)
+    app_instance = getattr(task, "app", None)
+    if hostname is None or app_instance is None:
+        return
+
+    try:
+        logger.info(
+            "Shutting down Celery worker %s after task %s completed",
+            hostname,
+            task_id,
+        )
+        Control(app=app_instance).shutdown(destination=[hostname])
+    except Exception:
+        logger.exception(
+            "Failed to shut down Celery worker %s after task %s",
+            hostname,
+            task_id,
+        )
 
 # Configuration validation function
 def validate_celery_redis_config():
@@ -30,8 +91,6 @@ def validate_celery_redis_config():
     Validate that Celery is properly configured with Redis.
     This function can be called during startup to ensure configuration is correct.
     """
-    logger = logging.getLogger(__name__)
-    
     try:
         # Check broker connection
         broker_url = app.conf.broker_url

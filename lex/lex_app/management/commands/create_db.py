@@ -1,16 +1,31 @@
 import os
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.conf import settings
+
+from lex.runtime_config import format_db_connection_unicode_error
 
 class Command(BaseCommand):
     help = 'Creates the database defined in settings if it does not exist (PostgreSQL only)'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--database",
+            default="default",
+            help="Database alias from settings.DATABASES to inspect and create if needed.",
+        )
+
     def handle(self, *args, **options):
-        # 1. Get the active default database configuration
-        db_conf = settings.DATABASES['default']
+        # 1. Get the active database configuration
+        database_alias = options.get("database", "default")
+        try:
+            db_conf = settings.DATABASES[database_alias]
+        except KeyError as exc:
+            raise CommandError(f"Unknown database alias: {database_alias}") from exc
+
         engine = db_conf['ENGINE']
         target_db_name = db_conf['NAME']
 
+        self.stdout.write(f"Database Alias: {database_alias}")
         self.stdout.write(f"Detected Engine: {engine}")
         self.stdout.write(f"Target Database: {target_db_name}")
 
@@ -76,6 +91,8 @@ class Command(BaseCommand):
 
                 conn.close()
 
+            except UnicodeDecodeError as e:
+                raise CommandError(format_db_connection_unicode_error(e, db_conf)) from e
             except psycopg2.OperationalError as e:
                 self.stdout.write(self.style.ERROR(f"Operational Error: {e}"))
                 self.stdout.write(self.style.ERROR("Check your HOST, USER, and PASSWORD settings."))

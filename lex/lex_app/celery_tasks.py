@@ -28,7 +28,6 @@ from celery import Task, shared_task
 from celery.result import allow_join_result
 
 from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
-from celery.signals import task_postrun
 from django.db import transaction
 from django.db.models import Model
 

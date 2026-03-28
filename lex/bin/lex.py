@@ -1,6 +1,9 @@
 # lex/bin/lex.py
 import os
 import sys
+import time
+import platform
+import subprocess
 import threading
 import asyncio
 from pathlib import Path
@@ -8,13 +11,15 @@ from pathlib import Path
 import click
 import uvicorn
 
+from lex.tools.project_root import find_project_root
+
 # Defer Django imports and setup until needed (NOT at import time)
 _DJANGO_READY = False
 _GET_COMMANDS = None
 _CALL_COMMAND = None
 
 LEX_APP_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.as_posix()
-PROJECT_ROOT_DIR = Path(os.getcwd()).resolve()
+PROJECT_ROOT_DIR = Path(find_project_root(os.getcwd())).resolve()
 sys.path.append(LEX_APP_PACKAGE_ROOT)
 
 # Set essential env vars early so they are available when any downstream code
@@ -28,35 +33,14 @@ lex = click.Group(help="lex-app Command Line Interface")
 
 # ---------- Project root and configs (no Django) ----------
 
-MARKERS = {".git", "pyproject.toml", "setup.cfg", "manage.py", "requirements.txt", ".idea", ".vscode"}
-
-def find_project_root(start=None) -> str:
-    base = Path(start or os.getcwd()).resolve()
-    # Git root
-    try:
-        import subprocess
-        out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(base),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=True,
-        )
-        return out.stdout.strip()
-    except Exception:
-        pass
-    # Marker ascent
-    for p in [base] + list(base.parents):
-        if any((p / m).exists() for m in MARKERS):
-            return str(p)
-    return str(base)
-
 DEFAULT_ENV = """KEYCLOAK_URL=https://auth.excellence-cloud.de
 KEYCLOAK_REALM=
 OIDC_RP_CLIENT_ID=
 OIDC_RP_CLIENT_SECRET=
 OIDC_RP_CLIENT_UUID=
+FLOWER_ADDRESS=127.0.0.1
+FLOWER_PORT=5555
+FLOWER_URL_PREFIX=
 """
 
 def ensure_env_file(project_root: str, content: str = DEFAULT_ENV):
@@ -113,15 +97,116 @@ def _install_dynamic_commands():
 
 # ---------- Existing specialized commands (unchanged behavior) ----------
 
+def _run_celery_command(args):
+    _bootstrap_django()
+    from celery.bin.celery import celery as celery_main
+    celery_main(list(args))
+
+
+def build_celery_worker_command(worker_number, extra_args=()):
+    command = [
+        sys.executable,
+        "-m",
+        "lex",
+        "celery",
+        "-A",
+        "lex_app",
+        "worker",
+        "--loglevel=info",
+        "--concurrency=1",
+        "--prefetch-multiplier=1",
+    ]
+
+    if platform.system() == "Darwin":
+        command.extend(["-P", "threads"])
+
+    command.extend(["-n", f"worker{worker_number}@%h", *extra_args])
+    return command
+
+
+def _stop_processes(processes):
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+
+    for process in processes:
+        if process.poll() is None:
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+
+def build_flower_command(settings, extra_args=()):
+    command = [
+        "--app",
+        "lex_app.celery:app",
+        "flower",
+        f"--address={settings.FLOWER_ADDRESS}",
+        f"--port={settings.FLOWER_PORT}",
+    ]
+
+    if getattr(settings, "FLOWER_URL_PREFIX", ""):
+        command.append(f"--url_prefix={settings.FLOWER_URL_PREFIX}")
+
+    return [*command, *extra_args]
+
 @lex.command(name="celery", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def celery(ctx):
     # Celery needs Django bootstrapped so that lex_app.celery can load
     # broker/backend settings from django.conf:settings.  Without this,
     # Celery falls back to its default AMQP broker (RabbitMQ).
+    _run_celery_command(ctx.args)
+
+
+@lex.command(name="celery-workers", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.argument("count", type=click.IntRange(1, None))
+@click.pass_context
+def celery_workers(ctx, count):
+    env = os.environ.copy()
+    env["IS_RUNNING_IN_CELERY"] = "true"
+    env["CELERY_ACTIVE"] = "true"
+
+    processes = []
+    exit_code = None
+
+    try:
+        for worker_number in range(1, count + 1):
+            command = build_celery_worker_command(worker_number, ctx.args)
+            processes.append(
+                subprocess.Popen(
+                    command,
+                    cwd=PROJECT_ROOT_DIR.as_posix(),
+                    env=env,
+                )
+            )
+
+        while True:
+            for process in processes:
+                code = process.poll()
+                if code is not None:
+                    exit_code = code
+                    break
+            if exit_code is not None:
+                break
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        click.echo("Stopping Celery workers...")
+    finally:
+        _stop_processes(processes)
+
+    if exit_code:
+        raise SystemExit(exit_code)
+
+
+@lex.command(name="flower", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.pass_context
+def flower(ctx):
     _bootstrap_django()
-    from celery.bin.celery import celery as celery_main
-    celery_main(ctx.args)
+    from django.conf import settings
+
+    _run_celery_command(build_flower_command(settings, ctx.args))
 
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
@@ -185,13 +270,6 @@ def start(ctx):
     _collect_static_if_deployed()
     uvicorn.main(ctx.args)
 
-@lex.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.pass_context
-def init(ctx):
-    for command in ["createcachetable", "makemigrations", "migrate"]:
-        _forward_to_django(command, ctx.args)
-    _collect_static_if_deployed()
-
 # ---------- New: setup (never bootstraps Django) ----------
 
 @lex.command(name="setup", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -207,7 +285,7 @@ def setup(project_root):
 # command enumeration.  For these, _bootstrap_django() is skipped so that
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
-_SKIP_BOOTSTRAP_COMMANDS = frozenset({"start", "celery", "setup", "init"})
+_SKIP_BOOTSTRAP_COMMANDS = frozenset({"start", "celery", "celery-workers", "flower", "setup"})
 
 
 def main():
@@ -221,7 +299,7 @@ def main():
         # to fire twice (once here, once when the real server starts).
         return lex(prog_name="lex")
 
-    # All other commands (init, migrate, makemigrations, …) need the full
+    # All other commands (including init, migrate, makemigrations, …) need the full
     # set of Django management commands registered as Click sub-commands.
     _install_dynamic_commands()
     return lex(prog_name="lex")

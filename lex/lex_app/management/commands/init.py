@@ -1,4 +1,6 @@
-# core/management/commands/Init.py
+from __future__ import annotations
+
+# core/management/commands/init.py
 
 import argparse
 import asyncio
@@ -22,7 +24,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
-from django.db import connection
+from django.db import DEFAULT_DB_ALIAS, connections
 from django.db.migrations.autodetector import MigrationAutodetector
 from django.db.migrations.loader import MigrationLoader
 from django.db.migrations.operations.models import CreateModel, DeleteModel, RenameModel
@@ -30,6 +32,7 @@ from django.db.migrations.questioner import MigrationQuestioner
 from django.db.migrations.state import ProjectState
 
 from lex.core.management.commands.bootstrap_callback_server import start_callback_server
+from lex.runtime_config import format_db_connection_unicode_error
 
 logger = logging.getLogger(__name__)
 
@@ -168,20 +171,20 @@ def set_state(state: str, value: str) -> None:
 
 def wait_for_keycloak_setup(state: str, timeout_seconds: int = 900, poll_interval: int = 3) -> None:
     """
-    Fail-fast: any unexpected error aborts; timeouts/cancel are fatal to Init.
+    Fail-fast: any unexpected error aborts; timeouts/cancel are fatal to init.
     """
     start = time.time()
     while True:
         if not get_missing_keycloak_env():
-            print("Keycloak credentials detected; continuing Init.")
+            print("Keycloak credentials detected; continuing init.")
             return
 
         current = get_state(state)
         if current == "done":
-            print("Keycloak setup completed; continuing Init.")
+            print("Keycloak setup completed; continuing init.")
             return
         if current == "cancelled":
-            raise CommandError("Keycloak setup cancelled; stopping Init.")
+            raise CommandError("Keycloak setup cancelled; stopping init.")
 
         if time.time() - start > timeout_seconds:
             raise CommandError(f"Timed out waiting for Keycloak setup after {timeout_seconds} seconds.")
@@ -992,8 +995,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--bootstrap",
             action=argparse.BooleanOptionalAction,
-            default=True,
-            help="If Keycloak env vars are missing, start bootstrap flow (default: True).",
+            default=False,
+            help="If Keycloak env vars are missing, start bootstrap flow (default: False).",
         )
         parser.add_argument(
             "--ensure-default-authz",
@@ -1020,12 +1023,20 @@ class Command(BaseCommand):
             help="Number of attempts for the Keycloak sync step (default: 1).",
         )
 
-    def check_unapplied_migrations(self) -> bool:
+    def check_unapplied_migrations(self, database: str = DEFAULT_DB_ALIAS) -> bool:
         from django.db.migrations.executor import MigrationExecutor
 
-        executor = MigrationExecutor(connection)
+        executor = MigrationExecutor(connections[database])
         plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
         return len(plan) > 0
+
+    @classmethod
+    def _database_alias_from_migrate_args(cls, raw: str | None) -> str:
+        _, options = cls._parse_extra_args(raw or "")
+        database = options.get("database")
+        if isinstance(database, str) and database.strip():
+            return database
+        return DEFAULT_DB_ALIAS
 
     @staticmethod
     def _parse_extra_args(raw: str):
@@ -1068,6 +1079,7 @@ class Command(BaseCommand):
         Fail-fast: any error raises CommandError.
         """
         try:
+            database_alias = self._database_alias_from_migrate_args(migrate_extra)
             if create_new:
                 mm_pos, mm_opts = self._parse_extra_args(makemigrations_extra or "")
                 self.stdout.write("Creating new migrations for model changes...")
@@ -1083,7 +1095,7 @@ class Command(BaseCommand):
                 )
                 self.stdout.write("✓ New migrations created successfully")
 
-            if not self.check_unapplied_migrations():
+            if not self.check_unapplied_migrations(database=database_alias):
                 self.stdout.write("No unapplied migrations found.")
                 return
 
@@ -1113,7 +1125,7 @@ class Command(BaseCommand):
             dry_run = options.get("dry_run", False)
             preserve_permissions = options.get("preserve_renamed_permissions", True)
             check_missing = options.get("check_missing", True)
-            bootstrap = options.get("bootstrap", True)
+            bootstrap = options.get("bootstrap", False)
             skip_migrations = options.get("skip_migrations", False)
             migration_verbosity = options.get("migration_verbosity", 1)
             no_makemigrations = options.get("no_makemigrations", False)
@@ -1154,13 +1166,13 @@ class Command(BaseCommand):
                     raise CommandError(f"Failed to open browser for bootstrap URL: {e}") from e
 
                 wait_for_keycloak_setup(state, timeout_seconds=900, poll_interval=3)
-                self.stdout.write("Keycloak configured. Continuing Init...")
+                self.stdout.write("Keycloak configured. Continuing init...")
 
             self.stdout.write("=" * 80)
             self.stdout.write("Django Migration + Keycloak Authorization Sync")
             self.stdout.write("=" * 80)
 
-            # Init sync manager
+            # Initialize the sync manager.
             sync_manager = KeycloakSyncManager()
 
             # Detect model changes BEFORE migrations
@@ -1207,11 +1219,19 @@ class Command(BaseCommand):
                 self.stdout.write("Executing Django Migrations")
                 self.stdout.write("-" * 80)
 
-                call_command("createcachetable")
+                database_alias = self._database_alias_from_migrate_args(options.get("migrate_args"))
+                db_engine = (
+                    settings.DATABASES.get(database_alias, {}).get("ENGINE", "")
+                    if isinstance(settings.DATABASES, dict)
+                    else ""
+                )
+                if "postgresql" in db_engine:
+                    call_command("create_db", database=database_alias)
+                call_command("createcachetable", database=database_alias)
 
                 if dry_run:
                     self.stdout.write("DRY RUN: Would execute Django migrations")
-                    if self.check_unapplied_migrations():
+                    if self.check_unapplied_migrations(database=database_alias):
                         self.stdout.write("Pending migrations found - would be executed")
                     else:
                         self.stdout.write("No pending migrations found")
@@ -1302,7 +1322,7 @@ class Command(BaseCommand):
                             )
                             if error_details:
                                 warning = f"{warning} ({error_details})"
-                            warning = f"{warning}; continuing Init without aborting."
+                            warning = f"{warning}; continuing init without aborting."
                             logger.warning(warning)
                             self.stderr.write(warning)
                             return
@@ -1324,6 +1344,10 @@ class Command(BaseCommand):
         except CommandError:
             # already a clean failure
             raise
+        except UnicodeDecodeError as e:
+            raise CommandError(
+                format_db_connection_unicode_error(e, settings.DATABASES.get("default", {}))
+            ) from e
         except Exception as e:
             # convert any unexpected error into a failing exit code
-            raise CommandError(f"Init command failed: {e}") from e
+            raise CommandError(f"init command failed: {e}") from e

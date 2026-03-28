@@ -2,14 +2,14 @@
 from unittest.mock import MagicMock, patch
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase
-from lex_app.management.commands.Init import KeycloakSyncManager, Command
+from lex_app.management.commands.init import KeycloakSyncManager, Command
 
 class InitCommandRetryTests(SimpleTestCase):
 
-    @patch("lex_app.management.commands.Init.KeycloakSyncManager")
-    @patch("lex_app.management.commands.Init.start_callback_server")
-    @patch("lex_app.management.commands.Init.wait_for_keycloak_setup")
-    @patch("lex_app.management.commands.Init.webbrowser.open")
+    @patch("lex_app.management.commands.init.KeycloakSyncManager")
+    @patch("lex_app.management.commands.init.start_callback_server")
+    @patch("lex_app.management.commands.init.wait_for_keycloak_setup")
+    @patch("lex_app.management.commands.init.webbrowser.open")
     def test_check_missing_phase_failure_retries(self, mock_webbrowser, mock_wait, mock_start_server, mock_manager_cls):
         """
         Test that failures during the 'check_missing' phase (export_configs) represent early failures.
@@ -31,18 +31,18 @@ class InitCommandRetryTests(SimpleTestCase):
         
         # We need to mock migration-related calls to avoid actual DB/migration logic
         with patch("django.db.migrations.executor.MigrationExecutor"), \
-             patch("lex_app.management.commands.Init.MigrationLoader"), \
-             patch("lex_app.management.commands.Init.MigrationAutodetector"), \
-             patch("lex_app.management.commands.Init.call_command") as mock_call_command:
+             patch("lex_app.management.commands.init.MigrationLoader"), \
+             patch("lex_app.management.commands.init.MigrationAutodetector"), \
+             patch("lex_app.management.commands.init.call_command") as mock_call_command:
 
             # Mock autodetector changes to return empty dict (no model changes)
             # This ensures we focus on the check_missing part
             mock_autodetector = MagicMock()
             mock_autodetector.changes.return_value = {}
-            with patch("lex_app.management.commands.Init.MigrationAutodetector", return_value=mock_autodetector):
+            with patch("lex_app.management.commands.init.MigrationAutodetector", return_value=mock_autodetector):
                  # Run command with --check-missing and retries
                 try:
-                    call_command("Init", check_missing=True, sync_retries=2, no_makemigrations=True, skip_migrations=True, bootstrap=False)
+                    call_command("init", check_missing=True, sync_retries=2, no_makemigrations=True, skip_migrations=True, bootstrap=False)
                 except CommandError as e:
                     # Current behavior: should crash or fail
                     print(f"\nCaught expected CommandError: {e}")
@@ -51,7 +51,7 @@ class InitCommandRetryTests(SimpleTestCase):
         # If it didn't raise CommandError, we might have fixed it or test setup is wrong for reproduction
         # self.fail("Command should have failed due to export_configs exception not being caught in retry loop")
 
-    @patch("lex_app.management.commands.Init.KeycloakSyncManager")
+    @patch("lex_app.management.commands.init.KeycloakSyncManager")
     def test_process_model_changes_retry(self, mock_manager_cls):
         """
         Test that process_model_changes is retried on failure.
@@ -68,15 +68,15 @@ class InitCommandRetryTests(SimpleTestCase):
         # Fail process_model_changes once, then succeed
         mock_manager.process_model_changes.side_effect = [Exception("Sync failed"), None]
 
-        with patch("lex_app.management.commands.Init.MigrationLoader"), \
-             patch("lex_app.management.commands.Init.MigrationAutodetector") as mock_detector_cls, \
-             patch("lex_app.management.commands.Init.call_command"):
+        with patch("lex_app.management.commands.init.MigrationLoader"), \
+             patch("lex_app.management.commands.init.MigrationAutodetector") as mock_detector_cls, \
+             patch("lex_app.management.commands.init.call_command"):
             
             mock_detector = MagicMock()
             mock_detector.changes.return_value = {}
             mock_detector_cls.return_value = mock_detector
 
-            call_command("Init", check_missing=True, sync_retries=2, no_makemigrations=True, skip_migrations=True, bootstrap=False)
+            call_command("init", check_missing=True, sync_retries=2, no_makemigrations=True, skip_migrations=True, bootstrap=False)
             
             # Assert process_model_changes was called twice
             self.assertEqual(mock_manager.process_model_changes.call_count, 2)

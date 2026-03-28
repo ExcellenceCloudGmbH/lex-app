@@ -23,13 +23,27 @@ class ModelStructure:
         ModelStructure._load_untracked_models_globally_from_data(data)
 
     @staticmethod
-    def _normalize_model_list(data, key):
-        values = data.get(key, [])
-        if values is None:
+    def _is_model_list_defined(values):
+        return values not in (None, "", {})
+
+    @staticmethod
+    def _normalize_model_list(values, key):
+        if not ModelStructure._is_model_list_defined(values):
             return []
         if not isinstance(values, list):
             raise ValueError(f"'{key}' must be defined as a list in model_structure.yaml.")
         return [str(value).lower() for value in values]
+
+    @classmethod
+    def _get_model_list(cls, data, key):
+        if key not in data:
+            return [], False
+
+        values = data.get(key)
+        if not cls._is_model_list_defined(values):
+            return [], False
+
+        return cls._normalize_model_list(values, key), True
 
     @classmethod
     def _load_yaml_data(cls, path: str):
@@ -39,7 +53,10 @@ class ModelStructure:
         if not isinstance(data, dict):
             return data
 
-        if "untracked_models" in data and "tracked_models" in data:
+        if (
+            cls._is_model_list_defined(data.get("untracked_models"))
+            and cls._is_model_list_defined(data.get("tracked_models"))
+        ):
             raise ValueError(
                 "model_structure.yaml cannot define both 'untracked_models' and "
                 "'tracked_models'. Please use only one of them."
@@ -59,9 +76,10 @@ class ModelStructure:
             logger.debug("Styling is not defined in the model info file")
 
         if isinstance(data, dict):
-            self.untracked_models = self._normalize_model_list(data, "untracked_models")
-            self.tracked_models = self._normalize_model_list(data, "tracked_models")
-            self.tracked_models_defined = "tracked_models" in data
+            self.untracked_models, _ = self._get_model_list(data, "untracked_models")
+            self.tracked_models, self.tracked_models_defined = self._get_model_list(
+                data, "tracked_models"
+            )
 
     def structure_is_defined(self):
         return self._structure_defined
@@ -93,5 +111,7 @@ class ModelStructure:
                 logger.debug("'untracked_models' not found in the YAML file.")
             return
 
-        cls.UNTRACKED_MODELS = cls._normalize_model_list(data, "untracked_models")
+        cls.UNTRACKED_MODELS = cls._normalize_model_list(
+            data.get("untracked_models"), "untracked_models"
+        )
         logger.debug(f"UNTRACKED_MODELS loaded: {cls.UNTRACKED_MODELS}")

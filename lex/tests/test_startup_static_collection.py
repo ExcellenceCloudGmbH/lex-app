@@ -21,3 +21,13 @@ class CollectStaticOnStartTests(TestCase):
         lex_cli._collect_static_if_deployed()
 
         bootstrap_django.assert_not_called()
+
+    @patch("lex.bin.lex._install_dynamic_commands")
+    @patch("lex.bin.lex.lex", autospec=True)
+    @patch("sys.argv", ["lex", "init"])
+    def test_main_bootstraps_django_for_init_management_command(self, lex_group, install_dynamic_commands):
+        lex_group.return_value = 0
+
+        lex_cli.main()
+
+        install_dynamic_commands.assert_called_once_with()

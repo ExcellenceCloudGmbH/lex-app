@@ -28,6 +28,12 @@ from datetime import timedelta
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
+from lex.runtime_config import (
+    derive_repo_name,
+    resolve_local_sqlite_path,
+    resolve_project_root,
+)
+
 
 def traces_sampler(sampling_context):
     if sampling_context == "/health":
@@ -61,7 +67,9 @@ if (
 warnings.simplefilter("ignore", CacheKeyWarning)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NEW_BASE_DIR = Path(os.getenv("PROJECT_ROOT", os.getcwd())).parent.as_posix()
+PROJECT_ROOT = resolve_project_root(os.getenv("PROJECT_ROOT"), os.getcwd()).as_posix()
+os.environ.setdefault("PROJECT_ROOT", PROJECT_ROOT)
+NEW_BASE_DIR = Path(PROJECT_ROOT).parent.as_posix()
 sys.path.append(NEW_BASE_DIR)
 
 ASGI_APPLICATION = "lex_app.asgi.application"
@@ -177,9 +185,7 @@ CSRF_TRUSTED_ORIGINS = [
 REACT_APP_BUILD_PATH = (
     Path(__file__).resolve().parent.parent / Path("react/build")
 ).as_posix()
-repo_name = os.getenv("PROJECT_ROOT", Path(os.getcwd()).resolve().as_posix()).split(
-    "/"
-)[-1]
+repo_name = derive_repo_name(PROJECT_ROOT, os.getcwd())
 LEGACY_MEDIA_ROOT = os.path.join(NEW_BASE_DIR, f"{repo_name}/")
 LOG_FILE_PATH = os.path.join(NEW_BASE_DIR, f"{repo_name}/{repo_name}.log")
 
@@ -310,7 +316,7 @@ CACHES = {
 DATABASES = {
     "local": {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, f"{repo_name}.sqlite3"),
+        'NAME': resolve_local_sqlite_path(PROJECT_ROOT, repo_name).as_posix(),
     },
     "default": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
@@ -403,6 +409,8 @@ CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_WORKER_SEND_TASK_EVENTS = True
+CELERY_TASK_SEND_SENT_EVENT = True
 
 # Result expiration (Redis cleanup)
 CELERY_RESULT_EXPIRES = 3600  # 1 hour
@@ -410,6 +418,11 @@ CELERY_RESULT_EXPIRES = 3600  # 1 hour
 # Use django-celery-beat's DatabaseScheduler so `celery beat` reads
 # PeriodicTask / ClockedSchedule rows from the DB by default.
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+# Flower monitoring configuration
+FLOWER_ADDRESS = os.getenv("FLOWER_ADDRESS", "127.0.0.1")
+FLOWER_PORT = int(os.getenv("FLOWER_PORT", "5555"))
+FLOWER_URL_PREFIX = os.getenv("FLOWER_URL_PREFIX", "")
 
 # Enhanced Celery Active Configuration
 # Support both CELERY_ACTIVE and legacy C_FORCE_ROOT for backward compatibility

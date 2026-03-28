@@ -1,7 +1,7 @@
 from datetime import datetime
 import logging
 
-from django.db import models
+from django.db import models, transaction
 
 from lex.core.mixins.ModelModificationRestriction import (
     AdminReportsModificationRestriction,
@@ -61,6 +61,74 @@ class CalculationLog(models.Model):
         app_label = "audit_logging"
 
     @classmethod
+    def _get_or_create_locked(cls, logger, **lookup_kwargs):
+        existing_entries = list(
+            cls.objects.filter(**lookup_kwargs).order_by("id")[:2]
+        )
+        if existing_entries:
+            if len(existing_entries) > 1:
+                logger.warning(
+                    "Detected duplicate CalculationLog rows for %s; using id=%s.",
+                    lookup_kwargs,
+                    existing_entries[0].id,
+                )
+            return existing_entries[0], False
+
+        return cls.objects.create(**lookup_kwargs), True
+
+    @classmethod
+    def _persist_message(cls, context_info, message: str, logger):
+        parent_debug = None
+        log_debug = None
+        parent_log = None
+        audit_log_id = getattr(context_info.audit_log, "pk", None)
+
+        with transaction.atomic():
+            if audit_log_id:
+                from lex.audit_logging.models.AuditLog import AuditLog
+
+                AuditLog.objects.select_for_update().get(pk=audit_log_id)
+
+            if context_info.parent_model and context_info.parent_content_type:
+                parent_debug = {
+                    "calculationId": context_info.calculation_id,
+                    "audit_log": context_info.audit_log,
+                    "content_type": context_info.parent_content_type,
+                    "object_id": context_info.parent_model.pk,
+                }
+                parent_log, _ = cls._get_or_create_locked(
+                    logger,
+                    calculationId=context_info.calculation_id,
+                    audit_log=context_info.audit_log,
+                    content_type=context_info.parent_content_type,
+                    object_id=context_info.parent_model.pk,
+                )
+
+            current_model_pk = (
+                context_info.current_model.pk if context_info.current_model else None
+            )
+            log_debug = {
+                "calc_id": context_info.calculation_id,
+                "audit_log": context_info.audit_log,
+                "content_type": context_info.content_type,
+                "object_id": current_model_pk,
+                "calclog": parent_log,
+            }
+            log_entry, _ = cls._get_or_create_locked(
+                logger,
+                calculationId=context_info.calculation_id,
+                audit_log=context_info.audit_log,
+                content_type=context_info.content_type,
+                object_id=current_model_pk,
+                parent_log=parent_log,
+            )
+
+            logger.debug(f"Log: {log_debug}")
+            logger.debug(f"Parent: {parent_debug}")
+            log_entry.calculation_log = (log_entry.calculation_log or "") + f"\n{message}"
+            log_entry.save(update_fields=["calculation_log"])
+
+    @classmethod
     def log(cls, message: str):
         """
         Logs `message` against the current model context.
@@ -87,43 +155,30 @@ class CalculationLog(models.Model):
 
 
             # 2) Create parent log entry if needed
-            parent_log = None
-            if context_info.parent_model and context_info.parent_content_type:
-                parent_debug = {"calculationId": context_info.calculation_id,
-                 "audit_log": context_info.audit_log,
-                 "content_type": context_info.parent_content_type,
-                 "object_id": context_info.parent_model.pk}
-                parent_log, _ = cls.objects.get_or_create(
-                    calculationId=context_info.calculation_id,
-                    audit_log=context_info.audit_log,
-                    content_type=context_info.parent_content_type,
-                    object_id=context_info.parent_model.pk,
-                )
-            
-            # 3) Create or get current log entry
-            current_model_pk = context_info.current_model.pk if context_info.current_model else None
-
-            log_debug = {"calc_id": context_info.calculation_id,
-                 "audit_log": context_info.audit_log,
-                 "content_type": context_info.content_type,
-                 "object_id": current_model_pk,
-                 "calclog": parent_log}
-
-            # TODO: Test this
-            log_entry, _ = cls.objects.get_or_create(
-                calculationId=context_info.calculation_id,
-                audit_log=context_info.audit_log,
-                content_type=context_info.content_type,
-                object_id=current_model_pk,
-                parent_log=parent_log,
+            db_alias = (
+                getattr(getattr(context_info.audit_log, "_state", None), "db", None)
+                or cls.objects.db
+                or "default"
             )
+            connection = transaction.get_connection(using=db_alias)
 
+            if connection.in_atomic_block:
+                def persist_after_commit():
+                    try:
+                        cls._persist_message(context_info, message, logger)
+                    except Exception as persist_error:
+                        logger.error("ERROR IN CALCULATION LOG")
+                        logger.error(
+                            "Unexpected deferred error in CalculationLog.log() for message: %s. Error: %s",
+                            message,
+                            persist_error,
+                            exc_info=True,
+                        )
+                        logger.warning(f"Fallback logging: {message}")
 
-            logger.debug(f"Log: {log_debug}")
-            logger.debug(f"Parent: {parent_debug}")
-            # 4) Append message and save
-            log_entry.calculation_log = (log_entry.calculation_log or "") + f"\n{message}"
-            log_entry.save()
+                transaction.on_commit(persist_after_commit, using=db_alias)
+            else:
+                cls._persist_message(context_info, message, logger)
 
 
             root_record = context_info.root_record

@@ -1,5 +1,5 @@
 """
-Tests for the Init management command's argument parsing and migration forwarding.
+Tests for the init management command's argument parsing and migration forwarding.
 """
 import json
 from unittest import TestCase
@@ -8,7 +8,7 @@ from io import StringIO
 
 from django.core.management.base import CommandError
 
-from lex.lex_app.management.commands.Init import Command, KeycloakSyncManager
+from lex.lex_app.management.commands.init import Command, KeycloakSyncManager
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ class ExecuteMigrationsForwardingTest(TestCase):
         self.cmd.stdout = StringIO()
         self.cmd.stderr = StringIO()
 
-    @patch('lex.lex_app.management.commands.Init.call_command')
+    @patch('lex.lex_app.management.commands.init.call_command')
     def test_no_extra_args(self, mock_call):
         mock_call.return_value = None
         with patch.object(self.cmd, 'check_unapplied_migrations', return_value=False):
@@ -131,7 +131,7 @@ class ExecuteMigrationsForwardingTest(TestCase):
             no_input=True,
         )
 
-    @patch('lex.lex_app.management.commands.Init.call_command')
+    @patch('lex.lex_app.management.commands.init.call_command')
     def test_makemigrations_extra_merge(self, mock_call):
         mock_call.return_value = None
         with patch.object(self.cmd, 'check_unapplied_migrations', return_value=False):
@@ -150,7 +150,7 @@ class ExecuteMigrationsForwardingTest(TestCase):
             merge=True,
         )
 
-    @patch('lex.lex_app.management.commands.Init.call_command')
+    @patch('lex.lex_app.management.commands.init.call_command')
     def test_migrate_extra_run_syncdb(self, mock_call):
         mock_call.return_value = None
         with patch.object(self.cmd, 'check_unapplied_migrations', return_value=True):
@@ -168,7 +168,7 @@ class ExecuteMigrationsForwardingTest(TestCase):
             run_syncdb=True,
         )
 
-    @patch('lex.lex_app.management.commands.Init.call_command')
+    @patch('lex.lex_app.management.commands.init.call_command')
     def test_migrate_extra_database_equals(self, mock_call):
         """--migrate-args='--database=GCP' forwards correctly."""
         mock_call.return_value = None
@@ -187,7 +187,7 @@ class ExecuteMigrationsForwardingTest(TestCase):
             database='GCP',
         )
 
-    @patch('lex.lex_app.management.commands.Init.call_command')
+    @patch('lex.lex_app.management.commands.init.call_command')
     def test_both_extra_args_forwarded(self, mock_call):
         mock_call.return_value = None
         with patch.object(self.cmd, 'check_unapplied_migrations', return_value=True):
@@ -220,7 +220,7 @@ class ExecuteMigrationsForwardingTest(TestCase):
             run_syncdb=True,
         ))
 
-    @patch('lex.lex_app.management.commands.Init.call_command')
+    @patch('lex.lex_app.management.commands.init.call_command')
     def test_skip_makemigrations(self, mock_call):
         mock_call.return_value = None
         with patch.object(self.cmd, 'check_unapplied_migrations', return_value=True):
@@ -229,11 +229,25 @@ class ExecuteMigrationsForwardingTest(TestCase):
         mock_call.assert_called_once()
         self.assertEqual(mock_call.call_args_list[0][0][0], 'migrate')
 
-    @patch('lex.lex_app.management.commands.Init.call_command')
-    def test_migration_failure_returns_false(self, mock_call):
+    @patch('lex.lex_app.management.commands.init.call_command')
+    def test_migration_failure_raises_command_error(self, mock_call):
         mock_call.side_effect = Exception('migration boom')
-        result = self.cmd.execute_migrations(verbosity=1, create_new=True)
-        self.assertFalse(result)
+        with self.assertRaises(CommandError):
+            self.cmd.execute_migrations(verbosity=1, create_new=True)
+
+
+class BootstrapArgumentDefaultsTest(TestCase):
+    def test_bootstrap_defaults_to_false(self):
+        parser = Command().create_parser("manage.py", "init")
+        options = parser.parse_args([])
+
+        self.assertFalse(options.bootstrap)
+
+    def test_bootstrap_can_be_enabled_explicitly(self):
+        parser = Command().create_parser("manage.py", "init")
+        options = parser.parse_args(["--bootstrap"])
+
+        self.assertTrue(options.bootstrap)
 
 
 class InitCommandKeycloakRetryBehaviorTest(TestCase):
@@ -242,10 +256,155 @@ class InitCommandKeycloakRetryBehaviorTest(TestCase):
         self.cmd.stdout = StringIO()
         self.cmd.stderr = StringIO()
 
-    @patch("lex.lex_app.management.commands.Init.KeycloakSyncManager")
-    @patch("lex.lex_app.management.commands.Init.MigrationAutodetector")
-    @patch("lex.lex_app.management.commands.Init.MigrationLoader")
-    @patch("lex.lex_app.management.commands.Init.ProjectState.from_apps")
+    @patch("lex.lex_app.management.commands.init.KeycloakSyncManager")
+    @patch("lex.lex_app.management.commands.init.MigrationAutodetector")
+    @patch("lex.lex_app.management.commands.init.MigrationLoader")
+    @patch("lex.lex_app.management.commands.init.ProjectState.from_apps")
+    @patch("lex.lex_app.management.commands.init.call_command")
+    def test_handle_uses_selected_database_for_createcachetable(
+        self,
+        mock_call_command,
+        mock_from_apps,
+        mock_loader_cls,
+        mock_autodetector_cls,
+        mock_manager_cls,
+    ):
+        mock_manager_cls.return_value = MagicMock()
+
+        mock_loader = MagicMock()
+        mock_loader.graph = MagicMock()
+        mock_loader.project_state.return_value = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_from_apps.return_value = MagicMock()
+
+        mock_autodetector = MagicMock()
+        mock_autodetector.changes.return_value = {}
+        mock_autodetector_cls.return_value = mock_autodetector
+
+        self.cmd.handle(
+            dry_run=True,
+            preserve_renamed_permissions=True,
+            check_missing=False,
+            bootstrap=False,
+            skip_migrations=False,
+            migration_verbosity=1,
+            no_makemigrations=True,
+            ensure_default_authz=False,
+            sync_retries=1,
+            makemigrations_args="",
+            migrate_args="--database=local",
+        )
+
+        self.assertEqual(mock_call_command.call_args_list, [call("createcachetable", database="local")])
+
+    @patch("lex.lex_app.management.commands.init.settings")
+    @patch("lex.lex_app.management.commands.init.KeycloakSyncManager")
+    @patch("lex.lex_app.management.commands.init.MigrationAutodetector")
+    @patch("lex.lex_app.management.commands.init.MigrationLoader")
+    @patch("lex.lex_app.management.commands.init.ProjectState.from_apps")
+    @patch("lex.lex_app.management.commands.init.call_command")
+    def test_handle_creates_postgres_database_before_cache_table(
+        self,
+        mock_call_command,
+        mock_from_apps,
+        mock_loader_cls,
+        mock_autodetector_cls,
+        mock_manager_cls,
+        mock_settings,
+    ):
+        mock_manager_cls.return_value = MagicMock()
+
+        mock_loader = MagicMock()
+        mock_loader.graph = MagicMock()
+        mock_loader.project_state.return_value = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_from_apps.return_value = MagicMock()
+
+        mock_autodetector = MagicMock()
+        mock_autodetector.changes.return_value = {}
+        mock_autodetector_cls.return_value = mock_autodetector
+
+        mock_settings.DATABASES = {
+            "default": {"ENGINE": "django.db.backends.postgresql_psycopg2"},
+        }
+
+        self.cmd.handle(
+            dry_run=True,
+            preserve_renamed_permissions=True,
+            check_missing=False,
+            bootstrap=False,
+            skip_migrations=False,
+            migration_verbosity=1,
+            no_makemigrations=True,
+            ensure_default_authz=False,
+            sync_retries=1,
+            makemigrations_args="",
+            migrate_args="",
+        )
+
+        self.assertEqual(
+            mock_call_command.call_args_list,
+            [
+                call("create_db", database="default"),
+                call("createcachetable", database="default"),
+            ],
+        )
+
+    @patch("lex.lex_app.management.commands.init.KeycloakSyncManager")
+    @patch("lex.lex_app.management.commands.init.MigrationAutodetector")
+    @patch("lex.lex_app.management.commands.init.MigrationLoader")
+    @patch("lex.lex_app.management.commands.init.ProjectState.from_apps")
+    @patch("lex.lex_app.management.commands.init.call_command")
+    def test_handle_wraps_unicode_db_errors(
+        self,
+        mock_call_command,
+        mock_from_apps,
+        mock_loader_cls,
+        mock_autodetector_cls,
+        mock_manager_cls,
+    ):
+        mock_manager_cls.return_value = MagicMock()
+
+        mock_loader = MagicMock()
+        mock_loader.graph = MagicMock()
+        mock_loader.project_state.return_value = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+        mock_from_apps.return_value = MagicMock()
+
+        mock_autodetector = MagicMock()
+        mock_autodetector.changes.return_value = {}
+        mock_autodetector_cls.return_value = mock_autodetector
+
+        mock_call_command.side_effect = UnicodeDecodeError(
+            "utf-8",
+            b"abc\xbb",
+            3,
+            4,
+            "invalid start byte",
+        )
+
+        with self.assertRaises(CommandError) as exc_info:
+            self.cmd.handle(
+                dry_run=True,
+                preserve_renamed_permissions=True,
+                check_missing=False,
+                bootstrap=False,
+                skip_migrations=False,
+                migration_verbosity=1,
+                no_makemigrations=True,
+                ensure_default_authz=False,
+                sync_retries=1,
+                makemigrations_args="",
+                migrate_args="",
+            )
+
+        self.assertIn("Database connection failed while psycopg2/libpq was decoding", str(exc_info.exception))
+        self.assertIn("Check whether any PostgreSQL credential source contains non-UTF-8 bytes.", str(exc_info.exception))
+
+    @patch("lex.lex_app.management.commands.init.KeycloakSyncManager")
+    @patch("lex.lex_app.management.commands.init.MigrationAutodetector")
+    @patch("lex.lex_app.management.commands.init.MigrationLoader")
+    @patch("lex.lex_app.management.commands.init.ProjectState.from_apps")
     def test_handle_continues_after_max_retries_on_gateway_timeout(
         self,
         mock_from_apps,
@@ -290,14 +449,14 @@ class InitCommandKeycloakRetryBehaviorTest(TestCase):
 
         self.assertEqual(mock_manager.process_model_changes.call_count, 2)
         self.assertIn(
-            "continuing Init without aborting",
+            "continuing init without aborting",
             self.cmd.stderr.getvalue(),
         )
 
-    @patch("lex.lex_app.management.commands.Init.KeycloakSyncManager")
-    @patch("lex.lex_app.management.commands.Init.MigrationAutodetector")
-    @patch("lex.lex_app.management.commands.Init.MigrationLoader")
-    @patch("lex.lex_app.management.commands.Init.ProjectState.from_apps")
+    @patch("lex.lex_app.management.commands.init.KeycloakSyncManager")
+    @patch("lex.lex_app.management.commands.init.MigrationAutodetector")
+    @patch("lex.lex_app.management.commands.init.MigrationLoader")
+    @patch("lex.lex_app.management.commands.init.ProjectState.from_apps")
     def test_handle_still_raises_for_non_timeout_sync_failures(
         self,
         mock_from_apps,

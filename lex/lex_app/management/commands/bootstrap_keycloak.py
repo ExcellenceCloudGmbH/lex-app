@@ -16,7 +16,7 @@ import webbrowser
 
 from django.core.management.base import BaseCommand
 
-from lex_app.management.commands.Init import (
+from lex_app.management.commands.init import (
     ENV_FILE,
     STATE_FILE,
     build_instance_controller_url,

@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
 import os
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from lex.tools.project_root import find_project_root  # shared utility
+
+
+DEFAULT_CONFIG_ENVS = {"PYTHONUNBUFFERED": "1"}
+CELERY_WORKER_COUNT_PROMPT = "$Prompt:Worker count:1$"
+
+
+def _render_envs(envs):
+    return "\n".join(
+        f'      <env name="{escape(name)}" value="{escape(value)}" />'
+        for name, value in envs.items()
+    )
+
+
+def _build_celery_workers_parameters():
+    return f"celery-workers {CELERY_WORKER_COUNT_PROMPT}"
+
 
 def generate_pycharm_configs(project_root=None):
     # Resolve against caller’s execution directory by default
@@ -21,10 +38,22 @@ def generate_pycharm_configs(project_root=None):
     )
 
     configs = {
-        "Init.run.xml": {"name": "Init", "parameters": "Init"},
+        "Init.run.xml": {"name": "Init", "parameters": "init"},
         "Start.run.xml": {
             "name": "Start",
             "parameters": "start --reload --loop asyncio lex_app.asgi:application",
+        },
+        "Flower.run.xml": {
+            "name": "Flower",
+            "parameters": "flower",
+        },
+        "Celery_Worker.run.xml": {
+            "name": "Celery Workers",
+            "parameters": _build_celery_workers_parameters(),
+            "envs": {
+                "IS_RUNNING_IN_CELERY": "true",
+                "CELERY_ACTIVE": "true",
+            },
         },
         "Make_migrations.run.xml": {"name": "Make migrations", "parameters": "makemigrations"},
         "Migrate.run.xml": {"name": "Migrate", "parameters": "migrate"},
@@ -41,6 +70,7 @@ def generate_pycharm_configs(project_root=None):
     print(f"Project root: {project_root}")
 
     for filename, config in configs.items():
+        envs = {**DEFAULT_CONFIG_ENVS, **config.get("envs", {})}
         content = f'''<component name="ProjectRunConfigurationManager">
   <configuration default="false" name="{config['name']}" type="PythonConfigurationType" factoryName="Python">
     <module name="{project_name}" />
@@ -48,7 +78,7 @@ def generate_pycharm_configs(project_root=None):
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <envs>
-      <env name="PYTHONUNBUFFERED" value="1" />
+{_render_envs(envs)}
     </envs>
     <option name="SDK_HOME" value="" />
     <option name="WORKING_DIRECTORY" value="{project_root}" />

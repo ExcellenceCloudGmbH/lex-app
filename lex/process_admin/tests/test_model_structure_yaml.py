@@ -63,6 +63,50 @@ class ModelStructureYamlTests(TestCase):
         finally:
             path.unlink()
 
+    def test_blank_tracked_models_defaults_to_tracking_everything(self):
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write("tracked_models:\n")
+            path = Path(handle.name)
+
+        try:
+            builder = ModelStructureBuilder()
+            builder.extract_from_yaml(str(path))
+
+            self.assertFalse(builder.tracked_models_defined)
+            self.assertEqual(
+                builder.resolve_untracked_models(["Foo", "Bar"]),
+                [],
+            )
+        finally:
+            path.unlink()
+
+    def test_blank_untracked_models_defaults_to_tracking_everything(self):
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write("untracked_models:\n")
+            path = Path(handle.name)
+
+        try:
+            structure = ModelStructure(str(path))
+            self.assertEqual(structure.untracked_models, [])
+        finally:
+            path.unlink()
+
+    def test_blank_tracked_models_does_not_conflict_with_untracked_models(self):
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write(
+                "tracked_models:\n"
+                "untracked_models:\n"
+                "  - bar\n"
+            )
+            path = Path(handle.name)
+
+        try:
+            structure = ModelStructure(str(path))
+            self.assertEqual(structure.untracked_models, ["bar"])
+            self.assertFalse(structure.tracked_models_defined)
+        finally:
+            path.unlink()
+
     def test_tracked_and_untracked_models_cannot_be_defined_together(self):
         with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
             handle.write(
