@@ -157,12 +157,18 @@ class CallbackTask(Task):
         """Update model status and notify connected systems."""
         try:
             with transaction.atomic():
+                update_fields = ["is_calculated"]
                 model_instance.is_calculated = status
                 if error_message and hasattr(model_instance, 'error_message'):
                     model_instance.error_message = error_message
+                    update_fields.append("error_message")
                 if task_id and hasattr(model_instance, 'task_id'):
                     model_instance.task_id = task_id
-                model_instance.save(skip_hooks=True)
+                    update_fields.append("task_id")
+                # Persist only the callback-managed status fields. Celery task
+                # arguments can hold a stale in-memory snapshot of the model,
+                # and saving the full instance can rewrite unrelated FK values.
+                model_instance.save(skip_hooks=True, update_fields=update_fields)
                 logger.warning(f"Updating status for {model_instance.__class__.__name__} task {task_id}")
                 update_calculation_status(
                     model_instance,

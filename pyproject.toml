@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lex-app"
-version = "2.0.0rc94"
+version = "2.0.0rc95"
 description = "A Python / Django library to create business applications easily with complex logic"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = "MIT"
