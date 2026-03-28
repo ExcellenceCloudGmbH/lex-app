@@ -3,8 +3,12 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from django.core.files.uploadedfile import TemporaryUploadedFile
+from django.http import QueryDict
+
 from lex.api.views.model_entries.One import OneModelEntry
 from lex.api.views.process_flow.CreateOrUpdate import CreateOrUpdate
+from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import should_use_atomic_model_operations
 
 
@@ -70,6 +74,34 @@ class AtomicViewTransactionTests(TestCase):
 
         self.assertEqual(response, "created")
         atomic_mock.assert_called_once_with()
+
+    def test_prepare_update_request_handles_uploaded_files_without_deepcopy(self):
+        view = OneModelEntry()
+        upload = TemporaryUploadedFile("payload.txt", "text/plain", 3, "utf-8")
+        upload.write(b"abc")
+        upload.seek(0)
+        request_data = QueryDict("", mutable=True)
+        request_data["calculate"] = "true"
+        request_data.setlist("attachment", [upload])
+        request = SimpleNamespace(data=request_data)
+
+        try:
+            prepared_request = view._prepare_update_request(
+                request,
+                reset_is_calculated=True,
+            )
+
+            self.assertIs(prepared_request, request)
+            self.assertEqual(request.data["calculate"], "true")
+            self.assertNotIn("calculate", prepared_request._data)
+            self.assertEqual(
+                prepared_request._data["is_calculated"],
+                CalculationModel.NOT_CALCULATED,
+            )
+            self.assertIs(prepared_request._data.getlist("attachment")[0], upload)
+            self.assertIs(prepared_request._full_data, prepared_request._data)
+        finally:
+            upload.close()
 
     def test_process_flow_update_skips_outer_atomic_for_non_atomic_models(self):
         instance = NonAtomicModel()

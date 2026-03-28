@@ -1,3 +1,4 @@
+import copy
 import traceback
 import logging
 from contextlib import nullcontext
@@ -56,11 +57,7 @@ class OneModelEntry(
         return response
 
     def _prepare_update_request(self, request, *, reset_is_calculated=False):
-        payload = (
-            request.data.copy()
-            if hasattr(request.data, "copy")
-            else dict(request.data)
-        )
+        payload = copy.copy(request.data) if hasattr(request, "data") else {}
         payload.pop("calculate", None)
         if reset_is_calculated:
             payload["is_calculated"] = CalculationModel.NOT_CALCULATED
