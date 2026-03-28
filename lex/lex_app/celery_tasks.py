@@ -157,19 +157,19 @@ class CallbackTask(Task):
         """Update model status and notify connected systems."""
         try:
             with transaction.atomic():
-                update_fields = ["is_calculated"]
+                update_values = {"is_calculated": status}
                 model_instance.is_calculated = status
                 if error_message and hasattr(model_instance, 'error_message'):
                     model_instance.error_message = error_message
-                    update_fields.append("error_message")
+                    update_values["error_message"] = error_message
                 if task_id and hasattr(model_instance, 'task_id'):
                     model_instance.task_id = task_id
-                    update_fields.append("task_id")
-                # Persist only the callback-managed status fields. Celery task
-                # arguments can hold a stale in-memory snapshot of the model,
-                # and saving the full instance can rewrite unrelated FK values.
-                model_instance.save(skip_hooks=True, update_fields=update_fields)
-                logger.warning(f"Updating status for {model_instance.__class__.__name__} task {task_id}")
+                    update_values["task_id"] = task_id
+                persisted = self._persist_status_fields(model_instance, update_values)
+                if persisted:
+                    logger.warning(
+                        f"Updating status for {model_instance.__class__.__name__} task {task_id}"
+                    )
                 update_calculation_status(
                     model_instance,
                     exception_details=error_message,
@@ -180,6 +180,48 @@ class CallbackTask(Task):
                 f"Failed to update model status for {model_instance}: {update_error}",
                 exc_info=True
             )
+
+    def _persist_status_fields(
+            self,
+            model_instance: CalculationModel,
+            update_values: Dict[str, Any],
+    ) -> bool:
+        """
+        Persist callback-managed status fields without saving the full model.
+
+        Celery task arguments may reference a stale model snapshot or even a row
+        that was removed and rebuilt by the bitemporal synchronization flow.
+        Using a direct queryset update avoids rewriting unrelated fields from the
+        stale snapshot and lets us handle a missing row gracefully.
+        """
+        model_class = model_instance.__class__
+        updated_rows = model_class._default_manager.filter(pk=model_instance.pk).update(**update_values)
+        if updated_rows:
+            return True
+
+        if hasattr(model_class, "history"):
+            try:
+                from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
+
+                BitemporalSynchronizer.sync_record_for_model(model_class, model_instance.pk)
+                updated_rows = model_class._default_manager.filter(pk=model_instance.pk).update(**update_values)
+                if updated_rows:
+                    return True
+            except Exception as sync_error:
+                logger.warning(
+                    "Failed to resync main-table row before persisting callback status for %s(%s): %s",
+                    model_class.__name__,
+                    model_instance.pk,
+                    sync_error,
+                    exc_info=True,
+                )
+
+        logger.warning(
+            "Skipping callback status persistence for %s(%s); no active row found.",
+            model_class.__name__,
+            model_instance.pk,
+        )
+        return False
 
 
 class FireAndForget:

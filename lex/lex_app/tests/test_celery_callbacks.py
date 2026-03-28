@@ -27,11 +27,16 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
 
     def test_success_callback_updates_only_status_fields(self):
         instance = DummyCallbackCalculationModel(id=1, name="Sponsor Plan")
-        instance.save = Mock()
+        queryset = Mock()
+        queryset.update.return_value = 1
 
         with patch(
             "lex.lex_app.celery_tasks.transaction.atomic",
             return_value=nullcontext(),
+        ), patch.object(
+            DummyCallbackCalculationModel._default_manager,
+            "filter",
+            return_value=queryset,
         ), patch(
             "lex.lex_app.celery_tasks.update_calculation_status"
         ) as update_status_mock:
@@ -43,9 +48,9 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
 
         self.assertEqual(instance.is_calculated, CalculationModel.SUCCESS)
         self.assertEqual(instance.task_id, "task-123")
-        instance.save.assert_called_once_with(
-            skip_hooks=True,
-            update_fields=["is_calculated", "task_id"],
+        queryset.update.assert_called_once_with(
+            is_calculated=CalculationModel.SUCCESS,
+            task_id="task-123",
         )
         update_status_mock.assert_called_once_with(
             instance,
@@ -55,11 +60,16 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
 
     def test_failure_callback_updates_only_error_related_fields(self):
         instance = DummyCallbackCalculationModel(id=2, name="Sponsor Plan")
-        instance.save = Mock()
+        queryset = Mock()
+        queryset.update.return_value = 1
 
         with patch(
             "lex.lex_app.celery_tasks.transaction.atomic",
             return_value=nullcontext(),
+        ), patch.object(
+            DummyCallbackCalculationModel._default_manager,
+            "filter",
+            return_value=queryset,
         ), patch(
             "lex.lex_app.celery_tasks.update_calculation_status"
         ) as update_status_mock:
@@ -73,12 +83,80 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
         self.assertEqual(instance.is_calculated, CalculationModel.ERROR)
         self.assertEqual(instance.error_message, "foreign key missing")
         self.assertEqual(instance.task_id, "task-456")
-        instance.save.assert_called_once_with(
-            skip_hooks=True,
-            update_fields=["is_calculated", "error_message", "task_id"],
+        queryset.update.assert_called_once_with(
+            is_calculated=CalculationModel.ERROR,
+            error_message="foreign key missing",
+            task_id="task-456",
         )
         update_status_mock.assert_called_once_with(
             instance,
             exception_details="foreign key missing",
+            stack_trace=None,
+        )
+
+    def test_missing_row_retries_after_bitemporal_resync(self):
+        instance = DummyCallbackCalculationModel(id=3, name="Sponsor Plan")
+        queryset = Mock()
+        queryset.update.side_effect = [0, 1]
+
+        with patch(
+            "lex.lex_app.celery_tasks.transaction.atomic",
+            return_value=nullcontext(),
+        ), patch.object(
+            DummyCallbackCalculationModel._default_manager,
+            "filter",
+            return_value=queryset,
+        ) as filter_mock, patch.object(
+            DummyCallbackCalculationModel,
+            "history",
+            object(),
+            create=True,
+        ), patch(
+            "lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model"
+        ) as sync_mock, patch(
+            "lex.lex_app.celery_tasks.update_calculation_status"
+        ):
+            self.callback_task._update_model_status(
+                instance,
+                CalculationModel.SUCCESS,
+                task_id="task-789",
+            )
+
+        self.assertEqual(filter_mock.call_count, 2)
+        self.assertEqual(queryset.update.call_count, 2)
+        sync_mock.assert_called_once_with(DummyCallbackCalculationModel, 3)
+
+    def test_missing_row_is_skipped_when_no_resynced_row_exists(self):
+        instance = DummyCallbackCalculationModel(id=4, name="Sponsor Plan")
+        queryset = Mock()
+        queryset.update.side_effect = [0, 0]
+
+        with patch(
+            "lex.lex_app.celery_tasks.transaction.atomic",
+            return_value=nullcontext(),
+        ), patch.object(
+            DummyCallbackCalculationModel._default_manager,
+            "filter",
+            return_value=queryset,
+        ), patch.object(
+            DummyCallbackCalculationModel,
+            "history",
+            object(),
+            create=True,
+        ), patch(
+            "lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model"
+        ) as sync_mock, patch(
+            "lex.lex_app.celery_tasks.update_calculation_status"
+        ) as update_status_mock:
+            self.callback_task._update_model_status(
+                instance,
+                CalculationModel.SUCCESS,
+                task_id="task-000",
+            )
+
+        sync_mock.assert_called_once_with(DummyCallbackCalculationModel, 4)
+        update_status_mock.assert_called_once_with(
+            instance,
+            exception_details=None,
             stack_trace=None,
         )
