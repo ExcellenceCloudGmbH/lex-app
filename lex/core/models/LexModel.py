@@ -476,35 +476,65 @@ class LexModel(LifecycleModel):
         base_save = super(LifecycleModelMixin, self).save
         atomic_context = transaction.atomic() if self._should_use_atomic_save() else nullcontext()
 
-        with atomic_context:
-            skip_hooks = kwargs.pop("skip_hooks", False)
-            skip_hooks_from_cm = (
-                lifecycle_bypass_state.is_bypassed_for(self.__class__)
-                if lifecycle_bypass_state is not None
-                else False
+        try:
+            with atomic_context:
+                skip_hooks = kwargs.pop("skip_hooks", False)
+                skip_hooks_from_cm = (
+                    lifecycle_bypass_state.is_bypassed_for(self.__class__)
+                    if lifecycle_bypass_state is not None
+                    else False
+                )
+                if skip_hooks or skip_hooks_from_cm:
+                    return base_save(*args, **kwargs)
+
+                self._clear_watched_fk_model_cache()
+                is_new = self._state.adding
+
+                if is_new:
+                    self._run_hooked_methods(BEFORE_CREATE, **kwargs)
+                else:
+                    self._run_hooked_methods(BEFORE_UPDATE, **kwargs)
+
+                self._run_hooked_methods(BEFORE_SAVE, **kwargs)
+                result = base_save(*args, **kwargs)
+                self._run_hooked_methods(AFTER_SAVE, **kwargs)
+
+                if is_new:
+                    self._run_hooked_methods(AFTER_CREATE, **kwargs)
+                else:
+                    self._run_hooked_methods(AFTER_UPDATE, **kwargs)
+
+                transaction.on_commit(self._reset_initial_state)
+                return result
+        except Exception:
+            self._finalize_pending_terminal_audit()
+            raise
+
+    def _finalize_pending_terminal_audit(self):
+        pending_terminal_audit = getattr(self, "_pending_terminal_audit", None)
+        if not isinstance(pending_terminal_audit, dict):
+            return
+
+        try:
+            from lex.audit_logging.utils.calculation_audit import (
+                ensure_terminal_calculation_audit,
             )
-            if skip_hooks or skip_hooks_from_cm:
-                return base_save(*args, **kwargs)
 
-            self._clear_watched_fk_model_cache()
-            is_new = self._state.adding
-
-            if is_new:
-                self._run_hooked_methods(BEFORE_CREATE, **kwargs)
-            else:
-                self._run_hooked_methods(BEFORE_UPDATE, **kwargs)
-
-            self._run_hooked_methods(BEFORE_SAVE, **kwargs)
-            result = base_save(*args, **kwargs)
-            self._run_hooked_methods(AFTER_SAVE, **kwargs)
-
-            if is_new:
-                self._run_hooked_methods(AFTER_CREATE, **kwargs)
-            else:
-                self._run_hooked_methods(AFTER_UPDATE, **kwargs)
-
-            transaction.on_commit(self._reset_initial_state)
-            return result
+            ensure_terminal_calculation_audit(
+                self,
+                audit_status=pending_terminal_audit.get("audit_status", "failure"),
+                error_message=pending_terminal_audit.get("error_message"),
+                stack_trace=pending_terminal_audit.get("stack_trace"),
+            )
+        except Exception as audit_error:
+            logger.error(
+                "Failed to finalize pending terminal audit for %s: %s",
+                self,
+                audit_error,
+                exc_info=True,
+            )
+        finally:
+            delattr(self, "_pending_terminal_audit")
 
     def _capture_snapshot(self) -> Dict[str, Any]:
         """Capture current model field state for rollback"""

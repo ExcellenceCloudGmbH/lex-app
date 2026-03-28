@@ -28,6 +28,9 @@ from celery import Task, shared_task
 from celery.result import allow_join_result
 
 from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
+from lex.audit_logging.utils.calculation_audit import (
+    ensure_terminal_calculation_audit,
+)
 from django.db import transaction
 from django.db.models import Model
 
@@ -106,7 +109,9 @@ class CallbackTask(Task):
                     self._update_model_status(
                         model_instance,
                         CalculationModel.SUCCESS,
-                        task_id=task_id
+                        task_id=task_id,
+                        context_data=kwargs.get("context"),
+                        model_context=kwargs.get("model_context"),
                     )
         except Exception as callback_error:
             logger.error(
@@ -127,7 +132,9 @@ class CallbackTask(Task):
                         CalculationModel.ERROR,
                         error_message=str(exc),
                         stack_trace=str(einfo) if einfo else None,
-                        task_id=task_id
+                        task_id=task_id,
+                        context_data=kwargs.get("context"),
+                        model_context=kwargs.get("model_context"),
                     )
         except Exception as callback_error:
             logger.error(
@@ -152,7 +159,9 @@ class CallbackTask(Task):
             status: str,
             error_message: Optional[str] = None,
             stack_trace: Optional[str] = None,
-            task_id: Optional[str] = None
+            task_id: Optional[str] = None,
+            context_data: Optional[Dict[str, Any]] = None,
+            model_context=None,
     ) -> None:
         """Update model status and notify connected systems."""
         try:
@@ -180,6 +189,23 @@ class CallbackTask(Task):
                 f"Failed to update model status for {model_instance}: {update_error}",
                 exc_info=True
             )
+        finally:
+            try:
+                ensure_terminal_calculation_audit(
+                    model_instance,
+                    audit_status="failure" if status == CalculationModel.ERROR else "success",
+                    error_message=error_message,
+                    stack_trace=stack_trace,
+                    context_data=context_data,
+                    model_context=model_context,
+                )
+            except Exception as audit_error:
+                logger.error(
+                    "Failed to finalize terminal audit log for %s in callback: %s",
+                    model_instance,
+                    audit_error,
+                    exc_info=True,
+                )
 
     def _persist_status_fields(
             self,

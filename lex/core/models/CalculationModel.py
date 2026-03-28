@@ -294,12 +294,39 @@ class CalculationModel(LexModel):
             except Exception as cleanup_error:
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
 
-            self.save(skip_hooks=True)
-            update_calculation_status(
-                self,
-                exception_details=exception_details,
-                stack_trace=stack_trace,
-            )
+            try:
+                self.save(skip_hooks=True)
+                update_calculation_status(
+                    self,
+                    exception_details=exception_details,
+                    stack_trace=stack_trace,
+                )
+            except Exception as status_update_error:
+                logger.error(
+                    "Failed to persist/notify terminal calculation state for %s: %s",
+                    self,
+                    status_update_error,
+                    exc_info=True,
+                )
+            if self.is_calculated != self.ERROR:
+                try:
+                    from lex.audit_logging.utils.calculation_audit import (
+                        ensure_terminal_calculation_audit,
+                    )
+
+                    ensure_terminal_calculation_audit(
+                        self,
+                        audit_status="success",
+                        error_message=exception_details,
+                        stack_trace=stack_trace,
+                    )
+                except Exception as audit_error:
+                    logger.error(
+                        "Failed to finalize terminal audit log for %s: %s",
+                        self,
+                        audit_error,
+                        exc_info=True,
+                    )
 
     @hook(AFTER_UPDATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
     @hook(AFTER_CREATE, condition=WhenFieldValueIs("is_calculated", IN_PROGRESS))
@@ -323,6 +350,7 @@ class CalculationModel(LexModel):
             return
 
         self._calculation_hook_in_progress = True
+        task_dispatched = False
         try:
             # ── Ensure this record is registered in the cache store ──
             # For child calculations (triggered from within a parent's
@@ -377,6 +405,7 @@ class CalculationModel(LexModel):
                 from lex.lex_app.celery_tasks import WaitForTasks
                 with WaitForTasks():
                     task_result = self.dispatch_calculation_task()
+                    task_dispatched = True
 
                     # Note: Status will be updated by CallbackTask.on_success/on_failure
                 # Model remains in IN_PROGRESS state until task completes
@@ -446,6 +475,11 @@ class CalculationModel(LexModel):
                     f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
                     exc_info=True,
                 )
+            self._pending_terminal_audit = {
+                "audit_status": "failure",
+                "error_message": exception_details,
+                "stack_trace": stack_trace,
+            }
 
 
             calc_obj, exception_chain, stack_trace_chain = self.build_exception_chain(

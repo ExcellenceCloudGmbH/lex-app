@@ -2,9 +2,13 @@ from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 from django.db import models
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
+from lex.audit_logging.models.AuditLog import AuditLog
+from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
+from lex.audit_logging.utils.ModelContext import ModelContext
 from lex.core.models.CalculationModel import CalculationModel
+from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 from lex.lex_app.celery_tasks import CallbackTask
 
 
@@ -39,7 +43,9 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
             return_value=queryset,
         ), patch(
             "lex.lex_app.celery_tasks.update_calculation_status"
-        ) as update_status_mock:
+        ) as update_status_mock, patch(
+            "lex.lex_app.celery_tasks.ensure_terminal_calculation_audit"
+        ):
             self.callback_task._update_model_status(
                 instance,
                 CalculationModel.SUCCESS,
@@ -58,6 +64,55 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
             stack_trace=None,
         )
 
+
+class CallbackTaskAuditRecoveryTests(TestCase):
+    def setUp(self):
+        self.callback_task = CallbackTask()
+        ActiveCalculationStateStore.clear_all()
+
+    def tearDown(self):
+        ActiveCalculationStateStore.clear_all()
+
+    def test_failure_callback_recreates_missing_terminal_audit_log(self):
+        instance = DummyCallbackCalculationModel(id=5, name="Sponsor Plan")
+        queryset = Mock()
+        queryset.update.return_value = 1
+        context_data = {
+            "operation_id": "worker-op",
+            "request_obj": {},
+            "calculation_id": "calc-worker-1",
+            "audit_log_temp": None,
+            "actor": None,
+        }
+
+        with patch(
+            "lex.lex_app.celery_tasks.transaction.atomic",
+            return_value=nullcontext(),
+        ), patch.object(
+            DummyCallbackCalculationModel._default_manager,
+            "filter",
+            return_value=queryset,
+        ), patch(
+            "lex.lex_app.celery_tasks.update_calculation_status"
+        ):
+            self.callback_task._update_model_status(
+                instance,
+                CalculationModel.ERROR,
+                error_message="worker exploded",
+                stack_trace="Traceback: worker exploded",
+                task_id="task-999",
+                context_data=context_data,
+                model_context=ModelContext([instance]),
+            )
+
+        audit_log = AuditLog.objects.get(calculation_id="calc-worker-1")
+        audit_status = AuditLogStatus.objects.get(audit_log=audit_log)
+
+        self.assertEqual(audit_log.resource, "dummycallbackcalculationmodel")
+        self.assertEqual(audit_log.object_id, instance.pk)
+        self.assertEqual(audit_status.status, "failure")
+        self.assertEqual(audit_status.error_traceback, "Traceback: worker exploded")
+
     def test_failure_callback_updates_only_error_related_fields(self):
         instance = DummyCallbackCalculationModel(id=2, name="Sponsor Plan")
         queryset = Mock()
@@ -72,7 +127,9 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
             return_value=queryset,
         ), patch(
             "lex.lex_app.celery_tasks.update_calculation_status"
-        ) as update_status_mock:
+        ) as update_status_mock, patch(
+            "lex.lex_app.celery_tasks.ensure_terminal_calculation_audit"
+        ):
             self.callback_task._update_model_status(
                 instance,
                 CalculationModel.ERROR,
@@ -115,6 +172,8 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
             "lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model"
         ) as sync_mock, patch(
             "lex.lex_app.celery_tasks.update_calculation_status"
+        ), patch(
+            "lex.lex_app.celery_tasks.ensure_terminal_calculation_audit"
         ):
             self.callback_task._update_model_status(
                 instance,
@@ -147,7 +206,9 @@ class CallbackTaskStatusUpdateTests(SimpleTestCase):
             "lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model"
         ) as sync_mock, patch(
             "lex.lex_app.celery_tasks.update_calculation_status"
-        ) as update_status_mock:
+        ) as update_status_mock, patch(
+            "lex.lex_app.celery_tasks.ensure_terminal_calculation_audit"
+        ):
             self.callback_task._update_model_status(
                 instance,
                 CalculationModel.SUCCESS,
