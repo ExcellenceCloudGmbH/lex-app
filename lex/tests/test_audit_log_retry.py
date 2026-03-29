@@ -4,11 +4,13 @@ from unittest.mock import MagicMock, patch
 from django.db.utils import OperationalError
 
 from lex.audit_logging.mixins.AuditLogMixin import (
+    _resolve_audit_failure_traceback,
     _delete_with_retry,
     _execute_with_retry,
     _is_retryable_db_error,
     _save_with_retry,
 )
+from lex.core.models.CalculationModel import CalculationModelException
 
 
 def build_deadlock_error():
@@ -90,3 +92,21 @@ class SaveWithRetryTests(TestCase):
         warning_args = warning_mock.call_args[0]
         self.assertIn("Retrying %s after transient DB error", warning_args[0])
         self.assertEqual(warning_args[1], "custom op")
+
+
+class AuditFailureTracebackTests(TestCase):
+    def test_prefers_nested_calculation_stack_trace(self):
+        nested_exception = CalculationModelException(
+            exception_details=["SharePoint Server cannot handle requests at the moment."],
+            stack_trace=["REAL INNER TRACEBACK"],
+        )
+
+        try:
+            try:
+                raise nested_exception
+            except CalculationModelException:
+                raise RuntimeError("wrapper failure")
+        except RuntimeError as exc:
+            error_traceback = _resolve_audit_failure_traceback(exc)
+
+        self.assertEqual(error_traceback, "REAL INNER TRACEBACK")

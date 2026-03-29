@@ -27,7 +27,7 @@ streamlit-keycloak-lex
 sqlalchemy
 django_redis
 django-storages[google]
-DjangoSharepointStorage==1.1.3
+DjangoSharepointStorage
 click
 django-lifecycle
 python-keycloak==3.9.1

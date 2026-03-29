@@ -16,6 +16,14 @@ from django_lifecycle.conditions import WhenFieldValueIs
 from rest_framework.exceptions import APIException
 
 from lex.core.models.LexModel import LexModel
+from lex.core.exceptions import (
+    ensure_list,
+    find_exception_artifacts,
+    resolve_exception_detail,
+    resolve_exception_traceback,
+    select_preferred_exception_detail,
+    select_preferred_stack_trace,
+)
 from lex.api.utils import operation_context, OperationContext
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ContextResolver import ContextResolver
@@ -23,21 +31,23 @@ from lex.audit_logging.utils.ContextResolver import ContextResolver
 logger = logging.getLogger(__name__)
 
 class CalculationModelException(APIException):
-        @staticmethod
-        def _ensure_list(value):
-            if value is None:
-                return []
-            if isinstance(value, list):
-                return value
-            if isinstance(value, tuple):
-                return list(value)
-            return [value]
+    @staticmethod
+    def _ensure_list(value):
+        return ensure_list(value)
 
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args)
-            self.calc_obj = self._ensure_list(kwargs.get("calc_obj", None))
-            self.exception_details = self._ensure_list(kwargs.get("exception_details", None))
-            self.stack_trace = self._ensure_list(kwargs.get("stack_trace", None))
+    def __init__(self, *args, **kwargs):
+        self.calc_obj = self._ensure_list(kwargs.get("calc_obj", None))
+        self.exception_details = self._ensure_list(
+            kwargs.get("exception_details", None)
+        )
+        self.stack_trace = self._ensure_list(kwargs.get("stack_trace", None))
+
+        preferred_detail = select_preferred_exception_detail(self.exception_details)
+        api_args = args
+        if not api_args and preferred_detail:
+            api_args = (preferred_detail,)
+
+        super().__init__(*api_args)
 
 
 class CalculationModel(LexModel):
@@ -90,15 +100,7 @@ class CalculationModel(LexModel):
 
     @staticmethod
     def build_exception_chain(exception, current_obj=None):
-        calc_obj = CalculationModelException._ensure_list(
-            getattr(exception, "calc_obj", None)
-        )
-        exception_details = CalculationModelException._ensure_list(
-            getattr(exception, "exception_details", None)
-        )
-        stack_trace = CalculationModelException._ensure_list(
-            getattr(exception, "stack_trace", None)
-        )
+        calc_obj, exception_details, stack_trace = find_exception_artifacts(exception)
 
         if current_obj is not None and (not calc_obj or calc_obj[-1] is not current_obj):
             calc_obj = calc_obj + [current_obj]
@@ -251,9 +253,13 @@ class CalculationModel(LexModel):
 
         except Exception as e:
             # Store error details
-            error_details = f"{str(e)}\n\n{traceback.format_exc()}"
-            exception_details = str(e)
-            stack_trace = traceback.format_exc()
+            fallback_stack_trace = traceback.format_exc()
+            exception_details = resolve_exception_detail(e, fallback=str(e))
+            stack_trace = resolve_exception_traceback(
+                e,
+                fallback=fallback_stack_trace,
+            )
+            error_details = f"{exception_details}\n\n{stack_trace}"
             self.is_calculated = self.ERROR
 
             if hasattr(self, 'calculation_error_message'):
@@ -428,9 +434,9 @@ class CalculationModel(LexModel):
             self.is_calculated = self.ERROR
 
             # Store error message if the model has an error_message field
-            stack_trace = f"{traceback.format_exc()}"
-            exception_details = str(e)
-                # Clean up cache and save error state
+            stack_trace = traceback.format_exc()
+            exception_details = resolve_exception_detail(e, fallback=str(e))
+            # Clean up cache and save error state
             try:
                 context = ContextResolver.resolve()
 
@@ -457,6 +463,21 @@ class CalculationModel(LexModel):
             except Exception as cleanup_error:
                 logger.error(f"Cache cleanup failed after calculation hook: {str(cleanup_error)}")
 
+            calc_obj, exception_chain, stack_trace_chain = self.build_exception_chain(
+                e,
+                current_obj=self,
+            )
+            full_exception_chain = exception_chain + [exception_details]
+            full_stack_trace_chain = stack_trace_chain + [stack_trace]
+            preferred_exception_detail = (
+                select_preferred_exception_detail(full_exception_chain)
+                or exception_details
+            )
+            preferred_stack_trace = (
+                select_preferred_stack_trace(full_stack_trace_chain)
+                or stack_trace
+            )
+
             # Persist ERROR state and notify websocket clients.
             # Always save self to ERROR — even when execute_calculation_sync
             # already did — to cover cases where the error originated in
@@ -467,8 +488,8 @@ class CalculationModel(LexModel):
                 if not status_was_error:
                     update_calculation_status(
                         self,
-                        exception_details=exception_details,
-                        stack_trace=stack_trace,
+                        exception_details=preferred_exception_detail,
+                        stack_trace=preferred_stack_trace,
                     )
             except Exception as status_update_error:
                 logger.error(
@@ -477,22 +498,16 @@ class CalculationModel(LexModel):
                 )
             self._pending_terminal_audit = {
                 "audit_status": "failure",
-                "error_message": exception_details,
-                "stack_trace": stack_trace,
+                "error_message": preferred_exception_detail,
+                "stack_trace": preferred_stack_trace,
             }
-
-
-            calc_obj, exception_chain, stack_trace_chain = self.build_exception_chain(
-                e,
-                current_obj=self,
-            )
             calc_obj_to_persist = calc_obj[:-1] if calc_obj and calc_obj[-1] is self else calc_obj
             self.persist_error_state(calc_obj_to_persist)
             raise CalculationModelException(
                 calc_obj=calc_obj,
-                exception_details=exception_chain + [exception_details],
-                stack_trace=stack_trace_chain + [stack_trace],
-            )
+                exception_details=full_exception_chain,
+                stack_trace=full_stack_trace_chain,
+            ) from e
         finally:
             # Ensure the guard does not leak across future independent saves.
             if hasattr(self, "_calculation_hook_in_progress"):

@@ -199,3 +199,41 @@ class CalculationStatusSignalTests(SimpleTestCase):
         # Outer invocation executes exactly once; nested invocation returns early.
         self.assertEqual(execute_sync_mock.call_count, 1)
         update_status_mock.assert_called_once_with(instance)
+
+
+class CalculationExceptionUtilityTests(SimpleTestCase):
+    def test_calculation_model_exception_string_uses_actual_detail(self):
+        exception = CalculationModelException(
+            exception_details=["SharePoint Server cannot handle requests at the moment."]
+        )
+
+        self.assertEqual(
+            str(exception),
+            "SharePoint Server cannot handle requests at the moment.",
+        )
+
+    def test_build_exception_chain_recovers_nested_calculation_exception(self):
+        instance = DummyCalculationModel(id=41)
+        child_instance = DummyCalculationModel(id=410)
+        nested_exception = CalculationModelException(
+            calc_obj=[child_instance],
+            exception_details=["inner-failure"],
+            stack_trace=["inner-trace"],
+        )
+
+        try:
+            try:
+                raise nested_exception
+            except CalculationModelException:
+                raise RuntimeError("outer-wrapper")
+        except RuntimeError as wrapped_exception:
+            calc_obj, exception_details, stack_trace = (
+                DummyCalculationModel.build_exception_chain(
+                    wrapped_exception,
+                    current_obj=instance,
+                )
+            )
+
+        self.assertEqual(calc_obj, [child_instance, instance])
+        self.assertEqual(exception_details, ["inner-failure"])
+        self.assertEqual(stack_trace, ["inner-trace"])

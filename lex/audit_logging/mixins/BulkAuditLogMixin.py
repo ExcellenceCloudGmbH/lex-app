@@ -1,6 +1,7 @@
-import traceback
-
-from audit_logging.mixins.AuditLogMixin import _safe_get_content_type
+from audit_logging.mixins.AuditLogMixin import (
+    _resolve_audit_failure_traceback,
+    _safe_get_content_type,
+)
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload
@@ -54,11 +55,11 @@ class BulkAuditLogMixin:
                 AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
             return updated_instances
         except Exception as e:
-            error_msg = traceback.format_exc()
+            error_msg = _resolve_audit_failure_traceback(e)
             for audit_log, _ in audit_logs:
                 AuditLogStatus.objects.filter(audit_log=audit_log) \
                     .update(status='failure', error_traceback=error_msg)
-            raise e
+            raise
 
     def perform_bulk_destroy(self, queryset):
         """
@@ -88,8 +89,8 @@ class BulkAuditLogMixin:
                 AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
             return deleted_ids
         except Exception as e:
-            error_msg = traceback.format_exc()
+            error_msg = _resolve_audit_failure_traceback(e)
             for audit_log in audit_logs:
                 AuditLogStatus.objects.filter(audit_log=audit_log) \
                     .update(status='failure', error_traceback=error_msg)
-            raise e
+            raise

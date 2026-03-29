@@ -4,6 +4,107 @@ Core exceptions for the LEX application.
 This module contains custom exception classes used throughout the core functionality.
 """
 
+GENERIC_SERVER_ERROR_MESSAGES = {
+    "A server error occurred.",
+    "A server error occurred",
+    "Server Error",
+}
+
+
+def ensure_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def iter_exception_chain(exception):
+    current = exception
+    seen = set()
+    while current and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+
+def _normalize_string(value):
+    if value is None:
+        return None
+
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def select_preferred_exception_detail(details):
+    normalized_details = [
+        detail
+        for detail in (_normalize_string(item) for item in ensure_list(details))
+        if detail
+    ]
+
+    for detail in normalized_details:
+        if detail not in GENERIC_SERVER_ERROR_MESSAGES:
+            return detail
+
+    if normalized_details:
+        return normalized_details[0]
+
+    return None
+
+
+def select_preferred_stack_trace(stack_traces):
+    for stack_trace in ensure_list(stack_traces):
+        normalized_trace = _normalize_string(stack_trace)
+        if normalized_trace:
+            return normalized_trace
+
+    return None
+
+
+def find_exception_artifacts(exception):
+    for chained_exception in iter_exception_chain(exception):
+        calc_obj = ensure_list(getattr(chained_exception, "calc_obj", None))
+        exception_details = ensure_list(
+            getattr(chained_exception, "exception_details", None)
+        )
+        stack_trace = ensure_list(getattr(chained_exception, "stack_trace", None))
+
+        if calc_obj or exception_details or stack_trace:
+            return calc_obj, exception_details, stack_trace
+
+    return [], [], []
+
+
+def resolve_exception_detail(exception, fallback=None):
+    detail = None
+
+    if exception is not None:
+        _, exception_details, _ = find_exception_artifacts(exception)
+        detail = select_preferred_exception_detail(exception_details)
+        if not detail:
+            detail = _normalize_string(exception)
+
+    if detail:
+        return detail
+
+    return _normalize_string(fallback)
+
+
+def resolve_exception_traceback(exception, fallback=None):
+    stack_trace = None
+
+    if exception is not None:
+        _, _, stack_trace_chain = find_exception_artifacts(exception)
+        stack_trace = select_preferred_stack_trace(stack_trace_chain)
+
+    if stack_trace:
+        return stack_trace
+
+    return _normalize_string(fallback)
+
 
 class ValidationError(Exception):
     """Custom validation error for rollback mechanism"""

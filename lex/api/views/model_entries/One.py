@@ -14,6 +14,7 @@ from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 from rest_framework.response import Response
 from rest_framework import status
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
+from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 
 from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.api.utils.Context import OperationContext
@@ -107,7 +108,7 @@ class OneModelEntry(
             except Exception as e:
                 raise APIException(
                     {"error": f"{e} ", "traceback": traceback.format_exc()}
-                )
+                ) from e
 
             return response
 
@@ -163,7 +164,7 @@ class OneModelEntry(
                     except Exception as e:
                         raise APIException(
                             {"error": f"Bitemporal update failed: {e}", "traceback": traceback.format_exc()}
-                        )
+                        ) from e
 
                 # STANDARD UPDATE LOGIC (Main Models)
                 try:
@@ -218,12 +219,18 @@ class OneModelEntry(
                     CalculationModel.persist_error_state(exc.calc_obj)
 
                     raise APIException(
-                        {"message": f"{exc.exception_details[0]} ", "traceback": exc.stack_trace[0]}
-                    )
+                        {
+                            "message": f"{resolve_exception_detail(exc) or str(exc)} ",
+                            "traceback": resolve_exception_traceback(
+                                exc,
+                                fallback=traceback.format_exc(),
+                            ),
+                        }
+                    ) from exc
 
                 except Exception as e:
                     raise APIException(
                         {"error": f"{e} ", "traceback": traceback.format_exc()}
-                    )
+                    ) from e
                 finally:
                     self._calculate_requested = False

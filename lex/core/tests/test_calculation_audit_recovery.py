@@ -1,3 +1,6 @@
+import traceback
+from unittest.mock import patch
+
 from django.db import connection, models
 from django.test import TransactionTestCase
 
@@ -68,3 +71,46 @@ class CalculationAuditRecoveryTests(TransactionTestCase):
         self.assertEqual(audit_log.object_id, instance.pk)
         self.assertEqual(audit_status.status, "failure")
         self.assertIn("sync calculation exploded", audit_status.error_traceback)
+
+    def test_nested_calculation_failure_keeps_inner_traceback_in_audit_status(self):
+        instance = AuditRecoveryCalculationModel.objects.create(name="nested")
+
+        def wrapped_calculate(model_instance):
+            try:
+                raise ValueError("sharepoint 401 unauthorized")
+            except ValueError:
+                inner_traceback = traceback.format_exc()
+
+            try:
+                raise CalculationModelException(
+                    calc_obj=[model_instance],
+                    exception_details=[
+                        "SharePoint Server cannot handle requests at the moment."
+                    ],
+                    stack_trace=[inner_traceback],
+                )
+            except CalculationModelException:
+                raise Exception("wrapped at period level")
+
+        with patch.object(
+            AuditRecoveryCalculationModel,
+            "calculate",
+            new=wrapped_calculate,
+        ):
+            with self.assertRaises(CalculationModelException) as raised:
+                with OperationContext({}, "calc-nested-failure"):
+                    with model_logging_context(instance):
+                        instance.is_calculated = CalculationModel.IN_PROGRESS
+                        instance.save()
+
+        CalculationModel.persist_error_state(raised.exception.calc_obj)
+        audit_log = AuditLog.objects.get(calculation_id="calc-nested-failure")
+        audit_status = AuditLogStatus.objects.get(audit_log=audit_log)
+
+        self.assertEqual(
+            raised.exception.exception_details[0],
+            "SharePoint Server cannot handle requests at the moment.",
+        )
+        self.assertIn("sharepoint 401 unauthorized", raised.exception.stack_trace[0])
+        self.assertIn("sharepoint 401 unauthorized", audit_status.error_traceback)
+        self.assertNotIn("wrapped at period level", audit_status.error_traceback)

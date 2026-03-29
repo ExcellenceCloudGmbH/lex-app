@@ -6,6 +6,7 @@ from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload
 from lex.audit_logging.utils.content_types import safe_get_content_type as _safe_get_content_type
+from lex.core.exceptions import resolve_exception_traceback
 
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,13 @@ def _delete_with_retry(instance, *, max_retries=MAX_UPDATE_RETRIES):
     )
 
 
+def _resolve_audit_failure_traceback(exception):
+    return resolve_exception_traceback(
+        exception,
+        fallback=traceback.format_exc(),
+    )
+
+
 class AuditLogMixin:
     
     def log_change(self, action, target, payload=None):
@@ -122,10 +130,10 @@ class AuditLogMixin:
             AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
             return instance
         except Exception as e:
-            error_msg = traceback.format_exc()
+            error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
                 .update(status='failure', error_traceback=error_msg)
-            raise e
+            raise
 
     def perform_update(self, serializer):
         initial_payload = _serialize_payload(serializer.validated_data)
@@ -140,10 +148,10 @@ class AuditLogMixin:
             AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
             return instance
         except Exception as e:
-            error_msg = traceback.format_exc()
+            error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
                 .update(status='failure', error_traceback=error_msg)
-            raise e
+            raise
 
     def perform_destroy(self, instance):
         serializer = self.get_serializer(instance)
@@ -156,7 +164,7 @@ class AuditLogMixin:
             audit_log.save()
             AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
         except Exception as e:
-            error_msg = traceback.format_exc()
+            error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
                 .update(status='failure', error_traceback=error_msg)
-            raise e
+            raise
