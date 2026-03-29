@@ -362,17 +362,14 @@ class PermissionResult:
         return f"ALLOWED all fields: {self.reason or 'No reason given'}"
 
 class LexManager(models.Manager):
-    """Custom manager for LexModel that ensures history tracking.
+    """Custom manager for LexModel bulk creation helpers.
 
-    Overrides ``bulk_create`` to use individual ``save()`` calls wrapped
-    in ``transaction.atomic()``.  This guarantees that Django's
-    ``post_save`` signal fires for every object, so simple_history and
-    the full bitemporal signal chain (meta-history, valid_to chaining,
-    scheduling) are triggered automatically.
+    ``bulk_create()`` preserves LexModel semantics by default: objects are
+    saved one by one so hooks, signals, and history tracking still run.
 
-    Pass ``skip_history=True`` to fall back to Django's native
-    ``bulk_create`` when raw performance is required and history
-    tracking is not needed (e.g. large data migrations).
+    Callers that explicitly need Django's raw bulk path can pass
+    ``skip_history=True``. ``with_history=True`` remains accepted as an
+    explicit alias for the default behavior.
     """
 
     def bulk_create(self, objs, batch_size=None, ignore_conflicts=False,

@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import List, Optional, Any, Dict
 import logging
@@ -86,8 +87,17 @@ class CeleryTaskDispatcher:
             group_mapping = {}  # Map task results to their corresponding groups
             failed_dispatch_count = 0
 
-            from lex.lex_app.celery_tasks import WaitForTasks
-            with WaitForTasks():
+            from lex.lex_app.celery_tasks import FireAndForget, WaitForTasks
+            active_fire_and_forget = FireAndForget.get_current_context()
+            active_wait_context = WaitForTasks.get_current_context()
+
+            wait_scope = (
+                nullcontext()
+                if active_fire_and_forget is not None or active_wait_context is not None
+                else WaitForTasks()
+            )
+
+            with wait_scope:
                 for i, group in enumerate(non_empty_groups):
                     try:
 

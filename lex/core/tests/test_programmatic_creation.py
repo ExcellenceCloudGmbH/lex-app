@@ -2,7 +2,7 @@
 Tests for programmatic record creation.
 
 Verifies that ``objects.create()``, ``object.save()``, and ``bulk_create()``
-all correctly trigger the full bitemporal pipeline:
+correctly trigger the full bitemporal pipeline:
   Level 1:  History record with valid_from / valid_to
   Level 2:  MetaHistory record with sys_from / sys_to
   Main table synchronisation
@@ -177,10 +177,9 @@ class ProgrammaticCreationTest(TransactionTestCase):
     # Test: bulk_create()
     # ────────────────────────────────────────────────────────────────
 
-    def test_bulk_create_generates_history(self):
+    def test_bulk_create_generates_history_by_default(self):
         """
-        LexManager.bulk_create() loops with save() inside transaction.atomic(),
-        so each object should get full history + meta-history.
+        bulk_create() should preserve LexModel history semantics by default.
         """
         T0 = datetime.datetime(2025, 6, 1, 14, 0, 0)
 
@@ -190,6 +189,34 @@ class ProgrammaticCreationTest(TransactionTestCase):
                 ProgrammaticTestModel(name="epsilon", value=20),
                 ProgrammaticTestModel(name="zeta", value=30),
             ])
+
+        self.assertEqual(ProgrammaticTestModel.objects.count(), 3)
+        for obj in objs:
+            self.assertIsNotNone(obj.pk, "bulk_create should return objects with PKs")
+
+        self.assertEqual(
+            self.HistoryModel.objects.count(),
+            3,
+            "Default bulk_create() should create history for each object",
+        )
+        self.assertGreaterEqual(
+            self.MetaModel.objects.count(),
+            3,
+            "Default bulk_create() should create meta-history for each object",
+        )
+
+    def test_bulk_create_with_history_generates_history(self):
+        """
+        bulk_create(with_history=True) should remain an explicit history-preserving alias.
+        """
+        T0 = datetime.datetime(2025, 6, 1, 14, 0, 0)
+
+        with patch("django.utils.timezone.now", return_value=T0):
+            objs = ProgrammaticTestModel.objects.bulk_create([
+                ProgrammaticTestModel(name="delta", value=10),
+                ProgrammaticTestModel(name="epsilon", value=20),
+                ProgrammaticTestModel(name="zeta", value=30),
+            ], with_history=True)
 
         # ── Main table ──
         self.assertEqual(ProgrammaticTestModel.objects.count(), 3)

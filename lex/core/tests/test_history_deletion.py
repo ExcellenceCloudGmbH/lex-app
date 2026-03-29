@@ -87,3 +87,39 @@ class BitemporalHistoryDeletionTest(TransactionTestCase):
         # 4. Verify C is untouched
         h_c.refresh_from_db()
         self.assertEqual(h_c.valid_to, None)
+
+    def test_history_descriptor_reuses_manager_class(self):
+        t0 = datetime.datetime(2025, 1, 1, 12, 0, 0)
+
+        with patch('django.utils.timezone.now', return_value=t0):
+            obj = HistoryDeleteTestModel.objects.create(name="A")
+
+        manager1 = obj.history
+        manager2 = obj.history
+
+        self.assertIs(
+            manager1.__class__,
+            manager2.__class__,
+            "History descriptor should reuse the resolved manager class.",
+        )
+
+    def test_delete_creates_delete_history_and_meta_history(self):
+        t0 = datetime.datetime(2025, 1, 1, 12, 0, 0)
+
+        with patch('django.utils.timezone.now', return_value=t0):
+            obj = HistoryDeleteTestModel.objects.create(name="A")
+
+        history_count_before = self.HistoryModel.objects.count()
+        meta_count_before = self.HistoryModel.meta_history.model.objects.count()
+
+        obj.delete()
+
+        self.assertEqual(self.HistoryModel.objects.count(), history_count_before + 1)
+        self.assertGreaterEqual(
+            self.HistoryModel.meta_history.model.objects.count(),
+            meta_count_before + 1,
+        )
+        self.assertEqual(
+            self.HistoryModel.objects.order_by("-valid_from", "-history_id").first().history_type,
+            "-",
+        )

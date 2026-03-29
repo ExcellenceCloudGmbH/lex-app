@@ -18,7 +18,9 @@ import asyncio
 import contextvars
 import logging
 import os
+import sys
 import traceback
+from contextlib import nullcontext
 from copy import deepcopy
 from functools import wraps
 from typing import Dict, Tuple, Optional, Set, List, Any
@@ -41,6 +43,12 @@ from asgiref.sync import sync_to_async
 from lex.core.models.CalculationModel import CalculationModel
 
 logger = logging.getLogger(__name__)
+
+_current_module = sys.modules[__name__]
+if __name__ == "lex.lex_app.celery_tasks":
+    sys.modules.setdefault("lex_app.celery_tasks", _current_module)
+elif __name__ == "lex_app.celery_tasks":
+    sys.modules.setdefault("lex.lex_app.celery_tasks", _current_module)
 
 
 def _celery_is_active() -> bool:
@@ -435,6 +443,41 @@ class WaitForTasks:
         return None
 
 
+def is_celery_worker_process() -> bool:
+    """
+    Return True only when code is executing inside an actual Celery worker.
+
+    ``CELERY_ACTIVE`` merely enables Celery dispatch for the current process;
+    it does not mean the current process is itself a worker. That distinction
+    matters for nested calculation dispatch, where worker tasks must avoid
+    spawning more worker-blocking child tasks unless the caller explicitly
+    opened an async context.
+    """
+    try:
+        from celery import current_task
+
+        if current_task and getattr(current_task, "request", None):
+            return True
+    except (ImportError, AttributeError):
+        pass
+
+    if os.getenv("IS_RUNNING_IN_CELERY", "").lower() == "true":
+        return True
+
+    if os.getenv("CELERY_WORKER_RUNNING", "").lower() == "true":
+        return True
+
+    try:
+        import sys
+
+        if "celery" in sys.argv[0] and "worker" in sys.argv:
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 # Context variables
 tasks_context: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
     'tasks_context',
@@ -775,13 +818,16 @@ def debug_context_in_celery():
 def is_running_in_celery():
     """Check if the current code is running in a Celery worker context."""
     try:
+        if is_celery_worker_process():
+            return True
+
         import celery
         from celery import current_task
 
         if current_task and current_task.request:
             return True
 
-        if os.getenv('CELERY_WORKER_RUNNING') or os.getenv('CELERY_ACTIVE'):
+        if os.getenv('CELERY_WORKER_RUNNING'):
             return True
 
         import sys

@@ -54,7 +54,7 @@ def create_meta_history_record(
             if latest and latest.sys_to is None:
                 for field_name, value in attrs.items():
                     setattr(latest, field_name, value)
-                latest.save(using=using)
+                latest.save(using=using, update_fields=list(attrs.keys()))
                 return latest
 
     if meta_history_user is None:

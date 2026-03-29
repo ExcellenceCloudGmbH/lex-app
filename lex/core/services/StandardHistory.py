@@ -10,7 +10,33 @@ which a fact was true in the real world.
 
 from django.db import models
 from django.utils import timezone
+from simple_history import manager as simple_history_manager_module
+from simple_history import models as simple_history_models_module
 from simple_history.models import HistoricalRecords
+
+class CachedHistoryDescriptor(simple_history_manager_module.HistoryDescriptor):
+    """
+    Reuse the dynamic history-manager subclass for repeated descriptor access.
+
+    django-simple-history rebuilds ``manager_class.from_queryset(...)`` on every
+    ``instance.history`` access. During large delete/rebuild flows that spends a
+    surprising amount of time in Django manager class construction while
+    producing the exact same manager subclass each time.
+    """
+
+    def __init__(self, model, manager=simple_history_manager_module.HistoryManager, queryset=simple_history_manager_module.HistoricalQuerySet):
+        super().__init__(model, manager=manager, queryset=queryset)
+        self._resolved_manager_class = self.manager_class.from_queryset(
+            self.queryset_class
+        )
+
+    def __get__(self, instance, owner):
+        return self._resolved_manager_class(self.model, instance)
+
+
+if simple_history_manager_module.HistoryDescriptor is not CachedHistoryDescriptor:
+    simple_history_manager_module.HistoryDescriptor = CachedHistoryDescriptor
+    simple_history_models_module.HistoryDescriptor = CachedHistoryDescriptor
 
 
 def create_standard_history_record(

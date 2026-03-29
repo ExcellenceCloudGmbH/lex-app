@@ -400,22 +400,35 @@ class CalculationModel(LexModel):
                 # Dispatch to Celery worker
                 logger.info(f"Dispatching calculation for {self} to Celery worker")
 
-                # IMPORTANT: Do NOT use WaitForTasks() here (which block-waits
-                # for the child task in __exit__).  We are still inside the
-                # parent's save() transaction that set is_calculated=IN_PROGRESS.
-                # Blocking here while holding that DB lock causes a deadlock
-                # when the child task tries to write back to the same row.
-                #
-                # Instead, dispatch fire-and-forget.  The child task reports
-                # its own SUCCESS/ERROR via CallbackTask.on_success/on_failure.
-                from lex.lex_app.celery_tasks import WaitForTasks
-                with WaitForTasks():
+                from lex.lex_app.celery_tasks import (
+                    FireAndForget,
+                    WaitForTasks,
+                    is_celery_worker_process,
+                )
+
+                has_explicit_async_context = (
+                    FireAndForget.get_current_context() is not None
+                    or WaitForTasks.get_current_context() is not None
+                )
+
+                if has_explicit_async_context:
                     task_result = self.dispatch_calculation_task()
                     task_dispatched = True
+                elif is_celery_worker_process():
+                    logger.info(
+                        "Executing nested calculation for %s synchronously inside Celery worker",
+                        self,
+                    )
+                    self.execute_calculation_sync()
+                else:
+                    with WaitForTasks():
+                        task_result = self.dispatch_calculation_task()
+                        task_dispatched = True
 
-                    # Note: Status will be updated by CallbackTask.on_success/on_failure
+                # Note: Status will be updated by CallbackTask.on_success/on_failure
                 # Model remains in IN_PROGRESS state until task completes
-                logger.info(f"Calculation task {task_result.id} dispatched for {self}")
+                if task_dispatched:
+                    logger.info(f"Calculation task {task_result.id} dispatched for {self}")
 
             else:
                 # Execute synchronously as fallback

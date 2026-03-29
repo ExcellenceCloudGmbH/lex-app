@@ -125,8 +125,8 @@ Version History:
 
 import itertools
 import logging
-
 import os
+from collections.abc import Iterable as IterableABC, Mapping as MappingABC
 from abc import abstractmethod
 from copy import deepcopy
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
@@ -147,6 +147,35 @@ logger = logging.getLogger(__name__)
 
 def _flatten(list_2d):
     return list(itertools.chain.from_iterable(list_2d))
+
+
+def _normalize_field_values(field_values: Any) -> List[Any]:
+    """
+    Normalize defining field values to a concrete list.
+
+    `get_selected_key_list()` callers often return lazy iterables such as
+    QuerySets, generators, or other iterable containers. Materializing them
+    here keeps scalar values working as before while allowing empty iterables
+    to mean "no combinations" without special-case list() calls in subclasses.
+    """
+    if isinstance(field_values, list):
+        return field_values
+
+    if isinstance(field_values, tuple):
+        return list(field_values)
+
+    if isinstance(field_values, (str, bytes, bytearray)):
+        return [field_values]
+
+    if isinstance(field_values, MappingABC):
+        return [field_values]
+
+    if isinstance(field_values, IterableABC):
+        return list(field_values)
+
+    return [field_values]
+
+
 from django.db import connection
 
 def get_transaction_depth():
@@ -244,6 +273,13 @@ class ModelCombinationGenerator:
                     )
                     
                     logger.debug(f"After expanding '{processed_field_name}': {len(models)} model combinations")
+
+                    if not models:
+                        logger.info(
+                            f"No model combinations remain for {base_model.__class__.__name__} "
+                            f"after expanding defining field '{processed_field_name}'"
+                        )
+                        break
                     
                 except Exception as field_error:
                     raise ModelCombinationError(
@@ -255,12 +291,11 @@ class ModelCombinationGenerator:
                     ) from field_error
             
             if not models:
-                raise ModelCombinationError(
-                    "Model combination generation resulted in empty model list",
-                    model_class=base_model.__class__.__name__,
-                    defining_fields=defining_fields,
-                    field_overrides=list(field_overrides.keys())
+                logger.info(
+                    f"Model combination generation produced no combinations for "
+                    f"{base_model.__class__.__name__}"
                 )
+                return []
             
             logger.info(
                 f"Successfully generated {len(models)} model combinations for {base_model.__class__.__name__} "
@@ -305,10 +340,8 @@ class ModelCombinationGenerator:
             ModelCombinationError: If field expansion fails or field values are invalid
         """
         if not models:
-            raise ModelCombinationError(
-                f"Cannot expand field '{field_name}' on empty model list",
-                field_name=field_name
-            )
+            logger.debug(f"No models available while expanding field '{field_name}', returning empty result")
+            return []
         
         expanded_models = []
         
@@ -324,16 +357,13 @@ class ModelCombinationGenerator:
                 if not field_values:
                     logger.warning(
                         f"Field '{field_name}' has no values for model {model_index + 1}/{len(models)} "
-                        f"of type {model.__class__.__name__}, skipping expansion"
+                        f"of type {model.__class__.__name__}; pruning this branch"
                     )
-                    # If no field values, keep the original model unchanged
-                    # This prevents the model from being lost in the expansion process
-                    expanded_models.append([model])
                     continue
                 
-                if not isinstance(field_values, (list, tuple)):
+                if not isinstance(field_values, list):
                     raise ModelCombinationError(
-                        f"Field values must be a list or tuple, got {type(field_values).__name__}",
+                        f"Field values must normalize to a list, got {type(field_values).__name__}",
                         field_name=field_name,
                         model_class=model.__class__.__name__,
                         field_values_type=type(field_values).__name__
@@ -430,11 +460,7 @@ class ModelCombinationGenerator:
                         model_class=model.__class__.__name__
                     )
                 
-                # Ensure field_values is a list
-                if not isinstance(field_values, (list, tuple)):
-                    field_values = [field_values]
-                
-                return list(field_values)
+                return _normalize_field_values(field_values)
             else:
                 # Get values from model's get_selected_key_list method
                 if not hasattr(model, 'get_selected_key_list'):
@@ -455,11 +481,7 @@ class ModelCombinationGenerator:
                             model_class=model.__class__.__name__
                         )
                     
-                    # Ensure field_values is a list
-                    if not isinstance(field_values, (list, tuple)):
-                        field_values = [field_values]
-                    
-                    return list(field_values)
+                    return _normalize_field_values(field_values)
                     
                 except Exception as get_values_error:
                     raise ModelCombinationError(
@@ -1582,8 +1604,24 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
         try:
             # Determine processing mode based on Celery configuration
             celery_active = os.getenv('CELERY_ACTIVE', "").lower() == 'true' and hasattr(cls.calculate, 'delay')
-            
             if celery_active:
+                from lex.lex_app.celery_tasks import (
+                    FireAndForget,
+                    WaitForTasks,
+                    is_celery_worker_process,
+                )
+
+                has_explicit_async_context = (
+                    FireAndForget.get_current_context() is not None
+                    or WaitForTasks.get_current_context() is not None
+                )
+                inline_inside_worker = (
+                    is_celery_worker_process() and not has_explicit_async_context
+                )
+            else:
+                inline_inside_worker = False
+            
+            if celery_active and not inline_inside_worker:
                 logger.info(f"Celery is active, dispatching {cls.__name__} models to parallel processing")
 
                 try:
@@ -1627,7 +1665,13 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
                     ) from dispatch_error
                     
             else:
-                logger.info(f"Celery not active, using synchronous processing for {cls.__name__}")
+                if inline_inside_worker:
+                    logger.info(
+                        "Running %s models synchronously inside Celery worker because no explicit async context is active",
+                        cls.__name__,
+                    )
+                else:
+                    logger.info(f"Celery not active, using synchronous processing for {cls.__name__}")
                 
                 try:
                     # Flatten all models from clusters for synchronous processing

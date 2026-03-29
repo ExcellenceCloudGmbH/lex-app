@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from lex.core.services.MetaHistory import create_meta_history_record
@@ -39,6 +40,7 @@ _suppress_meta_sys_to_chaining = ContextVar(
     "suppress_meta_sys_to_chaining",
     default=False,
 )
+_history_chain_dedupe_attr = "_bt_history_chain_processed"
 
 
 @contextmanager
@@ -118,11 +120,72 @@ def on_history_saved__chain_valid_to(
     HistoryModel = history_instance.__class__
     pk_name = main_model._meta.pk.name
     pk_val = getattr(history_instance, pk_name)
+    is_post_create_signal = history_instance is not instance
+    is_new_history_row = bool(kwargs.get("created")) or is_post_create_signal
+
+    # Standard history creation emits both post_save on the history row and
+    # post_create_historical_record for the same object. Process the chain only
+    # once for that newly created row to avoid duplicate maintenance work.
+    if is_post_create_signal and getattr(history_instance, _history_chain_dedupe_attr, False):
+        delattr(history_instance, _history_chain_dedupe_attr)
+        return
+    if kwargs.get("created"):
+        setattr(history_instance, _history_chain_dedupe_attr, True)
 
     with suppress_history_valid_to_chaining(), suppress_main_table_sync():
         with transaction.atomic():
-            # Acquire all relevant history rows in deterministic order to avoid
-            # opposite lock acquisition across concurrent writers.
+            if is_new_history_row:
+                current_key = (
+                    history_instance.valid_from,
+                    getattr(history_instance, "history_id", 0),
+                )
+                previous_record = (
+                    HistoryModel.objects.select_for_update()
+                    .filter(**{pk_name: pk_val})
+                    .filter(
+                        Q(valid_from__lt=current_key[0])
+                        | Q(valid_from=current_key[0], history_id__lt=current_key[1])
+                    )
+                    .order_by("-valid_from", "-history_id")
+                    .first()
+                )
+                next_record = (
+                    HistoryModel.objects.select_for_update()
+                    .filter(**{pk_name: pk_val})
+                    .filter(
+                        Q(valid_from__gt=current_key[0])
+                        | Q(valid_from=current_key[0], history_id__gt=current_key[1])
+                    )
+                    .order_by("valid_from", "history_id")
+                    .first()
+                )
+
+                if previous_record and previous_record.valid_to != history_instance.valid_from:
+                    previous_record.valid_to = history_instance.valid_from
+                    try:
+                        previous_record.save(update_fields=["valid_to"])
+                    finally:
+                        if hasattr(previous_record, "_strict_chaining_update"):
+                            delattr(previous_record, "_strict_chaining_update")
+
+                new_current_valid_to = next_record.valid_from if next_record else None
+                if history_instance.valid_to != new_current_valid_to:
+                    is_refinement = (
+                        history_instance.valid_to is not None
+                        and new_current_valid_to is not None
+                    )
+                    history_instance.valid_to = new_current_valid_to
+                    history_instance._strict_chaining_update = is_refinement
+                    try:
+                        history_instance.save(update_fields=["valid_to"])
+                    finally:
+                        if hasattr(history_instance, "_strict_chaining_update"):
+                            delattr(history_instance, "_strict_chaining_update")
+                return
+
+            # Existing history rows can be edited manually, which may relocate
+            # them within the timeline. In that case recalculate the full chain
+            # to preserve correctness.
             all_records = list(
                 HistoryModel.objects.select_for_update()
                 .filter(**{pk_name: pk_val})
@@ -336,23 +399,81 @@ def on_meta_saved__chain_sys_to(
 
     MetaModel = instance.__class__
     history_object_id = instance.history_object_id
+    update_fields = kwargs.get("update_fields")
+    is_new_meta_row = bool(kwargs.get("created"))
+
+    # Metadata-only updates that do not move a record within the system-time
+    # chain do not require re-chaining.
+    if (
+        not is_new_meta_row
+        and update_fields is not None
+        and "sys_from" not in update_fields
+        and "history_object" not in update_fields
+        and "history_object_id" not in update_fields
+    ):
+        return
 
     with suppress_meta_sys_to_chaining():
         with transaction.atomic():
-            # Lock meta rows in deterministic order to reduce deadlock cycles.
+            if is_new_meta_row:
+                current_key = (
+                    instance.sys_from,
+                    getattr(instance, "meta_history_id", 0),
+                )
+                previous_meta = (
+                    MetaModel.objects.select_for_update()
+                    .filter(history_object_id=history_object_id)
+                    .filter(
+                        Q(sys_from__lt=current_key[0])
+                        | Q(sys_from=current_key[0], meta_history_id__lt=current_key[1])
+                    )
+                    .order_by("-sys_from", "-meta_history_id")
+                    .first()
+                )
+                next_meta = (
+                    MetaModel.objects.select_for_update()
+                    .filter(history_object_id=history_object_id)
+                    .filter(
+                        Q(sys_from__gt=current_key[0])
+                        | Q(sys_from=current_key[0], meta_history_id__gt=current_key[1])
+                    )
+                    .order_by("sys_from", "meta_history_id")
+                    .first()
+                )
+
+                changed_records = []
+                if previous_meta and previous_meta.sys_to != instance.sys_from:
+                    previous_meta.sys_to = instance.sys_from
+                    changed_records.append(previous_meta)
+
+                new_current_sys_to = next_meta.sys_from if next_meta else None
+                if instance.sys_to != new_current_sys_to:
+                    instance.sys_to = new_current_sys_to
+                    changed_records.append(instance)
+
+                if changed_records:
+                    MetaModel.objects.bulk_update(changed_records, ["sys_to"])
+                return
+
+            # Manual edits to existing meta rows can relocate them within the
+            # chain. Rebuild the full ordering in that case.
             all_meta = list(
                 MetaModel.objects.select_for_update()
                 .filter(history_object_id=history_object_id)
                 .order_by("sys_from", "meta_history_id")
             )
 
+            changed_records = []
             for i, record in enumerate(all_meta):
                 next_record = all_meta[i + 1] if i < len(all_meta) - 1 else None
                 new_sys_to = next_record.sys_from if next_record else None
 
                 if record.sys_to != new_sys_to:
                     record.sys_to = new_sys_to
-                    record.save(update_fields=["sys_to"])
+                    changed_records.append(record)
+
+            if changed_records:
+                MetaModel.objects.bulk_update(changed_records, ["sys_to"])
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
