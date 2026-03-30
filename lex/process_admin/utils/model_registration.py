@@ -30,6 +30,7 @@ class ModelRegistration:
         cls,
         models: List[Type[models.Model]],
         untracked_models: Optional[List[str]] = None,
+        history_tracking_enabled: bool = True,
     ) -> None:
         """
         Register a list of Django models with appropriate admin sites and history tracking.
@@ -38,6 +39,8 @@ class ModelRegistration:
             models: List of Django model classes to register
             untracked_models: Optional list of model names (lowercase) that should
                             not have history tracking. Defaults to empty list.
+            history_tracking_enabled: Project-level switch for history tracking.
+                            When False, history is skipped for every model.
         """
         from lex.process_admin.settings import processAdminSite
         from lex.core.models.Process import Process
@@ -67,7 +70,8 @@ class ModelRegistration:
                     _exclusion = get_model_exclusion_reason(model)
                     _is_already_tracked = _exclusion == "Already has history tracking"
                     _will_track = (
-                        (_exclusion is None or _is_already_tracked)
+                        history_tracking_enabled
+                        and (_exclusion is None or _is_already_tracked)
                         and _model_name not in (untracked_models or [])
                     )
                     cls._validate_model_definition(
@@ -79,7 +83,11 @@ class ModelRegistration:
                 elif issubclass(model, Process):
                     cls._register_process_model(model)
                 elif not issubclass(model, type) and not model._meta.abstract:
-                    result = cls._register_standard_model(model, untracked_models)
+                    result = cls._register_standard_model(
+                        model,
+                        untracked_models,
+                        history_tracking_enabled,
+                    )
                     if result == "ok":
                         history_ok.append(model.__name__)
                     elif result == "skipped":
@@ -95,7 +103,11 @@ class ModelRegistration:
                 ) from e
 
         # One-line summary instead of per-model print spam
-        if history_ok or history_failed:
+        if (
+            history_ok
+            or history_failed
+            or (history_skipped and not history_tracking_enabled)
+        ):
             logger.info(
                 f"History tracking: {len(history_ok)} enabled, "
                 f"{len(history_skipped)} skipped, {len(history_failed)} failed"
@@ -263,7 +275,10 @@ class ModelRegistration:
 
     @classmethod
     def _register_standard_model(
-        cls, model: Type[models.Model], untracked_models: List[str]
+        cls,
+        model: Type[models.Model],
+        untracked_models: List[str],
+        history_tracking_enabled: bool = True,
     ) -> str:
         """
         Register a standard model with both admin sites and bitemporal history.
@@ -285,7 +300,8 @@ class ModelRegistration:
         exclusion_reason = get_model_exclusion_reason(model)
         is_already_tracked = exclusion_reason == "Already has history tracking"
         should_track = (
-            (exclusion_reason is None or is_already_tracked)
+            history_tracking_enabled
+            and (exclusion_reason is None or is_already_tracked)
             and model_name not in untracked_models
         )
 
@@ -349,7 +365,11 @@ class ModelRegistration:
                 )
                 result = "failed"
         else:
-            reason = exclusion_reason or "In untracked_models list"
+            reason = exclusion_reason or (
+                "Project-level history tracking disabled via model_structure.yaml"
+                if not history_tracking_enabled
+                else "In untracked_models list"
+            )
             logger.debug(
                 f"History tracking skipped for {model.__name__}: {reason}"
             )

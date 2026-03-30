@@ -160,8 +160,9 @@ class GenericAppConfig(AppConfig):
 
         ModelRegistration.register_models(
             [o for o in self.discovered_models.values() if not admin.site.is_registered(o)],
-            self.untracked_models
-       )
+            self.untracked_models,
+            self.model_structure_builder.history_tracking_enabled,
+        )
         if (
             self.model_structure_builder.model_structure
             or self.model_structure_builder.model_structure_is_explicitly_defined
@@ -172,4 +173,8 @@ class GenericAppConfig(AppConfig):
             )
         ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
-        ModelRegistration.register_models([Streamlit], self.untracked_models)
+        ModelRegistration.register_models(
+            [Streamlit],
+            self.untracked_models,
+            self.model_structure_builder.history_tracking_enabled,
+        )

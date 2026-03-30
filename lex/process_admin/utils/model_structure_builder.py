@@ -23,6 +23,7 @@ class ModelStructureBuilder:
         self.untracked_models = []
         self.tracked_models = []
         self.tracked_models_defined = False
+        self.history_tracking_enabled = True
 
     def extract_from_yaml(self, path: str):
         if not os.path.exists(path):
@@ -39,6 +40,7 @@ class ModelStructureBuilder:
         self.untracked_models = info.untracked_models
         self.tracked_models = info.tracked_models
         self.tracked_models_defined = info.tracked_models_defined
+        self.history_tracking_enabled = info.history_tracking_enabled
         self.model_structure_is_defined_in_yaml = info.structure_is_defined()
         self.model_structure_is_explicitly_defined = info.structure_is_defined()
 
@@ -148,6 +150,7 @@ class ModelStructureBuilder:
             "model_styling": self.model_styling,
             "untracked_models": self.untracked_models,
             "tracked_models": self.tracked_models,
+            "history_tracking_enabled": self.history_tracking_enabled,
         }
 
     def resolve_untracked_models(self, model_names: Iterable[str]) -> List[str]:

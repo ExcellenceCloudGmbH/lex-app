@@ -28,6 +28,60 @@ class ModelStructureYamlTests(TestCase):
             structure = ModelStructure(str(path))
             self.assertEqual(structure.tracked_models, ["foo", "bar"])
             self.assertEqual(structure.untracked_models, [])
+            self.assertTrue(structure.history_tracking_enabled)
+        finally:
+            path.unlink()
+
+    def test_missing_history_tracking_flag_defaults_to_enabled(self):
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write("model_structure: {}\n")
+            path = Path(handle.name)
+
+        try:
+            builder = ModelStructureBuilder()
+            builder.extract_from_yaml(str(path))
+
+            self.assertTrue(builder.history_tracking_enabled)
+        finally:
+            path.unlink()
+
+    def test_history_tracking_can_be_disabled_in_yaml(self):
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write("history_tracking_enabled: false\n")
+            path = Path(handle.name)
+
+        try:
+            structure = ModelStructure(str(path))
+            builder = ModelStructureBuilder()
+            builder.extract_from_yaml(str(path))
+
+            self.assertFalse(structure.history_tracking_enabled)
+            self.assertFalse(builder.history_tracking_enabled)
+        finally:
+            path.unlink()
+
+    def test_blank_history_tracking_flag_defaults_to_enabled(self):
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write("history_tracking_enabled:\n")
+            path = Path(handle.name)
+
+        try:
+            structure = ModelStructure(str(path))
+            self.assertTrue(structure.history_tracking_enabled)
+        finally:
+            path.unlink()
+
+    def test_history_tracking_flag_must_be_boolean(self):
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write('history_tracking_enabled: "false"\n')
+            path = Path(handle.name)
+
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "'history_tracking_enabled' must be defined as a boolean",
+            ):
+                ModelStructure(str(path))
         finally:
             path.unlink()
 

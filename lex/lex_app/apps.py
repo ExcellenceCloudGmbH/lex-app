@@ -164,7 +164,11 @@ class LexAppConfig(GenericAppConfig):
         if models_to_register:
             logger.info(f"Registering {len(models_to_register)} models from {repo_name}")
             logger.debug(f"Models: {[m.__name__ for m in models_to_register]}")
-            ModelRegistration.register_models(models_to_register, self.untracked_models)
+            ModelRegistration.register_models(
+                models_to_register,
+                self.untracked_models,
+                self.model_structure_builder.history_tracking_enabled,
+            )
         else:
             logger.debug(f"No new models to register from {repo_name}")
 
@@ -183,8 +187,16 @@ class LexAppConfig(GenericAppConfig):
             ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         if self.model_structure_builder.widget_structure:
             ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
-        ModelRegistration.register_models([Streamlit], self.untracked_models)
-        ModelRegistration.register_models([get_user_model()], self.untracked_models)
+        ModelRegistration.register_models(
+            [Streamlit],
+            self.untracked_models,
+            self.model_structure_builder.history_tracking_enabled,
+        )
+        ModelRegistration.register_models(
+            [get_user_model()],
+            self.untracked_models,
+            self.model_structure_builder.history_tracking_enabled,
+        )
 
     def is_running_in_celery(self):
         # from celery import current_task

@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 class ModelStructure:
     UNTRACKED_MODELS = []
+    DEFAULT_HISTORY_TRACKING_ENABLED = True
 
     def __init__(self, path: str):
         self.path = path
@@ -16,6 +17,7 @@ class ModelStructure:
         self.untracked_models = []
         self.tracked_models = []
         self.tracked_models_defined = False
+        self.history_tracking_enabled = self.DEFAULT_HISTORY_TRACKING_ENABLED
 
         data = self._load_yaml_data(self.path)
         self._load_info(data)
@@ -44,6 +46,21 @@ class ModelStructure:
             return [], False
 
         return cls._normalize_model_list(values, key), True
+
+    @classmethod
+    def _get_history_tracking_enabled(cls, data):
+        if not isinstance(data, dict):
+            return cls.DEFAULT_HISTORY_TRACKING_ENABLED
+
+        value = data.get("history_tracking_enabled")
+        if value is None:
+            return cls.DEFAULT_HISTORY_TRACKING_ENABLED
+        if not isinstance(value, bool):
+            raise ValueError(
+                "'history_tracking_enabled' must be defined as a boolean in "
+                "model_structure.yaml."
+            )
+        return value
 
     @classmethod
     def _load_yaml_data(cls, path: str):
@@ -80,6 +97,7 @@ class ModelStructure:
             self.tracked_models, self.tracked_models_defined = self._get_model_list(
                 data, "tracked_models"
             )
+            self.history_tracking_enabled = self._get_history_tracking_enabled(data)
 
     def structure_is_defined(self):
         return self._structure_defined
