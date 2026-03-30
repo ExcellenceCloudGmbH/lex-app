@@ -1,5 +1,6 @@
 recursive-include lex/react *
 recursive-include lex/assets *
+recursive-include lex/docs *
 include pyproject.toml
 include requirements*.txt
 include generate_pycharm_configs.py
