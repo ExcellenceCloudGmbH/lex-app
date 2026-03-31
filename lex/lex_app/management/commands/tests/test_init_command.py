@@ -8,7 +8,11 @@ from io import StringIO
 
 from django.core.management.base import CommandError
 
-from lex.lex_app.management.commands.init import Command, KeycloakSyncManager
+from lex.lex_app.management.commands.init import (
+    Command,
+    KeycloakSyncManager,
+    _format_keycloak_import_error_details,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +533,8 @@ class KeycloakSyncManagerRolePolicyTest(TestCase):
             [policy["name"] for policy in auth_config["policies"]],
             ["Policy - admin", "Policy - standard", "Policy - view-only", "Policy - auditor"],
         )
+        for policy in auth_config["policies"]:
+            self.assertNotIn("roles", policy)
         manager.kc_manager.admin.create_client_role.assert_not_called()
 
     def test_ensure_client_role_policies_normalizes_existing_role_references(self):
@@ -557,10 +563,34 @@ class KeycloakSyncManagerRolePolicyTest(TestCase):
         manager.ensure_client_role_policies(auth_config)
 
         admin_policy = next(policy for policy in auth_config["policies"] if policy["name"] == "Policy - admin")
+        self.assertNotIn("roles", admin_policy)
         self.assertEqual(
-            admin_policy["roles"],
+            json.loads(admin_policy["config"]["roles"]),
             [{"id": "role-admin", "required": True}],
         )
+
+    def test_normalize_role_policy_references_rewrites_stale_client_prefixed_ids(self):
+        manager = self.build_manager()
+        auth_config = {
+            "policies": [
+                {
+                    "name": "Policy - admin",
+                    "type": "role",
+                    "config": {
+                        "roles": json.dumps([{"id": "LEX/admin", "required": True}]),
+                    },
+                }
+            ]
+        }
+        client_roles = {
+            "admin": {"name": "admin", "id": "role-admin"},
+            "standard": {"name": "standard", "id": "role-standard"},
+        }
+
+        manager.normalize_role_policy_references(auth_config, client_roles)
+
+        admin_policy = auth_config["policies"][0]
+        self.assertNotIn("roles", admin_policy)
         self.assertEqual(
             json.loads(admin_policy["config"]["roles"]),
             [{"id": "role-admin", "required": True}],
@@ -703,3 +733,16 @@ class KeycloakSyncManagerRolePolicyTest(TestCase):
             permission_policies["Permission - billing.Invoice - create"],
             ["Policy - admin"],
         )
+
+
+class KeycloakImportErrorFormattingTest(TestCase):
+    def test_http_error_details_include_response_body_excerpt(self):
+        details = _format_keycloak_import_error_details(
+            {
+                "kind": "http_error",
+                "status_code": 400,
+                "response_text": "Role policy invalid",
+            }
+        )
+
+        self.assertEqual(details, "Keycloak returned HTTP 400: Role policy invalid")

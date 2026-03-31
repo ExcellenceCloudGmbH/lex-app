@@ -77,15 +77,26 @@ def _format_keycloak_import_error_details(error: dict[str, Any] | None) -> str |
         return None
 
     kind = error.get("kind")
+    response_text = error.get("response_text")
     if kind == "timeout":
         timeout = error.get("timeout")
         return f"request timed out after {timeout}" if timeout is not None else "request timed out"
     if kind == "gateway_timeout":
         status_code = error.get("status_code", 504)
-        return f"Keycloak returned HTTP {status_code}"
+        return (
+            f"Keycloak returned HTTP {status_code}: {response_text}"
+            if response_text
+            else f"Keycloak returned HTTP {status_code}"
+        )
     if kind == "http_error":
         status_code = error.get("status_code")
-        return f"Keycloak returned HTTP {status_code}" if status_code is not None else None
+        if status_code is None:
+            return response_text or None
+        return (
+            f"Keycloak returned HTTP {status_code}: {response_text}"
+            if response_text
+            else f"Keycloak returned HTTP {status_code}"
+        )
     return None
 
 
@@ -598,6 +609,82 @@ class KeycloakSyncManager:
         ordered.extend(sorted(role_name for role_name in role_names if role_name not in DEFAULT_CLIENT_ROLES))
         return ordered
 
+    def normalize_role_policy_references(self, auth_config: Dict, client_roles: Dict[str, Dict[str, Any]]) -> None:
+        policies = auth_config.get("policies", [])
+        if not isinstance(policies, list):
+            raise CommandError("auth_config.policies must be a list")
+
+        normalized_count = 0
+        for policy in policies:
+            if not isinstance(policy, dict) or policy.get("type") != "role":
+                continue
+
+            config = policy.get("config")
+            if not isinstance(config, dict):
+                config = {}
+                policy["config"] = config
+
+            desired_role_name = None
+            policy_name = policy.get("name")
+            if isinstance(policy_name, str) and policy_name.startswith("Policy - "):
+                candidate = policy_name.removeprefix("Policy - ").strip()
+                if candidate in client_roles:
+                    desired_role_name = candidate
+
+            raw_roles = policy.get("roles")
+            if raw_roles is None:
+                raw_roles = config.get("roles")
+            if raw_roles is None:
+                continue
+
+            parsed_roles = self._parse_json_maybe(
+                raw_roles,
+                f"role policy roles for {policy.get('name')}",
+            )
+
+            normalized_roles = []
+            for raw_role in parsed_roles:
+                if not isinstance(raw_role, dict):
+                    raise CommandError(
+                        f"Unexpected role entry type for policy {policy.get('name')}: {type(raw_role).__name__}"
+                    )
+
+                role_name = raw_role.get("name")
+                if not role_name:
+                    role_id = raw_role.get("id")
+                    if isinstance(role_id, str) and role_id in {role.get("id") for role in client_roles.values()}:
+                        role_name = next(
+                            (name for name, role in client_roles.items() if role.get("id") == role_id),
+                            None,
+                        )
+                    elif isinstance(role_id, str) and "/" in role_id:
+                        role_name = role_id.rsplit("/", 1)[-1]
+
+                if desired_role_name and desired_role_name in client_roles:
+                    role_name = desired_role_name
+
+                if not role_name or role_name not in client_roles:
+                    normalized_roles.append(raw_role)
+                    continue
+
+                normalized_roles.append(
+                    {
+                        "id": client_roles[role_name]["id"],
+                        "required": bool(raw_role.get("required", True)),
+                    }
+                )
+
+            canonical_roles_json = json.dumps(normalized_roles, separators=(",", ":"))
+            if "roles" in policy:
+                policy.pop("roles", None)
+                normalized_count += 1
+            if config.get("roles") != canonical_roles_json:
+                config["roles"] = canonical_roles_json
+                normalized_count += 1
+
+        if normalized_count:
+            logger.info("   ✓ Normalized %s role policy reference field(s) before import", normalized_count)
+
     def get_client_roles(self) -> Dict[str, Dict[str, Any]]:
         client_roles = {
             role["name"]: role
@@ -742,8 +829,8 @@ class KeycloakSyncManager:
                 if config.get("roles") != canonical_roles_json:
                     config["roles"] = canonical_roles_json
                     updated = True
-                if existing_policy.get("roles") != role_definitions:
-                    existing_policy["roles"] = role_definitions
+                if "roles" in existing_policy:
+                    existing_policy.pop("roles", None)
                     updated = True
 
                 if updated:
@@ -758,7 +845,6 @@ class KeycloakSyncManager:
                     "type": "role",
                     "logic": "POSITIVE",
                     "decisionStrategy": "UNANIMOUS",
-                    "roles": role_definitions,
                     "config": {"roles": canonical_roles_json},
                 }
             )
@@ -862,6 +948,8 @@ class KeycloakSyncManager:
 
             logger.info("Ensuring client role-based policies exist before adding resources...")
             managed_role_names = self.ensure_client_role_policies(auth_config)
+            client_roles = self.get_client_roles()
+            self.normalize_role_policy_references(auth_config, client_roles)
 
             # add resources + permissions
             if to_add_set:

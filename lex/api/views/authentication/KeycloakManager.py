@@ -293,9 +293,13 @@ class KeycloakManager:
                 return True
             else:
                 error_kind = "gateway_timeout" if response.status_code == 504 else "http_error"
+                response_excerpt = (response.text or "").strip()
+                if len(response_excerpt) > 1000:
+                    response_excerpt = response_excerpt[:1000] + "..."
                 self._record_authz_import_error(
                     error_kind,
                     status_code=response.status_code,
+                    response_text=response_excerpt,
                 )
                 logger.error(
                     f"Failed to import authorization configuration. Status: {response.status_code}, Response: {response.text}")

@@ -68,7 +68,11 @@ class KeycloakManagerTimeoutTests(SimpleTestCase):
         self.assertFalse(success)
         self.assertEqual(
             manager.last_authz_import_error,
-            {"kind": "gateway_timeout", "status_code": 504},
+            {
+                "kind": "gateway_timeout",
+                "status_code": 504,
+                "response_text": "Gateway time-out",
+            },
         )
 
     def test_resolve_client_uuid_uses_exact_special_character_client_id_when_uuid_missing(self):
