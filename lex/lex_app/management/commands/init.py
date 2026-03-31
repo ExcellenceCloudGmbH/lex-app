@@ -707,20 +707,50 @@ class KeycloakSyncManager:
         Fail-fast: any Keycloak admin API error raises.
         """
         policies = auth_config.setdefault("policies", [])
-        existing_policy_names = {p.get("name") for p in policies}
+        policies_by_name = {p.get("name"): p for p in policies if p.get("name")}
         client_roles = self.get_client_roles()
         ordered_role_names = self._ordered_client_role_names(set(client_roles))
 
         for role_name in ordered_role_names:
             full_policy_name = f"Policy - {role_name}"
-            if full_policy_name in existing_policy_names:
-                logger.info(f"   ✓ Client role policy already exists: {full_policy_name}")
-                continue
-
             role = client_roles[role_name]
             role_id = role.get("id")
             if not role_id:
                 raise CommandError(f"Client role '{role_name}' is missing an id")
+            role_definitions = [{"id": role_id, "required": True}]
+            canonical_roles_json = json.dumps(role_definitions, separators=(",", ":"))
+
+            existing_policy = policies_by_name.get(full_policy_name)
+            if existing_policy:
+                updated = False
+                if existing_policy.get("type") != "role":
+                    existing_policy["type"] = "role"
+                    updated = True
+                if existing_policy.get("logic") != "POSITIVE":
+                    existing_policy["logic"] = "POSITIVE"
+                    updated = True
+                if existing_policy.get("decisionStrategy") != "UNANIMOUS":
+                    existing_policy["decisionStrategy"] = "UNANIMOUS"
+                    updated = True
+
+                config = existing_policy.get("config")
+                if not isinstance(config, dict):
+                    config = {}
+                    existing_policy["config"] = config
+                    updated = True
+
+                if config.get("roles") != canonical_roles_json:
+                    config["roles"] = canonical_roles_json
+                    updated = True
+                if existing_policy.get("roles") != role_definitions:
+                    existing_policy["roles"] = role_definitions
+                    updated = True
+
+                if updated:
+                    logger.info(f"   ✓ Normalized client role policy in config: {full_policy_name}")
+                else:
+                    logger.info(f"   ✓ Client role policy already exists: {full_policy_name}")
+                continue
 
             policies.append(
                 {
@@ -728,10 +758,11 @@ class KeycloakSyncManager:
                     "type": "role",
                     "logic": "POSITIVE",
                     "decisionStrategy": "UNANIMOUS",
-                    "config": {"roles": json.dumps([{"id": role_id, "required": True}])},
+                    "roles": role_definitions,
+                    "config": {"roles": canonical_roles_json},
                 }
             )
-            existing_policy_names.add(full_policy_name)
+            policies_by_name[full_policy_name] = policies[-1]
             logger.info(f"   ✓ Added client role policy to config: {full_policy_name}")
 
         return ordered_role_names

@@ -531,6 +531,41 @@ class KeycloakSyncManagerRolePolicyTest(TestCase):
         )
         manager.kc_manager.admin.create_client_role.assert_not_called()
 
+    def test_ensure_client_role_policies_normalizes_existing_role_references(self):
+        manager = self.build_manager()
+        manager.kc_manager.admin.get_client_roles.return_value = [
+            {"name": "admin", "id": "role-admin"},
+            {"name": "standard", "id": "role-standard"},
+            {"name": "view-only", "id": "role-view"},
+        ]
+
+        auth_config = {
+            "policies": [
+                {
+                    "name": "Policy - admin",
+                    "type": "role",
+                    "logic": "POSITIVE",
+                    "decisionStrategy": "UNANIMOUS",
+                    "roles": [{"id": "LEX/admin", "required": True}],
+                    "config": {
+                        "roles": json.dumps([{"id": "LEX/admin", "required": True}]),
+                    },
+                }
+            ]
+        }
+
+        manager.ensure_client_role_policies(auth_config)
+
+        admin_policy = next(policy for policy in auth_config["policies"] if policy["name"] == "Policy - admin")
+        self.assertEqual(
+            admin_policy["roles"],
+            [{"id": "role-admin", "required": True}],
+        )
+        self.assertEqual(
+            json.loads(admin_policy["config"]["roles"]),
+            [{"id": "role-admin", "required": True}],
+        )
+
     def test_process_model_changes_applies_standard_mapping_to_extra_roles(self):
         manager = self.build_manager()
         manager.kc_manager.admin.get_client.return_value = {
