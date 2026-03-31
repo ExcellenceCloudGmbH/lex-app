@@ -444,8 +444,8 @@ class LexModel(LifecycleModel):
     FALLBACK_AUDIT_ACTOR = 'Initial Data Upload'
     API_KEY_AUDIT_ACTOR = 'Technical User'
 
-    created_at = models.DateTimeField(default=lex_datetime_now, editable=False)
-    edited_at = models.DateTimeField(default=lex_datetime_now, editable=False)
+    created_at = models.DateTimeField(null=True, blank=True, editable=False)
+    edited_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_by = models.TextField(null=True, blank=True, editable=False)
     edited_by = models.TextField(null=True, blank=True, editable=False)
 
