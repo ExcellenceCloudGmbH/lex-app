@@ -10,8 +10,7 @@ from lex.api.views.authentication.KeycloakManager import (
 
 class KeycloakManagerTimeoutTests(SimpleTestCase):
     def build_manager(self):
-        manager_cls = KeycloakManager.__wrapped__
-        manager = manager_cls.__new__(manager_cls)
+        manager = object.__new__(KeycloakManager)
         manager.realm_name = "lex"
         manager.client_uuid = "client-uuid"
         manager.oidc = None
@@ -71,3 +70,33 @@ class KeycloakManagerTimeoutTests(SimpleTestCase):
             manager.last_authz_import_error,
             {"kind": "gateway_timeout", "status_code": 504},
         )
+
+    def test_resolve_client_uuid_uses_exact_special_character_client_id_when_uuid_missing(self):
+        manager = self.build_manager()
+        manager.admin.get_client_id.return_value = "resolved-uuid"
+
+        resolved = manager._resolve_client_uuid("LEX/transactionmonitoringv1[594]", None)
+
+        self.assertEqual(resolved, "resolved-uuid")
+        manager.admin.get_client_id.assert_called_once_with("LEX/transactionmonitoringv1[594]")
+
+    def test_resolve_client_uuid_replaces_mismatched_uuid_with_exact_client_id_match(self):
+        manager = self.build_manager()
+        manager.admin.get_client.return_value = {"clientId": "LEX"}
+        manager.admin.get_client_id.return_value = "resolved-uuid"
+
+        resolved = manager._resolve_client_uuid("LEX/transactionmonitoringv1[594]", "uuid-for-lex")
+
+        self.assertEqual(resolved, "resolved-uuid")
+        manager.admin.get_client.assert_called_once_with("uuid-for-lex")
+        manager.admin.get_client_id.assert_called_once_with("LEX/transactionmonitoringv1[594]")
+
+    def test_resolve_client_uuid_keeps_matching_uuid_without_lookup(self):
+        manager = self.build_manager()
+        manager.admin.get_client.return_value = {"clientId": "LEX/transactionmonitoringv1[594]"}
+
+        resolved = manager._resolve_client_uuid("LEX/transactionmonitoringv1[594]", "resolved-uuid")
+
+        self.assertEqual(resolved, "resolved-uuid")
+        manager.admin.get_client.assert_called_once_with("resolved-uuid")
+        manager.admin.get_client_id.assert_not_called()

@@ -1,10 +1,81 @@
 # core/management/commands/bootstrap_callback_server.py
 
 import json
+import re
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+_UNQUOTED_ENV_VALUE_RE = re.compile(r"^[A-Za-z0-9._:/-]*$")
+
+
+def _first_present(*values):
+    for value in values:
+        if value not in (None, ""):
+            return value
+    for value in values:
+        if value is not None:
+            return value
+    return ""
+
+
+def _mapping_value(data: dict, *keys: str):
+    for key in keys:
+        if key in data and data[key] is not None:
+            return data[key]
+    return None
+
+
+def _format_env_value(value) -> str:
+    text = "" if value is None else str(value)
+    if _UNQUOTED_ENV_VALUE_RE.fullmatch(text):
+        return text
+    return json.dumps(text)
+
+
+def _extract_bootstrap_env_values(data: dict) -> dict[str, str]:
+    client_data = data.get("client")
+    if not isinstance(client_data, dict):
+        client_data = {}
+
+    return {
+        "KEYCLOAK_URL": str(
+            _first_present(
+                _mapping_value(data, "keycloak_url", "keycloakUrl", "KEYCLOAK_URL"),
+                _mapping_value(client_data, "keycloak_url", "keycloakUrl", "url"),
+            )
+        ),
+        "KEYCLOAK_REALM": str(
+            _first_present(
+                _mapping_value(data, "realm", "realm_name", "realmName", "KEYCLOAK_REALM", "KEYCLOAK_REALM_NAME"),
+                _mapping_value(client_data, "realm", "realm_name", "realmName"),
+            )
+        ),
+        "OIDC_RP_CLIENT_ID": str(
+            _first_present(
+                _mapping_value(data, "client_id", "clientId", "OIDC_RP_CLIENT_ID"),
+                _mapping_value(client_data, "client_id", "clientId", "name"),
+            )
+        ),
+        "OIDC_RP_CLIENT_SECRET": str(
+            _first_present(
+                _mapping_value(data, "client_secret", "clientSecret", "OIDC_RP_CLIENT_SECRET"),
+                _mapping_value(client_data, "client_secret", "clientSecret", "secret"),
+            )
+        ),
+        "OIDC_RP_CLIENT_UUID": str(
+            _first_present(
+                _mapping_value(data, "client_uuid", "clientUuid", "clientUUID", "OIDC_RP_CLIENT_UUID"),
+                _mapping_value(client_data, "client_uuid", "clientUuid", "clientUUID", "uuid", "id"),
+            )
+        ),
+    }
+
+
+def build_env_lines(data: dict) -> list[str]:
+    env_values = _extract_bootstrap_env_values(data)
+    return [f"{key}={_format_env_value(value)}" for key, value in env_values.items()]
 
 
 class CallbackHandler(BaseHTTPRequestHandler):
@@ -48,13 +119,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
             return
 
         # Write .env
-        env_lines = [
-            f"KEYCLOAK_URL={data.get('keycloak_url', '')}",
-            f"KEYCLOAK_REALM={data.get('realm', '')}",
-            f"OIDC_RP_CLIENT_ID={data.get('client_id', '')}",
-            f"OIDC_RP_CLIENT_SECRET={data.get('client_secret', '')}",
-            f"OIDC_RP_CLIENT_UUID={data.get('client_uuid', '')}",
-        ]
+        env_lines = build_env_lines(data)
         self.env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
 
         # Flip state

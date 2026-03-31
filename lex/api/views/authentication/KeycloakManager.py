@@ -45,9 +45,55 @@ class KeycloakManager:
     def _record_authz_import_error(self, kind: str, **details: Any) -> None:
         self.last_authz_import_error = {"kind": kind, **details}
 
+    def _resolve_client_uuid(self, client_id: str | None, client_uuid: str | None) -> str | None:
+        normalized_client_id = client_id.strip() if isinstance(client_id, str) and client_id.strip() else None
+        normalized_client_uuid = (
+            client_uuid.strip() if isinstance(client_uuid, str) and client_uuid.strip() else None
+        )
+
+        if not self.admin or not normalized_client_id:
+            return normalized_client_uuid
+
+        if normalized_client_uuid:
+            try:
+                client = self.admin.get_client(normalized_client_uuid)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to validate configured OIDC_RP_CLIENT_UUID=%r against client_id=%r: %s",
+                    normalized_client_uuid,
+                    normalized_client_id,
+                    exc,
+                )
+            else:
+                if isinstance(client, dict) and client.get("clientId") == normalized_client_id:
+                    return normalized_client_uuid
+
+                logger.warning(
+                    "Configured OIDC_RP_CLIENT_UUID=%r did not match client_id=%r; resolving an exact UUID.",
+                    normalized_client_uuid,
+                    normalized_client_id,
+                )
+
+        try:
+            resolved_client_uuid = self.admin.get_client_id(normalized_client_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to resolve Keycloak client UUID for client_id=%r: %s",
+                normalized_client_id,
+                exc,
+            )
+            return normalized_client_uuid
+
+        if resolved_client_uuid:
+            return resolved_client_uuid
+
+        return normalized_client_uuid
+
     def initialize(self):
         self.realm_name = os.getenv("KEYCLOAK_REALM")
-        self.client_uuid = os.getenv("OIDC_RP_CLIENT_UUID")
+        configured_client_id = os.getenv("OIDC_RP_CLIENT_ID")
+        configured_client_uuid = os.getenv("OIDC_RP_CLIENT_UUID")
+        self.client_uuid = configured_client_uuid
 
         # Get SSL verification setting from Django settings
         verify_ssl = getattr(settings, "KEYCLOAK_VERIFY_SSL", False)
@@ -63,6 +109,7 @@ class KeycloakManager:
             self.admin = KeycloakAdmin(connection=self.conn)
             self.uma = KeycloakUMA(connection=self.conn)
             self.oidc = self.conn.keycloak_openid
+            self.client_uuid = self._resolve_client_uuid(configured_client_id, configured_client_uuid)
         except Exception as e:
             logger.error(f"Failed to initialize Keycloak OIDC client: {e}")
             self.oidc = None
