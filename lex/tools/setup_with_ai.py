@@ -343,7 +343,7 @@ def configure_ai_integration(
     python_path = (
         resolve_active_python_executable(Path(project_root), env=env)
         if python_executable is None
-        else Path(python_executable).resolve()
+        else Path(os.path.abspath(python_executable))
     )
     wrapper_script_path = resolve_wrapper_script_path(python_path)
     env_values = build_ai_env_values(
