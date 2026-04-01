@@ -104,13 +104,13 @@ def resolve_active_python_executable(
         if resolved_root in seen_roots:
             continue
         seen_roots.add(resolved_root)
-        for candidate in _python_candidates_for_venv(resolved_root):
+        for candidate in _python_candidates_for_venv(root):
             if candidate.is_file():
-                return candidate.resolve()
+                return Path(os.path.abspath(candidate))
 
     path_python = shutil.which("python") or shutil.which("python3")
     if path_python:
-        return Path(path_python).expanduser().resolve()
+        return Path(os.path.abspath(path_python))
 
     sys_python = Path(sys.executable).expanduser().resolve()
     if sys_python.is_file():

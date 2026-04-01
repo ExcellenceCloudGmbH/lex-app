@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -345,7 +346,7 @@ class SetupWithAIToolsTests(TestCase):
 
             resolved = resolve_active_python_executable(project_root, env={})
 
-        self.assertEqual(resolved, python_path.resolve())
+        self.assertEqual(resolved, Path(os.path.abspath(python_path)))
 
     def test_resolve_active_python_executable_prefers_project_virtualenv_over_conda(self):
         with TemporaryDirectory() as tmp_dir:
@@ -363,7 +364,7 @@ class SetupWithAIToolsTests(TestCase):
                 env={"CONDA_PREFIX": str(conda_python.parent.parent)},
             )
 
-        self.assertEqual(resolved, project_python.resolve())
+        self.assertEqual(resolved, Path(os.path.abspath(project_python)))
 
     def test_resolve_active_python_executable_prefers_path_python_over_current_process(self):
         with TemporaryDirectory() as tmp_dir:
@@ -375,5 +376,5 @@ class SetupWithAIToolsTests(TestCase):
             with patch("lex.tools.setup_with_ai.shutil.which", return_value=str(shell_python)):
                 resolved = resolve_active_python_executable(project_root, env={})
 
-        self.assertEqual(resolved, shell_python.resolve())
+        self.assertEqual(resolved, Path(os.path.abspath(shell_python)))
         self.assertNotEqual(resolved, Path(sys.executable).resolve())
