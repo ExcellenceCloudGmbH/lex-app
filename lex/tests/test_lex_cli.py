@@ -347,6 +347,24 @@ class SetupWithAIToolsTests(TestCase):
 
         self.assertEqual(resolved, python_path.resolve())
 
+    def test_resolve_active_python_executable_prefers_project_virtualenv_over_conda(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            project_python = project_root / ".venv" / "bin" / "python"
+            project_python.parent.mkdir(parents=True)
+            project_python.write_text("", encoding="utf-8")
+
+            conda_python = project_root / "conda-base" / "bin" / "python"
+            conda_python.parent.mkdir(parents=True)
+            conda_python.write_text("", encoding="utf-8")
+
+            resolved = resolve_active_python_executable(
+                project_root,
+                env={"CONDA_PREFIX": str(conda_python.parent.parent)},
+            )
+
+        self.assertEqual(resolved, project_python.resolve())
+
     def test_resolve_active_python_executable_prefers_path_python_over_current_process(self):
         with TemporaryDirectory() as tmp_dir:
             project_root = Path(tmp_dir)

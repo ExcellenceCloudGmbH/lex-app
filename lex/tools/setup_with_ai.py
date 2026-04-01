@@ -85,15 +85,18 @@ def resolve_active_python_executable(
     env_map = dict(os.environ if env is None else env)
     candidate_roots: list[Path] = []
 
-    for env_name in ("VIRTUAL_ENV", "CONDA_PREFIX"):
-        root = env_map.get(env_name)
-        if root:
-            candidate_roots.append(Path(root).expanduser())
+    virtual_env_root = env_map.get("VIRTUAL_ENV")
+    if virtual_env_root:
+        candidate_roots.append(Path(virtual_env_root).expanduser())
 
     for local_dir_name in (".venv", "venv"):
         local_root = project_root / local_dir_name
         if local_root.is_dir():
             candidate_roots.append(local_root)
+
+    conda_prefix = env_map.get("CONDA_PREFIX")
+    if conda_prefix:
+        candidate_roots.append(Path(conda_prefix).expanduser())
 
     seen_roots: set[Path] = set()
     for root in candidate_roots:
