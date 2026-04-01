@@ -105,13 +105,13 @@ def resolve_active_python_executable(
             if candidate.is_file():
                 return candidate.resolve()
 
-    sys_python = Path(sys.executable).expanduser().resolve()
-    if sys_python.is_file():
-        return sys_python
-
     path_python = shutil.which("python") or shutil.which("python3")
     if path_python:
         return Path(path_python).expanduser().resolve()
+
+    sys_python = Path(sys.executable).expanduser().resolve()
+    if sys_python.is_file():
+        return sys_python
 
     raise SetupWithAIError("Could not determine a Python interpreter for the active virtual environment.")
 

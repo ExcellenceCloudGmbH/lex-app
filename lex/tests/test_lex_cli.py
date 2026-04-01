@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock
 from unittest.mock import patch
+import sys
 
 from click.testing import CliRunner
 
@@ -345,3 +346,16 @@ class SetupWithAIToolsTests(TestCase):
             resolved = resolve_active_python_executable(project_root, env={})
 
         self.assertEqual(resolved, python_path.resolve())
+
+    def test_resolve_active_python_executable_prefers_path_python_over_current_process(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            shell_python = project_root / "shell-env" / "bin" / "python"
+            shell_python.parent.mkdir(parents=True)
+            shell_python.write_text("", encoding="utf-8")
+
+            with patch("lex.tools.setup_with_ai.shutil.which", return_value=str(shell_python)):
+                resolved = resolve_active_python_executable(project_root, env={})
+
+        self.assertEqual(resolved, shell_python.resolve())
+        self.assertNotEqual(resolved, Path(sys.executable).resolve())
