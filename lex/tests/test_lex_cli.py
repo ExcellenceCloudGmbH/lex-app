@@ -13,6 +13,21 @@ from generate_pycharm_configs import (
     generate_pycharm_configs,
 )
 from lex.bin.lex import build_celery_worker_command, build_flower_command, lex
+from lex.tools.setup_with_ai import (
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS,
+    DEFAULT_LEX_MCP_PRODUCTION,
+    DEFAULT_REMOTE_MCP_TRANSPORT,
+    DEFAULT_REMOTE_MCP_URL,
+    LEX_MCP_LOCAL_SERVER_NAME,
+    SetupWithAICredentials,
+    SetupWithAIArtifacts,
+    build_mcp_server_definition,
+    resolve_github_copilot_mcp_config_path,
+    resolve_active_python_executable,
+    update_env_file,
+    write_github_copilot_mcp_config,
+)
 
 
 class GeneratePyCharmConfigsTests(TestCase):
@@ -38,6 +53,26 @@ class GeneratePyCharmConfigsTests(TestCase):
             )
             self.assertIn('name="Flower"', flower_config)
             self.assertIn('<option name="PARAMETERS" value="flower" />', flower_config)
+
+    def test_generate_configs_includes_setup_with_ai_run_configuration(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir) / "sample-project"
+            project_root.mkdir()
+            (project_root / "pyproject.toml").write_text(
+                "[project]\nname='sample-project'\n",
+                encoding="utf-8",
+            )
+
+            generate_pycharm_configs(project_root)
+
+            setup_with_ai_config = (project_root / ".run" / "Setup_With_AI.run.xml").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn('name="Setup With AI"', setup_with_ai_config)
+            self.assertIn(
+                '<option name="PARAMETERS" value="setup-with-ai" />',
+                setup_with_ai_config,
+            )
 
     def test_generate_configs_includes_prompted_celery_worker_configuration(self):
         with TemporaryDirectory() as tmp_dir:
@@ -150,3 +185,163 @@ class LexFlowerCommandTests(TestCase):
             self.assertIn("FLOWER_PORT=5555", env_content)
             self.assertTrue((project_root / ".run" / "Flower.run.xml").exists())
             self.assertTrue((project_root / ".run" / "Celery_Worker.run.xml").exists())
+
+    def test_setup_with_ai_runs_full_non_django_flow(self):
+        runner = CliRunner()
+
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir) / "sample-project"
+            project_root.mkdir()
+            env_path = project_root / ".env"
+            env_path.write_text("", encoding="utf-8")
+
+            artifacts = SetupWithAIArtifacts(
+                env_file_path=env_path,
+                mcp_config_path=project_root / "mcp.json",
+                wrapper_script_path=project_root / "wrapper_mcp.py",
+                python_executable=project_root / ".venv" / "bin" / "python",
+            )
+
+            with (
+                patch("lex.bin.lex.ensure_env_file", return_value=(str(env_path), False)),
+                patch("lex.bin.lex.generate_configs") as generate_configs_mock,
+                patch(
+                    "lex.bin.lex.resolve_active_python_executable",
+                    return_value=artifacts.python_executable,
+                ) as resolve_python_mock,
+                patch("lex.bin.lex.install_lex_mcp_local") as install_mock,
+                patch(
+                    "lex.bin.lex.launch_setup_with_ai_form",
+                    return_value=SetupWithAICredentials(
+                        github_token="ghu_example",
+                        remote_mcp_api_key="remote_api_key",
+                        gemini_api_key="gemini_api_key",
+                    ),
+                ) as launch_form_mock,
+                patch(
+                    "lex.bin.lex.configure_ai_integration",
+                    return_value=artifacts,
+                ) as configure_mock,
+            ):
+                result = runner.invoke(
+                    lex,
+                    ["setup-with-ai", "--project-root", str(project_root)],
+                )
+
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+            generate_configs_mock.assert_called_once_with(project_root.resolve().as_posix())
+            resolve_python_mock.assert_called_once_with(project_root.resolve())
+            install_mock.assert_called_once_with(artifacts.python_executable)
+            launch_form_mock.assert_called_once()
+            configure_mock.assert_called_once_with(
+                project_root=project_root.resolve(),
+                github_token="ghu_example",
+                remote_mcp_api_key="remote_api_key",
+                gemini_api_key="gemini_api_key",
+                remote_mcp_url=DEFAULT_REMOTE_MCP_URL,
+                python_executable=artifacts.python_executable,
+            )
+            self.assertIn("Setup complete.", result.output)
+
+
+class SetupWithAIToolsTests(TestCase):
+    def test_update_env_file_preserves_comments_and_replaces_existing_keys(self):
+        with TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text(
+                "# existing comment\nCOPILOT_GITHUB_TOKEN=old_token\nKEEP_ME=yes\n",
+                encoding="utf-8",
+            )
+
+            update_env_file(
+                env_path,
+                {
+                    "REMOTE_MCP_TRANSPORT": DEFAULT_REMOTE_MCP_TRANSPORT,
+                    "REMOTE_MCP_URL": DEFAULT_REMOTE_MCP_URL,
+                    "GEMINI_MODEL": DEFAULT_GEMINI_MODEL,
+                    "GIT_GEMINI_MAX_REPAIR_ATTEMPTS": DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS,
+                    "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
+                    "GITHUB_TOKEN": "new_token",
+                    "REMOTE_MCP_API_KEY": "new_api_key",
+                    "GEMINI_API_KEY": "gemini_api_key",
+                },
+            )
+
+            env_content = env_path.read_text(encoding="utf-8")
+            self.assertIn("# existing comment", env_content)
+            self.assertIn(f"REMOTE_MCP_TRANSPORT={DEFAULT_REMOTE_MCP_TRANSPORT}", env_content)
+            self.assertIn(f"REMOTE_MCP_URL={DEFAULT_REMOTE_MCP_URL}", env_content)
+            self.assertIn(f"GEMINI_MODEL={DEFAULT_GEMINI_MODEL}", env_content)
+            self.assertIn(
+                f"GIT_GEMINI_MAX_REPAIR_ATTEMPTS={DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS}",
+                env_content,
+            )
+            self.assertIn(f"LEX_MCP_PRODUCTION={DEFAULT_LEX_MCP_PRODUCTION}", env_content)
+            self.assertIn("GITHUB_TOKEN=new_token", env_content)
+            self.assertNotIn("COPILOT_GITHUB_TOKEN=", env_content)
+            self.assertIn("KEEP_ME=yes", env_content)
+            self.assertIn("REMOTE_MCP_API_KEY=new_api_key", env_content)
+            self.assertIn("GEMINI_API_KEY=gemini_api_key", env_content)
+
+    def test_write_github_copilot_mcp_config_replaces_legacy_alias(self):
+        with TemporaryDirectory() as tmp_dir:
+            mcp_path = Path(tmp_dir) / "mcp.json"
+            mcp_path.write_text(
+                (
+                    '{\n'
+                    '  "servers": {\n'
+                    '    "com.atlassian/atlassian-mcp-server": {"type": "http"},\n'
+                    '    "lex-mcp-wrapper": {"type": "stdio"}\n'
+                    "  }\n"
+                    "}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            server_definition = build_mcp_server_definition(
+                python_executable=Path("/venv/bin/python"),
+                wrapper_script_path=Path("/venv/lib/python3.12/site-packages/lex_mcp_local/wrapper_mcp.py"),
+                github_token="ghu_example",
+                remote_mcp_api_key="remote_api_key",
+                gemini_api_key="gemini_api_key",
+            )
+
+            write_github_copilot_mcp_config(mcp_path, server_definition)
+
+            config = mcp_path.read_text(encoding="utf-8")
+            self.assertIn('"com.atlassian/atlassian-mcp-server"', config)
+            self.assertIn(f'"{LEX_MCP_LOCAL_SERVER_NAME}"', config)
+            self.assertNotIn('"lex-mcp-wrapper"', config)
+            self.assertIn('"command": "/venv/bin/python"', config)
+            self.assertIn(f'"REMOTE_MCP_TRANSPORT": "{DEFAULT_REMOTE_MCP_TRANSPORT}"', config)
+            self.assertIn(f'"REMOTE_MCP_URL": "{DEFAULT_REMOTE_MCP_URL}"', config)
+            self.assertIn(f'"GEMINI_MODEL": "{DEFAULT_GEMINI_MODEL}"', config)
+            self.assertIn(
+                f'"GIT_GEMINI_MAX_REPAIR_ATTEMPTS": "{DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS}"',
+                config,
+            )
+            self.assertIn(f'"LEX_MCP_PRODUCTION": "{DEFAULT_LEX_MCP_PRODUCTION}"', config)
+            self.assertIn('"REMOTE_MCP_API_KEY": "remote_api_key"', config)
+            self.assertIn('"GITHUB_TOKEN": "ghu_example"', config)
+            self.assertNotIn('"COPILOT_GITHUB_TOKEN"', config)
+            self.assertIn('"GEMINI_API_KEY": "gemini_api_key"', config)
+
+    def test_resolve_github_copilot_mcp_config_path_uses_home_config_on_unix(self):
+        with patch("lex.tools.setup_with_ai.os.name", "posix"):
+            path = resolve_github_copilot_mcp_config_path(home=Path("/Users/example"))
+
+        self.assertEqual(
+            path,
+            Path("/Users/example/.config/github-copilot/intellij/mcp.json"),
+        )
+
+    def test_resolve_active_python_executable_prefers_project_virtualenv(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            python_path = project_root / ".venv" / "bin" / "python"
+            python_path.parent.mkdir(parents=True)
+            python_path.write_text("", encoding="utf-8")
+
+            resolved = resolve_active_python_executable(project_root, env={})
+
+        self.assertEqual(resolved, python_path.resolve())

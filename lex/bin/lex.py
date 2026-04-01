@@ -12,6 +12,15 @@ import click
 import uvicorn
 
 from lex.tools.project_root import find_project_root
+from lex.tools.setup_with_ai import (
+    DEFAULT_REMOTE_MCP_URL,
+    SetupWithAICredentials,
+    SetupWithAIError,
+    configure_ai_integration,
+    install_lex_mcp_local,
+    launch_setup_with_ai_form,
+    resolve_active_python_executable,
+)
 
 # Defer Django imports and setup until needed (NOT at import time)
 _DJANGO_READY = False
@@ -289,11 +298,123 @@ def setup(project_root):
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
     click.echo(f".run: {os.path.join(root, '.run')} (updated)")
 
+
+@lex.command(name="setup-with-ai", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+@click.option("--github-token", help="Fine-grained GitHub token for Copilot Extensions.")
+@click.option("--remote-mcp-api-key", help="API key for the hosted remote MCP server.")
+@click.option("--gemini-api-key", help="Gemini API key exposed to lex-mcp-local.")
+@click.option(
+    "--remote-mcp-url",
+    default=DEFAULT_REMOTE_MCP_URL,
+    show_default=True,
+    help="Remote MCP HTTP endpoint used by lex-mcp-local.",
+)
+@click.option(
+    "--no-browser",
+    is_flag=True,
+    help="Skip the local setup page and prompt in the terminal instead.",
+)
+def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key, remote_mcp_url, no_browser):
+    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    python_executable = resolve_active_python_executable(root)
+
+    env_path, created = ensure_env_file(root.as_posix())
+    generate_configs(root.as_posix())
+    click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
+    click.echo(f".run: {os.path.join(root.as_posix(), '.run')} (updated)")
+
+    click.echo("Installing lex-mcp-local into the active virtual environment...")
+    try:
+        install_lex_mcp_local(python_executable)
+    except subprocess.CalledProcessError as exc:
+        raise click.ClickException(
+            f"Failed to install lex-mcp-local into {python_executable}."
+        ) from exc
+
+    credentials = _collect_setup_with_ai_credentials(
+        github_token=github_token,
+        remote_mcp_api_key=remote_mcp_api_key,
+        gemini_api_key=gemini_api_key,
+        project_root=root,
+        env_file_path=Path(env_path),
+        no_browser=no_browser,
+    )
+
+    try:
+        artifacts = configure_ai_integration(
+            project_root=root,
+            github_token=credentials.github_token,
+            remote_mcp_api_key=credentials.remote_mcp_api_key,
+            gemini_api_key=credentials.gemini_api_key,
+            remote_mcp_url=remote_mcp_url,
+            python_executable=python_executable,
+        )
+    except SetupWithAIError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Updated .env with AI credentials: {artifacts.env_file_path}")
+    click.echo(f"Registered {artifacts.server_name} in GitHub Copilot MCP config: {artifacts.mcp_config_path}")
+    click.echo(f"Using interpreter: {artifacts.python_executable}")
+    click.echo(f"Using wrapper: {artifacts.wrapper_script_path}")
+    click.echo(
+        "Setup complete. Open GitHub Copilot in PyCharm and write your first prompt."
+    )
+
+
+def _collect_setup_with_ai_credentials(
+    *,
+    github_token: str | None,
+    remote_mcp_api_key: str | None,
+    gemini_api_key: str | None,
+    project_root: Path,
+    env_file_path: Path,
+    no_browser: bool,
+) -> SetupWithAICredentials:
+    if github_token and remote_mcp_api_key and gemini_api_key:
+        return SetupWithAICredentials(
+            github_token=github_token,
+            remote_mcp_api_key=remote_mcp_api_key,
+            gemini_api_key=gemini_api_key,
+        )
+
+    if not no_browser:
+        click.echo("Opening the local AI setup page in your browser...")
+        try:
+            return launch_setup_with_ai_form(
+                project_root=project_root,
+                env_file_path=env_file_path,
+                reporter=click.echo,
+            )
+        except SetupWithAIError as exc:
+            click.echo(f"Browser setup page failed: {exc}")
+            click.echo("Falling back to terminal prompts.")
+
+    final_github_token = github_token or click.prompt(
+        "GitHub token",
+        hide_input=True,
+    )
+    final_remote_mcp_api_key = remote_mcp_api_key or click.prompt(
+        "Remote MCP API key",
+        hide_input=True,
+    )
+    final_gemini_api_key = gemini_api_key or click.prompt(
+        "Gemini API key",
+        hide_input=True,
+    )
+    return SetupWithAICredentials(
+        github_token=final_github_token,
+        remote_mcp_api_key=final_remote_mcp_api_key,
+        gemini_api_key=final_gemini_api_key,
+    )
+
 # Commands that have dedicated handlers and do NOT need Django management
 # command enumeration.  For these, _bootstrap_django() is skipped so that
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
-_SKIP_BOOTSTRAP_COMMANDS = frozenset({"start", "celery", "celery-workers", "flower", "setup"})
+_SKIP_BOOTSTRAP_COMMANDS = frozenset(
+    {"start", "celery", "celery-workers", "flower", "setup", "setup-with-ai"}
+)
 
 
 def main():

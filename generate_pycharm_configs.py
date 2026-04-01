@@ -39,6 +39,10 @@ def generate_pycharm_configs(project_root=None):
 
     configs = {
         "Init.run.xml": {"name": "Init", "parameters": "init"},
+        "Setup_With_AI.run.xml": {
+            "name": "Setup With AI",
+            "parameters": "setup-with-ai",
+        },
         "Start.run.xml": {
             "name": "Start",
             "parameters": "start --reload --loop asyncio lex_app.asgi:application",
