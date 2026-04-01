@@ -11,6 +11,7 @@ Purpose: high-signal index extracted from `lex_context.md` and `lex_context_repo
 4. `04-calculationmodel-lifecycle.md` — status model, state machine, calculation hooks, sync/async, is_atomic
 5. `05-calculatedmodelmixin-combinatorics.md` — defining fields, combinatorial expansion, duplicate handling, common patterns
 6. `06-permissions-authorization.md` — UserContext, PermissionResult, permission methods, fallback chain, code examples
+7. `07-streamlit-dashboards.md` — model-level Streamlit contracts, runtime, embedding points, auth token handoff
 8. `08-serializers-and-api-layer.md` — custom serializers, @add_permission_checks, PATCH-safe validation, file organization
 9. `09-fields-and-report-assets.md` — Lex custom fields (XLSX/PDF/HTML/Bokeh) and report output patterns
 10. `10-process-admin-and-model-structure.md` — registration, model_structure.yaml (all three sections), YAML examples
@@ -30,7 +31,6 @@ Purpose: high-signal index extracted from `lex_context.md` and `lex_context_repo
 
 ## Out of Scope
 
-- Streamlit dashboards and custom UI dashboards are implemented manually by developers and are intentionally excluded from this topic set.
 - History and bitemporal history are automatic Lex features — no user action required.
 - Audit logs are automatic Lex features — no user action required.
 

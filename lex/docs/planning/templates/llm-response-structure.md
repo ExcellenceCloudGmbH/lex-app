@@ -11,13 +11,13 @@ Use this exact end-of-response block in every planning step response.
 1. Step output for current step (content requested by handbook)
 2. Validation summary (ambiguities, risks, conflicts)
 3. Traceability updates (Requirement IDs, Story IDs, Model references)
-4. Approval status (`Approved: Yes/No/Pending`)
+4. Completion status (`Completed: Yes/No` and remaining blockers if `No`)
 
 ## End-of-response block (required)
 
 ```md
 ## Next User Action
-- <1-3 precise things the user should provide or approve next>
+- <1-3 precise things the user should provide next, only if required>
 
 ## Next Step Pointer
 - Next handbook step: <docs/planning/NN-...>
@@ -33,5 +33,5 @@ Use this exact end-of-response block in every planning step response.
 
 - Keep this block at the end of every response.
 - Never include private chain-of-thought; only actionable execution notes.
-- If waiting for user approval, state exactly what is blocked.
+- If blocked, state exactly what is missing and why the next step cannot proceed.
 - Always provide both a handbook-step pointer and a concrete `plans/` file pointer.

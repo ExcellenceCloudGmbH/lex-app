@@ -11,6 +11,7 @@ Use this file to route a user question to the most relevant focused Lex topic fi
 - CalculationModel, is_calculated, calculate_hook, status transitions, state machine → `04-calculationmodel-lifecycle.md`
 - defining_fields, combinatorial expansion, duplicates, get_selected_key_list → `05-calculatedmodelmixin-combinatorics.md`
 - UserContext, PermissionResult, permission_read/edit, scopes, Keycloak permissions → `06-permissions-authorization.md`
+- streamlit, dashboards, streamlit_main, streamlit_class_main, analytics tab, streamlit token → `07-streamlit-dashboards.md`
 - serializer, add_permission_checks, CRUD endpoint wiring, PATCH validation → `08-serializers-and-api-layer.md`
 - XLSXField, PDFField, HTMLField, report output file → `09-fields-and-report-assets.md`
 - process admin, model_structure.yaml, ModelContainer, registration, model_styling → `10-process-admin-and-model-structure.md`
@@ -28,7 +29,6 @@ Use this file to route a user question to the most relevant focused Lex topic fi
 
 ## Out of Scope Routing
 
-- Streamlit dashboards, `streamlit_main`, `streamlit_class_main`, and custom dashboard UX → manual developer implementation (not documented in `docs/lex_topics`).
 - History, bitemporal history, and audit logs → automatic Lex features (no user action needed).
 - Lex framework internals (`LexModel`, `CalculationModel` implementations) → out of scope for planning outputs; use/subclass only.
 

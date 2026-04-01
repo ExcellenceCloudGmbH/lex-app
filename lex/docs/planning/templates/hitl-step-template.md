@@ -38,11 +38,11 @@ Use this template when running any planning step that needs user clarification.
 - Conflicts found:
 - Traceability links:
 
-## Approval Block
+## Completion Checkpoint
 
-- Approved: Yes / No
+- Completed: Yes / No
+- Blocking inputs (if any):
 - Notes:
-- Approved by:
 - Date:
 
 ## Next User Action

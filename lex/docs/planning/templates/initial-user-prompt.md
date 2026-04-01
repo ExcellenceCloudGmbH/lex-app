@@ -16,14 +16,14 @@ Use `HANDBOOK_ROOT=./.venv/lib/python3.12/site-packages/lex/docs` as the canonic
 Hard rules:
 1. Treat `${HANDBOOK_ROOT}` as read-only handbook content.
 2. For tool/runtime dependencies, assume only `${HANDBOOK_ROOT}` and the connected `lex-mcp` server are required.
-3. Retrieve planning step instructions only via MCP using `get_planning_step`.
-4. Execute one planning step at a time: one MCP request for one step, complete it, then request the next step.
+3. Initialize the workflow via MCP, then load planning step instructions from MCP.
+4. Execute planning steps sequentially: load one step, complete it, persist artifacts, notify completion, then load the next step.
 5. Write all generated artifacts only under `plans/<run-id>/`.
 6. Start by creating a run folder using today’s date and a project slug.
 7. Copy `${HANDBOOK_ROOT}/runs/run-template.md` to `plans/<run-id>/run.md`.
 8. Begin by requesting planning Step 0 from MCP and do not skip steps.
 9. At the end of each step, use the exact end block from `${HANDBOOK_ROOT}/planning/templates/llm-response-structure.md`.
-10. Do not proceed to the next step unless the current step has explicit approval when required.
+10. Do not wait for approval gates between planning steps.
 11. Apply `${HANDBOOK_ROOT}/lex_topics/20-LEX-SPECIFICATIONS.md` as canonical Lex ground truth.
 12. Lex is an implementation framework contract, not a standalone traceability requirement policy.
 13. This project is CSV-first; do not introduce non-CSV I/O assumptions.
@@ -31,7 +31,8 @@ Hard rules:
 15. Enforce Lex folder architecture: `Inputs` for transformed data, `Uploads` for file-ingestion models, `Reports` for report-generation models.
 16. Ensure report models are planned with at least one Django `FileField`.
 17. Do not plan or generate Django project bootstrap/scaffold artifacts (`apps.py`, `urls.py`, `settings.py`, etc.) unless explicitly requested.
-18. Step 8 must validate all planning outputs against `${HANDBOOK_ROOT}/lex_topics/20-LEX-SPECIFICATIONS.md` before implementation can start.
+18. Step 8 must validate all planning outputs against `${HANDBOOK_ROOT}/lex_topics/20-LEX-SPECIFICATIONS.md` before implementation starts.
+19. After Step 8 completes, continue directly into implementation steps in the same prompt execution.
 
 Project seed inputs:
 - Project name: <fill>
@@ -49,5 +50,5 @@ Now do the following in order:
 
 - Propose `plans/YYYY-MM-DD-<project-slug>/`.
 - Create/update `plans/<run-id>/run.md`.
-- Request and execute planning Step 0 via `get_planning_step`.
+- Load and execute planning Step 0 via MCP.
 - End response with required next-action/self-notes block.

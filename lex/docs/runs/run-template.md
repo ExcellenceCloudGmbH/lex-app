@@ -23,8 +23,12 @@ status: draft
 - [ ] Step 3 — Architecture and Flow
 - [ ] Step 4 — User Stories
 - [ ] Step 5 — Functional Breakdown
-- [ ] Step 6 — UML/ER Diagrams (Approved)
-- [ ] Step 7 — Business Logic Pseudocode (Approved)
+- [ ] Step 6 — UML/ER Diagrams
+- [ ] Step 7 — Business Logic Pseudocode
+- [ ] Step 8 — Planning Rule Compliance Validation
+- [ ] Step 9 — Implementation Kickoff/Foundations
+- [ ] Step 10 — Implementation Delivery
+- [ ] Step 11 — Code-Level Rule Compliance Validation
 
 ## Decisions Log
 
@@ -43,9 +47,11 @@ status: draft
 - UML:
 - ER:
 - Pseudocode:
+- Implementation outputs:
 
-## Final Planning Gate
+## Workflow Completion
 
-- Ready for implementation: Yes / No
-- Approved by:
+- Planning complete: Yes / No
+- Implementation complete: Yes / No
+- Deployment started: Yes / No (out of scope by default)
 - Date:

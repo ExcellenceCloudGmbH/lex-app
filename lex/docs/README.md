@@ -8,9 +8,10 @@ This folder is the immutable handbook for building Lex-compatible financial prod
 
 ## Navigation
 
-- [[planning/README|Planning Phase (Step 0-8)]]
-- [[implementation/README|Implementation Phase (Step 0-11)]]
-- [[deployment/README|Deployment Phase (Step 0-8)]]
+- [[mcp-execution-model|MCP Execution Model (Single Prompt)]]
+- [[planning/README|Planning Steps (0-8)]]
+- [[implementation/README|Implementation Steps (0-11)]]
+- [[deployment/README|Deployment Steps (separate topic)]]
 - [[runs/run-template|Run Log Template (copy into plans/)]]
 - [[lex_topics/00-TOPIC-LIST|Lex Topic Map (Focused Index)]]
 - [[lex_topics/99-QUERY-ROUTER|Lex Query Router]]
@@ -28,18 +29,19 @@ This folder is the immutable handbook for building Lex-compatible financial prod
 
 ## MCP step execution contract
 
-- Planning, implementation, and deployment steps are retrieved from the MCP server, not read directly from local phase files during execution.
-- Use `get_planning_step` for planning steps, `get_implementation_step` for implementation steps, and `get_deployment_step` for deployment steps.
-- Execute exactly one step at a time: request one step from MCP, complete that step, then request the next step in a new MCP call.
-- Enforce phase order strictly: finish planning (`0..8`) before implementation (`0..11`), and finish implementation before deployment (`0..2`).
+- Workflow execution is MCP-driven: step instructions are loaded from MCP, not from local step files.
+- The default run mode is single-prompt sequential execution: planning (`0..8`) then implementation (`0..11`) in one continuous prompt execution.
+- For each step: load current step → execute work → write artifacts under `plans/<run-id>/...` → notify completion → load next step.
+- Human approvals are not required to advance between planning and implementation steps.
+- Deployment is intentionally out of scope for this execution mode and is handled separately when explicitly requested.
 
 ## How to run
 
 1. Create a run folder under `plans/` (example: `plans/2026-02-24-product-x/`).
 2. Copy [[runs/run-template|run-template]] into that run folder as `run.md`.
-3. Work through planning steps in order: `00` to `08` using handbook docs in `docs/planning/`.
-4. Do not move to the next step unless the current step contains an explicit `Approved` decision.
-5. After final planning validation approval, continue with implementation steps in `docs/implementation/`.
+3. Start workflow initialization from MCP, then execute planning and implementation steps in order without pausing for approval gates.
+4. Persist each step artifact as soon as that step completes, then notify completion before loading the next step.
+5. Continue until all planning and implementation steps are complete in the same prompt execution.
 6. Store all generated artifacts only in the active `plans/<run-id>/` folder.
 
 ## Core system assumptions

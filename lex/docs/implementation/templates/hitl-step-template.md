@@ -29,8 +29,9 @@ Use this structure for each implementation step output file.
 ## Risks / Open Issues
 - ...
 
-## Approval
-- Approved: Yes / No / Pending
-- Approved by:
+## Completion Checkpoint
+- Completed: Yes / No
+- Blocking inputs (if any):
+- Notes:
 - Date:
 ```

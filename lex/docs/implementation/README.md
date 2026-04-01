@@ -2,9 +2,9 @@
 tags: [implementation, lex, copilot]
 ---
 
-# Implementation Phase (Step 0-11)
+# Implementation Steps (0-11)
 
-This phase converts approved planning artifacts into production-ready code and verified outputs.
+These steps convert planning artifacts into production-ready code and run immediately after planning in the same workflow execution.
 
 ## Start here (single entry point)
 
@@ -15,7 +15,7 @@ This phase converts approved planning artifacts into production-ready code and v
 
 ## Input contract
 
-- Implementation starts only after planning Step 8 is approved.
+- Implementation starts immediately after planning Step 8 completes.
 - Read planning artifacts from `plans/<run-id>/step-00..step-08*.md`.
 - Treat planning outputs as the source of truth unless user explicitly revises requirements.
 
@@ -27,11 +27,10 @@ This phase converts approved planning artifacts into production-ready code and v
 ## MCP step retrieval contract
 
 - Do not read implementation step instructions from local files during execution.
-- Retrieve each step from MCP using `get_implementation_step`.
-- Request and complete exactly one step at a time.
-- After finishing Step `N`, make a new MCP request for Step `N+1`.
-- Implementation starts only after planning is fully complete and approved.
-- Implementation must complete all steps (`0..11`) before deployment starts.
+- Load each implementation step from MCP.
+- Execute steps sequentially: load Step `N`, complete Step `N`, persist outputs, notify completion, then load Step `N+1`.
+- Do not wait for approval gates between implementation steps.
+- Implementation must complete all steps (`0..11`) before any deployment work begins.
 
 ## Step order
 
@@ -43,10 +42,10 @@ This phase converts approved planning artifacts into production-ready code and v
 5. [[05-api-workflows-and-permissions|API Workflows and Permissions]]
 6. [[06-tests-reconciliation-and-hardening|Reconciliation and Hardening]]
 7. [[07-full-project-implementation|Implementation Blueprint Consolidation]]
-8. [[08-release-readiness-and-handover|Release and Handover Planning Gate]]
+8. [[08-release-readiness-and-handover|Release and Handover Planning]]
 9. [[09-rule-compliance-validation|Rule Compliance Validation for Implementation Plans]]
 10. [[10-full-project-implementation|Full Project Implementation (Code Delivery)]]
-11. [[11-code-rule-compliance-validation|Code-Level Lex Rule Compliance Validation (Final Gate)]]
+11. [[11-code-rule-compliance-validation|Code-Level Lex Rule Compliance Validation]]
 
 ## Step routing map (where to go next)
 
@@ -61,7 +60,7 @@ This phase converts approved planning artifacts into production-ready code and v
 - After Step 8 output: update `plans/<run-id>/implementation/step-08-release-plan.md`, then continue to Step 9.
 - After Step 9 output: update `plans/<run-id>/implementation/step-09-plan-rule-validation.md`, then continue to Step 10.
 - After Step 10 output: update `plans/<run-id>/implementation/step-10-implementation.md`, then continue to Step 11.
-- After Step 11 output: update `plans/<run-id>/implementation/step-11-code-rule-validation.md`; require explicit final implementation approval before deployment.
+- After Step 11 output: update `plans/<run-id>/implementation/step-11-code-rule-validation.md`; implementation workflow is complete.
 
 ## Mandatory implementation outputs
 
@@ -69,9 +68,9 @@ This phase converts approved planning artifacts into production-ready code and v
 - Implemented ORM model layer aligned to approved planning
 - Implemented ingestion, validation, and calculation services
 - Implemented API/workflow behaviors and permission boundaries
-- Approved implementation plan bundle that is Lex-rule-compliant before coding
+- Implementation plan bundle that is Lex-rule-compliant before coding
 - Complete code artifacts implementing the approved project scope
-- Reconciliation evidence and release checklist with approval
+- Reconciliation evidence and release checklist
 - Final code-level rule compliance validation against [[../lex_topics/20-LEX-SPECIFICATIONS|Lex Specifications (Canonical, Project-Specific)]]
 
 ## Session templates
@@ -93,4 +92,4 @@ This phase converts approved planning artifacts into production-ready code and v
 - Do not generate Django bootstrap/scaffold files (`apps.py`, `urls.py`, `settings.py`, etc.) unless explicitly requested.
 - Load Lex runtime context from `docs/lex_topics/21-LEX-APP-CONTEXT.yaml` whenever framework-level behavior details are needed.
 - Ask for missing inputs instead of inventing schema, workflow, or policy details.
-- Gate progression with explicit `Approved: Yes/No` at required checkpoints.
+- Complete each step fully, persist outputs, and advance immediately using MCP step sequencing.
