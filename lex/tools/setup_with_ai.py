@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable, Mapping
-from urllib.parse import parse_qs
+from typing import Any, Callable, Mapping
+from urllib.parse import parse_qs, quote
 
 
 DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
@@ -28,10 +28,8 @@ DEFAULT_LEX_MCP_PRODUCTION = "false"
 GITHUB_FINE_GRAINED_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
 LEX_MCP_LOCAL_SERVER_NAME = "lex-mcp-local"
 LEGACY_LEX_MCP_SERVER_NAMES = ("lex-mcp-wrapper",)
-LEX_MCP_LOCAL_INSTALL_COMMAND = (
+LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
     "--no-cache-dir",
-    "--index-url",
-    "https://dl.cloudsmith.io/IYJO5A9oO5JAYS5T/excellence-cloud/lex-mcp-local/python/simple/",
     "--extra-index-url",
     "https://pypi.org/simple",
     "lex-mcp-local",
@@ -58,13 +56,48 @@ class SetupWithAIArtifacts:
     wrapper_script_path: Path
     python_executable: Path
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME
+    github_directory_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class SetupWithAIServerRuntime:
+    pid: int
+    log_file_path: Path
+    pid_file_path: Path
+    already_running: bool = False
+
+
+def build_lex_mcp_local_install_command(
+    python_executable: str | os.PathLike[str],
+    remote_mcp_api_key: str,
+) -> list[str]:
+    entitlement_token = remote_mcp_api_key.strip()
+    if not entitlement_token:
+        raise SetupWithAIError("Remote MCP API key is required to install lex-mcp-local.")
+
+    index_url = (
+        "https://dl.cloudsmith.io/"
+        f"{quote(entitlement_token, safe='')}/"
+        "excellence-cloud/lex-mcp-local/python/simple/"
+    )
+    return [
+        str(python_executable),
+        "-m",
+        "pip",
+        "install",
+        LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[0],
+        "--index-url",
+        index_url,
+        *LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[1:],
+    ]
 
 
 def install_lex_mcp_local(
     python_executable: str | os.PathLike[str],
+    remote_mcp_api_key: str,
     runner=subprocess.run,
 ) -> list[str]:
-    command = [str(python_executable), "-m", "pip", "install", *LEX_MCP_LOCAL_INSTALL_COMMAND]
+    command = build_lex_mcp_local_install_command(python_executable, remote_mcp_api_key)
     runner(command, check=True)
     return command
 
@@ -145,6 +178,39 @@ def resolve_wrapper_script_path(python_executable: Path) -> Path:
     return Path(origin).resolve()
 
 
+def _resolve_lex_mcp_local_embedded_directory(
+    wrapper_script_path: Path,
+    directory_name: str,
+) -> Path | None:
+    package_root = wrapper_script_path.resolve().parent
+    candidate = package_root / directory_name
+    if candidate.is_dir():
+        return candidate
+    return None
+
+
+def copy_lex_mcp_local_github_directory(
+    project_root: Path,
+    wrapper_script_path: Path,
+) -> Path | None:
+    source_directory = _resolve_lex_mcp_local_embedded_directory(
+        wrapper_script_path,
+        ".github",
+    )
+    if source_directory is None:
+        return None
+
+    destination_directory = Path(project_root).resolve() / source_directory.name
+    try:
+        shutil.copytree(source_directory, destination_directory, dirs_exist_ok=True)
+    except OSError as exc:
+        raise SetupWithAIError(
+            f"Could not copy {source_directory} into {destination_directory}."
+        ) from exc
+
+    return destination_directory
+
+
 def resolve_github_copilot_mcp_config_path(
     env: Mapping[str, str] | None = None,
     home: Path | None = None,
@@ -176,6 +242,77 @@ def build_ai_env_values(
         "GITHUB_TOKEN": github_token,
         "GEMINI_API_KEY": gemini_api_key,
     }
+
+
+def _build_process_env(
+    env_values: Mapping[str, str],
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    process_env = dict(os.environ if base_env is None else base_env)
+    process_env.update({key: str(value) for key, value in env_values.items()})
+    return process_env
+
+
+def _resolve_lex_mcp_local_runtime_paths(
+    mcp_config_path: Path,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+) -> tuple[Path, Path]:
+    runtime_root = Path(mcp_config_path).resolve().parent
+    return (
+        runtime_root / f"{server_name}.pid",
+        runtime_root / f"{server_name}.log",
+    )
+
+
+def _read_pid_file(pid_file_path: Path) -> int | None:
+    if not pid_file_path.exists():
+        return None
+    try:
+        return int(pid_file_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _is_process_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _build_detached_popen_kwargs() -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"close_fds": True}
+    if os.name == "nt":
+        kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def _read_log_tail(log_file_path: Path, max_chars: int = 4000) -> str:
+    if not log_file_path.exists():
+        return ""
+
+    try:
+        content = log_file_path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+    if len(content) > max_chars:
+        content = content[-max_chars:]
+    return content
 
 
 def _format_env_value(value: str) -> str:
@@ -297,8 +434,7 @@ def verify_lex_mcp_local_server_starts(
     base_env: Mapping[str, str] | None = None,
     startup_timeout_seconds: float = 1.0,
 ) -> None:
-    process_env = dict(os.environ if base_env is None else base_env)
-    process_env.update({key: str(value) for key, value in env_values.items()})
+    process_env = _build_process_env(env_values, base_env=base_env)
 
     process = subprocess.Popen(
         [str(python_executable), str(wrapper_script_path)],
@@ -327,6 +463,75 @@ def verify_lex_mcp_local_server_starts(
                 process.kill()
 
 
+def start_lex_mcp_local_server(
+    project_root: Path,
+    mcp_config_path: Path,
+    python_executable: Path,
+    wrapper_script_path: Path,
+    github_token: str,
+    remote_mcp_api_key: str,
+    gemini_api_key: str,
+    remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
+    *,
+    env: Mapping[str, str] | None = None,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+    startup_timeout_seconds: float = 1.0,
+) -> SetupWithAIServerRuntime:
+    pid_file_path, log_file_path = _resolve_lex_mcp_local_runtime_paths(
+        mcp_config_path,
+        server_name=server_name,
+    )
+    pid_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing_pid = _read_pid_file(pid_file_path)
+    if existing_pid is not None and _is_process_running(existing_pid):
+        return SetupWithAIServerRuntime(
+            pid=existing_pid,
+            log_file_path=log_file_path,
+            pid_file_path=pid_file_path,
+            already_running=True,
+        )
+    if pid_file_path.exists():
+        pid_file_path.unlink()
+
+    env_values = build_ai_env_values(
+        github_token=github_token,
+        remote_mcp_api_key=remote_mcp_api_key,
+        gemini_api_key=gemini_api_key,
+        remote_mcp_url=remote_mcp_url,
+    )
+    process_env = _build_process_env(env_values, base_env=env)
+
+    with log_file_path.open("a", encoding="utf-8") as log_handle:
+        process = subprocess.Popen(
+            [str(python_executable), str(wrapper_script_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            cwd=str(Path(project_root).resolve()),
+            env=process_env,
+            **_build_detached_popen_kwargs(),
+        )
+
+        time.sleep(startup_timeout_seconds)
+
+    return_code = process.poll()
+    if return_code is not None:
+        log_tail = _read_log_tail(log_file_path)
+        detail = log_tail or f"exit code {return_code}"
+        raise SetupWithAIError(
+            "lex-mcp-local exited immediately after the background launch attempt. "
+            f"Check {log_file_path}: {detail}"
+        )
+
+    _atomic_write_text(pid_file_path, f"{process.pid}\n")
+    return SetupWithAIServerRuntime(
+        pid=process.pid,
+        log_file_path=log_file_path,
+        pid_file_path=pid_file_path,
+    )
+
+
 def configure_ai_integration(
     project_root: Path,
     github_token: str,
@@ -346,6 +551,10 @@ def configure_ai_integration(
         else Path(os.path.abspath(python_executable))
     )
     wrapper_script_path = resolve_wrapper_script_path(python_path)
+    github_directory_path = copy_lex_mcp_local_github_directory(
+        Path(project_root),
+        wrapper_script_path,
+    )
     env_values = build_ai_env_values(
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
@@ -385,6 +594,7 @@ def configure_ai_integration(
         mcp_config_path=copilot_mcp_path,
         wrapper_script_path=wrapper_script_path,
         python_executable=python_path,
+        github_directory_path=github_directory_path,
     )
 
 
@@ -701,7 +911,7 @@ def _build_setup_form_html(
           </ul>
           <div class="meta">
             <div>The token must have Copilot-related account permissions enabled, otherwise Copilot Extensions access will fail.</div>
-            <div>Use the remote MCP API key that authenticates your hosted MCP server, not the local <code>lex-mcp-local</code> package.</div>
+                        <div>Use the remote MCP API key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
             <div>Provide the Gemini API key that should be exposed to the MCP wrapper as <code>GEMINI_API_KEY</code>.</div>
           </div>
         </article>
@@ -723,7 +933,7 @@ def _build_setup_form_html(
               Remote MCP API key
               <input type="password" name="remote_mcp_api_key" autocomplete="off" required>
             </label>
-            <p class="hint">Paste the API key for the hosted MCP endpoint used by <code>lex-mcp-local</code>.</p>
+                        <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
 
             <label>
               Gemini API key
@@ -747,7 +957,7 @@ def _build_success_html(*, env_file_path: Path) -> str:
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>LEX AI Setup Complete</title>
+        <title>LEX AI Setup In Progress</title>
     <style>
       body {{
         margin: 0;
@@ -781,10 +991,9 @@ def _build_success_html(*, env_file_path: Path) -> str:
   </head>
   <body>
     <section class="card">
-      <h1>Setup complete</h1>
-      <p>Your GitHub token, remote MCP API key, and Gemini API key were saved to <code>{html.escape(str(env_file_path))}</code>, and GitHub Copilot can now launch <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code> from its <code>mcp.json</code> configuration.</p>
-      <p>Next step: open the GitHub Copilot plugin in PyCharm and write your first prompt. Example: <code>Explain the architecture of this repository and point me to the main app entry points.</code></p>
-      <p>If Copilot does not pick up the server immediately, restart PyCharm once and try again.</p>
+            <h1>Credentials received</h1>
+            <p>Return to the terminal while LEX installs <code>lex-mcp-local</code> and finishes writing <code>{html.escape(str(env_file_path))}</code> plus the GitHub Copilot <code>mcp.json</code> entry for <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code>.</p>
+            <p>You can close this tab after the terminal prints the final setup success message.</p>
     </section>
   </body>
 </html>

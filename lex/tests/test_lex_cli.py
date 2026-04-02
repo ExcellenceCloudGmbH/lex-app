@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import subprocess
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
@@ -8,6 +9,8 @@ from unittest.mock import patch
 import sys
 
 from click.testing import CliRunner
+
+import lex.tools.setup_with_ai as setup_with_ai_module
 
 from generate_pycharm_configs import (
     CELERY_WORKER_COUNT_PROMPT,
@@ -24,9 +27,12 @@ from lex.tools.setup_with_ai import (
     LEX_MCP_LOCAL_SERVER_NAME,
     SetupWithAICredentials,
     SetupWithAIArtifacts,
+    SetupWithAIServerRuntime,
     build_mcp_server_definition,
+    install_lex_mcp_local,
     resolve_github_copilot_mcp_config_path,
     resolve_active_python_executable,
+    start_lex_mcp_local_server,
     update_env_file,
     write_github_copilot_mcp_config,
 )
@@ -196,12 +202,19 @@ class LexFlowerCommandTests(TestCase):
             project_root.mkdir()
             env_path = project_root / ".env"
             env_path.write_text("", encoding="utf-8")
+            call_order: list[str] = []
 
             artifacts = SetupWithAIArtifacts(
                 env_file_path=env_path,
                 mcp_config_path=project_root / "mcp.json",
                 wrapper_script_path=project_root / "wrapper_mcp.py",
                 python_executable=project_root / ".venv" / "bin" / "python",
+                github_directory_path=project_root / ".github",
+            )
+            server_runtime = SetupWithAIServerRuntime(
+                pid=321,
+                log_file_path=project_root / "lex-mcp-local.log",
+                pid_file_path=project_root / "lex-mcp-local.pid",
             )
 
             with (
@@ -224,7 +237,23 @@ class LexFlowerCommandTests(TestCase):
                     "lex.bin.lex.configure_ai_integration",
                     return_value=artifacts,
                 ) as configure_mock,
+                patch(
+                    "lex.bin.lex.start_lex_mcp_local_server",
+                    return_value=server_runtime,
+                ) as start_server_mock,
             ):
+                launch_form_mock.side_effect = lambda *args, **kwargs: (
+                    call_order.append("collect_credentials")
+                    or SetupWithAICredentials(
+                        github_token="ghu_example",
+                        remote_mcp_api_key="remote_api_key",
+                        gemini_api_key="gemini_api_key",
+                    )
+                )
+                install_mock.side_effect = lambda *args, **kwargs: call_order.append("install_package")
+                start_server_mock.side_effect = lambda *args, **kwargs: (
+                    call_order.append("start_server") or server_runtime
+                )
                 result = runner.invoke(
                     lex,
                     ["setup-with-ai", "--project-root", str(project_root)],
@@ -233,7 +262,7 @@ class LexFlowerCommandTests(TestCase):
             self.assertEqual(result.exit_code, 0, msg=result.output)
             generate_configs_mock.assert_called_once_with(project_root.resolve().as_posix())
             resolve_python_mock.assert_called_once_with(project_root.resolve())
-            install_mock.assert_called_once_with(artifacts.python_executable)
+            install_mock.assert_called_once_with(artifacts.python_executable, "remote_api_key")
             launch_form_mock.assert_called_once()
             configure_mock.assert_called_once_with(
                 project_root=project_root.resolve(),
@@ -243,10 +272,112 @@ class LexFlowerCommandTests(TestCase):
                 remote_mcp_url=DEFAULT_REMOTE_MCP_URL,
                 python_executable=artifacts.python_executable,
             )
+            start_server_mock.assert_called_once_with(
+                project_root=project_root.resolve(),
+                mcp_config_path=artifacts.mcp_config_path,
+                python_executable=artifacts.python_executable,
+                wrapper_script_path=artifacts.wrapper_script_path,
+                github_token="ghu_example",
+                remote_mcp_api_key="remote_api_key",
+                gemini_api_key="gemini_api_key",
+                remote_mcp_url=DEFAULT_REMOTE_MCP_URL,
+                server_name=artifacts.server_name,
+            )
+            self.assertEqual(call_order, ["collect_credentials", "install_package", "start_server"])
+            self.assertIn("Copied lex-mcp-local GitHub files:", result.output)
+            self.assertIn("Started lex-mcp-local", result.output)
             self.assertIn("Setup complete.", result.output)
 
 
 class SetupWithAIToolsTests(TestCase):
+    def test_copy_lex_mcp_local_github_directory_copies_recursive_contents(self):
+        with TemporaryDirectory() as tmp_dir:
+            temp_root = Path(tmp_dir)
+            project_root = temp_root / "project"
+            wrapper_script_path = temp_root / "site-packages" / "lex_mcp_local" / "wrapper_mcp.py"
+            source_file = wrapper_script_path.parent / ".github" / "workflows" / "copilot.yml"
+
+            project_root.mkdir()
+            wrapper_script_path.parent.mkdir(parents=True)
+            wrapper_script_path.write_text("# wrapper\n", encoding="utf-8")
+            source_file.parent.mkdir(parents=True)
+            source_file.write_text("name: Copilot\n", encoding="utf-8")
+
+            github_directory = setup_with_ai_module.copy_lex_mcp_local_github_directory(
+                project_root,
+                wrapper_script_path,
+            )
+
+            self.assertEqual(github_directory, (project_root / ".github").resolve())
+            self.assertEqual(
+                (project_root / ".github" / "workflows" / "copilot.yml").read_text(
+                    encoding="utf-8"
+                ),
+                "name: Copilot\n",
+            )
+
+    def test_configure_ai_integration_copies_github_directory_into_project_root(self):
+        with TemporaryDirectory() as tmp_dir:
+            temp_root = Path(tmp_dir)
+            project_root = temp_root / "project"
+            wrapper_script_path = temp_root / "site-packages" / "lex_mcp_local" / "wrapper_mcp.py"
+            source_file = wrapper_script_path.parent / ".github" / "workflows" / "copilot.yml"
+            mcp_config_path = temp_root / "mcp.json"
+
+            project_root.mkdir()
+            wrapper_script_path.parent.mkdir(parents=True)
+            wrapper_script_path.write_text("# wrapper\n", encoding="utf-8")
+            source_file.parent.mkdir(parents=True)
+            source_file.write_text("name: Copilot\n", encoding="utf-8")
+
+            with patch(
+                "lex.tools.setup_with_ai.resolve_wrapper_script_path",
+                return_value=wrapper_script_path,
+            ):
+                artifacts = setup_with_ai_module.configure_ai_integration(
+                    project_root=project_root,
+                    github_token="ghu_example",
+                    remote_mcp_api_key="remote_api_key",
+                    gemini_api_key="gemini_api_key",
+                    python_executable=Path("/venv/bin/python"),
+                    mcp_config_path=mcp_config_path,
+                    verify_server=False,
+                )
+
+            self.assertEqual(artifacts.github_directory_path, (project_root / ".github").resolve())
+            self.assertEqual(
+                (project_root / ".github" / "workflows" / "copilot.yml").read_text(
+                    encoding="utf-8"
+                ),
+                "name: Copilot\n",
+            )
+
+    def test_install_lex_mcp_local_uses_remote_mcp_api_key_in_index_url(self):
+        runner = Mock()
+
+        command = install_lex_mcp_local(
+            "/venv/bin/python",
+            "remote_api_key",
+            runner=runner,
+        )
+
+        self.assertEqual(
+            command,
+            [
+                "/venv/bin/python",
+                "-m",
+                "pip",
+                "install",
+                "--no-cache-dir",
+                "--index-url",
+                "https://dl.cloudsmith.io/remote_api_key/excellence-cloud/lex-mcp-local/python/simple/",
+                "--extra-index-url",
+                "https://pypi.org/simple",
+                "lex-mcp-local",
+            ],
+        )
+        runner.assert_called_once_with(command, check=True)
+
     def test_update_env_file_preserves_comments_and_replaces_existing_keys(self):
         with TemporaryDirectory() as tmp_dir:
             env_path = Path(tmp_dir) / ".env"
@@ -378,3 +509,93 @@ class SetupWithAIToolsTests(TestCase):
 
         self.assertEqual(resolved, Path(os.path.abspath(shell_python)))
         self.assertNotEqual(resolved, Path(sys.executable).resolve())
+
+    def test_start_lex_mcp_local_server_uses_detached_process_on_posix(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            mcp_config_path = project_root / "copilot" / "mcp.json"
+            process = Mock(pid=4321)
+            process.poll.return_value = None
+
+            with (
+                patch("lex.tools.setup_with_ai.os.name", "posix"),
+                patch("lex.tools.setup_with_ai.time.sleep"),
+                patch("lex.tools.setup_with_ai.subprocess.Popen", return_value=process) as popen_mock,
+            ):
+                runtime = start_lex_mcp_local_server(
+                    project_root=project_root,
+                    mcp_config_path=mcp_config_path,
+                    python_executable=project_root / ".venv" / "bin" / "python",
+                    wrapper_script_path=project_root / "wrapper_mcp.py",
+                    github_token="ghu_example",
+                    remote_mcp_api_key="remote_api_key",
+                    gemini_api_key="gemini_api_key",
+                )
+
+        kwargs = popen_mock.call_args.kwargs
+        self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], subprocess.STDOUT)
+        self.assertEqual(kwargs["cwd"], str(project_root.resolve()))
+        self.assertTrue(kwargs["close_fds"])
+        self.assertTrue(kwargs["start_new_session"])
+        self.assertFalse(runtime.already_running)
+        self.assertEqual(runtime.pid, 4321)
+        self.assertEqual(runtime.pid_file_path.read_text(encoding="utf-8").strip(), "4321")
+        self.assertTrue(runtime.log_file_path.exists())
+
+    def test_start_lex_mcp_local_server_uses_windows_detached_flags(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            mcp_config_path = project_root / "copilot" / "mcp.json"
+            process = Mock(pid=9876)
+            process.poll.return_value = None
+
+            with (
+                patch("lex.tools.setup_with_ai.os.name", "nt"),
+                patch.object(setup_with_ai_module.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200, create=True),
+                patch.object(setup_with_ai_module.subprocess, "DETACHED_PROCESS", 0x8, create=True),
+                patch.object(setup_with_ai_module.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True),
+                patch("lex.tools.setup_with_ai.time.sleep"),
+                patch("lex.tools.setup_with_ai.subprocess.Popen", return_value=process) as popen_mock,
+            ):
+                start_lex_mcp_local_server(
+                    project_root=project_root,
+                    mcp_config_path=mcp_config_path,
+                    python_executable=project_root / ".venv" / "Scripts" / "python.exe",
+                    wrapper_script_path=project_root / "wrapper_mcp.py",
+                    github_token="ghu_example",
+                    remote_mcp_api_key="remote_api_key",
+                    gemini_api_key="gemini_api_key",
+                )
+
+        kwargs = popen_mock.call_args.kwargs
+        self.assertTrue(kwargs["close_fds"])
+        self.assertNotIn("start_new_session", kwargs)
+        self.assertEqual(kwargs["creationflags"], 0x200 | 0x8 | 0x08000000)
+
+    def test_start_lex_mcp_local_server_reuses_running_process(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            mcp_config_path = project_root / "copilot" / "mcp.json"
+            pid_file_path = mcp_config_path.parent / f"{LEX_MCP_LOCAL_SERVER_NAME}.pid"
+            pid_file_path.parent.mkdir(parents=True)
+            pid_file_path.write_text("6543\n", encoding="utf-8")
+
+            with (
+                patch("lex.tools.setup_with_ai.os.kill") as os_kill_mock,
+                patch("lex.tools.setup_with_ai.subprocess.Popen") as popen_mock,
+            ):
+                runtime = start_lex_mcp_local_server(
+                    project_root=project_root,
+                    mcp_config_path=mcp_config_path,
+                    python_executable=project_root / ".venv" / "bin" / "python",
+                    wrapper_script_path=project_root / "wrapper_mcp.py",
+                    github_token="ghu_example",
+                    remote_mcp_api_key="remote_api_key",
+                    gemini_api_key="gemini_api_key",
+                )
+
+        os_kill_mock.assert_called_once_with(6543, 0)
+        popen_mock.assert_not_called()
+        self.assertTrue(runtime.already_running)
+        self.assertEqual(runtime.pid, 6543)
