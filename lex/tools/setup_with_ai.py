@@ -7,6 +7,7 @@ import queue
 import re
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,9 @@ DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS = "3"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
 GITHUB_FINE_GRAINED_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
+GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
+GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY = "mcp-servers-cache"
+GITHUB_COPILOT_STATE_DB_NAME = "copilot-intellij.db"
 LEX_MCP_LOCAL_SERVER_NAME = "lex-mcp-local"
 LEGACY_LEX_MCP_SERVER_NAMES = ("lex-mcp-wrapper",)
 LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
@@ -77,6 +81,10 @@ class SetupWithAIMCPProbeResult:
     prompt_count: int = 0
     resource_count: int = 0
     resource_template_count: int = 0
+    tools: tuple[dict[str, Any], ...] = ()
+    prompts: tuple[dict[str, Any], ...] = ()
+    resources: tuple[dict[str, Any], ...] = ()
+    resource_templates: tuple[dict[str, Any], ...] = ()
 
 
 def build_lex_mcp_local_install_command(
@@ -284,6 +292,25 @@ def resolve_github_copilot_mcp_config_path(
     return home_dir / ".config" / "github-copilot" / "intellij" / "mcp.json"
 
 
+def resolve_github_copilot_state_db_path(
+    mcp_config_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    if mcp_config_path is not None:
+        return Path(mcp_config_path).resolve().parent.parent / GITHUB_COPILOT_STATE_DB_NAME
+
+    env_map = dict(os.environ if env is None else env)
+    home_dir = Path.home() if home is None else Path(home)
+
+    if os.name == "nt":
+        local_app_data = env_map.get("LOCALAPPDATA")
+        base_dir = Path(local_app_data) if local_app_data else home_dir / "AppData" / "Local"
+        return base_dir / "github-copilot" / GITHUB_COPILOT_STATE_DB_NAME
+
+    return home_dir / ".config" / "github-copilot" / GITHUB_COPILOT_STATE_DB_NAME
+
+
 def build_ai_env_values(
     github_token: str,
     remote_mcp_api_key: str,
@@ -485,6 +512,194 @@ def write_github_copilot_mcp_config(
     _atomic_write_text(mcp_config_path, json.dumps(config, indent=2) + "\n")
 
 
+def _coerce_mcp_inventory_items(
+    items: list[Any],
+    *,
+    method: str,
+    result_key: str,
+    server_name: str,
+) -> tuple[dict[str, Any], ...]:
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise SetupWithAIError(
+                f"{server_name} returned an invalid {result_key} item for {method}: {item!r}"
+            )
+        normalized.append(json.loads(json.dumps(item)))
+    return tuple(normalized)
+
+
+def _normalize_github_copilot_cached_tool(tool: Mapping[str, Any]) -> dict[str, Any]:
+    name = tool.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise SetupWithAIError(f"Cannot cache an MCP tool without a name: {tool!r}")
+
+    description = tool.get("description")
+    input_schema = tool.get("inputSchema")
+    annotations = tool.get("annotations")
+
+    normalized_schema: dict[str, Any]
+    if isinstance(input_schema, dict):
+        normalized_schema = json.loads(json.dumps(input_schema))
+    else:
+        normalized_schema = {}
+
+    if not isinstance(normalized_schema.get("properties"), dict):
+        normalized_schema["properties"] = {}
+    if not isinstance(normalized_schema.get("type"), str) or not normalized_schema["type"]:
+        normalized_schema["type"] = "object"
+
+    normalized_tool: dict[str, Any] = {
+        "name": name,
+        "description": description if isinstance(description, str) else "",
+        "inputSchema": normalized_schema,
+        "_status": "enabled",
+        "_nameForModel": name,
+    }
+    if isinstance(annotations, dict):
+        normalized_tool["annotations"] = json.loads(json.dumps(annotations))
+    return normalized_tool
+
+
+def build_github_copilot_mcp_server_cache_entry(
+    probe_result: SetupWithAIMCPProbeResult,
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "tools": [
+            _normalize_github_copilot_cached_tool(tool)
+            for tool in probe_result.tools
+        ],
+        "resources": [json.loads(json.dumps(resource)) for resource in probe_result.resources],
+        "resourceTemplates": [
+            json.loads(json.dumps(resource_template))
+            for resource_template in probe_result.resource_templates
+        ],
+        "prompts": [json.loads(json.dumps(prompt)) for prompt in probe_result.prompts],
+    }
+
+
+def _ensure_github_copilot_state_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+
+
+def _encode_github_copilot_state_value(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        inner_value = json.dumps(value)
+    else:
+        inner_value = str(value)
+    return json.dumps(inner_value)
+
+
+def _decode_github_copilot_state_value(raw_value: str) -> Any:
+    return json.loads(raw_value)
+
+
+def _load_github_copilot_mcp_servers_cache(
+    connection: sqlite3.Connection,
+) -> dict[str, Any]:
+    row = connection.execute(
+        "SELECT value FROM state WHERE key = ?",
+        (GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY,),
+    ).fetchone()
+    if row is None:
+        return {}
+
+    raw_value = row[0]
+    try:
+        decoded_value = _decode_github_copilot_state_value(raw_value)
+    except json.JSONDecodeError:
+        return {}
+
+    if isinstance(decoded_value, str):
+        if not decoded_value:
+            return {}
+        try:
+            decoded_value = json.loads(decoded_value)
+        except json.JSONDecodeError:
+            return {}
+
+    if not isinstance(decoded_value, dict):
+        return {}
+    return json.loads(json.dumps(decoded_value))
+
+
+def _write_github_copilot_state_value(
+    connection: sqlite3.Connection,
+    key: str,
+    value: Any,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO state (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = excluded.updated_at
+        """,
+        (
+            key,
+            _encode_github_copilot_state_value(value),
+            int(time.time() * 1000),
+        ),
+    )
+
+
+def bootstrap_github_copilot_mcp_server_for_pycharm(
+    probe_result: SetupWithAIMCPProbeResult,
+    *,
+    mcp_config_path: Path | None = None,
+    state_db_path: Path | None = None,
+    server_name: str | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    target_server_name = server_name or probe_result.server_name
+    target_state_db_path = (
+        Path(state_db_path).resolve()
+        if state_db_path is not None
+        else resolve_github_copilot_state_db_path(
+            mcp_config_path=mcp_config_path,
+            env=env,
+            home=home,
+        ).resolve()
+    )
+    target_state_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cache_entry = build_github_copilot_mcp_server_cache_entry(probe_result)
+
+    try:
+        with sqlite3.connect(target_state_db_path) as connection:
+            _ensure_github_copilot_state_table(connection)
+            cached_servers = _load_github_copilot_mcp_servers_cache(connection)
+            cached_servers[target_server_name] = cache_entry
+            _write_github_copilot_state_value(
+                connection,
+                GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY,
+                cached_servers,
+            )
+            # Copilot only auto-starts managed MCP servers on its first boot path.
+            _write_github_copilot_state_value(
+                connection,
+                GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY,
+                "false",
+            )
+            connection.commit()
+    except sqlite3.Error as exc:
+        raise SetupWithAIError(
+            f"Could not prime GitHub Copilot's MCP cache at {target_state_db_path}."
+        ) from exc
+
+    return target_state_db_path
+
+
 def probe_lex_mcp_local_server_for_pycharm(
     project_root: Path,
     python_executable: Path,
@@ -560,7 +775,7 @@ def probe_lex_mcp_local_server_for_pycharm(
         method: str,
         result_key: str,
         deadline: float,
-    ) -> int:
+    ) -> tuple[dict[str, Any], ...]:
         _send_json(
             process,
             {
@@ -593,7 +808,12 @@ def probe_lex_mcp_local_server_for_pycharm(
             raise SetupWithAIError(
                 f"{server_name} returned an invalid {result_key} payload for {method}: {inventory!r}"
             )
-        return len(inventory)
+        return _coerce_mcp_inventory_items(
+            inventory,
+            method=method,
+            result_key=result_key,
+            server_name=server_name,
+        )
 
     try:
         process = subprocess.Popen(
@@ -666,37 +886,46 @@ def probe_lex_mcp_local_server_for_pycharm(
             },
         )
 
+        tools = _read_inventory(
+            process,
+            request_id=2,
+            method="tools/list",
+            result_key="tools",
+            deadline=deadline,
+        )
+        prompts = _read_inventory(
+            process,
+            request_id=3,
+            method="prompts/list",
+            result_key="prompts",
+            deadline=deadline,
+        )
+        resources = _read_inventory(
+            process,
+            request_id=4,
+            method="resources/list",
+            result_key="resources",
+            deadline=deadline,
+        )
+        resource_templates = _read_inventory(
+            process,
+            request_id=5,
+            method="resources/templates/list",
+            result_key="resourceTemplates",
+            deadline=deadline,
+        )
+
         return SetupWithAIMCPProbeResult(
             server_name=server_name,
             server_version=server_version,
-            tool_count=_read_inventory(
-                process,
-                request_id=2,
-                method="tools/list",
-                result_key="tools",
-                deadline=deadline,
-            ),
-            prompt_count=_read_inventory(
-                process,
-                request_id=3,
-                method="prompts/list",
-                result_key="prompts",
-                deadline=deadline,
-            ),
-            resource_count=_read_inventory(
-                process,
-                request_id=4,
-                method="resources/list",
-                result_key="resources",
-                deadline=deadline,
-            ),
-            resource_template_count=_read_inventory(
-                process,
-                request_id=5,
-                method="resources/templates/list",
-                result_key="resourceTemplates",
-                deadline=deadline,
-            ),
+            tool_count=len(tools),
+            prompt_count=len(prompts),
+            resource_count=len(resources),
+            resource_template_count=len(resource_templates),
+            tools=tools,
+            prompts=prompts,
+            resources=resources,
+            resource_templates=resource_templates,
         )
     finally:
         if process.stdin is not None and not process.stdin.closed:

@@ -1,5 +1,7 @@
+import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -29,9 +31,11 @@ from lex.tools.setup_with_ai import (
     SetupWithAIArtifacts,
     SetupWithAIMCPProbeResult,
     SetupWithAIServerRuntime,
+    bootstrap_github_copilot_mcp_server_for_pycharm,
     build_mcp_server_definition,
     install_lex_mcp_local,
     resolve_github_copilot_mcp_config_path,
+    resolve_github_copilot_state_db_path,
     resolve_active_python_executable,
     start_lex_mcp_local_server,
     update_env_file,
@@ -223,7 +227,9 @@ class LexFlowerCommandTests(TestCase):
                 prompt_count=0,
                 resource_count=0,
                 resource_template_count=0,
+                tools=({"name": "kickstart_workflow", "inputSchema": {"type": "object"}},),
             )
+            copilot_state_db_path = project_root / ".copilot" / "copilot-intellij.db"
 
             with (
                 patch("lex.bin.lex.ensure_env_file", return_value=(str(env_path), False)),
@@ -249,6 +255,10 @@ class LexFlowerCommandTests(TestCase):
                     "lex.bin.lex.probe_lex_mcp_local_server_for_pycharm",
                     return_value=server_probe,
                 ) as probe_server_mock,
+                patch(
+                    "lex.bin.lex.bootstrap_github_copilot_mcp_server_for_pycharm",
+                    return_value=copilot_state_db_path,
+                ) as bootstrap_copilot_state_mock,
             ):
                 launch_form_mock.side_effect = lambda *args, **kwargs: (
                     call_order.append("collect_credentials")
@@ -261,6 +271,9 @@ class LexFlowerCommandTests(TestCase):
                 install_mock.side_effect = lambda *args, **kwargs: call_order.append("install_package")
                 probe_server_mock.side_effect = lambda *args, **kwargs: (
                     call_order.append("probe_server") or server_probe
+                )
+                bootstrap_copilot_state_mock.side_effect = lambda *args, **kwargs: (
+                    call_order.append("prime_copilot_state") or copilot_state_db_path
                 )
                 result = runner.invoke(
                     lex,
@@ -297,10 +310,20 @@ class LexFlowerCommandTests(TestCase):
                     "GEMINI_API_KEY": "gemini_api_key",
                 },
             )
-            self.assertEqual(call_order, ["collect_credentials", "install_package", "probe_server"])
+            bootstrap_copilot_state_mock.assert_called_once_with(
+                server_probe,
+                mcp_config_path=artifacts.mcp_config_path,
+                server_name=artifacts.server_name,
+            )
+            self.assertEqual(
+                call_order,
+                ["collect_credentials", "install_package", "probe_server", "prime_copilot_state"],
+            )
             self.assertIn("Copied lex-mcp-local GitHub files:", result.output)
             self.assertIn("Copied lex-app docs:", result.output)
             self.assertIn("Validated lex-mcp-local v3.2.0", result.output)
+            self.assertIn("Primed GitHub Copilot MCP cache:", result.output)
+            self.assertIn("restart it once", result.output)
             self.assertIn("Setup complete.", result.output)
 
 
@@ -626,6 +649,82 @@ class SetupWithAIToolsTests(TestCase):
         self.assertEqual(probe.prompt_count, 0)
         self.assertEqual(probe.resource_count, 1)
         self.assertEqual(probe.resource_template_count, 0)
+        self.assertEqual(probe.tools[0]["name"], "kickstart_workflow")
+        self.assertEqual(probe.resources[0]["uri"], "lex://status")
+
+    def test_bootstrap_github_copilot_mcp_server_for_pycharm_primes_cache_and_first_boot(self):
+        with TemporaryDirectory() as tmp_dir:
+            temp_root = Path(tmp_dir)
+            mcp_config_path = temp_root / "github-copilot" / "intellij" / "mcp.json"
+            state_db_path = resolve_github_copilot_state_db_path(mcp_config_path=mcp_config_path)
+            state_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with sqlite3.connect(state_db_path) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE state (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO state (key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (
+                        "mcp-servers-cache",
+                        json.dumps(json.dumps({"existing-server": {"tools": []}})),
+                        1,
+                    ),
+                )
+                connection.commit()
+
+            probe = SetupWithAIMCPProbeResult(
+                server_name=LEX_MCP_LOCAL_SERVER_NAME,
+                server_version="3.2.0",
+                tool_count=1,
+                tools=(
+                    {
+                        "name": "kickstart_workflow",
+                        "description": "Start a workflow",
+                        "inputSchema": {"properties": {"repo": {"type": "string"}}},
+                    },
+                ),
+                resources=({"uri": "lex://status"},),
+            )
+
+            primed_state_db_path = bootstrap_github_copilot_mcp_server_for_pycharm(
+                probe,
+                mcp_config_path=mcp_config_path,
+            )
+
+            self.assertEqual(primed_state_db_path, state_db_path.resolve())
+            with sqlite3.connect(primed_state_db_path) as connection:
+                first_boot_raw = connection.execute(
+                    "SELECT value FROM state WHERE key = ?",
+                    ("mcp-first-boot-completed",),
+                ).fetchone()[0]
+                cache_raw = connection.execute(
+                    "SELECT value FROM state WHERE key = ?",
+                    ("mcp-servers-cache",),
+                ).fetchone()[0]
+
+            self.assertEqual(json.loads(first_boot_raw), "false")
+
+            cached_servers = json.loads(json.loads(cache_raw))
+            self.assertIn("existing-server", cached_servers)
+            self.assertIn(LEX_MCP_LOCAL_SERVER_NAME, cached_servers)
+
+            lex_cache = cached_servers[LEX_MCP_LOCAL_SERVER_NAME]
+            self.assertEqual(len(lex_cache["tools"]), 1)
+            self.assertEqual(lex_cache["tools"][0]["name"], "kickstart_workflow")
+            self.assertEqual(lex_cache["tools"][0]["_status"], "enabled")
+            self.assertEqual(lex_cache["tools"][0]["_nameForModel"], "kickstart_workflow")
+            self.assertEqual(lex_cache["tools"][0]["inputSchema"]["type"], "object")
+            self.assertEqual(lex_cache["resources"][0]["uri"], "lex://status")
 
     def test_start_lex_mcp_local_server_uses_detached_process_on_posix(self):
         with TemporaryDirectory() as tmp_dir:

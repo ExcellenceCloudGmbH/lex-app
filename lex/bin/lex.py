@@ -16,6 +16,7 @@ from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
     SetupWithAIError,
+    bootstrap_github_copilot_mcp_server_for_pycharm,
     build_ai_env_values,
     configure_ai_integration,
     install_lex_mcp_local,
@@ -358,6 +359,8 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
 
     server_probe = None
     server_probe_warning: str | None = None
+    copilot_state_db_path = None
+    copilot_state_warning: str | None = None
     click.echo(f"Validating {artifacts.server_name} with a PyCharm-style MCP session...")
     try:
         server_probe = probe_lex_mcp_local_server_for_pycharm(
@@ -374,6 +377,15 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
         )
     except SetupWithAIError as exc:
         server_probe_warning = str(exc)
+    else:
+        try:
+            copilot_state_db_path = bootstrap_github_copilot_mcp_server_for_pycharm(
+                server_probe,
+                mcp_config_path=artifacts.mcp_config_path,
+                server_name=artifacts.server_name,
+            )
+        except SetupWithAIError as exc:
+            copilot_state_warning = str(exc)
 
     click.echo(f"Updated .env with AI credentials: {artifacts.env_file_path}")
     if artifacts.github_directory_path is not None:
@@ -392,7 +404,23 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
             f"{server_probe.resource_count} resources, "
             f"{server_probe.resource_template_count} templates."
         )
-        click.echo(f"{artifacts.server_name} is configured for stdio launch from PyCharm on demand.")
+        if copilot_state_db_path is not None:
+            click.echo(f"Primed GitHub Copilot MCP cache: {copilot_state_db_path}")
+            click.echo(
+                f"{artifacts.server_name} is configured and primed for PyCharm-managed stdio launch."
+            )
+        elif copilot_state_warning is not None:
+            click.echo(f"Warning: {copilot_state_warning}")
+            click.echo(
+                f"{artifacts.server_name} is configured for PyCharm-managed stdio launch, "
+                "but the Copilot cache could not be primed automatically."
+            )
+        else:
+            click.echo(f"{artifacts.server_name} is configured for PyCharm-managed stdio launch.")
+        click.echo(
+            "If PyCharm is already open, restart it once so GitHub Copilot reloads the MCP configuration "
+            f"and starts {artifacts.server_name} from inside the IDE."
+        )
     elif server_probe_warning is not None:
         click.echo(
             "Warning: "
