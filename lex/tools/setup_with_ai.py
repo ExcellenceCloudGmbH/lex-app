@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import queue
 import re
 import secrets
 import shutil
@@ -57,6 +58,7 @@ class SetupWithAIArtifacts:
     python_executable: Path
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME
     github_directory_path: Path | None = None
+    docs_directory_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,16 @@ class SetupWithAIServerRuntime:
     log_file_path: Path
     pid_file_path: Path
     already_running: bool = False
+
+
+@dataclass(frozen=True)
+class SetupWithAIMCPProbeResult:
+    server_name: str
+    server_version: str | None = None
+    tool_count: int = 0
+    prompt_count: int = 0
+    resource_count: int = 0
+    resource_template_count: int = 0
 
 
 def build_lex_mcp_local_install_command(
@@ -189,14 +201,10 @@ def _resolve_lex_mcp_local_embedded_directory(
     return None
 
 
-def copy_lex_mcp_local_github_directory(
+def _copy_directory_into_project_root(
     project_root: Path,
-    wrapper_script_path: Path,
+    source_directory: Path | None,
 ) -> Path | None:
-    source_directory = _resolve_lex_mcp_local_embedded_directory(
-        wrapper_script_path,
-        ".github",
-    )
     if source_directory is None:
         return None
 
@@ -209,6 +217,56 @@ def copy_lex_mcp_local_github_directory(
         ) from exc
 
     return destination_directory
+
+
+def copy_lex_mcp_local_github_directory(
+    project_root: Path,
+    wrapper_script_path: Path,
+) -> Path | None:
+    source_directory = _resolve_lex_mcp_local_embedded_directory(
+        wrapper_script_path,
+        ".github",
+    )
+    return _copy_directory_into_project_root(project_root, source_directory)
+
+
+def resolve_lex_app_package_root(python_executable: Path) -> Path | None:
+    fallback_package_root = Path(__file__).resolve().parents[1]
+    script = (
+        "import importlib.util, os, sys; "
+        "spec = importlib.util.find_spec('lex'); "
+        "locations = list(spec.submodule_search_locations or []) if spec else []; "
+        "location = locations[0] if locations else (os.path.dirname(spec.origin) if spec and spec.origin else ''); "
+        "sys.stdout.write(location)"
+    )
+    try:
+        result = subprocess.run(
+            [str(python_executable), "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        return fallback_package_root if fallback_package_root.is_dir() else None
+
+    package_root = result.stdout.strip()
+    if not package_root:
+        return fallback_package_root if fallback_package_root.is_dir() else None
+    return Path(package_root).resolve()
+
+
+def copy_lex_app_docs_directory(
+    project_root: Path,
+    lex_package_root: Path | None,
+) -> Path | None:
+    if lex_package_root is None:
+        return None
+
+    source_directory = lex_package_root.resolve() / "docs"
+    if not source_directory.is_dir():
+        return None
+
+    return _copy_directory_into_project_root(project_root, source_directory)
 
 
 def resolve_github_copilot_mcp_config_path(
@@ -427,40 +485,246 @@ def write_github_copilot_mcp_config(
     _atomic_write_text(mcp_config_path, json.dumps(config, indent=2) + "\n")
 
 
-def verify_lex_mcp_local_server_starts(
+def probe_lex_mcp_local_server_for_pycharm(
+    project_root: Path,
     python_executable: Path,
     wrapper_script_path: Path,
     env_values: Mapping[str, str],
     base_env: Mapping[str, str] | None = None,
-    startup_timeout_seconds: float = 1.0,
-) -> None:
+    startup_timeout_seconds: float = 10.0,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+) -> SetupWithAIMCPProbeResult:
     process_env = _build_process_env(env_values, base_env=base_env)
+    recent_output: list[str] = []
+    # TextIO buffering can hide already-read responses from simple polling.
+    line_queue: queue.Queue[str | None] = queue.Queue()
 
-    process = subprocess.Popen(
-        [str(python_executable), str(wrapper_script_path)],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=process_env,
-    )
+    def _append_output(line: str) -> None:
+        stripped = line.strip()
+        if not stripped:
+            return
+        recent_output.append(stripped)
+        if len(recent_output) > 40:
+            del recent_output[: len(recent_output) - 40]
+
+    def _format_recent_output(limit: int = 12) -> str:
+        if not recent_output:
+            return "no recent output"
+        return " | ".join(recent_output[-limit:])
+
+    def _send_json(process: subprocess.Popen[str], payload: Mapping[str, Any]) -> None:
+        if process.stdin is None:
+            raise SetupWithAIError(f"{server_name} stdin is not available for MCP probing.")
+        process.stdin.write(json.dumps(dict(payload)) + "\n")
+        process.stdin.flush()
+
+    def _reader_thread(stdout) -> None:  # type: ignore[no-untyped-def]
+        try:
+            for line in iter(stdout.readline, ""):
+                line_queue.put(line)
+        except Exception:
+            pass
+        finally:
+            line_queue.put(None)
+
+    def _read_response_for_id(expected_id: int, deadline: float) -> dict[str, Any] | None:
+        while time.monotonic() < deadline:
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                line = line_queue.get(timeout=remaining)
+            except queue.Empty:
+                break
+
+            if line is None:
+                break
+
+            _append_output(line)
+            candidate = line.strip()
+            if not candidate.startswith("{"):
+                continue
+
+            try:
+                response = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+            if isinstance(response, dict) and response.get("id") == expected_id:
+                return response
+
+        return None
+
+    def _read_inventory(
+        process: subprocess.Popen[str],
+        *,
+        request_id: int,
+        method: str,
+        result_key: str,
+        deadline: float,
+    ) -> int:
+        _send_json(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": {},
+            },
+        )
+        response = _read_response_for_id(request_id, deadline)
+        if response is None:
+            return_code = process.poll()
+            raise SetupWithAIError(
+                f"{server_name} did not answer {method} during the PyCharm-style MCP refresh. "
+                f"Process exit code: {return_code}. Recent output: {_format_recent_output()}"
+            )
+        if "error" in response:
+            raise SetupWithAIError(
+                f"{server_name} returned an MCP error for {method}: {response['error']}"
+            )
+
+        result = response.get("result", {})
+        if not isinstance(result, dict):
+            raise SetupWithAIError(
+                f"{server_name} returned an invalid result for {method}: {result!r}"
+            )
+
+        inventory = result.get(result_key, [])
+        if not isinstance(inventory, list):
+            raise SetupWithAIError(
+                f"{server_name} returned an invalid {result_key} payload for {method}: {inventory!r}"
+            )
+        return len(inventory)
 
     try:
-        time.sleep(startup_timeout_seconds)
-        return_code = process.poll()
-        if return_code is not None:
-            _, stderr_text = process.communicate(timeout=1)
+        process = subprocess.Popen(
+            [str(python_executable), str(wrapper_script_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=str(Path(project_root).resolve()),
+            env=process_env,
+        )
+    except OSError as exc:
+        raise SetupWithAIError(
+            f"Could not launch {server_name} for the PyCharm-style MCP validation."
+        ) from exc
+
+    try:
+        if process.stdout is None:
+            raise SetupWithAIError(f"{server_name} stdout is not available for MCP probing.")
+
+        reader = threading.Thread(target=_reader_thread, args=(process.stdout,), daemon=True)
+        reader.start()
+
+        deadline = time.monotonic() + startup_timeout_seconds
+        _send_json(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "lex-setup-with-ai", "version": "0.1.0"},
+                },
+            },
+        )
+        init_response = _read_response_for_id(1, deadline)
+        if init_response is None:
+            return_code = process.poll()
             raise SetupWithAIError(
-                "lex-mcp-local exited before GitHub Copilot could attach to it: "
-                f"{stderr_text.strip() or f'exit code {return_code}'}"
+                f"{server_name} never completed the MCP initialize handshake that PyCharm uses. "
+                f"Process exit code: {return_code}. Recent output: {_format_recent_output()}"
             )
+        if "error" in init_response:
+            raise SetupWithAIError(
+                f"{server_name} rejected the MCP initialize handshake: {init_response['error']}"
+            )
+
+        init_result = init_response.get("result", {})
+        if not isinstance(init_result, dict):
+            raise SetupWithAIError(
+                f"{server_name} returned an invalid initialize result: {init_result!r}"
+            )
+
+        server_info = init_result.get("serverInfo", {})
+        server_version = None
+        if isinstance(server_info, dict):
+            version_value = server_info.get("version")
+            if isinstance(version_value, str) and version_value.strip():
+                server_version = version_value.strip()
+
+        _send_json(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            },
+        )
+
+        return SetupWithAIMCPProbeResult(
+            server_name=server_name,
+            server_version=server_version,
+            tool_count=_read_inventory(
+                process,
+                request_id=2,
+                method="tools/list",
+                result_key="tools",
+                deadline=deadline,
+            ),
+            prompt_count=_read_inventory(
+                process,
+                request_id=3,
+                method="prompts/list",
+                result_key="prompts",
+                deadline=deadline,
+            ),
+            resource_count=_read_inventory(
+                process,
+                request_id=4,
+                method="resources/list",
+                result_key="resources",
+                deadline=deadline,
+            ),
+            resource_template_count=_read_inventory(
+                process,
+                request_id=5,
+                method="resources/templates/list",
+                result_key="resourceTemplates",
+                deadline=deadline,
+            ),
+        )
     finally:
+        if process.stdin is not None and not process.stdin.closed:
+            process.stdin.close()
         if process.poll() is None:
             process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+
+
+def verify_lex_mcp_local_server_starts(
+    project_root: Path,
+    python_executable: Path,
+    wrapper_script_path: Path,
+    env_values: Mapping[str, str],
+    base_env: Mapping[str, str] | None = None,
+    startup_timeout_seconds: float = 10.0,
+) -> SetupWithAIMCPProbeResult:
+    return probe_lex_mcp_local_server_for_pycharm(
+        project_root=project_root,
+        python_executable=python_executable,
+        wrapper_script_path=wrapper_script_path,
+        env_values=env_values,
+        base_env=base_env,
+        startup_timeout_seconds=startup_timeout_seconds,
+    )
 
 
 def start_lex_mcp_local_server(
@@ -555,6 +819,10 @@ def configure_ai_integration(
         Path(project_root),
         wrapper_script_path,
     )
+    docs_directory_path = copy_lex_app_docs_directory(
+        Path(project_root),
+        resolve_lex_app_package_root(python_path),
+    )
     env_values = build_ai_env_values(
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
@@ -583,6 +851,7 @@ def configure_ai_integration(
 
     if verify_server:
         verify_lex_mcp_local_server_starts(
+            project_root=Path(project_root),
             python_executable=python_path,
             wrapper_script_path=wrapper_script_path,
             env_values=env_values,
@@ -595,6 +864,7 @@ def configure_ai_integration(
         wrapper_script_path=wrapper_script_path,
         python_executable=python_path,
         github_directory_path=github_directory_path,
+        docs_directory_path=docs_directory_path,
     )
 
 

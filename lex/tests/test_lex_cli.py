@@ -27,6 +27,7 @@ from lex.tools.setup_with_ai import (
     LEX_MCP_LOCAL_SERVER_NAME,
     SetupWithAICredentials,
     SetupWithAIArtifacts,
+    SetupWithAIMCPProbeResult,
     SetupWithAIServerRuntime,
     build_mcp_server_definition,
     install_lex_mcp_local,
@@ -34,6 +35,7 @@ from lex.tools.setup_with_ai import (
     resolve_active_python_executable,
     start_lex_mcp_local_server,
     update_env_file,
+    verify_lex_mcp_local_server_starts,
     write_github_copilot_mcp_config,
 )
 
@@ -193,6 +195,8 @@ class LexFlowerCommandTests(TestCase):
             self.assertIn("FLOWER_PORT=5555", env_content)
             self.assertTrue((project_root / ".run" / "Flower.run.xml").exists())
             self.assertTrue((project_root / ".run" / "Celery_Worker.run.xml").exists())
+            self.assertFalse((project_root / ".github").exists())
+            self.assertFalse((project_root / "docs").exists())
 
     def test_setup_with_ai_runs_full_non_django_flow(self):
         runner = CliRunner()
@@ -210,11 +214,15 @@ class LexFlowerCommandTests(TestCase):
                 wrapper_script_path=project_root / "wrapper_mcp.py",
                 python_executable=project_root / ".venv" / "bin" / "python",
                 github_directory_path=project_root / ".github",
+                docs_directory_path=project_root / "docs",
             )
-            server_runtime = SetupWithAIServerRuntime(
-                pid=321,
-                log_file_path=project_root / "lex-mcp-local.log",
-                pid_file_path=project_root / "lex-mcp-local.pid",
+            server_probe = SetupWithAIMCPProbeResult(
+                server_name=artifacts.server_name,
+                server_version="3.2.0",
+                tool_count=9,
+                prompt_count=0,
+                resource_count=0,
+                resource_template_count=0,
             )
 
             with (
@@ -238,9 +246,9 @@ class LexFlowerCommandTests(TestCase):
                     return_value=artifacts,
                 ) as configure_mock,
                 patch(
-                    "lex.bin.lex.start_lex_mcp_local_server",
-                    return_value=server_runtime,
-                ) as start_server_mock,
+                    "lex.bin.lex.probe_lex_mcp_local_server_for_pycharm",
+                    return_value=server_probe,
+                ) as probe_server_mock,
             ):
                 launch_form_mock.side_effect = lambda *args, **kwargs: (
                     call_order.append("collect_credentials")
@@ -251,8 +259,8 @@ class LexFlowerCommandTests(TestCase):
                     )
                 )
                 install_mock.side_effect = lambda *args, **kwargs: call_order.append("install_package")
-                start_server_mock.side_effect = lambda *args, **kwargs: (
-                    call_order.append("start_server") or server_runtime
+                probe_server_mock.side_effect = lambda *args, **kwargs: (
+                    call_order.append("probe_server") or server_probe
                 )
                 result = runner.invoke(
                     lex,
@@ -271,21 +279,28 @@ class LexFlowerCommandTests(TestCase):
                 gemini_api_key="gemini_api_key",
                 remote_mcp_url=DEFAULT_REMOTE_MCP_URL,
                 python_executable=artifacts.python_executable,
+                verify_server=False,
             )
-            start_server_mock.assert_called_once_with(
+            probe_server_mock.assert_called_once_with(
                 project_root=project_root.resolve(),
-                mcp_config_path=artifacts.mcp_config_path,
                 python_executable=artifacts.python_executable,
                 wrapper_script_path=artifacts.wrapper_script_path,
-                github_token="ghu_example",
-                remote_mcp_api_key="remote_api_key",
-                gemini_api_key="gemini_api_key",
-                remote_mcp_url=DEFAULT_REMOTE_MCP_URL,
                 server_name=artifacts.server_name,
+                env_values={
+                    "REMOTE_MCP_TRANSPORT": DEFAULT_REMOTE_MCP_TRANSPORT,
+                    "REMOTE_MCP_URL": DEFAULT_REMOTE_MCP_URL,
+                    "GEMINI_MODEL": DEFAULT_GEMINI_MODEL,
+                    "GIT_GEMINI_MAX_REPAIR_ATTEMPTS": DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS,
+                    "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
+                    "REMOTE_MCP_API_KEY": "remote_api_key",
+                    "GITHUB_TOKEN": "ghu_example",
+                    "GEMINI_API_KEY": "gemini_api_key",
+                },
             )
-            self.assertEqual(call_order, ["collect_credentials", "install_package", "start_server"])
+            self.assertEqual(call_order, ["collect_credentials", "install_package", "probe_server"])
             self.assertIn("Copied lex-mcp-local GitHub files:", result.output)
-            self.assertIn("Started lex-mcp-local", result.output)
+            self.assertIn("Copied lex-app docs:", result.output)
+            self.assertIn("Validated lex-mcp-local v3.2.0", result.output)
             self.assertIn("Setup complete.", result.output)
 
 
@@ -316,12 +331,38 @@ class SetupWithAIToolsTests(TestCase):
                 "name: Copilot\n",
             )
 
-    def test_configure_ai_integration_copies_github_directory_into_project_root(self):
+    def test_copy_lex_app_docs_directory_copies_recursive_contents(self):
+        with TemporaryDirectory() as tmp_dir:
+            temp_root = Path(tmp_dir)
+            project_root = temp_root / "project"
+            lex_package_root = temp_root / "site-packages" / "lex"
+            source_file = lex_package_root / "docs" / "planning" / "README.md"
+
+            project_root.mkdir()
+            source_file.parent.mkdir(parents=True)
+            source_file.write_text("Planning docs\n", encoding="utf-8")
+
+            docs_directory = setup_with_ai_module.copy_lex_app_docs_directory(
+                project_root,
+                lex_package_root,
+            )
+
+            self.assertEqual(docs_directory, (project_root / "docs").resolve())
+            self.assertEqual(
+                (project_root / "docs" / "planning" / "README.md").read_text(
+                    encoding="utf-8"
+                ),
+                "Planning docs\n",
+            )
+
+    def test_configure_ai_integration_copies_github_and_docs_directories_into_project_root(self):
         with TemporaryDirectory() as tmp_dir:
             temp_root = Path(tmp_dir)
             project_root = temp_root / "project"
             wrapper_script_path = temp_root / "site-packages" / "lex_mcp_local" / "wrapper_mcp.py"
+            lex_package_root = temp_root / "site-packages" / "lex"
             source_file = wrapper_script_path.parent / ".github" / "workflows" / "copilot.yml"
+            docs_file = lex_package_root / "docs" / "planning" / "README.md"
             mcp_config_path = temp_root / "mcp.json"
 
             project_root.mkdir()
@@ -329,10 +370,15 @@ class SetupWithAIToolsTests(TestCase):
             wrapper_script_path.write_text("# wrapper\n", encoding="utf-8")
             source_file.parent.mkdir(parents=True)
             source_file.write_text("name: Copilot\n", encoding="utf-8")
+            docs_file.parent.mkdir(parents=True)
+            docs_file.write_text("Planning docs\n", encoding="utf-8")
 
             with patch(
                 "lex.tools.setup_with_ai.resolve_wrapper_script_path",
                 return_value=wrapper_script_path,
+            ), patch(
+                "lex.tools.setup_with_ai.resolve_lex_app_package_root",
+                return_value=lex_package_root,
             ):
                 artifacts = setup_with_ai_module.configure_ai_integration(
                     project_root=project_root,
@@ -345,11 +391,18 @@ class SetupWithAIToolsTests(TestCase):
                 )
 
             self.assertEqual(artifacts.github_directory_path, (project_root / ".github").resolve())
+            self.assertEqual(artifacts.docs_directory_path, (project_root / "docs").resolve())
             self.assertEqual(
                 (project_root / ".github" / "workflows" / "copilot.yml").read_text(
                     encoding="utf-8"
                 ),
                 "name: Copilot\n",
+            )
+            self.assertEqual(
+                (project_root / "docs" / "planning" / "README.md").read_text(
+                    encoding="utf-8"
+                ),
+                "Planning docs\n",
             )
 
     def test_install_lex_mcp_local_uses_remote_mcp_api_key_in_index_url(self):
@@ -509,6 +562,70 @@ class SetupWithAIToolsTests(TestCase):
 
         self.assertEqual(resolved, Path(os.path.abspath(shell_python)))
         self.assertNotEqual(resolved, Path(sys.executable).resolve())
+
+    def test_verify_lex_mcp_local_server_starts_mimics_pycharm_handshake(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            wrapper_script_path = project_root / "wrapper_mcp.py"
+            wrapper_script_path.write_text(
+                (
+                    "import json\n"
+                    "import sys\n"
+                    "print('FastMCP banner', flush=True)\n"
+                    "for raw in sys.stdin:\n"
+                    "    message = json.loads(raw)\n"
+                    "    method = message.get('method')\n"
+                    "    if method == 'initialize':\n"
+                    "        print(json.dumps({\n"
+                    "            'jsonrpc': '2.0',\n"
+                    "            'id': message['id'],\n"
+                    "            'result': {\n"
+                    "                'serverInfo': {'name': 'Lex AI Server', 'version': '3.2.0'}\n"
+                    "            },\n"
+                    "        }), flush=True)\n"
+                    "    elif method == 'notifications/initialized':\n"
+                    "        continue\n"
+                    "    elif method == 'tools/list':\n"
+                    "        print(json.dumps({\n"
+                    "            'jsonrpc': '2.0',\n"
+                    "            'id': message['id'],\n"
+                    "            'result': {'tools': [{'name': 'kickstart_workflow'}, {'name': 'finalize_workflow'}]},\n"
+                    "        }), flush=True)\n"
+                    "    elif method == 'prompts/list':\n"
+                    "        print(json.dumps({\n"
+                    "            'jsonrpc': '2.0',\n"
+                    "            'id': message['id'],\n"
+                    "            'result': {'prompts': []},\n"
+                    "        }), flush=True)\n"
+                    "    elif method == 'resources/list':\n"
+                    "        print(json.dumps({\n"
+                    "            'jsonrpc': '2.0',\n"
+                    "            'id': message['id'],\n"
+                    "            'result': {'resources': [{'uri': 'lex://status'}]},\n"
+                    "        }), flush=True)\n"
+                    "    elif method == 'resources/templates/list':\n"
+                    "        print(json.dumps({\n"
+                    "            'jsonrpc': '2.0',\n"
+                    "            'id': message['id'],\n"
+                    "            'result': {'resourceTemplates': []},\n"
+                    "        }), flush=True)\n"
+                ),
+                encoding="utf-8",
+            )
+
+            probe = verify_lex_mcp_local_server_starts(
+                project_root=project_root,
+                python_executable=Path(sys.executable),
+                wrapper_script_path=wrapper_script_path,
+                env_values={},
+            )
+
+        self.assertEqual(probe.server_name, LEX_MCP_LOCAL_SERVER_NAME)
+        self.assertEqual(probe.server_version, "3.2.0")
+        self.assertEqual(probe.tool_count, 2)
+        self.assertEqual(probe.prompt_count, 0)
+        self.assertEqual(probe.resource_count, 1)
+        self.assertEqual(probe.resource_template_count, 0)
 
     def test_start_lex_mcp_local_server_uses_detached_process_on_posix(self):
         with TemporaryDirectory() as tmp_dir:

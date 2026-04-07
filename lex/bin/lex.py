@@ -16,12 +16,12 @@ from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
     SetupWithAIError,
-    SetupWithAIServerRuntime,
+    build_ai_env_values,
     configure_ai_integration,
     install_lex_mcp_local,
     launch_setup_with_ai_form,
+    probe_lex_mcp_local_server_for_pycharm,
     resolve_active_python_executable,
-    start_lex_mcp_local_server,
 )
 
 # Defer Django imports and setup until needed (NOT at import time)
@@ -351,44 +351,52 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
             gemini_api_key=credentials.gemini_api_key,
             remote_mcp_url=remote_mcp_url,
             python_executable=python_executable,
+            verify_server=False,
         )
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    server_runtime: SetupWithAIServerRuntime | None = None
-    server_runtime_warning: str | None = None
-    click.echo(f"Starting {artifacts.server_name}...")
+    server_probe = None
+    server_probe_warning: str | None = None
+    click.echo(f"Validating {artifacts.server_name} with a PyCharm-style MCP session...")
     try:
-        server_runtime = start_lex_mcp_local_server(
+        server_probe = probe_lex_mcp_local_server_for_pycharm(
             project_root=root,
-            mcp_config_path=artifacts.mcp_config_path,
             python_executable=artifacts.python_executable,
             wrapper_script_path=artifacts.wrapper_script_path,
-            github_token=credentials.github_token,
-            remote_mcp_api_key=credentials.remote_mcp_api_key,
-            gemini_api_key=credentials.gemini_api_key,
-            remote_mcp_url=remote_mcp_url,
             server_name=artifacts.server_name,
+            env_values=build_ai_env_values(
+                github_token=credentials.github_token,
+                remote_mcp_api_key=credentials.remote_mcp_api_key,
+                gemini_api_key=credentials.gemini_api_key,
+                remote_mcp_url=remote_mcp_url,
+            ),
         )
     except SetupWithAIError as exc:
-        server_runtime_warning = str(exc)
+        server_probe_warning = str(exc)
 
     click.echo(f"Updated .env with AI credentials: {artifacts.env_file_path}")
     if artifacts.github_directory_path is not None:
         click.echo(f"Copied lex-mcp-local GitHub files: {artifacts.github_directory_path}")
+    if artifacts.docs_directory_path is not None:
+        click.echo(f"Copied lex-app docs: {artifacts.docs_directory_path}")
     click.echo(f"Registered {artifacts.server_name} in GitHub Copilot MCP config: {artifacts.mcp_config_path}")
     click.echo(f"Using interpreter: {artifacts.python_executable}")
     click.echo(f"Using wrapper: {artifacts.wrapper_script_path}")
-    if server_runtime is not None:
-        if server_runtime.already_running:
-            click.echo(f"{artifacts.server_name} is already running (PID {server_runtime.pid}).")
-        else:
-            click.echo(f"Started {artifacts.server_name} (PID {server_runtime.pid}).")
-        click.echo(f"{artifacts.server_name} log: {server_runtime.log_file_path}")
-    elif server_runtime_warning is not None:
+    if server_probe is not None:
+        version_suffix = f" v{server_probe.server_version}" if server_probe.server_version else ""
+        click.echo(
+            f"Validated {artifacts.server_name}{version_suffix}: "
+            f"{server_probe.tool_count} tools, "
+            f"{server_probe.prompt_count} prompts, "
+            f"{server_probe.resource_count} resources, "
+            f"{server_probe.resource_template_count} templates."
+        )
+        click.echo(f"{artifacts.server_name} is configured for stdio launch from PyCharm on demand.")
+    elif server_probe_warning is not None:
         click.echo(
             "Warning: "
-            f"{server_runtime_warning} GitHub Copilot can still launch the server from mcp.json on demand."
+            f"{server_probe_warning} GitHub Copilot may still be able to launch the server from mcp.json on demand."
         )
     click.echo(
         "Setup complete. Open GitHub Copilot in PyCharm and write your first prompt."
