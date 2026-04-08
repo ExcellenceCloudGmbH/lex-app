@@ -16,6 +16,7 @@ Search keywords: initial data, seed data, JSON, test data, lex_config, subproces
 - Three actions: `create`, `update`, `delete`.
 - Supports foreign key references via `tag:` prefix and date parsing via `datetime:` prefix.
 - File uploads for `FileField` parameters use relative paths from the project root.
+- For model classes that include a CalculationModel include `"is_calculated": "IN_PROGRESS"` in the json so the calculaions are tested.
 
 ## Configuration
 
@@ -107,7 +108,7 @@ Deletes all objects matching `filter_parameters`. Empty `{}` deletes all instanc
 
 ### `tag:` — Foreign Key References
 Resolves to the actual model instance created earlier in the same data load:
-```json
+```jsonF
 "team": "tag:team_design"
 ```
 

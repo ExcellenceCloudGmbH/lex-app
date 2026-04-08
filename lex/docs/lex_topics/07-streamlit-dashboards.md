@@ -15,6 +15,7 @@ Search keywords: streamlit, streamlit_main, streamlit_class_main, dashboards, an
 - Two method entry points are supported:
   - Table-level: `streamlit_class_main(cls)`
   - Record-level: `streamlit_main(self)`
+- A main function must be written in the project root inside of `_streamlit_structure.py`
 - Table-level dashboards are shown from the model table view; record-level dashboards are shown in record detail analytics.
 - Streamlit runs as a separate process and should be started with `lex streamlit`.
 - Embedded mode passes user access context automatically; no second login flow is required.

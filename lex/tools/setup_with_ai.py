@@ -1251,25 +1251,24 @@ def _build_setup_form_html(
     <style>
       :root {{
         color-scheme: light;
-        --bg: #f5f1e8;
-        --card: #fffdfa;
-        --text: #1e1b18;
-        --muted: #6c6258;
-        --line: #d7c8b5;
-        --accent: #a14d1c;
-        --accent-strong: #7e350d;
-        --error: #8b1e1e;
+        --bg: #f0f4f8;
+        --card: #ffffff;
+        --text: #1a1a2e;
+        --muted: #5a6278;
+        --line: #d0d7e2;
+        --blue: #283067;
+        --blue-strong: #1b2050;
+        --teal: #24b6bb;
+        --error: #c0392b;
       }}
       * {{
         box-sizing: border-box;
       }}
       body {{
         margin: 0;
-        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        font-family: "Segoe UI", "Avenir Next", system-ui, sans-serif;
         color: var(--text);
-        background:
-          radial-gradient(circle at top right, rgba(161, 77, 28, 0.14), transparent 26rem),
-          linear-gradient(180deg, #f8f3ea 0%, var(--bg) 100%);
+        background: var(--bg);
       }}
       .shell {{
         max-width: 68rem;
@@ -1277,45 +1276,69 @@ def _build_setup_form_html(
         padding: 2rem 1.25rem 3rem;
       }}
       .hero {{
-        background: linear-gradient(135deg, rgba(161, 77, 28, 0.10), rgba(255, 255, 255, 0.92));
-        border: 1px solid rgba(161, 77, 28, 0.25);
-        border-radius: 1.5rem;
-        padding: 1.5rem;
-        box-shadow: 0 18px 40px rgba(73, 48, 26, 0.08);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        padding: 1.75rem 1.5rem;
+        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+      }}
+      .hero-logo {{
+        flex-shrink: 0;
+      }}
+      .hero-logo svg {{
+        height: 52px;
+        width: auto;
+      }}
+      .hero-text {{
+        flex: 1;
+        min-width: 0;
       }}
       .hero h1 {{
-        margin: 0 0 0.5rem;
-        font-size: clamp(1.9rem, 3vw, 3rem);
+        margin: 0 0 0.4rem;
+        font-size: clamp(1.5rem, 2.5vw, 2rem);
+        color: var(--blue);
       }}
       .hero p {{
-        margin: 0.45rem 0;
+        margin: 0.3rem 0;
         color: var(--muted);
         line-height: 1.5;
+        font-size: 0.95rem;
+      }}
+      .hero code {{
+        background: var(--bg);
+        padding: 0.15em 0.4em;
+        border-radius: 4px;
+        font-size: 0.88em;
+        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
       }}
       .grid {{
         display: grid;
-        grid-template-columns: 1.2fr 0.9fr;
+        grid-template-columns: 1.15fr 0.85fr;
         gap: 1.25rem;
         margin-top: 1.25rem;
       }}
       .panel {{
         background: var(--card);
         border: 1px solid var(--line);
-        border-radius: 1.25rem;
-        padding: 1.25rem;
-        box-shadow: 0 10px 28px rgba(73, 48, 26, 0.06);
+        border-radius: 1rem;
+        padding: 1.5rem;
+        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
       }}
       .eyebrow {{
         margin: 0 0 0.6rem;
-        font-size: 0.78rem;
+        font-size: 0.72rem;
         font-weight: 700;
         letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: var(--accent);
+        color: var(--teal);
       }}
       h2 {{
         margin: 0 0 0.75rem;
-        font-size: 1.3rem;
+        font-size: 1.25rem;
+        color: var(--blue);
       }}
       p, li {{
         line-height: 1.55;
@@ -1324,6 +1347,14 @@ def _build_setup_form_html(
         margin: 0.75rem 0 0;
         padding-left: 1.2rem;
       }}
+      li {{
+        padding: 0.1rem 0;
+        color: var(--muted);
+        font-size: 0.93rem;
+      }}
+      li::marker {{
+        color: var(--teal);
+      }}
       .meta {{
         display: grid;
         gap: 0.4rem;
@@ -1331,24 +1362,33 @@ def _build_setup_form_html(
         padding-top: 1rem;
         border-top: 1px solid var(--line);
         color: var(--muted);
-        font-size: 0.95rem;
+        font-size: 0.92rem;
+      }}
+      .meta code {{
+        background: var(--bg);
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+        font-size: 0.88em;
+        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
       }}
       a.button, button {{
+        display: inline-block;
         appearance: none;
         border: 0;
-        border-radius: 999px;
-        background: var(--accent);
+        border-radius: 8px;
+        background: var(--blue);
         color: #fff;
         text-decoration: none;
         font: inherit;
-        font-weight: 700;
+        font-size: 0.95rem;
+        font-weight: 600;
         cursor: pointer;
-        padding: 0.85rem 1.1rem;
-        transition: transform 120ms ease, background 120ms ease;
+        padding: 0.75rem 1.25rem;
+        transition: background 120ms ease, box-shadow 120ms ease;
       }}
       a.button:hover, button:hover {{
-        background: var(--accent-strong);
-        transform: translateY(-1px);
+        background: var(--blue-strong);
+        box-shadow: 0 4px 14px rgba(40, 48, 103, 0.18);
       }}
       form {{
         display: grid;
@@ -1356,36 +1396,54 @@ def _build_setup_form_html(
       }}
       label {{
         display: grid;
-        gap: 0.4rem;
+        gap: 0.35rem;
         font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--blue);
       }}
       input {{
         width: 100%;
-        padding: 0.85rem 0.95rem;
-        border-radius: 0.9rem;
+        padding: 0.75rem 0.85rem;
+        border-radius: 8px;
         border: 1px solid var(--line);
         font: inherit;
+        font-size: 0.95rem;
         background: #fff;
+        transition: border-color 120ms ease, box-shadow 120ms ease;
       }}
       input:focus {{
-        outline: 2px solid rgba(161, 77, 28, 0.2);
-        border-color: var(--accent);
+        outline: none;
+        border-color: var(--blue);
+        box-shadow: 0 0 0 3px rgba(40, 48, 103, 0.10);
       }}
       .hint {{
         color: var(--muted);
-        font-size: 0.92rem;
+        font-size: 0.88rem;
         margin: 0;
       }}
+      .hint code {{
+        background: var(--bg);
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+        font-size: 0.88em;
+        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+      }}
       .error {{
-        border: 1px solid rgba(139, 30, 30, 0.25);
-        background: rgba(139, 30, 30, 0.08);
+        border: 1px solid rgba(192, 57, 43, 0.3);
+        background: rgba(192, 57, 43, 0.06);
         color: var(--error);
-        border-radius: 1rem;
-        padding: 0.85rem 1rem;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        font-size: 0.93rem;
       }}
       @media (max-width: 860px) {{
         .grid {{
           grid-template-columns: 1fr;
+        }}
+        .hero {{
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 1rem;
         }}
       }}
     </style>
@@ -1393,10 +1451,14 @@ def _build_setup_form_html(
   <body>
     <main class="shell">
       <section class="hero">
-        <p class="eyebrow">LEX AI Setup</p>
-        <h1>Connect GitHub Copilot to your LEX MCP setup.</h1>
-        <p>This flow will store the required secrets in <code>{html.escape(str(env_file_path))}</code> and register <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code> in GitHub Copilot's <code>mcp.json</code>.</p>
-        <p>Project root: <code>{html.escape(str(project_root))}</code></p>
+        <div class="hero-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 329.02 78.41"><defs><style>.lx1{{fill:#24b6bb}}.lx2{{fill:#283067}}.lx3{{fill:#282f63}}</style></defs><g><path class="lx3" d="M269.21,58.25h-77.14c.57.57,1.22,1.06,1.97,1.47l32.26,17.6c2.68,1.46,5.99,1.46,8.66,0l32.28-17.6c.73-.41,1.4-.9,1.96-1.47h0Z"/><path class="lx3" d="M269.21,20.16h-77.14c.57-.57,1.22-1.06,1.97-1.47L226.32,1.09c2.68-1.46,5.99-1.46,8.66,0l32.28,17.6c.73.41,1.4.9,1.96,1.47h0Z"/></g><g><path class="lx1" d="M196.83,43.09c1.37,0,2.48-.54,3.35-1.6l1.78,1.81c-1.42,1.57-3.07,2.36-5,2.36s-3.5-.59-4.73-1.79c-1.25-1.2-1.86-2.7-1.86-4.52s.63-3.34,1.9-4.57c1.26-1.22,2.82-1.82,4.64-1.82,2.05,0,3.76.78,5.12,2.31l-1.72,1.94c-.87-1.08-1.96-1.62-3.28-1.62-1.04,0-1.93.34-2.68,1.01-.75.68-1.11,1.59-1.11,2.73s.34,2.06,1.06,2.75c.7.66,1.55,1.01,2.54,1.01h0Z"/><path class="lx1" d="M208.56,45.51v-12.3h2.78v9.86h5.31v2.45h-8.09Z"/><path class="lx1" d="M233.22,43.82c-1.26,1.22-2.8,1.82-4.64,1.82s-3.38-.61-4.64-1.82c-1.26-1.22-1.88-2.73-1.88-4.54s.63-3.32,1.88-4.54c1.26-1.22,2.8-1.82,4.64-1.82s3.38.61,4.64,1.82c1.26,1.22,1.88,2.73,1.88,4.54s-.63,3.32-1.88,4.54ZM232.27,39.3c0-1.1-.36-2.03-1.08-2.8-.72-.78-1.59-1.16-2.63-1.16s-1.91.39-2.63,1.16-1.08,1.7-1.08,2.8.36,2.03,1.08,2.8c.72.78,1.59,1.15,2.63,1.15s1.91-.39,2.63-1.15c.73-.78,1.08-1.7,1.08-2.8Z"/><path class="lx1" d="M245.15,42.33c.46.57,1.09.86,1.86.86s1.4-.29,1.86-.86c.46-.57.68-1.35.68-2.33v-6.8h2.78v6.89c0,1.79-.5,3.16-1.5,4.1-.99.96-2.27,1.43-3.82,1.43s-2.83-.49-3.84-1.45c-1.01-.96-1.5-2.33-1.5-4.1v-6.89h2.78v6.8c.02,1,.24,1.79.7,2.35h0Z"/><path class="lx1" d="M269.15,34.82c1.18,1.08,1.78,2.57,1.78,4.47s-.58,3.43-1.74,4.54c-1.16,1.11-2.92,1.67-5.29,1.67h-4.25v-12.3h4.41c2.22.02,3.93.54,5.11,1.62h0ZM267.12,42.13c.68-.64,1.02-1.55,1.02-2.77s-.34-2.14-1.02-2.78c-.68-.66-1.72-.98-3.14-.98h-1.55v7.48h1.76c1.28.02,2.25-.3,2.94-.95h0Z"/></g><g><path class="lx2" d="M8.92,33.22v2.43H2.76v2.51h5.53v2.33H2.76v2.53h6.34v2.41H0v-12.21h8.92Z"/><path class="lx2" d="M24.51,33.22h3.32l-3.85,5.88,4.17,6.32h-3.36l-2.63-4.02-2.61,4.02h-3.32l4.15-6.25-3.86-5.96h3.31l2.36,3.62,2.32-3.6Z"/><path class="lx2" d="M41.53,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.36,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="lx2" d="M63.68,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="lx2" d="M72.33,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="lx2" d="M88.36,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="lx2" d="M113.31,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="lx2" d="M132.14,33.22h2.76v12.21h-2.76l-5.88-7.66v7.66h-2.76v-12.21h2.58l6.07,7.86v-7.86Z"/><path class="lx2" d="M149.62,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.34,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="lx2" d="M171.77,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/></g></svg>
+        </div>
+        <div class="hero-text">
+          <h1>Connect GitHub Copilot to your LEX MCP setup</h1>
+          <p>This flow will store the required secrets in <code>{html.escape(str(env_file_path))}</code> and register <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code> in GitHub Copilot's <code>mcp.json</code>.</p>
+          <p>Project root: <code>{html.escape(str(project_root))}</code></p>
+        </div>
       </section>
 
       <section class="grid">
@@ -1410,7 +1472,7 @@ def _build_setup_form_html(
           </ul>
           <div class="meta">
             <div>The token must have Copilot-related account permissions enabled, otherwise Copilot Extensions access will fail.</div>
-                        <div>Use the remote MCP API key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
+            <div>Use the remote MCP API key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
             <div>Provide the Gemini API key that should be exposed to the MCP wrapper as <code>GEMINI_API_KEY</code>.</div>
           </div>
         </article>
@@ -1432,7 +1494,7 @@ def _build_setup_form_html(
               Remote MCP API key
               <input type="password" name="remote_mcp_api_key" autocomplete="off" required>
             </label>
-                        <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
+            <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
 
             <label>
               Gemini API key
@@ -1456,43 +1518,77 @@ def _build_success_html(*, env_file_path: Path) -> str:
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>LEX AI Setup In Progress</title>
+    <title>LEX AI Setup In Progress</title>
     <style>
       body {{
         margin: 0;
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background:
-          radial-gradient(circle at top left, rgba(82, 141, 90, 0.16), transparent 20rem),
-          linear-gradient(180deg, #eef5ec 0%, #f7fbf6 100%);
-        color: #1b261b;
-        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        background: #f0f4f8;
+        color: #1a1a2e;
+        font-family: "Segoe UI", "Avenir Next", system-ui, sans-serif;
       }}
       .card {{
         width: min(38rem, calc(100vw - 2rem));
-        background: rgba(255, 255, 255, 0.94);
-        border: 1px solid rgba(82, 141, 90, 0.25);
-        border-radius: 1.4rem;
-        padding: 1.6rem;
-        box-shadow: 0 18px 42px rgba(47, 71, 50, 0.10);
+        background: #ffffff;
+        border: 1px solid #d0d7e2;
+        border-radius: 1rem;
+        padding: 2rem;
+        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
+        text-align: center;
+      }}
+      .card-logo {{
+        margin-bottom: 1.25rem;
+      }}
+      .card-logo svg {{
+        height: 44px;
+        width: auto;
       }}
       h1 {{
         margin: 0 0 0.75rem;
+        color: #283067;
+        font-size: 1.5rem;
       }}
       p {{
         line-height: 1.6;
+        color: #5a6278;
+        text-align: left;
       }}
       code {{
-        font-family: "SFMono-Regular", "Consolas", monospace;
+        background: #f0f4f8;
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+        font-size: 0.88em;
+        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+      }}
+      .check {{
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: rgba(36, 182, 187, 0.12);
+        margin-bottom: 0.75rem;
+      }}
+      .check svg {{
+        width: 24px;
+        height: 24px;
       }}
     </style>
   </head>
   <body>
     <section class="card">
-            <h1>Credentials received</h1>
-            <p>Return to the terminal while LEX installs <code>lex-mcp-local</code> and finishes writing <code>{html.escape(str(env_file_path))}</code> plus the GitHub Copilot <code>mcp.json</code> entry for <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code>.</p>
-            <p>You can close this tab after the terminal prints the final setup success message.</p>
+      <div class="card-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 329.02 78.41"><defs><style>.sx1{{fill:#24b6bb}}.sx2{{fill:#283067}}.sx3{{fill:#282f63}}</style></defs><g><path class="sx3" d="M269.21,58.25h-77.14c.57.57,1.22,1.06,1.97,1.47l32.26,17.6c2.68,1.46,5.99,1.46,8.66,0l32.28-17.6c.73-.41,1.4-.9,1.96-1.47h0Z"/><path class="sx3" d="M269.21,20.16h-77.14c.57-.57,1.22-1.06,1.97-1.47L226.32,1.09c2.68-1.46,5.99-1.46,8.66,0l32.28,17.6c.73.41,1.4.9,1.96,1.47h0Z"/></g><g><path class="sx1" d="M196.83,43.09c1.37,0,2.48-.54,3.35-1.6l1.78,1.81c-1.42,1.57-3.07,2.36-5,2.36s-3.5-.59-4.73-1.79c-1.25-1.2-1.86-2.7-1.86-4.52s.63-3.34,1.9-4.57c1.26-1.22,2.82-1.82,4.64-1.82,2.05,0,3.76.78,5.12,2.31l-1.72,1.94c-.87-1.08-1.96-1.62-3.28-1.62-1.04,0-1.93.34-2.68,1.01-.75.68-1.11,1.59-1.11,2.73s.34,2.06,1.06,2.75c.7.66,1.55,1.01,2.54,1.01h0Z"/><path class="sx1" d="M208.56,45.51v-12.3h2.78v9.86h5.31v2.45h-8.09Z"/><path class="sx1" d="M233.22,43.82c-1.26,1.22-2.8,1.82-4.64,1.82s-3.38-.61-4.64-1.82c-1.26-1.22-1.88-2.73-1.88-4.54s.63-3.32,1.88-4.54c1.26-1.22,2.8-1.82,4.64-1.82s3.38.61,4.64,1.82c1.26,1.22,1.88,2.73,1.88,4.54s-.63,3.32-1.88,4.54ZM232.27,39.3c0-1.1-.36-2.03-1.08-2.8-.72-.78-1.59-1.16-2.63-1.16s-1.91.39-2.63,1.16-1.08,1.7-1.08,2.8.36,2.03,1.08,2.8c.72.78,1.59,1.15,2.63,1.15s1.91-.39,2.63-1.15c.73-.78,1.08-1.7,1.08-2.8Z"/><path class="sx1" d="M245.15,42.33c.46.57,1.09.86,1.86.86s1.4-.29,1.86-.86c.46-.57.68-1.35.68-2.33v-6.8h2.78v6.89c0,1.79-.5,3.16-1.5,4.1-.99.96-2.27,1.43-3.82,1.43s-2.83-.49-3.84-1.45c-1.01-.96-1.5-2.33-1.5-4.1v-6.89h2.78v6.8c.02,1,.24,1.79.7,2.35h0Z"/><path class="sx1" d="M269.15,34.82c1.18,1.08,1.78,2.57,1.78,4.47s-.58,3.43-1.74,4.54c-1.16,1.11-2.92,1.67-5.29,1.67h-4.25v-12.3h4.41c2.22.02,3.93.54,5.11,1.62h0ZM267.12,42.13c.68-.64,1.02-1.55,1.02-2.77s-.34-2.14-1.02-2.78c-.68-.66-1.72-.98-3.14-.98h-1.55v7.48h1.76c1.28.02,2.25-.3,2.94-.95h0Z"/></g><g><path class="sx2" d="M8.92,33.22v2.43H2.76v2.51h5.53v2.33H2.76v2.53h6.34v2.41H0v-12.21h8.92Z"/><path class="sx2" d="M24.51,33.22h3.32l-3.85,5.88,4.17,6.32h-3.36l-2.63-4.02-2.61,4.02h-3.32l4.15-6.25-3.86-5.96h3.31l2.36,3.62,2.32-3.6Z"/><path class="sx2" d="M41.53,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.36,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="sx2" d="M63.68,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="sx2" d="M72.33,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="sx2" d="M88.36,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="sx2" d="M113.31,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="sx2" d="M132.14,33.22h2.76v12.21h-2.76l-5.88-7.66v7.66h-2.76v-12.21h2.58l6.07,7.86v-7.86Z"/><path class="sx2" d="M149.62,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.34,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="sx2" d="M171.77,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/></g></svg>
+      </div>
+      <div class="check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <h1>Credentials received</h1>
+      <p>Return to the terminal while LEX installs <code>lex-mcp-local</code> and finishes writing <code>{html.escape(str(env_file_path))}</code> plus the GitHub Copilot <code>mcp.json</code> entry for <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code>.</p>
+      <p>You can close this tab after the terminal prints the final setup success message.</p>
     </section>
   </body>
 </html>
