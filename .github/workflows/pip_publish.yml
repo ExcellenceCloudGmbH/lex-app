@@ -8,7 +8,12 @@
 #   3. Can be triggered manually (workflow_dispatch) or on a GitHub
 #      release (tag push).
 #
-#  The hard gate ensures that a broken package can never be published.
+#  Version is derived from the GitHub release tag (e.g. v2.0.0rc124
+#  → 2.0.0rc124). The version in pyproject.toml is dynamic — it reads
+#  from lex/_version.py which this workflow writes before building.
+#
+#  Required secrets:
+#   - PYPI_API_TOKEN  (PyPI API token with upload permission)
 # ──────────────────────────────────────────────────────────────────────
 
 name: Publish to PyPI
@@ -26,6 +31,10 @@ on:
         options:
           - "true"
           - "false"
+      version:
+        description: "Version to publish (e.g. 2.0.0rc124). Required for manual runs."
+        required: false
+        type: string
 
 jobs:
   # ── Step 1: Run the full test suite ──────────────────────────────
@@ -41,7 +50,6 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      id-token: write       # for trusted publishing via OIDC
       contents: read
 
     steps:
@@ -56,6 +64,23 @@ jobs:
       - name: Install build tools
         run: pip install --upgrade pip build twine
 
+      - name: Determine version from release tag
+        id: version
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Strip leading 'v' from tag: v2.0.0rc124 → 2.0.0rc124
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Publishing version: ${VERSION}"
+
+      - name: Write version to lex/_version.py
+        run: |
+          echo '__version__ = "${{ steps.version.outputs.VERSION }}"' > lex/_version.py
+          cat lex/_version.py
+
       - name: Build sdist and wheel
         run: python -m build
 
@@ -65,9 +90,5 @@ jobs:
       - name: Publish to PyPI
         if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
-        # Uses trusted publishing (OIDC) — no API token needed if the
-        # PyPI project is configured for this GitHub repository.
-        # Alternatively, set PYPI_API_TOKEN in repository secrets and
-        # uncomment the 'password' line below.
-        # with:
-        #   password: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

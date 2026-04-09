@@ -4,7 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lex-app"
-version = "2.0.0rc122"
 description = "A Python / Django library to create business applications easily with complex logic"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = "MIT"
@@ -17,7 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-dynamic = ["dependencies"]
+dynamic = ["version", "dependencies"]
 
 [project.urls]
 Homepage = "https://github.com/ExcellenceCloudGmbH/lex-app"
@@ -30,6 +29,7 @@ lex-generate-configs = "generate_pycharm_configs:generate_pycharm_configs"
 py-modules = ["generate_pycharm_configs"]
 
 [tool.setuptools.dynamic]
+version = {attr = "lex._version.__version__"}
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
