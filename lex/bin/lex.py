@@ -12,6 +12,7 @@ import click
 import uvicorn
 
 from lex.tools.project_root import find_project_root
+from lex.tools.ai_faq import launch_ai_faq
 from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
@@ -431,6 +432,12 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
     )
 
 
+@lex.command(name="ai-faq", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+def ai_faq():
+    """Open the LEX AI FAQ page in your browser."""
+    launch_ai_faq(reporter=click.echo)
+
+
 def _collect_setup_with_ai_credentials(
     *,
     github_token: str | None,
@@ -482,7 +489,7 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "setup", "setup-with-ai"}
+    {"start", "celery", "celery-workers", "flower", "setup", "setup-with-ai", "ai-faq"}
 )
 
 

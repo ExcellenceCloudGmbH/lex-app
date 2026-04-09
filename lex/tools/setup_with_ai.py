@@ -27,7 +27,7 @@ DEFAULT_REMOTE_MCP_TRANSPORT = "http"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS = "3"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
-GITHUB_FINE_GRAINED_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new"
+GITHUB_TOKEN_URL = "https://github.com/settings/tokens/new?description=Full+Classic+PAT&scopes=repo,workflow,admin:org,admin:repo_hook,user,project,admin:enterprise,read:enterprise,manage_runners:enterprise,read:audit_log,write:network_configurations,manage_billing:copilot"
 GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
 GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY = "mcp-servers-cache"
 GITHUB_COPILOT_STATE_DB_NAME = "copilot-intellij.db"
@@ -93,7 +93,7 @@ def build_lex_mcp_local_install_command(
 ) -> list[str]:
     entitlement_token = remote_mcp_api_key.strip()
     if not entitlement_token:
-        raise SetupWithAIError("Remote MCP API key is required to install lex-mcp-local.")
+        raise SetupWithAIError("Lex MCP Access Key is required to install lex-mcp-local.")
 
     index_url = (
         "https://dl.cloudsmith.io/"
@@ -1219,28 +1219,7 @@ def _build_setup_form_html(
             f'<div class="error">{html.escape(error_message)}</div>'
         )
 
-    permissions = [
-        "Repository access: All repositories",
-        "Actions: Read and write",
-        "Administration: Read and write",
-        "Artifact metadata: Read and write",
-        "Codespaces: Read and write",
-        "Commit statuses: Read and write",
-        "Contents: Read and write",
-        "Issues: Read and write",
-        "Metadata: Read-only (required)",
-        "Pages: Read and write",
-        "Pull requests: Read and write",
-        "Webhooks: Read and write",
-        "Workflows: Read and write",
-        "Copilot Chat: Read-only",
-        "Copilot Editor Context: Read-only",
-        "Copilot Requests: Read-only",
-        "Models: Read-only",
-    ]
-    permission_items = "".join(
-        f"<li>{html.escape(permission)}</li>" for permission in permissions
-    )
+
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1464,15 +1443,17 @@ def _build_setup_form_html(
       <section class="grid">
         <article class="panel">
           <p class="eyebrow">Documentation</p>
-          <h2>Create a fine-grained GitHub token</h2>
-          <p>Open GitHub's fine-grained token page, create a new token, pick the right resource owner, then set the repository and account permissions shown below.</p>
-          <p><a class="button" href="{html.escape(GITHUB_FINE_GRAINED_TOKEN_URL)}" target="_blank" rel="noreferrer">Open GitHub token page</a></p>
+          <h2>Create a GitHub Classic Personal Access Token</h2>
+          <p>Click the button below to open the GitHub token creation page. All required permission scopes are <strong>pre-selected</strong> for you.</p>
+          <p>All you need to do is:</p>
           <ul>
-            {permission_items}
+            <li>Give the token an expiration (or select <strong>No expiration</strong>).</li>
+            <li>Scroll down and click <strong>&ldquo;Generate token&rdquo;</strong>.</li>
+            <li>Copy the token and paste it into the form on the right.</li>
           </ul>
+          <p><a class="button" href="{html.escape(GITHUB_TOKEN_URL)}" target="_blank" rel="noreferrer">Open GitHub token page</a></p>
           <div class="meta">
-            <div>The token must have Copilot-related account permissions enabled, otherwise Copilot Extensions access will fail.</div>
-            <div>Use the remote MCP API key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
+            <div>Use the Lex MCP Access Key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
             <div>Provide the Gemini API key that should be exposed to the MCP wrapper as <code>GEMINI_API_KEY</code>.</div>
           </div>
         </article>
@@ -1491,7 +1472,7 @@ def _build_setup_form_html(
             <p class="hint">Paste the fine-grained GitHub token you just created.</p>
 
             <label>
-              Remote MCP API key
+              Lex MCP Access Key
               <input type="password" name="remote_mcp_api_key" autocomplete="off" required>
             </label>
             <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
