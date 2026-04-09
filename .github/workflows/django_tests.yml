@@ -1,5 +1,18 @@
 name: Lex Test Suite
 
+# ──────────────────────────────────────────────────────────────────────
+#  Release-gating test suite for the lex-app framework.
+#
+#  This workflow:
+#   1. Runs the full backend test suite via the `lex` CLI wrapper.
+#   2. Collects branch-level coverage with coverage.py.
+#   3. Enforces a hard minimum coverage threshold (fail-under).
+#   4. Uploads the coverage XML as a build artifact.
+#
+#  If any test fails or coverage drops below the threshold, the entire
+#  workflow fails — preventing merge / release.
+# ──────────────────────────────────────────────────────────────────────
+
 on:
   push:
     branches: ["main"]
@@ -8,6 +21,13 @@ on:
   schedule:
     - cron: "00 9 * * *"
   workflow_dispatch:
+  # Allow other workflows (e.g. pip-publish) to call this as a reusable check
+  workflow_call:
+
+# Minimum coverage percentage required to pass.  Increase as new tests
+# are added — never decrease.
+env:
+  COVERAGE_FAIL_UNDER: "50"
 
 jobs:
   test:
@@ -27,6 +47,7 @@ jobs:
         ports:
           - 5432:5432
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 3
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -35,6 +56,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Cache pip
         uses: actions/cache@v3
         with:
@@ -43,18 +65,48 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install dependecies
+      - name: Install dependencies
         run: |
           pip install --upgrade pip setuptools wheel
           pip install --prefer-binary -r requirements.txt
+          # Install the lex-app package itself (editable) so the `lex` CLI
+          # entry-point is available on $PATH.
+          pip install -e .
+
       - name: Save pip cache
         if: always()
         uses: actions/cache/save@v3
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-      - name: Run Tests
+
+      - name: Run Tests via lex CLI
+        env:
+          # Minimal .env for CI — no Keycloak, no Celery broker
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
         run: |
-          cd lex
-          coverage run --source='.' manage.py test --parallel --verbosity=2
-          coverage report
+          # Run all framework tests under coverage
+          coverage run --rcfile=.coveragerc -m lex test --verbosity=2 --noinput \
+            lex.core.tests \
+            lex.audit_logging.tests \
+            lex.process_admin.tests \
+            lex.lex_app.tests \
+            lex.tests
+
+          # Report to stdout
+          coverage report --rcfile=.coveragerc
+
+          # Enforce minimum threshold — fails the step if coverage drops
+          coverage report --rcfile=.coveragerc --fail-under=${{ env.COVERAGE_FAIL_UNDER }}
+
+          # Generate XML for artifact upload
+          coverage xml --rcfile=.coveragerc -o coverage.xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: coverage.xml

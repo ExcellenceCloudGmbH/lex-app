@@ -1,12 +1,22 @@
-import unittest
+"""
+Tests for ``LocalSchedulerBackend`` – the in-process task scheduler.
+
+Verifies singleton behaviour, task scheduling, and cancellation without
+requiring Celery or django-celery-beat.
+"""
+
+import threading
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
+
 from django.test import TestCase
 from django.utils import timezone
-from datetime import timedelta
+
 from lex.process_admin.utils.local_scheduler import LocalSchedulerBackend
-import threading
+
 
 class TestLocalSchedulerBackend(TestCase):
+    """Prove singleton, scheduling, and cancellation of ``LocalSchedulerBackend``."""
     
     def setUp(self):
         # Reset singleton for testing

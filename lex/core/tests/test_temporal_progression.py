@@ -1,3 +1,11 @@
+"""
+Tests for temporal reconciliation – passage-of-time activation.
+
+Verifies that a future-valid record appears in the main table after
+the ``TemporalReconciler`` runs once the record’s validity window
+has arrived.
+"""
+
 from unittest.mock import patch
 from django.test import TransactionTestCase
 from django.db import models, connection
@@ -12,12 +20,15 @@ class TemporalTestModel(LexModel):
         app_label = 'lex_app'
 
 class BitemporalProgressionTest(TransactionTestCase):
-    
+    """Prove that temporal reconciliation activates future-valid records."""
+
     def setUp(self):
         from lex.process_admin.utils.model_registration import ModelRegistration
         mr = ModelRegistration()
-        try: mr._register_standard_model(TemporalTestModel, [])
-        except Exception: pass
+        try:
+            mr._register_standard_model(TemporalTestModel, [])
+        except Exception:
+            pass  # already registered
         self.HistoryModel = TemporalTestModel.history.model
         
         with connection.schema_editor() as schema_editor:
@@ -27,55 +38,42 @@ class BitemporalProgressionTest(TransactionTestCase):
 
     def tearDown(self):
         with connection.schema_editor() as schema_editor:
-             try: schema_editor.delete_model(self.HistoryModel.meta_history.model)
-             except: pass
-             try: schema_editor.delete_model(self.HistoryModel)
-             except: pass
-             try: schema_editor.delete_model(TemporalTestModel)
-             except: pass
+            try:
+                schema_editor.delete_model(self.HistoryModel.meta_history.model)
+            except Exception:
+                pass
+            try:
+                schema_editor.delete_model(self.HistoryModel)
+            except Exception:
+                pass
+            try:
+                schema_editor.delete_model(TemporalTestModel)
+            except Exception:
+                pass
 
     def test_passage_of_time(self):
-        """
-        Verify what happens when time passes into a Future Record's validity period.
-        """
+        """Future-valid record appears after reconciliation runs past its validity window."""
         T0 = datetime.datetime(2025, 1, 1, 10, 0, 0)
-        T_Future = T0 + timedelta(hours=1) # 11:00
-        
-        print("\n--- Test Passage of Time ---")
-        
+        T_Future = T0 + timedelta(hours=1)  # 11:00
+
         # 1. At T0, insert a record valid from T_Future (11:00)
         with patch('django.utils.timezone.now', return_value=T0):
             obj = TemporalTestModel(name="FutureVal")
             obj._history_date = T_Future
             obj.save()
-            
-        # At T0, Main Table should be empty (Verified by previous robust tests)
+
+        # At T0, Main Table should be empty
         self.assertEqual(TemporalTestModel.objects.count(), 0, "Should be empty at T0")
-        
+
         # 2. Advance Time to T_Future + 1 min (11:01)
         T_Active = T_Future + timedelta(minutes=1)
-        print(f"Advancing time to {T_Active}")
-        
+
         with patch('django.utils.timezone.now', return_value=T_Active):
-             # Run Reconciliation Logic
-             from lex.process_admin.utils.temporal_reconciler import TemporalReconciler
-             
-             # Reconcile window: From T0 to T_Active
-             # Ideally we run this periodically.
-             # We look for records that became valid between T0 and T_Active.
-             count_reconciled = TemporalReconciler.reconcile_changes_since(T0, T_Active)
-             print(f"Reconciled {count_reconciled} records.")
-             
-             qs = TemporalTestModel.objects.all()
-             count = qs.count()
-             
-             print(f"Main Table Count at T_Active: {count}")
-             
-             # EXPECTATION: 
-             # Now that we ran reconciliation, the Main Table should be updated!
-             if count == 1:
-                 print("Result: Main Table Updated Successfully via Reconciliation!")
-             else:
-                 print("Result: Main Table still STALE.")
-                 
-             self.assertEqual(count, 1, "Main Table should reflect the active record after reconciliation")
+            from lex.process_admin.utils.temporal_reconciler import TemporalReconciler
+            count_reconciled = TemporalReconciler.reconcile_changes_since(T0, T_Active)
+
+            self.assertGreaterEqual(count_reconciled, 1, "Reconciler should sync at least 1 record")
+            self.assertEqual(
+                TemporalTestModel.objects.count(), 1,
+                "Main Table should reflect the active record after reconciliation",
+            )

@@ -1,7 +1,20 @@
+"""
+Tests for the dynamic serializer map and permission-scoped serialization.
+
+Verifies:
+    • Custom ``api_serializers`` are additive to the auto-generated default
+    • Explicit ``default`` overrides still inherit internal fields
+    • ``ModelContainer`` refreshes when ``api_serializers`` change
+    • ``lex_reserved_scopes`` reflects field-level ``PermissionResult``
+      for edit, delete, and export actions
+"""
+
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 
 import django
 from django.apps import apps
@@ -18,9 +31,11 @@ from django.contrib.auth.models import User
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
+from lex.api.serializers import base_serializers
 from lex.api.serializers.base_serializers import get_serializer_map_for_model
 from lex.api.views.model_entries.History import HistoryModelEntry
 from lex.api.views.model_info.Fields import Fields
+from lex.core.models.LexModel import PermissionResult
 from lex.process_admin.models.ModelContainer import ModelContainer
 
 
@@ -65,15 +80,32 @@ class _DummyProcessAdmin:
 
 
 class SerializerMapBehaviorTests(TestCase):
+    """Prove serializer map construction, refresh, and permission-scoped output."""
     def setUp(self):
         self._had_api_serializers = hasattr(User, "api_serializers")
         self._original_api_serializers = getattr(User, "api_serializers", None)
+        base_serializers._capability_cache.pop(User, None)
 
     def tearDown(self):
         if self._had_api_serializers:
             User.api_serializers = self._original_api_serializers
         elif hasattr(User, "api_serializers"):
             delattr(User, "api_serializers")
+        base_serializers._capability_cache.pop(User, None)
+
+    def _permission_request(self):
+        return SimpleNamespace(
+            user=SimpleNamespace(
+                email="viewer@example.com",
+                is_authenticated=True,
+                is_superuser=False,
+                groups=SimpleNamespace(values_list=lambda *args, **kwargs: []),
+            ),
+            userinfo={},
+            user_permissions=[],
+            client_roles=[],
+            session={},
+        )
 
     def test_custom_serializers_are_additive_to_default_serializer(self):
         User.api_serializers = {"compact": _CompactUserSerializer}
@@ -175,3 +207,54 @@ class SerializerMapBehaviorTests(TestCase):
         view.list(request, model_container=_Container(), pk=1)
 
         self.assertIs(view.captured_serializer_class, _NewDefaultUserSerializer)
+
+    def test_default_serializer_exposes_permission_result_scopes(self):
+        serializer_map = get_serializer_map_for_model(User, default_fields=["id", "username", "email"])
+        serializer_class = serializer_map["default"]
+        request = self._permission_request()
+
+        with (
+            patch.object(
+                User,
+                "permission_edit",
+                new=lambda _self, _user_context: PermissionResult.allow_fields(
+                    {"username", "email", "id"},
+                    "selected fields",
+                ),
+                create=True,
+            ),
+            patch.object(User, "permission_delete", new=lambda _self, _user_context: False, create=True),
+            patch.object(
+                User,
+                "permission_export",
+                new=lambda _self, _user_context: PermissionResult.allow_all_except({"password"}, "mask secrets"),
+                create=True,
+            ),
+        ):
+            base_serializers._capability_cache.pop(User, None)
+            payload = serializer_class(
+                User(id=1, username="alice", email="alice@example.com"),
+                context={"request": request},
+            ).data
+
+        self.assertEqual(payload["lex_reserved_scopes"]["edit"], ["email", "username"])
+        self.assertFalse(payload["lex_reserved_scopes"]["delete"])
+        self.assertTrue(payload["lex_reserved_scopes"]["export"])
+
+    def test_default_serializer_reports_denied_permission_results(self):
+        serializer_map = get_serializer_map_for_model(User, default_fields=["id", "username"])
+        serializer_class = serializer_map["default"]
+        request = self._permission_request()
+
+        with (
+            patch.object(User, "permission_edit", new=lambda _self, _user_context: PermissionResult.deny("blocked"), create=True),
+            patch.object(User, "permission_delete", new=lambda _self, _user_context: False, create=True),
+            patch.object(User, "permission_export", new=lambda _self, _user_context: PermissionResult.deny("blocked"), create=True),
+        ):
+            base_serializers._capability_cache.pop(User, None)
+            payload = serializer_class(
+                User(id=1, username="alice"),
+                context={"request": request},
+            ).data
+
+        self.assertEqual(payload["lex_reserved_scopes"], {"edit": [], "delete": False, "export": False})

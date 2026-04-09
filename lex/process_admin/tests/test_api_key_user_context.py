@@ -1,3 +1,10 @@
+"""
+Tests for API-key-based ``UserContext`` construction.
+
+Verifies that requests authenticated via DRF API-key middleware produce
+a correct ``UserContext`` with scopes derived from the key identity.
+"""
+
 import os
 import sys
 from pathlib import Path

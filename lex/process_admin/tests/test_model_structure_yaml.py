@@ -179,3 +179,79 @@ class ModelStructureYamlTests(TestCase):
                 ModelStructure(str(path))
         finally:
             path.unlink()
+
+
+class ModelStructureDictFormatTests(TestCase):
+    """
+    Verify dict-format ``untracked_models`` / ``tracked_models`` parsing.
+
+    Customers commonly write YAML dicts (``key: null``) instead of lists.
+    The framework must accept both.
+    """
+
+    def test_untracked_models_dict_format(self):
+        """Dict-format ``untracked_models`` is accepted and lowercased."""
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write(
+                "model_structure:\n  G:\n    a: null\n"
+                "untracked_models:\n  Cashflow: null\n  Valuation: null\n"
+            )
+            path = Path(handle.name)
+
+        try:
+            ms = ModelStructure(str(path))
+            self.assertEqual(sorted(ms.untracked_models), ["cashflow", "valuation"])
+        finally:
+            path.unlink()
+
+    def test_tracked_models_dict_format(self):
+        """Dict-format ``tracked_models`` is accepted and lowercased."""
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write("tracked_models:\n  Foo: null\n  Bar: null\n")
+            path = Path(handle.name)
+
+        try:
+            ms = ModelStructure(str(path))
+            self.assertEqual(sorted(ms.tracked_models), ["bar", "foo"])
+            self.assertTrue(ms.tracked_models_defined)
+        finally:
+            path.unlink()
+
+    def test_global_untracked_from_dict(self):
+        """Dict-format populates class-level ``UNTRACKED_MODELS``."""
+        original = list(ModelStructure.UNTRACKED_MODELS)
+        try:
+            data = {"untracked_models": {"Alpha": None, "Beta": None}}
+            ModelStructure._load_untracked_models_globally_from_data(data)
+            self.assertEqual(sorted(ModelStructure.UNTRACKED_MODELS), ["alpha", "beta"])
+        finally:
+            ModelStructure.UNTRACKED_MODELS = original
+
+    def test_full_yaml_with_dict_untracked(self):
+        """End-to-end: YAML with dict-format untracked_models parses correctly."""
+        yaml_content = (
+            "model_structure:\n"
+            "  Portfolio:\n"
+            "    investor: null\n"
+            "untracked_models:\n"
+            "  investor: null\n"
+            "history_tracking_enabled: true\n"
+        )
+        with NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write(yaml_content)
+            path = Path(handle.name)
+
+        try:
+            ms = ModelStructure(str(path))
+            self.assertIn("Portfolio", ms.structure)
+            self.assertEqual(ms.untracked_models, ["investor"])
+            self.assertTrue(ms.history_tracking_enabled)
+        finally:
+            path.unlink()
+
+    def test_normalize_model_list_rejects_scalar(self):
+        """A bare scalar (int) raises ValueError."""
+        with self.assertRaises(ValueError) as cm:
+            ModelStructure._normalize_model_list(42, "tracked_models")
+        self.assertIn("tracked_models", str(cm.exception))
+

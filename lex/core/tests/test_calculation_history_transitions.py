@@ -1,3 +1,11 @@
+"""
+Tests for calculation model history transitions.
+
+Verifies that ``CalculationModel`` correctly records history rows and
+meta-history rows when the ``is_calculated`` status changes through
+API-driven save / calculate cycles.
+"""
+
 from unittest.mock import patch
 
 from django.contrib.auth.models import User

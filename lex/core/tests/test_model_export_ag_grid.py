@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pandas as pd
 from django.contrib.auth import get_user_model
@@ -7,6 +8,7 @@ from django.http import QueryDict
 from django.test import TestCase
 from rest_framework import serializers
 
+from lex.core.models.LexModel import PermissionResult
 from lex.api.views.file_operations.ModelExport import (
     AG_GROUP_HIERARCHY_COLUMN,
     AG_GROUP_HIERARCHY_DEPTH_COLUMN,
@@ -54,7 +56,16 @@ class ModelExportAgGridTests(TestCase):
     def _request(self):
         return SimpleNamespace(
             query_params=QueryDict(""),
-            user=None,
+            user=SimpleNamespace(
+                is_authenticated=True,
+                is_superuser=False,
+                email="viewer@example.com",
+                groups=SimpleNamespace(values_list=lambda *args, **kwargs: []),
+            ),
+            user_permissions=[],
+            userinfo={},
+            client_roles=[],
+            session={},
         )
 
     def _permission_view(self) -> ModelExportView:
@@ -238,3 +249,48 @@ class ModelExportAgGridTests(TestCase):
         self.assertEqual(refreshed.iloc[0]["content_type"], str(permission.content_type))
         self.assertEqual(refreshed.iloc[0][AG_GROUP_HIERARCHY_COLUMN], str(permission.content_type))
         self.assertEqual(refreshed.iloc[1][AG_GROUP_HIERARCHY_COLUMN], f"  {permission.codename}")
+
+    def test_filter_and_mask_data_for_export_keeps_only_allowed_permission_fields(self):
+        request = self._request()
+
+        with patch.object(
+            User,
+            "permission_export",
+            new=lambda _self, _user_context: PermissionResult.allow_fields({"username"}, "username only"),
+            create=True,
+        ):
+            df = self._view().filter_and_mask_data_for_export(
+                queryset=User.objects.filter(username="alice"),
+                request=request,
+            )
+
+        self.assertEqual(len(df.index), 1)
+        self.assertEqual(df.iloc[0]["username"], "alice")
+        self.assertIsNotNone(df.iloc[0]["id"])
+        self.assertIsNone(df.iloc[0]["email"])
+        self.assertIsNone(df.iloc[0]["password"])
+        self.assertIsNone(df.iloc[0]["is_staff"])
+
+    def test_filter_and_mask_data_for_export_honors_excluded_fields(self):
+        request = self._request()
+
+        with patch.object(
+            User,
+            "permission_export",
+            new=lambda _self, _user_context: PermissionResult.allow_all_except(
+                {"password", "email"},
+                "hide sensitive fields",
+            ),
+            create=True,
+        ):
+            df = self._view().filter_and_mask_data_for_export(
+                queryset=User.objects.filter(username="alex"),
+                request=request,
+            )
+
+        self.assertEqual(len(df.index), 1)
+        self.assertEqual(df.iloc[0]["username"], "alex")
+        self.assertTrue(df.iloc[0]["is_staff"])
+        self.assertIsNotNone(df.iloc[0]["id"])
+        self.assertIsNone(df.iloc[0]["email"])
+        self.assertIsNone(df.iloc[0]["password"])

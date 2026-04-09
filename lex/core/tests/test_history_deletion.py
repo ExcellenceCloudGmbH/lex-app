@@ -1,3 +1,14 @@
+"""
+Tests for bitemporal history record deletion.
+
+Verifies:
+    • Deleting a mid-chain history row extends the predecessor’s
+      ``valid_to`` to cover the gap
+    • History descriptor reuses its resolved manager class
+    • Deleting the main record creates a ``history_type = '-'`` row
+      and a corresponding meta-history entry
+"""
+
 from unittest.mock import patch
 from django.test import TransactionTestCase
 from django.db import models, connection
@@ -12,12 +23,15 @@ class HistoryDeleteTestModel(LexModel):
         app_label = 'lex_app'
 
 class BitemporalHistoryDeletionTest(TransactionTestCase):
+    """Prove history deletion gap-closing and delete-marker creation."""
     
     def setUp(self):
         from lex.process_admin.utils.model_registration import ModelRegistration
         mr = ModelRegistration()
-        try: mr._register_standard_model(HistoryDeleteTestModel, [])
-        except Exception: pass
+        try:
+            mr._register_standard_model(HistoryDeleteTestModel, [])
+        except Exception:
+            pass  # already registered
         self.HistoryModel = HistoryDeleteTestModel.history.model
         
         with connection.schema_editor() as schema_editor:
@@ -27,12 +41,18 @@ class BitemporalHistoryDeletionTest(TransactionTestCase):
 
     def tearDown(self):
         with connection.schema_editor() as schema_editor:
-             try: schema_editor.delete_model(self.HistoryModel.meta_history.model)
-             except: pass
-             try: schema_editor.delete_model(self.HistoryModel)
-             except: pass
-             try: schema_editor.delete_model(HistoryDeleteTestModel)
-             except: pass
+            try:
+                schema_editor.delete_model(self.HistoryModel.meta_history.model)
+            except Exception:
+                pass
+            try:
+                schema_editor.delete_model(self.HistoryModel)
+            except Exception:
+                pass
+            try:
+                schema_editor.delete_model(HistoryDeleteTestModel)
+            except Exception:
+                pass
 
     def test_deletion_extends_previous_record(self):
         """
@@ -72,15 +92,11 @@ class BitemporalHistoryDeletionTest(TransactionTestCase):
         self.assertEqual(h_b.valid_to, T2)
         self.assertEqual(h_c.valid_to, None)
         
-        print(f"Initial State Verified: A({h_a.valid_to}), B({h_b.valid_to}), C({h_c.valid_to})")
-        
         # 2. Delete B
-        # Trigger post_delete signal on history model
         h_b.delete()
         
         # 3. Verify A is extended
         h_a.refresh_from_db()
-        print(f"Post-Delete State: A valid_to = {h_a.valid_to}")
         
         self.assertEqual(h_a.valid_to, T2, "Record A should be extended to cover the gap left by B")
         

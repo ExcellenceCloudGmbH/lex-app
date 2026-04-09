@@ -1,0 +1,73 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Publish lex-app to PyPI.
+#
+#  This workflow:
+#   1. Calls the test suite (django_tests.yml) as a reusable workflow.
+#   2. Only if ALL tests pass and coverage threshold is met, builds the
+#      sdist + wheel and publishes to PyPI.
+#   3. Can be triggered manually (workflow_dispatch) or on a GitHub
+#      release (tag push).
+#
+#  The hard gate ensures that a broken package can never be published.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — build but do not upload to PyPI"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  # ── Step 1: Run the full test suite ──────────────────────────────
+  gate-tests:
+    name: "Gate: Test Suite"
+    uses: ./.github/workflows/django_tests.yml
+    secrets: inherit
+
+  # ── Step 2: Build and publish (only if tests pass) ──────────────
+  publish:
+    name: "Build & Publish"
+    needs: gate-tests       # ← hard dependency — skipped if tests fail
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write       # for trusted publishing via OIDC
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install --upgrade pip build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check dist with twine
+        run: twine check dist/*
+
+      - name: Publish to PyPI
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses trusted publishing (OIDC) — no API token needed if the
+        # PyPI project is configured for this GitHub repository.
+        # Alternatively, set PYPI_API_TOKEN in repository secrets and
+        # uncomment the 'password' line below.
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}

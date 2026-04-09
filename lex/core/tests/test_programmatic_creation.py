@@ -56,8 +56,8 @@ class ProgrammaticCreationTest(TransactionTestCase):
 
         try:
             mr._register_standard_model(ProgrammaticTestModel, [])
-        except Exception as e:
-            print(f"Warning: Registration: {e}")
+        except Exception:
+            pass  # already registered
 
         self.HistoryModel = ProgrammaticTestModel.history.model
         self.MetaModel = self.HistoryModel.meta_history.model

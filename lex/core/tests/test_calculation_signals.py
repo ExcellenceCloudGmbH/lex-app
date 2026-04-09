@@ -1,3 +1,14 @@
+"""
+Tests for calculation status signals and websocket broadcast.
+
+Verifies:
+    • ``update_calculation_status`` records state transitions in
+      ``ActiveCalculationStateStore``
+    • Websocket channel-layer messages are dispatched with correct
+      payload shape and calculation metadata
+    • Edge-cases: missing channel layer, missing operation context
+"""
+
 from unittest.mock import patch
 
 from django.test import SimpleTestCase

@@ -1,3 +1,12 @@
+"""
+Tests for ``LexModel`` atomic save behaviour.
+
+Verifies:
+    • Models with default ``is_atomic=True`` run lifecycle hooks inside
+      a ``transaction.atomic()`` block
+    • Models with ``is_atomic=False`` skip the atomic wrapper
+"""
+
 from unittest.mock import patch
 
 from django.db import connection

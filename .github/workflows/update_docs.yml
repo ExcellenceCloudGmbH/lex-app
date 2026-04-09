@@ -1,0 +1,121 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Notify lex-app-docs to update after a successful release.
+#
+#  This workflow sends a lightweight `repository_dispatch` event to
+#  lex-app-docs with the release metadata (tags, diff URL).  The
+#  actual documentation update (LLM analysis, branch creation, PR)
+#  happens inside the lex-app-docs repo using its own GITHUB_TOKEN.
+#
+#  Architecture (repository_dispatch pattern):
+#
+#    lex-app                          lex-app-docs
+#    ───────                          ────────────
+#    pip_publish.yml succeeds
+#         │
+#         ▼
+#    update_docs.yml
+#    (this file)
+#         │  POST /repos/.../dispatches
+#         │  event_type: "release-published"
+#         │  payload: { version, base_tag, head_tag }
+#         ▼
+#                                     on: repository_dispatch
+#                                       types: [release-published]
+#                                          │
+#                                          ├─ Checkout lex-app (read-only)
+#                                          ├─ Compute diff
+#                                          ├─ Create issue with diff + instructions
+#                                          └─ Assign @copilot → Copilot opens PR
+#
+#  Why this pattern?
+#   - lex-app-docs uses its own GITHUB_TOKEN for push + PR — no
+#     cross-repo auth needed for the heavy lifting.
+#   - The only cross-repo call is the dispatch event itself, which
+#     needs minimal permissions (contents:write on lex-app-docs).
+#   - Each repo owns its own CI logic.
+#
+#  Authentication:
+#   Uses a GitHub App installed on both repos.  The App generates a
+#   short-lived installation token scoped to lex-app-docs — just
+#   enough to fire the dispatch event.
+#
+#  Required secrets (on lex-app):
+#   - DOCS_APP_ID          (GitHub App numeric ID)
+#   - DOCS_APP_PRIVATE_KEY (GitHub App .pem private key)
+# ──────────────────────────────────────────────────────────────────────
+
+name: Update Documentation (Post-Release)
+
+on:
+  # Triggered automatically after pip_publish.yml completes
+  workflow_run:
+    workflows: ["Publish to PyPI"]
+    types: [completed]
+  # Manual trigger for testing / re-running
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Base ref (previous release tag, e.g. v2.3.0)"
+        required: false
+        type: string
+      head_ref:
+        description: "Head ref (current release tag, e.g. v2.4.0)"
+        required: false
+        type: string
+
+jobs:
+  notify-docs-repo:
+    name: "Dispatch to lex-app-docs"
+    runs-on: ubuntu-latest
+    # Only run if the publish workflow succeeded (or manual trigger)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      # ── 1. Checkout lex-app to read git tags ───────────────────
+      - name: Checkout lex-app
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Determine release tags ──────────────────────────────
+      - name: Determine release tags
+        id: tags
+        run: |
+          if [[ -n "${{ inputs.head_ref }}" ]]; then
+            HEAD_TAG="${{ inputs.head_ref }}"
+            BASE_TAG="${{ inputs.base_ref }}"
+          else
+            HEAD_TAG=$(git describe --tags --abbrev=0 HEAD)
+            BASE_TAG=$(git describe --tags --abbrev=0 "${HEAD_TAG}^" 2>/dev/null || echo "")
+          fi
+
+          echo "head_tag=${HEAD_TAG}" >> "$GITHUB_OUTPUT"
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Release diff: ${BASE_TAG:-'(initial)'}..${HEAD_TAG}"
+
+      # ── 3. Generate GitHub App token (scoped to lex-app-docs) ──
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DOCS_APP_ID }}
+          private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}
+          repositories: "lex-app-docs"
+          owner: ExcellenceCloudGmbH
+
+      # ── 4. Fire repository_dispatch to lex-app-docs ────────────
+      - name: Dispatch event to lex-app-docs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/ExcellenceCloudGmbH/lex-app-docs/dispatches \
+            -f event_type="release-published" \
+            -f "client_payload[head_tag]=${{ steps.tags.outputs.head_tag }}" \
+            -f "client_payload[base_tag]=${{ steps.tags.outputs.base_tag }}" \
+            -f "client_payload[source_repo]=ExcellenceCloudGmbH/lex-app"
+
+          echo "Dispatched 'release-published' to lex-app-docs"
+          echo "  head_tag: ${{ steps.tags.outputs.head_tag }}"
+          echo "  base_tag: ${{ steps.tags.outputs.base_tag }}"
