@@ -1,3 +1,11 @@
+"""
+Tests for ``ModelRegistration._validate_model_definition``.
+
+Verifies that the framework rejects models with reserved names,
+reserved prefixes, reserved field names, or forbidden overrides, and
+accepts valid definitions without error.
+"""
+
 from django.test import SimpleTestCase
 from django.db import models
 from lex.process_admin.utils.model_registration import ModelRegistration

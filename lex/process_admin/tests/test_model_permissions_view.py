@@ -1,3 +1,14 @@
+"""
+Tests for model-permissions and user-permissions API endpoints.
+
+Verifies:
+    • ``ModelPermissions`` endpoint resolves request-scoped Keycloak
+      permissions into per-model CRUD flags
+    • Legacy ``modification_restriction`` blocks still apply even when
+      Keycloak scopes would allow
+    • ``UserPermissionsView`` returns the live Keycloak scopes
+"""
+
 import os
 import sys
 from pathlib import Path
@@ -77,6 +88,7 @@ class _User:
 
 
 class ModelPermissionsViewTests(TestCase):
+    """Prove model-permissions endpoint resolves Keycloak scope flags."""
     def setUp(self):
         self.factory = APIRequestFactory()
         self.user = _User("scope-user")
@@ -132,6 +144,7 @@ class ModelPermissionsViewTests(TestCase):
 
 
 class UserPermissionsViewTests(TestCase):
+    """Prove user-permissions endpoint returns live request scopes."""
     def setUp(self):
         self.factory = APIRequestFactory()
         self.user = _User("rbac-user")

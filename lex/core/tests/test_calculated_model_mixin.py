@@ -1,3 +1,13 @@
+"""
+Tests for ``CalculatedModelMixin`` – the parallelisable calculation engine.
+
+Verifies:
+    • ``get_selected_key_list`` iterates lazy querysets and plain lists
+    • ``ModelCombinationGenerator`` produces correct Cartesian products
+    • Dispatch respects ``WaitForTasks`` / ``FireAndForget`` context
+    • Parallelisable vs non-parallelisable field handling
+"""
+
 import os
 from django.db import models
 from django.test import SimpleTestCase

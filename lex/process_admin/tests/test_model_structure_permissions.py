@@ -1,3 +1,13 @@
+"""
+Tests for permission-based pruning of the model structure tree.
+
+Verifies:
+    • Models whose ``can_list`` returns ``False`` are pruned from the
+      structure payload
+    • Historical sub-models are hidden when their parent is denied
+    • Empty folders are removed after pruning
+"""
+
 import os
 import sys
 from pathlib import Path

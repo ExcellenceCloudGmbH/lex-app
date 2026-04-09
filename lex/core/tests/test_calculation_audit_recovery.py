@@ -1,3 +1,12 @@
+"""
+Tests for calculation audit-log recovery after failures.
+
+Verifies that ``AuditLog`` rows transition to the correct status when a
+calculation succeeds, fails with a handled exception, or crashes with an
+unhandled exception – and that the audit trail is never left in an
+inconsistent state.
+"""
+
 import traceback
 from unittest.mock import patch
 

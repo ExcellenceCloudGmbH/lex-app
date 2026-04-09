@@ -1,3 +1,15 @@
+"""
+Tests for the AG Grid server-side row model integration.
+
+Verifies that the ``ListModelEntries`` view correctly translates AG Grid
+server-side requests into Django ORM queries, covering:
+    • Column-level filtering (text, number, date, set)
+    • Row grouping and aggregation
+    • Pivot mode layout
+    • Sort-model translation
+    • Query-param datetime filters
+"""
+
 from datetime import datetime
 
 from django.contrib.auth import get_user_model
@@ -24,6 +36,8 @@ class _AgGridListTestView(ListModelEntries):
 
 
 class AgGridServerSideServiceTests(TestCase):
+    """Prove AG Grid server-side filtering, grouping, and pivot logic."""
+
     @classmethod
     def setUpTestData(cls):
         cls.alice = User.objects.create_user(username="alice", password="x", first_name="Alice", is_staff=False)

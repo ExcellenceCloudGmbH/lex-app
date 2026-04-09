@@ -32,6 +32,12 @@ class ModelStructure:
     def _normalize_model_list(values, key):
         if not ModelStructure._is_model_list_defined(values):
             return []
+        # Accept both list and dict formats.  A dict such as
+        #   untracked_models:
+        #     mymodel: null
+        # is treated the same as a list of its keys.
+        if isinstance(values, dict):
+            values = list(values.keys())
         if not isinstance(values, list):
             raise ValueError(f"'{key}' must be defined as a list in model_structure.yaml.")
         return [str(value).lower() for value in values]

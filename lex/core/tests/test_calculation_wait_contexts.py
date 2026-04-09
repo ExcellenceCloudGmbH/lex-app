@@ -1,3 +1,12 @@
+"""
+Tests for ``WaitForTasks`` / ``FireAndForget`` calculation wait contexts.
+
+Verifies:
+    • A calculation without an outer ``WaitForTasks`` waits locally
+    • Nested ``WaitForTasks`` properly registers sub-tasks
+    • ``register_task_with_context`` attaches to the active context
+"""
+
 from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
