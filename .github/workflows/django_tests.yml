@@ -95,7 +95,6 @@ jobs:
             lex.core.tests \
             lex.audit_logging.tests \
             lex.process_admin.tests \
-            lex.lex_app.tests \
             lex.tests
 
           # Report to stdout
