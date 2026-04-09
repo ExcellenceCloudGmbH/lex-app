@@ -65,6 +65,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
+
       - name: Install dependencies
         run: |
           pip install --upgrade pip setuptools wheel
