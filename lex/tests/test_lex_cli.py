@@ -22,19 +22,24 @@ from generate_pycharm_configs import (
 )
 from lex.bin.lex import build_celery_worker_command, build_flower_command, lex
 from lex.tools.setup_with_ai import (
-    DEFAULT_GEMINI_MODEL,
-    DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS,
     DEFAULT_LEX_MCP_PRODUCTION,
     DEFAULT_REMOTE_MCP_TRANSPORT,
     DEFAULT_REMOTE_MCP_URL,
     LEX_MCP_LOCAL_SERVER_NAME,
+    LEGACY_GEMINI_ENV_NAMES,
+    LEGACY_GEMINI_MCP_ENV_KEYS,
     SetupWithAICredentials,
     SetupWithAIArtifacts,
     SetupWithAIMCPProbeResult,
     SetupWithAIServerRuntime,
+    SetupWithAIUpdateResult,
+    apply_ai_update,
+    apply_ai_update_0_2_1,
     bootstrap_github_copilot_mcp_server_for_pycharm,
     build_mcp_server_definition,
     install_lex_mcp_local,
+    remove_env_keys,
+    remove_mcp_server_env_keys,
     resolve_github_copilot_mcp_config_path,
     resolve_github_copilot_state_db_path,
     resolve_active_python_executable,
@@ -245,7 +250,6 @@ class LexFlowerCommandTests(TestCase):
                     return_value=SetupWithAICredentials(
                         github_token="ghu_example",
                         remote_mcp_api_key="remote_api_key",
-                        gemini_api_key="gemini_api_key",
                     ),
                 ) as launch_form_mock,
                 patch(
@@ -266,7 +270,6 @@ class LexFlowerCommandTests(TestCase):
                     or SetupWithAICredentials(
                         github_token="ghu_example",
                         remote_mcp_api_key="remote_api_key",
-                        gemini_api_key="gemini_api_key",
                     )
                 )
                 install_mock.side_effect = lambda *args, **kwargs: call_order.append("install_package")
@@ -290,7 +293,6 @@ class LexFlowerCommandTests(TestCase):
                 project_root=project_root.resolve(),
                 github_token="ghu_example",
                 remote_mcp_api_key="remote_api_key",
-                gemini_api_key="gemini_api_key",
                 remote_mcp_url=DEFAULT_REMOTE_MCP_URL,
                 python_executable=artifacts.python_executable,
                 verify_server=False,
@@ -303,12 +305,9 @@ class LexFlowerCommandTests(TestCase):
                 env_values={
                     "REMOTE_MCP_TRANSPORT": DEFAULT_REMOTE_MCP_TRANSPORT,
                     "REMOTE_MCP_URL": DEFAULT_REMOTE_MCP_URL,
-                    "GEMINI_MODEL": DEFAULT_GEMINI_MODEL,
-                    "GIT_GEMINI_MAX_REPAIR_ATTEMPTS": DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS,
                     "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
                     "REMOTE_MCP_API_KEY": "remote_api_key",
                     "GITHUB_TOKEN": "ghu_example",
-                    "GEMINI_API_KEY": "gemini_api_key",
                 },
             )
             bootstrap_copilot_state_mock.assert_called_once_with(
@@ -408,7 +407,6 @@ class SetupWithAIToolsTests(TestCase):
                     project_root=project_root,
                     github_token="ghu_example",
                     remote_mcp_api_key="remote_api_key",
-                    gemini_api_key="gemini_api_key",
                     python_executable=Path("/venv/bin/python"),
                     mcp_config_path=mcp_config_path,
                     verify_server=False,
@@ -468,12 +466,9 @@ class SetupWithAIToolsTests(TestCase):
                 {
                     "REMOTE_MCP_TRANSPORT": DEFAULT_REMOTE_MCP_TRANSPORT,
                     "REMOTE_MCP_URL": DEFAULT_REMOTE_MCP_URL,
-                    "GEMINI_MODEL": DEFAULT_GEMINI_MODEL,
-                    "GIT_GEMINI_MAX_REPAIR_ATTEMPTS": DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS,
                     "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
                     "GITHUB_TOKEN": "new_token",
                     "REMOTE_MCP_API_KEY": "new_api_key",
-                    "GEMINI_API_KEY": "gemini_api_key",
                 },
             )
 
@@ -481,17 +476,11 @@ class SetupWithAIToolsTests(TestCase):
             self.assertIn("# existing comment", env_content)
             self.assertIn(f"REMOTE_MCP_TRANSPORT={DEFAULT_REMOTE_MCP_TRANSPORT}", env_content)
             self.assertIn(f"REMOTE_MCP_URL={DEFAULT_REMOTE_MCP_URL}", env_content)
-            self.assertIn(f"GEMINI_MODEL={DEFAULT_GEMINI_MODEL}", env_content)
-            self.assertIn(
-                f"GIT_GEMINI_MAX_REPAIR_ATTEMPTS={DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS}",
-                env_content,
-            )
             self.assertIn(f"LEX_MCP_PRODUCTION={DEFAULT_LEX_MCP_PRODUCTION}", env_content)
             self.assertIn("GITHUB_TOKEN=new_token", env_content)
             self.assertNotIn("COPILOT_GITHUB_TOKEN=", env_content)
             self.assertIn("KEEP_ME=yes", env_content)
             self.assertIn("REMOTE_MCP_API_KEY=new_api_key", env_content)
-            self.assertIn("GEMINI_API_KEY=gemini_api_key", env_content)
 
     def test_write_github_copilot_mcp_config_replaces_legacy_alias(self):
         with TemporaryDirectory() as tmp_dir:
@@ -513,7 +502,6 @@ class SetupWithAIToolsTests(TestCase):
                 wrapper_script_path=Path("/venv/lib/python3.12/site-packages/lex_mcp_local/wrapper_mcp.py"),
                 github_token="ghu_example",
                 remote_mcp_api_key="remote_api_key",
-                gemini_api_key="gemini_api_key",
             )
 
             write_github_copilot_mcp_config(mcp_path, server_definition)
@@ -525,16 +513,10 @@ class SetupWithAIToolsTests(TestCase):
             self.assertIn('"command": "/venv/bin/python"', config)
             self.assertIn(f'"REMOTE_MCP_TRANSPORT": "{DEFAULT_REMOTE_MCP_TRANSPORT}"', config)
             self.assertIn(f'"REMOTE_MCP_URL": "{DEFAULT_REMOTE_MCP_URL}"', config)
-            self.assertIn(f'"GEMINI_MODEL": "{DEFAULT_GEMINI_MODEL}"', config)
-            self.assertIn(
-                f'"GIT_GEMINI_MAX_REPAIR_ATTEMPTS": "{DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS}"',
-                config,
-            )
             self.assertIn(f'"LEX_MCP_PRODUCTION": "{DEFAULT_LEX_MCP_PRODUCTION}"', config)
             self.assertIn('"REMOTE_MCP_API_KEY": "remote_api_key"', config)
             self.assertIn('"GITHUB_TOKEN": "ghu_example"', config)
             self.assertNotIn('"COPILOT_GITHUB_TOKEN"', config)
-            self.assertIn('"GEMINI_API_KEY": "gemini_api_key"', config)
 
     def test_resolve_github_copilot_mcp_config_path_uses_home_config_on_unix(self):
         with patch("lex.tools.setup_with_ai.os.name", "posix"):
@@ -747,7 +729,6 @@ class SetupWithAIToolsTests(TestCase):
                     wrapper_script_path=project_root / "wrapper_mcp.py",
                     github_token="ghu_example",
                     remote_mcp_api_key="remote_api_key",
-                    gemini_api_key="gemini_api_key",
                 )
 
         kwargs = popen_mock.call_args.kwargs
@@ -784,7 +765,6 @@ class SetupWithAIToolsTests(TestCase):
                     wrapper_script_path=project_root / "wrapper_mcp.py",
                     github_token="ghu_example",
                     remote_mcp_api_key="remote_api_key",
-                    gemini_api_key="gemini_api_key",
                 )
 
         kwargs = popen_mock.call_args.kwargs
@@ -811,10 +791,300 @@ class SetupWithAIToolsTests(TestCase):
                     wrapper_script_path=project_root / "wrapper_mcp.py",
                     github_token="ghu_example",
                     remote_mcp_api_key="remote_api_key",
-                    gemini_api_key="gemini_api_key",
                 )
 
         os_kill_mock.assert_called_once_with(6543, 0)
         popen_mock.assert_not_called()
         self.assertTrue(runtime.already_running)
         self.assertEqual(runtime.pid, 6543)
+
+
+class AIUpdateTests(TestCase):
+    def test_remove_env_keys_strips_matching_lines_and_preserves_rest(self):
+        with TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text(
+                "# header\n"
+                "GITHUB_TOKEN=ghu_example\n"
+                "GEMINI_API_KEY=gemini_key\n"
+                "GEMINI_MODEL=gemini-2.5-flash\n"
+                "GIT_GEMINI_MAX_REPAIR_ATTEMPTS=3\n"
+                "KEEP_ME=yes\n",
+                encoding="utf-8",
+            )
+
+            removed = remove_env_keys(env_path, set(LEGACY_GEMINI_ENV_NAMES))
+
+            content = env_path.read_text(encoding="utf-8")
+            self.assertIn("GITHUB_TOKEN=ghu_example", content)
+            self.assertIn("KEEP_ME=yes", content)
+            self.assertIn("# header", content)
+            self.assertNotIn("GEMINI_API_KEY", content)
+            self.assertNotIn("GEMINI_MODEL", content)
+            self.assertNotIn("GIT_GEMINI_MAX_REPAIR_ATTEMPTS", content)
+            self.assertEqual(set(removed), {"GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS"})
+
+    def test_remove_env_keys_returns_empty_for_missing_file(self):
+        removed = remove_env_keys(Path("/nonexistent/.env"), {"GEMINI_API_KEY"})
+        self.assertEqual(removed, ())
+
+    def test_remove_env_keys_returns_empty_when_nothing_matches(self):
+        with TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text("GITHUB_TOKEN=ghu_example\n", encoding="utf-8")
+
+            removed = remove_env_keys(env_path, set(LEGACY_GEMINI_ENV_NAMES))
+
+            self.assertEqual(removed, ())
+            content = env_path.read_text(encoding="utf-8")
+            self.assertIn("GITHUB_TOKEN=ghu_example", content)
+
+    def test_remove_mcp_server_env_keys_strips_gemini_from_server_env(self):
+        with TemporaryDirectory() as tmp_dir:
+            mcp_path = Path(tmp_dir) / "mcp.json"
+            config = {
+                "servers": {
+                    LEX_MCP_LOCAL_SERVER_NAME: {
+                        "type": "stdio",
+                        "command": "/venv/bin/python",
+                        "env": {
+                            "REMOTE_MCP_TRANSPORT": "http",
+                            "GITHUB_TOKEN": "ghu_example",
+                            "GEMINI_API_KEY": "gemini_key",
+                            "GEMINI_MODEL": "gemini-2.5-flash",
+                            "GIT_GEMINI_MAX_REPAIR_ATTEMPTS": "3",
+                        },
+                    }
+                }
+            }
+            mcp_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+            removed = remove_mcp_server_env_keys(
+                mcp_path, LEGACY_GEMINI_MCP_ENV_KEYS,
+            )
+
+            updated_config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            server_env = updated_config["servers"][LEX_MCP_LOCAL_SERVER_NAME]["env"]
+            self.assertIn("REMOTE_MCP_TRANSPORT", server_env)
+            self.assertIn("GITHUB_TOKEN", server_env)
+            self.assertNotIn("GEMINI_API_KEY", server_env)
+            self.assertNotIn("GEMINI_MODEL", server_env)
+            self.assertNotIn("GIT_GEMINI_MAX_REPAIR_ATTEMPTS", server_env)
+            self.assertEqual(
+                set(removed),
+                {"GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS"},
+            )
+
+    def test_remove_mcp_server_env_keys_returns_empty_for_missing_file(self):
+        removed = remove_mcp_server_env_keys(
+            Path("/nonexistent/mcp.json"), LEGACY_GEMINI_MCP_ENV_KEYS,
+        )
+        self.assertEqual(removed, ())
+
+    def test_remove_mcp_server_env_keys_returns_empty_when_server_missing(self):
+        with TemporaryDirectory() as tmp_dir:
+            mcp_path = Path(tmp_dir) / "mcp.json"
+            mcp_path.write_text(
+                json.dumps({"servers": {"other-server": {}}}),
+                encoding="utf-8",
+            )
+
+            removed = remove_mcp_server_env_keys(
+                mcp_path, LEGACY_GEMINI_MCP_ENV_KEYS,
+            )
+            self.assertEqual(removed, ())
+
+    def test_apply_ai_update_0_2_1_cleans_env_and_mcp(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "GEMINI_API_KEY=gemini_key\n"
+                "GEMINI_MODEL=gemini-2.5-flash\n"
+                "GIT_GEMINI_MAX_REPAIR_ATTEMPTS=3\n",
+                encoding="utf-8",
+            )
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {
+                                "GITHUB_TOKEN": "ghu_example",
+                                "GEMINI_API_KEY": "gemini_key",
+                                "GEMINI_MODEL": "gemini-2.5-flash",
+                                "GIT_GEMINI_MAX_REPAIR_ATTEMPTS": "3",
+                            },
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            result = apply_ai_update_0_2_1(
+                project_root, mcp_config_path=mcp_path,
+            )
+
+            self.assertEqual(result.version, "0.2.1")
+            self.assertEqual(
+                set(result.env_keys_removed),
+                {"GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS"},
+            )
+            self.assertEqual(
+                set(result.mcp_env_keys_removed),
+                {"GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS"},
+            )
+
+            env_content = env_path.read_text(encoding="utf-8")
+            self.assertIn("GITHUB_TOKEN=ghu_example", env_content)
+            self.assertNotIn("GEMINI_", env_content)
+
+            mcp_config = json.loads(mcp_path.read_text(encoding="utf-8"))
+            server_env = mcp_config["servers"][LEX_MCP_LOCAL_SERVER_NAME]["env"]
+            self.assertIn("GITHUB_TOKEN", server_env)
+            self.assertNotIn("GEMINI_API_KEY", server_env)
+
+    def test_apply_ai_update_0_2_1_is_idempotent(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text("GITHUB_TOKEN=ghu_example\n", encoding="utf-8")
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {"GITHUB_TOKEN": "ghu_example"},
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            result = apply_ai_update_0_2_1(
+                project_root, mcp_config_path=mcp_path,
+            )
+
+            self.assertEqual(result.version, "0.2.1")
+            self.assertEqual(result.env_keys_removed, ())
+            self.assertEqual(result.mcp_env_keys_removed, ())
+
+    def test_apply_ai_update_runs_all_steps(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "GEMINI_API_KEY=gemini_key\n",
+                encoding="utf-8",
+            )
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {
+                                "GITHUB_TOKEN": "ghu_example",
+                                "GEMINI_API_KEY": "gemini_key",
+                            },
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            results = apply_ai_update(
+                project_root, mcp_config_path=mcp_path,
+            )
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].version, "0.2.1")
+            self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
+            self.assertIn("GEMINI_API_KEY", results[0].mcp_env_keys_removed)
+
+    def test_ai_update_cli_command_reports_removed_keys(self):
+        runner = CliRunner()
+
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir) / "sample-project"
+            project_root.mkdir()
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "GEMINI_API_KEY=gemini_key\n"
+                "GEMINI_MODEL=gemini-2.5-flash\n",
+                encoding="utf-8",
+            )
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {
+                                "GITHUB_TOKEN": "ghu_example",
+                                "GEMINI_API_KEY": "gemini_key",
+                            },
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "lex.tools.setup_with_ai.resolve_github_copilot_mcp_config_path",
+                return_value=mcp_path,
+            ):
+                result = runner.invoke(
+                    lex,
+                    ["ai-update", "--project-root", str(project_root)],
+                )
+
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+            self.assertIn("Removed from .env", result.output)
+            self.assertIn("GEMINI_API_KEY", result.output)
+            self.assertIn("Removed from mcp.json", result.output)
+            self.assertIn("LEX AI update complete", result.output)
+
+    def test_ai_update_cli_command_reports_already_up_to_date(self):
+        runner = CliRunner()
+
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir) / "sample-project"
+            project_root.mkdir()
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text("GITHUB_TOKEN=ghu_example\n", encoding="utf-8")
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {"GITHUB_TOKEN": "ghu_example"},
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "lex.tools.setup_with_ai.resolve_github_copilot_mcp_config_path",
+                return_value=mcp_path,
+            ):
+                result = runner.invoke(
+                    lex,
+                    ["ai-update", "--project-root", str(project_root)],
+                )
+
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+            self.assertIn("Already up to date", result.output)
+            self.assertIn("LEX AI update complete", result.output)

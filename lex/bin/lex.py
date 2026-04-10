@@ -17,6 +17,7 @@ from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
     SetupWithAIError,
+    apply_ai_update,
     bootstrap_github_copilot_mcp_server_for_pycharm,
     build_ai_env_values,
     configure_ai_integration,
@@ -307,7 +308,6 @@ def setup(project_root):
 @click.option("-p", "--project-root", help="Project root (default: execution dir)")
 @click.option("--github-token", help="Fine-grained GitHub token for Copilot Extensions.")
 @click.option("--remote-mcp-api-key", help="API key for the hosted remote MCP server.")
-@click.option("--gemini-api-key", help="Gemini API key exposed to lex-mcp-local.")
 @click.option(
     "--remote-mcp-url",
     default=DEFAULT_REMOTE_MCP_URL,
@@ -319,7 +319,7 @@ def setup(project_root):
     is_flag=True,
     help="Skip the local setup page and prompt in the terminal instead.",
 )
-def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key, remote_mcp_url, no_browser):
+def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url, no_browser):
     root = Path(find_project_root(project_root or os.getcwd())).resolve()
     python_executable = resolve_active_python_executable(root)
 
@@ -331,7 +331,6 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
     credentials = _collect_setup_with_ai_credentials(
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
-        gemini_api_key=gemini_api_key,
         project_root=root,
         env_file_path=Path(env_path),
         no_browser=no_browser,
@@ -350,7 +349,6 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
             project_root=root,
             github_token=credentials.github_token,
             remote_mcp_api_key=credentials.remote_mcp_api_key,
-            gemini_api_key=credentials.gemini_api_key,
             remote_mcp_url=remote_mcp_url,
             python_executable=python_executable,
             verify_server=False,
@@ -372,7 +370,6 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
             env_values=build_ai_env_values(
                 github_token=credentials.github_token,
                 remote_mcp_api_key=credentials.remote_mcp_api_key,
-                gemini_api_key=credentials.gemini_api_key,
                 remote_mcp_url=remote_mcp_url,
             ),
         )
@@ -432,6 +429,34 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, gemini_api_key
     )
 
 
+@lex.command(name="ai-update", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+def ai_update(project_root):
+    """Apply incremental updates to an existing LEX AI setup."""
+    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+
+    click.echo("Applying LEX AI updates...")
+    try:
+        results = apply_ai_update(project_root=root)
+    except SetupWithAIError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not results:
+        click.echo("No updates to apply.")
+        return
+
+    for result in results:
+        click.echo(f"Applied update to v{result.version}:")
+        if result.env_keys_removed:
+            click.echo(f"  Removed from .env: {', '.join(result.env_keys_removed)}")
+        if result.mcp_env_keys_removed:
+            click.echo(f"  Removed from mcp.json: {', '.join(result.mcp_env_keys_removed)}")
+        if not result.env_keys_removed and not result.mcp_env_keys_removed:
+            click.echo("  Already up to date.")
+
+    click.echo("LEX AI update complete.")
+
+
 @lex.command(name="ai-faq", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 def ai_faq():
     """Open the LEX AI FAQ page in your browser."""
@@ -442,16 +467,14 @@ def _collect_setup_with_ai_credentials(
     *,
     github_token: str | None,
     remote_mcp_api_key: str | None,
-    gemini_api_key: str | None,
     project_root: Path,
     env_file_path: Path,
     no_browser: bool,
 ) -> SetupWithAICredentials:
-    if github_token and remote_mcp_api_key and gemini_api_key:
+    if github_token and remote_mcp_api_key:
         return SetupWithAICredentials(
             github_token=github_token,
             remote_mcp_api_key=remote_mcp_api_key,
-            gemini_api_key=gemini_api_key,
         )
 
     if not no_browser:
@@ -474,14 +497,9 @@ def _collect_setup_with_ai_credentials(
         "Remote MCP API key",
         hide_input=True,
     )
-    final_gemini_api_key = gemini_api_key or click.prompt(
-        "Gemini API key",
-        hide_input=True,
-    )
     return SetupWithAICredentials(
         github_token=final_github_token,
         remote_mcp_api_key=final_remote_mcp_api_key,
-        gemini_api_key=final_gemini_api_key,
     )
 
 # Commands that have dedicated handlers and do NOT need Django management
@@ -489,7 +507,7 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "setup", "setup-with-ai", "ai-faq"}
+    {"start", "celery", "celery-workers", "flower", "setup", "setup-with-ai", "ai-update", "ai-faq"}
 )
 
 

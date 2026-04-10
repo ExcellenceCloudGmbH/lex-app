@@ -24,8 +24,6 @@ from urllib.parse import parse_qs, quote
 
 DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS = "3"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
 GITHUB_TOKEN_URL = "https://github.com/settings/tokens/new?description=Full+Classic+PAT&scopes=repo,workflow,admin:org,admin:repo_hook,user,project,admin:enterprise,read:enterprise,manage_runners:enterprise,read:audit_log,write:network_configurations,manage_billing:copilot"
 GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
@@ -41,6 +39,8 @@ LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
 )
 _SAFE_UNQUOTED_ENV_VALUE_RE = re.compile(r"^[A-Za-z0-9._:/@+-]*$")
 LEGACY_GITHUB_TOKEN_ENV_NAMES = ("COPILOT_GITHUB_TOKEN",)
+LEGACY_GEMINI_ENV_NAMES = ("GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS")
+LEGACY_GEMINI_MCP_ENV_KEYS = frozenset({"GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS"})
 
 
 class SetupWithAIError(RuntimeError):
@@ -48,10 +48,18 @@ class SetupWithAIError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class SetupWithAIUpdateResult:
+    version: str
+    env_keys_removed: tuple[str, ...] = ()
+    mcp_env_keys_removed: tuple[str, ...] = ()
+    env_file_path: Path | None = None
+    mcp_config_path: Path | None = None
+
+
+@dataclass(frozen=True)
 class SetupWithAICredentials:
     github_token: str
     remote_mcp_api_key: str
-    gemini_api_key: str
 
 
 @dataclass(frozen=True)
@@ -314,18 +322,14 @@ def resolve_github_copilot_state_db_path(
 def build_ai_env_values(
     github_token: str,
     remote_mcp_api_key: str,
-    gemini_api_key: str,
     remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
 ) -> dict[str, str]:
     return {
         "REMOTE_MCP_TRANSPORT": DEFAULT_REMOTE_MCP_TRANSPORT,
         "REMOTE_MCP_URL": remote_mcp_url,
-        "GEMINI_MODEL": DEFAULT_GEMINI_MODEL,
-        "GIT_GEMINI_MAX_REPAIR_ATTEMPTS": DEFAULT_GIT_GEMINI_MAX_REPAIR_ATTEMPTS,
         "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
         "REMOTE_MCP_API_KEY": remote_mcp_api_key,
         "GITHUB_TOKEN": github_token,
-        "GEMINI_API_KEY": gemini_api_key,
     }
 
 
@@ -460,7 +464,6 @@ def build_mcp_server_definition(
     wrapper_script_path: Path,
     github_token: str,
     remote_mcp_api_key: str,
-    gemini_api_key: str,
     remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
 ) -> dict:
     return {
@@ -470,7 +473,6 @@ def build_mcp_server_definition(
         "env": build_ai_env_values(
             github_token=github_token,
             remote_mcp_api_key=remote_mcp_api_key,
-            gemini_api_key=gemini_api_key,
             remote_mcp_url=remote_mcp_url,
         ),
     }
@@ -963,7 +965,6 @@ def start_lex_mcp_local_server(
     wrapper_script_path: Path,
     github_token: str,
     remote_mcp_api_key: str,
-    gemini_api_key: str,
     remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
     *,
     env: Mapping[str, str] | None = None,
@@ -990,7 +991,6 @@ def start_lex_mcp_local_server(
     env_values = build_ai_env_values(
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
-        gemini_api_key=gemini_api_key,
         remote_mcp_url=remote_mcp_url,
     )
     process_env = _build_process_env(env_values, base_env=env)
@@ -1029,7 +1029,6 @@ def configure_ai_integration(
     project_root: Path,
     github_token: str,
     remote_mcp_api_key: str,
-    gemini_api_key: str,
     remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
     *,
     python_executable: Path | None = None,
@@ -1055,7 +1054,6 @@ def configure_ai_integration(
     env_values = build_ai_env_values(
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
-        gemini_api_key=gemini_api_key,
         remote_mcp_url=remote_mcp_url,
     )
 
@@ -1073,7 +1071,6 @@ def configure_ai_integration(
         wrapper_script_path=wrapper_script_path,
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
-        gemini_api_key=gemini_api_key,
         remote_mcp_url=remote_mcp_url,
     )
     write_github_copilot_mcp_config(copilot_mcp_path, server_definition)
@@ -1141,14 +1138,13 @@ def launch_setup_with_ai_form(
 
             github_token = form_data.get("github_token", [""])[0].strip()
             remote_mcp_api_key = form_data.get("remote_mcp_api_key", [""])[0].strip()
-            gemini_api_key = form_data.get("gemini_api_key", [""])[0].strip()
 
-            if not github_token or not remote_mcp_api_key or not gemini_api_key:
+            if not github_token or not remote_mcp_api_key:
                 body = _build_setup_form_html(
                     state=state,
                     project_root=project_root,
                     env_file_path=env_file_path,
-                    error_message="All three fields are required.",
+                    error_message="Both fields are required.",
                 )
                 encoded = body.encode("utf-8")
                 self.send_response(HTTPStatus.BAD_REQUEST)
@@ -1161,7 +1157,6 @@ def launch_setup_with_ai_form(
             result["credentials"] = SetupWithAICredentials(
                 github_token=github_token,
                 remote_mcp_api_key=remote_mcp_api_key,
-                gemini_api_key=gemini_api_key,
             )
             body = _build_success_html(env_file_path=env_file_path)
             encoded = body.encode("utf-8")
@@ -1204,6 +1199,149 @@ def launch_setup_with_ai_form(
     if credentials is None:
         raise SetupWithAIError("AI setup form closed before credentials were submitted.")
     return credentials
+
+
+# ---------------------------------------------------------------------------
+# ai-update: versioned, incremental migration of an existing LEX AI setup
+# ---------------------------------------------------------------------------
+
+def remove_env_keys(env_file_path: Path, keys_to_remove: set[str]) -> tuple[str, ...]:
+    """Remove matching lines from a dotenv file. Returns the keys actually removed."""
+    if not env_file_path.exists():
+        return ()
+
+    existing_lines = env_file_path.read_text(encoding="utf-8").splitlines()
+    output_lines: list[str] = []
+    removed: list[str] = []
+
+    for line in existing_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key, _ = stripped.split("=", 1)
+            if key in keys_to_remove:
+                removed.append(key)
+                continue
+        output_lines.append(line)
+
+    if removed:
+        content = "\n".join(output_lines)
+        if content:
+            content += "\n"
+        _atomic_write_text(env_file_path, content)
+
+    return tuple(removed)
+
+
+def remove_mcp_server_env_keys(
+    mcp_config_path: Path,
+    keys_to_remove: set[str],
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+) -> tuple[str, ...]:
+    """Remove env keys from a specific server entry inside an mcp.json file.
+
+    Returns the keys actually removed.
+    """
+    if not mcp_config_path.exists():
+        return ()
+
+    try:
+        config = json.loads(mcp_config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return ()
+
+    if not isinstance(config, dict):
+        return ()
+
+    servers = config.get("servers", {})
+    if not isinstance(servers, dict):
+        return ()
+
+    server_def = servers.get(server_name)
+    if not isinstance(server_def, dict):
+        return ()
+
+    env_block = server_def.get("env")
+    if not isinstance(env_block, dict):
+        return ()
+
+    removed: list[str] = []
+    for key in keys_to_remove:
+        if key in env_block:
+            del env_block[key]
+            removed.append(key)
+
+    if removed:
+        _atomic_write_text(mcp_config_path, json.dumps(config, indent=2) + "\n")
+
+    return tuple(removed)
+
+
+def apply_ai_update_0_2_1(
+    project_root: Path,
+    *,
+    mcp_config_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+) -> SetupWithAIUpdateResult:
+    """Migrate an existing LEX AI setup from 0.2.0 to 0.2.1.
+
+    * Removes ``GEMINI_API_KEY``, ``GEMINI_MODEL`` and
+      ``GIT_GEMINI_MAX_REPAIR_ATTEMPTS`` from the project ``.env``.
+    * Removes the same keys from the server's ``env`` block inside
+      GitHub Copilot's ``mcp.json``.
+    """
+    env_file_path = (Path(project_root) / ".env").resolve()
+    copilot_mcp_path = (
+        resolve_github_copilot_mcp_config_path(env=env, home=home)
+        if mcp_config_path is None
+        else Path(mcp_config_path)
+    ).resolve()
+
+    env_keys_removed = remove_env_keys(env_file_path, set(LEGACY_GEMINI_ENV_NAMES))
+    mcp_keys_removed = remove_mcp_server_env_keys(
+        copilot_mcp_path,
+        LEGACY_GEMINI_MCP_ENV_KEYS,
+        server_name=server_name,
+    )
+
+    return SetupWithAIUpdateResult(
+        version="0.2.1",
+        env_keys_removed=env_keys_removed,
+        mcp_env_keys_removed=mcp_keys_removed,
+        env_file_path=env_file_path,
+        mcp_config_path=copilot_mcp_path,
+    )
+
+
+# Ordered list of (target_version, migration_function) pairs.
+# Each function accepts (project_root, **kwargs) and returns a
+# SetupWithAIUpdateResult.  ``apply_ai_update`` runs them in sequence.
+_AI_UPDATE_STEPS: list[tuple[str, Callable[..., SetupWithAIUpdateResult]]] = [
+    ("0.2.1", apply_ai_update_0_2_1),
+]
+
+
+def apply_ai_update(
+    project_root: Path,
+    *,
+    mcp_config_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+) -> list[SetupWithAIUpdateResult]:
+    """Run every registered AI-setup migration step and return results."""
+    results: list[SetupWithAIUpdateResult] = []
+    for _version, step_fn in _AI_UPDATE_STEPS:
+        result = step_fn(
+            project_root,
+            mcp_config_path=mcp_config_path,
+            env=env,
+            home=home,
+            server_name=server_name,
+        )
+        results.append(result)
+    return results
 
 
 def _build_setup_form_html(
@@ -1454,7 +1592,6 @@ def _build_setup_form_html(
           <p><a class="button" href="{html.escape(GITHUB_TOKEN_URL)}" target="_blank" rel="noreferrer">Open GitHub token page</a></p>
           <div class="meta">
             <div>Use the Lex MCP Access Key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
-            <div>Provide the Gemini API key that should be exposed to the MCP wrapper as <code>GEMINI_API_KEY</code>.</div>
           </div>
         </article>
 
@@ -1476,12 +1613,6 @@ def _build_setup_form_html(
               <input type="password" name="remote_mcp_api_key" autocomplete="off" required>
             </label>
             <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
-
-            <label>
-              Gemini API key
-              <input type="password" name="gemini_api_key" autocomplete="off" required>
-            </label>
-            <p class="hint">Paste the Gemini API key that should be available to the MCP server.</p>
 
             <button type="submit">Save and finish setup</button>
           </form>
