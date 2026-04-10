@@ -35,7 +35,7 @@ def convert_dfs_in_excel(path, data_frames, sheet_names=None, merge_cells=False,
                 index_frame = df.index.to_frame()
                 for idx, col in enumerate(index_frame):  # loop through all columns
                     series = index_frame[col]
-                    max_len = max((series.astype(str).map(len).max(), len(str(series.name)))) + 1  # adding a little extra space
+                    max_len = max((series.astype(str).str.len().max(skipna=True) or 0, len(str(series.name)))) + 1  # adding a little extra space
                     if is_datetime(series):
                         max_len = 22
                     worksheet.set_column(idx, idx, max_len)  # set column width
@@ -43,7 +43,7 @@ def convert_dfs_in_excel(path, data_frames, sheet_names=None, merge_cells=False,
             for idx, col in enumerate(df):  # loop through all columns
                 series = df[col]
                 max_len = max((
-                    series.astype(str).map(len).max(), len(str(series.name)))) + 1  # adding a little extra space
+                    series.astype(str).str.len().max(skipna=True) or 0, len(str(series.name)))) + 1  # adding a little extra space
                 worksheet.set_column(idx + idx_length, idx + idx_length, max_len)  # set column width
                 # set Cell format
                 if col in formats:

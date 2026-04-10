@@ -87,7 +87,7 @@ class XLSXField(FileField):
                     for idx, col in enumerate(index_frame):  # loop through all columns
                         series = index_frame[col]
                         max_len = max((
-                            series.astype(str).map(len).max(),  # len of largest item
+                            series.astype(str).str.len().max(skipna=True) or 0,  # len of largest item
                             len(str(series.name))  # len of column name/header
                         )) + 1  # adding a little extra space
                         if is_datetime(series):
@@ -102,7 +102,7 @@ class XLSXField(FileField):
                             worksheet.write_comment(0, idx + idx_length, comment)
 
                     max_len = max((
-                        series.astype(str).map(len).max(),  # len of largest item
+                        series.astype(str).str.len().max(skipna=True) or 0,  # len of largest item
                         len(str(series.name))  # len of column name/header
                     )) + 1  # adding a little extra space
                     worksheet.set_column(idx + idx_length, idx + idx_length, max_len)  # set column width
