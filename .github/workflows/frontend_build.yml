@@ -3,7 +3,8 @@
 #
 #  This workflow:
 #   1. Calls django_tests.yml (reusable) to gate on backend health.
-#   2. Checks out the frontend from the lex-app-v2-pac-latest repo.
+#   2. Checks out the frontend from process-admin-general-client
+#      (branch: lex-app-v2-pac-latest by default, configurable).
 #   3. Runs the Vitest unit-test suite with a coverage threshold.
 #   4. Runs Playwright E2E tests against a real Django backend
 #      (reuses the Python env where `lex` is already installed).
@@ -12,7 +13,7 @@
 #
 #  Required secrets:
 #   - NPM_MARMELAB_TOKEN   (for the private @marmelab npm registry)
-#   - FRONTEND_REPO_TOKEN  (PAT with read access to lex-app-v2-pac-latest,
+#   - FRONTEND_REPO_TOKEN  (PAT with read access to the frontend repo,
 #                           or use secrets.GITHUB_TOKEN if same org + SSO)
 # ──────────────────────────────────────────────────────────────────────
 
@@ -25,15 +26,15 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      frontend_ref:
-        description: "Branch or tag of lex-app-v2-pac-latest to build"
+      frontend_branch:
+        description: "Frontend branch to build"
         required: false
-        default: "main"
+        default: "lex-app-v2-pac-latest"
         type: string
 
 env:
-  FRONTEND_REPO: lex-app-v2-pac-latest          # owner/repo filled in checkout
-  FRONTEND_REF: ${{ inputs.frontend_ref || 'main' }}
+  FRONTEND_REPO: ExcellenceCloudGmbH/process-admin-general-client
+  FRONTEND_BRANCH: ${{ inputs.frontend_branch || 'lex-app-v2-pac-latest' }}
   COVERAGE_THRESHOLD: "76"                       # vitest line-coverage gate
 
 jobs:
@@ -56,8 +57,8 @@ jobs:
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/${{ env.FRONTEND_REPO }}
-          ref: ${{ env.FRONTEND_REF }}
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_BRANCH }}
           token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           path: frontend
 
@@ -93,8 +94,8 @@ jobs:
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/${{ env.FRONTEND_REPO }}
-          ref: ${{ env.FRONTEND_REF }}
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_BRANCH }}
           token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           path: frontend
 
@@ -174,8 +175,8 @@ jobs:
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/${{ env.FRONTEND_REPO }}
-          ref: ${{ env.FRONTEND_REF }}
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_BRANCH }}
           token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           path: frontend
 
