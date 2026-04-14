@@ -75,33 +75,42 @@ class CalculationAuditRecoveryTests(TransactionTestCase):
     patch here matches the contract the CI pipeline is validating.
     """
 
+    # Models whose tables we created ourselves (and therefore must drop).
+    _created_tables = []
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        existing = set(connection.introspection.table_names())
+        cls._created_tables = []
         with connection.schema_editor() as schema_editor:
-            schema_editor.create_model(AuditLog)
-            schema_editor.create_model(AuditLogStatus)
-            schema_editor.create_model(AuditRecoveryCalculationModel)
+            for model in (AuditLog, AuditLogStatus, AuditRecoveryCalculationModel):
+                if model._meta.db_table not in existing:
+                    schema_editor.create_model(model)
+                    cls._created_tables.append(model)
 
     @classmethod
     def tearDownClass(cls):
         try:
-            with connection.schema_editor() as schema_editor:
-                schema_editor.delete_model(AuditRecoveryCalculationModel)
-                schema_editor.delete_model(AuditLogStatus)
-                schema_editor.delete_model(AuditLog)
+            if cls._created_tables:
+                with connection.schema_editor() as schema_editor:
+                    for model in reversed(cls._created_tables):
+                        schema_editor.delete_model(model)
         finally:
             super().tearDownClass()
 
     def _fixture_teardown(self):
-        # Disable FK enforcement so Django's flush can DELETE in any order.
-        with connection.cursor() as cursor:
-            cursor.execute("PRAGMA foreign_keys = OFF")
+        # SQLite enforces FK constraints during flush but Django doesn't
+        # guarantee deletion order.  Temporarily disable for SQLite only.
+        if connection.vendor == "sqlite":
+            with connection.cursor() as cursor:
+                cursor.execute("PRAGMA foreign_keys = OFF")
         try:
             super()._fixture_teardown()
         finally:
-            with connection.cursor() as cursor:
-                cursor.execute("PRAGMA foreign_keys = ON")
+            if connection.vendor == "sqlite":
+                with connection.cursor() as cursor:
+                    cursor.execute("PRAGMA foreign_keys = ON")
 
     def setUp(self):
         super().setUp()

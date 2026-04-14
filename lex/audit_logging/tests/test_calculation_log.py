@@ -24,19 +24,27 @@ from lex.audit_logging.utils.ModelContext import ModelContext, _model_context
 class CalculationLogRegressionTest(TransactionTestCase):
     """Prove deduplication, cache fan-out, and fallback routing of calculation logs."""
 
+    # Models whose tables we created ourselves (and therefore must drop).
+    _created_tables = []
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        existing = set(connection.introspection.table_names())
+        cls._created_tables = []
         with connection.schema_editor() as schema_editor:
-            schema_editor.create_model(AuditLog)
-            schema_editor.create_model(CalculationLog)
+            for model in (AuditLog, CalculationLog):
+                if model._meta.db_table not in existing:
+                    schema_editor.create_model(model)
+                    cls._created_tables.append(model)
 
     @classmethod
     def tearDownClass(cls):
         try:
-            with connection.schema_editor() as schema_editor:
-                schema_editor.delete_model(CalculationLog)
-                schema_editor.delete_model(AuditLog)
+            if cls._created_tables:
+                with connection.schema_editor() as schema_editor:
+                    for model in reversed(cls._created_tables):
+                        schema_editor.delete_model(model)
         finally:
             super().tearDownClass()
 
@@ -53,14 +61,17 @@ class CalculationLogRegressionTest(TransactionTestCase):
         self._original_model_context = _model_context.get()["model_context"]
 
     def _fixture_teardown(self):
-        # Disable FK enforcement so Django's flush can DELETE in any order.
-        with connection.cursor() as cursor:
-            cursor.execute("PRAGMA foreign_keys = OFF")
+        # SQLite enforces FK constraints during flush but Django doesn't
+        # guarantee deletion order.  Temporarily disable for SQLite only.
+        if connection.vendor == "sqlite":
+            with connection.cursor() as cursor:
+                cursor.execute("PRAGMA foreign_keys = OFF")
         try:
             super()._fixture_teardown()
         finally:
-            with connection.cursor() as cursor:
-                cursor.execute("PRAGMA foreign_keys = ON")
+            if connection.vendor == "sqlite":
+                with connection.cursor() as cursor:
+                    cursor.execute("PRAGMA foreign_keys = ON")
 
     def tearDown(self):
         _model_context.get()["model_context"] = self._original_model_context
