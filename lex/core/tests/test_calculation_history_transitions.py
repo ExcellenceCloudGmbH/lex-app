@@ -163,7 +163,14 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
         self.obj.refresh_from_db()
         self.assertEqual(self.obj.is_calculated, CalculationModel.NOT_CALCULATED)
 
-    @unittest.skip("ActiveCalculationStateStore state mismatch — tests need update")
+    @unittest.skip(
+        "Needs pairing: current _handle_calculation_model_reset uses "
+        "queryset.update() to flip IN_PROGRESS→ABORTED, which bypasses "
+        "history signals, so no ABORTED history row is created. This "
+        "test asserts a history row IS created. Either the startup "
+        "reset should use save() to preserve audit trail, or the test "
+        "should be weakened to assert DB-state only. Design decision."
+    )
     def test_startup_abort_reset_persists_aborted_history_row(self):
         self.obj.is_calculated = CalculationModel.IN_PROGRESS
         self.obj.save(skip_hooks=True)
@@ -188,7 +195,14 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
         self.assertEqual(len(new_rows), 1)
         self.assertEqual(new_rows[0].is_calculated, CalculationModel.ABORTED)
 
-    @unittest.skip("ActiveCalculationStateStore state mismatch — tests need update")
+    @unittest.skip(
+        "Needs pairing: current _handle_calculation_model_reset only "
+        "considers DB rows with is_calculated=IN_PROGRESS — it does NOT "
+        "consult ActiveCalculationStateStore. This test asserts that a "
+        "record registered in the store should also be reset, which is "
+        "not the current contract. Either the startup path should also "
+        "drain the store, or this test should be dropped. Design decision."
+    )
     def test_startup_abort_reset_uses_active_state_store_when_db_is_not_in_progress(self):
         self.obj.is_calculated = CalculationModel.NOT_CALCULATED
         self.obj.save(skip_hooks=True)

@@ -58,7 +58,12 @@ class ReconcileCommandTest(TransactionTestCase):
             except Exception:
                 pass
 
-    @unittest.skip("reconcile_temporal management command not found — needs investigation")
+    @unittest.skip(
+        "Needs pairing: reconcile_temporal management command does not exist "
+        "anywhere in lex/. Either the command needs to be created to exercise "
+        "TemporalReconciler, or this test should be replaced with a direct "
+        "TemporalReconciler unit test."
+    )
     def test_command_reconciles_stale_record(self):
         """
         Verify that the management command wakes up a record that became valid.

@@ -53,9 +53,9 @@ class CalculationIdTest(SimpleTestCase):
         self.assertNotEqual(id1, id2)
 
 
-@unittest.skip("Audit logger functions return None — API changed")
 class LogObjectCreationTest(SimpleTestCase):
     """Verify ``log_object_creation`` audit logging."""
+    databases = {"default"}
 
     @patch("lex.audit_logging.utils.InitialDataAuditLogger.AuditLogStatus.objects")
     @patch("lex.audit_logging.utils.InitialDataAuditLogger.AuditLog.objects")
@@ -100,9 +100,9 @@ class LogObjectCreationTest(SimpleTestCase):
         self.assertIsNone(result)
 
 
-@unittest.skip("Audit logger functions return None — API changed")
 class LogObjectUpdateTest(SimpleTestCase):
     """Verify ``log_object_update`` audit logging."""
+    databases = {"default"}
 
     @patch("lex.audit_logging.utils.InitialDataAuditLogger.AuditLogStatus.objects")
     @patch("lex.audit_logging.utils.InitialDataAuditLogger.AuditLog.objects")
@@ -124,9 +124,9 @@ class LogObjectUpdateTest(SimpleTestCase):
         self.assertEqual(create_kwargs["payload"]["id"], 42)
 
 
-@unittest.skip("Audit logger functions return None — API changed")
 class LogObjectDeletionTest(SimpleTestCase):
     """Verify ``log_object_deletion`` audit logging."""
+    databases = {"default"}
 
     @patch("lex.audit_logging.utils.InitialDataAuditLogger.AuditLogStatus.objects")
     @patch("lex.audit_logging.utils.InitialDataAuditLogger.AuditLog.objects")

@@ -1,15 +1,41 @@
 """
-Tests for calculation status signals and websocket broadcast.
+Tests for ``update_calculation_status`` — the authoritative signal that
+broadcasts calculation state transitions and keeps
+``ActiveCalculationStateStore`` in sync.
 
-Verifies:
-    • ``update_calculation_status`` records state transitions in
-      ``ActiveCalculationStateStore``
-    • Websocket channel-layer messages are dispatched with correct
-      payload shape and calculation metadata
-    • Edge-cases: missing channel layer, missing operation context
+Why this matters
+----------------
+Every IN_PROGRESS / SUCCESS / ERROR / ABORTED transition on a
+``CalculationModel`` instance flows through this function. The frontend
+relies on the broadcast to update its spinners across tabs, and the
+``ActiveCalculationStateStore`` is the authoritative source for
+post-reconnect WebSocket reconciliation. A bug here means either a
+stuck spinner in the UI or a duplicated calculation in the reconciliation
+payload — both customer-visible.
+
+What we assert
+--------------
+1. IN_PROGRESS registers the record in the store with the current
+   ``operation_context`` calculation_id and emits a
+   ``calculation_in_progress`` channel message.
+2. Every IN_PROGRESS broadcast fires — the design explicitly never
+   suppresses duplicates (the frontend handles them idempotently, and
+   suppression previously caused multi-tab drift; see the docstring on
+   ``update_calculation_status`` in ``CalculationSignals.py``).
+3. SUCCESS / ERROR clear the store entry and broadcast the terminal
+   message.
+4. When ``operation_context`` has no calculation_id, the store's
+   previously-written entry is preserved.
+
+Why we patch ``sync_channel_group_send`` and not the channel layer
+------------------------------------------------------------------
+``update_calculation_status`` calls ``sync_channel_group_send`` which
+owns the channel-layer boundary (ASGI vs Celery-worker dispatch). That
+helper is the true boundary — we patch it to capture broadcast calls
+and assert on the payload. We do NOT mock ``ActiveCalculationStateStore``:
+it is part of the behavior we are asserting.
 """
 
-import unittest
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -17,7 +43,10 @@ from django.test import SimpleTestCase
 from lex.api.utils import operation_context
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
-from lex.core.signals.CalculationSignals import update_calculation_status
+from lex.core.signals.CalculationSignals import (
+    update_calculation_status,
+    _resolve_calculation_id,
+)
 
 
 class DummyCalculationModel(CalculationModel):
@@ -29,42 +58,33 @@ class DummyCalculationModel(CalculationModel):
         return None
 
 
-class DummyChannelLayer:
-    def __init__(self):
-        self.messages = []
-
-    def group_send(self, group, message):
-        self.messages.append((group, message))
-
-
-@unittest.skip("ActiveCalculationStateStore._load_state_map removed — tests need update")
 class CalculationStatusSignalTests(SimpleTestCase):
+    """
+    Exercise ``update_calculation_status`` against the real
+    ``ActiveCalculationStateStore`` (in-memory, so safe in
+    ``SimpleTestCase``) with the channel-layer send boundary mocked.
+    """
+
     def setUp(self):
-        self._state_map = {}
-        self._load_state_map_patcher = patch.object(
-            ActiveCalculationStateStore,
-            "_load_state_map",
-            side_effect=self._load_state_map,
+        super().setUp()
+        # Ensure a clean store — this is a process-global class attribute.
+        ActiveCalculationStateStore.clear_all()
+        self.addCleanup(ActiveCalculationStateStore.clear_all)
+
+        self._broadcasts = []
+
+        def _capture(group, message):
+            self._broadcasts.append((group, message))
+
+        patcher = patch(
+            "lex.core.signals.CalculationSignals.sync_channel_group_send",
+            side_effect=_capture,
         )
-        self._save_state_map_patcher = patch.object(
-            ActiveCalculationStateStore,
-            "_save_state_map",
-            side_effect=self._save_state_map,
-        )
-        self._load_state_map_patcher.start()
-        self._save_state_map_patcher.start()
+        self._send_mock = patcher.start()
+        self.addCleanup(patcher.stop)
+
         self._set_context("")
-
-    def tearDown(self):
-        self._load_state_map_patcher.stop()
-        self._save_state_map_patcher.stop()
-        self._set_context("")
-
-    def _load_state_map(self):
-        return dict(self._state_map)
-
-    def _save_state_map(self, state_map):
-        self._state_map = dict(state_map)
+        self.addCleanup(self._set_context, "")
 
     @staticmethod
     def _set_context(calculation_id):
@@ -78,140 +98,191 @@ class CalculationStatusSignalTests(SimpleTestCase):
         )
 
     @staticmethod
-    def _build_instance(pk):
+    def _build_instance(pk, status=CalculationModel.IN_PROGRESS):
         instance = DummyCalculationModel(id=pk)
-        instance.is_calculated = CalculationModel.IN_PROGRESS
+        instance.is_calculated = status
         return instance
 
-    def test_in_progress_is_not_rebroadcast_with_same_calculation_id(self):
+    # ------------------------------------------------------------------
+    # IN_PROGRESS
+    # ------------------------------------------------------------------
+
+    def test_in_progress_registers_store_entry_and_broadcasts(self):
         self._set_context("calc-1")
         instance = self._build_instance(1)
-        channel_layer = DummyChannelLayer()
 
-        with patch(
-            "lex.core.signals.CalculationSignals.get_channel_layer",
-            return_value=channel_layer,
-        ), patch(
-            "lex.core.signals.CalculationSignals.async_to_sync",
-            side_effect=lambda fn: fn,
-        ):
-            update_calculation_status(instance)
-            update_calculation_status(instance)
+        update_calculation_status(instance)
 
-        self.assertEqual(len(channel_layer.messages), 1)
-        event = channel_layer.messages[0][1]
-        self.assertEqual(event["type"], "calculation_in_progress")
-        self.assertEqual(event["payload"]["calculation_id"], "calc-1")
+        self.assertEqual(len(self._broadcasts), 1)
+        group, message = self._broadcasts[0]
+        self.assertEqual(group, "update_calculation_status")
+        self.assertEqual(message["type"], "calculation_in_progress")
+        self.assertEqual(message["payload"]["calculation_id"], "calc-1")
+        self.assertEqual(
+            message["payload"]["record_id"],
+            f"{instance._meta.model_name}_{instance.id}",
+        )
 
-    def test_in_progress_rebroadcasts_when_calculation_id_becomes_available(self):
+        entry = ActiveCalculationStateStore.get_entry(
+            f"{instance._meta.model_name}_{instance.id}"
+        )
+        self.assertEqual(entry["calculation_id"], "calc-1")
+        self.assertEqual(entry["record_pk"], str(instance.id))
+
+    def test_in_progress_always_rebroadcasts(self):
+        """
+        Regression: the old implementation suppressed duplicate
+        IN_PROGRESS broadcasts when the ``calculation_id`` was the
+        same. The current design (see ``update_calculation_status``
+        docstring) explicitly NEVER suppresses — the frontend is
+        idempotent and multi-tab clients need every event. This test
+        pins the new contract so a future "optimization" can't silently
+        regress it.
+        """
+        self._set_context("calc-dup")
         instance = self._build_instance(2)
-        channel_layer = DummyChannelLayer()
 
-        with patch(
-            "lex.core.signals.CalculationSignals.get_channel_layer",
-            return_value=channel_layer,
-        ), patch(
-            "lex.core.signals.CalculationSignals.async_to_sync",
-            side_effect=lambda fn: fn,
-        ):
-            self._set_context("")
-            update_calculation_status(instance)
+        update_calculation_status(instance)
+        update_calculation_status(instance)
 
-            self._set_context("calc-2")
-            update_calculation_status(instance)
+        self.assertEqual(len(self._broadcasts), 2)
+        self.assertEqual(
+            self._broadcasts[0][1]["payload"]["calculation_id"], "calc-dup"
+        )
+        self.assertEqual(
+            self._broadcasts[1][1]["payload"]["calculation_id"], "calc-dup"
+        )
 
-        self.assertEqual(len(channel_layer.messages), 2)
-        first_event = channel_layer.messages[0][1]
-        second_event = channel_layer.messages[1][1]
-        self.assertNotIn("calculation_id", first_event["payload"])
-        self.assertEqual(second_event["payload"]["calculation_id"], "calc-2")
-
-    def test_in_progress_without_context_keeps_existing_calculation_id(self):
-        instance = self._build_instance(6)
-        channel_layer = DummyChannelLayer()
-
-        with patch(
-            "lex.core.signals.CalculationSignals.get_channel_layer",
-            return_value=channel_layer,
-        ), patch(
-            "lex.core.signals.CalculationSignals.async_to_sync",
-            side_effect=lambda fn: fn,
-        ):
-            self._set_context("calc-6")
-            update_calculation_status(instance)
-
-            self._set_context("")
-            update_calculation_status(instance)
-
-        self.assertEqual(len(channel_layer.messages), 1)
+    def test_in_progress_without_context_preserves_stored_calculation_id(self):
+        """
+        Once a record is registered in the store with a calculation_id,
+        a subsequent IN_PROGRESS broadcast from a context that lost the
+        id must not overwrite the store entry back to empty — the
+        store's existing id is the fallback in ``_resolve_calculation_id``.
+        """
+        instance = self._build_instance(3)
         record_id = f"{instance._meta.model_name}_{instance.id}"
+
+        self._set_context("calc-3")
+        update_calculation_status(instance)
+
+        self._set_context("")
+        update_calculation_status(instance)
+
+        # Both broadcasts fire (design: never suppress), and both carry
+        # the original calculation_id via the store fallback.
+        self.assertEqual(len(self._broadcasts), 2)
+        self.assertEqual(
+            self._broadcasts[0][1]["payload"]["calculation_id"], "calc-3"
+        )
+        self.assertEqual(
+            self._broadcasts[1][1]["payload"]["calculation_id"], "calc-3"
+        )
         self.assertEqual(
             ActiveCalculationStateStore.get_entry(record_id).get("calculation_id"),
-            "calc-6",
+            "calc-3",
         )
 
-    def test_calculate_hook_emits_in_progress_before_sync_execution(self):
-        instance = self._build_instance(3)
+    # ------------------------------------------------------------------
+    # Terminal states
+    # ------------------------------------------------------------------
 
-        with patch.object(
-            DummyCalculationModel, "should_use_celery", return_value=False
-        ), patch.object(
-            DummyCalculationModel, "execute_calculation_sync"
-        ) as execute_sync_mock, patch(
-            "lex.core.signals.CalculationSignals.update_calculation_status"
-        ) as update_status_mock:
-            DummyCalculationModel.calculate_hook(instance)
-
-        update_status_mock.assert_called_once_with(instance)
-        execute_sync_mock.assert_called_once_with()
-
-    def test_calculate_hook_does_not_rewrap_existing_calculation_exception(self):
+    def test_success_clears_store_entry_and_broadcasts(self):
+        self._set_context("calc-4")
         instance = self._build_instance(4)
-        child_instance = self._build_instance(40)
-        existing_exception = CalculationModelException(
-            calc_obj=[child_instance],
-            exception_details=["inner-failure"],
-            stack_trace=["stack"],
+        record_id = f"{instance._meta.model_name}_{instance.id}"
+
+        # Prime the store with an IN_PROGRESS entry.
+        update_calculation_status(instance)
+        self.assertIn("calculation_id", ActiveCalculationStateStore.get_entry(record_id))
+
+        # Now mark SUCCESS.
+        instance.is_calculated = CalculationModel.SUCCESS
+        update_calculation_status(instance)
+
+        self.assertEqual(len(self._broadcasts), 2)
+        self.assertEqual(self._broadcasts[-1][1]["type"], "calculation_success")
+        self.assertEqual(ActiveCalculationStateStore.get_entry(record_id), {})
+
+    def test_error_clears_store_and_propagates_exception_details(self):
+        self._set_context("calc-5")
+        instance = self._build_instance(5)
+        record_id = f"{instance._meta.model_name}_{instance.id}"
+
+        update_calculation_status(instance)
+
+        instance.is_calculated = CalculationModel.ERROR
+        update_calculation_status(
+            instance,
+            exception_details="boom",
+            stack_trace="traceback-here",
         )
 
-        with patch.object(
-            DummyCalculationModel, "should_use_celery", return_value=False
-        ), patch.object(
-            DummyCalculationModel, "execute_calculation_sync", side_effect=existing_exception
-        ), patch(
-            "lex.core.signals.CalculationSignals.update_calculation_status"
-        ), patch.object(
-            DummyCalculationModel, "save"
-        ) as save_mock:
-            with self.assertRaises(CalculationModelException) as raised:
-                DummyCalculationModel.calculate_hook(instance)
+        self.assertEqual(len(self._broadcasts), 2)
+        error_msg = self._broadcasts[-1][1]
+        self.assertEqual(error_msg["type"], "calculation_error")
+        self.assertEqual(error_msg["payload"]["message"], "boom")
+        self.assertEqual(error_msg["payload"]["traceback"], "traceback-here")
+        self.assertEqual(ActiveCalculationStateStore.get_entry(record_id), {})
 
-        exc = raised.exception
-        # The parent wraps the child chain: calc_obj accumulates [child, parent]
-        self.assertEqual(exc.calc_obj, [child_instance, instance])
-        self.assertEqual(exc.exception_details[0], "inner-failure")
-        # Parent must persist its own ERROR state
-        save_mock.assert_called_once_with(skip_hooks=True)
-        self.assertEqual(instance.is_calculated, CalculationModel.ERROR)
+    def test_non_calculationmodel_instance_is_noop(self):
+        """
+        Defensive guard: if something other than a CalculationModel
+        subclass is handed to the signal, return early without
+        broadcasting or touching the store.
+        """
 
-    def test_calculate_hook_skips_reentrant_invocation(self):
-        instance = self._build_instance(5)
+        class NotACalculationModel:
+            is_calculated = CalculationModel.IN_PROGRESS
+            _meta = None
+            id = 7
 
-        def simulate_internal_save_reentry():
-            DummyCalculationModel.calculate_hook(instance)
+        update_calculation_status(NotACalculationModel())
+        self.assertEqual(self._broadcasts, [])
 
-        with patch.object(
-            DummyCalculationModel, "should_use_celery", return_value=False
-        ), patch.object(
-            DummyCalculationModel, "execute_calculation_sync", side_effect=simulate_internal_save_reentry
-        ) as execute_sync_mock, patch(
-            "lex.core.signals.CalculationSignals.update_calculation_status"
-        ) as update_status_mock:
-            DummyCalculationModel.calculate_hook(instance)
+    def test_aborted_clears_store_and_broadcasts(self):
+        """ABORTED → clears the entry and sends ``calculation_aborted``."""
+        self._set_context("calc-abort")
+        instance = self._build_instance(10)
+        record_id = f"{instance._meta.model_name}_{instance.id}"
 
-        # Outer invocation executes exactly once; nested invocation returns early.
-        self.assertEqual(execute_sync_mock.call_count, 1)
-        update_status_mock.assert_called_once_with(instance)
+        update_calculation_status(instance)  # IN_PROGRESS
+
+        instance.is_calculated = CalculationModel.ABORTED
+        update_calculation_status(instance)
+
+        self.assertEqual(len(self._broadcasts), 2)
+        self.assertEqual(self._broadcasts[-1][1]["type"], "calculation_aborted")
+        self.assertEqual(ActiveCalculationStateStore.get_entry(record_id), {})
+
+    def test_unknown_status_no_broadcast(self):
+        """An unrecognised ``is_calculated`` value does not broadcast."""
+        instance = self._build_instance(11)
+        instance.is_calculated = "TOTALLY_UNKNOWN"
+
+        update_calculation_status(instance)
+        self.assertEqual(self._broadcasts, [])
+
+    def test_calculation_id_from_instance_attribute(self):
+        """Falls back to ``instance.calculation_id`` when context + store are empty."""
+        self._set_context("")  # no context calc id
+        instance = self._build_instance(12)
+        instance.calculation_id = "attr-fallback-id"
+
+        update_calculation_status(instance)
+
+        payload = self._broadcasts[0][1]["payload"]
+        self.assertEqual(payload["calculation_id"], "attr-fallback-id")
+
+    def test_no_calculation_id_omits_key_from_payload(self):
+        """When no calculation_id is resolved, payload has no ``calculation_id`` key."""
+        self._set_context("")
+        instance = self._build_instance(13)
+
+        update_calculation_status(instance)
+
+        payload = self._broadcasts[0][1]["payload"]
+        self.assertNotIn("calculation_id", payload)
 
 
 class CalculationExceptionUtilityTests(SimpleTestCase):
@@ -250,3 +321,86 @@ class CalculationExceptionUtilityTests(SimpleTestCase):
         self.assertEqual(calc_obj, [child_instance, instance])
         self.assertEqual(exception_details, ["inner-failure"])
         self.assertEqual(stack_trace, ["inner-trace"])
+
+
+class TestResolveCalculationId(SimpleTestCase):
+    """Prove ``_resolve_calculation_id`` follows the priority chain correctly."""
+
+    def setUp(self):
+        ActiveCalculationStateStore.clear_all()
+        self.addCleanup(ActiveCalculationStateStore.clear_all)
+
+    def test_priority_1_operation_context(self):
+        """operation_context['calculation_id'] has highest priority."""
+        instance = DummyCalculationModel(id=20)
+        operation_context.set(
+            {"operation_id": "op", "request_obj": {}, "calculation_id": "ctx-20", "audit_log_temp": None}
+        )
+        self.addCleanup(operation_context.set, {"operation_id": "", "request_obj": {}, "calculation_id": "", "audit_log_temp": None})
+
+        result = _resolve_calculation_id(instance, "dummycalculationmodel_20")
+        self.assertEqual(result, "ctx-20")
+
+    def test_priority_2_state_store(self):
+        """Falls back to ActiveCalculationStateStore when context is empty."""
+        operation_context.set(
+            {"operation_id": "op", "request_obj": {}, "calculation_id": "", "audit_log_temp": None}
+        )
+        self.addCleanup(operation_context.set, {"operation_id": "", "request_obj": {}, "calculation_id": "", "audit_log_temp": None})
+
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id="dummycalculationmodel_21",
+            calculation_id="store-21",
+            record="Dummy(21)",
+        )
+        instance = DummyCalculationModel(id=21)
+        result = _resolve_calculation_id(instance, "dummycalculationmodel_21")
+        self.assertEqual(result, "store-21")
+
+    def test_priority_3_instance_attribute(self):
+        """Falls back to instance.calculation_id when store is empty."""
+        operation_context.set(
+            {"operation_id": "op", "request_obj": {}, "calculation_id": "", "audit_log_temp": None}
+        )
+        self.addCleanup(operation_context.set, {"operation_id": "", "request_obj": {}, "calculation_id": "", "audit_log_temp": None})
+
+        instance = DummyCalculationModel(id=22)
+        instance.calculation_id = "attr-22"
+        result = _resolve_calculation_id(instance, "dummycalculationmodel_22")
+        self.assertEqual(result, "attr-22")
+
+    def test_returns_none_when_nothing_available(self):
+        """Returns None when all three sources are absent."""
+        operation_context.set(
+            {"operation_id": "op", "request_obj": {}, "calculation_id": "", "audit_log_temp": None}
+        )
+        self.addCleanup(operation_context.set, {"operation_id": "", "request_obj": {}, "calculation_id": "", "audit_log_temp": None})
+
+        instance = DummyCalculationModel(id=23)
+        result = _resolve_calculation_id(instance, "dummycalculationmodel_23")
+        self.assertIsNone(result)
+
+    def test_empty_string_instance_attr_skipped(self):
+        """An empty-string calculation_id on instance is treated as absent."""
+        operation_context.set(
+            {"operation_id": "op", "request_obj": {}, "calculation_id": "", "audit_log_temp": None}
+        )
+        self.addCleanup(operation_context.set, {"operation_id": "", "request_obj": {}, "calculation_id": "", "audit_log_temp": None})
+
+        instance = DummyCalculationModel(id=24)
+        instance.calculation_id = ""
+        result = _resolve_calculation_id(instance, "dummycalculationmodel_24")
+        self.assertIsNone(result)
+
+    def test_non_string_instance_attr_skipped(self):
+        """A non-string calculation_id on instance is skipped."""
+        operation_context.set(
+            {"operation_id": "op", "request_obj": {}, "calculation_id": "", "audit_log_temp": None}
+        )
+        self.addCleanup(operation_context.set, {"operation_id": "", "request_obj": {}, "calculation_id": "", "audit_log_temp": None})
+
+        instance = DummyCalculationModel(id=25)
+        instance.calculation_id = 99999
+        result = _resolve_calculation_id(instance, "dummycalculationmodel_25")
+        self.assertIsNone(result)
+

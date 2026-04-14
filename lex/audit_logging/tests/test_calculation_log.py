@@ -12,7 +12,7 @@ Verifies:
 from unittest.mock import call, patch
 
 from django.contrib.contenttypes.models import ContentType
-from django.db import transaction
+from django.db import connection, transaction
 from django.test import TransactionTestCase
 
 from lex.audit_logging.models.AuditLog import AuditLog
@@ -23,6 +23,23 @@ from lex.audit_logging.utils.ModelContext import ModelContext, _model_context
 
 class CalculationLogRegressionTest(TransactionTestCase):
     """Prove deduplication, cache fan-out, and fallback routing of calculation logs."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        with connection.schema_editor() as schema_editor:
+            schema_editor.create_model(AuditLog)
+            schema_editor.create_model(CalculationLog)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            with connection.schema_editor() as schema_editor:
+                schema_editor.delete_model(CalculationLog)
+                schema_editor.delete_model(AuditLog)
+        finally:
+            super().tearDownClass()
+
     def setUp(self):
         self.audit_log = AuditLog.objects.create(
             author="tester",
@@ -34,6 +51,16 @@ class CalculationLogRegressionTest(TransactionTestCase):
         self.parent_model = CalculationLog.objects.create(calculationId="parent-model")
         self.current_model = CalculationLog.objects.create(calculationId="current-model")
         self._original_model_context = _model_context.get()["model_context"]
+
+    def _fixture_teardown(self):
+        # Disable FK enforcement so Django's flush can DELETE in any order.
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA foreign_keys = OFF")
+        try:
+            super()._fixture_teardown()
+        finally:
+            with connection.cursor() as cursor:
+                cursor.execute("PRAGMA foreign_keys = ON")
 
     def tearDown(self):
         _model_context.get()["model_context"] = self._original_model_context

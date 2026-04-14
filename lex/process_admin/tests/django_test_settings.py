@@ -13,6 +13,10 @@ INSTALLED_APPS = [
 
 API_KEY_CUSTOM_HEADER = "HTTP_API_KEY"
 
+# Silence lazy-reference system check errors from audit_logging models
+# that reference apps not installed in this minimal test configuration.
+SILENCED_SYSTEM_CHECKS = ["fields.E307"]
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

@@ -8,7 +8,12 @@ from lex.api.serializers.base_serializers import LexSerializer
 from lex.api.utils.helpers import resolve_target_model
 from lex.audit_logging.serializers.AuditLogSerializer import AuditLogDefaultSerializer
 from lex.audit_logging.serializers.CalculationLogSerializer import CalculationLogDefaultSerializer
-from lex.audit_logging.utils.content_types import safe_get_content_type
+from lex.audit_logging.utils.content_types import (
+    safe_get_content_type,
+    safe_get_generic_related_object,
+    _describe_model,
+    _get_content_type_manager,
+)
 
 
 class SafeContentTypeTest(SimpleTestCase):
@@ -134,4 +139,109 @@ class ResolveTargetModelRegressionTest(SimpleTestCase):
             result = LexSerializer._resolve_target_model(StubAuditLog())
 
         self.assertIs(result, expected_model)
+
+
+# ── New tests for untested content_types helpers ─────────────────────
+
+
+class TestDescribeModel(SimpleTestCase):
+    """Prove ``_describe_model`` returns a meaningful label for any input."""
+
+    def test_django_model_class_returns_label_lower(self):
+        """A Django model class returns ``app_label.model_name``."""
+        from django.contrib.auth.models import User
+        result = _describe_model(User)
+        self.assertEqual(result, "auth.user")
+
+    def test_plain_class_returns_name(self):
+        """A class without ``_meta`` falls back to ``__name__``."""
+        class Foo:
+            pass
+        self.assertEqual(_describe_model(Foo), "Foo")
+
+    def test_string_returns_str(self):
+        """A string (no ``_meta``, no ``__name__``) returns ``str()``."""
+        self.assertEqual(_describe_model("hello"), "hello")
+
+    def test_none_returns_str_none(self):
+        """None returns the string ``'None'``."""
+        self.assertEqual(_describe_model(None), "None")
+
+
+class TestGetContentTypeManager(SimpleTestCase):
+    """Prove ``_get_content_type_manager`` picks the right manager."""
+
+    def test_none_returns_default_manager(self):
+        """Passing ``None`` returns ``ContentType.objects``."""
+        manager = _get_content_type_manager(None)
+        self.assertIs(manager, ContentType.objects)
+
+    def test_using_returns_db_manager(self):
+        """Passing a db alias returns a db_manager bound to that alias."""
+        manager = _get_content_type_manager("default")
+        self.assertIsNotNone(manager)
+
+
+class TestSafeGetContentTypeValidation(SimpleTestCase):
+    """Prove ``safe_get_content_type`` validates its arguments."""
+
+    def test_raises_on_no_arguments(self):
+        """Calling with neither model nor content_type_id raises ValueError."""
+        with self.assertRaises(ValueError):
+            safe_get_content_type()
+
+
+class TestSafeGetGenericRelatedObject(SimpleTestCase):
+    """Prove ``safe_get_generic_related_object`` resolves GFK targets safely."""
+
+    def test_returns_none_when_no_content_type_id(self):
+        """When content_type_id is None, returns None immediately."""
+        instance = MagicMock()
+        instance.content_type_id = None
+        instance.object_id = 1
+        result = safe_get_generic_related_object(instance)
+        self.assertIsNone(result)
+
+    def test_returns_none_when_no_object_id(self):
+        """When object_id is None, returns None."""
+        instance = MagicMock()
+        instance.content_type_id = 1
+        instance.object_id = None
+        result = safe_get_generic_related_object(instance)
+        self.assertIsNone(result)
+
+    def test_custom_field_names(self):
+        """Supports custom ``content_type_field`` and ``object_id_field``."""
+        instance = SimpleNamespace(my_ct_id=None, my_oid=1, _state=SimpleNamespace(db=None))
+        result = safe_get_generic_related_object(
+            instance,
+            content_type_field="my_ct",
+            object_id_field="my_oid",
+        )
+        self.assertIsNone(result)
+
+    def test_returns_none_on_resolution_error(self):
+        """Returns None when ContentType lookup raises an exception."""
+        instance = SimpleNamespace(
+            content_type_id=99999,
+            object_id=1,
+            _state=SimpleNamespace(db="default"),
+        )
+        result = safe_get_generic_related_object(instance)
+        self.assertIsNone(result)
+
+    def test_returns_none_when_model_class_is_none(self):
+        """Returns None when content_type.model_class() is None."""
+        fake_ct = SimpleNamespace(model_class=lambda: None)
+        instance = SimpleNamespace(
+            content_type_id=1,
+            object_id=1,
+            _state=SimpleNamespace(db="default"),
+        )
+        with patch(
+            "lex.audit_logging.utils.content_types.safe_get_content_type",
+            return_value=fake_ct,
+        ):
+            result = safe_get_generic_related_object(instance)
+        self.assertIsNone(result)
 

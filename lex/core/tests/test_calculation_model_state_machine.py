@@ -1,10 +1,10 @@
 """
-Unit tests for the ``CalculationModel`` state machine.
+Tests for the ``CalculationModel`` state machine.
 
-**What this tests (customer-visible behaviour)**
-
+Why this matters
+----------------
 ``CalculationModel`` is the base class for every model whose rows can be
-"calculated" — either synchronously or via Celery.  When a row's
+"calculated" — either synchronously or via Celery. When a row's
 ``is_calculated`` field transitions to ``IN_PROGRESS``, the framework:
 
 1. Fires ``calculate_hook`` (a django-lifecycle hook on AFTER_CREATE /
@@ -16,20 +16,23 @@ Unit tests for the ``CalculationModel`` state machine.
 4. Transitions to ``SUCCESS`` on success, or ``ERROR`` (with
    ``calculation_error_message`` capture) on failure.
 
-**Why it matters**
-
 Every calculated model in every customer project inherits from
-``CalculationModel``.  Incorrect status transitions, lost error messages,
-or re-entrant hook execution break the entire calculation pipeline.
+``CalculationModel``. Incorrect status transitions, lost error messages,
+or re-entrant hook execution break the entire calculation pipeline, so
+these are release-gating tests.
 
-**Methodology**
+Methodology
+-----------
+Tests come in two flavours, matching the thing under test:
 
-- We define a minimal concrete subclass (``StubCalcModel``) inside the
-  test module — it never touches the database (``managed = False``).
-- ``calculate_hook`` and ``execute_calculation_sync`` are tested in
-  isolation by mocking dependencies (``ContextResolver``, ``CacheManager``,
-  ``update_calculation_status``).
-- Status constants and ``lex_func()`` resolution are purely in-memory.
+* **Pure-logic (status constants, ``lex_func()`` resolution)** — use
+  ``SimpleTestCase`` with an unmanaged ``StubCalcModel`` (no DB).
+* **State machine (``execute_calculation_sync``)** — use
+  ``TransactionTestCase`` with a real managed model whose table is
+  created via ``schema_editor`` in ``setUpClass``. The real
+  ``transaction.atomic()`` block runs against the test DB; only true
+  boundaries (Redis-backed ``CacheManager``/``ActiveCalculationStateStore``
+  + channel layer via ``update_calculation_status``) are mocked.
 
 See also
 --------
@@ -37,14 +40,16 @@ See also
 - ``docs/reference/CalculationModel Internals.md``
 """
 
-import unittest
-from unittest.mock import MagicMock, patch, PropertyMock
-from types import SimpleNamespace
+import os
+from unittest.mock import MagicMock, patch
 
-from django.db import models
-from django.test import SimpleTestCase
+from django.db import connection, models
+from django.test import SimpleTestCase, TransactionTestCase
 
+from lex.api.utils import OperationContext
+from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
+from lex.core.models.LexModel import PermissionResult
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -122,6 +127,12 @@ class TestCalculationModelStatuses(SimpleTestCase):
         obj = StubCalcModel()
         self.assertEqual(obj.is_calculated, CalculationModel.NOT_CALCULATED)
 
+    def test_statuses_are_pairs(self):
+        """Each entry in ``STATUSES`` is a ``(value, label)`` pair where both elements match."""
+        for status in CalculationModel.STATUSES:
+            self.assertEqual(len(status), 2)
+            self.assertEqual(status[0], status[1])
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 2.  lex_func() resolution
@@ -182,80 +193,162 @@ class TestLexFuncResolution(SimpleTestCase):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 3.  execute_calculation_sync  status transitions
+# 3.  execute_calculation_sync  status transitions (real DB, real atomic block)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-@unittest.skip("DatabaseOperationForbidden — execute_calculation_sync uses transaction.atomic() in SimpleTestCase")
-class TestExecuteCalculationSync(SimpleTestCase):
-    """Prove ``execute_calculation_sync`` transitions to SUCCESS or ERROR."""
+class ExecSyncCalcModel(CalculationModel):
+    """
+    Real managed ``CalculationModel`` used by ``TestExecuteCalculationSync``.
 
-    def _make_obj(self, side_effect=None):
-        """Create a ``StubCalcModel`` configured to succeed or fail."""
-        obj = StubCalcModel()
-        obj._calc_side_effect = side_effect
-        obj.is_calculated = CalculationModel.IN_PROGRESS
-        obj.save = MagicMock()  # prevent DB writes
-        return obj
+    The table is built at class setup time via ``schema_editor`` and torn
+    down at the end, mirroring the pattern used by
+    ``test_calculation_audit_recovery`` — this lets the test exercise the
+    real ``transaction.atomic()`` block inside ``execute_calculation_sync``
+    without polluting the permanent schema.
+    """
 
-    @patch("lex.core.models.CalculationModel.CacheManager")
-    @patch("lex.core.models.CalculationModel.ContextResolver")
-    @patch("lex.core.signals.CalculationSignals.update_calculation_status")
-    def test_success_transition(self, mock_status, mock_resolver, mock_cache):
-        """Successful ``calculate()`` → ``is_calculated == SUCCESS``."""
-        mock_resolver.resolve.return_value = MagicMock(
-            root_record="stub_1",
-            current_record="stub_1",
-            parent_record=None,
-            calculation_id="c1",
+    name = models.CharField(max_length=100, default="")
+    calculation_error_message = models.TextField(blank=True, default="")
+    _calc_side_effect = None  # set per-instance by tests to control calculate()
+
+    class Meta:
+        app_label = "lex_app"
+
+    def calculate(self):
+        if self._calc_side_effect:
+            effect = self._calc_side_effect
+            if isinstance(effect, type) and issubclass(effect, BaseException):
+                raise effect("forced error")
+            if isinstance(effect, BaseException):
+                raise effect
+            if callable(effect):
+                return effect()
+        return None
+
+    # Permission hooks — the base save() path checks these. Allow-all keeps
+    # the focus on the state machine, not on authorization.
+    def permission_read(self, user_context):
+        return PermissionResult.allow_all("test")
+
+    def permission_edit(self, user_context):
+        return PermissionResult.allow_all("test")
+
+    def permission_create(self, user_context):
+        return True
+
+    def permission_delete(self, user_context):
+        return True
+
+
+class TestExecuteCalculationSync(TransactionTestCase):
+    """
+    Exercise ``execute_calculation_sync`` against a real managed model and
+    a real DB connection, so the inner ``transaction.atomic()`` block is
+    actually hit. Only the Redis-backed status broadcast and cache cleanup
+    are mocked — those are the *true* boundaries at this layer.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        with connection.schema_editor() as schema_editor:
+            schema_editor.create_model(ExecSyncCalcModel)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            with connection.schema_editor() as schema_editor:
+                schema_editor.delete_model(ExecSyncCalcModel)
+        finally:
+            super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        # Force the sync path regardless of whatever the surrounding env
+        # has in CELERY_ACTIVE — this test is explicitly about the sync
+        # branch of the state machine.
+        env_patch = patch.dict(
+            os.environ, {"CELERY_ACTIVE": "False"}, clear=False
         )
-        mock_cache.cleanup_calculation.return_value = MagicMock(success=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
 
-        obj = self._make_obj()
-        obj.execute_calculation_sync()
-
-        self.assertEqual(obj.is_calculated, CalculationModel.SUCCESS)
-        obj.save.assert_called()
-
-    @patch("lex.core.models.CalculationModel.CacheManager")
-    @patch("lex.core.models.CalculationModel.ContextResolver")
-    @patch("lex.core.signals.CalculationSignals.update_calculation_status")
-    def test_error_transition_on_exception(self, mock_status, mock_resolver, mock_cache):
-        """Exception in ``calculate()`` → ``is_calculated == ERROR``."""
-        mock_resolver.resolve.return_value = MagicMock(
-            root_record="stub_1",
-            current_record="stub_1",
-            parent_record=None,
-            calculation_id="c1",
+        # Boundary mocks: update_calculation_status writes to Redis via the
+        # channel layer + ActiveCalculationStateStore, and CacheManager
+        # cleanup also hits Redis. Neither is what this test is about.
+        # ``update_calculation_status`` is imported lazily inside
+        # ``execute_calculation_sync`` so we patch the source module.
+        status_patch = patch(
+            "lex.core.signals.CalculationSignals.update_calculation_status"
         )
-        mock_cache.cleanup_calculation.return_value = MagicMock(success=True)
+        status_patch.start()
+        self.addCleanup(status_patch.stop)
 
-        obj = self._make_obj(side_effect=ValueError("test"))
+        cache_patch = patch("lex.core.models.CalculationModel.CacheManager")
+        mock_cache = cache_patch.start()
+        mock_cache.cleanup_calculation.return_value = MagicMock(success=True)
+        self.addCleanup(cache_patch.stop)
+
+    def _instance(self, side_effect=None, name="calc"):
+        """
+        Build a committed ``ExecSyncCalcModel`` row already in IN_PROGRESS,
+        wired with the requested side effect for its ``calculate()`` call.
+        """
+        with OperationContext({}, f"calc-setup-{name}"):
+            instance = ExecSyncCalcModel.objects.create(name=name)
+        instance._calc_side_effect = side_effect
+        instance.is_calculated = CalculationModel.IN_PROGRESS
+        return instance
+
+    def test_success_transition(self):
+        """
+        A ``calculate()`` that returns normally must leave the row with
+        ``is_calculated == SUCCESS`` after ``execute_calculation_sync``
+        runs — both on the in-memory instance and in the database row
+        that the method itself saves via ``save(skip_hooks=True)``.
+        """
+        instance = self._instance()
+
+        with OperationContext({}, "calc-success"), model_logging_context(instance):
+            instance.execute_calculation_sync()
+
+        self.assertEqual(instance.is_calculated, CalculationModel.SUCCESS)
+
+        refreshed = ExecSyncCalcModel.objects.get(pk=instance.pk)
+        self.assertEqual(refreshed.is_calculated, CalculationModel.SUCCESS)
+
+    def test_error_transition_on_exception(self):
+        """
+        When ``calculate()`` raises, the method must re-raise and the row
+        must end in ``is_calculated == ERROR`` — the persisted row too,
+        so a second request sees the error state.
+        """
+        instance = self._instance(side_effect=ValueError("test"), name="err")
 
         with self.assertRaises(ValueError):
-            obj.execute_calculation_sync()
+            with OperationContext({}, "calc-error"), model_logging_context(instance):
+                instance.execute_calculation_sync()
 
-        self.assertEqual(obj.is_calculated, CalculationModel.ERROR)
+        self.assertEqual(instance.is_calculated, CalculationModel.ERROR)
+        refreshed = ExecSyncCalcModel.objects.get(pk=instance.pk)
+        self.assertEqual(refreshed.is_calculated, CalculationModel.ERROR)
 
-    @patch("lex.core.models.CalculationModel.CacheManager")
-    @patch("lex.core.models.CalculationModel.ContextResolver")
-    @patch("lex.core.signals.CalculationSignals.update_calculation_status")
-    def test_error_message_captured(self, mock_status, mock_resolver, mock_cache):
-        """Error details are written to ``calculation_error_message``."""
-        mock_resolver.resolve.return_value = MagicMock(
-            root_record="stub_1",
-            current_record="stub_1",
-            parent_record=None,
-            calculation_id="c1",
-        )
-        mock_cache.cleanup_calculation.return_value = MagicMock(success=True)
-
-        obj = self._make_obj(side_effect=RuntimeError("bad math"))
+    def test_error_message_captured(self):
+        """
+        On failure, the original exception message must be written to
+        ``calculation_error_message`` (the standard error-surfacing field)
+        so the UI can show the user what broke.
+        """
+        instance = self._instance(side_effect=RuntimeError("bad math"), name="msg")
 
         with self.assertRaises(RuntimeError):
-            obj.execute_calculation_sync()
+            with OperationContext({}, "calc-msg"), model_logging_context(instance):
+                instance.execute_calculation_sync()
 
-        self.assertIn("bad math", obj.calculation_error_message)
+        self.assertIn("bad math", instance.calculation_error_message)
+        refreshed = ExecSyncCalcModel.objects.get(pk=instance.pk)
+        self.assertIn("bad math", refreshed.calculation_error_message)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -334,6 +427,39 @@ class TestBuildExceptionChain(SimpleTestCase):
         self.assertIsInstance(details, list)
         self.assertIsInstance(traces, list)
 
+    def test_no_artifacts_on_plain_exception(self):
+        """A plain exception with no prior chain attributes produces empty lists."""
+        exc = RuntimeError("simple error")
+        calc_obj, details, trace = CalculationModel.build_exception_chain(exc)
+        self.assertEqual(calc_obj, [])
+        self.assertEqual(details, [])
+        self.assertEqual(trace, [])
+
+    def test_does_not_duplicate_current_obj(self):
+        """If ``calc_obj`` already ends with ``current_obj``, don't append again."""
+        exc = RuntimeError("error")
+        obj = StubCalcModel()
+        exc.calc_obj = [obj]
+        calc_obj, _, _ = CalculationModel.build_exception_chain(exc, current_obj=obj)
+        self.assertEqual(calc_obj.count(obj), 1)
+
+    def test_preserves_existing_artifacts(self):
+        """Pre-existing chain attributes are carried through unchanged."""
+        exc = RuntimeError("error")
+        exc.exception_details = ["Detail A"]
+        exc.stack_trace = ["trace"]
+        exc.calc_obj = ["obj1"]
+        calc_obj, details, trace = CalculationModel.build_exception_chain(exc)
+        self.assertEqual(details, ["Detail A"])
+        self.assertEqual(trace, ["trace"])
+        self.assertIn("obj1", calc_obj)
+
+    def test_current_obj_none_is_noop(self):
+        """Passing ``current_obj=None`` does not add ``None`` to the chain."""
+        exc = RuntimeError("error")
+        calc_obj, _, _ = CalculationModel.build_exception_chain(exc, current_obj=None)
+        self.assertEqual(calc_obj, [])
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 6.  CalculationModelException
@@ -364,3 +490,21 @@ class TestCalculationModelException(SimpleTestCase):
             exception_details=[None, "real detail"]
         )
         self.assertIn("real detail", str(exc.detail))
+
+    def test_fallback_to_args_message(self):
+        """Positional string arg is used as message when no details provided."""
+        exc = CalculationModelException("Direct message")
+        self.assertIn("Direct message", str(exc))
+
+    def test_none_kwargs_become_empty_lists(self):
+        """Omitting all kwargs normalises to empty lists."""
+        exc = CalculationModelException()
+        self.assertEqual(exc.calc_obj, [])
+        self.assertEqual(exc.exception_details, [])
+        self.assertEqual(exc.stack_trace, [])
+
+    def test_is_api_exception(self):
+        """``CalculationModelException`` inherits from DRF ``APIException``."""
+        from rest_framework.exceptions import APIException
+        exc = CalculationModelException("test")
+        self.assertIsInstance(exc, APIException)

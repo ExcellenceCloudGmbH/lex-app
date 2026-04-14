@@ -18,17 +18,24 @@ thread-safe and provide correct snapshots at all times.
 
 **Methodology**
 
-The public API is class-method based with no DB dependency (except
-``validate_and_prune`` which we skip here).  Tests exercise the full
-CRUD lifecycle and the ``_split_record_id`` helper.
+``TestActiveCalculationStateStore`` and ``TestSplitRecordId`` cover
+the pure-logic public API via ``SimpleTestCase`` (no DB access).
+``TestValidateAndPrune`` and ``TestResolveModelAndPk`` exercise the
+startup-prune path and internal model-resolution helpers via
+``TransactionTestCase`` with a dynamically-created test table.
 
 Run::
 
-    python manage.py test lex.core.tests.test_active_calculation_state_store
+    lex test lex.core.tests.test_active_calculation_state_store --verbosity=2 --noinput --keepdb
 """
 
-from django.test import SimpleTestCase
+from unittest.mock import patch
 
+from django.db import connection, models
+from django.test import SimpleTestCase, TransactionTestCase
+
+from lex.core.models.CalculationModel import CalculationModel
+from lex.core.models.LexModel import PermissionResult
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 
 
@@ -199,3 +206,272 @@ class TestSplitRecordId(SimpleTestCase):
             ActiveCalculationStateStore._split_record_id("model_"),
             (None, None),
         )
+
+
+# ── DB-dependent tests ──────────────────────────────────────────────────
+
+
+class PruneTestCalcModel(CalculationModel):
+    """Disposable CalculationModel for validate_and_prune tests."""
+
+    name = models.CharField(max_length=100, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def calculate(self):
+        pass
+
+    def permission_read(self, user_context):
+        return PermissionResult.allow_all("test")
+
+    def permission_edit(self, user_context):
+        return PermissionResult.allow_all("test")
+
+    def permission_create(self, user_context):
+        return True
+
+    def permission_delete(self, user_context):
+        return True
+
+
+class TestValidateAndPrune(TransactionTestCase):
+    """
+    Exercise ``validate_and_prune`` — the startup-only method that
+    removes store entries whose DB row is no longer IN_PROGRESS.
+
+    Why this matters: after an unclean server restart, stale entries
+    can remain in the store (if the process was killed without clearing
+    them). ``validate_and_prune`` is called during startup to reconcile
+    the store against the database. If it fails silently, the frontend
+    shows phantom spinners for calculations that already finished.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        with connection.schema_editor() as schema_editor:
+            schema_editor.create_model(PruneTestCalcModel)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            with connection.schema_editor() as schema_editor:
+                schema_editor.delete_model(PruneTestCalcModel)
+        finally:
+            super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        ActiveCalculationStateStore.clear_all()
+        self.addCleanup(ActiveCalculationStateStore.clear_all)
+
+        # PruneTestCalcModel is dynamically created via schema_editor so
+        # it is NOT registered in the Django app registry.  Patch the
+        # internal model-resolution helper so validate_and_prune can find it.
+        _original_find = ActiveCalculationStateStore._find_model_by_name
+
+        def _patched_find(name):
+            if name == PruneTestCalcModel._meta.model_name:
+                return PruneTestCalcModel
+            return _original_find(name)
+
+        find_patch = patch.object(
+            ActiveCalculationStateStore,
+            "_find_model_by_name",
+            side_effect=_patched_find,
+        )
+        find_patch.start()
+        self.addCleanup(find_patch.stop)
+
+    def test_keeps_in_progress_entries(self):
+        """Entries whose DB row is still IN_PROGRESS survive the prune."""
+        # Use save(skip_hooks=True) to bypass calculate_hook — otherwise
+        # the hook runs execute_calculation_sync which flips the status
+        # to SUCCESS before we can test the prune.
+        obj = PruneTestCalcModel(name="active")
+        obj.is_calculated = CalculationModel.IN_PROGRESS
+        obj.save(skip_hooks=True)
+
+        record_id = f"{obj._meta.model_name}_{obj.pk}"
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id=record_id,
+            calculation_id="c1",
+            record=str(obj),
+            model_label=obj._meta.label_lower,
+            record_pk=obj.pk,
+        )
+
+        ActiveCalculationStateStore.validate_and_prune()
+
+        self.assertNotEqual(
+            ActiveCalculationStateStore.get_entry(record_id), {},
+            "IN_PROGRESS entry should be kept after prune",
+        )
+
+    def test_removes_success_entries(self):
+        """Entries whose DB row moved to SUCCESS are pruned."""
+        obj = PruneTestCalcModel(name="done")
+        obj.is_calculated = CalculationModel.SUCCESS
+        obj.save(skip_hooks=True)
+        record_id = f"{obj._meta.model_name}_{obj.pk}"
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id=record_id,
+            calculation_id="c2",
+            record=str(obj),
+            model_label=obj._meta.label_lower,
+            record_pk=obj.pk,
+        )
+
+        ActiveCalculationStateStore.validate_and_prune()
+
+        self.assertEqual(
+            ActiveCalculationStateStore.get_entry(record_id), {},
+            "SUCCESS entry should be pruned",
+        )
+
+    def test_removes_entry_for_deleted_record(self):
+        """Entries whose DB row no longer exists are pruned."""
+        obj = PruneTestCalcModel(name="ghost")
+        obj.is_calculated = CalculationModel.IN_PROGRESS
+        obj.save(skip_hooks=True)
+        record_id = f"{obj._meta.model_name}_{obj.pk}"
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id=record_id,
+            calculation_id="c3",
+            record=str(obj),
+            model_label=obj._meta.label_lower,
+            record_pk=obj.pk,
+        )
+        obj.delete()
+
+        ActiveCalculationStateStore.validate_and_prune()
+
+        self.assertEqual(
+            ActiveCalculationStateStore.get_entry(record_id), {},
+            "Entry for deleted record should be pruned",
+        )
+
+    def test_empty_store_is_noop(self):
+        """validate_and_prune on an empty store returns without error."""
+        ActiveCalculationStateStore.validate_and_prune()
+        self.assertEqual(ActiveCalculationStateStore.snapshot(), [])
+
+    def test_removes_entry_with_unresolvable_model(self):
+        """
+        Entries whose model_label cannot be resolved to an actual
+        Django model are dropped (e.g. if the model was removed from
+        the codebase between deploys).
+        """
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id="nosuchmodel_99",
+            calculation_id="c4",
+            record="phantom",
+            model_label="nosuchapp.nosuchmodel",
+            record_pk=99,
+        )
+
+        ActiveCalculationStateStore.validate_and_prune()
+
+        self.assertEqual(
+            ActiveCalculationStateStore.get_entry("nosuchmodel_99"), {},
+            "Unresolvable model entry should be pruned",
+        )
+
+
+class TestResolveModelAndPk(TransactionTestCase):
+    """
+    Exercise ``_resolve_model_and_pk`` — the internal helper that maps
+    a store entry dict back to a (model_class, pk) pair.
+
+    Why this matters: if resolution fails silently (returns None, None),
+    ``validate_and_prune`` drops the entry even though the calculation
+    is still running. This causes phantom completion in the UI.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        with connection.schema_editor() as schema_editor:
+            schema_editor.create_model(PruneTestCalcModel)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            with connection.schema_editor() as schema_editor:
+                schema_editor.delete_model(PruneTestCalcModel)
+        finally:
+            super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        # PruneTestCalcModel is dynamically created via schema_editor so
+        # it is NOT registered in the Django app registry.  Patch the
+        # internal model-resolution helper so _resolve_model_and_pk can find it.
+        _original_find = ActiveCalculationStateStore._find_model_by_name
+
+        def _patched_find(name):
+            if name == PruneTestCalcModel._meta.model_name:
+                return PruneTestCalcModel
+            return _original_find(name)
+
+        find_patch = patch.object(
+            ActiveCalculationStateStore,
+            "_find_model_by_name",
+            side_effect=_patched_find,
+        )
+        find_patch.start()
+        self.addCleanup(find_patch.stop)
+
+    def test_resolves_via_model_label(self):
+        """When model_label is present, resolves via apps.get_model."""
+        entry = {
+            "record_id": f"{PruneTestCalcModel._meta.model_name}_1",
+            "model_label": PruneTestCalcModel._meta.label_lower,
+            "record_pk": "1",
+        }
+        model_class, pk = ActiveCalculationStateStore._resolve_model_and_pk(entry)
+        self.assertIs(model_class, PruneTestCalcModel)
+        self.assertEqual(pk, "1")
+
+    def test_falls_back_to_record_id_when_no_model_label(self):
+        """When model_label is empty, derives model_name from record_id."""
+        model_name = PruneTestCalcModel._meta.model_name
+        entry = {
+            "record_id": f"{model_name}_7",
+            "model_label": "",
+            "record_pk": "",
+        }
+        model_class, pk = ActiveCalculationStateStore._resolve_model_and_pk(entry)
+        self.assertIs(model_class, PruneTestCalcModel)
+        self.assertEqual(pk, "7")
+
+    def test_returns_none_for_non_calculation_model(self):
+        """LexModel subclasses that are NOT CalculationModel are rejected."""
+        from django.contrib.auth.models import User
+
+        entry = {
+            "record_id": "user_1",
+            "model_label": "auth.user",
+            "record_pk": "1",
+        }
+        model_class, pk = ActiveCalculationStateStore._resolve_model_and_pk(entry)
+        self.assertIsNone(model_class)
+        self.assertIsNone(pk)
+
+    def test_returns_none_for_empty_entry(self):
+        """Completely empty entry returns (None, None)."""
+        model_class, pk = ActiveCalculationStateStore._resolve_model_and_pk({})
+        self.assertIsNone(model_class)
+        self.assertIsNone(pk)
+
+    def test_returns_none_for_nonexistent_app(self):
+        """Bogus app_label falls through to _find_model_by_name."""
+        entry = {
+            "record_id": "foo_1",
+            "model_label": "nonexistent_app.foo",
+            "record_pk": "1",
+        }
+        model_class, pk = ActiveCalculationStateStore._resolve_model_and_pk(entry)
+        # "foo" is not a registered CalculationModel
+        self.assertIsNone(model_class)

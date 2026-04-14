@@ -52,7 +52,13 @@ class BitemporalProgressionTest(TransactionTestCase):
             except Exception:
                 pass
 
-    @unittest.skip("count_reconciled is None — TemporalReconciler API changed")
+    @unittest.skip(
+        "Needs pairing: TemporalReconciler.reconcile_changes_since() is "
+        "missing its 'return synced_count' statement (production bug, line ~58 "
+        "of temporal_reconciler.py — the variable is set but the function "
+        "falls through returning None). Fix the production code first, then "
+        "verify the test's temporal assumptions still hold."
+    )
     def test_passage_of_time(self):
         """Future-valid record appears after reconciliation runs past its validity window."""
         T0 = datetime.datetime(2025, 1, 1, 10, 0, 0)
