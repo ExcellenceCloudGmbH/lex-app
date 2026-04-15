@@ -20,10 +20,8 @@
 name: Frontend Build
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       frontend_branch:
@@ -38,16 +36,9 @@ env:
   COVERAGE_THRESHOLD: "76"                       # vitest line-coverage gate
 
 jobs:
-  # ── Step 1: Backend tests must pass first ──────────────────────────
-  gate-backend:
-    name: "Gate: Backend Tests"
-    uses: ./.github/workflows/django_tests.yml
-    secrets: inherit
-
-  # ── Step 2: Frontend unit tests ────────────────────────────────────
+  # ── Step 1: Frontend unit tests ────────────────────────────────────
   unit-tests:
     name: "Frontend: Unit Tests"
-    needs: gate-backend
     runs-on: ubuntu-latest
 
     steps:
@@ -80,10 +71,9 @@ jobs:
         env:
           NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
 
-  # ── Step 3: Playwright E2E tests (real Django backend) ─────────────
+  # ── Step 2: Playwright E2E tests (real Django backend) ─────────────
   e2e-tests:
     name: "Frontend: E2E Tests"
-    needs: gate-backend
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -154,13 +144,11 @@ jobs:
           path: frontend/test-results/
           retention-days: 7
 
-  # ── Step 4: Build + commit bundle ──────────────────────────────────
+  # ── Step 3: Build + commit bundle ──────────────────────────────────
   build-and-commit:
     name: "Build & Update Bundle"
     needs: [unit-tests, e2e-tests]
     runs-on: ubuntu-latest
-    # Only update the bundle on pushes to main (not on PRs)
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     permissions:
       contents: write

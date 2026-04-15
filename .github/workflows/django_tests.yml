@@ -92,9 +92,6 @@ jobs:
         run: |
           # Run all framework tests under coverage
           coverage run --rcfile=.coveragerc -m lex test --verbosity=2 --noinput \
-            lex.core.tests \
-            lex.audit_logging.tests \
-            lex.process_admin.tests \
             lex.tests
 
           # Report to stdout

@@ -1,0 +1,72 @@
+[run]
+branch = True
+relative_files = True
+# The lex codebase uses both fully-qualified imports (lex.core.models.LexModel)
+# AND bare Django-app-level imports (core.models.LexModel, lex_app.settings,
+# api.utils, audit_logging.mixins, etc.).  Python registers the module under
+# whichever name imports it first, and coverage decides whether to trace a
+# module based on its *module name*, not file path.  With only `source = lex`,
+# modules first loaded via the bare app name are SILENTLY SKIPPED — causing
+# critical files like LexModel.py, CalculatedModelMixin.py, and AuditLogMixin.py
+# to show 0% coverage even though they run during every test.
+#
+# Adding the bare app names below tells coverage to also trace those namespaces.
+# Use the filesystem path to the editable install so coverage traces ALL
+# framework code regardless of whether the module was imported as lex.core.X
+# or bare core.X.  The lex CLI adds lex/ to sys.path at runtime, making
+# "core", "api", etc. importable as top-level packages — but coverage can't
+# resolve those package names at startup.  Pointing at the directory ensures
+# every .py file under lex/ is traced.
+source =
+    lex
+omit =
+    */migrations/*
+    */tests/*
+    lex/react/*
+    frontend/*
+    docs/*
+    build/*
+    project_example/*
+    project_example_2/*
+    lex/fix_v1_migration.py
+    lex/sanitize_v2_migrations.py
+    lex/restore_legacy_logs.py
+    lex/backfill_history_sql.py
+    lex/extract_legacy_logs.py
+    lex/lex_app/management/commands/backfill_bitemporal_history.py
+    lex/lex_app/management/commands/backfill_audit_logging.py
+    lex/lex_app/management/commands/Init2.py
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 2
+# Exclude test and migration files from coverage reports.
+# These are also listed under [run] omit, but repeating them here
+# ensures that coverage report / coverage xml / coverage html all
+# honour the exclusions even when relative_files = True causes the
+# [run] omit globs to resolve differently (e.g. on CI).
+omit =
+    */migrations/*
+    */tests/*
+    lex/react/*
+    frontend/*
+    docs/*
+    build/*
+    project_example/*
+    project_example_2/*
+    lex/fix_v1_migration.py
+    lex/sanitize_v2_migrations.py
+    lex/restore_legacy_logs.py
+    lex/backfill_history_sql.py
+    lex/extract_legacy_logs.py
+    lex/lex_app/management/commands/backfill_bitemporal_history.py
+    lex/lex_app/management/commands/backfill_audit_logging.py
+    lex/lex_app/management/commands/Init2.py
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if TYPE_CHECKING:
+
+[html]
+directory = coverage_html
