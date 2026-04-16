@@ -1,0 +1,210 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Frontend build pipeline — runs AFTER the backend test suite passes.
+#
+#  This workflow:
+#   1. Calls django_tests.yml (reusable) to gate on backend health.
+#   2. Checks out the frontend from process-admin-general-client
+#      (branch: lex-app-v2-pac-latest by default, configurable).
+#   3. Runs the Vitest unit-test suite with a coverage threshold.
+#   4. Runs Playwright E2E tests against a real Django backend
+#      (reuses the Python env where `lex` is already installed).
+#   5. On success: `yarn build` → copies the build output into
+#      lex/react/build/ and commits the updated bundle.
+#
+#  Required secrets:
+#   - NPM_MARMELAB_TOKEN   (for the private @marmelab npm registry)
+#   - FRONTEND_REPO_TOKEN  (PAT with read access to the frontend repo,
+#                           or use secrets.GITHUB_TOKEN if same org + SSO)
+# ──────────────────────────────────────────────────────────────────────
+
+name: Frontend Build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      frontend_branch:
+        description: "Frontend branch to build"
+        required: false
+        default: "lex-app-v2-pac-latest"
+        type: string
+
+env:
+  FRONTEND_REPO: ExcellenceCloudGmbH/process-admin-general-client
+  FRONTEND_BRANCH: ${{ inputs.frontend_branch || 'lex-app-v2-pac-latest' }}
+  COVERAGE_THRESHOLD: "76"                       # vitest line-coverage gate
+
+jobs:
+  # ── Step 1: Frontend unit tests ────────────────────────────────────
+  unit-tests:
+    name: "Frontend: Unit Tests"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout backend (lex)
+        uses: actions/checkout@v4
+
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_BRANCH }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          path: frontend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install Node dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: frontend
+        env:
+          NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
+
+      - name: Run Vitest with coverage gate
+        run: yarn test --run --coverage --coverage.thresholds.lines=${{ env.COVERAGE_THRESHOLD }}
+        working-directory: frontend
+        env:
+          NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
+
+  # ── Step 2: Playwright E2E tests (real Django backend) ─────────────
+  e2e-tests:
+    name: "Frontend: E2E Tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout backend (lex)
+        uses: actions/checkout@v4
+
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_BRANCH }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          path: frontend
+
+      # ── Python (lex CLI) ───────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies + lex CLI
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --prefer-binary -r requirements.txt
+          pip install -e .
+
+      # ── Node ───────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install Node dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: frontend
+        env:
+          NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      # ── Run Playwright (globalSetup handles migrate + seed) ────────
+      - name: Run E2E tests
+        run: npx playwright test
+        working-directory: frontend
+        env:
+          CI: "true"
+          DJANGO_SETTINGS_MODULE: e2e_project.e2e_settings
+          PROJECT_ROOT: ${{ github.workspace }}/frontend/e2e/e2e_project
+          DATABASE_DEPLOYMENT_TARGET: local
+          PYTHONPATH: "${{ github.workspace }}/frontend/e2e:${{ github.workspace }}:${{ github.workspace }}/lex"
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload test traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 7
+
+  # ── Step 3: Build + commit bundle ──────────────────────────────────
+  build-and-commit:
+    name: "Build & Update Bundle"
+    needs: [unit-tests, e2e-tests]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout backend (lex)
+        uses: actions/checkout@v4
+        with:
+          # Need full history + write token for the commit step
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_BRANCH }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          path: frontend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install Node dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: frontend
+        env:
+          NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
+
+      - name: Build production bundle
+        run: yarn build
+        working-directory: frontend
+
+      - name: Copy build output into lex/react/build
+        run: |
+          # Wipe old build (except config.js which is runtime-injected)
+          find lex/react/build -mindepth 1 ! -name 'config.js' -delete
+
+          # Copy fresh build, skip config.js if it exists in the output
+          rsync -a --exclude='config.js' frontend/build/ lex/react/build/
+
+          echo "✅ lex/react/build updated:"
+          ls -la lex/react/build/
+
+      - name: Commit updated bundle
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lex/react/build/
+          # Only commit if there are actual changes
+          if git diff --cached --quiet; then
+            echo "No changes to bundle — skipping commit"
+          else
+            FRONTEND_SHA=$(cd frontend && git rev-parse --short HEAD)
+            git commit -m "build(frontend): update bundle from ${FRONTEND_REPO}@${FRONTEND_SHA}"
+            git push
+          fi
