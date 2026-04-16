@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from django.db import models
 from django.db import transaction
+from django.utils import timezone
 from django_lifecycle import (
     hook,
     AFTER_UPDATE,
@@ -53,6 +54,8 @@ class CalculationModelException(APIException):
 class CalculationModel(LexModel):
 
     _TERMINAL_STATE_PERSISTENCE_ATTR = "_persisted_terminal_calculation_state"
+    _IN_PROGRESS_STATE_PERSISTENCE_ATTR = "_persisted_in_progress_calculation_state"
+    _PENDING_IN_PROGRESS_HISTORY_ATTR = "_pending_in_progress_history_snapshot"
 
     IN_PROGRESS = "IN_PROGRESS"
     ERROR = "ERROR"
@@ -74,6 +77,11 @@ class CalculationModel(LexModel):
     class Meta:
         abstract = True
 
+    def save(self, *args, **kwargs):
+        result = super().save(*args, **kwargs)
+        self._register_in_progress_state_persistence(self)
+        return result
+
     @classmethod
     def _terminal_state_identity(cls, obj):
         pk = getattr(obj, "pk", None)
@@ -91,6 +99,100 @@ class CalculationModel(LexModel):
             cls._TERMINAL_STATE_PERSISTENCE_ATTR,
             getattr(obj, "is_calculated", None),
         )
+
+    @classmethod
+    def _apply_in_progress_state_persistence(cls, obj, state):
+        if obj is None:
+            return
+
+        if state == cls.IN_PROGRESS:
+            setattr(obj, cls._IN_PROGRESS_STATE_PERSISTENCE_ATTR, True)
+            if hasattr(obj, cls._PENDING_IN_PROGRESS_HISTORY_ATTR):
+                delattr(obj, cls._PENDING_IN_PROGRESS_HISTORY_ATTR)
+            return
+
+        if hasattr(obj, cls._IN_PROGRESS_STATE_PERSISTENCE_ATTR):
+            delattr(obj, cls._IN_PROGRESS_STATE_PERSISTENCE_ATTR)
+
+    @classmethod
+    def _register_in_progress_state_persistence(cls, obj):
+        if obj is None:
+            return
+
+        state = getattr(obj, "is_calculated", None)
+        if transaction.get_connection().in_atomic_block:
+            transaction.on_commit(
+                lambda: cls._apply_in_progress_state_persistence(obj, state)
+            )
+            return
+
+        cls._apply_in_progress_state_persistence(obj, state)
+
+    @classmethod
+    def _has_persisted_in_progress_state(cls, obj):
+        return bool(getattr(obj, cls._IN_PROGRESS_STATE_PERSISTENCE_ATTR, False))
+
+    @classmethod
+    def _queue_missing_in_progress_history(cls, obj):
+        if obj is None or cls._has_persisted_in_progress_state(obj):
+            if obj is not None and hasattr(obj, cls._PENDING_IN_PROGRESS_HISTORY_ATTR):
+                delattr(obj, cls._PENDING_IN_PROGRESS_HISTORY_ATTR)
+            return
+
+        setattr(
+            obj,
+            cls._PENDING_IN_PROGRESS_HISTORY_ATTR,
+            {
+                "snapshot": obj._capture_snapshot(),
+                "history_date": getattr(obj, "_history_date", timezone.now()),
+                "history_user": getattr(obj, "_history_user", None),
+                "history_change_reason": getattr(obj, "_history_change_reason", ""),
+            },
+        )
+
+    @classmethod
+    def _restore_missing_in_progress_history(cls, obj):
+        pending_history = getattr(obj, cls._PENDING_IN_PROGRESS_HISTORY_ATTR, None)
+        if (
+            obj is None
+            or not isinstance(pending_history, dict)
+            or cls._has_persisted_in_progress_state(obj)
+        ):
+            return False
+
+        current_snapshot = obj._capture_snapshot()
+        had_history_date = hasattr(obj, "_history_date")
+        previous_history_date = getattr(obj, "_history_date", None)
+        had_history_user = hasattr(obj, "_history_user")
+        previous_history_user = getattr(obj, "_history_user", None)
+        had_history_change_reason = hasattr(obj, "_history_change_reason")
+        previous_history_change_reason = getattr(obj, "_history_change_reason", None)
+
+        try:
+            obj._restore_from_snapshot(pending_history.get("snapshot", {}))
+            obj.is_calculated = cls.IN_PROGRESS
+            obj._history_date = pending_history.get("history_date", timezone.now())
+            obj._history_user = pending_history.get("history_user")
+            obj._history_change_reason = pending_history.get("history_change_reason", "")
+            obj.save(skip_hooks=True)
+            return True
+        finally:
+            obj._restore_from_snapshot(current_snapshot)
+
+            if had_history_date:
+                obj._history_date = previous_history_date
+            elif hasattr(obj, "_history_date"):
+                delattr(obj, "_history_date")
+
+            if had_history_user:
+                obj._history_user = previous_history_user
+            elif hasattr(obj, "_history_user"):
+                delattr(obj, "_history_user")
+
+            if had_history_change_reason:
+                obj._history_change_reason = previous_history_change_reason
+            elif hasattr(obj, "_history_change_reason"):
+                delattr(obj, "_history_change_reason")
 
     @classmethod
     def _register_terminal_state_persistence(cls, obj):
@@ -137,6 +239,7 @@ class CalculationModel(LexModel):
                 continue
 
             try:
+                CalculationModel._restore_missing_in_progress_history(obj)
                 obj.is_calculated = CalculationModel.ERROR
                 obj.save(skip_hooks=True)
                 CalculationModel._register_terminal_state_persistence(obj)
@@ -410,6 +513,7 @@ class CalculationModel(LexModel):
 
         self._calculation_hook_in_progress = True
         self._clear_terminal_state_persistence(self)
+        self._queue_missing_in_progress_history(self)
         task_dispatched = False
         try:
             # ── Ensure this record is registered in the cache store ──
