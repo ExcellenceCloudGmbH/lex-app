@@ -61,6 +61,7 @@ KEYCLOAK_SYNC_EXCLUDED_RESOURCE_NAMES = frozenset(
     {
         "audit_logging.AuditLog",
         "audit_logging.AuditLogStatus",
+        "audit_logging.CalculationLog",
     }
 )
 KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES = ("historical", "metahistorical")

@@ -778,7 +778,7 @@ class KeycloakSyncManagerImmutableResourceTest(TestCase):
                 "legacy_data.LegacyDynamicGenericAppArchive"
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("audit_logging.CalculationLog")
         )
         self.assertFalse(
