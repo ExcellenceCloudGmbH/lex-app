@@ -313,6 +313,16 @@ class TestPersistErrorState(SimpleTestCase):
         self.assertEqual(len(persisted), 1)
         self.assertEqual(obj.save.call_count, 1)
 
+    def test_skips_objects_with_already_persisted_error_state(self):
+        """Repeated persistence calls should not create duplicate ERROR saves."""
+        obj = StubCalcModel()
+        obj.save = MagicMock()
+
+        CalculationModel.persist_error_state([obj])
+        CalculationModel.persist_error_state([obj])
+
+        self.assertEqual(obj.save.call_count, 1)
+
 
 class TestBuildExceptionChain(SimpleTestCase):
     """Prove ``build_exception_chain`` collects calc objects and tracebacks."""

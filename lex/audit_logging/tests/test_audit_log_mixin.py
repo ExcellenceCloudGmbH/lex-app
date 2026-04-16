@@ -236,6 +236,64 @@ class AuditLogMixinLogChangeTest(SimpleTestCase):
         resource = mock_auditlog_mgr.create.call_args.kwargs["resource"]
         self.assertEqual(resource, "vehicle")
 
+    @patch("lex.audit_logging.mixins.AuditLogMixin._safe_get_content_type", return_value=None)
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLogStatus.objects")
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLog.objects")
+    def test_log_failed_change_creates_failure_status(
+        self, mock_auditlog_mgr, mock_status_mgr, _content_type
+    ):
+        """``log_failed_change`` writes a failure status record for the audit log."""
+        fake_log = MagicMock(id=4)
+        mock_auditlog_mgr.create.return_value = fake_log
+
+        mixin = self._make_mixin()
+        instance = type("Vehicle", (), {"pk": 99})()
+
+        result = mixin.log_failed_change(
+            "update",
+            instance.__class__,
+            payload={"name": "Broken"},
+            error_traceback="traceback",
+            related_instance=instance,
+        )
+
+        self.assertEqual(mock_auditlog_mgr.create.call_args.kwargs["payload"]["id"], 99)
+        mock_status_mgr.create.assert_called_once_with(audit_log=fake_log, status="pending")
+        mock_status_mgr.filter.return_value.update.assert_called_once_with(
+            status="failure",
+            error_traceback="traceback",
+        )
+        fake_log.save.assert_called_once_with()
+        self.assertTrue(mixin.has_logged_failure_audit())
+        self.assertIs(result, fake_log)
+
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLogStatus.objects")
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLog.objects")
+    def test_flush_pending_failed_audit_log_persists_queued_failure(
+        self, mock_auditlog_mgr, mock_status_mgr
+    ):
+        """Queued failure audits can be recreated after an outer rollback."""
+        fake_log = MagicMock(id=5)
+        mock_auditlog_mgr.create.return_value = fake_log
+
+        mixin = self._make_mixin()
+        mixin.queue_failed_audit_log(
+            "create",
+            type("Vehicle", (), {}),
+            payload={"name": "Queued"},
+            error_traceback="queued traceback",
+        )
+
+        result = mixin.flush_pending_failed_audit_log()
+
+        mock_status_mgr.create.assert_called_once_with(audit_log=fake_log, status="pending")
+        mock_status_mgr.filter.return_value.update.assert_called_once_with(
+            status="failure",
+            error_traceback="queued traceback",
+        )
+        self.assertTrue(mixin.has_logged_failure_audit())
+        self.assertIs(result, fake_log)
+
 
 # ────────────────────────────────────────────────────────────────────
 #  perform_create / perform_update / perform_destroy
@@ -301,6 +359,99 @@ class AuditLogMixinCRUDTest(SimpleTestCase):
         call_kwargs = update_call.call_args.kwargs
         self.assertEqual(call_kwargs["status"], "failure")
         self.assertIn("error_traceback", call_kwargs)
+
+    @patch("lex.audit_logging.mixins.AuditLogMixin.transaction.get_connection")
+    @patch("lex.audit_logging.mixins.AuditLogMixin._safe_get_content_type", return_value=None)
+    @patch("lex.audit_logging.mixins.AuditLogMixin._serialize_payload", side_effect=lambda x: x)
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLogStatus.objects")
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLog.objects")
+    def test_perform_create_failure_queues_fallback_when_atomic(
+        self,
+        mock_log_mgr,
+        mock_status_mgr,
+        _ser,
+        _ct,
+        mock_get_connection,
+    ):
+        """Atomic create failures queue a replacement failure audit for post-rollback logging."""
+        fake_log = MagicMock(id=7, payload={})
+        mock_log_mgr.create.return_value = fake_log
+        mock_get_connection.return_value = SimpleNamespace(in_atomic_block=True)
+
+        mixin = self._make_mixin()
+        ser, _ = self._mock_serializer()
+        ser.save.side_effect = RuntimeError("DB crash")
+
+        with self.assertRaises(RuntimeError):
+            mixin.perform_create(ser)
+
+        self.assertEqual(getattr(mixin, "_pending_failed_audit_log")["action"], "create")
+        self.assertFalse(mixin.has_logged_failure_audit())
+
+    @patch("lex.audit_logging.mixins.AuditLogMixin.transaction.get_connection")
+    @patch("lex.audit_logging.mixins.AuditLogMixin._safe_get_content_type", return_value=None)
+    @patch("lex.audit_logging.mixins.AuditLogMixin._serialize_payload", side_effect=lambda x: x)
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLogStatus.objects")
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLog.objects")
+    def test_perform_update_failure_queues_fallback_when_atomic(
+        self,
+        mock_log_mgr,
+        mock_status_mgr,
+        _ser,
+        _ct,
+        mock_get_connection,
+    ):
+        """Atomic update failures queue a replacement failure audit for post-rollback logging."""
+        fake_log = MagicMock(id=8, payload={})
+        mock_log_mgr.create.return_value = fake_log
+        mock_get_connection.return_value = SimpleNamespace(in_atomic_block=True)
+
+        mixin = self._make_mixin()
+        mixin.get_serializer = MagicMock(side_effect=lambda instance: MagicMock(data={"id": instance.pk}))
+        ser, instance = self._mock_serializer(pk=13)
+        ser.instance = instance
+        ser.save.side_effect = RuntimeError("DB crash")
+
+        with self.assertRaises(RuntimeError):
+            mixin.perform_update(ser)
+
+        pending_failed_audit = getattr(mixin, "_pending_failed_audit_log")
+        self.assertEqual(pending_failed_audit["action"], "update")
+        self.assertEqual(pending_failed_audit["payload"]["id"], 13)
+        self.assertIs(pending_failed_audit["related_instance"], instance)
+        self.assertFalse(mixin.has_logged_failure_audit())
+
+    @patch("lex.audit_logging.mixins.AuditLogMixin.transaction.get_connection")
+    @patch("lex.audit_logging.mixins.AuditLogMixin._safe_get_content_type", return_value=None)
+    @patch("lex.audit_logging.mixins.AuditLogMixin._serialize_payload", side_effect=lambda x: x)
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLogStatus.objects")
+    @patch("lex.audit_logging.mixins.AuditLogMixin.AuditLog.objects")
+    def test_perform_destroy_failure_queues_fallback_when_atomic(
+        self,
+        mock_log_mgr,
+        mock_status_mgr,
+        _ser,
+        _ct,
+        mock_get_connection,
+    ):
+        """Atomic destroy failures queue a replacement failure audit for post-rollback logging."""
+        fake_log = MagicMock(id=9, payload={})
+        mock_log_mgr.create.return_value = fake_log
+        mock_get_connection.return_value = SimpleNamespace(in_atomic_block=True)
+
+        mixin = self._make_mixin()
+        mixin.get_serializer = MagicMock(return_value=MagicMock(data={"id": 1}))
+
+        instance = MagicMock(pk=21, __class__=type("Vehicle", (), {}))
+        instance.delete.side_effect = RuntimeError("FK violation")
+
+        with self.assertRaises(RuntimeError):
+            mixin.perform_destroy(instance)
+
+        pending_failed_audit = getattr(mixin, "_pending_failed_audit_log")
+        self.assertEqual(pending_failed_audit["action"], "delete")
+        self.assertIs(pending_failed_audit["related_instance"], instance)
+        self.assertFalse(mixin.has_logged_failure_audit())
 
     @patch("lex.audit_logging.mixins.AuditLogMixin._safe_get_content_type", return_value=None)
     @patch("lex.audit_logging.mixins.AuditLogMixin._serialize_payload", side_effect=lambda x: x)

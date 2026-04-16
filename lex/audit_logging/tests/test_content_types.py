@@ -32,28 +32,40 @@ class SafeContentTypeTest(SimpleTestCase):
 
 
 class AuditLogSerializerRegressionTest(SimpleTestCase):
-    def test_audit_log_serializer_uses_safe_helpers_instead_of_direct_relations(self):
+    def test_audit_log_serializer_builds_calculation_record_from_cached_content_type_and_payload(self):
         serializer = AuditLogDefaultSerializer()
-        target = SimpleNamespace(is_calculated=True)
         content_type = SimpleNamespace(app_label="core", model="dummy")
 
         class StubAuditLog:
             object_id = 13
             content_type_id = 7
-            _state = SimpleNamespace(db="default")
+            payload = {"name": "Target Name", "is_calculated": True}
+            _state = SimpleNamespace(db="default", fields_cache={"content_type": content_type})
 
-            @property
-            def content_type(self):
-                raise AssertionError("Serializer should not access obj.content_type directly")
+        result = serializer.get_calculation_record(StubAuditLog())
 
-            @property
-            def calculatable_object(self):
-                raise AssertionError("Serializer should not access obj.calculatable_object directly")
+        self.assertEqual(
+            result,
+            {
+                "id": 13,
+                "app_label": "core",
+                "model": "dummy",
+                "display_name": "Target Name",
+                "details": {"is_calculated": True},
+            },
+        )
+
+    def test_audit_log_serializer_falls_back_to_safe_content_type_lookup(self):
+        serializer = AuditLogDefaultSerializer()
+        content_type = SimpleNamespace(app_label="core", model="dummy")
+
+        class StubAuditLog:
+            object_id = 21
+            content_type_id = 8
+            payload = {}
+            _state = SimpleNamespace(db="default", fields_cache={})
 
         with patch(
-            "lex.audit_logging.serializers.AuditLogSerializer.safe_get_generic_related_object",
-            return_value=target,
-        ), patch(
             "lex.audit_logging.serializers.AuditLogSerializer.safe_get_content_type",
             return_value=content_type,
         ):
@@ -62,11 +74,11 @@ class AuditLogSerializerRegressionTest(SimpleTestCase):
         self.assertEqual(
             result,
             {
-                "id": 13,
+                "id": 21,
                 "app_label": "core",
                 "model": "dummy",
-                "display_name": str(target),
-                "details": {"is_calculated": True},
+                "display_name": "dummy #21",
+                "details": {},
             },
         )
 
@@ -134,4 +146,3 @@ class ResolveTargetModelRegressionTest(SimpleTestCase):
             result = LexSerializer._resolve_target_model(StubAuditLog())
 
         self.assertIs(result, expected_model)
-

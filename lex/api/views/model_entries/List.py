@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -29,8 +30,10 @@ from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from lex.api.utils import can_read_from_payload
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
+from lex.core.models.LexModel import UserContext
 
 
 MAX_PIVOT_COMBINATIONS = 200
@@ -176,6 +179,18 @@ def normalize_field_path(path: str) -> str:
 ResolvedLookup = Tuple[str, str, Any]
 
 
+def _is_json_field(model_field: Field) -> bool:
+    return getattr(model_field, "get_internal_type", lambda: "")() == "JSONField"
+
+
+def _split_safe_lookup_suffix(parts: list[str]) -> Tuple[list[str], Optional[str]]:
+    for size in range(len(parts), 0, -1):
+        candidate = "__".join(parts[-size:])
+        if candidate in SAFE_LOOKUPS:
+            return parts[:-size], candidate
+    return parts, None
+
+
 @lru_cache(maxsize=2048)
 def _resolve_lookup(model_class: type[Model], raw_lookup: str) -> Optional[ResolvedLookup]:
     lookup = normalize_field_path(raw_lookup)
@@ -212,6 +227,16 @@ def _resolve_lookup(model_class: type[Model], raw_lookup: str) -> Optional[Resol
     if not suffix_parts:
         field_path = "__".join(field_parts)
         return (field_path, field_path, model_field)
+
+    if _is_json_field(model_field):
+        json_path_parts, lookup_suffix = _split_safe_lookup_suffix(suffix_parts)
+        if any(not re.fullmatch(r"[A-Za-z0-9_]+", part) for part in json_path_parts):
+            return None
+
+        lookup_parts = field_parts + json_path_parts
+        if lookup_suffix:
+            lookup_parts.append(lookup_suffix)
+        return ("__".join(field_parts), "__".join(lookup_parts), model_field)
 
     suffix = "__".join(suffix_parts)
     if suffix not in SAFE_LOOKUPS:
@@ -285,6 +310,12 @@ def _coerce_value(model_field, value):
             if parsed_date:
                 return datetime.combine(parsed_date, datetime.min.time())
         return value
+
+    if internal in {"JSONField"} and isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
 
     return value
 
@@ -415,18 +446,47 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         queryset = apply_query_param_filters(queryset, self.request.query_params, model_class)
         return apply_ordering(queryset, self.request.query_params.get("ordering"), model_class)
 
+    def _normalize_ag_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(payload, dict) and isinstance(payload.get("request"), dict):
+            return payload.get("request") or {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _is_auditlog_flat_leaf_request(self, req: Dict[str, Any]) -> bool:
+        if self._ag_model_class._meta.model_name.lower() != "auditlog":
+            return False
+
+        row_group_cols = self._parse_columns(req.get("rowGroupCols"), include_agg=False)
+        group_keys = list(req.get("groupKeys") or [])
+        pivot_mode = _parse_bool(req.get("pivotMode"), default=False)
+
+        return not pivot_mode and (not row_group_cols or len(group_keys) >= len(row_group_cols))
+
     def post(self, request, *args, **kwargs):
         self._ag_model_class = self.kwargs["model_container"].model_class
         self._ag_field_validity_cache: Dict[str, bool] = {}
         self._ag_model_field_cache: Dict[str, Field] = {}
 
-        queryset = self.filter_queryset(self.get_queryset())
-        result = self._execute_ag_grid_request(queryset, request.data or {})
+        payload = request.data or {}
+        ag_request = self._normalize_ag_request(payload)
+
+        defer_auditlog_permissions = self._is_auditlog_flat_leaf_request(ag_request)
+        queryset = self.get_queryset() if defer_auditlog_permissions else self.filter_queryset(self.get_queryset())
+        result = self._execute_ag_grid_request(
+            queryset,
+            payload,
+            req=ag_request,
+            defer_auditlog_permissions=defer_auditlog_permissions,
+        )
         return Response(result)
 
-    def _execute_ag_grid_request(self, queryset: QuerySet, payload: Dict[str, Any]) -> Dict[str, Any]:
-        req = payload.get("request") if isinstance(payload, dict) and isinstance(payload.get("request"), dict) else payload
-        req = req or {}
+    def _execute_ag_grid_request(
+        self,
+        queryset: QuerySet,
+        payload: Dict[str, Any],
+        req: Optional[Dict[str, Any]] = None,
+        defer_auditlog_permissions: bool = False,
+    ) -> Dict[str, Any]:
+        req = req or self._normalize_ag_request(payload)
 
         start_row = _parse_int(req.get("startRow"), 0)
         end_row = _parse_int(req.get("endRow"), start_row + 100)
@@ -472,6 +532,7 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
             start_row=start_row,
             end_row=end_row,
             sort_model=sort_model,
+            defer_auditlog_permissions=defer_auditlog_permissions,
         )
 
     def _parse_columns(self, raw_cols: Any, include_agg: bool) -> List[AgColumn]:
@@ -750,6 +811,7 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         start_row: int,
         end_row: int,
         sort_model: List[Dict[str, Any]],
+        defer_auditlog_permissions: bool = False,
     ) -> Dict[str, Any]:
         qs = self._apply_sort_model(qs, sort_model, allowed_columns=None)
 
@@ -757,12 +819,105 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         if not qs.query.order_by:
             qs = qs.order_by(self._ag_model_class._meta.pk.name)
 
+        page_size = max(end_row - start_row, 1)
+
+        if defer_auditlog_permissions and self._ag_model_class._meta.model_name.lower() == "auditlog":
+            return self._execute_deferred_auditlog_leaf_level(
+                qs=qs,
+                start_row=start_row,
+                page_size=page_size,
+            )
+
+        if self._ag_model_class._meta.model_name.lower() == "auditlog":
+            rows = list(qs[start_row:end_row + 1])
+            has_more = len(rows) > page_size
+            if has_more:
+                rows = rows[:page_size]
+                row_count = None
+            else:
+                row_count = start_row + len(rows)
+            serializer = self.get_serializer(rows, many=True)
+            return {
+                "rowData": serializer.data,
+                "rowCount": row_count,
+            }
+
         row_count = qs.count()
         page_qs = qs[start_row:end_row]
         serializer = self.get_serializer(page_qs, many=True)
         return {
             "rowData": serializer.data,
             "rowCount": row_count,
+        }
+
+    def _execute_deferred_auditlog_leaf_level(
+        self,
+        qs: QuerySet,
+        start_row: int,
+        page_size: int,
+    ) -> Dict[str, Any]:
+        visibility_backend = UserReadRestrictionFilterBackend()
+        handled_resources, allowed_q = visibility_backend._build_auditlog_db_visibility_filters(
+            getattr(self, "request", None)
+        )
+
+        if handled_resources:
+            residual_q = ~Q(resource__in=handled_resources)
+            if allowed_q is None:
+                candidate_qs = qs.filter(residual_q)
+            else:
+                candidate_qs = qs.filter(allowed_q | residual_q)
+        else:
+            candidate_qs = qs
+
+        candidate_qs = candidate_qs.select_related("content_type").only(
+            "id",
+            "date",
+            "author",
+            "resource",
+            "action",
+            "payload",
+            "calculation_id",
+            "content_type_id",
+            "object_id",
+            "content_type__app_label",
+            "content_type__model",
+        )
+
+        request = getattr(self, "request", None)
+        base_user_context = UserContext.from_request_base(request) if request is not None else None
+
+        rows = []
+        visible_offset = 0
+        has_more = False
+
+        for row in candidate_qs.iterator(
+            chunk_size=UserReadRestrictionFilterBackend.ITERATOR_CHUNK_SIZE
+        ):
+            if row.resource not in handled_resources:
+                if not can_read_from_payload(
+                    request,
+                    row,
+                    base_user_context=base_user_context,
+                ):
+                    continue
+
+            if visible_offset < start_row:
+                visible_offset += 1
+                continue
+
+            rows.append(row)
+            visible_offset += 1
+
+            if len(rows) > page_size:
+                has_more = True
+                rows = rows[:page_size]
+                break
+
+        serializer = self.get_serializer(rows, many=True)
+        return {
+            "rowData": serializer.data,
+            "rowCount": None if has_more else (start_row + len(rows)),
         }
 
     def _execute_pivot_mode(

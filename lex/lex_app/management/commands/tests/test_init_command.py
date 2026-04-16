@@ -746,3 +746,142 @@ class KeycloakImportErrorFormattingTest(TestCase):
         )
 
         self.assertEqual(details, "Keycloak returned HTTP 400: Role policy invalid")
+
+
+class KeycloakSyncManagerImmutableResourceTest(TestCase):
+    def build_manager(self):
+        manager = KeycloakSyncManager.__new__(KeycloakSyncManager)
+        manager.kc_manager = MagicMock()
+        manager.kc_manager.client_uuid = "client-uuid"
+        manager.default_scopes = ["list", "read", "create", "edit", "delete", "export"]
+        manager.exported_configs = None
+        return manager
+
+    def test_is_keycloak_sync_excluded_resource_name_matches_immutable_models(self):
+        self.assertTrue(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("core.HistoricalQuarter")
+        )
+        self.assertTrue(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("core.MetaHistoricalQuarter")
+        )
+        self.assertTrue(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("audit_logging.AuditLog")
+        )
+        self.assertTrue(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("audit_logging.AuditLogStatus")
+        )
+        self.assertTrue(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("legacy_data.LegacyLog")
+        )
+        self.assertTrue(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name(
+                "legacy_data.LegacyDynamicGenericAppArchive"
+            )
+        )
+        self.assertFalse(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("audit_logging.CalculationLog")
+        )
+        self.assertFalse(
+            KeycloakSyncManager.is_keycloak_sync_excluded_resource_name("billing.Invoice")
+        )
+
+    def test_process_model_changes_prunes_existing_immutable_resources_and_skips_new_ones(self):
+        manager = self.build_manager()
+        manager.delete_resources_individual = MagicMock()
+        manager.kc_manager.admin.get_client.return_value = {
+            "authorizationServicesEnabled": True,
+            "redirectUris": [],
+            "webOrigins": [],
+            "authenticationFlowBindingOverrides": {},
+            "protocol": "openid-connect",
+            "publicClient": False,
+            "serviceAccountsEnabled": True,
+            "standardFlowEnabled": True,
+            "directAccessGrantsEnabled": True,
+        }
+        manager.kc_manager.admin.get_client_roles.return_value = [
+            {"name": "admin", "id": "role-admin"},
+            {"name": "standard", "id": "role-standard"},
+            {"name": "view-only", "id": "role-view"},
+        ]
+        manager.kc_manager.admin.get_client_authz_resources.return_value = [
+            {"name": "audit_logging.AuditLog", "_id": "resource-audit"},
+            {"name": "core.HistoricalQuarter", "_id": "resource-history"},
+            {"name": "billing.Invoice", "_id": "resource-invoice"},
+        ]
+        manager.kc_manager.export_authorization_settings.return_value = {
+            "resources": [
+                {
+                    "name": "audit_logging.AuditLog",
+                    "ownerManagedAccess": False,
+                    "attributes": {},
+                    "uris": [],
+                    "scopes": [{"name": "read"}],
+                },
+                {
+                    "name": "core.HistoricalQuarter",
+                    "ownerManagedAccess": False,
+                    "attributes": {},
+                    "uris": [],
+                    "scopes": [{"name": "read"}],
+                },
+                {
+                    "name": "billing.Invoice",
+                    "ownerManagedAccess": False,
+                    "attributes": {},
+                    "uris": [],
+                    "scopes": [{"name": "read"}],
+                },
+            ],
+            "policies": [
+                {
+                    "name": "Permission - audit_logging.AuditLog - read",
+                    "type": "scope",
+                    "config": {
+                        "resources": json.dumps(["audit_logging.AuditLog"]),
+                        "scopes": json.dumps(["read"]),
+                        "applyPolicies": json.dumps(["Policy - admin"]),
+                    },
+                },
+                {
+                    "name": "Permission - core.HistoricalQuarter - read",
+                    "type": "scope",
+                    "config": {
+                        "resources": json.dumps(["core.HistoricalQuarter"]),
+                        "scopes": json.dumps(["read"]),
+                        "applyPolicies": json.dumps(["Policy - admin"]),
+                    },
+                },
+            ],
+        }
+        manager.kc_manager.import_authorization_settings.return_value = True
+
+        manager.process_model_changes(
+            adds=[
+                ("audit_logging", "AuditLogStatus"),
+                ("core", "MetaHistoricalQuarter"),
+                ("legacy_data", "LegacyLog"),
+                ("billing", "Payment"),
+            ],
+            deletes=[],
+            renames=[],
+        )
+
+        imported_config = manager.kc_manager.import_authorization_settings.call_args.args[0]
+        imported_resource_names = {resource["name"] for resource in imported_config["resources"]}
+        self.assertEqual(imported_resource_names, {"billing.Invoice", "billing.Payment"})
+
+        referenced_resources = set()
+        for policy in imported_config["policies"]:
+            if policy.get("type") != "scope":
+                continue
+            referenced_resources.update(json.loads(policy["config"]["resources"]))
+
+        self.assertNotIn("audit_logging.AuditLog", referenced_resources)
+        self.assertNotIn("core.HistoricalQuarter", referenced_resources)
+        self.assertIn("billing.Payment", referenced_resources)
+
+        manager.delete_resources_individual.assert_called_once_with(
+            {"audit_logging.AuditLog", "core.HistoricalQuarter"},
+            manager.kc_manager.admin.get_client_authz_resources.return_value,
+        )

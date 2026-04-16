@@ -147,6 +147,91 @@ def _get_field_map(model_class: type[Model]):
     return field_map
 
 
+def _get_default_read_permission_cache(request):
+    if request is None:
+        return {}
+
+    cache = getattr(request, "_audit_log_default_read_permission_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(request, "_audit_log_default_read_permission_cache", cache)
+    return cache
+
+
+def _get_default_read_permission_scope(request, model_class):
+    cache = _get_default_read_permission_cache(request)
+    if model_class in cache:
+        return cache[model_class]
+
+    try:
+        from lex.core.models.LexModel import LexModel
+
+        if not (isinstance(model_class, type) and issubclass(model_class, LexModel)):
+            cache[model_class] = None
+            return cache[model_class]
+
+        if getattr(model_class, "permission_read", None) is not LexModel.permission_read:
+            cache[model_class] = None
+            return cache[model_class]
+    except Exception:
+        cache[model_class] = None
+        return cache[model_class]
+
+    resource_name = f"{model_class._meta.app_label}.{model_class.__name__}"
+    user_permissions = getattr(request, "user_permissions", ()) or ()
+
+    has_global_read = False
+    allowed_ids = set()
+    for perm in user_permissions:
+        if not isinstance(perm, dict):
+            continue
+        if perm.get("rsname") != resource_name:
+            continue
+
+        scopes = perm.get("scopes") or ()
+        if "read" not in scopes:
+            continue
+
+        resource_set_id = perm.get("resource_set_id")
+        if resource_set_id is None:
+            has_global_read = True
+            break
+        allowed_ids.add(str(resource_set_id))
+
+    cache[model_class] = has_global_read, frozenset(allowed_ids)
+    return cache[model_class]
+
+
+def _can_read_with_default_permission_scope(request, model_class, payload) -> bool | None:
+    permission_scope = _get_default_read_permission_scope(request, model_class)
+    if permission_scope is None:
+        return None
+
+    has_global_read, allowed_ids = permission_scope
+    if has_global_read:
+        return True
+
+    raw_id = None
+    if isinstance(payload, dict):
+        pk_name = model_class._meta.pk.name
+        raw_id = payload.get(pk_name)
+        if raw_id is None:
+            raw_id = payload.get("id")
+
+    if raw_id is None:
+        return False
+
+    return str(raw_id) in allowed_ids
+
+
+def get_default_read_permission_scope(request, model_class):
+    return _get_default_read_permission_scope(request, model_class)
+
+
+def can_read_with_default_permission_scope(request, model_class, payload) -> bool | None:
+    return _can_read_with_default_permission_scope(request, model_class, payload)
+
+
 def resolve_target_model(audit_log):
     """
     Resolve the Django model class from an audit log entry.
@@ -245,6 +330,14 @@ def can_read_from_payload(request, audit_log, base_user_context=None) -> bool:
     model_class = resolve_target_model(audit_log)
     if not model_class:
         return True  # preserve allow-by-default behavior
+
+    fast_path_result = _can_read_with_default_permission_scope(
+        request,
+        model_class,
+        getattr(audit_log, "payload", None),
+    )
+    if fast_path_result is not None:
+        return fast_path_result
 
     instance = build_shadow_instance(model_class, getattr(audit_log, "payload", None))
     if instance is None:

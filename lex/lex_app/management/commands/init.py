@@ -56,6 +56,14 @@ DEFAULT_SCOPE_POLICY_MAPPING = {
     "export": ["Policy - admin", "Policy - standard"],
 }
 NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS = frozenset({"timeout", "gateway_timeout"})
+KEYCLOAK_SYNC_EXCLUDED_APPS = frozenset({"legacy_data"})
+KEYCLOAK_SYNC_EXCLUDED_RESOURCE_NAMES = frozenset(
+    {
+        "audit_logging.AuditLog",
+        "audit_logging.AuditLogStatus",
+    }
+)
+KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES = ("historical", "metahistorical")
 
 STATE_FILE = Path(
     getattr(
@@ -409,6 +417,35 @@ class KeycloakSyncManager:
         if changed:
             self.kc_manager.admin.update_client(client_id, rep)
 
+    @staticmethod
+    def _resource_name(app_label: str, model_name: str) -> str:
+        return f"{app_label}.{model_name}"
+
+    @classmethod
+    def is_keycloak_sync_excluded_model(cls, app_label: str, model_name: str) -> bool:
+        if not model_name:
+            return False
+
+        if app_label in KEYCLOAK_SYNC_EXCLUDED_APPS:
+            return True
+
+        resource_name = cls._resource_name(app_label, model_name)
+        if resource_name in KEYCLOAK_SYNC_EXCLUDED_RESOURCE_NAMES:
+            return True
+
+        return model_name.lower().startswith(KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES)
+
+    @classmethod
+    def is_keycloak_sync_excluded_resource_name(cls, resource_name: str | None) -> bool:
+        if not resource_name:
+            return False
+
+        if "." not in resource_name:
+            return resource_name.lower().startswith(KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES)
+
+        app_label, model_name = resource_name.split(".", 1)
+        return cls.is_keycloak_sync_excluded_model(app_label, model_name)
+
     def get_all_django_models(self) -> Set[str]:
         """
         Fail-fast: do NOT swallow per-app errors.
@@ -445,11 +482,16 @@ class KeycloakSyncManager:
                     continue
                 if model._meta.proxy:
                     continue
-                if "Historical" in model.__name__:
+
+                model_name = model.__name__
+                if self.is_keycloak_sync_excluded_model(app_label, model_name):
+                    logger.debug(
+                        "Skipping Keycloak sync for immutable model: %s",
+                        self._resource_name(app_label, model_name),
+                    )
                     continue
 
-                model_name = f"{app_label}.{model.__name__}"
-                all_models.add(model_name)
+                all_models.add(self._resource_name(app_label, model_name))
 
         logger.info(f"Found {len(all_models)} Django models total")
         return all_models
@@ -888,15 +930,26 @@ class KeycloakSyncManager:
             preserved_permissions: Dict[str, Dict[str, Any]] = {}
 
             for app_label, model_name in deletes:
-                to_delete_set.add(f"{app_label}.{model_name}")
+                to_delete_set.add(self._resource_name(app_label, model_name))
 
             for app_label, old_name, new_name in renames:
-                old_resource_name = f"{app_label}.{old_name}"
-                new_resource_name = f"{app_label}.{new_name}"
+                old_resource_name = self._resource_name(app_label, old_name)
+                new_resource_name = self._resource_name(app_label, new_name)
+                old_resource_is_excluded = self.is_keycloak_sync_excluded_resource_name(old_resource_name)
+                new_resource_is_excluded = self.is_keycloak_sync_excluded_resource_name(new_resource_name)
+
                 to_delete_set.add(old_resource_name)
+
+                if new_resource_is_excluded:
+                    logger.info(
+                        "  ✓ Skipping immutable resource target during rename sync: %s",
+                        new_resource_name,
+                    )
+                    continue
+
                 to_add_set.add(new_resource_name)
 
-                if preserve_permissions:
+                if preserve_permissions and not old_resource_is_excluded:
                     old_resource = next(
                         (r for r in auth_config["resources"] if r.get("name") == old_resource_name), None
                     )
@@ -914,7 +967,30 @@ class KeycloakSyncManager:
                     )
 
             for app_label, model_name in adds:
-                to_add_set.add(f"{app_label}.{model_name}")
+                resource_name = self._resource_name(app_label, model_name)
+                if self.is_keycloak_sync_excluded_resource_name(resource_name):
+                    logger.info("  ✓ Skipping immutable resource sync: %s", resource_name)
+                    continue
+                to_add_set.add(resource_name)
+
+            existing_excluded_resources: Set[str] = set()
+            for resource in auth_config["resources"]:
+                resource_name = resource.get("name")
+                if self.is_keycloak_sync_excluded_resource_name(resource_name):
+                    existing_excluded_resources.add(resource_name)
+
+            for resource in all_resources:
+                resource_name = resource.get("name")
+                if self.is_keycloak_sync_excluded_resource_name(resource_name):
+                    existing_excluded_resources.add(resource_name)
+
+            if existing_excluded_resources:
+                logger.info(
+                    "Pruning %s immutable resource(s) from Keycloak sync: %s",
+                    len(existing_excluded_resources),
+                    ", ".join(sorted(existing_excluded_resources)),
+                )
+                to_delete_set.update(existing_excluded_resources)
 
             # remove deleted resources from config
             resources_to_keep = []

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from lex.audit_logging.models.AuditLog import AuditLog
-from lex.audit_logging.utils.content_types import safe_get_content_type, safe_get_generic_related_object
+from lex.audit_logging.utils.content_types import safe_get_content_type
 
 
 class AuditLogReadOnlySerializerMixin:
@@ -38,46 +38,68 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
 
     def get_calculation_record(self, obj):
         """
-        Returns a structured object for AG Grid.
-        This allows the frontend to:
-        1. Render a clickable link (using id/model).
-        2. Populate a 'Master/Detail' expandable row with the 'details' dict.
+        Build the link/detail payload for AG Grid without dereferencing the
+        generic relation for every row in a list response.
         """
-        using = getattr(getattr(obj, "_state", None), "db", None)
-        target = safe_get_generic_related_object(obj)
-        content_type = None
+        object_id = getattr(obj, "object_id", None)
+        if object_id is None:
+            return None
 
-        if target is not None:
-            try:
-                content_type = safe_get_content_type(target, using=using)
-            except Exception:
-                content_type = None
-        elif getattr(obj, "content_type_id", None):
+        using = getattr(getattr(obj, "_state", None), "db", None)
+        state = getattr(obj, "_state", None)
+        fields_cache = getattr(state, "fields_cache", {}) or {}
+        content_type = fields_cache.get("content_type")
+
+        if content_type is None and getattr(obj, "content_type_id", None):
             try:
                 content_type = safe_get_content_type(content_type_id=obj.content_type_id, using=using)
             except Exception:
                 content_type = None
 
-        if target and content_type:
-            return {
-                # Metadata for Navigation/Routing
-                "id": obj.object_id,
-                "app_label": content_type.app_label,
-                "model": content_type.model,
+        if content_type is None:
+            return None
 
-                # Display text for the Cell Renderer
-                "display_name": str(target),
+        payload = getattr(obj, "payload", None)
+        if not isinstance(payload, dict):
+            payload = {}
 
-                # Data for the "Collapsed" / Detail view in AG Grid
-                # You can customize what goes here based on the target model
-                "details": {
-                    "is_calculated": getattr(target, 'is_calculated', None),
-                    # You could add other fields dynamically here:
-                    # "status": getattr(target, 'status', 'N/A'),
-                }
-            }
-        return None
+        display_name = (
+            payload.get("short_description")
+            or payload.get("name")
+            or payload.get("display")
+            or f"{content_type.model} #{object_id}"
+        )
+
+        details = {}
+        if "is_calculated" in payload:
+            details["is_calculated"] = payload.get("is_calculated")
+
+        if "error_message" in payload:
+            details["error_message"] = payload.get("error_message")
+
+        return {
+            "id": object_id,
+            "app_label": content_type.app_label,
+            "model": content_type.model,
+            "display_name": display_name,
+            "details": details,
+        }
+
+
+class AuditLogReferenceSerializer(AuditLogReadOnlySerializerMixin, serializers.ModelSerializer):
+    class Meta:
+        model = AuditLog
+        fields = [
+            "id",
+            "date",
+            "author",
+            "resource",
+            "action",
+            "calculation_id",
+        ]
+        read_only_fields = [f.name for f in AuditLog._meta.fields]
 
 AuditLog.api_serializers = {
     "default": AuditLogDefaultSerializer,
+    "reference": AuditLogReferenceSerializer,
 }

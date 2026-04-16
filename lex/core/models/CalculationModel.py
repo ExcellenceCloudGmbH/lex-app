@@ -52,6 +52,8 @@ class CalculationModelException(APIException):
 
 class CalculationModel(LexModel):
 
+    _TERMINAL_STATE_PERSISTENCE_ATTR = "_persisted_terminal_calculation_state"
+
     IN_PROGRESS = "IN_PROGRESS"
     ERROR = "ERROR"
     SUCCESS = "SUCCESS"
@@ -72,6 +74,47 @@ class CalculationModel(LexModel):
     class Meta:
         abstract = True
 
+    @classmethod
+    def _terminal_state_identity(cls, obj):
+        pk = getattr(obj, "pk", None)
+        if pk is not None:
+            return obj.__class__, pk
+        return id(obj)
+
+    @classmethod
+    def _mark_terminal_state_persisted(cls, obj):
+        if obj is None:
+            return
+
+        setattr(
+            obj,
+            cls._TERMINAL_STATE_PERSISTENCE_ATTR,
+            getattr(obj, "is_calculated", None),
+        )
+
+    @classmethod
+    def _register_terminal_state_persistence(cls, obj):
+        if obj is None:
+            return
+
+        if transaction.get_connection().in_atomic_block:
+            transaction.on_commit(lambda: cls._mark_terminal_state_persisted(obj))
+            return
+
+        cls._mark_terminal_state_persisted(obj)
+
+    @classmethod
+    def _clear_terminal_state_persistence(cls, obj):
+        if obj is not None and hasattr(obj, cls._TERMINAL_STATE_PERSISTENCE_ATTR):
+            delattr(obj, cls._TERMINAL_STATE_PERSISTENCE_ATTR)
+
+    @classmethod
+    def _has_persisted_terminal_state(cls, obj, state=None):
+        persisted_state = getattr(obj, cls._TERMINAL_STATE_PERSISTENCE_ATTR, None)
+        if state is None:
+            return persisted_state is not None
+        return persisted_state == state
+
     @staticmethod
     def persist_error_state(calc_objs):
         persisted_objects = []
@@ -81,14 +124,22 @@ class CalculationModel(LexModel):
             if obj is None:
                 continue
 
-            object_identity = id(obj)
+            object_identity = CalculationModel._terminal_state_identity(obj)
             if object_identity in seen_objects:
                 continue
             seen_objects.add(object_identity)
 
+            if CalculationModel._has_persisted_terminal_state(
+                obj,
+                CalculationModel.ERROR,
+            ):
+                persisted_objects.append(obj)
+                continue
+
             try:
                 obj.is_calculated = CalculationModel.ERROR
                 obj.save(skip_hooks=True)
+                CalculationModel._register_terminal_state_persistence(obj)
                 persisted_objects.append(obj)
             except Exception:
                 logger.error(
@@ -239,6 +290,7 @@ class CalculationModel(LexModel):
         """
         from lex.core.signals.CalculationSignals import update_calculation_status
 
+        self._clear_terminal_state_persistence(self)
         func = self.lex_func()
         exception_details = None
         stack_trace = None
@@ -302,6 +354,7 @@ class CalculationModel(LexModel):
 
             try:
                 self.save(skip_hooks=True)
+                self._register_terminal_state_persistence(self)
                 update_calculation_status(
                     self,
                     exception_details=exception_details,
@@ -356,6 +409,7 @@ class CalculationModel(LexModel):
             return
 
         self._calculation_hook_in_progress = True
+        self._clear_terminal_state_persistence(self)
         task_dispatched = False
         try:
             # ── Ensure this record is registered in the cache store ──
@@ -496,8 +550,14 @@ class CalculationModel(LexModel):
             # already did — to cover cases where the error originated in
             # calculate_hook itself (e.g. dispatch failure) or where the
             # parent's own calculate() raised directly.
+            error_state_already_persisted = self._has_persisted_terminal_state(
+                self,
+                self.ERROR,
+            )
             try:
-                self.save(skip_hooks=True)
+                if not error_state_already_persisted:
+                    self.save(skip_hooks=True)
+                    self._register_terminal_state_persistence(self)
                 if not status_was_error:
                     update_calculation_status(
                         self,

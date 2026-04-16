@@ -24,8 +24,10 @@ Run::
     python manage.py test lex.tests.test_serializer_helpers
 """
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
+from django.db import models
 from django.test import SimpleTestCase
 
 from lex.api.serializers.base_serializers import (
@@ -33,6 +35,29 @@ from lex.api.serializers.base_serializers import (
     _get_capabilities,
     _capability_cache,
 )
+from lex.core.models.LexModel import LexModel
+
+
+class _SerializerHelperRelatedModel(LexModel):
+    name = models.CharField(max_length=20, default="")
+
+    class Meta:
+        app_label = "serializer_tests"
+        managed = False
+
+
+class _SerializerHelperParentModel(LexModel):
+    name = models.CharField(max_length=20, default="")
+    related = models.ForeignKey(
+        _SerializerHelperRelatedModel,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        app_label = "serializer_tests"
+        managed = False
 
 
 class TestNormalizeFieldNames(SimpleTestCase):
@@ -145,3 +170,76 @@ class TestUnwrapInstance(SimpleTestCase):
         history.instance = main_model
         result = LexSerializer._unwrap_instance(history)
         self.assertIs(result, main_model)
+
+
+class TestAuditLogPayloadPermissionFastPaths(SimpleTestCase):
+    def test_default_permission_payload_visibility_skips_shadow_instance(self):
+        request = SimpleNamespace(
+            user_permissions=[
+                {
+                    "rsname": (
+                        f"{_SerializerHelperParentModel._meta.app_label}."
+                        f"{_SerializerHelperParentModel.__name__}"
+                    ),
+                    "resource_set_id": "10",
+                    "scopes": ["read"],
+                }
+            ]
+        )
+
+        with patch.object(
+            LexSerializer,
+            "_build_shadow_instance",
+            side_effect=AssertionError("shadow instance should not be built"),
+        ):
+            visible_fields = LexSerializer._get_audit_log_payload_visible_fields(
+                request,
+                _SerializerHelperParentModel,
+                {"id": 10, "name": "allowed"},
+            )
+
+        self.assertIn("name", visible_fields)
+        self.assertIn("related", visible_fields)
+
+    def test_default_permission_related_payload_skips_database_lookup(self):
+        request = SimpleNamespace(
+            user_permissions=[
+                {
+                    "rsname": (
+                        f"{_SerializerHelperRelatedModel._meta.app_label}."
+                        f"{_SerializerHelperRelatedModel.__name__}"
+                    ),
+                    "resource_set_id": "77",
+                    "scopes": ["read"],
+                }
+            ]
+        )
+
+        with patch.object(
+            _SerializerHelperRelatedModel.objects,
+            "get",
+            side_effect=AssertionError("related object lookup should not run"),
+        ):
+            filtered = LexSerializer._filter_foreign_key_relations(
+                request,
+                _SerializerHelperParentModel,
+                {"name": "parent", "related": {"id": 77, "name": "allowed"}},
+            )
+
+        self.assertIn("related", filtered)
+
+    def test_unreadable_default_permission_related_payload_is_removed_without_database_lookup(self):
+        request = SimpleNamespace(user_permissions=[])
+
+        with patch.object(
+            _SerializerHelperRelatedModel.objects,
+            "get",
+            side_effect=AssertionError("related object lookup should not run"),
+        ):
+            filtered = LexSerializer._filter_foreign_key_relations(
+                request,
+                _SerializerHelperParentModel,
+                {"name": "parent", "related": {"id": 77, "name": "denied"}},
+            )
+
+        self.assertNotIn("related", filtered)

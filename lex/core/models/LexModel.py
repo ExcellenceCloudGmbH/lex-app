@@ -472,6 +472,28 @@ class LexModel(LifecycleModel):
         """
         base_save = super(LifecycleModelMixin, self).save
         atomic_context = transaction.atomic() if self._should_use_atomic_save() else nullcontext()
+        skip_history_for_current_save_only = (
+            kwargs.pop("skip_history_for_current_save_only", False)
+            or getattr(self, "_skip_history_for_current_save_only", False)
+        )
+        added_transient_skip_history_flag = False
+
+        def clear_transient_skip_history_flag():
+            nonlocal added_transient_skip_history_flag
+
+            if added_transient_skip_history_flag and hasattr(self, "skip_history_when_saving"):
+                del self.skip_history_when_saving
+                added_transient_skip_history_flag = False
+
+            if hasattr(self, "_skip_history_for_current_save_only"):
+                delattr(self, "_skip_history_for_current_save_only")
+
+        if (
+            skip_history_for_current_save_only
+            and not getattr(self, "skip_history_when_saving", False)
+        ):
+            self.skip_history_when_saving = True
+            added_transient_skip_history_flag = True
 
         try:
             with atomic_context:
@@ -482,7 +504,9 @@ class LexModel(LifecycleModel):
                     else False
                 )
                 if skip_hooks or skip_hooks_from_cm:
-                    return base_save(*args, **kwargs)
+                    result = base_save(*args, **kwargs)
+                    clear_transient_skip_history_flag()
+                    return result
 
                 self._clear_watched_fk_model_cache()
                 is_new = self._state.adding
@@ -494,6 +518,7 @@ class LexModel(LifecycleModel):
 
                 self._run_hooked_methods(BEFORE_SAVE, **kwargs)
                 result = base_save(*args, **kwargs)
+                clear_transient_skip_history_flag()
                 self._run_hooked_methods(AFTER_SAVE, **kwargs)
 
                 if is_new:
@@ -504,8 +529,11 @@ class LexModel(LifecycleModel):
                 transaction.on_commit(self._reset_initial_state)
                 return result
         except Exception:
+            clear_transient_skip_history_flag()
             self._finalize_pending_terminal_audit()
             raise
+        finally:
+            clear_transient_skip_history_flag()
 
     def _finalize_pending_terminal_audit(self):
         pending_terminal_audit = getattr(self, "_pending_terminal_audit", None)

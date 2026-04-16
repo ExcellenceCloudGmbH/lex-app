@@ -1,6 +1,9 @@
 import traceback
 import logging
 import time
+
+from django.db import transaction
+
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 
@@ -87,6 +90,103 @@ def _resolve_audit_failure_traceback(exception):
 
 
 class AuditLogMixin:
+
+    @staticmethod
+    def _attach_related_instance_id(payload, related_instance):
+        related_instance_pk = getattr(related_instance, "pk", None)
+        if related_instance_pk is None or not isinstance(payload, dict):
+            return payload
+
+        enriched_payload = dict(payload)
+        enriched_payload.setdefault("id", related_instance_pk)
+        return enriched_payload
+
+    def reset_failed_audit_log_state(self):
+        self._failed_audit_logged = False
+        if hasattr(self, "_pending_failed_audit_log"):
+            delattr(self, "_pending_failed_audit_log")
+        if hasattr(self, "_pending_failed_audit_logs"):
+            delattr(self, "_pending_failed_audit_logs")
+
+    def _get_pending_failed_audit_logs(self):
+        pending_failed_audit_logs = getattr(self, "_pending_failed_audit_logs", None)
+        if pending_failed_audit_logs is not None:
+            return pending_failed_audit_logs
+
+        legacy_pending_failed_audit_log = getattr(self, "_pending_failed_audit_log", None)
+        if legacy_pending_failed_audit_log is None:
+            return []
+
+        pending_failed_audit_logs = [legacy_pending_failed_audit_log]
+        self._pending_failed_audit_logs = pending_failed_audit_logs
+        delattr(self, "_pending_failed_audit_log")
+        return pending_failed_audit_logs
+
+    def has_logged_failure_audit(self):
+        return bool(getattr(self, "_failed_audit_logged", False))
+
+    def log_failed_change(
+        self,
+        action,
+        target,
+        payload=None,
+        error_traceback=None,
+        related_instance=None,
+    ):
+        payload = self._attach_related_instance_id(payload, related_instance)
+        audit_log = self.log_change(
+            action,
+            target,
+            payload=_serialize_payload(payload) or {},
+        )
+
+        if related_instance is not None and getattr(related_instance, "pk", None) is not None:
+            audit_log.content_type = _safe_get_content_type(related_instance.__class__)
+            audit_log.object_id = related_instance.pk
+            audit_log.save()
+
+        AuditLogStatus.objects.filter(audit_log=audit_log).update(
+            status='failure',
+            error_traceback=error_traceback,
+        )
+        self._failed_audit_logged = True
+        return audit_log
+
+    def queue_failed_audit_log(
+        self,
+        action,
+        target,
+        payload=None,
+        error_traceback=None,
+        related_instance=None,
+    ):
+        pending_failed_audit_logs = list(self._get_pending_failed_audit_logs())
+        pending_failed_audit_logs.append({
+            "action": action,
+            "target": target,
+            "payload": payload,
+            "error_traceback": error_traceback,
+            "related_instance": related_instance,
+        })
+        self._pending_failed_audit_logs = pending_failed_audit_logs
+        self._failed_audit_logged = False
+
+    def flush_pending_failed_audit_logs(self):
+        pending_failed_audit_logs = list(self._get_pending_failed_audit_logs())
+        if not pending_failed_audit_logs:
+            return []
+
+        if hasattr(self, "_pending_failed_audit_logs"):
+            delattr(self, "_pending_failed_audit_logs")
+
+        return [
+            self.log_failed_change(**pending_failed_audit_log)
+            for pending_failed_audit_log in pending_failed_audit_logs
+        ]
+
+    def flush_pending_failed_audit_log(self):
+        flushed_failed_audit_logs = self.flush_pending_failed_audit_logs()
+        return flushed_failed_audit_logs[0] if flushed_failed_audit_logs else None
     
     def log_change(self, action, target, payload=None):
         payload = payload or {}
@@ -133,10 +233,25 @@ class AuditLogMixin:
             error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
                 .update(status='failure', error_traceback=error_msg)
+            if transaction.get_connection().in_atomic_block:
+                # The failure status above rolls back with the surrounding request
+                # transaction, so the view persists a queued replacement afterward.
+                self.queue_failed_audit_log(
+                    "create",
+                    serializer.Meta.model,
+                    payload=payload,
+                    error_traceback=error_msg,
+                )
+            else:
+                # Non-atomic requests keep the failure row written above; only mark it
+                # so request-level fallback logging does not duplicate the audit.
+                self._failed_audit_logged = True
             raise
 
     def perform_update(self, serializer):
-        initial_payload = _serialize_payload(serializer.validated_data)
+        related_instance = getattr(serializer, "instance", None)
+        initial_payload = _serialize_payload(serializer.validated_data) or {}
+        initial_payload = self._attach_related_instance_id(initial_payload, related_instance)
         audit_log = self.log_change("update", serializer.Meta.model, payload=initial_payload)
         try:
             instance = _save_with_retry(serializer)
@@ -151,6 +266,16 @@ class AuditLogMixin:
             error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
                 .update(status='failure', error_traceback=error_msg)
+            if transaction.get_connection().in_atomic_block:
+                self.queue_failed_audit_log(
+                    "update",
+                    serializer.Meta.model,
+                    payload=initial_payload,
+                    error_traceback=error_msg,
+                    related_instance=related_instance,
+                )
+            else:
+                self._failed_audit_logged = True
             raise
 
     def perform_destroy(self, instance):
@@ -167,4 +292,14 @@ class AuditLogMixin:
             error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
                 .update(status='failure', error_traceback=error_msg)
+            if transaction.get_connection().in_atomic_block:
+                self.queue_failed_audit_log(
+                    "delete",
+                    instance,
+                    payload=payload,
+                    error_traceback=error_msg,
+                    related_instance=instance,
+                )
+            else:
+                self._failed_audit_logged = True
             raise

@@ -1,12 +1,16 @@
 import base64
 from collections.abc import Mapping
+from functools import lru_cache
 from urllib.parse import parse_qs
 
+from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist
+from django.db.models import Q
 from rest_framework import filters
 
 from lex.api.serializers.base_serializers import LexSerializer, _get_capabilities
 from lex.api.utils import can_read_from_payload
+from lex.api.utils.helpers import get_default_read_permission_scope
 from lex.core.models.LexModel import LexModel, UserContext
 
 
@@ -111,10 +115,95 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
 
         return queryset.filter(**{f"{lookup_field}__in": normalized_ids})
 
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _get_auditlog_default_permission_resource_map():
+        resource_map = {}
+        ambiguous_resources = set()
+
+        for model_class in apps.get_models():
+            try:
+                if not (isinstance(model_class, type) and issubclass(model_class, LexModel)):
+                    continue
+                if getattr(model_class, "permission_read", None) is not LexModel.permission_read:
+                    continue
+            except Exception:
+                continue
+
+            for resource_token in {model_class._meta.model_name.lower(), model_class.__name__.lower()}:
+                if resource_token in ambiguous_resources:
+                    continue
+
+                existing = resource_map.get(resource_token)
+                if existing is None:
+                    resource_map[resource_token] = model_class
+                elif existing is not model_class:
+                    ambiguous_resources.add(resource_token)
+                    resource_map.pop(resource_token, None)
+
+        return resource_map
+
+    def _build_auditlog_db_visibility_filters(self, request):
+        resource_map = self._get_auditlog_default_permission_resource_map()
+        if not resource_map:
+            return frozenset(), None
+
+        global_resources = set()
+        scoped_filters = []
+        handled_resources = set()
+
+        for resource_token, model_class in resource_map.items():
+            permission_scope = get_default_read_permission_scope(request, model_class)
+            if permission_scope is None:
+                continue
+
+            has_global_read, allowed_ids = permission_scope
+            handled_resources.add(resource_token)
+
+            if has_global_read:
+                global_resources.add(resource_token)
+                continue
+
+            if not allowed_ids:
+                continue
+
+            pk_field = model_class._meta.pk
+            normalized_ids = []
+            for raw_id in allowed_ids:
+                try:
+                    normalized_ids.append(pk_field.to_python(raw_id))
+                except Exception:
+                    normalized_ids.append(raw_id)
+
+            scoped_filters.append(
+                Q(resource=resource_token, object_id__in=normalized_ids)
+                | Q(resource=resource_token, object_id__isnull=True, payload__id__in=normalized_ids)
+            )
+
+        allowed_q = None
+        if global_resources:
+            allowed_q = Q(resource__in=global_resources)
+
+        for scoped_filter in scoped_filters:
+            allowed_q = scoped_filter if allowed_q is None else (allowed_q | scoped_filter)
+
+        return frozenset(handled_resources), allowed_q
+
     def _handle_auditlog(self, request, queryset):
+        handled_resources, allowed_q = self._build_auditlog_db_visibility_filters(request)
+        residual_queryset = queryset
+
+        if handled_resources:
+            residual_queryset = queryset.exclude(resource__in=handled_resources)
+            residual_q = ~Q(resource__in=handled_resources)
+            if allowed_q is None:
+                queryset = residual_queryset
+            else:
+                queryset = queryset.filter(allowed_q | residual_q)
+
         base_user_context = UserContext.from_request_base(request)
         excluded = []
-        for row in queryset.iterator(chunk_size=self.ITERATOR_CHUNK_SIZE):
+        for row in residual_queryset.iterator(chunk_size=self.ITERATOR_CHUNK_SIZE):
             try:
                 if not can_read_from_payload(request, row, base_user_context=base_user_context):
                     excluded.append(row.pk)

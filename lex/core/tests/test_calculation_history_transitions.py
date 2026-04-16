@@ -26,11 +26,14 @@ from lex.process_admin.utils.model_registration import ModelRegistration
 class CalculationHistoryTestModel(CalculationModel):
     name = models.CharField(max_length=100)
     computed = models.IntegerField(default=0)
+    should_fail = models.BooleanField(default=False)
 
     class Meta:
         app_label = "lex_app"
 
     def calculate(self):
+        if self.should_fail:
+            raise ValueError("forced calculation failure")
         self.computed = (self.computed or 0) + 1
 
     def permission_read(self, user_context):
@@ -104,6 +107,33 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
                 except Exception:
                     pass
 
+    def _history_rows_since(self, existing_ids):
+        return list(
+            self.HistoryModel.objects.filter(id=self.obj.pk)
+            .exclude(history_id__in=existing_ids)
+            .order_by("history_id")
+        )
+
+    def _send_calculation_request(self, calculation_id, *, should_fail=False):
+        request = self.factory.patch(
+            f"/api/model_entries/calculationhistorytestmodel/{calculation_id}/{self.obj.pk}/",
+            {
+                "calculate": "true",
+                "is_calculated": True,
+                "name": "trigger",
+                "should_fail": should_fail,
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        return OneModelEntry.as_view()(
+            request,
+            model_container=self.container,
+            calculationId=calculation_id,
+            pk=self.obj.pk,
+        )
+
     def test_frontend_calculation_creates_ordered_status_history_rows(self):
         existing_ids = set(
             self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
@@ -111,35 +141,65 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             )
         )
 
-        request = self.factory.patch(
-            "/api/model_entries/calculationhistorytestmodel/calc-1/1/",
-            {"calculate": "true", "is_calculated": True, "name": "trigger"},
-            format="json",
-        )
-        force_authenticate(request, user=self.user)
-
-        response = OneModelEntry.as_view()(
-            request,
-            model_container=self.container,
-            calculationId="calc-1",
-            pk=self.obj.pk,
-        )
+        response = self._send_calculation_request("calc-1")
         self.assertEqual(response.status_code, 200, response.data)
 
-        new_rows = list(
-            self.HistoryModel.objects.filter(id=self.obj.pk)
-            .exclude(history_id__in=existing_ids)
-            .order_by("history_id")
-        )
+        new_rows = self._history_rows_since(existing_ids)
         self.assertEqual(len(new_rows), 2)
         self.assertEqual(
             [row.is_calculated for row in new_rows],
             [CalculationModel.IN_PROGRESS, CalculationModel.SUCCESS],
         )
 
-    def test_regular_update_resets_is_calculated_even_when_payload_is_unchanged(self):
+    def test_atomic_calculation_error_keeps_single_in_progress_and_error_history_rows(self):
+        existing_ids = set(
+            self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
+                "history_id", flat=True
+            )
+        )
+
+        response = self._send_calculation_request(
+            "calc-atomic-error",
+            should_fail=True,
+        )
+        self.assertEqual(response.status_code, 500, response.data)
+
+        new_rows = self._history_rows_since(existing_ids)
+        self.assertEqual(
+            [row.is_calculated for row in new_rows],
+            [CalculationModel.IN_PROGRESS, CalculationModel.ERROR],
+        )
+
+    def test_non_atomic_calculation_error_creates_error_history_once(self):
+        existing_ids = set(
+            self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
+                "history_id", flat=True
+            )
+        )
+
+        with patch.object(CalculationHistoryTestModel, "is_atomic", False, create=True):
+            response = self._send_calculation_request(
+                "calc-non-atomic-error",
+                should_fail=True,
+            )
+
+        self.assertEqual(response.status_code, 500, response.data)
+
+        new_rows = self._history_rows_since(existing_ids)
+        self.assertEqual(
+            [row.is_calculated for row in new_rows],
+            [CalculationModel.IN_PROGRESS, CalculationModel.ERROR],
+        )
+
+    def test_regular_update_skips_noop_payload_without_resetting_is_calculated(self):
         self.obj.is_calculated = CalculationModel.SUCCESS
         self.obj.save(skip_hooks=True)
+
+        existing_ids = set(
+            self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
+                "history_id", flat=True
+            )
+        )
 
         request = self.factory.patch(
             f"/api/model_entries/calculationhistorytestmodel/edit-1/{self.obj.pk}/",
@@ -161,7 +221,53 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
         self.assertEqual(response.status_code, 200, response.data)
 
         self.obj.refresh_from_db()
+        self.assertEqual(self.obj.is_calculated, CalculationModel.SUCCESS)
+
+        new_rows = list(
+            self.HistoryModel.objects.filter(id=self.obj.pk)
+            .exclude(history_id__in=existing_ids)
+            .order_by("history_id")
+        )
+        self.assertEqual(new_rows, [])
+
+    def test_sharepoint_edit_history_row_persists_not_calculated_status(self):
+        self.obj.is_calculated = CalculationModel.SUCCESS
+        self.obj.save(skip_hooks=True)
+
+        existing_ids = set(
+            self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
+                "history_id", flat=True
+            )
+        )
+
+        request = self.factory.patch(
+            f"/api/model_entries/calculationhistorytestmodel/sharepoint-edit/{self.obj.pk}/",
+            {
+                "edited_file": "Calculation workbook",
+                "is_calculated": CalculationModel.NOT_CALCULATED,
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = OneModelEntry.as_view()(
+            request,
+            model_container=self.container,
+            calculationId="sharepoint-edit",
+            pk=self.obj.pk,
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.obj.refresh_from_db()
         self.assertEqual(self.obj.is_calculated, CalculationModel.NOT_CALCULATED)
+
+        new_rows = self._history_rows_since(existing_ids)
+        self.assertEqual(len(new_rows), 1)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.NOT_CALCULATED)
+        self.assertEqual(
+            new_rows[0].history_change_reason,
+            "SharePoint edit opened for Calculation workbook; calculation reset",
+        )
 
     @unittest.skip("ActiveCalculationStateStore state mismatch — tests need update")
     def test_startup_abort_reset_persists_aborted_history_row(self):

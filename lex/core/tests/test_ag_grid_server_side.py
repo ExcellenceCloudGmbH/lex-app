@@ -11,6 +11,8 @@ server-side requests into Django ORM queries, covering:
 """
 
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.http import QueryDict
@@ -19,6 +21,8 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from lex.api.views.model_entries.List import ListModelEntries, apply_ordering, apply_query_param_filters
+from lex.audit_logging.models.AuditLog import AuditLog
+from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 
 
 User = get_user_model()
@@ -33,6 +37,17 @@ class UserLiteSerializer(serializers.ModelSerializer):
 class _AgGridListTestView(ListModelEntries):
     def get_serializer(self, *args, **kwargs):
         return UserLiteSerializer(*args, **kwargs)
+
+
+class AuditLogLiteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AuditLog
+        fields = ("id", "resource", "object_id")
+
+
+class _AgGridAuditLogTestView(ListModelEntries):
+    def get_serializer(self, *args, **kwargs):
+        return AuditLogLiteSerializer(*args, **kwargs)
 
 
 class AgGridServerSideServiceTests(TestCase):
@@ -54,6 +69,13 @@ class AgGridServerSideServiceTests(TestCase):
     def _view(self):
         view = _AgGridListTestView()
         view._ag_model_class = User
+        view._ag_field_validity_cache = {}
+        view._ag_model_field_cache = {}
+        return view
+
+    def _auditlog_view(self):
+        view = _AgGridAuditLogTestView()
+        view._ag_model_class = AuditLog
         view._ag_field_validity_cache = {}
         view._ag_model_field_cache = {}
         return view
@@ -211,3 +233,161 @@ class AgGridServerSideServiceTests(TestCase):
         result = self._view()._execute_ag_grid_request(User.objects.all(), payload)
         self.assertEqual(result["rowCount"], 1)
         self.assertEqual(result["rowData"][0]["username"], "alex")
+
+    def test_query_param_filtering_by_json_payload_key(self):
+        matching_log = AuditLog.objects.create(
+            author="tester",
+            resource="fund",
+            action="update",
+            payload={"id": 101, "name": "Alpha"},
+        )
+        AuditLog.objects.create(
+            author="tester",
+            resource="fund",
+            action="update",
+            payload={"id": 202, "name": "Beta"},
+        )
+
+        params = QueryDict("payload.id=101")
+        qs = apply_query_param_filters(AuditLog.objects.all(), params, AuditLog)
+
+        self.assertEqual(list(qs.values_list("id", flat=True)), [matching_log.id])
+
+    def test_query_param_filtering_by_related_json_payload_key(self):
+        matching_log = AuditLog.objects.create(
+            author="tester",
+            resource="fund",
+            action="update",
+            payload={"id": 303},
+        )
+        AuditLogStatus.objects.create(audit_log=matching_log, status="success")
+
+        other_log = AuditLog.objects.create(
+            author="tester",
+            resource="fund",
+            action="update",
+            payload={"id": 404},
+        )
+        AuditLogStatus.objects.create(audit_log=other_log, status="failure")
+
+        params = QueryDict("audit_log.resource=fund&audit_log.payload.id=303")
+        qs = apply_query_param_filters(AuditLogStatus.objects.all(), params, AuditLogStatus)
+
+        self.assertEqual(list(qs.values_list("audit_log_id", flat=True)), [matching_log.id])
+
+    def test_auditlog_leaf_rows_avoid_exact_count_until_last_page(self):
+        for index in range(3):
+            AuditLog.objects.create(
+                author=f"tester-{index}",
+                resource="fund",
+                action="update",
+                object_id=index + 1,
+                payload={"id": index + 1},
+            )
+
+        payload = {
+            "startRow": 0,
+            "endRow": 2,
+            "rowGroupCols": [],
+            "groupKeys": [],
+            "valueCols": [],
+            "sortModel": [{"colId": "id", "sort": "asc"}],
+            "filterModel": {},
+            "pivotMode": False,
+        }
+
+        result = self._auditlog_view()._execute_ag_grid_request(AuditLog.objects.all(), payload)
+        self.assertEqual(len(result["rowData"]), 2)
+        self.assertIsNone(result["rowCount"])
+
+        payload["startRow"] = 2
+        payload["endRow"] = 4
+        result = self._auditlog_view()._execute_ag_grid_request(AuditLog.objects.all(), payload)
+        self.assertEqual(len(result["rowData"]), 1)
+        self.assertEqual(result["rowCount"], 3)
+
+    def test_auditlog_deferred_permissions_stop_after_requested_window(self):
+        for index in range(50):
+            AuditLog.objects.create(
+                author=f"tester-{index}",
+                resource="custom-resource",
+                action="update",
+                object_id=index + 1,
+                payload={"id": index + 1},
+            )
+
+        view = self._auditlog_view()
+        view.request = SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=False),
+            user_permissions=[],
+        )
+        payload = {
+            "startRow": 0,
+            "endRow": 2,
+            "rowGroupCols": [],
+            "groupKeys": [],
+            "valueCols": [],
+            "sortModel": [{"colId": "id", "sort": "asc"}],
+            "filterModel": {},
+            "pivotMode": False,
+        }
+
+        with patch(
+            "lex.api.views.model_entries.List.UserReadRestrictionFilterBackend._build_auditlog_db_visibility_filters",
+            return_value=(frozenset(), None),
+        ), patch(
+            "lex.api.views.model_entries.List.can_read_from_payload",
+            return_value=True,
+        ) as can_read_mock:
+            result = view._execute_ag_grid_request(
+                AuditLog.objects.all(),
+                payload,
+                defer_auditlog_permissions=True,
+            )
+
+        self.assertEqual([row["object_id"] for row in result["rowData"]], [1, 2])
+        self.assertIsNone(result["rowCount"])
+        self.assertEqual(can_read_mock.call_count, 3)
+
+    def test_auditlog_post_uses_deferred_permissions_for_flat_leaf_requests(self):
+        AuditLog.objects.create(
+            author="tester",
+            resource="fund",
+            action="update",
+            object_id=1,
+            payload={"id": 1},
+        )
+
+        view = self._auditlog_view()
+        view.kwargs = {"model_container": SimpleNamespace(model_class=AuditLog)}
+        request = SimpleNamespace(
+            data={
+                "request": {
+                    "startRow": 0,
+                    "endRow": 2,
+                    "rowGroupCols": [],
+                    "groupKeys": [],
+                    "valueCols": [],
+                    "sortModel": [{"colId": "id", "sort": "asc"}],
+                    "filterModel": {},
+                    "pivotMode": False,
+                }
+            },
+            query_params=QueryDict(""),
+            user=SimpleNamespace(is_authenticated=False),
+            user_permissions=[],
+        )
+        view.request = request
+        view.filter_queryset = lambda queryset: (_ for _ in ()).throw(
+            AssertionError("filter_queryset should not run for deferred AuditLog leaf requests")
+        )
+
+        with patch.object(
+            view,
+            "_execute_ag_grid_request",
+            return_value={"rowData": [], "rowCount": 0},
+        ) as execute_mock:
+            response = view.post(request)
+
+        self.assertEqual(response.data, {"rowData": [], "rowCount": 0})
+        self.assertTrue(execute_mock.call_args.kwargs["defer_auditlog_permissions"])

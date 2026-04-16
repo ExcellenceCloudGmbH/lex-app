@@ -9,6 +9,7 @@ from datetime import datetime, date, time
 from uuid import UUID
 from decimal import Decimal
 
+from lex.api.utils.helpers import can_read_with_default_permission_scope
 from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.core.models.LexModel import LexModel, UserContext
 
@@ -96,6 +97,7 @@ class LexSerializer(serializers.ModelSerializer):
     # ------------------------------------------------------------------
     _base_user_context = None      # Cached UserContext without keycloak scopes
     _meta_fields_cache: dict = {}  # { model_class: set_of_field_names }
+    _concrete_field_map_cache: dict = {}  # { model_class: { field_name: field } }
 
 
     def _get_base_user_context(self, request):
@@ -128,6 +130,14 @@ class LexSerializer(serializers.ModelSerializer):
             }
             cls._meta_fields_cache[model_class] = fields
         return fields
+
+    @classmethod
+    def _get_cached_concrete_field_map(cls, model_class) -> dict:
+        field_map = cls._concrete_field_map_cache.get(model_class)
+        if field_map is None:
+            field_map = {f.name: f for f in model_class._meta.concrete_fields}
+            cls._concrete_field_map_cache[model_class] = field_map
+        return field_map
 
     @staticmethod
     def _normalize_field_names(fields) -> set[str]:
@@ -282,7 +292,7 @@ class LexSerializer(serializers.ModelSerializer):
     @classmethod
     def _build_shadow_instance(cls, model_class: type[Model], payload: dict) -> Model | None:
         try:
-            field_map = {f.name: f for f in model_class._meta.concrete_fields}
+            field_map = cls._get_cached_concrete_field_map(model_class)
             init_kwargs = {}
             for key, val in (payload or {}).items():
                 if key in field_map:
@@ -299,9 +309,73 @@ class LexSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
-    
     @classmethod
-    def _filter_foreign_key_relations(cls, request, model_class, payload: dict) -> dict:
+    def _get_audit_log_related_permission_cache(cls, request) -> dict:
+        if request is None:
+            return {}
+
+        cache = getattr(request, "_audit_log_related_permission_cache", None)
+        if cache is None:
+            cache = {}
+            setattr(request, "_audit_log_related_permission_cache", cache)
+        return cache
+
+    @classmethod
+    def _can_read_related_payload_reference(
+        cls,
+        request,
+        related_model,
+        value,
+        base_user_context=None,
+    ) -> bool:
+        if not isinstance(value, dict):
+            return True
+
+        related_id = value.get("id")
+        if related_id is None:
+            return True
+
+        if request is not None:
+            fast_path_result = can_read_with_default_permission_scope(request, related_model, value)
+            if fast_path_result is not None:
+                return fast_path_result
+
+        cache_key = (related_model, str(related_id))
+        cache = cls._get_audit_log_related_permission_cache(request)
+        if cache_key in cache:
+            return cache[cache_key]
+
+        allowed = True
+        try:
+            related_obj = related_model.objects.get(pk=related_id)
+
+            if hasattr(related_obj, "permission_read"):
+                if base_user_context is not None:
+                    user_context = base_user_context.with_instance(request, related_obj)
+                else:
+                    user_context = UserContext.from_request(request, related_obj)
+                result = related_obj.permission_read(user_context)
+                allowed = result.allowed if hasattr(result, "allowed") else bool(result)
+            elif hasattr(related_obj, "can_read"):
+                readable_fields = related_obj.can_read(request)
+                if isinstance(readable_fields, (set, list, tuple)):
+                    allowed = len(readable_fields) > 0
+                else:
+                    allowed = bool(readable_fields)
+        except Exception:
+            allowed = True
+
+        cache[cache_key] = allowed
+        return allowed
+
+    @classmethod
+    def _filter_foreign_key_relations(
+        cls,
+        request,
+        model_class,
+        payload: dict,
+        base_user_context=None,
+    ) -> dict:
         """
         Filter foreign key relationships in payload based on individual permissions.
         
@@ -319,7 +393,7 @@ class LexSerializer(serializers.ModelSerializer):
         filtered_payload = payload.copy()
         
         # Get field map for the model
-        field_map = {f.name: f for f in model_class._meta.concrete_fields}
+        field_map = cls._get_cached_concrete_field_map(model_class)
         
         for field_name, field_value in payload.items():
             if field_name in field_map:
@@ -328,37 +402,61 @@ class LexSerializer(serializers.ModelSerializer):
                 # Check if this is a foreign key field with dictionary representation
                 if isinstance(field, ForeignKey) and isinstance(field_value, dict):
                     related_model = field.related_model
-                    
-                    # Try to get the related object ID
-                    related_id = field_value.get('id')
-                    if related_id is not None:
-                        try:
-                            # Get the actual related object
-                            related_obj = related_model.objects.get(pk=related_id)
-                            
-                            # Check if user can read this related object
-                            if hasattr(related_obj, 'permission_read'):
-                                user_context = UserContext.from_request(request, related_obj)
-                                result = related_obj.permission_read(user_context)
-                                
-                                # If permission is denied, remove this field from payload
-                                if not result.allowed:
-                                    filtered_payload.pop(field_name, None)
-                                    continue
-                            elif hasattr(related_obj, 'can_read'):
-                                # Fallback to legacy method
-                                readable_fields = related_obj.can_read(request)
-                                if isinstance(readable_fields, (set, list, tuple)) and len(readable_fields) == 0:
-                                    filtered_payload.pop(field_name, None)
-                                    continue
-                                elif not readable_fields:
-                                    filtered_payload.pop(field_name, None)
-                                    continue
-                                    
-                        except (related_model.DoesNotExist, Exception):
-                            pass
+                    if not cls._can_read_related_payload_reference(
+                        request,
+                        related_model,
+                        field_value,
+                        base_user_context=base_user_context,
+                    ):
+                        filtered_payload.pop(field_name, None)
+                        continue
         
         return filtered_payload
+
+    @classmethod
+    def _get_audit_log_payload_visible_fields(
+        cls,
+        request,
+        model_class,
+        payload,
+        base_user_context=None,
+    ) -> set[str] | None:
+        if request is not None:
+            fast_path_result = can_read_with_default_permission_scope(request, model_class, payload)
+            if fast_path_result is not None:
+                if not fast_path_result:
+                    return set()
+                return set(cls._get_cached_field_names(model_class))
+
+        shadow = cls._build_shadow_instance(model_class, payload)
+        if shadow is None:
+            return None
+
+        if hasattr(shadow, "permission_read"):
+            if base_user_context is not None:
+                user_context = base_user_context.with_instance(request, shadow)
+            else:
+                user_context = UserContext.from_request(request, shadow)
+            result = shadow.permission_read(user_context)
+            if hasattr(result, "allowed") and not result.allowed:
+                return set()
+
+            all_fields = cls._get_cached_field_names(type(shadow))
+            if hasattr(result, "get_fields"):
+                return cls._normalize_field_names(result.get_fields(all_fields))
+            if result:
+                return set(all_fields)
+            return set()
+
+        if hasattr(shadow, "can_read"):
+            raw_visible_fields = shadow.can_read(request)
+            if raw_visible_fields is True:
+                return set(cls._get_cached_field_names(type(shadow)))
+            if raw_visible_fields is False:
+                return set()
+            return cls._normalize_field_names(raw_visible_fields)
+
+        return None
 
     @staticmethod
     def _resolve_target_model(audit_log) -> type[Model] | None:
@@ -477,11 +575,21 @@ class LexSerializer(serializers.ModelSerializer):
                 if isinstance(payload, dict):
                     model_class = self._resolve_target_model(instance)
                     if model_class is not None:
-                        filtered_payload = self._filter_foreign_key_relations(request, model_class, payload)
-                        
-                        shadow = self._build_shadow_instance(model_class, filtered_payload)
-                        if shadow is not None and hasattr(shadow, 'can_read'):
-                            target_visible = shadow.can_read(request) or set()
+                        base_user_context = self._get_base_user_context(request) if request else None
+                        filtered_payload = self._filter_foreign_key_relations(
+                            request,
+                            model_class,
+                            payload,
+                            base_user_context=base_user_context,
+                        )
+
+                        target_visible = self._get_audit_log_payload_visible_fields(
+                            request,
+                            model_class,
+                            filtered_payload,
+                            base_user_context=base_user_context,
+                        )
+                        if target_visible is not None:
                             keep_always = {'id', 'id_field', SHORT_DESCR_NAME}
                             pruned = {k: v for k, v in filtered_payload.items() if k in target_visible or k in keep_always}
                             if "updates" in filtered_payload:
