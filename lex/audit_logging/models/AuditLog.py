@@ -2,7 +2,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from lex.core.mixins.ModelModificationRestriction import AdminReportsModificationRestriction
-from lex.core.models.LexModel import LexModel
+from lex.core.models.LexModel import LexModel, PermissionResult
 
 class AuditLog(LexModel):
     ACTION_CHOICES = (
@@ -25,6 +25,28 @@ class AuditLog(LexModel):
 
     class Meta:
         app_label = 'audit_logging'
+
+    # ------------------------------------------------------------------
+    # Permissions: AuditLog is excluded from Keycloak, so we bypass
+    # the default scope-based checks and always allow authenticated access.
+    # ------------------------------------------------------------------
+    def permission_read(self, user_context):
+        return PermissionResult.allow_all("AuditLog is Keycloak-excluded")
+
+    def permission_list(self, user_context):
+        return True
+
+    def permission_export(self, user_context):
+        return PermissionResult.allow_all("AuditLog is Keycloak-excluded")
+
+    def permission_create(self, user_context):
+        return False  # AuditLogs are system-created only
+
+    def permission_delete(self, user_context):
+        return False  # AuditLogs should not be deleted by users
+
+    def permission_edit(self, user_context):
+        return PermissionResult.deny("AuditLog records are read-only")
 
     def __str__(self):
         return f"{self.action} on {self.resource} by {self.author}"

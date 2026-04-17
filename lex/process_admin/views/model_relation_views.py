@@ -5,7 +5,6 @@ from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
 from lex.process_admin.models.ModelCollection import ModelCollection
-from lex.lex_app.management.commands.init import KeycloakSyncManager
 
 
 class ModelStructureObtainView(APIView):
@@ -21,12 +20,13 @@ class ModelStructureObtainView(APIView):
     def _is_keycloak_excluded_model(self, node_key):
         """Check if a model is excluded from Keycloak sync and should always be visible."""
         try:
+            from lex.lex_app.keycloak_exclusions import is_keycloak_sync_excluded_model
             model_container = self.get_container_func(node_key)
             model_class = model_container.model_class
             if hasattr(model_class, '_meta'):
                 app_label = model_class._meta.app_label
                 model_name = model_class.__name__
-                return KeycloakSyncManager.is_keycloak_sync_excluded_model(app_label, model_name)
+                return is_keycloak_sync_excluded_model(app_label, model_name)
         except Exception:
             pass
         return False

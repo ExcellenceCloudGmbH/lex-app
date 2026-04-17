@@ -56,15 +56,12 @@ DEFAULT_SCOPE_POLICY_MAPPING = {
     "export": ["Policy - admin", "Policy - standard"],
 }
 NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS = frozenset({"timeout", "gateway_timeout"})
-KEYCLOAK_SYNC_EXCLUDED_APPS = frozenset({"legacy_data"})
-KEYCLOAK_SYNC_EXCLUDED_RESOURCE_NAMES = frozenset(
-    {
-        "audit_logging.AuditLog",
-        "audit_logging.AuditLogStatus",
-        "audit_logging.CalculationLog",
-    }
+
+from lex.lex_app.keycloak_exclusions import (
+    KEYCLOAK_SYNC_EXCLUDED_APPS,
+    KEYCLOAK_SYNC_EXCLUDED_RESOURCE_NAMES,
+    KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES,
 )
-KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES = ("historical", "metahistorical")
 
 STATE_FILE = Path(
     getattr(
