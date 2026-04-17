@@ -78,9 +78,52 @@ class CalculationModel(LexModel):
         abstract = True
 
     def save(self, *args, **kwargs):
-        result = super().save(*args, **kwargs)
-        self._register_in_progress_state_persistence(self)
-        return result
+        skip_hooks = kwargs.get("skip_hooks", False)
+        # Detect when this save is the trigger for a new calculation cycle.
+        # We split it into two phases:
+        #   Phase 1: persist IN_PROGRESS (inside LexModel.save's atomic)
+        #   Phase 2: run calculate_hook (outside the atomic, so the
+        #            IN_PROGRESS history survives even if the calculation fails)
+        is_calculation_trigger = (
+            not skip_hooks
+            and getattr(self, "is_calculated", None) == self.IN_PROGRESS
+            and not getattr(self, "_calculation_hook_in_progress", False)
+            and not getattr(self, "_defer_calculate_hook", False)
+        )
+
+        if is_calculation_trigger:
+            # Phase 1: Save IN_PROGRESS with calculate_hook deferred.
+            # LexModel.save wraps base_save + hooks in transaction.atomic().
+            # By deferring calculate_hook, the atomic commits IN_PROGRESS
+            # to the DB (or to the enclosing savepoint) *before* the
+            # calculation runs.
+            self._defer_calculate_hook = True
+            try:
+                result = super().save(*args, **kwargs)
+            finally:
+                self._defer_calculate_hook = False
+
+            # Register that IN_PROGRESS has been written (on_commit for
+            # nested atomics, or immediately for autocommit).
+            self._register_in_progress_state_persistence(self)
+
+            # Phase 2: Run the actual calculation outside LexModel.save's
+            # atomic block.  SUCCESS / ERROR will be persisted by
+            # execute_calculation_sync in their own transactions/savepoints.
+            try:
+                self.calculate_hook()
+            except Exception:
+                # calculate_hook sets _pending_terminal_audit on failure.
+                # In the original (non-deferred) flow, LexModel.save's except
+                # block calls _finalize_pending_terminal_audit.  Since Phase 2
+                # runs outside LexModel.save, we must finalize here.
+                self._finalize_pending_terminal_audit()
+                raise
+            return result
+        else:
+            result = super().save(*args, **kwargs)
+            self._register_in_progress_state_persistence(self)
+            return result
 
     @classmethod
     def _terminal_state_identity(cls, obj):
@@ -177,6 +220,11 @@ class CalculationModel(LexModel):
             obj.save(skip_hooks=True)
             return True
         finally:
+            # Clean up the pending attr so it cannot be applied a second time
+            # (e.g. if persist_error_state is called twice for the same obj).
+            if hasattr(obj, cls._PENDING_IN_PROGRESS_HISTORY_ATTR):
+                delattr(obj, cls._PENDING_IN_PROGRESS_HISTORY_ATTR)
+
             obj._restore_from_snapshot(current_snapshot)
 
             if had_history_date:
@@ -500,6 +548,12 @@ class CalculationModel(LexModel):
         is available, otherwise falls back to synchronous execution. Proper status
         management ensures IN_PROGRESS -> SUCCESS/ERROR transitions.
         """
+        # When CalculationModel.save() defers the hook, return immediately.
+        # The save method will call calculate_hook() directly after the
+        # IN_PROGRESS state is committed.
+        if getattr(self, "_defer_calculate_hook", False):
+            return
+
         from lex.core.signals.CalculationSignals import update_calculation_status
         from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
         import logging

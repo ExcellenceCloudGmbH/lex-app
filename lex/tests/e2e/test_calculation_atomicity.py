@@ -1019,3 +1019,98 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
             child_states.count(CalculationModel.SUCCESS), 1,
             f"Atomic child has duplicate SUCCESS: {child_states}",
         )
+
+    # ── Re-calculation: second run after first success ────────────────
+
+    def test_recalculation_after_success_no_stale_in_progress(self):
+        """
+        After a successful calculation, triggering a second calculation
+        must produce a clean second cycle of IN_PROGRESS → SUCCESS
+        without any leftover state from the first run.
+        """
+        with OperationContext(calculation_id="recalc-1"):
+            child = HistChild.objects.create(factor=3)
+            self._trigger_calc(child)
+
+        child.refresh_from_db()
+        self.assertEqual(child.is_calculated, CalculationModel.SUCCESS)
+        self.assertEqual(child.output, 30)
+
+        # Second calculation
+        with OperationContext(calculation_id="recalc-2"):
+            child.refresh_from_db()
+            self._trigger_calc(child)
+
+        child.refresh_from_db()
+        self.assertEqual(child.is_calculated, CalculationModel.SUCCESS)
+
+        states = self._history_states(child)
+        # Should have: NOT_CALCULATED, IN_PROGRESS, SUCCESS, IN_PROGRESS, SUCCESS
+        self.assertEqual(
+            states.count(CalculationModel.IN_PROGRESS), 2,
+            f"Expected exactly 2 IN_PROGRESS for 2 calc cycles: {states}",
+        )
+        self.assertEqual(
+            states.count(CalculationModel.SUCCESS), 2,
+            f"Expected exactly 2 SUCCESS for 2 calc cycles: {states}",
+        )
+
+    # ── Atomic child failure: DATA rolled back but state preserved ────
+
+    def test_atomic_child_failure_rolls_back_data_not_state(self):
+        """
+        When an atomic child fails, the data changes from calculate()
+        must be rolled back (output stays 0), but the state-machine
+        history (IN_PROGRESS → ERROR) must be preserved.
+        """
+        with OperationContext(calculation_id="data-rollback"):
+            child = HistChild.objects.create(factor=5, should_fail=True)
+            with self.assertRaises(CalculationModelException):
+                self._trigger_calc(child)
+
+        child.refresh_from_db()
+        self.assertEqual(child.is_calculated, CalculationModel.ERROR)
+        # output should be 0 (default) because the atomic block rolled back
+        self.assertEqual(child.output, 0,
+                         "Data changes from calculate() must be rolled back")
+
+        states = self._history_states(child)
+        self.assertIn(CalculationModel.IN_PROGRESS, states)
+        self.assertIn(CalculationModel.ERROR, states)
+
+    # ── Multiple children: first succeeds, second fails, exact counts ─
+
+    def test_atomic_parent_mixed_children_exact_history_counts(self):
+        """
+        Atomic parent with child₁ (succeeds) then child₂ (fails).
+
+        After the parent's atomic rolls back, persist_error_state must
+        restore history for all affected models. Each model must have
+        exactly 1 IN_PROGRESS and 1 ERROR (or SUCCESS for child₁ if
+        it completed before the failure).
+
+        No duplicate IN_PROGRESS entries at any level.
+        """
+        with OperationContext(actor="PM"):
+            child1 = HistChild.objects.create(factor=2, should_fail=False)
+            child2 = HistChild.objects.create(factor=5, should_fail=True)
+            parent = HistParent.objects.create()
+
+        with OperationContext(calculation_id="mixed-exact"):
+            with self.assertRaises(CalculationModelException):
+                self._trigger_calc(parent)
+
+        parent.refresh_from_db()
+        self.assertEqual(parent.is_calculated, CalculationModel.ERROR)
+
+        parent_states = self._history_states(parent)
+        self.assertEqual(parent_states.count(CalculationModel.IN_PROGRESS), 1,
+                         f"Parent duplicate IN_PROGRESS: {parent_states}")
+
+        # child2 must be in ERROR
+        child2.refresh_from_db()
+        self.assertEqual(child2.is_calculated, CalculationModel.ERROR)
+        child2_states = self._history_states(child2)
+        self.assertEqual(child2_states.count(CalculationModel.IN_PROGRESS), 1,
+                         f"Child2 duplicate IN_PROGRESS: {child2_states}")
+
