@@ -14,6 +14,10 @@ from simple_history import manager as simple_history_manager_module
 from simple_history import models as simple_history_models_module
 from simple_history.models import HistoricalRecords
 
+
+MAIN_TABLE_SYNC_NOT_NEEDED_ATTR = "_bt_main_table_sync_not_needed"
+
+
 class CachedHistoryDescriptor(simple_history_manager_module.HistoryDescriptor):
     """
     Reuse the dynamic history-manager subclass for repeated descriptor access.
@@ -72,6 +76,14 @@ def create_standard_history_record(
         history_user=history_user,
         **attrs,
     )
+
+    # A regular live-model save has already written the correct state to the
+    # main table. The expensive history -> main-table synchronizer is only
+    # needed when callers intentionally override valid time via ``_history_date``
+    # or edit/delete history rows directly.
+    if not hasattr(instance, "_history_date"):
+        setattr(history_instance, MAIN_TABLE_SYNC_NOT_NEEDED_ATTR, True)
+
     history_instance.save(using=using)
 
     from simple_history.signals import post_create_historical_record

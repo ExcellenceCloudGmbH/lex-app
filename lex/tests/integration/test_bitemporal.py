@@ -35,7 +35,7 @@ import datetime
 import unittest
 from datetime import timedelta
 from importlib import reload
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.db import connection, models
 from django.test import TransactionTestCase
@@ -43,6 +43,7 @@ from django.utils import timezone
 
 from lex.core.models.LexModel import LexModel
 from lex.core.services.Bitemporal import get_queryset_as_of
+from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
 from lex.tests.integration._bitemporal_test_case import DynamicBitemporalModelTestCase
 
 
@@ -104,6 +105,14 @@ class HistDelAsOfModel(LexModel):
 
     class Meta:
         app_label = "lex_app"
+
+
+class SyncBypassModel(LexModel):
+    """Used to verify when history saves should skip or invoke main-table sync."""
+    name = models.CharField(max_length=100)
+
+    class Meta:
+        app_label = "rest_framework_api_key"
 
 
 # ====================================================================
@@ -445,6 +454,77 @@ class BitemporalRobustnessTest(DynamicBitemporalModelTestCase):
             gap_history.save()
 
         self.assertEqual(RobustnessTestModel.objects.count(), 0)
+
+
+class BitemporalSyncBypassTest(DynamicBitemporalModelTestCase):
+    """Regression coverage for selective main-table synchronization."""
+
+    model_class = SyncBypassModel
+
+    def setUp(self):
+        import lex.process_admin.settings as process_admin_settings
+
+        self._process_admin_settings_module = process_admin_settings
+        self._original_admin_site = process_admin_settings.__dict__.get("adminSite")
+        self._original_process_admin_site = process_admin_settings.__dict__.get("processAdminSite")
+
+        self.mock_admin_site = MagicMock()
+        self.mock_process_admin_site = MagicMock()
+        self.mock_admin_site.is_registered.return_value = False
+        self.mock_admin_site.register = MagicMock()
+        self.mock_process_admin_site.register = MagicMock()
+        process_admin_settings.__dict__["adminSite"] = self.mock_admin_site
+        process_admin_settings.__dict__["processAdminSite"] = self.mock_process_admin_site
+        self.addCleanup(self._restore_process_admin_sites)
+        super().setUp()
+
+    def _restore_process_admin_sites(self):
+        self._process_admin_settings_module.__dict__["adminSite"] = self._original_admin_site
+        self._process_admin_settings_module.__dict__["processAdminSite"] = self._original_process_admin_site
+
+    def test_live_model_saves_skip_history_to_main_sync(self):
+        """Current-time main-model saves should not pay for a redundant resync."""
+        t0 = timezone.make_aware(datetime.datetime(2025, 2, 1, 12, 0, 0))
+        t1 = t0 + timedelta(minutes=5)
+
+        with patch(
+            "lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model"
+        ) as sync_mock:
+            with patch("django.utils.timezone.now", return_value=t0):
+                obj = SyncBypassModel.objects.create(name="initial")
+
+            with patch("django.utils.timezone.now", return_value=t1):
+                obj.name = "updated"
+                obj.save()
+
+        self.assertEqual(sync_mock.call_count, 0)
+        self.assertEqual(SyncBypassModel.objects.get(pk=obj.pk).name, "updated")
+
+        history_rows = list(obj.history.order_by("valid_from", "history_id"))
+        self.assertEqual([row.name for row in history_rows], ["initial", "updated"])
+        self.assertTrue(abs((history_rows[0].valid_to - t1).total_seconds()) < 1.0)
+        self.assertIsNone(history_rows[1].valid_to)
+
+    def test_future_dated_main_save_still_uses_sync(self):
+        """Future-valid rows still need synchronizer cleanup of the live table."""
+        t0 = timezone.make_aware(datetime.datetime(2025, 2, 1, 12, 0, 0))
+        t_future = t0 + timedelta(hours=1)
+
+        with patch.object(
+            BitemporalSynchronizer,
+            "sync_record_for_model",
+            wraps=BitemporalSynchronizer.sync_record_for_model,
+        ) as sync_spy:
+            with patch("django.utils.timezone.now", return_value=t0):
+                obj = SyncBypassModel(name="future")
+                obj._history_date = t_future
+                obj.save()
+
+        self.assertEqual(sync_spy.call_count, 1)
+        self.assertEqual(SyncBypassModel.objects.count(), 0)
+
+        future_history = obj.history.filter(history_type="+").latest("history_id")
+        self.assertEqual(future_history.valid_from, t_future)
 
 
 # ====================================================================

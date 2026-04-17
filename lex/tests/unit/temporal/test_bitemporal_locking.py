@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from lex.core.services.StandardHistory import MAIN_TABLE_SYNC_NOT_NEEDED_ATTR
 from lex.core.services.MetaHistory import create_meta_history_record
 from lex.core.services.bitemporal_signals import (
     on_history_saved__chain_valid_to,
@@ -65,6 +66,22 @@ class HistoryChainLockingTests(TestCase):
             )
 
         sync_mock.assert_called_once_with(main_model, 55, historical_model)
+
+    def test_sync_main_skips_when_live_save_already_updated_main_table(self):
+        main_model = _build_main_model()
+        historical_model = object()
+        instance = SimpleNamespace(id=55)
+        setattr(instance, MAIN_TABLE_SYNC_NOT_NEEDED_ATTR, True)
+
+        with patch("lex.process_admin.utils.bitemporal_sync.BitemporalSynchronizer.sync_record_for_model") as sync_mock:
+            on_history_saved__sync_main_table(
+                sender=historical_model,
+                instance=instance,
+                main_model=main_model,
+                historical_model=historical_model,
+            )
+
+        sync_mock.assert_not_called()
 
     def test_chain_valid_to_suppresses_reentrant_save(self):
         manager = MagicMock()

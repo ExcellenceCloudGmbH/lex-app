@@ -25,6 +25,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from lex.core.services.MetaHistory import create_meta_history_record
+from lex.core.services.StandardHistory import MAIN_TABLE_SYNC_NOT_NEEDED_ATTR
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,8 @@ def on_history_saved__sync_main_table(
     if sender != historical_model:
         return
     if _suppress_main_table_sync.get():
+        return
+    if getattr(instance, MAIN_TABLE_SYNC_NOT_NEEDED_ATTR, False):
         return
 
     from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
