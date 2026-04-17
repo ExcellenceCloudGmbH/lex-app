@@ -386,6 +386,11 @@ class ModelRegistration:
     def _handle_calculation_model_reset(cls, model: Type[models.Model]) -> None:
         """
         Reset CalculationModel instances left in IN_PROGRESS state on startup.
+
+        Uses per-instance ``.save(skip_hooks=True)`` so that
+        django-simple-history records an ABORTED history row for each
+        affected record, and creates the corresponding AuditLog /
+        AuditLogStatus entries for a complete audit trail.
         """
         from lex.core.models.CalculationModel import CalculationModel
 
@@ -394,10 +399,33 @@ class ModelRegistration:
 
         @sync_to_async
         def reset_instances_with_aborted_calculations():
-            aborted = model.objects.filter(
-                is_calculated=CalculationModel.IN_PROGRESS
+            from lex.audit_logging.utils.calculation_audit import (
+                ensure_terminal_calculation_audit,
             )
-            aborted.update(is_calculated=CalculationModel.ABORTED)
+
+            stuck = list(
+                model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
+            )
+            for instance in stuck:
+                instance.is_calculated = CalculationModel.ABORTED
+                instance._history_change_reason = (
+                    "Startup reset: calculation was still IN_PROGRESS"
+                )
+                instance.save(skip_hooks=True)
+
+                try:
+                    ensure_terminal_calculation_audit(
+                        instance,
+                        audit_status="aborted",
+                        error_message="Calculation aborted during startup reset",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to create audit log for startup-aborted %s (pk=%s)",
+                        model.__name__,
+                        instance.pk,
+                        exc_info=True,
+                    )
 
         nest_asyncio.apply()
         loop = asyncio.get_event_loop()

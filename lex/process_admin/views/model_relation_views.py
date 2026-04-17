@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
 from lex.process_admin.models.ModelCollection import ModelCollection
+from lex.lex_app.management.commands.init import KeycloakSyncManager
 
 
 class ModelStructureObtainView(APIView):
@@ -17,6 +18,19 @@ class ModelStructureObtainView(APIView):
     get_container_func = None
     get_hidden_historical_models_func = None
 
+    def _is_keycloak_excluded_model(self, node_key):
+        """Check if a model is excluded from Keycloak sync and should always be visible."""
+        try:
+            model_container = self.get_container_func(node_key)
+            model_class = model_container.model_class
+            if hasattr(model_class, '_meta'):
+                app_label = model_class._meta.app_label
+                model_name = model_class.__name__
+                return KeycloakSyncManager.is_keycloak_sync_excluded_model(app_label, model_name)
+        except Exception:
+            pass
+        return False
+
     def delete_restricted_nodes_from_model_structure(self, tree, request):
         """
         Recursively remove nodes the user cannot list. Uses the new permission system.
@@ -25,6 +39,10 @@ class ModelStructureObtainView(APIView):
             node = tree[key]
             # If it's a leaf node representing a model, check list permission
             if node.get("type") == "Model":
+                # Models excluded from Keycloak sync should always be visible
+                if self._is_keycloak_excluded_model(key):
+                    continue
+
                 try:
                     model_container = self.get_container_func(key)
                     # Instantiate the model to call its permission check method

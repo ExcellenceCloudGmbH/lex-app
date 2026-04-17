@@ -163,14 +163,6 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
         self.obj.refresh_from_db()
         self.assertEqual(self.obj.is_calculated, CalculationModel.NOT_CALCULATED)
 
-    @unittest.skip(
-        "Needs pairing: current _handle_calculation_model_reset uses "
-        "queryset.update() to flip IN_PROGRESS→ABORTED, which bypasses "
-        "history signals, so no ABORTED history row is created. This "
-        "test asserts a history row IS created. Either the startup "
-        "reset should use save() to preserve audit trail, or the test "
-        "should be weakened to assert DB-state only. Design decision."
-    )
     def test_startup_abort_reset_persists_aborted_history_row(self):
         self.obj.is_calculated = CalculationModel.IN_PROGRESS
         self.obj.save(skip_hooks=True)
