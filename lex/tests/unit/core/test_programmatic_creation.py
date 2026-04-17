@@ -344,18 +344,18 @@ class ProgrammaticCreationTest(TransactionTestCase):
             "Streamlit Override",
         )
 
-    def test_create_sets_created_and_edited_at(self):
+    def test_create_sets_created_at_only(self):
         created_ts = project_timestamp(2025, 6, 1, 17, 0, 0)
 
         with patch("core.models.LexModel.lex_datetime_now", return_value=created_ts):
             obj = ProgrammaticTestModel.objects.create(name="timestamped", value=1)
 
         self.assertEqual(obj.created_at, created_ts)
-        self.assertEqual(obj.edited_at, created_ts)
+        self.assertIsNone(obj.edited_at)
 
         stored = ProgrammaticTestModel.objects.get(pk=obj.pk)
         self.assertEqual(stored.created_at, created_ts)
-        self.assertEqual(stored.edited_at, created_ts)
+        self.assertIsNone(stored.edited_at)
 
     def test_update_refreshes_edited_at_without_changing_created_at(self):
         created_ts = project_timestamp(2025, 6, 1, 18, 0, 0)

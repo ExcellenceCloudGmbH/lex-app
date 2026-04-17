@@ -271,12 +271,12 @@ class TestLexModelDBSaveFlow(TransactionTestCase):
         self.assertIsNone(obj.edited_at)
 
     def test_normal_save_sets_timestamps(self):
-        """Normal create sets created_at and edited_at."""
+        """Normal create sets created_at but not edited_at."""
         obj = CoreTestModel(name="normal-create")
         obj.save()
         obj.refresh_from_db()
         self.assertIsNotNone(obj.created_at)
-        self.assertIsNotNone(obj.edited_at)
+        self.assertIsNone(obj.edited_at)
 
     def test_update_only_changes_edited_at(self):
         """On update, created_at is untouched but edited_at advances."""

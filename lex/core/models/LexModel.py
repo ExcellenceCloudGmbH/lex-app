@@ -775,8 +775,6 @@ class LexModel(LifecycleModel):
         if not self._has_explicit_created_at_override():
             self.created_at = current_timestamp
 
-        if not self._explicit_timestamp_overrides.get('edited_at', False):
-            self.edited_at = current_timestamp
 
     @hook(BEFORE_UPDATE)
     def update_edited_at(self):

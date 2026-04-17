@@ -153,8 +153,8 @@ class TimestampHookTest(SimpleTestCase):
     """Verify timestamp auto-set on create and update."""
 
     @patch("lex.core.models.LexModel.lex_datetime_now")
-    def test_update_timestamps_on_create_sets_both(self, mock_now):
-        """On create, both created_at and edited_at are set."""
+    def test_update_timestamps_on_create_sets_only_created_at(self, mock_now):
+        """On create, only created_at is set; edited_at remains None."""
         mock_now.return_value = "2025-06-15T12:00:00Z"
         inst = MagicMock(spec=LexModel)
         inst.skip_history_when_saving = False
@@ -166,7 +166,7 @@ class TimestampHookTest(SimpleTestCase):
         LexModel.update_timestamps_on_create(inst)
 
         self.assertEqual(inst.created_at, "2025-06-15T12:00:00Z")
-        self.assertEqual(inst.edited_at, "2025-06-15T12:00:00Z")
+        self.assertIsNone(inst.edited_at)
 
     def test_update_timestamps_skipped_when_syncing_history(self):
         """Timestamp hooks are skipped when skip_history_when_saving is True."""
