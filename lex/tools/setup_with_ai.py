@@ -32,6 +32,12 @@ GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY = "mcp-servers-cache"
 GITHUB_COPILOT_STATE_DB_NAME = "copilot-intellij.db"
 LEX_MCP_LOCAL_SERVER_NAME = "lex-mcp-local"
 LEGACY_LEX_MCP_SERVER_NAMES = ("lex-mcp-wrapper",)
+# Directories inside the lex-mcp-local package root that are copied into the
+# consumer project root on every setup / update.  Extend this tuple when a new
+# version of lex-mcp-local ships additional directories that belong in the project.
+LEX_MCP_LOCAL_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = (".github",)
+# Directories inside the lex-app package that are copied into the project root.
+LEX_APP_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = ("docs",)
 LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
     "--no-cache-dir",
     "--extra-index-url",
@@ -56,8 +62,7 @@ class SetupWithAIUpdateResult:
     env_file_path: Path | None = None
     mcp_config_path: Path | None = None
     package_upgraded: bool = False
-    github_directory_copied: Path | None = None
-    docs_directory_copied: Path | None = None
+    artifact_directories_copied: tuple[Path, ...] = ()
     server_restarted: bool = False
 
 
@@ -103,6 +108,8 @@ class SetupWithAIMCPProbeResult:
 def build_lex_mcp_local_install_command(
     python_executable: str | os.PathLike[str],
     remote_mcp_api_key: str,
+    *,
+    upgrade: bool = False,
 ) -> list[str]:
     entitlement_token = remote_mcp_api_key.strip()
     if not entitlement_token:
@@ -113,24 +120,31 @@ def build_lex_mcp_local_install_command(
         f"{quote(entitlement_token, safe='')}/"
         "excellence-cloud/lex-mcp-local/python/simple/"
     )
-    return [
+    cmd = [
         str(python_executable),
         "-m",
         "pip",
         "install",
+    ]
+    if upgrade:
+        cmd.append("--upgrade")
+    cmd += [
         LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[0],
         "--index-url",
         index_url,
         *LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[1:],
     ]
+    return cmd
 
 
 def install_lex_mcp_local(
     python_executable: str | os.PathLike[str],
     remote_mcp_api_key: str,
     runner=subprocess.run,
+    *,
+    upgrade: bool = False,
 ) -> list[str]:
-    command = build_lex_mcp_local_install_command(python_executable, remote_mcp_api_key)
+    command = build_lex_mcp_local_install_command(python_executable, remote_mcp_api_key, upgrade=upgrade)
     runner(command, check=True)
     return command
 
@@ -249,6 +263,25 @@ def copy_lex_mcp_local_github_directory(
         ".github",
     )
     return _copy_directory_into_project_root(project_root, source_directory)
+
+
+def copy_lex_mcp_local_directories(
+    project_root: Path,
+    wrapper_script_path: Path,
+    directory_names: tuple[str, ...] = LEX_MCP_LOCAL_EMBEDDED_DIRECTORY_NAMES,
+) -> tuple[Path, ...]:
+    """Copy every embedded directory from the lex-mcp-local package into *project_root*.
+
+    Returns a tuple of the destination paths that were actually copied (directories
+    not present in the installed package are silently skipped).
+    """
+    copied: list[Path] = []
+    for name in directory_names:
+        source = _resolve_lex_mcp_local_embedded_directory(wrapper_script_path, name)
+        dest = _copy_directory_into_project_root(project_root, source)
+        if dest is not None:
+            copied.append(dest)
+    return tuple(copied)
 
 
 def resolve_lex_app_package_root(python_executable: Path) -> Path | None:
@@ -1391,13 +1424,16 @@ def apply_ai_update_0_2_2(
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
     runner: Callable[..., Any] = subprocess.run,
 ) -> SetupWithAIUpdateResult:
-    """Migrate an existing LEX AI setup from 0.2.1 to 0.2.2.
+    """Refresh all LEX AI artifacts.
 
-    * Upgrades the ``lex-mcp-local`` pip package.
-    * Re-copies the ``.github`` directory from the upgraded package.
-    * Re-copies the ``docs`` directory from the ``lex-app`` package.
-    * Stops the running MCP server so it picks up the new code on next
-      launch.
+    Run on every ``lex ai-update`` invocation (not just once):
+    * Upgrades the ``lex-mcp-local`` pip package to the latest published version.
+    * Re-copies ALL embedded directories from the upgraded ``lex-mcp-local``
+      package (see ``LEX_MCP_LOCAL_EMBEDDED_DIRECTORY_NAMES``) into the project
+      root so they stay in sync with each release.
+    * Re-copies ALL embedded directories from the ``lex-app`` package (see
+      ``LEX_APP_EMBEDDED_DIRECTORY_NAMES``) into the project root.
+    * Stops the running MCP server so it picks up the new code on next launch.
     """
     env_file_path = (Path(project_root) / ".env").resolve()
     copilot_mcp_path = (
@@ -1414,13 +1450,22 @@ def apply_ai_update_0_2_2(
             "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local."
         )
 
-    install_lex_mcp_local(python_executable, remote_mcp_api_key, runner=runner)
+    install_lex_mcp_local(python_executable, remote_mcp_api_key, runner=runner, upgrade=True)
 
     wrapper_script_path = resolve_wrapper_script_path(python_executable)
-    github_directory = copy_lex_mcp_local_github_directory(project_root, wrapper_script_path)
+    copied: list[Path] = list(
+        copy_lex_mcp_local_directories(project_root, wrapper_script_path)
+    )
 
     lex_package_root = resolve_lex_app_package_root(python_executable)
-    docs_directory = copy_lex_app_docs_directory(project_root, lex_package_root)
+    for dir_name in LEX_APP_EMBEDDED_DIRECTORY_NAMES:
+        if dir_name == "docs":
+            dest = copy_lex_app_docs_directory(project_root, lex_package_root)
+        else:
+            src = (lex_package_root / dir_name) if lex_package_root else None
+            dest = _copy_directory_into_project_root(project_root, src if src and src.is_dir() else None)
+        if dest is not None:
+            copied.append(dest)
 
     server_stopped = _stop_lex_mcp_local_server(
         copilot_mcp_path, server_name=server_name,
@@ -1431,8 +1476,7 @@ def apply_ai_update_0_2_2(
         env_file_path=env_file_path,
         mcp_config_path=copilot_mcp_path,
         package_upgraded=True,
-        github_directory_copied=github_directory,
-        docs_directory_copied=docs_directory,
+        artifact_directories_copied=tuple(copied),
         server_restarted=server_stopped,
     )
 
