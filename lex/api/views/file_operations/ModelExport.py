@@ -83,34 +83,45 @@ class ModelExportView(GenericAPIView):
         model = queryset.model
         all_fields = [field.name for field in model._meta.fields]
 
-        # Process objects and build data with field-level masking
-        export_data = []
+        # Stream rows in chunks to avoid loading the entire queryset into
+        # memory and to avoid expensive LIMIT/OFFSET pagination over large
+        # tables.
+        export_data: List[Dict[str, Any]] = []
 
-        # Process in batches to avoid memory issues
-        batch_size = 1000
-        total_count = queryset.count()
+        # Fast path: when permissions are uniform we can compute the allowed
+        # field set once instead of evaluating it per object.
+        uniform_allowed_fields: "Set[str] | None" = None
+        if self._has_default_export_permissions(model):
+            uniform_allowed_fields = self._compute_uniform_export_mask(queryset, request, model)
+            if uniform_allowed_fields is not None:
+                uniform_allowed_fields = uniform_allowed_fields.union(
+                    {"id", "created_by", "edited_by"}
+                )
 
-        for i in range(0, total_count, batch_size):
-            batch = queryset[i:i + batch_size]
+        if uniform_allowed_fields is not None:
+            value_fields = [name for name in all_fields if name in uniform_allowed_fields]
+            if not value_fields:
+                return pd.DataFrame(columns=all_fields)
 
-            for obj in batch:
+            for row in queryset.values(*value_fields).iterator(chunk_size=2000):
+                masked_row = {name: row.get(name) if name in value_fields else None for name in all_fields}
+                export_data.append(masked_row)
+        else:
+            for obj in queryset.iterator(chunk_size=1000):
                 exportable_fields = self.get_exportable_fields_for_object(obj, request)
 
                 # Only include rows that have at least some exportable fields
-                if exportable_fields:
-                    # Create row data with field masking
-                    row_data = {}
-                    obj_values = {field.name: getattr(obj, field.name) for field in model._meta.fields}
+                if not exportable_fields:
+                    continue
 
-                    for field_name in all_fields:
-                        if field_name in exportable_fields:
-                            # Field is exportable, include its value
-                            row_data[field_name] = obj_values[field_name]
-                        else:
-                            # Field is not exportable, mask it (empty/None)
-                            row_data[field_name] = None  # or '' for empty string
-
-                    export_data.append(row_data)
+                row_data: Dict[str, Any] = {}
+                obj_values = {field.name: getattr(obj, field.name) for field in model._meta.fields}
+                for field_name in all_fields:
+                    if field_name in exportable_fields:
+                        row_data[field_name] = obj_values[field_name]
+                    else:
+                        row_data[field_name] = None
+                export_data.append(row_data)
 
         # Create DataFrame from the processed data
         if export_data:
@@ -145,6 +156,23 @@ class ModelExportView(GenericAPIView):
         if not isinstance(raw_request, dict):
             return pd.DataFrame()
 
+        normalized_request = self._normalize_ag_request(raw_request)
+
+        # Fast path: flat (non-grouped, non-pivot) exports with default
+        # export-permission semantics can skip the DRF serializer and the
+        # per-row Python masking pass entirely. This is the dominant cost of
+        # large exports and the main reason the request would hit upstream
+        # 524 timeouts.
+        fast_df = self._try_build_flat_fast_export_dataframe(
+            queryset=queryset,
+            request=request,
+            model=model,
+            ag_export=ag_export,
+            normalized_request=normalized_request,
+        )
+        if fast_df is not None:
+            return fast_df
+
         ag_view = ListModelEntries()
         ag_view.request = request
         ag_view.args = ()
@@ -154,7 +182,6 @@ class ModelExportView(GenericAPIView):
         ag_view._ag_field_validity_cache = {}
         ag_view._ag_model_field_cache = {}
 
-        normalized_request = self._normalize_ag_request(raw_request)
         row_data = self._collect_ag_export_rows(
             ag_view=ag_view,
             queryset=queryset,
@@ -175,6 +202,172 @@ class ModelExportView(GenericAPIView):
         df = self._apply_foreign_key_display_names(df, model)
         df = self._refresh_hierarchy_labels_with_readable_values(df, normalized_request)
         return self._apply_ag_column_layout(df, ag_export)
+
+    def _has_default_export_permissions(self, model) -> bool:
+        try:
+            from lex.core.models.LexModel import LexModel
+        except Exception:
+            return False
+
+        permission_export = getattr(model, "permission_export", None)
+        can_export = getattr(model, "can_export", None)
+        return (
+            permission_export is getattr(LexModel, "permission_export", None)
+            and can_export is getattr(LexModel, "can_export", None)
+        )
+
+    def _resolve_export_field_paths(
+        self,
+        model,
+        ag_export: Dict[str, Any],
+    ) -> "List[str] | None":
+        from lex.api.views.model_entries.List import _resolve_lookup, normalize_field_path
+
+        raw_columns = ag_export.get("columns")
+        if not isinstance(raw_columns, list) or not raw_columns:
+            return None
+
+        field_paths: List[str] = []
+        for raw_column in raw_columns:
+            if not isinstance(raw_column, dict):
+                continue
+            data_key = str(raw_column.get("dataKey") or "").strip()
+            fallback_key = str(raw_column.get("field") or raw_column.get("colId") or "").strip()
+            candidate = data_key or fallback_key
+            if not candidate:
+                continue
+            # Synthetic AG hierarchy columns are only present in grouped exports
+            # which we already filter out before calling this method.
+            if candidate.startswith("__ag_"):
+                return None
+            normalized = normalize_field_path(candidate)
+            resolved = _resolve_lookup(model, normalized)
+            if resolved is None:
+                # Includes serializer-only / computed columns (e.g.
+                # `short_description`). Fall back to the slow DRF path so we
+                # don't lose any columns the user expects.
+                return None
+            field_paths.append(normalized)
+
+        if not field_paths:
+            return None
+
+        pk_name = model._meta.pk.name
+        if pk_name not in field_paths:
+            field_paths.append(pk_name)
+
+        # Preserve order while removing duplicates.
+        seen: set = set()
+        unique_paths: List[str] = []
+        for path in field_paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            unique_paths.append(path)
+        return unique_paths
+
+    def _compute_uniform_export_mask(
+        self,
+        queryset: QuerySet,
+        request,
+        model,
+    ) -> "Set[str] | None":
+        sample = queryset.first()
+        if sample is None:
+            return None
+        try:
+            allowed = self.get_exportable_fields_for_object(sample, request)
+        except Exception:
+            return None
+        if not isinstance(allowed, set):
+            return None
+        return allowed
+
+    def _try_build_flat_fast_export_dataframe(
+        self,
+        queryset: QuerySet,
+        request,
+        model,
+        ag_export: Dict[str, Any],
+        normalized_request: Dict[str, Any],
+    ) -> "pd.DataFrame | None":
+        if normalized_request.get("pivotMode"):
+            return None
+        if normalized_request.get("rowGroupCols"):
+            return None
+        if normalized_request.get("pivotCols"):
+            return None
+        if not self._has_default_export_permissions(model):
+            return None
+
+        field_paths = self._resolve_export_field_paths(model, ag_export)
+        if not field_paths:
+            return None
+
+        # Apply AG Grid filter & sort using the existing helpers so we stay
+        # consistent with the on-screen view.
+        ag_view = ListModelEntries()
+        ag_view.request = request
+        ag_view.args = ()
+        ag_view.kwargs = self.kwargs
+        ag_view.format_kwarg = None
+        ag_view._ag_model_class = model
+        ag_view._ag_field_validity_cache = {}
+        ag_view._ag_model_field_cache = {}
+
+        qs = ag_view._apply_filter_model(queryset, normalized_request.get("filterModel") or {})
+        qs = ag_view._apply_sort_model(qs, normalized_request.get("sortModel") or [], allowed_columns=None)
+        if not qs.query.order_by:
+            qs = qs.order_by(model._meta.pk.name)
+
+        # Compute the field-level export mask once. With default LexModel
+        # permissions the result is the same for every row.
+        allowed_fields = self._compute_uniform_export_mask(qs, request, model)
+        if allowed_fields is None:
+            return None
+
+        always_allowed = {"id", "id_field", "short_description", "lex_reserved_scopes"}
+        allowed_fields = allowed_fields.union(always_allowed)
+        # Always retain the PK so downstream layout/excel index is stable.
+        allowed_fields.add(model._meta.pk.name)
+
+        # Drop top-level fields the user is not allowed to export. Lookup paths
+        # (with `__`) are kept – masking those would require per-row evaluation
+        # which the default permission impl does not need.
+        effective_paths = [
+            path for path in field_paths
+            if "__" in path or path in allowed_fields
+        ]
+        if not effective_paths:
+            return pd.DataFrame()
+
+        # Stream rows in chunks straight from the database. Avoids both
+        # full DRF serialization and a second per-row masking loop.
+        end_row_raw = normalized_request.get("endRow")
+        try:
+            end_row = int(end_row_raw)
+        except (TypeError, ValueError):
+            end_row = MAX_AG_EXPORT_ROWS
+        end_row = max(1, min(end_row or MAX_AG_EXPORT_ROWS, MAX_AG_EXPORT_ROWS))
+
+        values_iter = qs.values(*effective_paths)[:end_row].iterator(chunk_size=5000)
+        rows = list(values_iter)
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows)
+
+        # Mask any columns that are present but not in the allowed set
+        # (defensive – effective_paths should already exclude them).
+        for column in list(df.columns):
+            if "__" in column:
+                continue
+            if column not in allowed_fields:
+                df[column] = None
+
+        df = self._apply_foreign_key_display_names(df, model)
+        return self._apply_ag_column_layout(df, ag_export)
+
 
     def _collect_ag_export_rows(
         self,
@@ -526,12 +719,40 @@ class ModelExportView(GenericAPIView):
             if not available_columns:
                 continue
 
-            field_objects = remote_model.objects.all()
+            # Only fetch FK targets that are actually referenced in the data.
+            # Loading the entire related table (`remote_model.objects.all()`)
+            # is the dominant cost when exporting wide rows, especially when
+            # several FKs point at large tables.
+            referenced_pks: set = set()
+            for column_name in available_columns:
+                column = df[column_name]
+                try:
+                    unique_values = column.dropna().unique()
+                except Exception:
+                    unique_values = column.tolist()
+                for raw_value in unique_values:
+                    if raw_value is None or isinstance(raw_value, (list, tuple, set, dict)):
+                        continue
+                    referenced_pks.add(raw_value)
+
+            if not referenced_pks:
+                continue
+
             field_objects_dict: Dict[Any, str] = {}
-            for item in field_objects:
-                readable = str(item)
-                field_objects_dict[item.pk] = readable
-                field_objects_dict[str(item.pk)] = readable
+            try:
+                related_iter = remote_model.objects.filter(pk__in=referenced_pks).iterator(
+                    chunk_size=2000
+                )
+                for item in related_iter:
+                    readable = str(item)
+                    field_objects_dict[item.pk] = readable
+                    field_objects_dict[str(item.pk)] = readable
+            except (TypeError, ValueError):
+                # Mixed/incoercible pk types: fall back to a bounded scan.
+                for item in remote_model.objects.all().iterator(chunk_size=2000):
+                    readable = str(item)
+                    field_objects_dict[item.pk] = readable
+                    field_objects_dict[str(item.pk)] = readable
 
             if not field_objects_dict:
                 continue
@@ -646,9 +867,10 @@ class ModelExportView(GenericAPIView):
         else:
             # Apply field-level export permission filtering and masking
             df = self.filter_and_mask_data_for_export(queryset, request)
-
-        # Preserve readable names for relation values.
-        df = self._apply_foreign_key_display_names(df, model)
+            # FK readable names for the legacy / non-AG path. The AG path
+            # already applies them inside `_build_ag_grid_dataframe`, so we
+            # avoid running the (still relatively expensive) conversion twice.
+            df = self._apply_foreign_key_display_names(df, model)
 
         # Check if there's any data to export
         if df.empty:
