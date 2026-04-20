@@ -3,6 +3,7 @@ import logging
 import time
 
 from django.db import transaction
+from django.utils import timezone
 
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
@@ -148,6 +149,7 @@ class AuditLogMixin:
         AuditLogStatus.objects.filter(audit_log=audit_log).update(
             status='failure',
             error_traceback=error_traceback,
+            updated_at=timezone.now(),
         )
         self._failed_audit_logged = True
         return audit_log
@@ -227,12 +229,12 @@ class AuditLogMixin:
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
             audit_log.save()
-            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
+            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return instance
         except Exception as e:
             error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
-                .update(status='failure', error_traceback=error_msg)
+                .update(status='failure', error_traceback=error_msg, updated_at=timezone.now())
             if transaction.get_connection().in_atomic_block:
                 # The failure status above rolls back with the surrounding request
                 # transaction, so the view persists a queued replacement afterward.
@@ -255,17 +257,19 @@ class AuditLogMixin:
         audit_log = self.log_change("update", serializer.Meta.model, payload=initial_payload)
         try:
             instance = _save_with_retry(serializer)
-            updated_payload = _serialize_payload(self.get_serializer(instance).data)
+            updated_payload = _serialize_payload(self.get_serializer(instance).data) or {}
+            if isinstance(updated_payload, dict):
+                updated_payload['id'] = instance.pk
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
             audit_log.payload = updated_payload
             audit_log.save()
-            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
+            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return instance
         except Exception as e:
             error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
-                .update(status='failure', error_traceback=error_msg)
+                .update(status='failure', error_traceback=error_msg, updated_at=timezone.now())
             if transaction.get_connection().in_atomic_block:
                 self.queue_failed_audit_log(
                     "update",
@@ -280,18 +284,21 @@ class AuditLogMixin:
 
     def perform_destroy(self, instance):
         serializer = self.get_serializer(instance)
-        payload = _serialize_payload(serializer.data)
+        payload = _serialize_payload(serializer.data) or {}
+        instance_pk = instance.pk
+        if isinstance(payload, dict):
+            payload['id'] = instance_pk
         audit_log = self.log_change("delete", instance, payload=payload)
         try:
             _delete_with_retry(instance)
             audit_log.content_type = _safe_get_content_type(instance.__class__)
-            audit_log.object_id = instance.pk
+            audit_log.object_id = instance_pk
             audit_log.save()
-            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
+            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
         except Exception as e:
             error_msg = _resolve_audit_failure_traceback(e)
             AuditLogStatus.objects.filter(audit_log=audit_log) \
-                .update(status='failure', error_traceback=error_msg)
+                .update(status='failure', error_traceback=error_msg, updated_at=timezone.now())
             if transaction.get_connection().in_atomic_block:
                 self.queue_failed_audit_log(
                     "delete",

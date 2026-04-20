@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.utils import timezone
 
 from lex.audit_logging.mixins.AuditLogMixin import (
     AuditLogMixin,
@@ -89,19 +90,21 @@ class BulkAuditLogMixin(AuditLogMixin):
             updated_instances = list(serializer.save())
             # After saving, refresh the payload of each audit log entry with the full updated data.
             for (audit_log, _instance, _payload), updated_instance in zip(audit_logs, updated_instances):
-                updated_payload = _serialize_payload(self.get_serializer(updated_instance).data)
+                updated_payload = _serialize_payload(self.get_serializer(updated_instance).data) or {}
+                if isinstance(updated_payload, dict):
+                    updated_payload['id'] = updated_instance.pk
                 audit_log.content_type = _safe_get_content_type(updated_instance.__class__)
                 audit_log.object_id = updated_instance.pk
                 audit_log.payload = updated_payload
                 audit_log.save()
-                AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
+                AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return updated_instances
         except Exception as e:
             error_msg = _resolve_audit_failure_traceback(e)
             is_atomic_block = transaction.get_connection().in_atomic_block
             for audit_log, instance, payload in audit_logs:
                 AuditLogStatus.objects.filter(audit_log=audit_log) \
-                    .update(status='failure', error_traceback=error_msg)
+                    .update(status='failure', error_traceback=error_msg, updated_at=timezone.now())
                 if is_atomic_block:
                     self.queue_failed_audit_log(
                         "update",
@@ -134,20 +137,22 @@ class BulkAuditLogMixin(AuditLogMixin):
             instances = [instance for instance in queryset]
             queryset.delete()
             # TODO: Test
-            for audit_log, instance in zip(audit_logs, instances):
-                updated_payload = _serialize_payload(self.get_serializer(instance).data)
+            for audit_log, instance, instance_pk in zip(audit_logs, instances, deleted_ids):
+                updated_payload = _serialize_payload(self.get_serializer(instance).data) or {}
+                if isinstance(updated_payload, dict):
+                    updated_payload['id'] = instance_pk
                 audit_log.content_type = _safe_get_content_type(instance.__class__)
-                audit_log.object_id = instance.pk
+                audit_log.object_id = instance_pk
                 audit_log.payload = updated_payload
                 audit_log.save()
-                AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success')
+                AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return deleted_ids
         except Exception as e:
             error_msg = _resolve_audit_failure_traceback(e)
             is_atomic_block = transaction.get_connection().in_atomic_block
             for audit_log, instance in zip(audit_logs, queryset):
                 AuditLogStatus.objects.filter(audit_log=audit_log) \
-                    .update(status='failure', error_traceback=error_msg)
+                    .update(status='failure', error_traceback=error_msg, updated_at=timezone.now())
                 if is_atomic_block:
                     self.queue_failed_audit_log(
                         "delete",

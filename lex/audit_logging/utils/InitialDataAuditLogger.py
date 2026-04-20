@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, Type, List
 from django.db import models, transaction
 from django.db.models import Model
+from django.utils import timezone
 
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
@@ -324,7 +325,8 @@ class InitialDataAuditLogger:
         try:
             updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
                 status='success',
-                error_traceback=None
+                error_traceback=None,
+                updated_at=timezone.now(),
             )
             if updated_count == 0:
                 AuditLogStatus.objects.create(
@@ -370,7 +372,8 @@ class InitialDataAuditLogger:
         try:
             updated_count = AuditLogStatus.objects.filter(audit_log=audit_log).update(
                 status='failure',
-                error_traceback=error_msg
+                error_traceback=error_msg,
+                updated_at=timezone.now(),
             )
             if updated_count == 0:
                 AuditLogStatus.objects.create(
