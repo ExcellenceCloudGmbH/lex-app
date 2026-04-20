@@ -35,6 +35,7 @@ from lex.tools.setup_with_ai import (
     SetupWithAIUpdateResult,
     apply_ai_update,
     apply_ai_update_0_2_1,
+    apply_ai_update_0_2_2,
     bootstrap_github_copilot_mcp_server_for_pycharm,
     build_mcp_server_definition,
     install_lex_mcp_local,
@@ -47,6 +48,8 @@ from lex.tools.setup_with_ai import (
     update_env_file,
     verify_lex_mcp_local_server_starts,
     write_github_copilot_mcp_config,
+    _read_dotenv_value,
+    _stop_lex_mcp_local_server,
 )
 
 
@@ -377,6 +380,24 @@ class SetupWithAIToolsTests(TestCase):
                 ),
                 "Planning docs\n",
             )
+
+    def test_copy_lex_app_docs_directory_skips_when_docs_are_already_inside_project(self):
+        with TemporaryDirectory() as tmp_dir:
+            temp_root = Path(tmp_dir)
+            project_root = temp_root / "project"
+            lex_package_root = project_root / "lex"
+            source_file = lex_package_root / "docs" / "planning" / "README.md"
+
+            source_file.parent.mkdir(parents=True)
+            source_file.write_text("Planning docs\n", encoding="utf-8")
+
+            docs_directory = setup_with_ai_module.copy_lex_app_docs_directory(
+                project_root,
+                lex_package_root,
+            )
+
+            self.assertIsNone(docs_directory)
+            self.assertFalse((project_root / "docs").exists())
 
     def test_configure_ai_integration_copies_github_and_docs_directories_into_project_root(self):
         with TemporaryDirectory() as tmp_dir:
@@ -982,7 +1003,8 @@ class AIUpdateTests(TestCase):
 
             env_path.write_text(
                 "GITHUB_TOKEN=ghu_example\n"
-                "GEMINI_API_KEY=gemini_key\n",
+                "GEMINI_API_KEY=gemini_key\n"
+                "REMOTE_MCP_API_KEY=secret123\n",
                 encoding="utf-8",
             )
             mcp_path.write_text(
@@ -1000,14 +1022,50 @@ class AIUpdateTests(TestCase):
                 encoding="utf-8",
             )
 
-            results = apply_ai_update(
-                project_root, mcp_config_path=mcp_path,
-            )
+            fake_python = Path(tmp_dir) / ".venv" / "bin" / "python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.touch()
+            fake_python.chmod(0o755)
 
-            self.assertEqual(len(results), 1)
+            with (
+                patch(
+                    "lex.tools.setup_with_ai.resolve_active_python_executable",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_wrapper_script_path",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_lex_app_package_root",
+                    return_value=project_root,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_app_docs_directory",
+                    return_value=project_root / "docs",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai._stop_lex_mcp_local_server",
+                    return_value=False,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.install_lex_mcp_local",
+                ),
+            ):
+                results = apply_ai_update(
+                    project_root, mcp_config_path=mcp_path,
+                )
+
+            self.assertEqual(len(results), 2)
             self.assertEqual(results[0].version, "0.2.1")
             self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
             self.assertIn("GEMINI_API_KEY", results[0].mcp_env_keys_removed)
+            self.assertEqual(results[1].version, "0.2.2")
+            self.assertTrue(results[1].package_upgraded)
 
     def test_ai_update_cli_command_reports_removed_keys(self):
         runner = CliRunner()
@@ -1021,7 +1079,8 @@ class AIUpdateTests(TestCase):
             env_path.write_text(
                 "GITHUB_TOKEN=ghu_example\n"
                 "GEMINI_API_KEY=gemini_key\n"
-                "GEMINI_MODEL=gemini-2.5-flash\n",
+                "GEMINI_MODEL=gemini-2.5-flash\n"
+                "REMOTE_MCP_API_KEY=secret123\n",
                 encoding="utf-8",
             )
             mcp_path.write_text(
@@ -1039,9 +1098,43 @@ class AIUpdateTests(TestCase):
                 encoding="utf-8",
             )
 
-            with patch(
-                "lex.tools.setup_with_ai.resolve_github_copilot_mcp_config_path",
-                return_value=mcp_path,
+            fake_python = Path(tmp_dir) / ".venv" / "bin" / "python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.touch()
+            fake_python.chmod(0o755)
+
+            with (
+                patch(
+                    "lex.tools.setup_with_ai.resolve_github_copilot_mcp_config_path",
+                    return_value=mcp_path,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_active_python_executable",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_wrapper_script_path",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_lex_app_package_root",
+                    return_value=project_root,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_app_docs_directory",
+                    return_value=project_root / "docs",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai._stop_lex_mcp_local_server",
+                    return_value=False,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.install_lex_mcp_local",
+                ),
             ):
                 result = runner.invoke(
                     lex,
@@ -1063,7 +1156,11 @@ class AIUpdateTests(TestCase):
             env_path = project_root / ".env"
             mcp_path = project_root / "mcp.json"
 
-            env_path.write_text("GITHUB_TOKEN=ghu_example\n", encoding="utf-8")
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "REMOTE_MCP_API_KEY=secret123\n",
+                encoding="utf-8",
+            )
             mcp_path.write_text(
                 json.dumps({
                     "servers": {
@@ -1076,9 +1173,43 @@ class AIUpdateTests(TestCase):
                 encoding="utf-8",
             )
 
-            with patch(
-                "lex.tools.setup_with_ai.resolve_github_copilot_mcp_config_path",
-                return_value=mcp_path,
+            fake_python = Path(tmp_dir) / ".venv" / "bin" / "python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.touch()
+            fake_python.chmod(0o755)
+
+            with (
+                patch(
+                    "lex.tools.setup_with_ai.resolve_github_copilot_mcp_config_path",
+                    return_value=mcp_path,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_active_python_executable",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_wrapper_script_path",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=None,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_lex_app_package_root",
+                    return_value=None,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_app_docs_directory",
+                    return_value=None,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai._stop_lex_mcp_local_server",
+                    return_value=False,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.install_lex_mcp_local",
+                ),
             ):
                 result = runner.invoke(
                     lex,
@@ -1088,3 +1219,284 @@ class AIUpdateTests(TestCase):
             self.assertEqual(result.exit_code, 0, msg=result.output)
             self.assertIn("Already up to date", result.output)
             self.assertIn("LEX AI update complete", result.output)
+
+
+class AIUpdate022Tests(TestCase):
+    def test_read_dotenv_value_returns_value(self):
+        with TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "REMOTE_MCP_API_KEY=secret123\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(_read_dotenv_value(env_path, "REMOTE_MCP_API_KEY"), "secret123")
+            self.assertEqual(_read_dotenv_value(env_path, "GITHUB_TOKEN"), "ghu_example")
+
+    def test_read_dotenv_value_returns_none_for_missing_key(self):
+        with TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text("GITHUB_TOKEN=ghu_example\n", encoding="utf-8")
+            self.assertIsNone(_read_dotenv_value(env_path, "REMOTE_MCP_API_KEY"))
+
+    def test_read_dotenv_value_returns_none_for_missing_file(self):
+        self.assertIsNone(_read_dotenv_value(Path("/nonexistent/.env"), "REMOTE_MCP_API_KEY"))
+
+    def test_read_dotenv_value_strips_surrounding_quotes(self):
+        with TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text('REMOTE_MCP_API_KEY="secret123"\n', encoding="utf-8")
+            self.assertEqual(_read_dotenv_value(env_path, "REMOTE_MCP_API_KEY"), "secret123")
+
+    def test_apply_ai_update_0_2_2_upgrades_package_and_copies_directories(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "REMOTE_MCP_API_KEY=secret123\n",
+                encoding="utf-8",
+            )
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {"GITHUB_TOKEN": "ghu_example"},
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            fake_python = Path(tmp_dir) / ".venv" / "bin" / "python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.touch()
+            fake_python.chmod(0o755)
+
+            mock_runner = Mock()
+
+            with (
+                patch(
+                    "lex.tools.setup_with_ai.resolve_active_python_executable",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_wrapper_script_path",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_lex_app_package_root",
+                    return_value=project_root,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_app_docs_directory",
+                    return_value=project_root / "docs",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai._stop_lex_mcp_local_server",
+                    return_value=True,
+                ),
+            ):
+                result = apply_ai_update_0_2_2(
+                    project_root,
+                    mcp_config_path=mcp_path,
+                    runner=mock_runner,
+                )
+
+            self.assertEqual(result.version, "0.2.2")
+            self.assertTrue(result.package_upgraded)
+            self.assertEqual(result.github_directory_copied, project_root / ".github")
+            self.assertEqual(result.docs_directory_copied, project_root / "docs")
+            self.assertTrue(result.server_restarted)
+
+            mock_runner.assert_called_once()
+            install_cmd = mock_runner.call_args[0][0]
+            self.assertIn("lex-mcp-local", install_cmd)
+
+    def test_apply_ai_update_0_2_2_raises_when_remote_mcp_api_key_missing(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text("GITHUB_TOKEN=ghu_example\n", encoding="utf-8")
+            mcp_path.write_text(
+                json.dumps({"servers": {LEX_MCP_LOCAL_SERVER_NAME: {"type": "stdio"}}}),
+                encoding="utf-8",
+            )
+
+            fake_python = Path(tmp_dir) / ".venv" / "bin" / "python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.touch()
+            fake_python.chmod(0o755)
+
+            with patch(
+                "lex.tools.setup_with_ai.resolve_active_python_executable",
+                return_value=fake_python,
+            ):
+                from lex.tools.setup_with_ai import SetupWithAIError
+                with self.assertRaises(SetupWithAIError):
+                    apply_ai_update_0_2_2(
+                        project_root, mcp_config_path=mcp_path,
+                    )
+
+    def test_apply_ai_update_runs_both_0_2_1_and_0_2_2(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "GEMINI_API_KEY=gemini_key\n"
+                "REMOTE_MCP_API_KEY=secret123\n",
+                encoding="utf-8",
+            )
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {
+                                "GITHUB_TOKEN": "ghu_example",
+                                "GEMINI_API_KEY": "gemini_key",
+                            },
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            fake_python = Path(tmp_dir) / ".venv" / "bin" / "python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.touch()
+            fake_python.chmod(0o755)
+
+            with (
+                patch(
+                    "lex.tools.setup_with_ai.resolve_active_python_executable",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_wrapper_script_path",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_lex_app_package_root",
+                    return_value=project_root,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_app_docs_directory",
+                    return_value=project_root / "docs",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai._stop_lex_mcp_local_server",
+                    return_value=False,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.install_lex_mcp_local",
+                ) as mock_install,
+            ):
+                results = apply_ai_update(
+                    project_root, mcp_config_path=mcp_path,
+                )
+
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].version, "0.2.1")
+            self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
+            self.assertEqual(results[1].version, "0.2.2")
+            self.assertTrue(results[1].package_upgraded)
+
+    def test_ai_update_cli_command_reports_0_2_2_actions(self):
+        runner = CliRunner()
+
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir) / "sample-project"
+            project_root.mkdir()
+            env_path = project_root / ".env"
+            mcp_path = project_root / "mcp.json"
+
+            env_path.write_text(
+                "GITHUB_TOKEN=ghu_example\n"
+                "REMOTE_MCP_API_KEY=secret123\n",
+                encoding="utf-8",
+            )
+            mcp_path.write_text(
+                json.dumps({
+                    "servers": {
+                        LEX_MCP_LOCAL_SERVER_NAME: {
+                            "type": "stdio",
+                            "env": {"GITHUB_TOKEN": "ghu_example"},
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            fake_python = Path(tmp_dir) / ".venv" / "bin" / "python"
+            fake_python.parent.mkdir(parents=True)
+            fake_python.touch()
+            fake_python.chmod(0o755)
+
+            with (
+                patch(
+                    "lex.tools.setup_with_ai.resolve_github_copilot_mcp_config_path",
+                    return_value=mcp_path,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_active_python_executable",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_wrapper_script_path",
+                    return_value=fake_python,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.resolve_lex_app_package_root",
+                    return_value=project_root,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.copy_lex_app_docs_directory",
+                    return_value=project_root / "docs",
+                ),
+                patch(
+                    "lex.tools.setup_with_ai._stop_lex_mcp_local_server",
+                    return_value=True,
+                ),
+                patch(
+                    "lex.tools.setup_with_ai.install_lex_mcp_local",
+                ),
+            ):
+                result = runner.invoke(
+                    lex,
+                    ["ai-update", "--project-root", str(project_root)],
+                )
+
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+            self.assertIn("v0.2.2", result.output)
+            self.assertIn("Upgraded lex-mcp-local", result.output)
+            self.assertIn("Copied .github directory", result.output)
+            self.assertIn("Copied docs directory", result.output)
+            self.assertIn("Stopped MCP server", result.output)
+            self.assertIn("LEX AI update complete", result.output)
+
+    def test_stop_lex_mcp_local_server_returns_false_when_no_pid_file(self):
+        with TemporaryDirectory() as tmp_dir:
+            mcp_path = Path(tmp_dir) / "mcp.json"
+            mcp_path.write_text("{}", encoding="utf-8")
+            self.assertFalse(_stop_lex_mcp_local_server(mcp_path))

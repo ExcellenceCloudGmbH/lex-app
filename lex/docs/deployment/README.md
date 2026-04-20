@@ -15,10 +15,9 @@ This phase deploys the implemented Lex application — installs dependencies, co
 
 ## Input contract
 
-- Deployment starts only after implementation Step 11 is approved.
-- Read planning artifacts from `plans/<run-id>/step-00..step-08*.md`.
-- Read implementation artifacts from `plans/<run-id>/implementation/step-00..step-11*.md`.
-- Treat implementation outputs as the source of truth unless user explicitly revises requirements.
+- Deployment starts only after all planning/implementation steps (0–14) are complete.
+- Read step artifacts from `plans/<run-id>/step-*.md`.
+- Treat step outputs as the source of truth unless user explicitly revises requirements.
 
 ## Output destination rule
 
@@ -31,7 +30,7 @@ This phase deploys the implemented Lex application — installs dependencies, co
 - Retrieve each step from MCP using `get_deployment_step`.
 - Request and complete exactly one step at a time.
 - After finishing Step `N`, make a new MCP request for Step `N+1`.
-- Deployment starts only after implementation is fully complete and approved.
+- Deployment starts only after all planning/implementation steps are fully complete.
 
 ## Step order
 
@@ -61,6 +60,6 @@ This phase deploys the implemented Lex application — installs dependencies, co
 ## Non-negotiable rules for Copilot
 
 - Do not deploy without explicit `Approved: Yes` checkpoint.
-- Keep traceability from planning + implementation outputs into deployment artifacts.
+- Keep traceability from planning + implementation step outputs into deployment artifacts.
 - Treat [[../lex_topics/20-LEX-SPECIFICATIONS|Lex Specifications (Canonical, Project-Specific)]] as authoritative for all Lex-specific decisions.
 - Gate progression with explicit `Approved: Yes/No` at required checkpoints.

@@ -26,9 +26,12 @@ status: draft
 - [ ] Step 6 — UML/ER Diagrams
 - [ ] Step 7 — Business Logic Pseudocode
 - [ ] Step 8 — Planning Rule Compliance Validation
-- [ ] Step 9 — Implementation Kickoff/Foundations
-- [ ] Step 10 — Implementation Delivery
-- [ ] Step 11 — Code-Level Rule Compliance Validation
+- [ ] Step 9 — (loaded from MCP)
+- [ ] Step 10 — (loaded from MCP)
+- [ ] Step 11 — (loaded from MCP)
+- [ ] Step 12 — (loaded from MCP)
+- [ ] Step 13 — (loaded from MCP)
+- [ ] Step 14 — (loaded from MCP)
 
 ## Decisions Log
 

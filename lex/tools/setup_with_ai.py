@@ -7,6 +7,7 @@ import queue
 import re
 import secrets
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -54,6 +55,10 @@ class SetupWithAIUpdateResult:
     mcp_env_keys_removed: tuple[str, ...] = ()
     env_file_path: Path | None = None
     mcp_config_path: Path | None = None
+    package_upgraded: bool = False
+    github_directory_copied: Path | None = None
+    docs_directory_copied: Path | None = None
+    server_restarted: bool = False
 
 
 @dataclass(frozen=True)
@@ -280,6 +285,10 @@ def copy_lex_app_docs_directory(
 
     source_directory = lex_package_root.resolve() / "docs"
     if not source_directory.is_dir():
+        return None
+
+    project_root_resolved = Path(project_root).resolve()
+    if project_root_resolved in source_directory.parents:
         return None
 
     return _copy_directory_into_project_root(project_root, source_directory)
@@ -1314,11 +1323,126 @@ def apply_ai_update_0_2_1(
     )
 
 
+def _read_dotenv_value(env_file_path: Path, key: str) -> str | None:
+    """Read a single value from a dotenv file. Returns *None* if not found."""
+    if not env_file_path.exists():
+        return None
+
+    for line in env_file_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        k, v = stripped.split("=", 1)
+        if k == key:
+            # Strip surrounding quotes if present.
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                v = v[1:-1]
+            return v
+    return None
+
+
+def _stop_lex_mcp_local_server(
+    mcp_config_path: Path,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+    timeout_seconds: float = 5.0,
+) -> bool:
+    """Stop a running lex-mcp-local server. Returns True if a process was stopped."""
+    pid_file_path, _log_file_path = _resolve_lex_mcp_local_runtime_paths(
+        mcp_config_path,
+        server_name=server_name,
+    )
+
+    pid = _read_pid_file(pid_file_path)
+    if pid is None or not _is_process_running(pid):
+        return False
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not _is_process_running(pid):
+            break
+        time.sleep(0.1)
+    else:
+        # Force-kill if still alive after timeout.
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    if pid_file_path.exists():
+        try:
+            pid_file_path.unlink()
+        except OSError:
+            pass
+
+    return True
+
+
+def apply_ai_update_0_2_2(
+    project_root: Path,
+    *,
+    mcp_config_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+    runner: Callable[..., Any] = subprocess.run,
+) -> SetupWithAIUpdateResult:
+    """Migrate an existing LEX AI setup from 0.2.1 to 0.2.2.
+
+    * Upgrades the ``lex-mcp-local`` pip package.
+    * Re-copies the ``.github`` directory from the upgraded package.
+    * Re-copies the ``docs`` directory from the ``lex-app`` package.
+    * Stops the running MCP server so it picks up the new code on next
+      launch.
+    """
+    env_file_path = (Path(project_root) / ".env").resolve()
+    copilot_mcp_path = (
+        resolve_github_copilot_mcp_config_path(env=env, home=home)
+        if mcp_config_path is None
+        else Path(mcp_config_path)
+    ).resolve()
+
+    python_executable = resolve_active_python_executable(project_root, env=env)
+
+    remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
+    if not remote_mcp_api_key:
+        raise SetupWithAIError(
+            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local."
+        )
+
+    install_lex_mcp_local(python_executable, remote_mcp_api_key, runner=runner)
+
+    wrapper_script_path = resolve_wrapper_script_path(python_executable)
+    github_directory = copy_lex_mcp_local_github_directory(project_root, wrapper_script_path)
+
+    lex_package_root = resolve_lex_app_package_root(python_executable)
+    docs_directory = copy_lex_app_docs_directory(project_root, lex_package_root)
+
+    server_stopped = _stop_lex_mcp_local_server(
+        copilot_mcp_path, server_name=server_name,
+    )
+
+    return SetupWithAIUpdateResult(
+        version="0.2.2",
+        env_file_path=env_file_path,
+        mcp_config_path=copilot_mcp_path,
+        package_upgraded=True,
+        github_directory_copied=github_directory,
+        docs_directory_copied=docs_directory,
+        server_restarted=server_stopped,
+    )
+
+
 # Ordered list of (target_version, migration_function) pairs.
 # Each function accepts (project_root, **kwargs) and returns a
 # SetupWithAIUpdateResult.  ``apply_ai_update`` runs them in sequence.
 _AI_UPDATE_STEPS: list[tuple[str, Callable[..., SetupWithAIUpdateResult]]] = [
     ("0.2.1", apply_ai_update_0_2_1),
+    ("0.2.2", apply_ai_update_0_2_2),
 ]
 
 

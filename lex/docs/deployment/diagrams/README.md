@@ -1,4 +1,4 @@
-# Deploymet Diagrams
+# Deployment Diagrams
 
 Use Mermaid blocks for deployment flow, rollout strategy, and rollback sequence diagrams.
 

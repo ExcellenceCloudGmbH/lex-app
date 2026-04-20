@@ -2,9 +2,9 @@
 tags: [template, hitl, implementation]
 ---
 
-# HITL Step Template (Implementation)
+# HITL Step Template
 
-Use this structure for each implementation step output file.
+Use this structure for each step output file.
 
 ```md
 # Step <N> — <Title>

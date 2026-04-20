@@ -117,10 +117,10 @@ USAGE_RULE:
 ## K) Mandatory implementation sequencing rule (project-specific)
 
 - Implementation workflow must include explicit plan-validation and code-validation gates.
-- Step 9 validates implementation plans against this Lex specification before coding starts.
-- Step 10 is the mandatory full project code-delivery step where the LLM realizes the project by writing complete code artifacts.
-- Step 11 is a second mandatory compliance gate that validates generated code itself against this Lex specification.
-- Do not treat implementation as complete unless Step 10 code delivery and Step 11 code-level compliance both pass with explicit approval.
+- All steps (0–14) are served by the unified `get_plan_step` tool. There is no separate implementation step tool.
+- The step flow includes plan-validation and code-validation gates at designated steps (loaded from MCP).
+- The implementation phase must deliver complete project code, not only implementation plans.
+- Do not treat implementation as complete unless both a code-delivery step and a code-level compliance gate have passed.
 
 ## L) Import, services, and dependency-safety rules (critical)
 

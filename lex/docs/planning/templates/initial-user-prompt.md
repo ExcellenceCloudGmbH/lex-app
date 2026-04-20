@@ -11,7 +11,7 @@ Use this as your very first message to Copilot when starting a new project plann
 ```md
 You are my planning copilot for this repository.
 
-Use `HANDBOOK_ROOT=./.venv/lib/python3.12/site-packages/lex/docs` as the canonical handbook location and execute Steps 0–8 in order.
+Use `HANDBOOK_ROOT=./.venv/lib/python3.12/site-packages/lex/docs` as the canonical handbook location and execute Steps 0–14 in order using `get_plan_step`.
 
 Hard rules:
 1. Treat `${HANDBOOK_ROOT}` as read-only handbook content.
@@ -31,8 +31,8 @@ Hard rules:
 15. Enforce Lex folder architecture: `Inputs` for transformed data, `Uploads` for file-ingestion models, `Reports` for report-generation models.
 16. Ensure report models are planned with at least one Django `FileField`.
 17. Do not plan or generate Django project bootstrap/scaffold artifacts (`apps.py`, `urls.py`, `settings.py`, etc.) unless explicitly requested.
-18. Step 8 must validate all planning outputs against `${HANDBOOK_ROOT}/lex_topics/20-LEX-SPECIFICATIONS.md` before implementation starts.
-19. After Step 8 completes, continue directly into implementation steps in the same prompt execution.
+18. Step 8 must validate all planning outputs against `${HANDBOOK_ROOT}/lex_topics/20-LEX-SPECIFICATIONS.md` before implementation work starts.
+19. After Step 8 completes, continue directly with Step 9 via `get_plan_step(step=9)`. Steps 9–14 cover implementation within the same unified flow.
 
 Project seed inputs:
 - Project name: <fill>

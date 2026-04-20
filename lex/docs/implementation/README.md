@@ -2,16 +2,19 @@
 tags: [implementation, lex, copilot]
 ---
 
-# Implementation Steps (0-11)
+# Implementation Steps (Part of Unified Step Flow)
 
-These steps convert planning artifacts into production-ready code and run immediately after planning in the same workflow execution.
+> **Important:** Implementation is NOT a separate process with its own MCP tool.
+> Steps 9–14 of the unified `get_plan_step` tool cover implementation work.
+> There is no `get_implementation_step` tool.
+
+These steps convert planning artifacts into production-ready code and run immediately after the planning steps (0–8) in the same workflow execution.
 
 ## Start here (single entry point)
 
-1. Open and copy: [[templates/initial-user-prompt|Initial User Prompt (Copy/Paste to Start)]].
-2. Paste it as your first user message for implementation.
-3. Let Copilot create `plans/<run-id>/implementation/run.md` and begin Step 0.
-4. Apply [[../lex_topics/20-LEX-SPECIFICATIONS|Lex Specifications (Canonical, Project-Specific)]].
+1. Complete planning Steps 0–8 via `get_plan_step`.
+2. Continue directly with `get_plan_step(step=9)`.
+3. Apply [[../lex_topics/20-LEX-SPECIFICATIONS|Lex Specifications (Canonical, Project-Specific)]].
 
 ## Input contract
 
@@ -22,45 +25,14 @@ These steps convert planning artifacts into production-ready code and run immedi
 ## Output destination rule
 
 - `docs/` files are handbook-only and must not be edited during runs.
-- All implementation outputs must be created in `plans/<run-id>/implementation/`.
+- All implementation outputs must be created in `plans/<run-id>/`.
 
 ## MCP step retrieval contract
 
-- Do not read implementation step instructions from local files during execution.
-- Load each implementation step from MCP.
-- Execute steps sequentially: load Step `N`, complete Step `N`, persist outputs, notify completion, then load Step `N+1`.
-- Do not wait for approval gates between implementation steps.
-- Implementation must complete all steps (`0..11`) before any deployment work begins.
-
-## Step order
-
-0. [[00-implementation-kickoff|Implementation Kickoff and Scope Lock]]
-1. [[01-foundation-and-scaffolding|Foundation and Scaffolding]]
-2. [[02-model-layer-implementation|Model Layer Implementation]]
-3. [[03-ingestion-and-validation|Ingestion and Validation Pipeline]]
-4. [[04-calculation-and-business-services|Calculation and Business Services]]
-5. [[05-api-workflows-and-permissions|API Workflows and Permissions]]
-6. [[06-tests-reconciliation-and-hardening|Reconciliation and Hardening]]
-7. [[07-full-project-implementation|Implementation Blueprint Consolidation]]
-8. [[08-release-readiness-and-handover|Release and Handover Planning]]
-9. [[09-rule-compliance-validation|Rule Compliance Validation for Implementation Plans]]
-10. [[10-full-project-implementation|Full Project Implementation (Code Delivery)]]
-11. [[11-code-rule-compliance-validation|Code-Level Lex Rule Compliance Validation]]
-
-## Step routing map (where to go next)
-
-- After Step 0 output: update `plans/<run-id>/implementation/step-00-kickoff.md`, then continue to Step 1.
-- After Step 1 output: update `plans/<run-id>/implementation/step-01-foundation.md`, then continue to Step 2.
-- After Step 2 output: update `plans/<run-id>/implementation/step-02-models.md`, then continue to Step 3.
-- After Step 3 output: update `plans/<run-id>/implementation/step-03-ingestion.md`, then continue to Step 4.
-- After Step 4 output: update `plans/<run-id>/implementation/step-04-services.md`, then continue to Step 5.
-- After Step 5 output: update `plans/<run-id>/implementation/step-05-api.md`, then continue to Step 6.
-- After Step 6 output: update `plans/<run-id>/implementation/step-06-quality.md`, then continue to Step 7.
-- After Step 7 output: update `plans/<run-id>/implementation/step-07-blueprint.md`, then continue to Step 8.
-- After Step 8 output: update `plans/<run-id>/implementation/step-08-release-plan.md`, then continue to Step 9.
-- After Step 9 output: update `plans/<run-id>/implementation/step-09-plan-rule-validation.md`, then continue to Step 10.
-- After Step 10 output: update `plans/<run-id>/implementation/step-10-implementation.md`, then continue to Step 11.
-- After Step 11 output: update `plans/<run-id>/implementation/step-11-code-rule-validation.md`; implementation workflow is complete.
+- Load each step from MCP using `get_plan_step` (the same tool used for planning steps).
+- Execute steps sequentially: load Step `N`, complete Step `N`, persist outputs, call `notify_step_complete(step=N, process='planning')`, then load Step `N+1`.
+- Do not wait for approval gates between steps.
+- Implementation must complete all steps (9–14) before any deployment work begins.
 
 ## Mandatory implementation outputs
 
@@ -68,17 +40,9 @@ These steps convert planning artifacts into production-ready code and run immedi
 - Implemented ORM model layer aligned to approved planning
 - Implemented ingestion, validation, and calculation services
 - Implemented API/workflow behaviors and permission boundaries
-- Implementation plan bundle that is Lex-rule-compliant before coding
 - Complete code artifacts implementing the approved project scope
 - Reconciliation evidence and release checklist
 - Final code-level rule compliance validation against [[../lex_topics/20-LEX-SPECIFICATIONS|Lex Specifications (Canonical, Project-Specific)]]
-
-## Session templates
-
-- [[templates/initial-user-prompt|Initial User Prompt (Copy/Paste to Start)]]
-- [[templates/copilot-session-template|Copilot Session Template]]
-- [[templates/hitl-step-template|HITL Step Template]]
-- [[templates/llm-response-structure|LLM Response Structure (Mandatory)]]
 
 ## Non-negotiable rules for Copilot
 
