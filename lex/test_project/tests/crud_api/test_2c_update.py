@@ -1,0 +1,133 @@
+"""
+Cluster 2c: Update (PATCH / PUT) via REST API.
+
+Asserts the customer-observable update contract:
+    * PATCH only touches fields in the payload
+    * ``edited_at`` / ``edited_by`` advance on update;
+      ``created_at`` never changes
+    * Invalid PATCH → 400 AND DB unchanged
+    * PATCH on non-existent id → 404
+    * Anonymous PATCH must not mutate
+
+Scenario numbering matches
+docs/test-plan/test-clusters.md#2-crud-via-rest-api.
+"""
+
+from __future__ import annotations
+
+import unittest
+
+from rest_framework import status
+
+from lex.tests.e2e._e2e_test_case import E2ETestCase
+
+from .models import ALL_MODELS, SIMPLE, TRACKED, SimpleItem, TrackedItem
+
+
+class TestCluster02c_Update(E2ETestCase):
+    """PATCH / PUT /api/<model>/<pk>/"""
+
+    e2e_models = ALL_MODELS
+
+    # -- 2.13 ----------------------------------------------------------
+    def test_2_13_patch_updates_only_specified_fields(self) -> None:
+        """Scenario 2.13: PATCH updates only listed fields."""
+        item = SimpleItem.objects.create(name="hotel", value=10, description="orig")
+        resp = self.client.patch(
+            self.url_detail(SIMPLE, item.pk),
+            data={"value": 99}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        item.refresh_from_db()
+        self.assertEqual(item.value, 99, "PATCHed field must be updated")
+        self.assertEqual(item.name, "hotel", "Unspecified field must NOT change")
+        self.assertEqual(
+            item.description, "orig",
+            "PATCH must not touch fields missing from the payload",
+        )
+
+    # -- 2.14 ----------------------------------------------------------
+    @unittest.expectedFailure  # BUG-004: edited_at not set on create
+    def test_2_14_patch_updates_edited_at_and_edited_by(self) -> None:
+        """
+        Scenario 2.14: PATCH updates ``edited_at`` / ``edited_by``;
+        ``created_at`` unchanged.
+
+        Expected failure (BUG-004): pre-existing ``edited_at`` is
+        ``None`` because create does not populate it (same root cause
+        as 2.2). Once BUG-004 is fixed this test exercises the
+        PATCH-side contract.
+        """
+        item = TrackedItem.objects.create(label="india")
+        original_created = item.created_at
+        original_edited = item.edited_at
+
+        resp = self.client.patch(
+            self.url_detail(TRACKED, item.pk),
+            data={"label": "india-updated"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        item.refresh_from_db()
+
+        self.assertEqual(
+            item.created_at, original_created,
+            "created_at must NEVER change on update",
+        )
+        self.assertGreaterEqual(
+            item.edited_at, original_edited,
+            "edited_at must advance on update",
+        )
+        self.assertTrue(
+            item.edited_by,
+            "edited_by must be the authenticated user after PATCH",
+        )
+
+    # -- 2.15 ----------------------------------------------------------
+    @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
+    def test_2_15_patch_invalid_value_leaves_record_unchanged(self) -> None:
+        """
+        Scenario 2.15: PATCH with invalid value → 400 AND DB unchanged.
+
+        Expected failure (BUG-005): API returns 500 instead of 400 when
+        a PATCH payload fails field-level validation.
+        """
+        item = SimpleItem.objects.create(name="juliet", value=5)
+        resp = self.client.patch(
+            self.url_detail(SIMPLE, item.pk),
+            data={"value": "not-an-int"}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        item.refresh_from_db()
+        self.assertEqual(
+            item.value, 5,
+            "Rejected PATCH must not mutate the DB",
+        )
+
+    # -- 2.17 ----------------------------------------------------------
+    def test_2_17_patch_nonexistent_returns_404(self) -> None:
+        """Scenario 2.17: PATCH non-existent id → 404."""
+        resp = self.client.patch(
+            self.url_detail(SIMPLE, 99_999),
+            data={"value": 1}, format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    # -- 2.18 ----------------------------------------------------------
+    def test_2_18_unauthenticated_patch_is_rejected(self) -> None:
+        """Scenario 2.18: Anonymous PATCH must not mutate."""
+        item = SimpleItem.objects.create(name="kilo", value=7)
+        self.client.logout()
+        resp = self.client.patch(
+            self.url_detail(SIMPLE, item.pk),
+            data={"value": 999}, format="json",
+        )
+        self.assertNotIn(resp.status_code, (200, 201))
+        item.refresh_from_db()
+        self.assertEqual(
+            item.value, 7,
+            "Anonymous PATCH must NOT mutate the DB",
+        )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

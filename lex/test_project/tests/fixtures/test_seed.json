@@ -1,0 +1,22 @@
+[
+  {
+    "class": "SeedableItem",
+    "action": "create",
+    "tag": "alpha",
+    "parameters": {
+      "name": "Alpha Record",
+      "value": 100,
+      "category": "seed"
+    }
+  },
+  {
+    "class": "SeedableItem",
+    "action": "create",
+    "tag": "beta",
+    "parameters": {
+      "name": "Beta Record",
+      "value": 200,
+      "category": "seed"
+    }
+  }
+]
