@@ -446,6 +446,18 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         queryset = apply_query_param_filters(queryset, self.request.query_params, model_class)
         return apply_ordering(queryset, self.request.query_params.get("ordering"), model_class)
 
+    def list(self, request, *args, **kwargs):
+        # Fast path: when the client only needs the set of primary keys matching
+        # the current filters (e.g. AG Grid "select all rows" bulk selection),
+        # skip serialization and pagination entirely.
+        if _parse_bool(request.query_params.get("pk_only"), default=False):
+            queryset = self.filter_queryset(self.get_queryset())
+            model_class = self.kwargs["model_container"].model_class
+            pk_name = model_class._meta.pk.name
+            ids = list(queryset.values_list(pk_name, flat=True))
+            return Response({"ids": ids, "count": len(ids)})
+        return super().list(request, *args, **kwargs)
+
     def _normalize_ag_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(payload, dict) and isinstance(payload.get("request"), dict):
             return payload.get("request") or {}
