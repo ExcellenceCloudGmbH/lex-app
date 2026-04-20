@@ -101,31 +101,64 @@ class ActiveCalculationStateStore:
     @classmethod
     def snapshot(cls) -> List[Dict[str, str]]:
         """
-        Return the current set of active calculations.
+        Return the current set of active calculations, validated against
+        the database.
 
         This is called by ``UpdateCalculationStatusConsumer.connect()`` to
         send the reconciliation payload to a (re)connecting WebSocket
-        client.  No DB queries — just returns whatever is in the store.
+        client.
+
+        Each entry is cross-checked against the DB so that records whose
+        ``is_calculated`` field has already moved to a terminal state
+        (SUCCESS / ERROR / ABORTED) are pruned from the store and excluded
+        from the payload.
         """
+        from lex.core.models.CalculationModel import CalculationModel
+
         with cls._lock:
-            entries = list(cls._state_map.values())
+            entries = dict(cls._state_map)
 
         if not entries:
             return []
 
-        return [
-            {
+        validated: List[Dict[str, str]] = []
+        stale_ids: List[str] = []
+
+        for record_id, entry in sorted(entries.items(), key=lambda item: item[0]):
+            model_class, record_pk = cls._resolve_model_and_pk(entry)
+            if model_class is not None and record_pk is not None:
+                try:
+                    instance = (
+                        model_class.objects.filter(pk=record_pk)
+                        .only("is_calculated")
+                        .first()
+                    )
+                    if instance is None or getattr(instance, "is_calculated", None) != CalculationModel.IN_PROGRESS:
+                        stale_ids.append(record_id)
+                        continue
+                except Exception:
+                    logger.exception(
+                        "Failed to validate entry during snapshot, keeping it",
+                        extra={"entry": entry},
+                    )
+
+            validated.append({
                 "record_id": entry.get("record_id", ""),
                 "record": entry.get("record", entry.get("record_id", "")),
                 "calculation_id": entry.get("calculation_id", ""),
-            }
-            for entry in sorted(entries, key=lambda item: item.get("record_id", ""))
-        ]
+            })
+
+        # Prune stale entries from the store
+        if stale_ids:
+            with cls._lock:
+                for rid in stale_ids:
+                    cls._state_map.pop(rid, None)
+
+        return validated
 
     # ------------------------------------------------------------------
     # Startup-only validation
     # ------------------------------------------------------------------
-
 
     @classmethod
     def validate_and_prune(cls) -> None:
