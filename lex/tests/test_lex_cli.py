@@ -381,24 +381,6 @@ class SetupWithAIToolsTests(TestCase):
                 "Planning docs\n",
             )
 
-    def test_copy_lex_app_docs_directory_skips_when_docs_are_already_inside_project(self):
-        with TemporaryDirectory() as tmp_dir:
-            temp_root = Path(tmp_dir)
-            project_root = temp_root / "project"
-            lex_package_root = project_root / "lex"
-            source_file = lex_package_root / "docs" / "planning" / "README.md"
-
-            source_file.parent.mkdir(parents=True)
-            source_file.write_text("Planning docs\n", encoding="utf-8")
-
-            docs_directory = setup_with_ai_module.copy_lex_app_docs_directory(
-                project_root,
-                lex_package_root,
-            )
-
-            self.assertIsNone(docs_directory)
-            self.assertFalse((project_root / "docs").exists())
-
     def test_configure_ai_integration_copies_github_and_docs_directories_into_project_root(self):
         with TemporaryDirectory() as tmp_dir:
             temp_root = Path(tmp_dir)
@@ -472,22 +454,6 @@ class SetupWithAIToolsTests(TestCase):
                 "lex-mcp-local",
             ],
         )
-        runner.assert_called_once_with(command, check=True)
-
-    def test_install_lex_mcp_local_includes_upgrade_flag_when_requested(self):
-        runner = Mock()
-
-        command = install_lex_mcp_local(
-            "/venv/bin/python",
-            "remote_api_key",
-            runner=runner,
-            upgrade=True,
-        )
-
-        self.assertIn("--upgrade", command)
-        # --upgrade must come before --no-cache-dir / index-url
-        self.assertLess(command.index("--upgrade"), command.index("--no-cache-dir"))
-        self.assertIn("lex-mcp-local", command)
         runner.assert_called_once_with(command, check=True)
 
     def test_update_env_file_preserves_comments_and_replaces_existing_keys(self):
@@ -832,7 +798,7 @@ class SetupWithAIToolsTests(TestCase):
 
         os_kill_mock.assert_called_once_with(6543, 0)
         popen_mock.assert_not_called()
-        self.assertTrue(runtime.already_running)
+        selfhow to revert a commit.assertTrue(runtime.already_running)
         self.assertEqual(runtime.pid, 6543)
 
 
@@ -1053,8 +1019,8 @@ class AIUpdateTests(TestCase):
                     return_value=fake_python,
                 ),
                 patch(
-                    "lex.tools.setup_with_ai.copy_lex_mcp_local_directories",
-                    return_value=(project_root / ".github",),
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
                 ),
                 patch(
                     "lex.tools.setup_with_ai.resolve_lex_app_package_root",
@@ -1133,8 +1099,8 @@ class AIUpdateTests(TestCase):
                     return_value=fake_python,
                 ),
                 patch(
-                    "lex.tools.setup_with_ai.copy_lex_mcp_local_directories",
-                    return_value=(project_root / ".github",),
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
                 ),
                 patch(
                     "lex.tools.setup_with_ai.resolve_lex_app_package_root",
@@ -1208,8 +1174,8 @@ class AIUpdateTests(TestCase):
                     return_value=fake_python,
                 ),
                 patch(
-                    "lex.tools.setup_with_ai.copy_lex_mcp_local_directories",
-                    return_value=(),
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=None,
                 ),
                 patch(
                     "lex.tools.setup_with_ai.resolve_lex_app_package_root",
@@ -1304,8 +1270,8 @@ class AIUpdate022Tests(TestCase):
                     return_value=fake_python,
                 ),
                 patch(
-                    "lex.tools.setup_with_ai.copy_lex_mcp_local_directories",
-                    return_value=(project_root / ".github",),
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
                 ),
                 patch(
                     "lex.tools.setup_with_ai.resolve_lex_app_package_root",
@@ -1405,8 +1371,8 @@ class AIUpdate022Tests(TestCase):
                     return_value=fake_python,
                 ),
                 patch(
-                    "lex.tools.setup_with_ai.copy_lex_mcp_local_directories",
-                    return_value=(project_root / ".github",),
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
                 ),
                 patch(
                     "lex.tools.setup_with_ai.resolve_lex_app_package_root",
@@ -1479,8 +1445,8 @@ class AIUpdate022Tests(TestCase):
                     return_value=fake_python,
                 ),
                 patch(
-                    "lex.tools.setup_with_ai.copy_lex_mcp_local_directories",
-                    return_value=(project_root / ".github",),
+                    "lex.tools.setup_with_ai.copy_lex_mcp_local_github_directory",
+                    return_value=project_root / ".github",
                 ),
                 patch(
                     "lex.tools.setup_with_ai.resolve_lex_app_package_root",

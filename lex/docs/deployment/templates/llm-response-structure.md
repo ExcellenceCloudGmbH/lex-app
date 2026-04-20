@@ -1,6 +1,6 @@
-# LLM Response Structure (Deploymet)
+# LLM Response Structure (Deployment)
 
-Every deploymet step response must include:
+Every deployment step response must include:
 
 1. Objective
 2. Inputs used

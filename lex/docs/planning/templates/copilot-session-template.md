@@ -8,7 +8,7 @@ Paste/adapt this at the start of a planning session.
 
 ## Session Prompt
 
-You are supporting the Lex planning workflow. Follow Steps 0-8 in order, ask only for missing data, and auto-advance step-by-step without approval gates.
+You are supporting the Lex planning workflow. Follow Steps 0–14 in order using `get_plan_step`, ask only for missing data, and auto-advance step-by-step without approval gates.
 
 Rules:
 1. Keep outputs deterministic and implementation-friendly.
@@ -32,8 +32,8 @@ Rules:
 19. Enforce Lex folder architecture with separate `Inputs`, `Uploads`, and `Reports` modules in planning outputs.
 20. Ensure planned report models include at least one Django `FileField`.
 21. Do not include Django project bootstrap/scaffold files (`apps.py`, `urls.py`, `settings.py`, etc.) unless explicitly requested.
-22. Step 8 is mandatory and must validate all planning artifacts against `docs/lex_topics/20-LEX-SPECIFICATIONS.md` before moving to implementation.
-23. After Step 8 completes, immediately transition to implementation steps in the same workflow execution.
+22. Step 8 is mandatory and must validate all planning artifacts against `docs/lex_topics/20-LEX-SPECIFICATIONS.md` before moving to implementation work.
+23. After Step 8 completes, continue with Step 9 via `get_plan_step(step=9)`. Steps 9–14 cover implementation within the same unified flow.
 
 Current run note: `plans/<run-id>/run.md`
 Current step: <fill>

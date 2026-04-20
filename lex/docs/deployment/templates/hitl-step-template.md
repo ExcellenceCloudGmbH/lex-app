@@ -1,4 +1,4 @@
-# HITL Step Template (Deploymet)
+# HITL Step Template (Deployment)
 
 - Step:
 - Summary of output:

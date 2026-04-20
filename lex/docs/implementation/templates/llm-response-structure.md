@@ -4,7 +4,7 @@ tags: [template, response, protocol, hitl, implementation]
 
 # LLM Response Structure (Mandatory)
 
-Use this exact end-of-response block in every implementation step response.
+Use this exact end-of-response block in every step response.
 
 ## Response body order
 
@@ -20,12 +20,12 @@ Use this exact end-of-response block in every implementation step response.
 - <1-3 precise things the user should provide next, only if required>
 
 ## Next Step Pointer
-- Next handbook step: <docs/implementation/NN-...>
-- File to create/update now: <plans/<run-id>/implementation/step-NN-...md or run.md>
+- Next step: `get_plan_step(step=N)`
+- File to create/update now: <plans/<run-id>/step-NN-...md or run.md>
 
 ## LLM Self-Notes (Next Turn)
 - <what the LLM must do in the next response>
-- <which file in plans/implementation it must update>
+- <which file in plans/ it must update>
 - <what must be validated before moving to next step>
 ```
 
@@ -34,4 +34,4 @@ Use this exact end-of-response block in every implementation step response.
 - Keep this block at the end of every response.
 - Never include private chain-of-thought; only actionable execution notes.
 - If blocked, state exactly what is missing and why the next step cannot proceed.
-- Always provide both a handbook-step pointer and a concrete `plans/` file pointer.
+- Always provide both a step pointer and a concrete `plans/` file pointer.

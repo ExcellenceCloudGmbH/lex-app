@@ -409,6 +409,30 @@ def _build_faq_html() -> str:
           </div>
         </details>
 
+        <!-- Q4 -->
+        <details class="faq">
+          <summary>
+            <span class="q-label">Q4</span>
+            <span class="q-title">How to check if the MCP server is running?</span>
+          </summary>
+          <div class="answer">
+            <h3>In PyCharm</h3>
+            <ol>
+              <li>Open the <strong>GitHub Copilot</strong> tool window (usually in the right-hand sidebar or via <strong>View &rarr; Tool Windows &rarr; GitHub Copilot</strong>).</li>
+              <li>In the Copilot Chat panel, look for the small <strong>wrench-and-screwdriver</strong> (&#x1F527;) icon near the chat input area. Click it.</li>
+              <li>A list of all registered MCP servers will appear. Each entry shows its current status &mdash; look for <code>lex-mcp-local</code> and confirm it is marked as <strong>running</strong> (a green indicator or &ldquo;Running&rdquo; label).</li>
+              <li>If the server is <strong>not</strong> running, you can click on it to start or restart it from the same menu.</li>
+            </ol>
+
+            <h3>In VS Code</h3>
+            <ol>
+              <li>Open the <strong>Command Palette</strong> (<code>Ctrl+Shift+P</code> / <code>Cmd+Shift+P</code>).</li>
+              <li>Type <strong>&ldquo;MCP: List Servers&rdquo;</strong> and select it.</li>
+              <li>Find <code>lex-mcp-local</code> in the list &mdash; its status will show whether it is currently running or stopped.</li>
+            </ol>
+          </div>
+        </details>
+
       </section>
     </main>
 

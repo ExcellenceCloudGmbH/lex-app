@@ -4,7 +4,7 @@ Use this prompt to begin deployment work for a run:
 
 0. Set `HANDBOOK_ROOT=./.venv/lib/python3.12/site-packages/lex/docs` as the canonical handbook location.
 1. Assume only `${HANDBOOK_ROOT}` and the connected `lex-mcp` server are required runtime context for the LLM.
-2. Start deployment only after implementation is fully complete and approved.
+2. Start deployment only after all planning/implementation steps (0–14) are fully complete.
 3. Create `plans/<run-id>/deployment/run.md`.
 4. Retrieve deployment step instructions only via MCP using `get_deployment_step`.
 5. Execute one deployment step at a time: one MCP request for one step, complete it, then request the next step.

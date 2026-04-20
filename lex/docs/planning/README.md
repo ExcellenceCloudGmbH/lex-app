@@ -4,7 +4,8 @@ tags: [planning, lex, copilot]
 
 # Planning Steps (0-8)
 
-These steps produce implementation-ready specs and run as the first segment of the single-prompt workflow.
+These steps produce implementation-ready specs and cover the first segment of the unified step flow (steps 0–8 of 0–14).
+All steps are retrieved via `get_plan_step`. There is no separate implementation step tool.
 
 ## Start here (single entry point)
 
@@ -21,10 +22,10 @@ These steps produce implementation-ready specs and run as the first segment of t
 ## MCP step retrieval contract
 
 - Do not read planning step instructions from local files during execution.
-- Load each planning step from MCP.
+- Load each planning step from MCP using `get_plan_step`.
 - Execute steps sequentially: load Step `N`, complete Step `N`, persist outputs, notify completion, then load Step `N+1`.
 - Do not wait for approval gates between steps.
-- After Step 8 is complete, continue immediately to [[../implementation/README|Implementation Steps (0-11)]].
+- After Step 8 is complete, continue with Step 9 via `get_plan_step(step=9)`. Steps 9–14 cover implementation-phase work within the same unified flow.
 
 ## Step order
 
@@ -48,7 +49,7 @@ These steps produce implementation-ready specs and run as the first segment of t
 - After Step 5 output: update `plans/<run-id>/step-05-functional-breakdown.md`, then continue to Step 6.
 - After Step 6 output: update `plans/<run-id>/step-06-uml-er.md`, then continue to Step 7.
 - After Step 7 output: update `plans/<run-id>/step-07-pseudocode.md`, then continue to Step 8.
-- After Step 8 output: update `plans/<run-id>/step-08-rule-validation.md`, then continue with [[../implementation/README|Implementation Steps (0-11)]].
+- After Step 8 output: update `plans/<run-id>/step-08-rule-validation.md`, then continue with Step 9 via `get_plan_step(step=9)`.
 
 ## Mandatory planning outputs
 
