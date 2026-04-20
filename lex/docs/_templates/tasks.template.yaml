@@ -13,8 +13,8 @@ tasks:
       - backend
       - validation
     related_docs:
-      - docs/25-TASK-FORMAT.md
-      - docs/24-IMPLEMENTATION-CHECKLIST.md
+      - docs/lex_topics/20-LEX-SPECIFICATIONS.md
+      - docs/lex_topics/18-patterns-pitfalls-checklists.md
     jira_issue_type: Task
     slug: ingestion-validation
 
@@ -30,4 +30,4 @@ tasks:
     labels:
       - reporting
     related_docs:
-      - docs/20-TASKING-AND-AUDIT.md
+      - docs/lex_topics/20-LEX-SPECIFICATIONS.md

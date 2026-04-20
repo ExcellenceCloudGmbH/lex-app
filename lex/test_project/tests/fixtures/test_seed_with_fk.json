@@ -1,0 +1,22 @@
+[
+  {
+    "class": "HierarchicalItem",
+    "action": "create",
+    "tag": "parent-root",
+    "parameters": {
+      "name": "Parent Root",
+      "value": 1
+    }
+  },
+  {
+    "class": "HierarchicalItem",
+    "action": "create",
+    "tag": "child-of-root",
+    "parameters": {
+      "name": "Child of Root",
+      "value": 2,
+      "parent_tag": "parent-root"
+    }
+  }
+]
+

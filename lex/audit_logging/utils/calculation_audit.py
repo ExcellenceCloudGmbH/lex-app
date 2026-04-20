@@ -2,6 +2,7 @@ import logging
 from typing import Any, Optional
 
 from django.db import transaction
+from django.utils import timezone
 
 from lex.api.utils import operation_context
 from lex.audit_logging.models.AuditLog import AuditLog
@@ -243,6 +244,7 @@ def ensure_terminal_calculation_audit(
         updated_rows = AuditLogStatus.objects.filter(audit_log=audit_log).update(
             status=audit_status,
             error_traceback=stack_trace if audit_status == "failure" else None,
+            updated_at=timezone.now(),
         )
         if updated_rows == 0:
             AuditLogStatus.objects.create(

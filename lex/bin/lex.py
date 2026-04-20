@@ -451,7 +451,20 @@ def ai_update(project_root):
             click.echo(f"  Removed from .env: {', '.join(result.env_keys_removed)}")
         if result.mcp_env_keys_removed:
             click.echo(f"  Removed from mcp.json: {', '.join(result.mcp_env_keys_removed)}")
-        if not result.env_keys_removed and not result.mcp_env_keys_removed:
+        if result.package_upgraded:
+            click.echo("  Upgraded lex-mcp-local package.")
+        for dest in result.artifact_directories_copied:
+            click.echo(f"  Copied {dest.name} to {dest}")
+        if result.server_restarted:
+            click.echo("  Stopped MCP server (will restart on next use).")
+        has_action = (
+            result.env_keys_removed
+            or result.mcp_env_keys_removed
+            or result.package_upgraded
+            or result.artifact_directories_copied
+            or result.server_restarted
+        )
+        if not has_action:
             click.echo("  Already up to date.")
 
     click.echo("LEX AI update complete.")
