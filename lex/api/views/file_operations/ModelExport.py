@@ -239,15 +239,14 @@ class ModelExportView(GenericAPIView):
             # Synthetic AG hierarchy columns are only present in grouped exports
             # which we already filter out before calling this method.
             if candidate.startswith("__ag_"):
-                continue
+                return None
             normalized = normalize_field_path(candidate)
             resolved = _resolve_lookup(model, normalized)
             if resolved is None:
-                # Serializer-only / computed columns (e.g. `short_description`)
-                # cannot be projected via `.values()`. Skip them silently — the
-                # alternative is bailing out to the slow path which routinely
-                # times out on large datasets.
-                continue
+                # Includes serializer-only / computed columns (e.g.
+                # `short_description`). Fall back to the slow DRF path so we
+                # don't silently drop columns the user expects.
+                return None
             field_paths.append(normalized)
 
         if not field_paths:
@@ -273,53 +272,25 @@ class ModelExportView(GenericAPIView):
         request,
         model,
     ) -> "Set[str] | None":
-        """Return the field-level export mask if it is uniform across rows.
+        """Return the field-level export mask if it is safe to assume uniform.
 
-        Samples a handful of rows; if every sample yields the same allowed
-        field set, we assume the rest of the queryset agrees. This lets the
-        fast path activate for models whose `permission_export` only depends
-        on the request user (the overwhelmingly common case) without giving
-        up correctness for truly per-instance permission models.
+        Restricted to models that have NOT overridden ``permission_export`` /
+        ``can_export``. With the default LexModel implementation the result
+        depends only on the request user, so a single sample is correct for
+        every row. Models with custom per-instance export rules fall back to
+        the slow per-row path.
         """
-        if self._has_default_export_permissions(model):
-            sample = queryset.first()
-            if sample is None:
-                return set()
-            try:
-                allowed = self.get_exportable_fields_for_object(sample, request)
-            except Exception:
-                return None
-            return allowed if isinstance(allowed, set) else None
+        if not self._has_default_export_permissions(model):
+            return None
 
-        # Probe a few rows from different ends of the queryset.
-        sample_qs = queryset.order_by(model._meta.pk.name)
-        try:
-            head = list(sample_qs[:3])
-            tail = list(sample_qs.reverse()[:2])
-        except Exception:
-            try:
-                head = list(queryset[:3])
-            except Exception:
-                return None
-            tail = []
-
-        samples = head + [obj for obj in tail if obj.pk not in {h.pk for h in head}]
-        if not samples:
+        sample = queryset.first()
+        if sample is None:
             return set()
-
-        baseline: "Set[str] | None" = None
-        for obj in samples:
-            try:
-                allowed = self.get_exportable_fields_for_object(obj, request)
-            except Exception:
-                return None
-            if not isinstance(allowed, set):
-                return None
-            if baseline is None:
-                baseline = allowed
-            elif allowed != baseline:
-                return None
-        return baseline
+        try:
+            allowed = self.get_exportable_fields_for_object(sample, request)
+        except Exception:
+            return None
+        return allowed if isinstance(allowed, set) else None
 
     def _try_build_flat_fast_export_dataframe(
         self,
@@ -334,6 +305,8 @@ class ModelExportView(GenericAPIView):
         if normalized_request.get("rowGroupCols"):
             return None
         if normalized_request.get("pivotCols"):
+            return None
+        if not self._has_default_export_permissions(model):
             return None
 
         field_paths = self._resolve_export_field_paths(model, ag_export)
@@ -942,19 +915,11 @@ class ModelExportView(GenericAPIView):
             df = df.drop(columns=[AG_GROUP_HIERARCHY_DEPTH_COLUMN], errors="ignore")
 
         excel_file = BytesIO()
-        # Use xlsxwriter "constant_memory" mode whenever we don't need to
-        # post-process row formatting. It streams rows straight to disk
-        # instead of buffering the whole workbook in RAM and is dramatically
-        # faster (often 5-10x) for large exports.
-        engine_kwargs: Dict[str, Any] = {}
-        if not hierarchy_depths:
-            engine_kwargs = {"options": {"constant_memory": True}}
-
-        writer = pd.ExcelWriter(
-            excel_file,
-            engine='xlsxwriter',
-            engine_kwargs=engine_kwargs,
-        )
+        # NOTE: Do NOT enable xlsxwriter "constant_memory" mode here.
+        # That mode requires strictly row-by-row writes, but pandas'
+        # ``DataFrame.to_excel`` writes column-by-column, which silently
+        # produces a workbook where every row except the last is blank.
+        writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
 
         df.to_excel(writer, sheet_name=model.__name__, merge_cells=False, freeze_panes=(1, 1), index=True)
 
