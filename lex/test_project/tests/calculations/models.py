@@ -184,6 +184,42 @@ class MidCalc(CalculationModel):
 
 
 @_permissive
+class NonAtomicParentCalc(CalculationModel):
+    """
+    Non-atomic parent that spawns an atomic :class:`ChildCalc`.
+
+    Used by scenario 7.7 to prove that error-propagation works
+    regardless of ``is_atomic`` on the *parent* — the child's failure
+    must still trail up and mark the parent as ERROR.
+    """
+
+    name = models.CharField(max_length=200)
+    child_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        child = ChildCalc(
+            name=f"{self.name}-child",
+            should_fail=self.child_should_fail,
+        )
+        child.is_calculated = CalculationModel.IN_PROGRESS
+        child.save()
+        if child.is_calculated == CalculationModel.ERROR:
+            raise RuntimeError(
+                f"NonAtomicParentCalc({self.name!r}) propagating child "
+                "failure",
+            )
+
+
+@_permissive
 class FailingCalc(CalculationModel):
     """Always raises in ``calculate()``."""
 
@@ -206,6 +242,7 @@ ALL_MODELS = [
     AtomicCalc, NonAtomicCalc,
     ChildCalc, ParentCalc,
     GrandchildCalc, MidCalc,
+    NonAtomicParentCalc,
     FailingCalc,
 ]
 

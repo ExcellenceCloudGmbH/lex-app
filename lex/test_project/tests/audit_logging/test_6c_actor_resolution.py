@@ -59,13 +59,35 @@ class TestCluster06c_ActorResolution(E2ETestCase):
         )
 
     # -- 6.8 -----------------------------------------------------------
-    @unittest.skip(
-        "Scenario 6.8: API-key actor = 'Technical User'. Requires the "
-        "API-key auth middleware to attach identity to the request. "
-        "Not wired in E2ETestCase; covered at unit level."
-    )
     def test_6_8_api_key_becomes_technical_user(self) -> None:
-        """Scenario 6.8: API-key caller → created_by = 'Technical User'."""
+        """
+        Scenario 6.8: API-key caller → ``created_by = 'Technical User'``.
+
+        Same contract as Scenario 2.7, asserted from Cluster-6's
+        perspective (the audit-actor chain). We drive the real REST
+        path with the API-key fixture so the view, DRF permissions,
+        ``UserContext._api_key_context`` and
+        :meth:`LexModel._resolve_audit_actor` all participate — no
+        direct model save, no mock on actor resolution.
+        """
+        self.authenticate_as_api_key(name="Technical User")
+
+        resp = self.client.post(
+            self.url_create(AUDIT_SIMPLE),
+            data={"name": "a6-8", "value": 8}, format="json",
+        )
+        self.assertIn(
+            resp.status_code, (200, 201),
+            f"API-key POST must succeed; got {resp.status_code}: "
+            f"{getattr(resp, 'data', resp.content)!r}",
+        )
+
+        item = AuditSimpleItem.objects.get(name="a6-8")
+        self.assertEqual(
+            item.created_by, "Technical User",
+            "API-key actor must land on created_by as the configured "
+            f"key name — got {item.created_by!r}.",
+        )
 
     # -- 6.9 -----------------------------------------------------------
     def test_6_9_no_context_falls_back_to_initial_data_upload(self) -> None:
