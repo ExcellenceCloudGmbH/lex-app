@@ -178,14 +178,67 @@ class Employee(LexModel):
         return True
 
 
+# ---------------------------------------------------------------------
+# Journey E — ValidatedInvoice (validation-hook narrative)
+# ---------------------------------------------------------------------
+class ValidatedInvoice(LexModel):
+    """
+    Finance record guarded by both validation hooks.
+
+    * ``pre_validation`` rejects ``customer == 'BLOCKED'`` — the save
+      is cancelled before it hits the DB, so no row and no history
+      row are ever produced.
+    * ``post_validation`` rejects negative ``amount`` — the save has
+      already landed in the DB, so the framework must roll back to
+      the pre-save snapshot and re-raise.
+
+    Permissions are wide-open: Journey E is about validation, not
+    authz.
+    """
+
+    customer = models.CharField(max_length=200)
+    amount = models.IntegerField(default=0)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ValidatedInvoice({self.customer}:{self.amount})"
+
+    def pre_validation(self) -> None:
+        if self.customer == "BLOCKED":
+            raise ValueError("pre_validation rejected this customer")
+
+    def post_validation(self) -> None:
+        if self.amount < 0:
+            raise ValueError("post_validation rejected this amount")
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("journey-E: validation only")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("journey-E: validation only")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [
     Invoice,
     JourneyPosition, JourneyPortfolio,
     Employee,
+    ValidatedInvoice,
 ]
 
 INVOICE = "invoice"
 POSITION = "journeyposition"
 PORTFOLIO = "journeyportfolio"
 EMPLOYEE = "employee"
+VALIDATED_INVOICE = "validatedinvoice"
 

@@ -58,7 +58,82 @@ class ApiAtomicCalc(CalculationModel):
             raise RuntimeError(f"ApiAtomicCalc({self.name!r}) failing on purpose")
 
 
-ALL_MODELS = [ApiSimpleItem, ApiAtomicCalc]
+# ---------------------------------------------------------------------------
+# Schema-introspection + search models (Cluster 10e + 10f)
+# ---------------------------------------------------------------------------
+
+@_permissive
+class SchemaFKTarget(LexModel):
+    """FK target used by :class:`SchemaItem` to exercise the
+    ``foreign_key`` branch of ``create_field_info``."""
+
+    label = models.CharField(max_length=64)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.label
+
+
+@_permissive
+class SchemaItem(LexModel):
+    """One field per interesting Django type so 10.11 can table-drive the
+    ``create_field_info`` type mapping. Also the primary subject of the
+    10f search scenarios — the ``name`` char field is what
+    ``SearchVector`` indexes against."""
+
+    name = models.CharField(max_length=200)                     # string
+    amount = models.IntegerField(default=0)                     # int
+    ratio = models.FloatField(default=0.0)                      # float
+    active = models.BooleanField(default=True)                  # boolean
+    day = models.DateField(null=True, blank=True)               # date
+    when = models.DateTimeField(null=True, blank=True)          # date_time
+    payload = models.JSONField(default=dict, blank=True)        # json
+    target = models.ForeignKey(                                 # foreign_key
+        SchemaFKTarget,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="items",
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+class SchemaHiddenItem(LexModel):
+    """``permission_list`` returns False — used by 10.14 to prove that
+    ``delete_restricted_nodes_from_model_structure`` prunes denied
+    model nodes AND collapses the folder that held them."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("schema hidden read-open")
+
+    def permission_list(self, uc):
+        return False  # hidden from nav
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("schema hidden edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+ALL_MODELS = [ApiSimpleItem, ApiAtomicCalc, SchemaFKTarget, SchemaItem, SchemaHiddenItem]
 
 API_SIMPLE = "apisimpleitem"
 API_ATOMIC = "apiatomiccalc"

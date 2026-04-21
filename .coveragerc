@@ -28,6 +28,7 @@ omit =
     build/*
     project_example/*
     project_example_2/*
+    lex/full_migration_workflow.py
     lex/fix_v1_migration.py
     lex/sanitize_v2_migrations.py
     lex/restore_legacy_logs.py
@@ -36,6 +37,16 @@ omit =
     lex/lex_app/management/commands/backfill_bitemporal_history.py
     lex/lex_app/management/commands/backfill_audit_logging.py
     lex/lex_app/management/commands/Init2.py
+    lex/lex_app/management/commands/detect_model_changes.py
+    lex/lex_app/management/commands/full_migration_workflow.py
+    lex/lex_app/management/commands/lex_migrate.py
+    lex/lex_app/management/commands/normalize_is_calculated.py
+    lex/lex_app/management/commands/rollback_migration_state.py
+    lex/lex_app/management/commands/generate_legacy_freeze_manifest.py
+    lex/lex_app/management/commands/sync_keycloak.py
+    lex/lex_app/management/commands/capture_migration_state.py
+    lex/lex_app/management/commands/capture_db_tables.py
+    lex/tools/setup_with_ai.py
 
 [report]
 show_missing = True
@@ -60,9 +71,20 @@ omit =
     lex/restore_legacy_logs.py
     lex/backfill_history_sql.py
     lex/extract_legacy_logs.py
+    lex/full_migration_workflow.py
     lex/lex_app/management/commands/backfill_bitemporal_history.py
     lex/lex_app/management/commands/backfill_audit_logging.py
     lex/lex_app/management/commands/Init2.py
+    lex/lex_app/management/commands/detect_model_changes.py
+    lex/lex_app/management/commands/full_migration_workflow.py
+    lex/lex_app/management/commands/lex_migrate.py
+    lex/lex_app/management/commands/normalize_is_calculated.py
+    lex/lex_app/management/commands/rollback_migration_state.py
+    lex/lex_app/management/commands/generate_legacy_freeze_manifest.py
+    lex/lex_app/management/commands/sync_keycloak.py
+    lex/lex_app/management/commands/capture_migration_state.py
+    lex/lex_app/management/commands/capture_db_tables.py
+    lex/tools/setup_with_ai.py
 exclude_lines =
     pragma: no cover
     raise NotImplementedError

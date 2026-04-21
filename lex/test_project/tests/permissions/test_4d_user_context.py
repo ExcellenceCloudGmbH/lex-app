@@ -69,14 +69,62 @@ class TestCluster04d_UserContext(TestCase):
         )
 
     # -- 4.11 ----------------------------------------------------------
-    @unittest.skip(
-        "Scenario 4.11: API-key context — ``client_roles`` includes "
-        "'api_key'. Needs the API-key authentication middleware to "
-        "attach identity metadata to the request; not wired in "
-        "E2ETestCase. Covered by lex.tests.unit.auth.test_api_key_user_context."
-    )
     def test_4_11_api_key_context_includes_api_key_role(self) -> None:
-        """Scenario 4.11: API-key client_roles must include 'api_key'."""
+        """
+        Scenario 4.11: An API-key authenticated context must have
+        ``"api_key"`` in ``client_roles``.
+
+        We seed a request with the identity artefact that the
+        middleware / :func:`get_api_key_request_identity` would
+        normally attach (``_lex_api_key_identity`` is the documented
+        cache key — see ``lex/api/utils/api_key_requests.py``). The
+        request's user is anonymous, matching the production flow
+        where the session has no logged-in user and the API key is
+        the sole identity.
+
+        The test asserts the **contract** of
+        :meth:`UserContext.from_request` — not the internals of the
+        middleware — so we bypass ``KeyParser`` cleanly.
+        """
+        from django.contrib.auth.models import AnonymousUser
+
+        from lex.api.utils.api_key_requests import (
+            APIKeyRequestIdentity,
+            TechnicalAPIKeyUser,
+        )
+
+        identity = APIKeyRequestIdentity(
+            api_key_name="Technical User",
+            user=TechnicalAPIKeyUser("Technical User"),
+        )
+
+        request = RequestFactory().get("/")
+        request.user = AnonymousUser()
+        # This is the exact attribute
+        # ``get_api_key_request_identity`` caches on the holder — by
+        # pre-seeding it we skip the KeyParser round-trip and keep
+        # the test hermetic.
+        request._lex_api_key_identity = identity
+
+        uc = UserContext.from_request(request)
+
+        self.assertIn(
+            "api_key", uc.client_roles,
+            "API-key contexts must declare the 'api_key' role so "
+            "downstream permission checks and audit actor resolution "
+            f"can branch on it — got {sorted(uc.client_roles)!r}.",
+        )
+        self.assertTrue(
+            uc.is_authenticated,
+            "An API-key context must be authenticated even though "
+            "request.user is Anonymous — the identity comes from the "
+            "key, not the session.",
+        )
+        self.assertEqual(
+            uc.user.username, "Technical User",
+            "UserContext.user for an API-key caller must carry the "
+            f"key name as username — got {uc.user.username!r}.",
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -20,7 +20,10 @@ from lex.core.models.CalculationModel import CalculationModel
 
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
-from .models import ALL_MODELS, ChildCalc, GrandchildCalc, MidCalc, ParentCalc
+from .models import (
+    ALL_MODELS, ChildCalc, GrandchildCalc, MidCalc,
+    NonAtomicParentCalc, ParentCalc,
+)
 
 
 class TestCluster07c_Hierarchy(E2ETestCase):
@@ -70,14 +73,39 @@ class TestCluster07c_Hierarchy(E2ETestCase):
         )
 
     # -- 7.7 -----------------------------------------------------------
-    @unittest.skip(
-        "Scenario 7.7: Non-atomic parent + atomic child that fails. "
-        "Needs a dedicated non-atomic ParentCalc variant with the same "
-        "child-spawning logic; add once Cluster 7c surfaces a need to "
-        "test non-atomic propagation distinct from atomic."
-    )
     def test_7_7_non_atomic_parent_atomic_child_fails(self) -> None:
-        """Scenario 7.7: Non-atomic parent, atomic child fails → both trail to ERROR."""
+        """
+        Scenario 7.7: Non-atomic parent spawns an atomic child that
+        fails → error propagates up.
+
+        Intent: ``is_atomic`` on the parent controls whether the
+        parent's own state-machine writes are wrapped in a single DB
+        transaction, but it does NOT change the contract that a failing
+        child drags its parent to ERROR. This is the complement to 7.6
+        (atomic parent + atomic child) and guards against a regression
+        where the non-atomic save path forgets to observe the child's
+        outcome.
+        """
+        parent = NonAtomicParentCalc(name="np7-7", child_should_fail=True)
+        parent.is_calculated = CalculationModel.IN_PROGRESS
+        try:
+            parent.save()
+        except Exception:
+            pass
+
+        parent.refresh_from_db()
+        child = ChildCalc.objects.get(name="np7-7-child")
+
+        self.assertEqual(
+            child.is_calculated, CalculationModel.ERROR,
+            "Atomic child must end ERROR when its calculate() raises.",
+        )
+        self.assertEqual(
+            parent.is_calculated, CalculationModel.ERROR,
+            "Non-atomic parent must still end ERROR when the atomic "
+            "child it spawned failed — error propagation is independent "
+            "of the parent's is_atomic flag.",
+        )
 
     # -- 7.8 -----------------------------------------------------------
     def test_7_8_three_level_hierarchy_grandchild_fails(self) -> None:

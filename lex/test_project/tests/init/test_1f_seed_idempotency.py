@@ -36,6 +36,8 @@ from django.test import TestCase
 
 from lex.lex_app.celery_tasks import load_data
 from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
+from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests.crud_api.models import SimpleItem
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -43,11 +45,13 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 # ---------------------------------------------------------------------
 # 1.18 — Seed load is skipped when a referenced model already has rows
 # ---------------------------------------------------------------------
-class TestCluster01f_SeedIdempotencyGate(TestCase):
+class TestCluster01f_SeedIdempotencyGate(E2ETestCase):
     """
     ``check_if_all_models_are_empty`` is the gate customers rely on —
     it decides whether a re-run of ``lex Init`` touches the database.
     """
+
+    e2e_models = [SimpleItem]
 
     def test_1_18_load_data_is_noop_when_initial_data_falsy(self) -> None:
         """
@@ -77,18 +81,15 @@ class TestCluster01f_SeedIdempotencyGate(TestCase):
         When: the framework checks whether a seed-load is safe.
         Then: the answer is False, so ``lex Init`` must skip seeding.
         """
-        from lex.test_project.models import SeedableItem
+        from lex.test_project.tests.crud_api.models import SimpleItem  # noqa: F811
 
-        SeedableItem.objects.create(
-            name="existing", value=1, category="pre-existing", skip_history_when_saving=True,
-        )
+        SimpleItem.objects.create(name="pre-existing", value=1)
 
         test = ProcessAdminTestCase()
-        test.test_path = str(FIXTURES / "test_seed.json")
-
-        # Build the generic_app_models dict in the shape the real
-        # framework passes — class name → class.
-        generic_app_models = {"SeedableItem": SeedableItem}
+        # Bypass get_test_data()'s JSON parse — the gate is model-agnostic
+        # and only cares which classes to probe.
+        test.get_classes = lambda models: {SimpleItem}
+        generic_app_models = {"SimpleItem": SimpleItem}
 
         self.assertFalse(
             test.check_if_all_models_are_empty(generic_app_models),
@@ -112,15 +113,15 @@ class TestCluster01f_SeedIdempotencyGate(TestCase):
         When: the framework checks the gate.
         Then: it returns True so ``lex Init`` will proceed to load.
         """
-        from lex.test_project.models import SeedableItem
+        from lex.test_project.tests.crud_api.models import SimpleItem
 
-        self.assertEqual(SeedableItem.objects.count(), 0)
+        self.assertEqual(SimpleItem.objects.count(), 0)
 
         test = ProcessAdminTestCase()
-        test.test_path = str(FIXTURES / "test_seed.json")
+        test.get_classes = lambda models: {SimpleItem}
 
         self.assertTrue(
-            test.check_if_all_models_are_empty({"SeedableItem": SeedableItem}),
+            test.check_if_all_models_are_empty({"SimpleItem": SimpleItem}),
             "A fresh DB with no referenced rows must pass the gate — "
             "this is the first-run contract.",
         )
