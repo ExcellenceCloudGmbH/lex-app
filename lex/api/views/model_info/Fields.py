@@ -86,6 +86,20 @@ def create_field_info(field):
     return info
 
 
+def create_list_ui_info(serializer):
+    """Expose serializer-level list UI configuration to the frontend."""
+    serializer_class = serializer if isinstance(serializer, type) else serializer.__class__
+    getter = getattr(serializer_class, "get_list_ui_options", None)
+
+    if callable(getter):
+        return getter()
+
+    meta = getattr(serializer_class, "Meta", None)
+    return {
+        "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+    }
+
+
 class Fields(APIView):
     http_method_names = ["get"]
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
@@ -161,4 +175,10 @@ class Fields(APIView):
 
             fields_info.append(info)
 
-        return Response({"fields": fields_info, "id_field": model._meta.pk.name})
+        return Response(
+            {
+                "fields": fields_info,
+                "id_field": model._meta.pk.name,
+                "list_ui": create_list_ui_info(serializer),
+            }
+        )

@@ -152,6 +152,14 @@ class LexSerializer(serializers.ModelSerializer):
             return {f for f in fields if isinstance(f, str)}
         return set()
 
+    @classmethod
+    def get_list_ui_options(cls) -> dict:
+        """Expose serializer-level frontend list options via ``Meta``."""
+        meta = getattr(cls, "Meta", None)
+        return {
+            "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+        }
+
     # ------------------------------------------------------------------
     # Helper: unwrap history/meta wrappers to get the real model instance
     # ------------------------------------------------------------------
@@ -618,6 +626,7 @@ class RestApiModelSerializerTemplate(LexSerializer):
     class Meta:
         model = None
         fields = "__all__"
+        hide_actions_column = False
         # Use our custom list serializer for all list views.
         list_serializer_class = FilteredListSerializer
 
