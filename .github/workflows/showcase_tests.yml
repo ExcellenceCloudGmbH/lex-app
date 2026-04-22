@@ -71,7 +71,7 @@ jobs:
           pip install --upgrade pip setuptools wheel
           pip install --prefer-binary -r requirements.txt
           pip install -e .
-          pip install "weasyprint>=61" "sendgrid>=6.11"
+          pip install "weasyprint>=61" "cairosvg>=2.7" "sendgrid>=6.11"
       - name: Run test — Project initialisation
         id: test_init
         continue-on-error: true

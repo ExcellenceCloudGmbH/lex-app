@@ -153,4 +153,3 @@ class TestCluster07g_CreatePipeline(E2ETestCase):
         result = inst.delete_models_with_same_defining_fields()
         self.assertIs(result, inst)
         self.assertIsNone(inst.pk)
-
