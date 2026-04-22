@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """
-Build the Platform Health Report in two layouts:
+Build the Platform Health Report in two layouts, plus a PNG logo.
 
-  1. ``report.html``  — the **email body**: headline layout that stays
-     short no matter how many tests we run. Passing tests are listed as
-     compact one-line rows; only failing tests get an expanded paragraph.
-     The "what we test and why" glossary is NOT included — it lives in
-     the PDF.
-  2. ``report.pdf``   — the **archive**: the full detailed version with
-     a card per test and the glossary. Rendered via WeasyPrint.
-
-Both share the Excellence Cloud brand palette (navy ``#283067`` +
-teal ``#24b6bb``) inferred from the logo. The logo is embedded as a
-base64 PNG (converted from SVG via cairosvg) so every email client —
-including older Outlook, which strips inline SVG — renders it.
+Outputs:
+  * ``report.html`` — **email body**, tabular layout. Uses ``cid:logo``
+    for the header image so SendGrid (and corporate mail gateways that
+    strip ``data:`` URIs from ``<img>``) render the wordmark reliably.
+  * ``report.pdf``  — the **archive**, same tabular layout with every
+    row expanded plus a "What we test and why" glossary. Embeds the
+    logo directly as a base64 PNG (no CID — PDFs don't have them).
+  * ``logo.png``    — the rasterised wordmark the email sender attaches
+    inline with ``Content-ID: <logo>``.
 
 Usage:
     python build_showcase_report.py \\
         --init-outcome success --init-duration 0.45 \\
         --crud-outcome success --crud-duration 0.28 \\
-        --out-html report.html --out-pdf report.pdf
+        --out-html report.html --out-pdf report.pdf --out-logo logo.png
 """
 
 from __future__ import annotations
@@ -34,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# ── Business mapping — single source of truth for labels/copy ────────
+# ── Business mapping — single source of truth ────────────────────────
 @dataclass(frozen=True)
 class Capability:
     key: str
@@ -51,9 +48,8 @@ CAPABILITIES: dict[str, Capability] = {
         key="init",
         label="Project initialisation",
         short_description=(
-            "When a customer presses <strong>Init</strong> on a new "
-            "project, the platform prepares the database and access "
-            "management in one step."
+            "Pressing <strong>Init</strong> prepares the database and "
+            "access management in one step."
         ),
         what_it_proves=(
             "The platform correctly detects the customer's data model, "
@@ -64,9 +60,9 @@ CAPABILITIES: dict[str, Capability] = {
         ),
         what_it_means_if_broken=(
             "New customers cannot reliably onboard. The platform may "
-            "leave a project in a half-configured state where either the "
-            "database is missing tables or access management does not "
-            "recognise the project. Engineering should be notified "
+            "leave a project in a half-configured state where either "
+            "the database is missing tables or access management does "
+            "not recognise the project. Engineering should be notified "
             "immediately."
         ),
         why_it_matters=(
@@ -83,8 +79,8 @@ CAPABILITIES: dict[str, Capability] = {
         key="crud",
         label="Create a record through the public API",
         short_description=(
-            "A record sent to the platform's public REST API is "
-            "accepted, stored, and readable on subsequent requests."
+            "A record posted to the public REST API is accepted, "
+            "stored, and readable afterwards."
         ),
         what_it_proves=(
             "The platform's public Create API works end-to-end: a "
@@ -112,21 +108,23 @@ CAPABILITIES: dict[str, Capability] = {
 }
 
 
-# ── Brand palette — inferred from the Excellence Cloud logo ──────────
+# ── Brand palette — from the Excellence Cloud logo ───────────────────
 C = {
-    "brand":      "#283067",   # deep navy — logo hexagon
-    "accent":     "#24b6bb",   # teal — logo "=" band + "CLOUD" text
+    "brand":      "#283067",   # deep navy — hexagon
+    "accent":     "#24b6bb",   # teal — "=" band + "CLOUD" wordmark
     "ink":        "#1a2230",
     "muted":      "#5d6b7a",
     "rule":       "#e2e5ec",
     "bg":         "#f5f7fb",
     "card":       "#ffffff",
+    "zebra":      "#fafbfd",
     "ok_bg":      "#e8f5e9",
     "ok_ink":     "#1b5e20",
     "ok_border":  "#2e7d32",
     "bad_bg":     "#ffebee",
     "bad_ink":    "#b71c1c",
     "bad_border": "#c62828",
+    "bad_tint":   "#fff5f6",  # subtle row tint for failing rows
     "warn_bg":    "#fff8e1",
     "warn_ink":   "#8a6d00",
 }
@@ -134,21 +132,13 @@ SANS = ("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
         "'Helvetica Neue', Arial, sans-serif")
 SERIF = "Georgia, 'Times New Roman', Times, serif"
 
-
-# ── Logo loader ──────────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LOGO_SVG = _REPO_ROOT / "images" / "dark-lex-logo.svg"
 
 
-def _logo_data_uri(svg_path: Path, *, width: int = 520) -> str | None:
-    """
-    Convert the given SVG to a PNG and return a data URI.
-
-    Used for email bodies: Outlook and several corporate gateways strip
-    inline SVG, so we pre-render to PNG. Returns None if cairosvg is not
-    installed or the file is missing — the caller then falls back to a
-    text wordmark so the report still renders.
-    """
+# ── Logo handling ────────────────────────────────────────────────────
+def _svg_to_png_bytes(svg_path: Path, *, width: int = 520) -> bytes | None:
+    """Rasterise the SVG to PNG bytes. Returns None on any failure."""
     try:
         import cairosvg  # type: ignore
     except ImportError:
@@ -156,11 +146,12 @@ def _logo_data_uri(svg_path: Path, *, width: int = 520) -> str | None:
     if not svg_path.exists():
         return None
     try:
-        png_bytes = cairosvg.svg2png(
-            url=str(svg_path), output_width=width
-        )
+        return cairosvg.svg2png(url=str(svg_path), output_width=width)
     except Exception:
         return None
+
+
+def _png_data_uri(png_bytes: bytes) -> str:
     return "data:image/png;base64," + base64.b64encode(png_bytes).decode()
 
 
@@ -171,40 +162,27 @@ def _verdict_palette(overall_ok: bool) -> dict[str, str]:
         "ink":    C["ok_ink"]    if overall_ok else C["bad_ink"],
         "border": C["ok_border"] if overall_ok else C["bad_border"],
         "icon":   "✓" if overall_ok else "✗",
-        "word":   (
-            "All capabilities are working"
-            if overall_ok
-            else "One or more capabilities are broken"
-        ),
+        "word":   ("All capabilities are working"
+                   if overall_ok
+                   else "One or more capabilities are broken"),
     }
 
 
-_OUTCOME_PALETTE = {
-    "success":   ("ok",   "✓", "Passed"),
-    "failure":   ("bad",  "✗", "Failed"),
-    "cancelled": ("warn", "⚠", "Cancelled"),
-    "skipped":   ("mute", "–", "Skipped"),
-}
-
-
 def _outcome_chip(outcome: str) -> str:
-    kind, icon, word = _OUTCOME_PALETTE.get(
-        outcome, ("mute", "?", outcome.title())
+    table = {
+        "success":   (C["ok_bg"],  C["ok_ink"],  C["ok_border"],  "✓", "Passed"),
+        "failure":   (C["bad_bg"], C["bad_ink"], C["bad_border"], "✗", "Failed"),
+        "cancelled": (C["warn_bg"], C["warn_ink"], C["warn_ink"], "⚠", "Cancelled"),
+        "skipped":   (C["bg"], C["muted"], C["rule"], "–", "Skipped"),
+    }
+    bg, ink, border, icon, word = table.get(
+        outcome, (C["bg"], C["muted"], C["rule"], "?", outcome.title())
     )
-    if kind == "ok":
-        bg, ink, border = C["ok_bg"], C["ok_ink"], C["ok_border"]
-    elif kind == "bad":
-        bg, ink, border = C["bad_bg"], C["bad_ink"], C["bad_border"]
-    elif kind == "warn":
-        bg, ink, border = C["warn_bg"], C["warn_ink"], C["warn_ink"]
-    else:
-        bg, ink, border = C["bg"], C["muted"], C["rule"]
     return (
-        f'<span style="display:inline-block;padding:4px 12px;'
+        f'<span style="display:inline-block;padding:4px 10px;'
         f'background:{bg};color:{ink};border:1px solid {border};'
-        f'border-radius:999px;font:600 12px/1 {SANS};'
-        f'letter-spacing:.4px;white-space:nowrap;">'
-        f'{icon}&nbsp; {word}</span>'
+        f'border-radius:999px;font:600 11px/1 {SANS};letter-spacing:.4px;'
+        f'white-space:nowrap;">{icon}&nbsp; {word}</span>'
     )
 
 
@@ -218,25 +196,25 @@ def _fmt_duration(seconds: float | None) -> str:
     return f"{seconds / 60:.1f} min"
 
 
-def _logo_block(logo_data_uri: str | None, *, for_email: bool) -> str:
-    # On dark navy header — white wordmark if logo is present, else text.
-    if logo_data_uri:
-        # email clients respect width attr on <img>; PDF respects max-width
+def _logo_block(*, logo_src: str | None, text_fallback: str) -> str:
+    """Render the logo for the header band. ``logo_src`` may be either a
+    data URI (PDF) or ``cid:logo`` (email)."""
+    if logo_src:
         return (
-            f'<img src="{logo_data_uri}" '
-            f'alt="Excellence Cloud" '
+            f'<img src="{logo_src}" '
+            f'alt="{html.escape(text_fallback)}" '
             f'width="260" '
             f'style="display:block;width:260px;max-width:100%;'
             f'height:auto;border:0;outline:0;">'
         )
     return (
         f'<div style="font:700 26px/1.1 {SERIF};color:#fff;">'
-        f'Excellence Cloud</div>'
+        f'{html.escape(text_fallback)}</div>'
     )
 
 
-def _header_band(brand: str, logo_data_uri: str | None,
-                 *, for_email: bool, generated_at: dt.datetime) -> str:
+def _header_band(brand: str, *, logo_src: str | None,
+                 generated_at: dt.datetime) -> str:
     return f"""
     <tr>
       <td style="background:{C['brand']};padding:26px 32px;color:#fff;">
@@ -245,7 +223,7 @@ def _header_band(brand: str, logo_data_uri: str | None,
           Platform Health Report
         </div>
         <div style="margin-top:12px;">
-          {_logo_block(logo_data_uri, for_email=for_email)}
+          {_logo_block(logo_src=logo_src, text_fallback='Excellence Cloud')}
         </div>
         <div style="font:400 13px/1.4 {SANS};margin-top:12px;opacity:.82;">
           <strong style="font-weight:600;">{html.escape(brand)}</strong>
@@ -267,12 +245,11 @@ def _verdict_band(overall_ok: bool, counts: dict[str, int]) -> str:
     passed = counts.get("success", 0)
     counts_line = (
         f"{passed} of {total} capabilities passing"
-        if total
-        else "No capabilities checked"
+        if total else "No capabilities checked"
     )
     return f"""
     <tr>
-      <td style="padding:26px 32px;background:{v['bg']};">
+      <td style="padding:24px 32px;background:{v['bg']};">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
             <td style="vertical-align:middle;width:60px;">
@@ -288,8 +265,7 @@ def _verdict_band(overall_ok: bool, counts: dict[str, int]) -> str:
               </div>
               <div style="font:400 13px/1.5 {SANS};color:{v['ink']};
                           margin-top:4px;opacity:.85;">
-                {counts_line} &middot; This report covers the
-                capabilities the platform promises to every customer.
+                {counts_line}
               </div>
             </td>
           </tr>
@@ -321,8 +297,7 @@ def _footer(commit_sha: str | None, branch: str | None,
         '<div style="margin-top:10px;">'
         'The attached PDF contains the full report including the '
         '&ldquo;What we test and why&rdquo; glossary.'
-        '</div>'
-        if for_email else ""
+        '</div>' if for_email else ""
     )
     return f"""
     <tr>
@@ -345,133 +320,112 @@ def _footer(commit_sha: str | None, branch: str | None,
     """
 
 
-def _compact_row(cap: Capability, outcome: str,
-                 duration: float | None) -> str:
-    """One-line row for the email layout — scales to many tests."""
-    return f"""
-    <tr>
-      <td style="padding:14px 32px;border-bottom:1px solid {C['rule']};">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+# ── Tabular results ─────────────────────────────────────────────────
+def _results_table(
+    results: list[tuple[Capability, str, float | None]],
+    *, expand_passes: bool,
+) -> str:
+    """
+    Single data table: Status | Capability | Runtime.
+
+    Failing rows get a subtle red tint plus a secondary full-width row
+    underneath carrying the "what it means" paragraph.
+    Passing rows get the same expansion only when ``expand_passes`` is
+    true (PDF layout); the email layout leaves them as single-line rows
+    so the table scales.
+    """
+    header = f"""
+      <thead>
+        <tr>
+          <th align="left"
+              style="padding:12px 16px;background:{C['bg']};
+                     border-bottom:1px solid {C['rule']};
+                     font:700 11px/1 {SANS};color:{C['muted']};
+                     letter-spacing:1.2px;text-transform:uppercase;
+                     width:130px;">
+            Status
+          </th>
+          <th align="left"
+              style="padding:12px 16px;background:{C['bg']};
+                     border-bottom:1px solid {C['rule']};
+                     font:700 11px/1 {SANS};color:{C['muted']};
+                     letter-spacing:1.2px;text-transform:uppercase;">
+            Capability
+          </th>
+          <th align="right"
+              style="padding:12px 16px;background:{C['bg']};
+                     border-bottom:1px solid {C['rule']};
+                     font:700 11px/1 {SANS};color:{C['muted']};
+                     letter-spacing:1.2px;text-transform:uppercase;
+                     width:90px;">
+            Runtime
+          </th>
+        </tr>
+      </thead>
+    """
+
+    body_rows: list[str] = []
+    for i, (cap, outcome, duration) in enumerate(results):
+        failing = outcome != "success"
+        row_bg = (C['bad_tint'] if failing
+                  else (C['zebra'] if i % 2 else C['card']))
+        body_rows.append(f"""
           <tr>
-            <td style="vertical-align:middle;">
+            <td style="padding:14px 16px;background:{row_bg};
+                       border-bottom:1px solid {C['rule']};
+                       vertical-align:top;">
+              {_outcome_chip(outcome)}
+            </td>
+            <td style="padding:14px 16px;background:{row_bg};
+                       border-bottom:1px solid {C['rule']};
+                       vertical-align:top;">
               <div style="font:600 14px/1.3 {SANS};color:{C['ink']};">
                 {html.escape(cap.label)}
               </div>
-              <div style="font:400 12px/1.4 {SANS};color:{C['muted']};
-                          margin-top:2px;">
-                Runtime {_fmt_duration(duration)}
+              <div style="font:400 12px/1.5 {SANS};color:{C['muted']};
+                          margin-top:3px;">
+                {cap.short_description}
               </div>
             </td>
-            <td style="vertical-align:middle;text-align:right;
-                       white-space:nowrap;padding-left:16px;">
-              {_outcome_chip(outcome)}
+            <td align="right"
+                style="padding:14px 16px;background:{row_bg};
+                       border-bottom:1px solid {C['rule']};
+                       font:500 12px/1.3 {SANS};color:{C['ink']};
+                       vertical-align:top;white-space:nowrap;">
+              {_fmt_duration(duration)}
             </td>
           </tr>
-        </table>
-      </td>
-    </tr>
-    """
+        """)
 
+        show_detail = failing or expand_passes
+        if show_detail:
+            body = (cap.what_it_proves if outcome == "success"
+                    else cap.what_it_means_if_broken)
+            body_ink = C['bad_ink'] if failing else C['ink']
+            body_bg = C['bad_tint'] if failing else row_bg
+            body_rows.append(f"""
+              <tr>
+                <td colspan="3"
+                    style="padding:0 16px 16px 16px;background:{body_bg};
+                           border-bottom:1px solid {C['rule']};">
+                  <div style="font:400 13px/1.65 {SANS};color:{body_ink};
+                              padding:0 0 0 0;">
+                    {body}
+                  </div>
+                </td>
+              </tr>
+            """)
 
-def _expanded_failure(cap: Capability, outcome: str,
-                      duration: float | None) -> str:
-    """Expanded card for a failure — only used in the email."""
     return f"""
     <tr>
-      <td style="padding:0 32px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-               style="margin:16px 0;border:1px solid {C['bad_border']};
-                      border-radius:8px;overflow:hidden;">
-          <tr>
-            <td style="padding:16px 20px;background:{C['bad_bg']};
-                       border-bottom:1px solid {C['bad_border']};">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td>
-                    <div style="font:700 15px/1.3 {SANS};color:{C['bad_ink']};">
-                      {html.escape(cap.label)}
-                    </div>
-                    <div style="font:400 12px/1.5 {SANS};color:{C['bad_ink']};
-                                margin-top:4px;opacity:.85;">
-                      Runtime {_fmt_duration(duration)}
-                    </div>
-                  </td>
-                  <td style="text-align:right;white-space:nowrap;padding-left:16px;">
-                    {_outcome_chip(outcome)}
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 20px;background:{C['card']};">
-              <div style="font:400 13px/1.6 {SANS};color:{C['ink']};">
-                {cap.what_it_means_if_broken}
-              </div>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-    """
-
-
-def _detailed_card(cap: Capability, outcome: str,
-                   duration: float | None,
-                   generated_at: dt.datetime) -> str:
-    """Full card — used in the PDF for every test."""
-    body = (cap.what_it_proves if outcome == "success"
-            else cap.what_it_means_if_broken)
-    return f"""
-    <tr>
-      <td style="padding:0 32px;">
+      <td style="padding:0 32px 16px 32px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
                style="background:{C['card']};border:1px solid {C['rule']};
-                      border-radius:8px;margin:16px 0;">
-          <tr>
-            <td style="padding:20px 22px 14px 22px;
-                       border-bottom:1px solid {C['rule']};">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="vertical-align:top;">
-                    <div style="font:700 15px/1.3 {SANS};color:{C['ink']};">
-                      {html.escape(cap.label)}
-                    </div>
-                    <div style="font:400 13px/1.5 {SANS};color:{C['muted']};margin-top:4px;">
-                      {cap.short_description}
-                    </div>
-                  </td>
-                  <td style="vertical-align:top;text-align:right;
-                             white-space:nowrap;padding-left:16px;">
-                    {_outcome_chip(outcome)}
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 22px;">
-              <div style="font:400 13px/1.65 {SANS};color:{C['ink']};">
-                {body}
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:10px 22px 16px 22px;
-                       border-top:1px solid {C['rule']};">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="font:400 11px/1.4 {SANS};color:{C['muted']};">
-                    Runtime: <strong style="color:{C['ink']};">
-                    {_fmt_duration(duration)}</strong>
-                  </td>
-                  <td style="font:400 11px/1.4 {SANS};color:{C['muted']};text-align:right;">
-                    Checked {generated_at.strftime("%d %b %Y, %H:%M UTC")}
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+                      border-radius:8px;overflow:hidden;">
+          {header}
+          <tbody>
+            {''.join(body_rows)}
+          </tbody>
         </table>
       </td>
     </tr>
@@ -549,84 +503,29 @@ def _scaffold(inner: str, title: str) -> str:
 """
 
 
-def render_email_html(results: list[tuple[Capability, str, float | None]],
-                      *, brand: str,
-                      logo_data_uri: str | None,
-                      commit_sha: str | None, branch: str | None,
-                      run_url: str | None,
-                      generated_at: dt.datetime) -> str:
-    """
-    Compact headline layout that scales to any number of tests.
-
-    Passes → 1-line rows. Failures → expanded card with "what it means
-    if broken". Glossary lives only in the PDF.
-    """
+def render_email_html(results, *, brand, logo_src, commit_sha, branch,
+                      run_url, generated_at):
+    """Tabular layout; failures expand, passes stay one-line."""
     counts = _count_outcomes(results)
     overall_ok = all(o == "success" for _, o, _ in results)
-
-    # 1. Failures first, as expanded cards (so the reader's eye lands
-    #    on what needs attention immediately).
-    failures = [(c, o, d) for c, o, d in results if o != "success"]
-    failures_block = "".join(
-        _expanded_failure(c, o, d) for c, o, d in failures
-    )
-    failures_heading = (f"""
-    <tr>
-      <td style="padding:22px 32px 4px 32px;">
-        <div style="font:700 12px/1 {SANS};color:{C['bad_ink']};
-                    letter-spacing:1.5px;text-transform:uppercase;">
-          Needs attention ({len(failures)})
-        </div>
-      </td>
-    </tr>
-    """ if failures else "")
-
-    # 2. Passing rows — compact.
-    passes = [(c, o, d) for c, o, d in results if o == "success"]
-    passes_block = "".join(
-        _compact_row(c, o, d) for c, o, d in passes
-    )
-    passes_heading = (f"""
-    <tr>
-      <td style="padding:22px 32px 4px 32px;">
-        <div style="font:700 12px/1 {SANS};color:{C['ok_ink']};
-                    letter-spacing:1.5px;text-transform:uppercase;">
-          Working ({len(passes)})
-        </div>
-      </td>
-    </tr>
-    """ if passes else "")
-
     inner = (
-        _header_band(brand, logo_data_uri,
-                     for_email=True, generated_at=generated_at)
+        _header_band(brand, logo_src=logo_src, generated_at=generated_at)
         + _verdict_band(overall_ok, counts)
-        + failures_heading + failures_block
-        + passes_heading + passes_block
+        + _results_table(results, expand_passes=False)
         + _footer(commit_sha, branch, run_url, for_email=True)
     )
     return _scaffold(inner, f"{brand} — Platform Health Report")
 
 
-def render_pdf_html(results: list[tuple[Capability, str, float | None]],
-                    *, brand: str,
-                    logo_data_uri: str | None,
-                    commit_sha: str | None, branch: str | None,
-                    run_url: str | None,
-                    generated_at: dt.datetime) -> str:
-    """
-    Full detailed version — one expanded card per test + glossary.
-    """
+def render_pdf_html(results, *, brand, logo_src, commit_sha, branch,
+                    run_url, generated_at):
+    """Tabular layout; every row expanded + glossary."""
     counts = _count_outcomes(results)
     overall_ok = all(o == "success" for _, o, _ in results)
-    cards = "".join(
-        _detailed_card(c, o, d, generated_at) for c, o, d in results
-    )
     inner = (
-        _header_band(brand, logo_data_uri,
-                     for_email=False, generated_at=generated_at)
+        _header_band(brand, logo_src=logo_src, generated_at=generated_at)
         + _verdict_band(overall_ok, counts)
-        + cards
+        + _results_table(results, expand_passes=True)
         + _why_section([c for c, _, _ in results])
         + _footer(commit_sha, branch, run_url, for_email=False)
     )
@@ -653,8 +552,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--crud-outcome", required=True)
     p.add_argument("--crud-duration", type=float, default=None)
     p.add_argument("--brand", default=os.environ.get("SHOWCASE_BRAND", "Excellence Cloud"))
-    p.add_argument("--logo-svg", default=str(DEFAULT_LOGO_SVG),
-                   help="Path to the SVG used in the header band.")
+    p.add_argument("--logo-svg", default=str(DEFAULT_LOGO_SVG))
     p.add_argument("--commit-sha", default=os.environ.get("GITHUB_SHA"))
     p.add_argument("--branch", default=os.environ.get("GITHUB_REF_NAME"))
     p.add_argument(
@@ -668,40 +566,68 @@ def main(argv: list[str]) -> int:
     )
     p.add_argument("--out-html", default="report.html")
     p.add_argument("--out-pdf", default="report.pdf")
-    p.add_argument("--skip-pdf", action="store_true",
-                   help="Render HTML only (useful for local dev without WeasyPrint).")
+    p.add_argument("--out-logo", default="logo.png",
+                   help="Where to write the rasterised logo PNG for "
+                        "the email's CID-inline attachment.")
+    p.add_argument("--out-email-preview", default=None,
+                   help="Optional: also write a browser-openable copy "
+                        "of the email HTML with the logo inlined as a "
+                        "data URI. The `cid:` version cannot render "
+                        "outside a MIME mail client — use this flag for "
+                        "local preview only.")
+    p.add_argument("--cid-logo", default="logo",
+                   help="Content-ID the email body refers to.")
+    p.add_argument("--skip-pdf", action="store_true")
     args = p.parse_args(argv)
 
-    results: list[tuple[Capability, str, float | None]] = [
+    results = [
         (CAPABILITIES["init"], args.init_outcome, args.init_duration),
         (CAPABILITIES["crud"], args.crud_outcome, args.crud_duration),
     ]
-    logo_uri = _logo_data_uri(Path(args.logo_svg))
-    if logo_uri is None:
+
+    # Logo: emit PNG alongside the report (the email sender attaches it
+    # as Content-ID-inline). The PDF doesn't use CID — embeds a data URI.
+    png_bytes = _svg_to_png_bytes(Path(args.logo_svg))
+    if png_bytes:
+        with open(args.out_logo, "wb") as fh:
+            fh.write(png_bytes)
+        print(f"Wrote {args.out_logo} ({len(png_bytes):,} bytes)")
+        email_logo_src = f"cid:{args.cid_logo}"
+        pdf_logo_src = _png_data_uri(png_bytes)
+    else:
         print(
-            f"note: logo not embedded (cairosvg missing or {args.logo_svg} "
-            "unavailable) — using text wordmark fallback.",
+            f"note: logo not rasterised (cairosvg missing or "
+            f"{args.logo_svg} unavailable) — using text wordmark fallback.",
             file=sys.stderr,
         )
+        email_logo_src = pdf_logo_src = None
 
     generated_at = dt.datetime.now(dt.timezone.utc)
 
     email_html = render_email_html(
-        results,
-        brand=args.brand, logo_data_uri=logo_uri,
+        results, brand=args.brand, logo_src=email_logo_src,
         commit_sha=args.commit_sha, branch=args.branch, run_url=args.run_url,
         generated_at=generated_at,
     )
     pdf_html = render_pdf_html(
-        results,
-        brand=args.brand, logo_data_uri=logo_uri,
+        results, brand=args.brand, logo_src=pdf_logo_src,
         commit_sha=args.commit_sha, branch=args.branch, run_url=args.run_url,
         generated_at=generated_at,
     )
 
     with open(args.out_html, "w", encoding="utf-8") as fh:
         fh.write(email_html)
-    print(f"Wrote {args.out_html} (email layout)")
+    print(f"Wrote {args.out_html} (email layout, cid logo)")
+
+    # Optional browser-previewable copy — swap cid:<id> for the data URI
+    # so local file:// preview shows the logo.
+    if args.out_email_preview and pdf_logo_src:
+        preview_html = email_html.replace(
+            f'src="cid:{args.cid_logo}"', f'src="{pdf_logo_src}"', 1,
+        )
+        with open(args.out_email_preview, "w", encoding="utf-8") as fh:
+            fh.write(preview_html)
+        print(f"Wrote {args.out_email_preview} (browser preview, inlined logo)")
 
     if not args.skip_pdf:
         render_pdf(pdf_html, args.out_pdf)
@@ -711,4 +637,6 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
 

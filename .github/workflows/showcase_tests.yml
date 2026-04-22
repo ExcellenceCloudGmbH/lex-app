@@ -114,7 +114,7 @@ jobs:
         if: always()
         id: build_report
         env:
-          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'LEX Platform' }}
+          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'Excellence Cloud' }}
         run: |
           python .github/scripts/build_showcase_report.py \
             --init-outcome "${{ steps.test_init.outcome }}" \
@@ -122,7 +122,8 @@ jobs:
             --crud-outcome "${{ steps.test_crud.outcome }}" \
             --crud-duration "${{ steps.test_crud.outputs.duration || 0 }}" \
             --out-html report.html \
-            --out-pdf report.pdf
+            --out-pdf report.pdf \
+            --out-logo logo.png
           if [[ "${{ steps.test_init.outcome }}" == "success" && \
                 "${{ steps.test_crud.outcome }}" == "success" ]]; then
             echo "overall_ok=true"  >> "$GITHUB_OUTPUT"
@@ -137,6 +138,7 @@ jobs:
           path: |
             report.html
             report.pdf
+            logo.png
       - name: Send customer email
         if: always()
         env:
@@ -144,11 +146,13 @@ jobs:
           SHOWCASE_REPORT_RECIPIENTS: ${{ secrets.SHOWCASE_REPORT_RECIPIENTS }}
           SHOWCASE_REPORT_FROM: ${{ secrets.SHOWCASE_REPORT_FROM }}
           SHOWCASE_REPORT_FROM_NAME: ${{ secrets.SHOWCASE_REPORT_FROM_NAME }}
-          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'LEX Platform' }}
+          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'Excellence Cloud' }}
         run: |
           python .github/scripts/send_showcase_email.py \
             --html-path report.html \
             --pdf-path report.pdf \
+            --logo-path logo.png \
+            --logo-cid logo \
             --overall-ok "${{ steps.build_report.outputs.overall_ok }}"
       - name: Fail job if any showcase test failed
         if: steps.test_init.outcome != 'success' || steps.test_crud.outcome != 'success'
