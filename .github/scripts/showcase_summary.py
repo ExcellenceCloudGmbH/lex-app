@@ -214,21 +214,23 @@ def main(argv: list[str]) -> int:
         run_url=args.run_url,
     )
 
-    # Always echo to stdout so the raw step log shows the summary too.
-    # GitHub Actions also renders $GITHUB_STEP_SUMMARY as the "Summary"
-    # tab on the run page — so we write to both when the env var is set.
-    sys.stdout.write(md)
-    sys.stdout.flush()
-
+    # Render to the GitHub Summary tab only (engineer view).
+    # The customer-facing artefact is the PDF/email produced by
+    # build_showcase_report.py — this summary is intentionally quiet in
+    # the step log.
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as fh:
             fh.write(md)
+    else:
+        # Local dry-runs: print so the developer can see the output.
+        sys.stdout.write(md)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
 
 
 

@@ -1,44 +1,35 @@
 name: Showcase Tests (Business View)
-
 # ──────────────────────────────────────────────────────────────────────
-#  Stakeholder-facing CI workflow.
+#  Customer-facing CI workflow.
 #
-#  Runs exactly TWO hand-picked tests from the new `lex/test_project/`
-#  suite — one per customer-facing capability — and renders a plain-
-#  English pass/fail summary on the workflow-run page via the GitHub
-#  Step Summary API.
+#  Runs TWO hand-picked tests from the `lex/test_project/` suite and
+#  produces:
+#    1. A quiet GitHub Step Summary (engineer view)
+#    2. A branded HTML + PDF "Platform Health Report" (customer view)
+#    3. An email with the PDF attached, via SendGrid
 #
-#  This workflow does NOT replace `django_tests.yml` (the full release
-#  gate). It is a narrow, always-green "does the product do what we
-#  say it does?" check that non-engineers can read at a glance.
+#  Required secrets (Settings → Secrets → Actions):
+#    SENDGRID_API_KEY              — SendGrid API key
+#    SHOWCASE_REPORT_RECIPIENTS    — comma-separated recipient emails
+#    SHOWCASE_REPORT_FROM          — a SendGrid-verified sender address
 #
-#  Showcase tests:
-#    1. Project initialization — migrations & access sync
-#         lex.test_project.tests.init.test_1b_lex_init.
-#         TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline
-#    2. Create record via REST API
-#         lex.test_project.tests.crud_api.test_2a_create.
-#         TestCluster02a_Create.test_2_1_post_creates_record
+#  Optional:
+#    SHOWCASE_REPORT_FROM_NAME     — display name for the sender
+#    SHOWCASE_BRAND (repo variable)— brand shown on the report
 #
-#  Read docs/ci-cd/showcase-ci.md for the stakeholder-facing guide.
+#  Read docs/ci-cd/showcase-ci.md for the stakeholder guide.
 # ──────────────────────────────────────────────────────────────────────
-
 on:
-  # Stakeholders kick it off on demand.
   workflow_dispatch:
-  # Run automatically on every merge to the default branch so the
-  # latest completed run is always fresh.
   push:
     branches: ["lex-app-v2"]
-
 jobs:
   showcase:
-    name: Run & summarise showcase tests
+    name: Run showcase tests & send report
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: [3.12.0]
-
     services:
       postgres:
         image: postgres:latest
@@ -53,16 +44,13 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 3
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-
       - name: Cache pip
         uses: actions/cache@v3
         with:
@@ -70,19 +58,21 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
-
-      - name: Install lex-app
+        # libcairo2-dev, pkg-config — pycairo
+        # libpango-1.0-0, libpangoft2-1.0-0 — WeasyPrint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcairo2-dev pkg-config \
+            libpango-1.0-0 libpangoft2-1.0-0
+      - name: Install lex-app + report toolchain
         run: |
           pip install --upgrade pip setuptools wheel
           pip install --prefer-binary -r requirements.txt
-          # Editable install so the `lex` CLI is available on $PATH.
           pip install -e .
-
-      # ── Test 1: Project initialization ───────────────────────────
-      - name: Run showcase test — Project initialization
+          pip install "weasyprint>=61" "sendgrid>=6.11"
+      - name: Run test — Project initialisation
         id: test_init
         continue-on-error: true
         env:
@@ -90,11 +80,15 @@ jobs:
           DATABASE_DEPLOYMENT_TARGET: default
           CELERY_ACTIVE: "False"
         run: |
+          start=$(date +%s.%N)
           lex test --verbosity=2 --noinput \
             lex.test_project.tests.init.test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline
-
-      # ── Test 2: Create record via REST API ───────────────────────
-      - name: Run showcase test — Create record via REST API
+          rc=$?
+          end=$(date +%s.%N)
+          duration=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.3f", e-s }')
+          echo "duration=$duration" >> "$GITHUB_OUTPUT"
+          exit $rc
+      - name: Run test — Create record via REST API
         id: test_crud
         continue-on-error: true
         env:
@@ -102,26 +96,62 @@ jobs:
           DATABASE_DEPLOYMENT_TARGET: default
           CELERY_ACTIVE: "False"
         run: |
+          start=$(date +%s.%N)
           lex test --verbosity=2 --noinput \
             lex.test_project.tests.crud_api.test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
-
-      # ── Render the business-friendly summary ─────────────────────
-      - name: Render business summary
+          rc=$?
+          end=$(date +%s.%N)
+          duration=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.3f", e-s }')
+          echo "duration=$duration" >> "$GITHUB_OUTPUT"
+          exit $rc
+      - name: Render engineer summary
         if: always()
         run: |
-          echo "The markdown below is also rendered on the 'Summary' tab of this workflow run."
-          echo "--------------------------------------------------------------------------------"
           python .github/scripts/showcase_summary.py \
             "${{ steps.test_init.outcome }}" \
             "${{ steps.test_crud.outcome }}"
-          echo "--------------------------------------------------------------------------------"
-          echo "Open the 'Summary' tab at the top of this run for the formatted version."
-
-      # ── Final gate: fail the job if either showcase test failed ─
+      - name: Build customer report
+        if: always()
+        id: build_report
+        env:
+          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'LEX Platform' }}
+        run: |
+          python .github/scripts/build_showcase_report.py \
+            --init-outcome "${{ steps.test_init.outcome }}" \
+            --init-duration "${{ steps.test_init.outputs.duration || 0 }}" \
+            --crud-outcome "${{ steps.test_crud.outcome }}" \
+            --crud-duration "${{ steps.test_crud.outputs.duration || 0 }}" \
+            --out-html report.html \
+            --out-pdf report.pdf
+          if [[ "${{ steps.test_init.outcome }}" == "success" && \
+                "${{ steps.test_crud.outcome }}" == "success" ]]; then
+            echo "overall_ok=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "overall_ok=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload report artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-health-report
+          path: |
+            report.html
+            report.pdf
+      - name: Send customer email
+        if: always()
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SHOWCASE_REPORT_RECIPIENTS: ${{ secrets.SHOWCASE_REPORT_RECIPIENTS }}
+          SHOWCASE_REPORT_FROM: ${{ secrets.SHOWCASE_REPORT_FROM }}
+          SHOWCASE_REPORT_FROM_NAME: ${{ secrets.SHOWCASE_REPORT_FROM_NAME }}
+          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'LEX Platform' }}
+        run: |
+          python .github/scripts/send_showcase_email.py \
+            --html-path report.html \
+            --pdf-path report.pdf \
+            --overall-ok "${{ steps.build_report.outputs.overall_ok }}"
       - name: Fail job if any showcase test failed
         if: steps.test_init.outcome != 'success' || steps.test_crud.outcome != 'success'
         run: |
-          echo "::error::One or more showcase tests failed. See the run summary above."
+          echo "::error::One or more showcase tests failed. See the emailed report."
           exit 1
-
-
