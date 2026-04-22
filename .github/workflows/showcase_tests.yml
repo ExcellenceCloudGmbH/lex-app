@@ -1,0 +1,122 @@
+name: Showcase Tests (Business View)
+
+# ──────────────────────────────────────────────────────────────────────
+#  Stakeholder-facing CI workflow.
+#
+#  Runs exactly TWO hand-picked tests from the new `lex/test_project/`
+#  suite — one per customer-facing capability — and renders a plain-
+#  English pass/fail summary on the workflow-run page via the GitHub
+#  Step Summary API.
+#
+#  This workflow does NOT replace `django_tests.yml` (the full release
+#  gate). It is a narrow, always-green "does the product do what we
+#  say it does?" check that non-engineers can read at a glance.
+#
+#  Showcase tests:
+#    1. Project initialization — migrations & access sync
+#         lex.test_project.tests.init.test_1b_lex_init.
+#         TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline
+#    2. Create record via REST API
+#         lex.test_project.tests.crud_api.test_2a_create.
+#         TestCluster02a_Create.test_2_1_post_creates_record
+#
+#  Read docs/ci-cd/showcase-ci.md for the stakeholder-facing guide.
+# ──────────────────────────────────────────────────────────────────────
+
+on:
+  # Stakeholders kick it off on demand.
+  workflow_dispatch:
+  # Run automatically on every merge to the default branch so the
+  # latest completed run is always fresh.
+  push:
+    branches: ["lex-app-v2"]
+
+jobs:
+  showcase:
+    name: Run & summarise showcase tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.12.0]
+
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: lundadminlocal
+          POSTGRES_DB: db_lex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
+
+      - name: Install lex-app
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --prefer-binary -r requirements.txt
+          # Editable install so the `lex` CLI is available on $PATH.
+          pip install -e .
+
+      # ── Test 1: Project initialization ───────────────────────────
+      - name: Run showcase test — Project initialization
+        id: test_init
+        continue-on-error: true
+        env:
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
+        run: |
+          lex test --verbosity=2 --noinput \
+            lex.test_project.tests.init.test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline
+
+      # ── Test 2: Create record via REST API ───────────────────────
+      - name: Run showcase test — Create record via REST API
+        id: test_crud
+        continue-on-error: true
+        env:
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
+        run: |
+          lex test --verbosity=2 --noinput \
+            lex.test_project.tests.crud_api.test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
+
+      # ── Render the business-friendly summary ─────────────────────
+      - name: Render business summary
+        if: always()
+        run: |
+          python .github/scripts/showcase_summary.py \
+            "${{ steps.test_init.outcome }}" \
+            "${{ steps.test_crud.outcome }}"
+
+      # ── Final gate: fail the job if either showcase test failed ─
+      - name: Fail job if any showcase test failed
+        if: steps.test_init.outcome != 'success' || steps.test_crud.outcome != 'success'
+        run: |
+          echo "::error::One or more showcase tests failed. See the run summary above."
+          exit 1
+

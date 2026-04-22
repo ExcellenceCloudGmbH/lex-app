@@ -147,7 +147,7 @@ If either command is broken, a new customer cannot start using the framework at 
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 2.1 | POST creates a record | Response 201, body includes `id`, record in DB |
+| 2.1 | POST creates a record (**CI showcase test**) | Response 201, body includes `id`, record in DB. This is the CRUD showcase scenario driven by `.github/workflows/showcase_tests.yml`. |
 | 2.2 | POST sets framework-managed fields | `created_at`, `edited_at`, `created_by` = authenticated user's email |
 | 2.3 | POST with missing required field | Response 400, error names the missing field, no record created |
 | 2.4 | POST with invalid field type | Response 400, no record created |
@@ -925,6 +925,32 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:** 🟢 Complete — 4 pass / 0 fail.
 
+### 7g — `CalculatedModel.create()` pipeline (end-to-end) 🟢
+
+**Gap:** `lex/core/mixins/CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
+
+1. `_generate_model_combinations` (1346-1401)
+2. `_prepare_models_for_processing` (1403-1494)
+3. `_create_processing_clusters` (1497-1576)
+4. `_dispatch_model_processing` — sync branch (1579-1713)
+5. `calc_and_save_sync` (843-971)
+6. `delete_models_with_same_defining_fields` (1715-1807)
+
+**Model:** new `CombinatorialCalc` — a non-atomic `CalculatedModelMixin` subclass with `defining_fields = ["region", "category"]` and `parallelizable_fields = ["region"]`. A single `create()` call walks every one of the six sections above.
+
+**Shape:** `E2ETestCase` — runs under `CELERY_ACTIVE=False` (the documented sync fallback); same environment every other Cluster 7 scenario uses.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 7.25 | `Model.create(region=[...], category=[...])` cartesian expansion | 3×2 = 6 rows persisted, each with `name` set by `calculate()`; exercises combination generator → prepare → cluster → dispatch → `calc_and_save_sync` |
+| 7.26 | `Model.create()` with no kwargs falls back to `get_selected_key_list` | Default 2×2 = 4 rows, one per `(region, category)` combo |
+| 7.27 | Partial failure — `calculate()` raises for one region | `calc_and_save_sync` catches + accumulates the error and keeps going; failed rows are NOT saved; successful rows persist; "processed_count > 0" warning branch fires |
+| 7.28 | `Model.create()` is idempotent on rerun | `delete_models_with_same_defining_fields` detects existing rows; pk set unchanged between runs |
+| 7.29 | Empty `get_selected_key_list` return prunes the whole branch | Zero rows, no error — exercises the `if not field_values: continue` + early-break |
+| 7.30 | `delete_models_with_same_defining_fields` on un-saved instance | Returns `self` and resets a stale pk to `None` so caller can INSERT |
+
+**Status:** 🟢 Complete — 6 pass / 0 fail. Drove `CalculatedModelMixin.py` from **33.74% → 64.75%** (+31 pts, +170 lines covered).
+
 ### Sequencing
 
 ```
@@ -934,6 +960,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 10e (schema introspection) — small surface, frontend-critical
 10f (global search)        — small, user-facing
 5.11 + 9.7-9.10            — close remaining holes in already-🟢 clusters
+7g  (CalculatedModel.create pipeline) — closes the largest single source-file gap
 ```
 
 **Why no new top-level clusters:** every gap is a *facet* of an existing user-journey concern. Permission enforcement belongs in Cluster 4. Schema & search belong in Cluster 10 (API Layer). Write-path serializer behaviour is Cluster 12. Signal branches are Cluster 9. Splitting them out would fragment the story and duplicate setup.
@@ -959,6 +986,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | `ChildCalc` | CalculationModel | 7, 9 |
 | `GrandchildCalc` | CalculationModel | 7 |
 | `FailingCalc` | CalculationModel | 7 |
+| `CombinatorialCalc` | CalculatedModelMixin (`defining_fields`, `parallelizable_fields`) | 7 (7g) |
 | `CeleryCalc` | CalculationModel (@lex_shared_task) | 8 |
 | `StressCounterparty` | LexModel (small FK target) | 11 |
 | `StressInvoice` | LexModel (wide row, FK to StressCounterparty) | 11 |

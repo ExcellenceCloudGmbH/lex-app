@@ -113,6 +113,81 @@ class TestCluster01b_LexInit(TestCase):
             "Invoked commands: %s" % invoked,
         )
 
+    # -- 1.6b ----------------------------------------------------------
+    def test_1_6b_init_runs_full_pipeline(self) -> None:
+        """
+        Scenario 1.6b: ``lex Init`` runs the full first-run pipeline.
+
+        When a customer presses **Init** after creating their project, the
+        framework must perform the complete onboarding sequence in a
+        single command:
+
+          1. **Detect model changes** — compare the project's current
+             models to the migration history.
+          2. **makemigrations** — generate migration files for any
+             changes found.
+          3. **migrate** — apply the migrations to the database.
+          4. **Sync to Keycloak** — register the project's models as
+             Keycloak resources so access management works.
+
+        All four pieces are customer-visible promises in
+        ``docs/installation.md``. This scenario asserts that **every one
+        of them is engaged in a single run** — if any step is silently
+        skipped, the customer ends up with a half-initialised project
+        and no useful error.
+
+        This is the scenario the CI "Showcase Tests" workflow runs to
+        prove that project initialisation works end-to-end.
+        """
+        cmd = self._make_command()
+        # Force the "there are pending migrations" branch so the
+        # command actually reaches the `migrate` call. Without this,
+        # execute_migrations short-circuits when no migrations need
+        # applying, and we would be asserting on a branch the customer
+        # never sees on a real first run.
+        cmd.check_unapplied_migrations = MagicMock(return_value=True)
+
+        opts = {
+            **self._DEFAULT_OPTS,
+            "dry_run": False,
+            "no_makemigrations": False,
+        }
+        cmd.handle(**opts)
+
+        # 1. Detect model changes — autodetector was asked for a diff.
+        autodetector = self.mock_autodetector_cls.return_value
+        self.assertTrue(
+            autodetector.changes.called,
+            "lex Init must run the Django migration autodetector so new "
+            "or renamed models are picked up before migrations run.",
+        )
+
+        invoked = [c.args[0] for c in self.mock_call_command.call_args_list]
+
+        # 2. makemigrations was invoked.
+        self.assertIn(
+            "makemigrations", invoked,
+            "lex Init must call `makemigrations` so migration files are "
+            "generated for any detected model changes. "
+            "Invoked commands: %s" % invoked,
+        )
+
+        # 3. migrate was invoked.
+        self.assertIn(
+            "migrate", invoked,
+            "lex Init must call `migrate` so the customer's database "
+            "tables are created/updated. Invoked commands: %s" % invoked,
+        )
+
+        # 4. Sync to Keycloak — the sync manager was engaged.
+        self.assertTrue(
+            self.mock_manager.process_model_changes.called,
+            "lex Init must push the project's models to Keycloak via "
+            "`KeycloakSyncManager.process_model_changes` so access "
+            "management is wired up. If this step is skipped, customers "
+            "cannot manage permissions on Excellence Cloud.",
+        )
+
     # -- 1.7 -----------------------------------------------------------
     def test_1_7_second_run_is_idempotent(self) -> None:
         """
