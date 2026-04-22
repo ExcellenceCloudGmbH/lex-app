@@ -293,6 +293,17 @@ def _coverage_cell(pct: float | None) -> str:
 
 def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
                    overall: dict[str, Any]) -> str:
+    # Three columns only — Status / Capability / Scenarios.
+    #
+    # The per-cluster Coverage column was removed on 22 April 2026:
+    # every reasonable attribution strategy we tried (manual cov_include
+    # globs, coverage.py contexts with the executable-lines denominator,
+    # and contexts with the universe-of-executed-lines denominator)
+    # produced the same number on every row in at least one common run
+    # regime — because Django's app loading imports the same framework
+    # code under every test. A column where every cluster reports the
+    # same value is noise, not signal. We keep ONE framework-wide
+    # number, in the Totals row and the verdict band.
     header = f"""
       <thead>
         <tr>
@@ -316,20 +327,8 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
                      border-bottom:1px solid {C['rule']};
                      font:700 11px/1 {SANS};color:{C['muted']};
                      letter-spacing:1.2px;text-transform:uppercase;
-                     width:110px;">
-            Scenarios
-          </th>
-          <th align="left"
-              style="padding:12px 16px;background:{C['bg']};
-                     border-bottom:1px solid {C['rule']};
-                     font:700 11px/1 {SANS};color:{C['muted']};
-                     letter-spacing:1.2px;text-transform:uppercase;
                      width:130px;">
-            Coverage<br>
-            <span style="font:400 9px/1.2 {SANS};letter-spacing:.5px;
-                         text-transform:none;color:{C['muted']};">
-              (of code this cluster runs)
-            </span>
+            Scenarios
           </th>
         </tr>
       </thead>
@@ -364,10 +363,6 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
                        border-bottom:1px solid {C['rule']};vertical-align:top;">
               {_scenarios_cell(row)}
             </td>
-            <td style="padding:14px 16px;background:{row_bg};
-                       border-bottom:1px solid {C['rule']};vertical-align:top;">
-              {_coverage_cell(row.get('coverage_pct'))}
-            </td>
           </tr>
         """)
 
@@ -379,7 +374,7 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
             body_bg = C['bad_tint'] if failing else row_bg
             body_rows.append(f"""
               <tr>
-                <td colspan="4"
+                <td colspan="3"
                     style="padding:0 16px 16px 16px;background:{body_bg};
                            border-bottom:1px solid {C['rule']};">
                   <div style="font:400 13px/1.6 {SANS};color:{body_ink};">
@@ -389,21 +384,9 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
               </tr>
             """)
 
-    # ── Totals row — aggregated scenarios + framework-wide coverage.
-    #
-    # The per-cluster Coverage column is computed from per-test
-    # coverage.py contexts (see run_showcase_suite.
-    # _per_cluster_coverage_from_contexts) — a file counts toward a
-    # cluster only if that cluster's tests actually executed a line
-    # in it. The totals row reports the *framework-wide* percentage
-    # computed against the full .coveragerc source list, so readers
-    # can see both perspectives at a glance.
-    #
-    # NOTE: this is appended to <tbody> (not <tfoot>) because
-    # WeasyPrint treats <tfoot> as a repeating page-footer group
-    # (CSS ``display: table-footer-group``) and duplicates it on
-    # every printed page of the PDF. Keeping it in <tbody> guarantees
-    # it appears exactly once, at the end.
+    # ── Totals row.  Appended to <tbody> (not <tfoot>) because WeasyPrint
+    # treats <tfoot> as a repeating page-footer group (CSS display:
+    # table-footer-group) and duplicates it on every printed page.
     total_ran     = overall.get("ran", 0)
     total_passed  = overall.get("passed", 0)
     total_failed  = overall.get("failed", 0) + overall.get("errors", 0)
@@ -418,6 +401,7 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
     if total_xfailed:
         totals_detail_bits.append(f"{total_xfailed} expected failures")
     totals_detail = " &middot; ".join(totals_detail_bits)
+    cov_fmt = _fmt_pct(overall.get("coverage_pct"))
     totals_row = f"""
       <tr>
         <td style="padding:14px 16px;background:{C['bg']};
@@ -434,6 +418,8 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
           <div style="font:400 11px/1.5 {SANS};color:{C['muted']};
                       margin-top:2px;">
             Total run time {_fmt_duration(overall.get('wall_s'))}
+            &nbsp;&middot;&nbsp;
+            Framework-wide code coverage <strong style="color:{C['ink']};">{cov_fmt}</strong>
           </div>
         </td>
         <td style="padding:14px 16px;background:{C['bg']};
@@ -445,40 +431,9 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
             f'margin-top:2px;">{totals_detail}</div>')
            if totals_detail else ''}
         </td>
-        <td style="padding:14px 16px;background:{C['bg']};
-                   border-top:2px solid {C['rule']};vertical-align:top;">
-          <div style="font:600 13px/1.3 {SANS};color:{C['ink']};">
-            {_fmt_pct(overall.get('coverage_pct'))}
-          </div>
-          <div style="font:400 10px/1.4 {SANS};color:{C['muted']};
-                      margin-top:2px;">
-            framework-wide
-          </div>
-        </td>
       </tr>
     """
     body_rows.append(totals_row)
-
-    # Footnote explaining the two coverage denominators — so the
-    # per-cluster 60% and the framework-wide 31% don't read as a
-    # contradiction.
-    footnote = f"""
-      <tr>
-        <td colspan="4"
-            style="padding:10px 16px 14px 16px;background:{C['bg']};
-                   font:400 11px/1.5 {SANS};color:{C['muted']};">
-          <strong style="color:{C['ink']};font-weight:600;">How to read coverage:</strong>
-          the per-cluster percentages measure how well each capability
-          covers <em>the code its own tests execute</em> — computed
-          automatically from per-test execution traces, with no manual
-          file curation. The <em>framework-wide</em> total measures the
-          whole platform. A capability can be 100 % covered while the
-          framework sits lower, or vice-versa — they answer different
-          questions.
-        </td>
-      </tr>
-    """
-    body_rows.append(footnote)
 
     return f"""
     <tr>
@@ -691,6 +646,7 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
 
 
 

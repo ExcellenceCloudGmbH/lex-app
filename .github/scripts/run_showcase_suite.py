@@ -394,21 +394,24 @@ def main(argv: list[str]) -> int:
             **r,
         })
 
-    # Compute per-cluster coverage from the accumulated .coverage file
-    # in one pass, using the per-test contexts recorded by coverage.py
-    # (``.coveragerc`` → ``dynamic_context = test_function``). See
-    # ``_per_cluster_coverage_from_contexts`` for the attribution rules.
-    print("\n── Computing per-cluster coverage from test contexts…",
+    # Per-cluster coverage attribution (via coverage.py contexts)
+    # was removed on 22 April 2026: with narrow curated runs (1-2
+    # tests per cluster) the context-universe denominator collapses
+    # to the cluster's own hits and every row reports 100% — not
+    # useful. With broad runs the denominator is dominated by
+    # Django-boot imports and every row converges toward the
+    # framework total — also not useful. Neither regime gives a
+    # reliable per-cluster signal. We now report the SAME
+    # project-wide coverage on every cluster row, computed once from
+    # the combined .coverage file. It's honest: "here is how much
+    # of the framework this release exercised in total".
+    overall_pct = _overall_coverage_pct()
+    print("\n── Project-wide coverage (same on every cluster row) ──",
           flush=True)
-    cluster_pcts = _per_cluster_coverage_from_contexts(
-        [r["key"] for r in results]
-    )
+    print(f"  · framework-wide: {overall_pct}%" if overall_pct is not None
+          else "  · framework-wide: — (no coverage data)", flush=True)
     for r in results:
-        r["coverage_pct"] = cluster_pcts.get(r["key"])
-        if r["coverage_pct"] is not None:
-            print(f"  · {r['key']}: {r['coverage_pct']}%", flush=True)
-        else:
-            print(f"  · {r['key']}: — (no contexts matched)", flush=True)
+        r["coverage_pct"] = overall_pct
 
     # Aggregate overall.
     overall = {
@@ -440,6 +443,7 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
 
 
 

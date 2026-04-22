@@ -112,6 +112,15 @@ jobs:
           pip install -e .
           pip install "coverage>=7.4" "weasyprint>=61" \
                       "cairosvg>=2.7" "sendgrid>=6.11"
+      # Preserved from the retired django_tests.yml — persists the pip
+      # cache so a re-run of this workflow (or a sibling workflow in
+      # the same release) doesn't re-download everything.
+      - name: Save pip cache
+        if: always()
+        uses: actions/cache/save@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
       # ── Run the selected clusters per-cluster, producing a manifest ─
       - name: Run cluster showcase suite
         id: run_suite
@@ -134,6 +143,28 @@ jobs:
           python .github/scripts/run_showcase_suite.py \
             --only "$SHOWCASE_CLUSTERS" \
             --out manifest.json
+      # ── Preserved from the retired django_tests.yml ───────────────
+      # After the suite runs, `.coverage` holds the combined trace.
+      # Print the per-file report to stdout (informational — visible
+      # in the CI log) and emit coverage.xml for the artifact upload.
+      # No minimum-coverage gate is enforced; the only gate is
+      # test pass/fail (see "Fail job if any cluster failed" below).
+      - name: Coverage report (informational)
+        if: always()
+        run: |
+          if [[ -f .coverage ]]; then
+            coverage report --rcfile=.coveragerc || true
+            coverage xml --rcfile=.coveragerc -o coverage.xml || true
+          else
+            echo "::warning::.coverage not found — skipping coverage report/xml"
+          fi
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: coverage.xml
+          if-no-files-found: warn
       # ── Read manifest → set job outputs (for pip_publish gate) ───
       - name: Parse manifest
         id: manifest

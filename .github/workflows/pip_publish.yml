@@ -1,20 +1,24 @@
 # ──────────────────────────────────────────────────────────────────────
 #  Publish lex-app to PyPI.
 #
-#  This workflow gates a PyPI release on TWO checks:
-#    1. django_tests.yml    — runs `lex.test_project.tests` (the
-#                             behaviour-driven suite from
-#                             lex/test_project/) with coverage
-#                             threshold (engineer-facing release gate).
-#    2. showcase_tests.yml  — the 14-cluster customer-facing showcase.
-#                             This workflow ALSO sends a branded
-#                             "Platform Health Report" email via
-#                             SendGrid on EVERY run — pass or fail —
-#                             so stakeholders always get a status
-#                             update on release day.
+#  A PyPI release is gated on a single check:
+#    showcase_tests.yml — runs the selected tests from
+#                         ``lex/test_project/tests/`` with coverage,
+#                         emits coverage.xml as a CI artifact, builds
+#                         the "Platform Health Report" (HTML + PDF),
+#                         and ALWAYS sends the branded email via
+#                         SendGrid on EVERY run — pass or fail — so
+#                         stakeholders always get a status update on
+#                         release day.
 #
-#  If either gate fails, the `publish` job is skipped and no version
-#  is pushed to PyPI. If both pass, the sdist + wheel are built and
+#  History: ``django_tests.yml`` used to run as a second, parallel
+#  gate. On 22 April 2026 it was absorbed into ``showcase_tests.yml``
+#  — both workflows were running the same test selector and building
+#  the same coverage.xml, so running them separately doubled the CI
+#  cost with no added signal.
+#
+#  If the gate fails, the ``publish`` job is skipped and no version
+#  is pushed to PyPI. If it passes, the sdist + wheel are built and
 #  uploaded.
 #
 #  Version is derived from the GitHub release tag (e.g. v2.0.0rc124
@@ -47,37 +51,46 @@ on:
         description: "Version to publish (e.g. 2.0.0rc124). Required for manual runs."
         required: false
         type: string
+      clusters:
+        description: >-
+          Cluster selector fed to BOTH gate-tests and gate-showcase.
+          Same syntax as ``run_showcase_suite.py --only``. Default is
+          the release-blessed subset. Change this to trial-run a wider
+          (or narrower) subset from a manual dispatch.
+        required: false
+        type: string
+        default: >-
+          init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
 
 jobs:
-  # ── Step 1a: Run the full internal test suite ─────────────────────
-  gate-tests:
-    name: "Gate: Test Suite"
-    uses: ./.github/workflows/django_tests.yml
-    secrets: inherit
-
-  # ── Step 1b: Run the customer-facing Cluster Showcase ────────────
-  # This job ALWAYS sends the Platform Health Report email via
-  # SendGrid (see showcase_tests.yml) — pass or fail. If any cluster
-  # fails, the job exits non-zero and the `publish` step below does
-  # not run.
+  # ── Step 1: Gate on the selected tests + emit the customer report ─
+  # showcase_tests.yml is the ONLY release gate (the former
+  # django_tests.yml was absorbed into it on 22 April 2026 — it ran
+  # the same tests twice with the same selector, so we consolidated).
   #
-  # The selector below is explicit — we do NOT run every cluster from
-  # pip_publish. Current scope: a single representative test per
-  # cluster for ``init`` (full first-run pipeline) and ``crud_api``
-  # (create-via-POST). Expand the list as new clusters reach the
-  # customer-facing bar.
-  gate-showcase:
-    name: "Gate: Cluster Showcase + Customer Email"
+  # This job:
+  #   * runs the tests (coverage run) for the configured selector,
+  #   * emits coverage.xml as a CI artifact ("backend-coverage-report"),
+  #   * builds the Platform Health Report HTML + PDF,
+  #   * ALWAYS emails the report via SendGrid — pass or fail,
+  #   * exits non-zero iff any cluster failed.
+  #
+  # The `publish` step below will not run unless this gate is green.
+  gate-release:
+    name: "Release Gate: Tests + Customer Email"
     uses: ./.github/workflows/showcase_tests.yml
     secrets: inherit
     with:
-      clusters: "init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record"
+      # Single source of truth for the test scope. Edit here (or
+      # override from workflow_dispatch) — the same selector drives
+      # both the release gate and the email content.
+      clusters: ${{ inputs.clusters || 'init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record' }}
 
-  # ── Step 2: Build and publish (only if BOTH gates pass) ──────────
+  # ── Step 2: Build and publish (only if the gate passes) ──────────
   publish:
     name: "Build & Publish"
-    needs: [gate-tests, gate-showcase]   # ← hard dependency — skipped
-                                         #   if either gate fails
+    needs: [gate-release]   # ← hard dependency — skipped if gate fails
+                            #   (no PyPI push when tests fail)
     runs-on: ubuntu-latest
 
     permissions:
