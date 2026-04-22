@@ -16,7 +16,10 @@ Outputs:
                                 the logo inlined as a data URI.
 
 The report shows ONE ROW PER CLUSTER, with columns:
-    Status | Cluster | Scenarios | Coverage
+    Status | Capability | Scenarios
+(Per-cluster coverage was removed on 22 April 2026 — see the long
+comment in ``_results_table`` for the rationale. Framework-wide
+coverage still appears in the verdict band and totals row.)
 """
 
 from __future__ import annotations
@@ -266,29 +269,6 @@ def _scenarios_cell(row: dict[str, Any]) -> str:
            f'margin-top:2px;">{detail}</div>' if detail else "")
     )
 
-
-def _coverage_cell(pct: float | None) -> str:
-    if pct is None:
-        return f'<div style="font:500 12px/1.3 {SANS};color:{C["muted"]};">—</div>'
-
-    # Tiny coloured bar — brand navy for the filled portion.
-    fill_w = max(0.0, min(100.0, pct))
-    return f"""
-      <div style="font:600 13px/1.3 {SANS};color:{C['ink']};">{pct:.1f}%</div>
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-             width="100%" style="margin-top:4px;">
-        <tr>
-          <td style="height:6px;width:{fill_w:.1f}%;background:{C['accent']};
-                     line-height:0;font-size:0;border-radius:3px 0 0 3px;">
-            &nbsp;
-          </td>
-          <td style="height:6px;background:{C['rule']};line-height:0;
-                     font-size:0;border-radius:0 3px 3px 0;">
-            &nbsp;
-          </td>
-        </tr>
-      </table>
-    """
 
 
 def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,

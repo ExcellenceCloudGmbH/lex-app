@@ -26,12 +26,12 @@ name: Showcase Tests (Business View)
 #  Read docs/ci-cd/showcase-ci.md for the stakeholder guide.
 # ──────────────────────────────────────────────────────────────────────
 on:
-  # Release-only: no push / PR triggers. The showcase fires when a
-  # GitHub release is published (directly, and indirectly via
-  # pip_publish.yml → workflow_call). workflow_dispatch stays so
-  # maintainers can rerun by hand.
-  release:
-    types: [published]
+  # The showcase is NOT triggered directly by release events — it only
+  # runs as a reusable workflow called from pip_publish.yml (which is
+  # the release-triggered workflow), or by manual dispatch. Triggering
+  # on `release: published` directly would fire a second, parallel run
+  # with an empty `inputs.clusters` (release events can't supply inputs),
+  # which the guard rejects. Keep a single entry point via pip_publish.
   workflow_dispatch:
     inputs:
       clusters:
