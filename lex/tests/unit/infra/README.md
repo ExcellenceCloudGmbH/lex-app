@@ -5,7 +5,7 @@
 > connections must respect timeouts, and the init sequence must retry on
 > transient failures."*
 
-## What Lives Here (7 files, 26 tests)
+## What Lives Here (20 files)
 
 | File | Tests | Covers |
 |------|------:|--------|
@@ -16,6 +16,19 @@
 | `test_keycloak_manager_timeout.py` | 7 | Keycloak HTTP timeout configuration — default read timeout, connect+read override from settings, single-value override, gateway-timeout error recording, client UUID resolution with special characters |
 | `test_runtime_config.py` | 5 | Runtime config helpers — repo name derivation from Windows/POSIX paths, project-root resolution via marker file, SQLite path construction, Unicode DB error formatting |
 | `test_user_model_registration.py` | 1 | ⚠️ Built-in `User` model auto-registration — **pre-existing failure** (`Converter 'model' is already registered`) |
+| `test_bitemporal_service.py` | — | Bitemporal service — as-of queries, history sync, gap detection |
+| `test_celery_tasks_unit.py` | — | Celery task unit tests — task registration, retry, failure handling |
+| `test_celery_worker_shutdown.py` | — | Celery worker graceful shutdown — signal handling, drain |
+| `test_collection_utils.py` | — | Collection utility functions — flatten, group, deduplicate |
+| `test_custom_storage.py` | — | Custom file storage backend — path resolution, upload |
+| `test_generic_app_config_discovery.py` | — | AppConfig auto-discovery — model scanning, app registry |
+| `test_generic_app_config_helpers.py` | — | AppConfig helper functions — model filtering, label resolution |
+| `test_injector_decorator.py` | — | `@injector` decorator — dependency injection for management commands |
+| `test_model_structure_builder.py` | — | ModelStructureBuilder — YAML/JSON schema generation |
+| `test_proxy_transport_config.py` | — | Proxy transport configuration — HTTP/HTTPS proxy settings |
+| `test_simple_history_config.py` | — | simple-history integration — auto-registration, excluded fields |
+| `test_singleton_decorator.py` | — | `@singleton` decorator — single-instance enforcement |
+| `test_startup_static_collection.py` | — | Startup static collection — model scanning at boot |
 
 ## Key Concepts Tested
 
@@ -35,6 +48,6 @@
 
 ```bash
 source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
-lex test lex.tests.unit.infra              # all 26 tests (1 pre-existing error)
+lex test lex.tests.unit.infra              # all tests (1 pre-existing error)
 lex test lex.tests.unit.infra.test_celery_callbacks  # 5 tests
 ```

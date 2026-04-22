@@ -1,19 +1,31 @@
 # ──────────────────────────────────────────────────────────────────────
 #  Publish lex-app to PyPI.
 #
-#  This workflow:
-#   1. Calls the test suite (django_tests.yml) as a reusable workflow.
-#   2. Only if ALL tests pass and coverage threshold is met, builds the
-#      sdist + wheel and publishes to PyPI.
-#   3. Can be triggered manually (workflow_dispatch) or on a GitHub
-#      release (tag push).
+#  This workflow gates a PyPI release on TWO checks:
+#    1. django_tests.yml    — runs `lex.test_project.tests` (the
+#                             behaviour-driven suite from
+#                             lex/test_project/) with coverage
+#                             threshold (engineer-facing release gate).
+#    2. showcase_tests.yml  — the 14-cluster customer-facing showcase.
+#                             This workflow ALSO sends a branded
+#                             "Platform Health Report" email via
+#                             SendGrid on EVERY run — pass or fail —
+#                             so stakeholders always get a status
+#                             update on release day.
+#
+#  If either gate fails, the `publish` job is skipped and no version
+#  is pushed to PyPI. If both pass, the sdist + wheel are built and
+#  uploaded.
 #
 #  Version is derived from the GitHub release tag (e.g. v2.0.0rc124
 #  → 2.0.0rc124). The version in pyproject.toml is dynamic — it reads
 #  from lex/_version.py which this workflow writes before building.
 #
 #  Required secrets:
-#   - PYPI_API_TOKEN  (PyPI API token with upload permission)
+#   - PYPI_API_TOKEN               (PyPI API token with upload permission)
+#   - SENDGRID_API_KEY             (used by the showcase workflow)
+#   - SHOWCASE_REPORT_RECIPIENTS
+#   - SHOWCASE_REPORT_FROM
 # ──────────────────────────────────────────────────────────────────────
 
 name: Publish to PyPI
@@ -37,16 +49,35 @@ on:
         type: string
 
 jobs:
-  # ── Step 1: Run the full test suite ──────────────────────────────
+  # ── Step 1a: Run the full internal test suite ─────────────────────
   gate-tests:
     name: "Gate: Test Suite"
     uses: ./.github/workflows/django_tests.yml
     secrets: inherit
 
-  # ── Step 2: Build and publish (only if tests pass) ──────────────
+  # ── Step 1b: Run the customer-facing Cluster Showcase ────────────
+  # This job ALWAYS sends the Platform Health Report email via
+  # SendGrid (see showcase_tests.yml) — pass or fail. If any cluster
+  # fails, the job exits non-zero and the `publish` step below does
+  # not run.
+  #
+  # The selector below is explicit — we do NOT run every cluster from
+  # pip_publish. Current scope: a single representative test per
+  # cluster for ``init`` (full first-run pipeline) and ``crud_api``
+  # (create-via-POST). Expand the list as new clusters reach the
+  # customer-facing bar.
+  gate-showcase:
+    name: "Gate: Cluster Showcase + Customer Email"
+    uses: ./.github/workflows/showcase_tests.yml
+    secrets: inherit
+    with:
+      clusters: "init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record"
+
+  # ── Step 2: Build and publish (only if BOTH gates pass) ──────────
   publish:
     name: "Build & Publish"
-    needs: gate-tests       # ← hard dependency — skipped if tests fail
+    needs: [gate-tests, gate-showcase]   # ← hard dependency — skipped
+                                         #   if either gate fails
     runs-on: ubuntu-latest
 
     permissions:

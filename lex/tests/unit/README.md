@@ -1,6 +1,6 @@
 # Unit Tests — `lex.tests.unit`
 
-> **1 219 tests** across **78 files** in **8 topic directories**
+> **~1 850 tests** across **125 files** in **11 topic directories**
 
 These are pure unit tests — no database, no network, no Celery broker.
 Every test mocks external dependencies and runs in < 40 s total.
@@ -9,14 +9,17 @@ Every test mocks external dependencies and runs in < 40 s total.
 
 | Directory | What it covers | Files | Tests |
 |-----------|---------------|------:|------:|
-| [calculation/](calculation/) | State machine, hooks, signals, Celery dispatch | 9 | 142 |
-| [audit/](audit/) | Audit-log mixins, context resolution, cache, WebSocket | 13 | 246 |
-| [api/](api/) | REST views, serializers, model structure, permissions | 18 | 227 |
-| [auth/](auth/) | Keycloak middleware, permissions, user context, tokens | 6 | 154 |
-| [core/](core/) | LexModel base, lifecycle hooks, combinations, exceptions | 12 | 218 |
-| [grid/](grid/) | AG Grid utilities, export, PK/user-read filter backends | 7 | 158 |
-| [temporal/](temporal/) | Bitemporal parsing, sync, suppression, reconciliation | 6 | 48 |
-| [infra/](infra/) | Celery callbacks, health check, Keycloak timeout, runtime config | 7 | 26 |
+| [api/](api/) | REST views, serializers, model structure, permissions | 28 | ~350 |
+| [audit/](audit/) | Audit-log mixins, context resolution, cache, WebSocket | 21 | ~300 |
+| [auth/](auth/) | Keycloak middleware, permissions, user context, tokens | 9 | ~180 |
+| [calculation/](calculation/) | State machine, hooks, signals, Celery dispatch | 11 | ~170 |
+| [cli/](cli/) | `lex` CLI — argument parsing, project-root discovery | 1 | ~40 |
+| [core/](core/) | LexModel base, lifecycle hooks, combinations, exceptions | 12 | ~218 |
+| [crud/](crud/) | Generic filters, API helpers | 2 | ~40 |
+| [grid/](grid/) | AG Grid utilities, export, PK/user-read filter backends | 7 | ~158 |
+| [infra/](infra/) | Celery callbacks, health check, Keycloak timeout, runtime config | 20 | ~100 |
+| [serialization/](serialization/) | LexSerializer, permission-aware mixin, parse_value | 4 | ~80 |
+| [temporal/](temporal/) | Bitemporal parsing, sync, suppression, reconciliation | 10 | ~100 |
 
 ## How to Run
 

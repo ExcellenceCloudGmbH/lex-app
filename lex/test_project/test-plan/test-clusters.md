@@ -828,20 +828,22 @@ After landing Clusters 1–14 (176+ scenarios, 14 real framework bugs surfaced),
 
 Priorities below are ordered by expected coverage delta × customer-visibility.
 
-### 4e. Read-restriction filter backend — `UserReadRestrictionFilterBackend`
+### 4e. Read-restriction filter backend — `UserReadRestrictionFilterBackend` 🟢
 
 **Gap:** `lex/api/views/model_entries/filter_backends.py` — 198 stmts, **28.97%** covered. Every List / Export / History query passes through this; also the lookup table for BUG-011 (permission O(n)).
 
-**Models:** `ProtectedItem` (reused from 4a) + new `MixedResourceItem` for the AuditLog content-type visibility path.
+**Models:** new `FilterBackendItem` in `permissions/models.py` — a minimal `LexModel` with `name` + `is_secret` whose `permission_read` branches on the caller's Django groups to hit all three filter-backend code paths in one fixture (`admin` → `allow_all`, `deny_all` → `deny`, default → per-row deny of secret rows). `MixedResourceItem` is deferred alongside the AuditLog scenarios (4.14 / 4.15) which need the Keycloak `user_permissions` payload + seeded `AuditLog` rows.
 
-| # | Scenario | What We Assert |
-|---|----------|----------------|
-| 4.13 | Per-row visibility — mixed allowed/denied rows in one page | Only allowed rows in response, `rowCount` reflects filtered total |
-| 4.14 | AuditLog resource filter — `_build_auditlog_db_visibility_filters` | Rows for resources the user can't read are excluded at the DB level (no Python-side filtering for handled resources) |
-| 4.15 | AuditLog deferred-permission path — mixed handled + residual resources | Residual rows are permission-checked via `can_read_from_payload`; handled rows go through the DB filter |
-| 4.16 | `pk_only=true` fast path honours permissions | Denied rows excluded from id list; count matches allowed subset |
-| 4.17 | Superuser bypass | `permission_read` never invoked; all rows returned |
-| 4.18 | Deny-all short-circuit — `permission_read → deny` | Zero rows, zero SQL beyond the permission probe |
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 4.13 | Per-row visibility — mixed allowed/denied rows in one page | Only allowed rows in response (exercises `queryset.iterator()` + `excluded.append`) | 🟢 |
+| 4.14 | AuditLog resource filter — `_build_auditlog_db_visibility_filters` | Rows for resources the user can't read are excluded at the DB level | ⏸ skip (fixture) |
+| 4.15 | AuditLog deferred-permission path — mixed handled + residual resources | Residual rows are permission-checked via `can_read_from_payload` | ⏸ skip (fixture) |
+| 4.16 | `pk_only=true` fast path honours permissions | Denied pks excluded from id list; `count` matches allowed subset | 🟢 |
+| 4.17 | `allow_all` profile (admin group) returns every row | `permission_read → allow_all`, no exclusion (`return queryset` branch) | 🟢 |
+| 4.18 | Deny-all short-circuit — `permission_read → deny` on every row | Zero rows returned even though DB holds every seeded row | 🟢 |
+
+**Status:** 🟢 Complete — 4 pass + 2 skip. See progress.md Session 16.
 
 ### 4f. Serializer-level masking — `PermissionAwareSerializerMixin`
 

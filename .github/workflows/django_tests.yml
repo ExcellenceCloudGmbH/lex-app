@@ -3,8 +3,15 @@ name: Lex Test Suite
 # ──────────────────────────────────────────────────────────────────────
 #  Release-gating test suite for the lex-app framework.
 #
+#  Runs the behaviour-driven suite from `lex/test_project/` — the
+#  dedicated test project that mirrors real customer usage (see
+#  lex/test_project/test-plan/index.md). This replaced the older
+#  `lex.tests` label on April 22, 2026 as the release gate, so the
+#  suite that publishes the framework is the same suite that validates
+#  customer-visible behaviour.
+#
 #  This workflow:
-#   1. Runs the full backend test suite via the `lex` CLI wrapper.
+#   1. Runs `lex.test_project.tests` via the `lex` CLI wrapper.
 #   2. Collects branch-level coverage with coverage.py.
 #   3. Enforces a hard minimum coverage threshold (fail-under).
 #   4. Uploads the coverage XML as a build artifact.
@@ -14,14 +21,11 @@ name: Lex Test Suite
 # ──────────────────────────────────────────────────────────────────────
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
-  schedule:
-    - cron: "00 9 * * *"
+  # Release-only: no push / PR / schedule triggers. The suite runs
+  # when pip_publish.yml (which is release-triggered) calls it via
+  # workflow_call, or on an explicit manual dispatch.
   workflow_dispatch:
-  # Allow other workflows (e.g. pip-publish) to call this as a reusable check
+  # Allow other workflows (e.g. pip-publish) to call this as a reusable check.
   workflow_call:
 
 # Minimum coverage percentage required to pass.  Increase as new tests
@@ -90,9 +94,10 @@ jobs:
           DATABASE_DEPLOYMENT_TARGET: default
           CELERY_ACTIVE: "False"
         run: |
-          # Run all framework tests under coverage
+          # Run the test_project suite under coverage (see
+          # lex/test_project/test-plan/index.md for the full plan).
           coverage run --rcfile=.coveragerc -m lex test --verbosity=2 --noinput \
-            lex.tests
+            lex.test_project.tests
 
           # Report to stdout
           coverage report --rcfile=.coveragerc

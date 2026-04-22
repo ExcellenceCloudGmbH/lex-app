@@ -43,6 +43,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--logo-cid", default="logo")
     p.add_argument("--overall-ok", required=True,
                    help="'true' or 'false' — shapes the subject line")
+    p.add_argument("--clusters-passing", default=None,
+                   help="e.g. '14/14' — included in the subject when provided")
     args = p.parse_args(argv)
 
     api_key = os.environ.get("SENDGRID_API_KEY")
@@ -92,8 +94,9 @@ def main(argv: list[str]) -> int:
 
     overall_ok = args.overall_ok.strip().lower() == "true"
     marker = "✓ all green" if overall_ok else "✗ action required"
+    cluster_tag = f" — {args.clusters_passing} clusters passing" if args.clusters_passing else ""
     today = dt.datetime.now(dt.timezone.utc).strftime("%d %b %Y")
-    subject = f"[{marker}] {brand} — Platform Health Report, {today}"
+    subject = f"[{marker}{cluster_tag}] {brand} — Platform Health Report, {today}"
 
     message = Mail(
         from_email=From(sender, sender_name),
@@ -144,4 +147,6 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
 

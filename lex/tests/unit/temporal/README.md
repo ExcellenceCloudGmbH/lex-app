@@ -5,7 +5,7 @@
 > The temporal layer must parse as-of queries, synchronise history to the main
 > table, suppress signals during bulk operations, and reconcile stale records."*
 
-## What Lives Here (6 files, 48 tests)
+## What Lives Here (10 files)
 
 | File | Tests | Covers |
 |------|------:|--------|
@@ -15,6 +15,10 @@
 | `test_history_deletion.py` | 3 | Mid-chain history deletion extends predecessor's `valid_to`, history-descriptor class caching, main-record deletion creates `valid_to` + meta-history entry |
 | `test_temporal_progression.py` | 1 | Passage-of-time activation — a future-valid record appears in the main table after `reconcile_time` runs |
 | `test_temporal_reconciler.py` | 7 | Single-model reconciliation, cross-model reconciliation, time-window filtering, models-without-history skip, default end-time-to-now |
+| `test_bitemporal_locking.py` | — | Bitemporal row locking — optimistic concurrency, conflict detection |
+| `test_bitemporal_suppress_context_managers.py` | — | Context managers for suppressing bitemporal signals during bulk imports |
+| `test_temporal_as_of_parser.py` | — | As-of datetime query-parameter parsing |
+| `test_temporal_utils.py` | — | Temporal utility functions — interval arithmetic, overlap detection |
 
 ## Key Concepts Tested
 
@@ -28,6 +32,6 @@
 
 ```bash
 source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
-lex test lex.tests.unit.temporal           # all 48 tests
+lex test lex.tests.unit.temporal           # all tests
 lex test lex.tests.unit.temporal.test_bitemporal_suppression  # 16 tests
 ```

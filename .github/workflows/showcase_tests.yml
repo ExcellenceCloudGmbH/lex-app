@@ -2,31 +2,72 @@ name: Showcase Tests (Business View)
 # ──────────────────────────────────────────────────────────────────────
 #  Customer-facing CI workflow.
 #
-#  Runs TWO hand-picked tests from the `lex/test_project/` suite and
-#  produces:
-#    1. A quiet GitHub Step Summary (engineer view)
-#    2. A branded HTML + PDF "Platform Health Report" (customer view)
-#    3. An email with the PDF attached, via SendGrid
+#  Runs the full `lex/test_project/` suite grouped by CLUSTER (not by
+#  individual test) and produces:
+#    1. A `manifest.json` with per-cluster counts + coverage %.
+#    2. A branded HTML + PDF "Platform Health Report" (customer view).
+#    3. An email with the PDF attached, via SendGrid — ALWAYS sent,
+#       pass or fail.
+#    4. A final gating step that fails the job if any cluster failed.
+#
+#  Callable as a reusable workflow (`workflow_call`) from
+#  `pip_publish.yml` so a PyPI release is gated on this job AND
+#  emits the email unconditionally.
 #
 #  Required secrets (Settings → Secrets → Actions):
-#    SENDGRID_API_KEY              — SendGrid API key
-#    SHOWCASE_REPORT_RECIPIENTS    — comma-separated recipient emails
-#    SHOWCASE_REPORT_FROM          — a SendGrid-verified sender address
+#    SENDGRID_API_KEY
+#    SHOWCASE_REPORT_RECIPIENTS   comma-separated recipient emails
+#    SHOWCASE_REPORT_FROM         SendGrid-verified sender address
 #
 #  Optional:
-#    SHOWCASE_REPORT_FROM_NAME     — display name for the sender
-#    SHOWCASE_BRAND (repo variable)— brand shown on the report
+#    SHOWCASE_REPORT_FROM_NAME    sender display name
+#    SHOWCASE_BRAND (repo var)    brand shown on the report
 #
 #  Read docs/ci-cd/showcase-ci.md for the stakeholder guide.
 # ──────────────────────────────────────────────────────────────────────
 on:
+  # Release-only: no push / PR triggers. The showcase fires when a
+  # GitHub release is published (directly, and indirectly via
+  # pip_publish.yml → workflow_call). workflow_dispatch stays so
+  # maintainers can rerun by hand.
+  release:
+    types: [published]
   workflow_dispatch:
-  push:
-    branches: ["lex-app-v2"]
+    inputs:
+      clusters:
+        description: >-
+          Comma-separated cluster selector for
+          ``run_showcase_suite.py --only``. Each entry is either
+          ``<cluster_key>`` (whole cluster) or
+          ``<cluster_key>:<test_suffix>`` (single test inside cluster).
+          Default runs ONE test per cluster for init and crud_api.
+        required: false
+        default: >-
+          init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
+  workflow_call:
+    inputs:
+      clusters:
+        description: >-
+          Same syntax as workflow_dispatch.inputs.clusters. Callers
+          (e.g. pip_publish.yml) pass their curated subset.
+        required: false
+        type: string
+        default: >-
+          init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
+    outputs:
+      overall_ok:
+        description: "true if every cluster passed, else false"
+        value: ${{ jobs.showcase.outputs.overall_ok }}
+      clusters_passing:
+        description: "e.g. '2/2'"
+        value: ${{ jobs.showcase.outputs.clusters_passing }}
 jobs:
   showcase:
-    name: Run showcase tests & send report
+    name: Run cluster showcase & send report
     runs-on: ubuntu-latest
+    outputs:
+      overall_ok: ${{ steps.manifest.outputs.overall_ok }}
+      clusters_passing: ${{ steps.manifest.outputs.clusters_passing }}
     strategy:
       matrix:
         python-version: [3.12.0]
@@ -59,8 +100,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       - name: Install system dependencies
-        # libcairo2-dev, pkg-config — pycairo
-        # libpango-1.0-0, libpangoft2-1.0-0 — WeasyPrint
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -71,65 +110,59 @@ jobs:
           pip install --upgrade pip setuptools wheel
           pip install --prefer-binary -r requirements.txt
           pip install -e .
-          pip install "weasyprint>=61" "cairosvg>=2.7" "sendgrid>=6.11"
-      - name: Run test — Project initialisation
-        id: test_init
+          pip install "coverage>=7.4" "weasyprint>=61" \
+                      "cairosvg>=2.7" "sendgrid>=6.11"
+      # ── Run the selected clusters per-cluster, producing a manifest ─
+      - name: Run cluster showcase suite
+        id: run_suite
         continue-on-error: true
         env:
           DJANGO_SETTINGS_MODULE: lex_app.settings
           DATABASE_DEPLOYMENT_TARGET: default
           CELERY_ACTIVE: "False"
+          # The cluster subset (and optionally per-cluster single-test
+          # selectors) is supplied by the caller. We intentionally refuse
+          # to fall back to "run every cluster" implicitly — the showcase
+          # must be a deliberately curated list.
+          SHOWCASE_CLUSTERS: ${{ inputs.clusters }}
         run: |
-          start=$(date +%s.%N)
-          lex test --verbosity=2 --noinput \
-            lex.test_project.tests.init.test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline
-          rc=$?
-          end=$(date +%s.%N)
-          duration=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.3f", e-s }')
-          echo "duration=$duration" >> "$GITHUB_OUTPUT"
-          exit $rc
-      - name: Run test — Create record via REST API
-        id: test_crud
-        continue-on-error: true
-        env:
-          DJANGO_SETTINGS_MODULE: lex_app.settings
-          DATABASE_DEPLOYMENT_TARGET: default
-          CELERY_ACTIVE: "False"
-        run: |
-          start=$(date +%s.%N)
-          lex test --verbosity=2 --noinput \
-            lex.test_project.tests.crud_api.test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
-          rc=$?
-          end=$(date +%s.%N)
-          duration=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.3f", e-s }')
-          echo "duration=$duration" >> "$GITHUB_OUTPUT"
-          exit $rc
-      - name: Render engineer summary
+          if [[ -z "$SHOWCASE_CLUSTERS" ]]; then
+            echo "::error::No cluster subset provided (inputs.clusters is empty). Refusing to run the full suite implicitly."
+            exit 1
+          fi
+          echo "Running selector: $SHOWCASE_CLUSTERS"
+          python .github/scripts/run_showcase_suite.py \
+            --only "$SHOWCASE_CLUSTERS" \
+            --out manifest.json
+      # ── Read manifest → set job outputs (for pip_publish gate) ───
+      - name: Parse manifest
+        id: manifest
         if: always()
         run: |
-          python .github/scripts/showcase_summary.py \
-            "${{ steps.test_init.outcome }}" \
-            "${{ steps.test_crud.outcome }}"
-      - name: Build customer report
-        if: always()
-        id: build_report
-        env:
-          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'Excellence Cloud' }}
-        run: |
-          python .github/scripts/build_showcase_report.py \
-            --init-outcome "${{ steps.test_init.outcome }}" \
-            --init-duration "${{ steps.test_init.outputs.duration || 0 }}" \
-            --crud-outcome "${{ steps.test_crud.outcome }}" \
-            --crud-duration "${{ steps.test_crud.outputs.duration || 0 }}" \
-            --out-html report.html \
-            --out-pdf report.pdf \
-            --out-logo logo.png
-          if [[ "${{ steps.test_init.outcome }}" == "success" && \
-                "${{ steps.test_crud.outcome }}" == "success" ]]; then
+          if [[ -f manifest.json ]]; then
+            OVERALL=$(python -c "import json; m=json.load(open('manifest.json')); print(m['overall']['outcome'])")
+            PASSING=$(python -c "import json; m=json.load(open('manifest.json')); print(f\"{m['overall']['clusters_passing']}/{m['overall']['clusters_total']}\")")
+          else
+            OVERALL="failure"
+            PASSING="0/0"
+          fi
+          if [[ "$OVERALL" == "success" ]]; then
             echo "overall_ok=true"  >> "$GITHUB_OUTPUT"
           else
             echo "overall_ok=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "clusters_passing=$PASSING" >> "$GITHUB_OUTPUT"
+      # ── Build the customer-facing report (HTML + PDF) ────────────
+      - name: Build customer report
+        if: always()
+        env:
+          SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'Excellence Cloud' }}
+        run: |
+          python .github/scripts/build_showcase_report.py \
+            --manifest manifest.json \
+            --out-html report.html \
+            --out-pdf report.pdf \
+            --out-logo logo.png
       - name: Upload report artefact
         if: always()
         uses: actions/upload-artifact@v4
@@ -139,6 +172,8 @@ jobs:
             report.html
             report.pdf
             logo.png
+            manifest.json
+      # ── ALWAYS send the email — pass or fail ─────────────────────
       - name: Send customer email
         if: always()
         env:
@@ -153,9 +188,12 @@ jobs:
             --pdf-path report.pdf \
             --logo-path logo.png \
             --logo-cid logo \
-            --overall-ok "${{ steps.build_report.outputs.overall_ok }}"
-      - name: Fail job if any showcase test failed
-        if: steps.test_init.outcome != 'success' || steps.test_crud.outcome != 'success'
+            --overall-ok "${{ steps.manifest.outputs.overall_ok }}" \
+            --clusters-passing "${{ steps.manifest.outputs.clusters_passing }}"
+      # ── Final gate — fail the job if any cluster failed ──────────
+      # (This runs AFTER the email step so the email always fires.)
+      - name: Fail job if any cluster failed
+        if: steps.manifest.outputs.overall_ok != 'true'
         run: |
-          echo "::error::One or more showcase tests failed. See the emailed report."
+          echo "::error::One or more clusters failed. See the emailed report."
           exit 1
