@@ -109,9 +109,13 @@ jobs:
       - name: Render business summary
         if: always()
         run: |
+          echo "The markdown below is also rendered on the 'Summary' tab of this workflow run."
+          echo "--------------------------------------------------------------------------------"
           python .github/scripts/showcase_summary.py \
             "${{ steps.test_init.outcome }}" \
             "${{ steps.test_crud.outcome }}"
+          echo "--------------------------------------------------------------------------------"
+          echo "Open the 'Summary' tab at the top of this run for the formatted version."
 
       # ── Final gate: fail the job if either showcase test failed ─
       - name: Fail job if any showcase test failed
@@ -119,4 +123,5 @@ jobs:
         run: |
           echo "::error::One or more showcase tests failed. See the run summary above."
           exit 1
+
 

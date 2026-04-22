@@ -214,16 +214,21 @@ def main(argv: list[str]) -> int:
         run_url=args.run_url,
     )
 
+    # Always echo to stdout so the raw step log shows the summary too.
+    # GitHub Actions also renders $GITHUB_STEP_SUMMARY as the "Summary"
+    # tab on the run page — so we write to both when the env var is set.
+    sys.stdout.write(md)
+    sys.stdout.flush()
+
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as fh:
             fh.write(md)
-    else:
-        sys.stdout.write(md)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
 
 
