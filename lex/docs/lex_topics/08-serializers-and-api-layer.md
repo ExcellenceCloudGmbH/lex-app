@@ -68,6 +68,7 @@ Expense.api_serializers = {
 ```
 
 ### Key patterns:
+
 1. **`@add_permission_checks`** — enforces `permission_read()`/`permission_edit()` at API level
 2. **`validate_<field>`** — field-level validation, errors shown inline in grid
 3. **`validate()` with `self.instance` fallback** — cross-field validation safe for PATCH
@@ -77,6 +78,7 @@ Expense.api_serializers = {
 ## More Validation Patterns
 
 ### Date checks
+
 ```python
 def validate_report_date(self, value):
     if value > timezone.now():
@@ -85,6 +87,7 @@ def validate_report_date(self, value):
 ```
 
 ### Conditional required fields
+
 ```python
 def validate(self, attrs):
     locked = attrs.get('locked', getattr(self.instance, 'locked', False))
@@ -105,6 +108,32 @@ MyModel.api_serializers = {
 }
 ```
 
+## Hide Default Table Actions Column
+
+If a serializer-backed table should not show Lex's default row actions column,
+set `hide_actions_column = True` on the serializer `Meta`.
+
+```python
+from rest_framework import serializers
+from lex.api.views.model_entries.mixins.PermissionAwareSerializerMixin import add_permission_checks
+from Input.Expense import Expense
+
+@add_permission_checks
+class ExpenseTableSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Expense
+        fields = ('id', 'name', 'amount', 'status')
+        hide_actions_column = True
+
+
+Expense.api_serializers = {
+    'default': ExpenseTableSerializer,
+}
+```
+
+Lex suppresses the default Show/Edit/Delete column for tables that use this
+serializer. Leave the option unset to keep the current behavior.
+
 ## File Organization
 
 One `serializers.py` per folder:
@@ -120,10 +149,10 @@ Input/
 
 ## Serializer vs. pre_validation()
 
-| Context | Use |
-|---|---|
-| Universal rule (every save) | `pre_validation()` on model |
-| API-specific (formatting, PATCH) | Serializer `validate()` |
+| Context                          | Use                         |
+| -------------------------------- | --------------------------- |
+| Universal rule (every save)      | `pre_validation()` on model |
+| API-specific (formatting, PATCH) | Serializer `validate()`     |
 
 ## Where to Expand
 

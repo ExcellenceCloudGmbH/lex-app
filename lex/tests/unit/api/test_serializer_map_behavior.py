@@ -62,6 +62,13 @@ class _OldDefaultUserSerializer(serializers.ModelSerializer):
         fields = ("id", "username")
 
 
+class _HiddenActionsUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ("id", "username")
+        hide_actions_column = True
+
+
 class _NewDefaultUserSerializer(serializers.ModelSerializer):
     override_marker = serializers.SerializerMethodField()
 
@@ -168,6 +175,34 @@ class SerializerMapBehaviorTests(TestCase):
 
         self.assertIn("override_marker", field_names)
         self.assertNotIn("username", field_names)
+
+    def test_fields_view_reports_default_list_ui_options(self):
+        class _Container:
+            model_class = User
+
+            @staticmethod
+            def get_serializers_map():
+                return {"default": _CompactUserSerializer}
+
+        request = Request(APIRequestFactory().get("/api/model_info/user/fields"))
+        response = Fields().get(request, model_container=_Container())
+
+        self.assertEqual(response.data["list_ui"], {"hide_actions_column": False})
+
+    def test_fields_view_uses_serializer_meta_to_hide_actions_column(self):
+        User.api_serializers = {"compact": _HiddenActionsUserSerializer}
+
+        class _Container:
+            model_class = User
+
+            @staticmethod
+            def get_serializers_map():
+                return get_serializer_map_for_model(User, default_fields=["id", "username"])
+
+        request = Request(APIRequestFactory().get("/api/model_info/user/fields?serializer=compact"))
+        response = Fields().get(request, model_container=_Container())
+
+        self.assertEqual(response.data["list_ui"], {"hide_actions_column": True})
 
     def test_history_view_uses_refreshed_default_serializer(self):
         class _Pk:
