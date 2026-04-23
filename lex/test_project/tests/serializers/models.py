@@ -174,10 +174,130 @@ class ProtectedWideItem(LexModel):
         return True
 
 
-ALL_MODELS = [RelatedItem, WideItem, ProtectedWideItem]
+# ---------------------------------------------------------------------
+# M2M / FK write path fixtures (12f)
+# ---------------------------------------------------------------------
+class TagItem(LexModel):
+    """Tiny tag used as both an M2M target and an FK target on
+    :class:`TaggableItem`. Minimal surface — tests only assert on
+    ``label``."""
+
+    label = models.CharField(max_length=64, unique=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.label
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12: tag open")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 12: tag open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+class TaggableItem(LexModel):
+    """Row carrying an M2M (``tags``) and a nullable FK
+    (``primary_tag``) for the Cluster-12f write-path scenarios."""
+
+    title = models.CharField(max_length=200)
+    tags = models.ManyToManyField(
+        TagItem, blank=True, related_name="taggables",
+    )
+    primary_tag = models.ForeignKey(
+        TagItem,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="primary_taggables",
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12: taggable open")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 12: taggable open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+# ---------------------------------------------------------------------
+# Field-level edit scope fixture (12.8)
+# ---------------------------------------------------------------------
+class EditScopedItem(LexModel):
+    """``permission_edit`` returns ``allow_fields({"x"})`` for non-admins.
+
+    Used by scenario 12.8 to assert that ``lex_reserved_scopes.edit``
+    on the serialized instance contains **exactly** those field names
+    — no more, no less.
+    """
+
+    x = models.CharField(max_length=200, default="")
+    y = models.CharField(max_length=200, default="")
+    z = models.CharField(max_length=200, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"EditScoped<{self.pk}>"
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12: edit-scoped read open")
+
+    def permission_edit(self, uc):
+        if uc.is_superuser or "admin" in uc.groups:
+            return PermissionResult.allow_all("admin — all fields editable")
+        return PermissionResult.allow_fields(
+            {"x"}, "non-admins may only edit 'x'",
+        )
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+ALL_MODELS = [
+    RelatedItem,
+    WideItem,
+    ProtectedWideItem,
+    TagItem,
+    TaggableItem,
+    EditScopedItem,
+]
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
 RELATED = "relateditem"
 WIDE = "wideitem"
 PROTECTED_WIDE = "protectedwideitem"
+TAG = "tagitem"
+TAGGABLE = "taggableitem"
+EDIT_SCOPED = "editscopeditem"
 

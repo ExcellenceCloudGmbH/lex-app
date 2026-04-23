@@ -57,10 +57,10 @@ class TestCluster12f_WritePaths(E2ETestCase):
             "green":  TagItem.objects.create(label="green"),
         }
 
-    # -- 12.26 ---------------------------------------------------------
-    def test_12_26_post_creates_m2m_with_pk_list(self) -> None:
+    # -- 12.29 ---------------------------------------------------------
+    def test_12_29_post_creates_m2m_with_pk_list(self) -> None:
         """
-        Scenario 12.26: POST with ``tags=[pk1, pk2]`` creates the row
+        Scenario 12.29: POST with ``tags=[pk1, pk2]`` creates the row
         and attaches both tags atomically. The through-table is the
         source of truth: the test reads it back via the ORM so we
         catch any "serializer says ok, relation never persisted" bug.
@@ -90,10 +90,10 @@ class TestCluster12f_WritePaths(E2ETestCase):
             ),
         )
 
-    # -- 12.27 ---------------------------------------------------------
-    def test_12_27_patch_replaces_m2m_set(self) -> None:
+    # -- 12.30 ---------------------------------------------------------
+    def test_12_30_patch_replaces_m2m_set(self) -> None:
         """
-        Scenario 12.27: PATCH with a different ``tags`` list REPLACES
+        Scenario 12.30: PATCH with a different ``tags`` list REPLACES
         the existing set — it does not merge. This is the "deselect"
         contract the frontend UI depends on. An "add-only" bug would
         silently keep ``red`` after the user removed it.
@@ -124,10 +124,10 @@ class TestCluster12f_WritePaths(E2ETestCase):
             ),
         )
 
-    # -- 12.28 ---------------------------------------------------------
-    def test_12_28_fk_attach_detach_rewire(self) -> None:
+    # -- 12.31 ---------------------------------------------------------
+    def test_12_31_fk_attach_detach_rewire(self) -> None:
         """
-        Scenario 12.28: The nullable FK ``primary_tag`` must support
+        Scenario 12.31: The nullable FK ``primary_tag`` must support
         the full lifecycle through POST + PATCH:
 
             (1) attach on create  (POST primary_tag=red)

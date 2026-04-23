@@ -244,6 +244,8 @@ ALL_MODELS = [
     GrandchildCalc, MidCalc,
     NonAtomicParentCalc,
     FailingCalc,
+    # Combinatorial / create()-pipeline model (7g + 7h).
+    # (Declared below so the mixin import is nearby.)
 ]
 
 ATOMIC = "atomiccalc"
@@ -253,4 +255,76 @@ PARENT = "parentcalc"
 MID = "midcalc"
 GRANDCHILD = "grandchildcalc"
 FAILING = "failingcalc"
+
+
+# ---------------------------------------------------------------------
+# Combinatorial / create() pipeline fixture (7g + 7h)
+# ---------------------------------------------------------------------
+from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin  # noqa: E402
+
+
+class CombinatorialCalc(CalculatedModelMixin):
+    """Cartesian-product calculation over ``region × category``.
+
+    Used by sub-clusters 7g (sync ``create()`` pipeline) and 7h
+    (Celery-dispatch branch of ``_dispatch_model_processing``). The
+    key-list class attributes are reset in each test's ``setUp``.
+    """
+
+    region = models.CharField(max_length=16)
+    category = models.CharField(max_length=16)
+    name = models.CharField(max_length=200, blank=True, default="")
+
+    defining_fields = ["region", "category"]
+    parallelizable_fields = ["region"]
+
+    # Mutable class-level test knobs — reset per test.
+    _region_keys = ["US", "EU"]
+    _category_keys = ["A", "B"]
+    fail_for_region: "str | None" = None
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name or f"{self.region}-{self.category}"
+
+    def get_selected_key_list(self, key):
+        if key == "region":
+            return list(type(self)._region_keys)
+        if key == "category":
+            return list(type(self)._category_keys)
+        return []
+
+    def calculate(self, *args, **kwargs):
+        if (
+            type(self).fail_for_region is not None
+            and self.region == type(self).fail_for_region
+        ):
+            raise RuntimeError(
+                f"CombinatorialCalc failing on purpose for region={self.region!r}"
+            )
+        self.name = f"{self.region}-{self.category}"
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 7: combinatorial")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 7: combinatorial")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+ALL_MODELS.append(CombinatorialCalc)
+COMBINATORIAL = "combinatorialcalc"
+
 

@@ -322,26 +322,13 @@ class TestCluster13e_UniversalStreamingExport(_StreamingFastPathTestBase):
         )
 
     # -- 13.17 ---------------------------------------------------------
-    def test_13_17_end_row_limit_caps_written_rows(self) -> None:
-        """``endRow`` smaller than DB row count → stream loop breaks at
-        the cap (``written >= end_row``)."""
-        for i in range(5):
-            FastExportItem.objects.create(
-                name=f"cap-{i}", amount=Decimal("1.00"), count=i,
-            )
-
-        payload = _ag_flat_payload(
-            [{"dataKey": "name", "headerName": "Name"}],
-            end_row=2,
-        )
-        resp = self.client.post(self.url_export(FAST), data=payload, format="json")
-        self.assertEqual(resp.status_code, 200, _assert_msg(resp))
-
-        df = _read_xlsx_stream(resp)
-        self.assertEqual(
-            len(df), 2,
-            f"endRow=2 must cap the stream; wrote {len(df)} rows",
-        )
+    # NOTE: there is no user-driven ``endRow`` scenario here.
+    # :meth:`_normalize_ag_request` unconditionally overwrites
+    # ``endRow`` to ``MAX_AG_EXPORT_ROWS`` (1,000,000) for every
+    # export request, so the ``written >= end_row`` break inside the
+    # streaming loop is only reachable at 1M rows — unreachable from
+    # a test. The clamp itself is exercised by scenario 13.7
+    # (AG ``endRow`` over limit → export still succeeds).
 
     # -- 13.18 ---------------------------------------------------------
     def test_13_18_empty_queryset_streaming_returns_404(self) -> None:
