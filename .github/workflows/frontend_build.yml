@@ -33,12 +33,49 @@ on:
 env:
   FRONTEND_REPO: ExcellenceCloudGmbH/process-admin-general-client
   FRONTEND_BRANCH: ${{ inputs.frontend_branch || 'lex-app-v2-pac-latest' }}
-  COVERAGE_THRESHOLD: "76"                       # vitest line-coverage gate
+  COVERAGE_THRESHOLD: "76" # vitest line-coverage gate
 
 jobs:
+  # ── Step 0: Preflight — verify required secrets / inputs ───────────
+  # The default GITHUB_TOKEN cannot read a *different* private repo
+  # (process-admin-general-client), so a PAT in FRONTEND_REPO_TOKEN is
+  # mandatory. Without it, actions/checkout reports a confusing
+  # "repository not found" error. Fail fast with a clear message instead.
+  preflight:
+    name: "Preflight: Validate Secrets"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure FRONTEND_REPO_TOKEN is configured
+        env:
+          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
+        run: |
+          if [ -z "${FRONTEND_REPO_TOKEN}" ]; then
+            echo "::error title=Missing secret::FRONTEND_REPO_TOKEN is not set."
+            echo "This workflow checks out '${FRONTEND_REPO}@${FRONTEND_BRANCH}',"
+            echo "which is a *different* repository than the one running this workflow."
+            echo "The default GITHUB_TOKEN cannot access cross-repository private content,"
+            echo "so a Personal Access Token (or fine-grained token / GitHub App token)"
+            echo "with 'Contents: read' permission on '${FRONTEND_REPO}' must be"
+            echo "configured as the repository secret 'FRONTEND_REPO_TOKEN'."
+            exit 1
+          fi
+          echo "FRONTEND_REPO_TOKEN is configured ✅"
+
+      - name: Ensure NPM_MARMELAB_TOKEN is configured
+        env:
+          NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
+        run: |
+          if [ -z "${NPM_MARMELAB_TOKEN}" ]; then
+            echo "::error title=Missing secret::NPM_MARMELAB_TOKEN is not set."
+            echo "Required to install private @marmelab packages from the npm registry."
+            exit 1
+          fi
+          echo "NPM_MARMELAB_TOKEN is configured ✅"
+
   # ── Step 1: Frontend unit tests ────────────────────────────────────
   unit-tests:
     name: "Frontend: Unit Tests"
+    needs: preflight
     runs-on: ubuntu-latest
 
     steps:
@@ -50,7 +87,7 @@ jobs:
         with:
           repository: ${{ env.FRONTEND_REPO }}
           ref: ${{ env.FRONTEND_BRANCH }}
-          token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: frontend
 
       - uses: actions/setup-node@v4
@@ -74,6 +111,7 @@ jobs:
   # ── Step 2: Playwright E2E tests (real Django backend) ─────────────
   e2e-tests:
     name: "Frontend: E2E Tests"
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -86,7 +124,7 @@ jobs:
         with:
           repository: ${{ env.FRONTEND_REPO }}
           ref: ${{ env.FRONTEND_BRANCH }}
-          token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: frontend
 
       # ── Python (lex CLI) ───────────────────────────────────────────
@@ -165,7 +203,7 @@ jobs:
         with:
           repository: ${{ env.FRONTEND_REPO }}
           ref: ${{ env.FRONTEND_BRANCH }}
-          token: ${{ secrets.FRONTEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: frontend
 
       - uses: actions/setup-node@v4
