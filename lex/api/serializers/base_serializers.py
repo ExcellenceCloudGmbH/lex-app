@@ -25,6 +25,7 @@ LEX_SCOPES_NAME = "lex_reserved_scopes"
 # Cache: LexModel base field names (identical for every LexModel subclass)
 _lexmodel_fields: set | None = None
 
+
 def _get_lexmodel_fields() -> set:
     """Return the cached set of LexModel base field names."""
     global _lexmodel_fields
@@ -39,6 +40,7 @@ def _get_lexmodel_fields() -> set:
 # Cache: model-name -> model-class lookup for _resolve_target_model
 _model_lookup: dict | None = None
 
+
 def _get_model_lookup() -> dict:
     """Return a lazily-built { lower_name: model_class } dict."""
     global _model_lookup
@@ -52,6 +54,7 @@ def _get_model_lookup() -> dict:
 
 # Cache: model_class -> capability flags (avoids repeated hasattr per record)
 _capability_cache: dict = {}
+
 
 def _get_capabilities(model_class: type) -> dict:
     """Return cached capability flags for a model class."""
@@ -95,10 +98,9 @@ class LexSerializer(serializers.ModelSerializer):
     # ------------------------------------------------------------------
     # Per-serializer caches (populated once, reused across all records)
     # ------------------------------------------------------------------
-    _base_user_context = None      # Cached UserContext without keycloak scopes
+    _base_user_context = None  # Cached UserContext without keycloak scopes
     _meta_fields_cache: dict = {}  # { model_class: set_of_field_names }
     _concrete_field_map_cache: dict = {}  # { model_class: { field_name: field } }
-
 
     def _get_base_user_context(self, request):
         """Get or create a base UserContext cached on this serializer instance."""
@@ -330,11 +332,11 @@ class LexSerializer(serializers.ModelSerializer):
 
     @classmethod
     def _can_read_related_payload_reference(
-        cls,
-        request,
-        related_model,
-        value,
-        base_user_context=None,
+            cls,
+            request,
+            related_model,
+            value,
+            base_user_context=None,
     ) -> bool:
         if not isinstance(value, dict):
             return True
@@ -378,56 +380,56 @@ class LexSerializer(serializers.ModelSerializer):
 
     @classmethod
     def _filter_foreign_key_relations(
-        cls,
-        request,
-        model_class,
-        payload: dict,
-        base_user_context=None,
+            cls,
+            request,
+            model_class,
+            payload: dict,
+            base_user_context=None,
     ) -> dict:
         """
         Filter foreign key relationships in payload based on individual permissions.
-        
+
         Args:
             request: Django request object
             model_class: The main model class
             payload: The audit log payload dictionary
-            
+
         Returns:
             Filtered payload with unauthorized foreign key relations removed
         """
         if not payload:
             return payload
-            
+
         filtered_payload = payload.copy()
-        
+
         # Get field map for the model
         field_map = cls._get_cached_concrete_field_map(model_class)
-        
+
         for field_name, field_value in payload.items():
             if field_name in field_map:
                 field = field_map[field_name]
-                
+
                 # Check if this is a foreign key field with dictionary representation
                 if isinstance(field, ForeignKey) and isinstance(field_value, dict):
                     related_model = field.related_model
                     if not cls._can_read_related_payload_reference(
-                        request,
-                        related_model,
-                        field_value,
-                        base_user_context=base_user_context,
+                            request,
+                            related_model,
+                            field_value,
+                            base_user_context=base_user_context,
                     ):
                         filtered_payload.pop(field_name, None)
                         continue
-        
+
         return filtered_payload
 
     @classmethod
     def _get_audit_log_payload_visible_fields(
-        cls,
-        request,
-        model_class,
-        payload,
-        base_user_context=None,
+            cls,
+            request,
+            model_class,
+            payload,
+            base_user_context=None,
     ) -> set[str] | None:
         if request is not None:
             fast_path_result = can_read_with_default_permission_scope(request, model_class, payload)
@@ -489,13 +491,13 @@ class LexSerializer(serializers.ModelSerializer):
     def _parse_value_for_field(field, value):
         if value is None:
             return None
-        
+
         # Handle foreign key relationships stored as dictionaries
         if isinstance(field, ForeignKey) and isinstance(value, dict):
             if 'id' in value:
                 return value['id']
             return None
-        
+
         try:
             if isinstance(field, DateTimeField):
                 return datetime.fromisoformat(value)
@@ -506,7 +508,6 @@ class LexSerializer(serializers.ModelSerializer):
         except Exception:
             return None
         return value
-
 
     # System fields always allowed through visibility filtering
     _SYSTEM_FIELDS = frozenset({
@@ -530,7 +531,7 @@ class LexSerializer(serializers.ModelSerializer):
 
         # Normal visible fields for concrete models
         visible_fields = None
-        
+
         # 1. Try Legacy 'can_read'
         if target_caps['has_can_read']:
             raw_visible_fields = target_instance.can_read(request)
@@ -540,25 +541,25 @@ class LexSerializer(serializers.ModelSerializer):
                 visible_fields = self._get_cached_field_names(type(target_instance))
             else:
                 visible_fields = self._normalize_field_names(raw_visible_fields)
-            
+
         # 2. Try New System 'permission_read'
         elif target_caps['has_permission_read']:
-             user_context = self._get_user_context(request, target_instance)
-             result = target_instance.permission_read(user_context)
-             if hasattr(result, "allowed") and not result.allowed:
-                 return {}  # Hide entirely
-             
-             all_fields = self._get_cached_field_names(type(target_instance))
-             if hasattr(result, "get_fields"):
-                 visible_fields = self._normalize_field_names(result.get_fields(all_fields))
-             elif result:
-                 visible_fields = set(all_fields)
-             else:
-                 visible_fields = set()
+            user_context = self._get_user_context(request, target_instance)
+            result = target_instance.permission_read(user_context)
+            if hasattr(result, "allowed") and not result.allowed:
+                return {}  # Hide entirely
+
+            all_fields = self._get_cached_field_names(type(target_instance))
+            if hasattr(result, "get_fields"):
+                visible_fields = self._normalize_field_names(result.get_fields(all_fields))
+            elif result:
+                visible_fields = set(all_fields)
+            else:
+                visible_fields = set()
 
         # 3. Fallback: All fields
         if visible_fields is None:
-             visible_fields = self._get_cached_field_names(type(instance))
+            visible_fields = self._get_cached_field_names(type(instance))
         else:
             visible_fields = self._normalize_field_names(visible_fields)
 
@@ -566,12 +567,12 @@ class LexSerializer(serializers.ModelSerializer):
             return {}
 
         representation = super().to_representation(instance)
-        
+
         # Filter non-AuditLog outputs by visible fields
         model_field_names = self._get_cached_field_names(type(target_instance))
         serializer_only_fields = set(self.fields.keys()) - model_field_names
         allowed_non_model_fields = self._SYSTEM_FIELDS | serializer_only_fields
-        
+
         for field_name in list(representation.keys()):
             if field_name not in visible_fields and field_name not in allowed_non_model_fields:
                 representation.pop(field_name, None)
@@ -599,9 +600,11 @@ class LexSerializer(serializers.ModelSerializer):
                         )
                         if target_visible is not None:
                             keep_always = {'id', 'id_field', SHORT_DESCR_NAME}
-                            pruned = {k: v for k, v in filtered_payload.items() if k in target_visible or k in keep_always}
+                            pruned = {k: v for k, v in filtered_payload.items() if
+                                      k in target_visible or k in keep_always}
                             if "updates" in filtered_payload:
-                                pruned_updates = {k: v for k, v in filtered_payload['updates'].items() if k in target_visible or k in keep_always}
+                                pruned_updates = {k: v for k, v in filtered_payload['updates'].items() if
+                                                  k in target_visible or k in keep_always}
                                 pruned['updates'] = pruned_updates
 
                             representation['payload'] = pruned
@@ -611,6 +614,7 @@ class LexSerializer(serializers.ModelSerializer):
             pass
 
         return representation
+
 
 # --- UPDATED BASE TEMPLATE ---
 class RestApiModelSerializerTemplate(LexSerializer):
@@ -670,7 +674,6 @@ def model2serializer(model, fields=None, name_suffix=""):
     )
 
 
-
 def _wrap_custom_serializer(custom_cls, model_class):
     meta = getattr(custom_cls, "Meta", type("Meta", (), {}))
     existing_fields = getattr(meta, "fields", "__all__")
@@ -706,7 +709,7 @@ def _wrap_custom_serializer(custom_cls, model_class):
         ID_FIELD_NAME: serializers.ReadOnlyField(default=model_class._meta.pk.name),
         SHORT_DESCR_NAME: serializers.SerializerMethodField(),
         "get_short_description": lambda self, obj: str(obj),
-        "id": serializers.ReadOnlyField(source=pk_attname),
+        "id": serializers.ReadOnlyField() if pk_attname == "id" else serializers.ReadOnlyField(source=pk_attname),
         "Meta": NewMeta,
     }
     base_classes = (LexSerializer, custom_cls)
@@ -747,7 +750,7 @@ def get_serializer_map_for_model(model_class, default_fields=None):
 
     custom = getattr(model_class, "api_serializers", None)
     has_custom_default_override = (
-        isinstance(custom, dict) and "default" in custom
+            isinstance(custom, dict) and "default" in custom
     )
 
     if auto_default is not None:
@@ -773,9 +776,9 @@ def get_serializer_map_for_model(model_class, default_fields=None):
                 DEFAULT_SERIALIZER_NAME = "default"
 
             if (
-                configured_name
-                and configured_name != DEFAULT_SERIALIZER_NAME
-                and configured_name not in custom
+                    configured_name
+                    and configured_name != DEFAULT_SERIALIZER_NAME
+                    and configured_name not in custom
             ):
                 serializers_map[configured_name] = auto_default
 
@@ -822,9 +825,9 @@ def resolve_default_serializer_name(serializers_map):
         return "default"
 
     if (
-        configured_name
-        and configured_name != DEFAULT_SERIALIZER_NAME
-        and configured_name in serializers_map
+            configured_name
+            and configured_name != DEFAULT_SERIALIZER_NAME
+            and configured_name in serializers_map
     ):
         return configured_name
     return "default"
