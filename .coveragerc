@@ -1,6 +1,13 @@
 [run]
 branch = True
 relative_files = True
+# Tag every hit line with the fully-qualified dotted name of the test
+# function that produced it (e.g. ``lex.test_project.tests.init.test_1a.
+# TestInit.test_bar|run``). The showcase runner uses this to compute
+# per-cluster coverage without a manual ``cov_include`` list — a file
+# counts toward a cluster's denominator only if a test in that cluster
+# actually *executed* one of its lines (not just imported it).
+dynamic_context = test_function
 # The lex codebase uses both fully-qualified imports (lex.core.models.LexModel)
 # AND bare Django-app-level imports (core.models.LexModel, lex_app.settings,
 # api.utils, audit_logging.mixins, etc.).  Python registers the module under

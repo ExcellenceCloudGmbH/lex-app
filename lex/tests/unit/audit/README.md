@@ -4,7 +4,7 @@
 > what, when, why — and downstream systems (WebSocket, cache, context resolver)
 > must stay in sync without duplicating logic."*
 
-## What Lives Here (13 files, 246 tests)
+## What Lives Here (21 files)
 
 | File | Tests | Covers |
 |------|------:|--------|
@@ -21,6 +21,13 @@
 | `test_websocket_notifier.py` | 8 | `WebSocketNotifier` — channel routing, payload construction, silent failure on disconnect |
 | `test_lex_logger.py` | 8 | `LexLogger` — structured log output, context enrichment, level filtering |
 | `test_audit_actor_tracking.py` | 15 | End-to-end actor propagation across create → calculate → update cycles |
+| `test_audit_config.py` | — | Audit configuration — enabled/disabled, format, backend selection |
+| `test_audit_data_models.py` | — | AuditLog / AuditLogStatus data model fields and constraints |
+| `test_audit_log_retry.py` | — | Audit log retry on transient failures |
+| `test_cache_manager_io.py` | — | CacheManager I/O — store/get/cleanup round-trips with LocMemCache |
+| `test_calculation_audit_helpers.py` | — | Calculation audit helper functions |
+| `test_channel_layer_utils.py` | — | Channel-layer utility functions for WebSocket routing |
+| `test_model_context.py` | — | ModelContext — model→context assembly for audit payloads |
 
 ## Key Concepts Tested
 
@@ -34,6 +41,6 @@
 
 ```bash
 source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
-lex test lex.tests.unit.audit              # all 246 tests
+lex test lex.tests.unit.audit              # all tests
 lex test lex.tests.unit.audit.test_audit_log_mixin  # 49 tests
 ```

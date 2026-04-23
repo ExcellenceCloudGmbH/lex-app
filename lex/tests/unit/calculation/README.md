@@ -4,7 +4,7 @@
 > whether to calculate synchronously, dispatch to Celery, or skip entirely —
 > and it must track every state transition along the way."*
 
-## What Lives Here (9 files, 142 tests)
+## What Lives Here (11 files)
 
 | File | Tests | Covers |
 |------|------:|--------|
@@ -17,6 +17,8 @@
 | `test_calculation_history_transitions.py` | 4 | History-row recording during `CalculationStatus` transitions through API-driven save/calculate cycles |
 | `test_calculation_wait_contexts.py` | 4 | `WaitForCalculation` / `CheckCalculation` context behaviour: local waiting, nested reuse, sync-inside-worker fallback |
 | `test_celery_task_dispatcher.py` | 25 | Group dispatch, single-group dispatch, sync fallback on Celery failure, task-result handling (success / partial-failure / retry) |
+| `test_objects_to_recalculate_store.py` | — | ObjectsToRecalculateStore — mark/clear/query objects pending recalculation |
+| `test_operation_context.py` | — | OperationContext — thread-local actor/calculation-ID propagation |
 
 ## Key Concepts Tested
 
@@ -30,6 +32,6 @@
 
 ```bash
 source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
-lex test lex.tests.unit.calculation          # all 142 tests
+lex test lex.tests.unit.calculation          # all tests
 lex test lex.tests.unit.calculation.test_calculation_model_state_machine  # 33 tests
 ```

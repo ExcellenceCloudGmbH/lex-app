@@ -123,10 +123,57 @@ class KeycloakItem(LexModel):
         return self.label
 
 
-ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem]
+class FilterBackendItem(LexModel):
+    """
+    Row-level visibility for Cluster 4e.
+
+    Drives :class:`UserReadRestrictionFilterBackend` through three
+    profiles selected by the caller's Django groups:
+
+    * ``"admin"`` → :meth:`PermissionResult.allow_all` (whole queryset
+      passes through unchanged — exercises the ``return queryset`` /
+      ``not excluded`` branch).
+    * ``"deny_all"`` → :meth:`PermissionResult.deny` on every row
+      (every row is excluded — exercises the "empty result" path).
+    * default → allow non-secret rows, deny secret rows row-by-row
+      (exercises ``queryset.iterator()`` + ``excluded.append``).
+    """
+
+    name = models.CharField(max_length=200)
+    is_secret = models.BooleanField(default=False)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        if uc.is_superuser or "admin" in uc.groups:
+            return PermissionResult.allow_all(
+                "cluster 4e: admin/superuser sees every row"
+            )
+        if "deny_all" in uc.groups:
+            return PermissionResult.deny(
+                "cluster 4e: deny-all profile — no rows visible"
+            )
+        if self.is_secret:
+            return PermissionResult.deny(
+                "cluster 4e: secret row hidden from non-admin"
+            )
+        return PermissionResult.allow_all(
+            "cluster 4e: non-secret row visible to everyone"
+        )
+
+    def permission_list(self, uc):
+        return True
+
+
+ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem]
 
 # URL names expected by process_admin_rest_api — lowercased model name.
 PROTECTED = "protecteditem"
 FIELD_LEVEL = "fieldlevelitem"
 KEYCLOAK = "keycloakitem"
+FILTER_BACKEND = "filterbackenditem"
 

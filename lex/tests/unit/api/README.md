@@ -4,7 +4,7 @@
 > and delete model entries — and the API must return the right structure,
 > enforce permissions, and serialise every field correctly."*
 
-## What Lives Here (18 files, 227 tests)
+## What Lives Here (28 files)
 
 | File | Tests | Covers |
 |------|------:|--------|
@@ -26,7 +26,16 @@
 | `test_model_utils.py` | 18 | Model utility functions — field introspection, related-model discovery |
 | `test_model_registration.py` | 14 | Auto-registration — models discovered and registered at startup |
 | `test_constants.py` | 15 | API constants — status codes, content types, header names |
-| `test_model_export_utilities.py` | — | *(shared with grid/ — export helpers used by both API and AG Grid)* |
+| `test_api_helpers.py` | — | API request/response helper utilities |
+| `test_api_helpers_advanced.py` | — | Advanced API helper edge cases |
+| `test_api_key_requests.py` | — | API key–based request authentication |
+| `test_destroy_mixin.py` | — | Destroy mixin — soft-delete, cascade behaviour |
+| `test_filter_backends.py` | — | DRF filter backend integration |
+| `test_filter_tree_node.py` | — | Filter tree node parsing and traversal |
+| `test_model_converter.py` | — | URL converter for model names |
+| `test_non_atomic_view_transactions.py` | — | Non-atomic view transaction handling |
+| `test_pagination.py` | — | Pagination configuration and limits |
+| `test_view_utils.py` | — | View utility helpers |
 
 ## Key Concepts Tested
 
@@ -40,6 +49,6 @@
 
 ```bash
 source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
-lex test lex.tests.unit.api                # all 227 tests
+lex test lex.tests.unit.api                # all tests
 lex test lex.tests.unit.api.test_one_model_entry  # 22 tests
 ```

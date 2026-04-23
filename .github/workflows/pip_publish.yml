@@ -1,19 +1,35 @@
 # ──────────────────────────────────────────────────────────────────────
 #  Publish lex-app to PyPI.
 #
-#  This workflow:
-#   1. Calls the test suite (django_tests.yml) as a reusable workflow.
-#   2. Only if ALL tests pass and coverage threshold is met, builds the
-#      sdist + wheel and publishes to PyPI.
-#   3. Can be triggered manually (workflow_dispatch) or on a GitHub
-#      release (tag push).
+#  A PyPI release is gated on a single check:
+#    showcase_tests.yml — runs the selected tests from
+#                         ``lex/test_project/tests/`` with coverage,
+#                         emits coverage.xml as a CI artifact, builds
+#                         the "Platform Health Report" (HTML + PDF),
+#                         and ALWAYS sends the branded email via
+#                         SendGrid on EVERY run — pass or fail — so
+#                         stakeholders always get a status update on
+#                         release day.
+#
+#  History: ``django_tests.yml`` used to run as a second, parallel
+#  gate. On 22 April 2026 it was absorbed into ``showcase_tests.yml``
+#  — both workflows were running the same test selector and building
+#  the same coverage.xml, so running them separately doubled the CI
+#  cost with no added signal.
+#
+#  If the gate fails, the ``publish`` job is skipped and no version
+#  is pushed to PyPI. If it passes, the sdist + wheel are built and
+#  uploaded.
 #
 #  Version is derived from the GitHub release tag (e.g. v2.0.0rc124
 #  → 2.0.0rc124). The version in pyproject.toml is dynamic — it reads
 #  from lex/_version.py which this workflow writes before building.
 #
 #  Required secrets:
-#   - PYPI_API_TOKEN  (PyPI API token with upload permission)
+#   - PYPI_API_TOKEN               (PyPI API token with upload permission)
+#   - SENDGRID_API_KEY             (used by the showcase workflow)
+#   - SHOWCASE_REPORT_RECIPIENTS
+#   - SHOWCASE_REPORT_FROM
 # ──────────────────────────────────────────────────────────────────────
 
 name: Publish to PyPI
@@ -35,18 +51,46 @@ on:
         description: "Version to publish (e.g. 2.0.0rc124). Required for manual runs."
         required: false
         type: string
+      clusters:
+        description: >-
+          Cluster selector fed to BOTH gate-tests and gate-showcase.
+          Same syntax as ``run_showcase_suite.py --only``. Default is
+          the release-blessed subset. Change this to trial-run a wider
+          (or narrower) subset from a manual dispatch.
+        required: false
+        type: string
+        default: >-
+          init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
 
 jobs:
-  # ── Step 1: Run the full test suite ──────────────────────────────
-  gate-tests:
-    name: "Gate: Test Suite"
-    uses: ./.github/workflows/django_tests.yml
+  # ── Step 1: Gate on the selected tests + emit the customer report ─
+  # showcase_tests.yml is the ONLY release gate (the former
+  # django_tests.yml was absorbed into it on 22 April 2026 — it ran
+  # the same tests twice with the same selector, so we consolidated).
+  #
+  # This job:
+  #   * runs the tests (coverage run) for the configured selector,
+  #   * emits coverage.xml as a CI artifact ("backend-coverage-report"),
+  #   * builds the Platform Health Report HTML + PDF,
+  #   * ALWAYS emails the report via SendGrid — pass or fail,
+  #   * exits non-zero iff any cluster failed.
+  #
+  # The `publish` step below will not run unless this gate is green.
+  gate-release:
+    name: "Release Gate: Tests + Customer Email"
+    uses: ./.github/workflows/showcase_tests.yml
     secrets: inherit
+    with:
+      # Single source of truth for the test scope. Edit here (or
+      # override from workflow_dispatch) — the same selector drives
+      # both the release gate and the email content.
+      clusters: ${{ inputs.clusters || 'init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record' }}
 
-  # ── Step 2: Build and publish (only if tests pass) ──────────────
+  # ── Step 2: Build and publish (only if the gate passes) ──────────
   publish:
     name: "Build & Publish"
-    needs: gate-tests       # ← hard dependency — skipped if tests fail
+    needs: [gate-release]   # ← hard dependency — skipped if gate fails
+                            #   (no PyPI push when tests fail)
     runs-on: ubuntu-latest
 
     permissions:

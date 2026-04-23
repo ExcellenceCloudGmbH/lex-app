@@ -147,7 +147,7 @@ If either command is broken, a new customer cannot start using the framework at 
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 2.1 | POST creates a record | Response 201, body includes `id`, record in DB |
+| 2.1 | POST creates a record (**CI showcase test**) | Response 201, body includes `id`, record in DB. This is the CRUD showcase scenario driven by `.github/workflows/showcase_tests.yml`. |
 | 2.2 | POST sets framework-managed fields | `created_at`, `edited_at`, `created_by` = authenticated user's email |
 | 2.3 | POST with missing required field | Response 400, error names the missing field, no record created |
 | 2.4 | POST with invalid field type | Response 400, no record created |
@@ -828,20 +828,22 @@ After landing Clusters 1–14 (176+ scenarios, 14 real framework bugs surfaced),
 
 Priorities below are ordered by expected coverage delta × customer-visibility.
 
-### 4e. Read-restriction filter backend — `UserReadRestrictionFilterBackend`
+### 4e. Read-restriction filter backend — `UserReadRestrictionFilterBackend` 🟢
 
 **Gap:** `lex/api/views/model_entries/filter_backends.py` — 198 stmts, **28.97%** covered. Every List / Export / History query passes through this; also the lookup table for BUG-011 (permission O(n)).
 
-**Models:** `ProtectedItem` (reused from 4a) + new `MixedResourceItem` for the AuditLog content-type visibility path.
+**Models:** new `FilterBackendItem` in `permissions/models.py` — a minimal `LexModel` with `name` + `is_secret` whose `permission_read` branches on the caller's Django groups to hit all three filter-backend code paths in one fixture (`admin` → `allow_all`, `deny_all` → `deny`, default → per-row deny of secret rows). `MixedResourceItem` is deferred alongside the AuditLog scenarios (4.14 / 4.15) which need the Keycloak `user_permissions` payload + seeded `AuditLog` rows.
 
-| # | Scenario | What We Assert |
-|---|----------|----------------|
-| 4.13 | Per-row visibility — mixed allowed/denied rows in one page | Only allowed rows in response, `rowCount` reflects filtered total |
-| 4.14 | AuditLog resource filter — `_build_auditlog_db_visibility_filters` | Rows for resources the user can't read are excluded at the DB level (no Python-side filtering for handled resources) |
-| 4.15 | AuditLog deferred-permission path — mixed handled + residual resources | Residual rows are permission-checked via `can_read_from_payload`; handled rows go through the DB filter |
-| 4.16 | `pk_only=true` fast path honours permissions | Denied rows excluded from id list; count matches allowed subset |
-| 4.17 | Superuser bypass | `permission_read` never invoked; all rows returned |
-| 4.18 | Deny-all short-circuit — `permission_read → deny` | Zero rows, zero SQL beyond the permission probe |
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 4.13 | Per-row visibility — mixed allowed/denied rows in one page | Only allowed rows in response (exercises `queryset.iterator()` + `excluded.append`) | 🟢 |
+| 4.14 | AuditLog resource filter — `_build_auditlog_db_visibility_filters` | Rows for resources the user can't read are excluded at the DB level | ⏸ skip (fixture) |
+| 4.15 | AuditLog deferred-permission path — mixed handled + residual resources | Residual rows are permission-checked via `can_read_from_payload` | ⏸ skip (fixture) |
+| 4.16 | `pk_only=true` fast path honours permissions | Denied pks excluded from id list; `count` matches allowed subset | 🟢 |
+| 4.17 | `allow_all` profile (admin group) returns every row | `permission_read → allow_all`, no exclusion (`return queryset` branch) | 🟢 |
+| 4.18 | Deny-all short-circuit — `permission_read → deny` on every row | Zero rows returned even though DB holds every seeded row | 🟢 |
+
+**Status:** 🟢 Complete — 4 pass + 2 skip. See progress.md Session 16.
 
 ### 4f. Serializer-level masking — `PermissionAwareSerializerMixin`
 
@@ -925,6 +927,32 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:** 🟢 Complete — 4 pass / 0 fail.
 
+### 7g — `CalculatedModel.create()` pipeline (end-to-end) 🟢
+
+**Gap:** `lex/core/mixins/CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
+
+1. `_generate_model_combinations` (1346-1401)
+2. `_prepare_models_for_processing` (1403-1494)
+3. `_create_processing_clusters` (1497-1576)
+4. `_dispatch_model_processing` — sync branch (1579-1713)
+5. `calc_and_save_sync` (843-971)
+6. `delete_models_with_same_defining_fields` (1715-1807)
+
+**Model:** new `CombinatorialCalc` — a non-atomic `CalculatedModelMixin` subclass with `defining_fields = ["region", "category"]` and `parallelizable_fields = ["region"]`. A single `create()` call walks every one of the six sections above.
+
+**Shape:** `E2ETestCase` — runs under `CELERY_ACTIVE=False` (the documented sync fallback); same environment every other Cluster 7 scenario uses.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 7.25 | `Model.create(region=[...], category=[...])` cartesian expansion | 3×2 = 6 rows persisted, each with `name` set by `calculate()`; exercises combination generator → prepare → cluster → dispatch → `calc_and_save_sync` |
+| 7.26 | `Model.create()` with no kwargs falls back to `get_selected_key_list` | Default 2×2 = 4 rows, one per `(region, category)` combo |
+| 7.27 | Partial failure — `calculate()` raises for one region | `calc_and_save_sync` catches + accumulates the error and keeps going; failed rows are NOT saved; successful rows persist; "processed_count > 0" warning branch fires |
+| 7.28 | `Model.create()` is idempotent on rerun | `delete_models_with_same_defining_fields` detects existing rows; pk set unchanged between runs |
+| 7.29 | Empty `get_selected_key_list` return prunes the whole branch | Zero rows, no error — exercises the `if not field_values: continue` + early-break |
+| 7.30 | `delete_models_with_same_defining_fields` on un-saved instance | Returns `self` and resets a stale pk to `None` so caller can INSERT |
+
+**Status:** 🟢 Complete — 6 pass / 0 fail. Drove `CalculatedModelMixin.py` from **33.74% → 64.75%** (+31 pts, +170 lines covered).
+
 ### Sequencing
 
 ```
@@ -934,6 +962,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 10e (schema introspection) — small surface, frontend-critical
 10f (global search)        — small, user-facing
 5.11 + 9.7-9.10            — close remaining holes in already-🟢 clusters
+7g  (CalculatedModel.create pipeline) — closes the largest single source-file gap
 ```
 
 **Why no new top-level clusters:** every gap is a *facet* of an existing user-journey concern. Permission enforcement belongs in Cluster 4. Schema & search belong in Cluster 10 (API Layer). Write-path serializer behaviour is Cluster 12. Signal branches are Cluster 9. Splitting them out would fragment the story and duplicate setup.
@@ -959,6 +988,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | `ChildCalc` | CalculationModel | 7, 9 |
 | `GrandchildCalc` | CalculationModel | 7 |
 | `FailingCalc` | CalculationModel | 7 |
+| `CombinatorialCalc` | CalculatedModelMixin (`defining_fields`, `parallelizable_fields`) | 7 (7g) |
 | `CeleryCalc` | CalculationModel (@lex_shared_task) | 8 |
 | `StressCounterparty` | LexModel (small FK target) | 11 |
 | `StressInvoice` | LexModel (wide row, FK to StressCounterparty) | 11 |
