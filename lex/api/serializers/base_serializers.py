@@ -692,24 +692,93 @@ def _wrap_custom_serializer(custom_cls, model_class):
             "list_serializer_class": FilteredListSerializer
         }
     )
+    # Always declare ``id`` explicitly so the wrapped serializer's output
+    # contains the model's primary-key value regardless of how the
+    # developer's ``Meta.fields`` / ``Meta.exclude`` is shaped or whether
+    # they declared a custom ``id`` field. The frontend SSRM datasource and
+    # row-action handlers depend on this key to derive show/edit URLs and
+    # to fire CRUD mutations (otherwise rows fall back to a synthetic
+    # ``ssrm:groupPath:...`` id that breaks navigation and skips the
+    # loading overlay).
+    pk_attname = model_class._meta.pk.attname
+
     attrs = {
         ID_FIELD_NAME: serializers.ReadOnlyField(default=model_class._meta.pk.name),
         SHORT_DESCR_NAME: serializers.SerializerMethodField(),
         "get_short_description": lambda self, obj: str(obj),
+        "id": serializers.ReadOnlyField(source=pk_attname),
         "Meta": NewMeta,
     }
     base_classes = (LexSerializer, custom_cls)
-    return type(f"{custom_cls.__name__}WithInternalFields", base_classes, attrs)
+    wrapped_cls = type(
+        f"{custom_cls.__name__}WithInternalFields", base_classes, attrs
+    )
+
+    # Post-pass: guarantee the row carries the model PK under ``id``. We do
+    # this in addition to the declared ``id = ReadOnlyField(...)`` because
+    # the developer's ``Meta.exclude`` or ``permission_read`` /
+    # ``can_read`` result can drop declared fields during
+    # ``LexSerializer.to_representation``'s visibility filter. The frontend
+    # SSRM datasource and the show/edit/CRUD handlers rely on
+    # ``record.id`` being the real PK — without it the row falls back to
+    # a synthetic ``ssrm:groupPath:...`` id that breaks navigation and
+    # suppresses the CRUD loading overlay.
+    _base_to_representation = wrapped_cls.to_representation
+
+    def _to_representation_with_id(self, instance, _pk_attname=pk_attname):
+        representation = _base_to_representation(self, instance)
+        # Respect deny-all: ``LexSerializer.to_representation`` returns an
+        # empty dict when ``can_read`` / ``permission_read`` denies the
+        # row entirely. Injecting an ``id`` there would leak the PK.
+        if isinstance(representation, dict) and representation and instance is not None:
+            pk_value = getattr(instance, _pk_attname, None)
+            if pk_value is not None:
+                representation["id"] = pk_value
+        return representation
+
+    wrapped_cls.to_representation = _to_representation_with_id
+    return wrapped_cls
 
 
 def get_serializer_map_for_model(model_class, default_fields=None):
     serializers_map = {}
 
     auto_default = model2serializer(model_class, default_fields)
+
+    custom = getattr(model_class, "api_serializers", None)
+    has_custom_default_override = (
+        isinstance(custom, dict) and "default" in custom
+    )
+
     if auto_default is not None:
         serializers_map["default"] = auto_default
 
-    custom = getattr(model_class, "api_serializers", None)
+        # If the project explicitly overrides the framework's auto-generated
+        # "default" serializer for this model, additionally expose the
+        # framework-generated serializer under the project-configured alias
+        # (see ``DEFAULT_SERIALIZER_NAME`` / ``default_serializer_name`` in
+        # ``lex_config.py`` or ``_authentication_settings.py``). Models that
+        # do not override "default" keep the historical behavior: only the
+        # auto-generated serializer is registered, under the "default" key.
+        if has_custom_default_override:
+            try:
+                from lex.core.config import (
+                    DEFAULT_SERIALIZER_NAME,
+                    get_configured_default_serializer_name,
+                )
+
+                configured_name = get_configured_default_serializer_name()
+            except Exception:
+                configured_name = "default"
+                DEFAULT_SERIALIZER_NAME = "default"
+
+            if (
+                configured_name
+                and configured_name != DEFAULT_SERIALIZER_NAME
+                and configured_name not in custom
+            ):
+                serializers_map[configured_name] = auto_default
+
     if isinstance(custom, dict) and custom:
         for name, cls in custom.items():
             try:
@@ -722,3 +791,56 @@ def get_serializer_map_for_model(model_class, default_fields=None):
                     exc,
                 )
     return serializers_map
+
+
+def resolve_default_serializer_name(serializers_map):
+    """Return the key under which the framework auto-generated serializer
+    lives in ``serializers_map``.
+
+    When a project has configured ``DEFAULT_SERIALIZER_NAME`` in
+    ``lex_config.py`` / ``_authentication_settings.py`` and the developer
+    has overridden the model's ``"default"`` serializer, the framework
+    auto-generated serializer is registered under that configured alias
+    by :func:`get_serializer_map_for_model`. In that case the alias is
+    returned; otherwise ``"default"`` is returned for backward compatibility.
+
+    This is the canonical lookup used by framework-internal endpoints
+    (history snapshots, foreign-key reference loaders, model_info/Fields,
+    obj_serializer wiring, etc.) that need the framework's full-fidelity
+    serializer regardless of any developer override.
+    """
+    if not isinstance(serializers_map, dict) or not serializers_map:
+        return "default"
+    try:
+        from lex.core.config import (
+            DEFAULT_SERIALIZER_NAME,
+            get_configured_default_serializer_name,
+        )
+
+        configured_name = get_configured_default_serializer_name()
+    except Exception:
+        return "default"
+
+    if (
+        configured_name
+        and configured_name != DEFAULT_SERIALIZER_NAME
+        and configured_name in serializers_map
+    ):
+        return configured_name
+    return "default"
+
+
+def resolve_requested_serializer_name(serializers_map, requested_name):
+    """Resolve a serializer name requested by an API consumer.
+
+    When the consumer asks for ``"default"`` (either explicitly via
+    ``?serializer=default`` or implicitly by omitting the parameter), this
+    routes the request to the framework auto-generated serializer using
+    :func:`resolve_default_serializer_name`. Any other explicit name is
+    returned unchanged so developers can still target their custom
+    serializers (including their own ``api_serializers["default"]``
+    override via the configured alias name).
+    """
+    if requested_name == "default":
+        return resolve_default_serializer_name(serializers_map)
+    return requested_name

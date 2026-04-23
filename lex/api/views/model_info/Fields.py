@@ -138,6 +138,10 @@ class Fields(APIView):
             try:
                 mfield = model._meta.get_field(source)
                 info = create_field_info(mfield)
+                # Real DB-backed columns can be used as AG Grid row-group
+                # / pivot keys (the backend SSRM endpoint runs
+                # ``qs.values(field).annotate(...)`` against them).
+                info["is_groupable"] = True
 
             except Exception:
                 # 2) Fallback: derive entirely from the DRF field
@@ -164,6 +168,13 @@ class Fields(APIView):
                     "editable": not getattr(drf_field, "read_only", False),
                     "required": getattr(drf_field, "required", False),
                     "default_value": default_value,
+                    # Serializer-only fields (e.g. ``SerializerMethodField``,
+                    # computed properties) have no underlying Django column,
+                    # so the SSRM ``_execute_group_level`` /
+                    # ``_execute_pivot_mode`` paths cannot group/pivot on
+                    # them — flag them so the frontend can disable
+                    # ``enableRowGroup`` / ``enablePivot`` on the column.
+                    "is_groupable": False,
                 }
 
                 # Related-field target

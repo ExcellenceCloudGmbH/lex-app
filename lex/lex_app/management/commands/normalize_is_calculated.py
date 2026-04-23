@@ -16,13 +16,13 @@ def _normalize_value(value):
     if value is True or value == 1:
         return CalculationModel.SUCCESS
     if value is False or value == 0:
-        return CalculationModel.ERROR
+        return CalculationModel.NOT_CALCULATED
     if isinstance(value, str):
         lowered = value.strip().lower()
         if lowered in TRUE_VALUES:
             return CalculationModel.SUCCESS
         if lowered in FALSE_VALUES:
-            return CalculationModel.ERROR
+            return CalculationModel.NOT_CALCULATED
     return None
 
 

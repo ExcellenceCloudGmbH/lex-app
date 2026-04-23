@@ -87,6 +87,56 @@ class AgGridServerSideServiceTests(TestCase):
         self.assertEqual(by_staff[True]["__childCount"], 1)
         self.assertEqual(by_staff[True]["id_count"], 1)
 
+    def test_group_by_serializer_only_field_returns_empty_instead_of_500(self):
+        """Defensive guard: when a developer's overridden default
+        serializer exposes a ``SerializerMethodField`` (e.g.
+        ``formatted_name``), the AG Grid client may still let the user
+        drag that column into the row-group panel. Without the guard
+        ``qs.values("formatted_name").annotate(...)`` raises
+        ``FieldError`` and the SSRM endpoint returns HTTP 500 — the
+        frontend then renders blank group labels and the grouping UX
+        breaks. The guard short-circuits with an empty group level so
+        AG Grid degrades gracefully.
+        """
+
+        payload = {
+            "startRow": 0,
+            "endRow": 100,
+            "rowGroupCols": [{"field": "formatted_name", "id": "formatted_name"}],
+            "groupKeys": [],
+            "valueCols": [],
+            "sortModel": [],
+            "filterModel": {},
+            "pivotMode": False,
+        }
+
+        result = self._view()._execute_ag_grid_request(User.objects.all(), payload)
+        self.assertEqual(result["rowCount"], 0)
+        self.assertEqual(result["rowData"], [])
+
+    def test_pivot_mode_with_serializer_only_row_group_returns_empty(self):
+        """Same guard as ``_execute_group_level``, applied in pivot
+        mode so a non-DB-backed row-group field doesn't crash the
+        pivot path either.
+        """
+
+        payload = {
+            "startRow": 0,
+            "endRow": 100,
+            "rowGroupCols": [{"field": "formatted_name", "id": "formatted_name"}],
+            "groupKeys": [],
+            "pivotCols": [{"field": "is_staff", "id": "is_staff"}],
+            "valueCols": [{"field": "id", "id": "id_sum", "aggFunc": "sum"}],
+            "sortModel": [],
+            "filterModel": {},
+            "pivotMode": True,
+        }
+
+        result = self._view()._execute_ag_grid_request(User.objects.all(), payload)
+        self.assertEqual(result["rowCount"], 0)
+        self.assertEqual(result["rowData"], [])
+        self.assertIn("pivotResultFields", result)
+
     def test_pivot_aggregation(self):
         payload = {
             "startRow": 0,

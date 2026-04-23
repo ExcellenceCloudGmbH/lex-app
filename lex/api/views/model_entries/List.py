@@ -806,6 +806,25 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         annotations.update(self._build_value_annotations(value_cols))
 
         group_field = str(group_col["field"])
+
+        # Defensive validation: when a project overrides
+        # ``api_serializers["default"]`` with a custom serializer that
+        # exposes a ``SerializerMethodField`` (e.g. ``formatted_name``)
+        # or a property with no underlying Django column, the frontend's
+        # AG Grid still marks the column ``enableRowGroup: true`` and the
+        # user can drag it into the row-group panel. Without this guard
+        # ``qs.values(group_field).annotate(...)`` would raise
+        # ``FieldError`` and return HTTP 500, which the SSRM datasource
+        # surfaces as a blank group label and breaks the grouping UX.
+        # Returning an empty group level instead lets AG Grid render
+        # gracefully (no groups for this column) and the user can
+        # choose a different column to group by.
+        if not self._is_valid_field_path(group_field):
+            return {
+                "rowData": [],
+                "rowCount": 0,
+            }
+
         grouped = qs.values(group_field).annotate(**annotations)
         grouped = self._apply_sort_model(grouped, sort_model, allowed_columns={group_field, *annotations.keys()})
 
@@ -948,6 +967,18 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         if row_group_cols and len(group_keys) < len(row_group_cols):
             group_col = row_group_cols[len(group_keys)]
             group_field = str(group_col["field"])
+            # Same defensive guard as ``_execute_group_level``: skip the
+            # ORM ``.values(group_field)`` call for non-DB-backed
+            # serializer fields (e.g. ``SerializerMethodField`` exposed
+            # by an overridden ``api_serializers["default"]``) to avoid a
+            # ``FieldError`` 500 that the FE would render as broken
+            # pivot rows.
+            if not self._is_valid_field_path(group_field):
+                return {
+                    "rowData": [],
+                    "rowCount": 0,
+                    "pivotResultFields": pivot_fields,
+                }
             grouped = qs.values(group_field).annotate(__childCount=Count("pk"), **annotations)
             grouped = self._apply_sort_model(
                 grouped,

@@ -132,6 +132,29 @@ class SerializerMapBehaviorTests(TestCase):
         self.assertIn("short_description", payload)
         self.assertIn("lex_reserved_scopes", payload)
 
+    def test_overridden_default_serializer_always_includes_id(self):
+        """The wrapped developer override must always expose the model's PK
+        as ``id`` so the frontend SSRM datasource can derive a real row id
+        (otherwise show/edit URLs degrade to ``ssrm:groupPath:...`` and the
+        cell-edit handler bails out, suppressing the CRUD loading overlay).
+        """
+
+        class _MinimalDefaultSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = User
+                fields = ("username",)  # intentionally omits "id"
+
+        User.api_serializers = {"default": _MinimalDefaultSerializer}
+
+        serializer_map = get_serializer_map_for_model(
+            User, default_fields=["username"]
+        )
+        payload = serializer_map["default"](User(id=42, username="alice")).data
+
+        self.assertEqual(payload.get("id"), 42)
+        self.assertEqual(payload.get("id_field"), "id")
+        self.assertIn("username", payload)
+
     def test_custom_serializer_method_fields_with_all_fields_are_preserved(self):
         User.api_serializers = {"formatted": _FormattedUserSerializer}
 
@@ -159,6 +182,180 @@ class SerializerMapBehaviorTests(TestCase):
 
         self.assertIn("default", serializer_map)
         self.assertNotIn("broken", serializer_map)
+
+    def test_configured_default_serializer_alias_added_when_default_overridden(self):
+        from lex.core import config as lex_config
+
+        User.api_serializers = {"default": _CompactUserSerializer}
+
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ):
+            serializer_map = get_serializer_map_for_model(
+                User, default_fields=["id", "username"]
+            )
+
+        self.assertEqual(
+            set(serializer_map.keys()), {"default", "framework_default"}
+        )
+        # The "default" entry holds the developer-provided serializer (wrapped),
+        # while the configured alias exposes the framework auto-generated one.
+        self.assertIsNot(
+            serializer_map["default"], serializer_map["framework_default"]
+        )
+        framework_payload = serializer_map["framework_default"](
+            User(id=1, username="alice")
+        ).data
+        self.assertIn("id_field", framework_payload)
+
+    def test_configured_alias_not_added_when_default_not_overridden(self):
+        from lex.core import config as lex_config
+
+        User.api_serializers = {"compact": _CompactUserSerializer}
+
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ):
+            serializer_map = get_serializer_map_for_model(
+                User, default_fields=["id", "username"]
+            )
+
+        # Models without an explicit "default" override keep historical
+        # behavior: only the auto-generated serializer is registered (under
+        # "default") plus the developer's other custom serializers.
+        self.assertEqual(set(serializer_map.keys()), {"default", "compact"})
+
+    def test_configured_alias_skipped_when_name_collides_with_custom(self):
+        from lex.core import config as lex_config
+
+        User.api_serializers = {
+            "default": _CompactUserSerializer,
+            "framework_default": _FormattedUserSerializer,
+        }
+
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ):
+            serializer_map = get_serializer_map_for_model(
+                User, default_fields=["id", "username"]
+            )
+
+        # The developer's own "framework_default" serializer is preserved and
+        # not silently replaced by the framework alias.
+        self.assertEqual(
+            set(serializer_map.keys()), {"default", "framework_default"}
+        )
+        payload = serializer_map["framework_default"](
+            User(username="alice", first_name="Alice", last_name="Smith")
+        ).data
+        self.assertEqual(payload["formatted_name"], "Alice Smith")
+
+    def test_configured_alias_noop_when_name_equals_default(self):
+        from lex.core import config as lex_config
+
+        User.api_serializers = {"default": _CompactUserSerializer}
+
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="default",
+        ):
+            serializer_map = get_serializer_map_for_model(
+                User, default_fields=["id", "username"]
+            )
+
+        self.assertEqual(set(serializer_map.keys()), {"default"})
+
+    # ------------------------------------------------------------------
+    # resolve_default_serializer_name / resolve_requested_serializer_name
+    # ------------------------------------------------------------------
+
+    def test_resolve_default_returns_default_when_no_alias_registered(self):
+        from lex.api.serializers.base_serializers import (
+            resolve_default_serializer_name,
+        )
+
+        self.assertEqual(
+            resolve_default_serializer_name({"default": _CompactUserSerializer}),
+            "default",
+        )
+
+    def test_resolve_default_returns_alias_when_developer_overrode_default(self):
+        from lex.core import config as lex_config
+        from lex.api.serializers.base_serializers import (
+            resolve_default_serializer_name,
+        )
+
+        serializer_map = {
+            "default": _CompactUserSerializer,
+            "framework_default": _NewDefaultUserSerializer,
+        }
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ):
+            self.assertEqual(
+                resolve_default_serializer_name(serializer_map),
+                "framework_default",
+            )
+
+    def test_resolve_default_falls_back_when_alias_not_registered(self):
+        from lex.core import config as lex_config
+        from lex.api.serializers.base_serializers import (
+            resolve_default_serializer_name,
+        )
+
+        # Model did not override "default" → alias is not in the map → fall
+        # back to literal "default".
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ):
+            self.assertEqual(
+                resolve_default_serializer_name(
+                    {"default": _CompactUserSerializer}
+                ),
+                "default",
+            )
+
+    def test_resolve_requested_passes_through_explicit_custom_names(self):
+        from lex.core import config as lex_config
+        from lex.api.serializers.base_serializers import (
+            resolve_requested_serializer_name,
+        )
+
+        serializer_map = {
+            "default": _CompactUserSerializer,
+            "framework_default": _NewDefaultUserSerializer,
+            "compact": _CompactUserSerializer,
+        }
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ):
+            # Explicit non-"default" names are not rewritten.
+            self.assertEqual(
+                resolve_requested_serializer_name(serializer_map, "compact"),
+                "compact",
+            )
+            # Explicit "default" gets routed to the framework alias by the
+            # helper. (Backend endpoints intentionally do NOT call this for
+            # the public ``?serializer=default`` query — frontends opt in by
+            # passing the configured alias explicitly. This helper is
+            # available for future framework-internal call sites.)
+            self.assertEqual(
+                resolve_requested_serializer_name(serializer_map, "default"),
+                "framework_default",
+            )
 
     def test_fields_view_uses_refreshed_default_serializer(self):
         class _Container:

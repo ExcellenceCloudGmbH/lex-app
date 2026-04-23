@@ -107,6 +107,17 @@ class ModelStructureObtainView(APIView):
                     node["available_serializers"] = list(
                         serializers_map.keys()
                     )
+                    # Tell the frontend which key in ``available_serializers``
+                    # holds the framework auto-generated serializer. Defaults
+                    # to ``"default"``; resolves to the configured alias when
+                    # the project overrides ``api_serializers["default"]`` and
+                    # has set ``DEFAULT_SERIALIZER_NAME`` in ``lex_config.py``.
+                    from lex.api.serializers import (
+                        resolve_default_serializer_name,
+                    )
+                    node["default_serializer_name"] = (
+                        resolve_default_serializer_name(serializers_map)
+                    )
                 children = node.get("children")
                 if isinstance(children, dict):
                     annotate(children)

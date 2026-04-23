@@ -4,6 +4,7 @@ import base64
 import datetime as _dt
 import logging
 import os
+import re
 import tempfile
 import time
 from io import BytesIO
@@ -1784,9 +1785,12 @@ class ModelExportView(GenericAPIView):
         # produces a workbook where every row except the last is blank.
         writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
 
-        df.to_excel(writer, sheet_name=model.__name__, merge_cells=False, freeze_panes=(1, 1), index=True)
+        # Excel limits worksheet names to 31 chars and disallows []:*?/\
+        sheet_name = re.sub(r'[\[\]:*?/\\]', '_', model.__name__)[:31]
 
-        worksheet = writer.sheets.get(model.__name__)
+        df.to_excel(writer, sheet_name=sheet_name, merge_cells=False, freeze_panes=(1, 1), index=True)
+
+        worksheet = writer.sheets.get(sheet_name)
         if worksheet is not None and hierarchy_depths:
             # Preserve grouped hierarchy in Excel with row outline levels.
             for row_index, depth in enumerate(hierarchy_depths, start=1):
