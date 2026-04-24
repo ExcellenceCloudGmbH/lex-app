@@ -992,6 +992,35 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:** 🟢 Complete — 6 pass / 0 fail. Drove `CalculatedModelMixin.py` from **33.74% → 64.75%** (+31 pts, +170 lines covered).
 
+### 1i. Initial-data upload — full journey end-to-end 🟢
+
+**Gap (April 24):** `InitialDataAuditLogger` (148 stmts, **12.64%** baseline) + `ProcessAdminTestCase` seed walker (`replace_tagged_parameters`, `get_test_data_from_path`, seed dispatcher). Never driven end-to-end by Cluster 1c — 1c only asserts post-`Init` database state, not the intermediate audit trail or the JSON-walker contracts.
+
+**Intent** (per `docs/lex_topics/16-initial-data-upload.md`): seed files declare production-shaped data in JSON; on server start if every referenced model is empty, the framework walks the JSON top-down and applies `create` / `update` / `delete` actions in declaration order. `tag:` prefixes resolve to in-memory objects created earlier; `datetime:` strings parse through `dateutil`; `{"subprocess": path}` entries flatten recursively. Every operation emits an `AuditLog` + `AuditLogStatus(pending)` pair; `mark_operation_success/failure` advances the status; `finalize_batch` sweeps lingering pendings so the compliance view is always consistent.
+
+**Models:** reuses `SimpleItem` from `crud_api/models.py` — a minimal LexModel with `name` + `value`. **Fixtures** (all new in `tests/fixtures/`): `seed_parent.json` (2 subprocess refs), `seed_child_01.json` (1 create), `seed_child_02.json` (2 creates), `test_seed_journey.json` (2 creates + 1 update + 1 delete).
+
+**Shape:** five test classes — two `SimpleTestCase` (pure unit, no DB) + three `E2ETestCase` (real `AuditLog` / `AuditLogStatus` / `SimpleItem`). `ProcessAdminTestCase.setUp` is driven via a `runTest = lambda: None` sub-class and a monkey-patched `get_test_data`; `apps.get_app_config` is stubbed so the harness sees `SimpleItem` without registering the test project as an installed app.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.51a | `tag:foo` resolves to previously-stored in-memory object | FK-by-reference mechanism — literals without a known prefix pass through unchanged |
+| 1.51b | `datetime:YYYY-MM-DD` parses via `dateutil.parser` | Seed dates ship as strings; models receive real `datetime` |
+| 1.52 | Recursive subprocess flattening preserves declared + internal order | Parent-before-child FK resolution depends on this ordering |
+| 1.54 | `log_object_creation` writes AuditLog + pending AuditLogStatus | `author = "system (initial_data_upload)"`, `_audit_tag` in payload for trace-back |
+| 1.54b | `_logged_ids` tracks every log in declaration order | `finalize_batch` sweep is scoped by this list — must not touch earlier sessions |
+| 1.55 | `log_object_update` embeds instance pk in payload | Compliance view links audit row → DB row |
+| 1.56 | `log_object_deletion` snapshots the instance via `generic_instance_payload` | Deleted row's fields survive in the audit trail after the main row is gone |
+| 1.57 | `mark_operation_success` / `mark_operation_failure` advance status; idempotent | Retry must not duplicate status rows |
+| 1.57b | `mark_operation_*` on `None` audit log is a no-op | The loader passes whatever `log_object_creation` returned — can be `None` |
+| 1.58a | `finalize_batch()` clean run resolves lingering pending → success | Summary reports `pending_resolved` count (signal that a handler forgot to mark) |
+| 1.58b | `finalize_batch(failure_error=…)` collapses pending → failure with error string | Outer-driver exception path — audit trail closes out even for aborted runs |
+| 1.59 | Full create/update/delete drive with audit (env-gated) | DB has correct surviving row; 4 AuditLog rows in `[create, create, update, delete]` order; all statuses `success` |
+| 1.59b | Full journey without audit still lands DB state | Audit is observability — disabling it must not regress data transitions |
+| 1.60 | Crash path — `finalize_batch(failure_error=…)` after 3 pending ops | All 3 swept to `failure` with error string; `pending_resolved == 3` |
+
+**Status:** 🟢 Complete — 13 pass / 0 fail / 1 env-gated skip (1.59). Targets ~140 lines in `InitialDataAuditLogger.py` + ~40 in `ProcessAdminTestCase`.
+
 ### Sequencing
 
 ```
@@ -1002,6 +1031,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 10f (global search)        — small, user-facing
 5.11 + 9.7-9.10            — close remaining holes in already-🟢 clusters
 7g  (CalculatedModel.create pipeline) — closes the largest single source-file gap
+1i  (initial-data upload journey)     — drives InitialDataAuditLogger + seed walker, closes Cluster-A/B/C bucket B
 ```
 
 **Why no new top-level clusters:** every gap is a *facet* of an existing user-journey concern. Permission enforcement belongs in Cluster 4. Schema & search belong in Cluster 10 (API Layer). Write-path serializer behaviour is Cluster 12. Signal branches are Cluster 9. Splitting them out would fragment the story and duplicate setup.
