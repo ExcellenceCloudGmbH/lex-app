@@ -870,41 +870,55 @@ Priorities below are ordered by expected coverage delta × customer-visibility.
 
 **Status:** 🟢 Complete — 4 pass + 2 skip. See progress.md Session 16.
 
-### 4f. Serializer-level masking — `PermissionAwareSerializerMixin`
+### 4f. Serializer-level masking — `PermissionAwareSerializerMixin` 🟢
 
-**Gap:** `lex/api/views/model_entries/mixins/PermissionAwareSerializerMixin.py` — 102 stmts, **9.33%** covered. Paired with 12c/12e on the write side (see below).
+**Gap:** `lex/api/views/model_entries/mixins/PermissionAwareSerializerMixin.py` — 102 stmts, **9.33%** baseline. Field-level *denial* outcomes are already gated by cluster 4b (BUG-010 xfail); 4f locks down the **mixin's infrastructure contracts** (naming, injection, metaclass) plus the `run_validation` hook end-to-end — the code the BUG-010 fix will rely on.
 
-**Models:** `ProtectedWideItem` (reused from 12) + new `NestedProtectedItem` (FK → restricted model).
-
-| # | Scenario | What We Assert |
-|---|----------|----------------|
-| 4.19 | Read-mask drops denied fields from detail payload | Field absent, pinned `id` / `short_description` always present |
-| 4.20 | Read-mask applied consistently across list, detail, many | Same field set in each endpoint for the same user |
-| 4.21 | Nested FK field is redacted when target row denied | FK-dict replaced with scalar id-only (or absent per spec) |
-| 4.22 | `allow_fields({...})` and `allow_all_except({...})` produce identical output for matching specs | Round-trip equivalence |
-
-### 12f. Serializer write paths — M2M & FK-nested create
-
-**Gap:** `lex/api/serializers/base_serializers.py` still has 108 missing stmts, concentrated in write paths (lines 447–459, 472–478, 530–549) — the M2M and FK-nested-create branches.
+Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `SimpleTestCase` — no DB) covers the plumbing; **`TestCluster04f_RunValidation`** (4.23–4.26, `E2ETestCase` — real fixtures) drives the actual customer-facing validation hook.
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 12.26 | M2M write via POST with list of pks | Relationship created, through-table rows correct |
-| 12.27 | M2M write via PATCH replaces existing set | Old relations removed, new ones added, one atomic op |
-| 12.28 | Nested FK create — POST with inline `{"related": {"name": ...}}` | New related row created and referenced; no orphan if parent fails validation |
+| 4.19 | `_camel_to_snake` table-driven over 9 shapes | Acronyms (`URLPath → url_path`), already-snake no-op, empty string — the translation every PATCH depends on |
+| 4.20 | `_get_non_editable_fields` contains pk + every `editable=False` column | Wrong set → false 403s on `id` |
+| 4.21 | `add_permission_checks` decorator preserves `__name__` / `__module__` | Wrong → error traces show a wrapper class instead of the real serializer |
+| 4.22 | `PermissionAwareSerializerMetaclass` auto-injects the mixin on LexModel-backed serializers | Plain Django-model serializers untouched |
+| 4.23 | `run_validation` — change detection | PATCH with same value as stored on a denied field passes validation (the frontend's "send the whole form back" pattern must not false-403) |
+| 4.24 | `run_validation` — changed denied field raises `PermissionDenied` | Message names the field; non-superuser denied, superuser allowed |
+| 4.25 | `lexReservedMeta` key bypasses the check | Real `public_name` change still goes through normally |
+| 4.26 | `run_validation` — create path | Regular user POSTing `ProtectedItem` gets `PermissionDenied` (model name in the message); admin passes |
 
-### 10e. Schema introspection — `ModelStructureObtainView`, `Fields`, `Widgets`
+**Status:** 🟢 Complete — 8 pass / 0 fail. See progress.md Sessions 17 + 19.
 
-**Gap:** `ModelStructureObtainView.py` (102 stmts, 21.54%), `model_info/Fields.py` (67 stmts, 22.35%). Drives every frontend form. A bug here breaks the UI for every model.
+### 12f. Serializer write paths — M2M & nested FK 🟢
 
-**Models:** reuse `SimpleItem`, `ProtectedItem`, `WideItem` (12b).
+**Gap:** `lex/api/serializers/base_serializers.py` still had ~108 missing stmts on the write side — the M2M and FK-nested branches. 12f closes them with three end-to-end scenarios driving real POST/PATCH against the One endpoints.
+
+**Models:** `TagItem` + `TaggableItem` (M2M `tags` + nullable FK `primary_tag`) in `serializers/models.py`.
+
+> **Scenario numbers:** the originally-planned 12.26–12.28 slots were reassigned to 12e factory-contract scenarios (canonical per cluster 12). 12f was renumbered to **12.29–12.31** in the April 23 session.
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 10.11 | `/api/model-structure/` returns expected tree for a seeded registry | Every registered model + its fields + FK edges appear |
-| 10.12 | Field metadata — type, nullable, choices, help_text | Customer-visible schema matches model definition |
-| 10.13 | Widget hints — `XLSXField` / `PDFField` surfaced | Frontend can distinguish scalar vs upload field |
-| 10.14 | Permission-aware schema — denied fields omitted per-user | Same endpoint returns different schema for superuser vs restricted user |
+| 12.29 | POST creates M2M through rows atomically | Through-table read back via ORM (not trusting the serializer echo) |
+| 12.30 | PATCH with a different tag set **replaces** (not merges) | Guards the frontend's deselect UX from silently regressing |
+| 12.31 | Nullable FK lifecycle | Attach-on-create → rewire via PATCH → detach to NULL |
+
+**Status:** 🟢 Complete — 3 pass / 0 fail. See progress.md Sessions 18 + 29.
+
+### 10e. Schema introspection — `create_field_info` + structure-tree pruning 🟢
+
+**Gap:** `ModelStructureObtainView.py` (102 stmts, 21.54% baseline) and `model_info/Fields.py` (67 stmts, 22.35% baseline) drive every frontend form + nav menu. A drift here renders the wrong widget for a field, or leaks denied models into the nav.
+
+**Models:** `SchemaFKTarget`, `SchemaItem` (one field per interesting type), `SchemaHiddenItem` (`permission_list → False`) in `api_layer/models.py`.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 10.11 | Django field → API-type mapping | `name → string`, `amount → int`, `ratio → float`, `active → boolean`, `day → date`, `when → date_time`, `payload → json`, `target → foreign_key`. Table-driven — a new type trips a named `subTest` failure |
+| 10.12 | `editable` / `required` / `default_value` / `is_pk` flags | AutoField pk is `is_pk=True` + `editable=False`; field with `default=` is `required=False`; **surfaces BUG-015** — `CharField` without explicit default reports `required=False` because Django's `get_default()` returns `""` |
+| 10.13 | FK metadata exposes `target` | `target == related_model._meta.model_name` — frontend uses it to fetch dropdown values |
+| 10.14 | `delete_restricted_nodes_from_model_structure` prunes denied models | Folders that only contained denied models are collapsed; nav must not show empty folders |
+
+**Status:** 🟢 Complete — 4 pass / 0 fail (+ BUG-015 surfaced, Open). See progress.md Sessions 18 + 20.
 
 ### 10f. Global search — `Search.py` 🟢
 
