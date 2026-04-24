@@ -116,7 +116,7 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
             f"got {status_row.error_traceback!r}.",
         )
 
-    @unittest.expectedFailure  # BUG-001 family: atomic rollback erases audit row
+    # @unittest.expectedFailure  # BUG-001 family: atomic rollback erases audit row
     def test_6_10_audit_survives_calculation_failure(self) -> None:
         """
         Scenario 6.10: Audit must survive a calculation's atomic rollback.

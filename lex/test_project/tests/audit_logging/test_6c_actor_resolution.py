@@ -31,7 +31,7 @@ class TestCluster06c_ActorResolution(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 6.7 -----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-004 family: actor may not populate via API create
+    # @unittest.expectedFailure  # BUG-004 family: actor may not populate via API create
     def test_6_7_authenticated_user_becomes_created_by(self) -> None:
         """
         Scenario 6.7: Authenticated API caller → ``created_by`` is

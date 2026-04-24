@@ -27,7 +27,7 @@ class TestCluster11b_ListEndpoint(StressTestCase):
     e2e_models = ALL_MODELS
 
     # -- 11.3 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-011: list endpoint does O(n) queries per page
+    # @unittest.expectedFailure  # BUG-011: list endpoint does O(n) queries per page
     def test_11_3_paginated_list_p95(self):
         """
         Scenario 11.3: list endpoint paginates invoices with a bounded

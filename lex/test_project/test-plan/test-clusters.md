@@ -361,6 +361,31 @@ If either command is broken, a new customer cannot start using the framework at 
 | 8.5 | `dispatch_calculation_task` extracts context correctly | `operation_context` serialized without unpicklable objects |
 | 8.6 | Nested calculation inside Celery worker runs synchronously | `is_celery_worker_process()` detected, no recursive dispatch |
 
+### 8g. Task infrastructure — `lex/lex_app/celery_tasks.py` 🟢
+
+**Gap:** `lex/lex_app/celery_tasks.py` is ~958 lines of customer-visible Celery plumbing (``CallbackTask``, ``CeleryCalculationContext``, ``FireAndForget`` / ``WaitForTasks``, ``EnhancedBoundTaskMethod``, the ``lex_shared_task`` decorator). Cluster 8a covered only the ``should_use_celery()`` / sync-fallback surface. 8g drives the remaining customer-visible code without requiring a Redis broker.
+
+**No broker needed.** Every scenario is broker-free:
+
+1. Branches gated on ``CELERY_ACTIVE`` are driven by ``patch.dict(os.environ, {"CELERY_ACTIVE": "true"})`` — the framework never tries to open a broker connection on its own.
+2. Scenarios that need a ``.delay(...)`` return value patch ``.delay`` onto a fake task to return a ``MagicMock`` stand-in for Celery's ``AsyncResult``.
+3. ``WaitForTasks.wait_for_completion`` normally calls ``allow_join_result()`` (which talks to the broker in production); 8.14 swaps it for ``contextlib.nullcontext`` so the blocking path is exercised end-to-end without a connection.
+4. The ``CallbackTask.on_success`` / ``on_failure`` scenarios instantiate the task class directly and drive real ORM + real signals — Celery itself never runs.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.7 | ``CallbackTask.on_success`` → ``is_calculated = SUCCESS`` on the persisted row | Direct queryset ``.update()`` (no stale-snapshot overwrite); ``ensure_terminal_calculation_audit`` called with ``audit_status="success"`` |
+| 8.8 | ``CallbackTask.on_failure`` → ``is_calculated = ERROR`` | Status persisted; audit called with ``audit_status="failure"`` + exception message + stack-trace string forwarded from ``einfo`` |
+| 8.9 | ``initial_data_upload`` task short-circuits both callbacks | No status update, no audit call — regression gate against the opt-out ever being forgotten |
+| 8.10 | ``CeleryCalculationContext(context=…, model_context=None)`` stamps and restores ``operation_context`` | Incoming ``calculation_id`` preserved; ``celery_task=True``, ``task_name="calc_and_save"``, fresh ``operation_id`` minted; prior context restored on exit |
+| 8.11 | ``CeleryCalculationContext(context=None, …)`` is a safe no-op | ``operation_context`` NOT mutated — matches the sync-mode bypass in ``lex_shared_task`` |
+| 8.12 | ``EnhancedBoundTaskMethod`` runs sync when CELERY_ACTIVE=true but no FF/WFT scope is active | ``.delay`` NOT called; task body invoked with ``(instance, *args, **kwargs)`` |
+| 8.13 | FireAndForget priority — wins over an enclosing WaitForTasks | ``.delay`` called; result registered on FF scope, NOT on the outer WFT scope |
+| 8.14 | WaitForTasks dispatches via ``.delay`` and blocks on scope exit | Result registered on WFT; on exit ``.get()`` is called (``allow_join_result`` swapped for ``nullcontext``); ``dispatched_results`` cleared |
+| 8.15 | ``lex_shared_task`` wrapper pops reserved kwargs and enters ``CeleryCalculationContext`` when truthy ``context`` is supplied | Body sees only the user kwargs; returns ``(inner_result, args)`` — the shape ``CallbackTask._extract_model_instances`` depends on |
+
+**Status:** 🟢 Complete — 9 pass / 0 fail / 0 xfail.
+
 ---
 
 ## 9. Signals & WebSocket

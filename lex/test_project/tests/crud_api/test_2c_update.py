@@ -47,7 +47,7 @@ class TestCluster02c_Update(E2ETestCase):
         )
 
     # -- 2.14 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-004: edited_at not set on create
+    # @unittest.expectedFailure  # BUG-004: edited_at not set on create
     def test_2_14_patch_updates_edited_at_and_edited_by(self) -> None:
         """
         Scenario 2.14: PATCH updates ``edited_at`` / ``edited_by``;
@@ -83,7 +83,7 @@ class TestCluster02c_Update(E2ETestCase):
         )
 
     # -- 2.15 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
+    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_2_15_patch_invalid_value_leaves_record_unchanged(self) -> None:
         """
         Scenario 2.15: PATCH with invalid value → 400 AND DB unchanged.

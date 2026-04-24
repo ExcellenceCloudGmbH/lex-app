@@ -52,7 +52,7 @@ class TestCluster02a_Create(E2ETestCase):
         )
 
     # -- 2.2 -----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-004: edited_at not set on create via POST
+    # @unittest.expectedFailure  # BUG-004: edited_at not set on create via POST
     def test_2_2_post_sets_framework_managed_fields(self) -> None:
         """
         Scenario 2.2: POST sets ``created_at`` / ``edited_at`` / ``created_by``.
@@ -75,7 +75,7 @@ class TestCluster02a_Create(E2ETestCase):
         )
 
     # -- 2.3 -----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
+    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_2_3_post_missing_required_field_returns_400(self) -> None:
         """
         Scenario 2.3: Missing required field → 400, no record created.
@@ -100,7 +100,7 @@ class TestCluster02a_Create(E2ETestCase):
         )
 
     # -- 2.4 -----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
+    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_2_4_post_invalid_field_type_returns_400(self) -> None:
         """
         Scenario 2.4: Invalid field type → 400, no record created.

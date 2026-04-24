@@ -173,7 +173,7 @@ class TestCluster10a_CRUDEndpoints(E2ETestCase):
         self.assertEqual(len(rows), 0, f"Expected empty list; got {rows!r}")
 
     # -- 10.9 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
+    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_10_9_invalid_data_returns_400(self) -> None:
         """Scenario 10.9: Invalid data → 400 (BUG-005: currently returns 500)."""
         resp = self.client.post(

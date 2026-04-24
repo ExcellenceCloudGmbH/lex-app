@@ -125,7 +125,7 @@ class TestCluster12c_ListContract(E2ETestCase):
         self.assertIn(item_b.pk, ids)
 
     # -- 12.22 ---------------------------------------------------------
-    @unittest.expectedFailure  # BUG-006: /many/ POST endpoint returns 405
+    # @unittest.expectedFailure  # BUG-006: /many/ POST endpoint returns 405
     def test_12_22_many_post_rejects_invalid_choice(self) -> None:
         """Scenario 12.22: POST to ``/many/`` with an invalid ``choices``
         value must reject the batch with 400 (not 500, not 405).

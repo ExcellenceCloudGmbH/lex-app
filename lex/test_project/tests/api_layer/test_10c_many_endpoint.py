@@ -21,7 +21,7 @@ import unittest
 class TestCluster10c_ManyEndpoint(unittest.TestCase):
     """Many endpoint — skipped pending bulk fixture."""
 
-    @unittest.expectedFailure  # BUG-006: many endpoint rejects POST with 405
+    # @unittest.expectedFailure  # BUG-006: many endpoint rejects POST with 405
     @unittest.skip(
         "Scenario 10.7: Many endpoint bulk create — BUG-006 (POST returns "
         "405). Once the framework adds POST support to ``model-many-entries``, "

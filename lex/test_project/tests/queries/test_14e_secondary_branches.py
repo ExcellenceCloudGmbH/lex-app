@@ -292,7 +292,7 @@ class TestCluster14e_SecondaryFilterBranches(E2ETestCase):
         )
 
     # -- 14.25 ---------------------------------------------------------
-    @unittest.expectedFailure  # BUG-016: blank/notBlank filter ops are unreachable
+    # @unittest.expectedFailure  # BUG-016: blank/notBlank filter ops are unreachable
     def test_14_25_blank_and_not_blank_ops_do_not_work_bug016(self) -> None:
         """
         Scenario 14.25 — **BUG-016**: the AG Grid ``blank`` and

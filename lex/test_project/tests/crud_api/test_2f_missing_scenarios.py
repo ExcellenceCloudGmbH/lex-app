@@ -97,7 +97,7 @@ class TestCluster02f_MissingScenarios(E2ETestCase):
                 )
 
     # -- 2.24 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-006: many/ endpoint rejects POST/PATCH
+    # @unittest.expectedFailure  # BUG-006: many/ endpoint rejects POST/PATCH
     def test_2_24_bulk_patch_updates_multiple_records(self) -> None:
         """
         Scenario 2.24: PATCH to ``many/`` updates multiple records.
@@ -130,7 +130,7 @@ class TestCluster02f_MissingScenarios(E2ETestCase):
         self.assertEqual(b.value, 200, "Row B must reflect the bulk patch")
 
     # -- 2.25 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-006: bulk endpoint rejects POST
+    # @unittest.expectedFailure  # BUG-006: bulk endpoint rejects POST
     def test_2_25_bulk_create_with_invalid_record_is_all_or_nothing(self) -> None:
         """
         Scenario 2.25: Bulk create with one invalid record.

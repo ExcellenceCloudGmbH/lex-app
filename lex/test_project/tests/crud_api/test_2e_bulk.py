@@ -23,7 +23,7 @@ class TestCluster02e_BulkOperations(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 2.23 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-006: many/ endpoint rejects POST
+    # @unittest.expectedFailure  # BUG-006: many/ endpoint rejects POST
     def test_2_23_bulk_post_creates_multiple_records(self) -> None:
         """
         Scenario 2.23: POST to many/ creates multiple records.

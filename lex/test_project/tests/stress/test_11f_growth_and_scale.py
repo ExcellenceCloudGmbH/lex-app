@@ -137,7 +137,7 @@ class TestCluster11f_PermissionAtScale(StressTestCase):
 
     e2e_models = ALL_MODELS
 
-    @unittest.expectedFailure  # BUG-011: permission_read called per-row on list
+    # @unittest.expectedFailure  # BUG-011: permission_read called per-row on list
     def test_11_14_permission_read_called_once_per_list(self):
         """
         Scenario 11.14: ``permission_read`` fires once per list

@@ -29,7 +29,7 @@ class TestCluster11e_BulkAPI(StressTestCase):
     e2e_models = ALL_MODELS
 
     # -- 11.10 ---------------------------------------------------------
-    @unittest.expectedFailure  # BUG-006: many endpoint rejects POST with 405
+    # @unittest.expectedFailure  # BUG-006: many endpoint rejects POST with 405
     def test_11_10_bulk_api_post_at_volume(self):
         """
         Scenario 11.10: POST to ``/many/`` inserts n rows in one call.

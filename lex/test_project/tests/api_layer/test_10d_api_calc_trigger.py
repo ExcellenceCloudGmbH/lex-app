@@ -30,7 +30,7 @@ class TestCluster10d_APICalcTrigger(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 10.8 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-009: is_calculated is editable=False so PATCH silently ignores it
+    # @unittest.expectedFailure  # BUG-009: is_calculated is editable=False so PATCH silently ignores it
     def test_10_8_patch_in_progress_triggers_calculation(self) -> None:
         """Scenario 10.8: PATCH is_calculated=IN_PROGRESS → calc runs."""
         calc = ApiAtomicCalc.objects.create(
