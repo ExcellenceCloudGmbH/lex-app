@@ -378,7 +378,20 @@ class TestCluster08i_WFTFilters(unittest.TestCase):
 class TestCluster08i_FFFilters(unittest.TestCase):
     """``FireAndForget(force_tasks={…})`` lets a caller restrict the
     force-dispatch to a specific subset — everything outside the set
-    falls through to whatever scope rule is active (WFT or sync)."""
+    falls through to whatever scope rule is active (WFT or sync).
+
+    NOTE — BUG-019 (open, **not xfailed, not tested**):
+    The sibling filter ``FireAndForget(exclude_tasks={…})`` is
+    **deliberately not covered** in this sub-cluster.  The
+    ``FireAndForget.__init__`` docstring promises excluded tasks
+    *"should follow WaitForTasks rules"*, but
+    ``EnhancedBoundTaskMethod.__call__`` (lines ~527–529) routes them
+    **straight to sync**, bypassing ``await_ctx.should_dispatch(...)``.
+    Writing a test either way would pre-commit the framework to one
+    interpretation before product has decided which is correct.  See
+    the Known Bugs Tracker entry for BUG-019 — raise with product,
+    pick an interpretation, then add the scenario and fix either the
+    docstring or the code to match."""
 
     def setUp(self):
         _reset_ctx()
