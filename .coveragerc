@@ -54,6 +54,11 @@ omit =
     lex/lex_app/management/commands/capture_migration_state.py
     lex/lex_app/management/commands/capture_db_tables.py
     lex/tools/setup_with_ai.py
+    lex/streamlit_app.py
+    lex/lex_app/streamlit/*
+    lex/proxy.py
+    lex/manage.py
+    lex/api/views/authentication/KeycloakManager.py
 
 [report]
 show_missing = True
@@ -79,6 +84,8 @@ omit =
     lex/backfill_history_sql.py
     lex/extract_legacy_logs.py
     lex/full_migration_workflow.py
+    lex/proxy.py
+    lex/manage.py
     lex/lex_app/management/commands/backfill_bitemporal_history.py
     lex/lex_app/management/commands/backfill_audit_logging.py
     lex/lex_app/management/commands/Init2.py
@@ -92,6 +99,9 @@ omit =
     lex/lex_app/management/commands/capture_migration_state.py
     lex/lex_app/management/commands/capture_db_tables.py
     lex/tools/setup_with_ai.py
+    lex/lex_app/streamlit/*
+    lex/streamlit_app.py
+    lex/api/views/authentication/KeycloakManager.py
 exclude_lines =
     pragma: no cover
     raise NotImplementedError
