@@ -1021,6 +1021,35 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:** 🟢 Complete — 13 pass / 0 fail / 1 env-gated skip (1.59). Targets ~140 lines in `InitialDataAuditLogger.py` + ~40 in `ProcessAdminTestCase`.
 
+### 8j. Celery task bodies — `load_data` / `calc_and_save` / `activate_history_version` 🟢
+
+**Gap (April 24):** 8g / 8h / 8i drove the *infrastructure* around `@lex_shared_task` (CallbackTask, CeleryCalculationContext, EnhancedBoundTaskMethod dispatch, WaitForTasks / FireAndForget scope contracts). The three **task bodies** shipped in `celery_tasks.py` — the customer-visible work units — remained dark: `load_data` (the `initial_data_upload` task body, 50+ lines spanning four storage/worker branches + finalize gate), `calc_and_save` (the per-model batch loop with IntegrityError conflict resolution), and `activate_history_version` (Celery Beat bitemporal-activation task with four documented return-string branches).
+
+**Intent** (per source + `docs/lex_topics/12-celery-async-dispatch.md`): `load_data` is the seed-on-boot task — routes through sync vs Celery-worker harness invocation based on `STORAGE_TYPE` + `is_running_in_celery`, always finalizes the audit batch in `finally` (`failure_error` on crash, `None` on clean); `calc_and_save` is what every `CalculatedModelMixin.create(...)` dispatch eventually runs — per-model `lex_func()` → `save()`, with `IntegrityError` triggering `delete_models_with_same_defining_fields` to detect the duplicate and either reassign pk or reset-and-retry; `activate_history_version` is fired by Celery Beat when a history row's `valid_from` becomes current — four documented return strings (`"failed_model_lookup"` / `"skipped_missing_record"` / `"failed_too_early"` / `"success"`) so the scheduler can distinguish dead tasks from successful activations.
+
+**Models:** reuses `CelerySyncCalc` from `celery_async/models.py` (the plain `calculate()` — no task decorator — so `calc_and_save` exercises save/lex_func without needing a broker). `activate_history_version` is driven against a `MagicMock` model with the `history.model` / `history.model.meta_history.model` / `_meta.pk.name` attribute tree the task walks — no real DB rows needed because the task's own side effects (BitemporalSynchronizer call + MetaModel filter-update) are the observable contract.
+
+**Shape:** three test classes — two `SimpleTestCase` (`load_data` via fake harness + mocked audit factory; `activate_history_version` via mocked `apps.get_model`) + one `E2ETestCase` (`calc_and_save` drives real save/IntegrityError against `CelerySyncCalc`). All scenarios run without a broker — `@lex_shared_task` descriptor routes to `self.task(...)` when `CELERY_ACTIVE` is unset, invoking the real body synchronously; wrapper return shape is `(inner_result, args)` and we assert on side effects.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.31 | `load_data` with `initial_data_load=None` | Early-return — neither harness method called, audit factory not invoked |
+| 8.32 | LEGACY storage + `is_running_in_celery=True` | `test.setUp(audit_logger)` direct; `asyncio.run` NOT called; `finalize_batch(failure_error=None)` on success |
+| 8.33 | LEGACY + not-in-Celery | `asyncio.run` invoked exactly once (bridges through `sync_to_async`); `setUpCloudStorage` untouched |
+| 8.34 | non-LEGACY storage + `CELERY_ACTIVE=true` | `setUpCloudStorage(models, audit_logger)` direct; `setUp` never called |
+| 8.35 | `setUp` raises → original exception propagates | `finalize_batch` called with `failure_error` embedding `"RuntimeError: seed crashed"` |
+| 8.36 | `audit_logger` returns `None` | `finally` guard `if audit_logger:` prevents `AttributeError` — clean exit |
+| 8.37 | `calc_and_save` happy path with 2 clean models | Both saved, summary `{total:2, processed:2, conflicts:0, errors:0}` |
+| 8.38 | `IntegrityError` on first save → conflict resolver reassigns pk | pk rewired to pre-existing row's pk; retry save succeeds; `conflicts_resolved:1` + `processed_successfully:1` |
+| 8.39 | `calculate()` raises non-IntegrityError | Exception re-raised verbatim (on_failure depends on original); row not persisted |
+| 8.40 | `apps.get_model` LookupError | Returns `"failed_model_lookup"` (not unhandled exception) |
+| 8.41 | History row `DoesNotExist` | Returns `"skipped_missing_record"` (race-safe against user-delete-during-schedule) |
+| 8.42 | `valid_from` > `now + 5s` | Returns `"failed_too_early"`; `BitemporalSynchronizer.sync_record_for_model` NOT called |
+| 8.43 | Valid history record, due now | `sync_record_for_model(model, pk_val, HistoryModel)` fires; `MetaModel.objects.filter(history_object_id, status="SCHEDULED").update(status="DONE")`; returns `"success"` |
+| 8.44 | Sync raises during happy path | Exception propagates (not silently swallowed) — Beat retries / alerts |
+
+**Status:** 🟢 Complete — 14 pass / 0 fail. Closes Cluster-A/B/C bucket C. Targets the 3 task bodies in `celery_tasks.py` lines 696–957 — previously uncovered by 8g/8h/8i which focused on the wrapper + dispatch layer.
+
 ### Sequencing
 
 ```
@@ -1032,6 +1061,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 5.11 + 9.7-9.10            — close remaining holes in already-🟢 clusters
 7g  (CalculatedModel.create pipeline) — closes the largest single source-file gap
 1i  (initial-data upload journey)     — drives InitialDataAuditLogger + seed walker, closes Cluster-A/B/C bucket B
+8j  (celery_tasks.py task bodies)     — load_data / calc_and_save / activate_history_version, closes Cluster-A/B/C bucket C
 ```
 
 **Why no new top-level clusters:** every gap is a *facet* of an existing user-journey concern. Permission enforcement belongs in Cluster 4. Schema & search belong in Cluster 10 (API Layer). Write-path serializer behaviour is Cluster 12. Signal branches are Cluster 9. Splitting them out would fragment the story and duplicate setup.
