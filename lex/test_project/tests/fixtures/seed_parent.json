@@ -1,0 +1,5 @@
+[
+  {"subprocess": "test_project/tests/fixtures/seed_child_01.json"},
+  {"subprocess": "test_project/tests/fixtures/seed_child_02.json"}
+]
+

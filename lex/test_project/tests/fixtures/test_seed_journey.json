@@ -1,0 +1,39 @@
+[
+  {
+    "class": "SimpleItem",
+    "action": "create",
+    "tag": "alpha",
+    "parameters": {
+      "name": "Alpha Seed",
+      "value": 10
+    }
+  },
+  {
+    "class": "SimpleItem",
+    "action": "create",
+    "tag": "beta",
+    "parameters": {
+      "name": "Beta Seed",
+      "value": 20
+    }
+  },
+  {
+    "class": "SimpleItem",
+    "action": "update",
+    "tag": "alpha_updated",
+    "filter_parameters": {
+      "name": "Alpha Seed"
+    },
+    "parameters": {
+      "value": 999
+    }
+  },
+  {
+    "class": "SimpleItem",
+    "action": "delete",
+    "filter_parameters": {
+      "name": "Beta Seed"
+    }
+  }
+]
+

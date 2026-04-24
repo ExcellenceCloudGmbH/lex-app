@@ -53,6 +53,17 @@ omit =
     lex/lex_app/management/commands/sync_keycloak.py
     lex/lex_app/management/commands/capture_migration_state.py
     lex/lex_app/management/commands/capture_db_tables.py
+    lex/lex_app/management/commands/create_db.py
+    lex/bin/lex.py
+    lex/legacy_data/apps.py
+    lex/authentication/management/commands/keycloak_backup.py
+    lex/authentication/management/commands/keycloak_rollback_bak.py
+    lex/authentication/management/commands/keycloak_init_bak.py
+    lex/authentication/management/commands/register_keycloak_resources.py
+    lex/authentication/management/commands/delete_keycloak_resources.py
+    lex/utilities/import_system/*
+    lex/lex_app/asgi.py
+    lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
     lex/streamlit_app.py
     lex/lex_app/streamlit/*
@@ -98,6 +109,17 @@ omit =
     lex/lex_app/management/commands/sync_keycloak.py
     lex/lex_app/management/commands/capture_migration_state.py
     lex/lex_app/management/commands/capture_db_tables.py
+    lex/lex_app/management/commands/create_db.py
+    lex/bin/lex.py
+    lex/legacy_data/apps.py
+    lex/authentication/management/commands/keycloak_backup.py
+    lex/authentication/management/commands/keycloak_rollback_bak.py
+    lex/authentication/management/commands/keycloak_init_bak.py
+    lex/authentication/management/commands/register_keycloak_resources.py
+    lex/authentication/management/commands/delete_keycloak_resources.py
+    lex/utilities/import_system/*
+    lex/lex_app/asgi.py
+    lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
     lex/lex_app/streamlit/*
     lex/streamlit_app.py

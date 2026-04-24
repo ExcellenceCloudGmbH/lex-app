@@ -1,0 +1,9 @@
+[
+  {
+    "class": "SimpleItem",
+    "action": "create",
+    "tag": "sub1_a",
+    "parameters": {"name": "Sub1 A", "value": 1}
+  }
+]
+

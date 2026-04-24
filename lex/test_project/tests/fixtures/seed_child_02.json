@@ -1,0 +1,15 @@
+[
+  {
+    "class": "SimpleItem",
+    "action": "create",
+    "tag": "sub2_a",
+    "parameters": {"name": "Sub2 A", "value": 2}
+  },
+  {
+    "class": "SimpleItem",
+    "action": "create",
+    "tag": "sub2_b",
+    "parameters": {"name": "Sub2 B", "value": 3}
+  }
+]
+
