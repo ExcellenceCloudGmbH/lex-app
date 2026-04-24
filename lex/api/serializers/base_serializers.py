@@ -703,15 +703,35 @@ def _wrap_custom_serializer(custom_cls, model_class):
     # to fire CRUD mutations (otherwise rows fall back to a synthetic
     # ``ssrm:groupPath:...`` id that breaks navigation and skips the
     # loading overlay).
+    #
+    # Edge case — non-``id`` primary key (e.g. django-simple-history's
+    # ``HistoricalX`` whose PK is ``history_id`` while the source row's
+    # ``id`` is preserved as a regular non-PK column): aliasing
+    # ``id = ReadOnlyField(source=pk_attname)`` here would (a) replace the
+    # natural ``id`` column from ``Meta.fields = "__all__"`` and (b) cause
+    # ``Fields.py`` to resolve both ``id`` (now sourcing ``history_id``)
+    # and the natural ``history_id`` field to the same Django column,
+    # rendering the column twice and suppressing the source row's ``id``.
+    # In that case we leave the natural ``id`` field intact and skip the
+    # post-pass PK injection so the row's ``id`` value is the source row's
+    # id, not the history PK. Frontends that need the history PK use
+    # ``id_field`` (which already aliases to ``model._meta.pk.name``).
     pk_attname = model_class._meta.pk.attname
+    pk_is_id = pk_attname == "id"
 
     attrs = {
         ID_FIELD_NAME: serializers.ReadOnlyField(default=model_class._meta.pk.name),
         SHORT_DESCR_NAME: serializers.SerializerMethodField(),
         "get_short_description": lambda self, obj: str(obj),
-        "id": serializers.ReadOnlyField() if pk_attname == "id" else serializers.ReadOnlyField(source=pk_attname),
         "Meta": NewMeta,
     }
+    # Use a bare ``ReadOnlyField()`` (DRF defaults ``source`` to the field
+    # name) to avoid DRF's redundant-``source`` assertion when the field
+    # name and source match. Only declared when the PK attname IS ``id``
+    # so we don't collide with the natural ``id`` column on history-style
+    # models whose PK attname is e.g. ``history_id`` (see comment above).
+    if pk_is_id:
+        attrs["id"] = serializers.ReadOnlyField()
     base_classes = (LexSerializer, custom_cls)
     wrapped_cls = type(
         f"{custom_cls.__name__}WithInternalFields", base_classes, attrs
@@ -726,21 +746,54 @@ def _wrap_custom_serializer(custom_cls, model_class):
     # ``record.id`` being the real PK — without it the row falls back to
     # a synthetic ``ssrm:groupPath:...`` id that breaks navigation and
     # suppresses the CRUD loading overlay.
-    _base_to_representation = wrapped_cls.to_representation
+    #
+    # Skipped when the PK attname is not ``id`` (see comment above the
+    # ``attrs`` block) — overwriting ``representation["id"]`` with the
+    # non-``id`` PK value would clobber the natural ``id`` column carried
+    # by history-style models that preserve the source row's id.
+    if pk_is_id:
+        _base_to_representation = wrapped_cls.to_representation
 
-    def _to_representation_with_id(self, instance, _pk_attname=pk_attname):
-        representation = _base_to_representation(self, instance)
-        # Respect deny-all: ``LexSerializer.to_representation`` returns an
-        # empty dict when ``can_read`` / ``permission_read`` denies the
-        # row entirely. Injecting an ``id`` there would leak the PK.
-        if isinstance(representation, dict) and representation and instance is not None:
-            pk_value = getattr(instance, _pk_attname, None)
-            if pk_value is not None:
-                representation["id"] = pk_value
-        return representation
+        def _to_representation_with_id(self, instance, _pk_attname=pk_attname):
+            representation = _base_to_representation(self, instance)
+            # Respect deny-all: ``LexSerializer.to_representation`` returns an
+            # empty dict when ``can_read`` / ``permission_read`` denies the
+            # row entirely. Injecting an ``id`` there would leak the PK.
+            if isinstance(representation, dict) and representation and instance is not None:
+                pk_value = getattr(instance, _pk_attname, None)
+                if pk_value is not None:
+                    representation["id"] = pk_value
+            return representation
 
-    wrapped_cls.to_representation = _to_representation_with_id
+        wrapped_cls.to_representation = _to_representation_with_id
     return wrapped_cls
+
+
+def _resolve_history_source_model(model_class):
+    """Walk the ``instance_type`` chain to the originating non-history model.
+
+    django-simple-history sets ``instance_type`` on every auto-generated
+    historical model class (and ``MetaLevelHistoricalRecords`` chains it on
+    the meta-history class), pointing back at the immediately tracked model.
+    This helper walks that chain and returns the root non-history model so
+    callers can mirror configuration (e.g. the ``api_serializers["default"]``
+    override status) from the tracked source down to its history /
+    meta-history tables.
+
+    Returns ``None`` when ``model_class`` is itself the source (i.e. has no
+    ``instance_type`` attribute or the chain does not advance past it).
+    """
+    if not hasattr(model_class, "instance_type"):
+        return None
+    seen = {model_class}
+    current = model_class
+    while True:
+        nxt = getattr(current, "instance_type", None)
+        if not isinstance(nxt, type) or nxt in seen:
+            break
+        seen.add(nxt)
+        current = nxt
+    return current if current is not model_class else None
 
 
 def get_serializer_map_for_model(model_class, default_fields=None):
@@ -753,17 +806,39 @@ def get_serializer_map_for_model(model_class, default_fields=None):
             isinstance(custom, dict) and "default" in custom
     )
 
+    # History / meta-history tables of tracked models do not carry their own
+    # ``api_serializers`` registration, but conceptually inherit the alias
+    # decision from their tracked source model: if the developer overrides
+    # ``api_serializers["default"]`` on the source, the framework
+    # auto-generated serializer should also be exposed under the configured
+    # alias on every history table that mirrors that source. This keeps
+    # foreign-key / detail / history-snapshot lookups consistent across the
+    # source model and its bitemporal tables.
+    inherits_default_override_from_source = False
+    if not has_custom_default_override:
+        source_model = _resolve_history_source_model(model_class)
+        if source_model is not None:
+            source_custom = getattr(source_model, "api_serializers", None)
+            if isinstance(source_custom, dict) and "default" in source_custom:
+                inherits_default_override_from_source = True
+
+    should_register_alias = (
+        has_custom_default_override or inherits_default_override_from_source
+    )
+
     if auto_default is not None:
         serializers_map["default"] = auto_default
 
         # If the project explicitly overrides the framework's auto-generated
-        # "default" serializer for this model, additionally expose the
-        # framework-generated serializer under the project-configured alias
-        # (see ``DEFAULT_SERIALIZER_NAME`` / ``default_serializer_name`` in
+        # "default" serializer for this model (or for the tracked source of
+        # this history table), additionally expose the framework-generated
+        # serializer under the project-configured alias (see
+        # ``DEFAULT_SERIALIZER_NAME`` / ``default_serializer_name`` in
         # ``lex_config.py`` or ``_authentication_settings.py``). Models that
-        # do not override "default" keep the historical behavior: only the
-        # auto-generated serializer is registered, under the "default" key.
-        if has_custom_default_override:
+        # do not override "default" — and whose tracked source does not
+        # either — keep the historical behavior: only the auto-generated
+        # serializer is registered, under the "default" key.
+        if should_register_alias:
             try:
                 from lex.core.config import (
                     DEFAULT_SERIALIZER_NAME,
@@ -775,10 +850,14 @@ def get_serializer_map_for_model(model_class, default_fields=None):
                 configured_name = "default"
                 DEFAULT_SERIALIZER_NAME = "default"
 
+            alias_collides_with_custom = (
+                isinstance(custom, dict) and configured_name in custom
+            )
+
             if (
-                    configured_name
-                    and configured_name != DEFAULT_SERIALIZER_NAME
-                    and configured_name not in custom
+                configured_name
+                and configured_name != DEFAULT_SERIALIZER_NAME
+                and not alias_collides_with_custom
             ):
                 serializers_map[configured_name] = auto_default
 
