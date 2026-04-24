@@ -155,6 +155,49 @@ class SerializerMapBehaviorTests(TestCase):
         self.assertEqual(payload.get("id_field"), "id")
         self.assertIn("username", payload)
 
+    def test_wrapper_does_not_alias_id_when_pk_attname_is_not_id(self):
+        """Regression: history-style models (django-simple-history's
+        ``HistoricalX``) have ``pk.attname == "history_id"`` AND preserve
+        the source row's ``id`` as a regular non-PK column. Previously the
+        wrapper unconditionally declared ``id = ReadOnlyField(source=pk_attname)``
+        which (a) replaced the natural ``id`` field from
+        ``Meta.fields = "__all__"`` and (b) caused ``Fields.py`` to resolve
+        both ``id`` (now sourcing ``history_id``) and the natural
+        ``history_id`` field to the same Django column — rendering
+        ``history_id`` twice in the table and suppressing the source
+        row's ``id`` column entirely. The fix: only alias ``id`` to the PK
+        when the PK's attname IS literally ``id``."""
+        from unittest.mock import patch
+        from lex.api.serializers.base_serializers import _wrap_custom_serializer
+
+        class _DeveloperHistorySerializer(serializers.ModelSerializer):
+            class Meta:
+                model = User
+                fields = "__all__"
+
+        # Pretend User's PK attname is "history_id" so the wrapper sees a
+        # non-``id`` PK like a real HistoricalX class would.
+        original_attname = User._meta.pk.attname
+        User._meta.pk.attname = "history_id"
+        try:
+            wrapped_cls = _wrap_custom_serializer(
+                _DeveloperHistorySerializer, User
+            )
+        finally:
+            User._meta.pk.attname = original_attname
+
+        wrapped_instance = wrapped_cls()
+        # The wrapper must NOT inject an ``id`` ReadOnlyField sourcing the
+        # non-``id`` PK; otherwise it collides with the developer's natural
+        # ``id`` field at the Fields.py source-resolution step.
+        id_field = wrapped_instance.fields.get("id")
+        self.assertFalse(
+            isinstance(id_field, serializers.ReadOnlyField)
+            and getattr(id_field, "source", None) == "history_id",
+            "Wrapper must not alias ``id`` to a non-``id`` PK on models "
+            "that already carry a real ``id`` column.",
+        )
+
     def test_custom_serializer_method_fields_with_all_fields_are_preserved(self):
         User.api_serializers = {"formatted": _FormattedUserSerializer}
 
@@ -268,6 +311,106 @@ class SerializerMapBehaviorTests(TestCase):
         ):
             serializer_map = get_serializer_map_for_model(
                 User, default_fields=["id", "username"]
+            )
+
+        self.assertEqual(set(serializer_map.keys()), {"default"})
+
+    # ------------------------------------------------------------------
+    # History / meta-history tables inherit alias from tracked source
+    # ------------------------------------------------------------------
+
+    def test_history_table_inherits_default_override_alias_from_source(self):
+        """When the tracked source model overrides ``api_serializers["default"]``
+        and the project has configured a ``default_serializer_name`` alias, the
+        framework auto-generated serializer must also be exposed under that
+        alias on the history table — even though the history model itself
+        carries no ``api_serializers`` registration. This mirrors the source
+        model's behavior end-to-end (FK / detail / history-snapshot lookups
+        all resolve to the framework serializer via the configured alias)."""
+        from lex.core import config as lex_config
+
+        User.api_serializers = {"default": _CompactUserSerializer}
+
+        class _FakeHistoryModel:
+            # Mimic django-simple-history's auto-generated history class:
+            # ``instance_type`` points back at the tracked source model and
+            # the class itself never has its own ``api_serializers``.
+            instance_type = User
+
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ), patch(
+            "lex.api.serializers.base_serializers.model2serializer",
+            return_value=_FormattedUserSerializer,
+        ):
+            serializer_map = get_serializer_map_for_model(
+                _FakeHistoryModel, default_fields=None
+            )
+
+        self.assertEqual(
+            set(serializer_map.keys()), {"default", "framework_default"}
+        )
+        # The framework auto-generated serializer is registered under both
+        # keys (the alias does NOT wrap a different developer override —
+        # there is none on the history model itself).
+        self.assertIs(
+            serializer_map["default"], serializer_map["framework_default"]
+        )
+
+    def test_meta_history_table_walks_chain_to_source_for_alias(self):
+        """``MetaLevelHistoricalRecords`` chains ``instance_type`` through the
+        history model up to the tracked source. The alias inheritance must
+        traverse the full chain so meta-history tables also get the alias."""
+        from lex.core import config as lex_config
+
+        User.api_serializers = {"default": _CompactUserSerializer}
+
+        class _FakeHistoryModel:
+            instance_type = User
+
+        class _FakeMetaHistoryModel:
+            instance_type = _FakeHistoryModel
+
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ), patch(
+            "lex.api.serializers.base_serializers.model2serializer",
+            return_value=_FormattedUserSerializer,
+        ):
+            serializer_map = get_serializer_map_for_model(
+                _FakeMetaHistoryModel, default_fields=None
+            )
+
+        self.assertEqual(
+            set(serializer_map.keys()), {"default", "framework_default"}
+        )
+
+    def test_history_table_alias_not_added_when_source_does_not_override(self):
+        """If the tracked source does not override ``"default"``, the history
+        table must keep the historical single-``"default"`` registration to
+        avoid leaking the alias into projects that never opted in."""
+        from lex.core import config as lex_config
+
+        # Source model exposes only non-"default" custom serializers.
+        User.api_serializers = {"compact": _CompactUserSerializer}
+
+        class _FakeHistoryModel:
+            instance_type = User
+
+        with patch.object(
+            lex_config,
+            "get_configured_default_serializer_name",
+            return_value="framework_default",
+        ), patch(
+            "lex.api.serializers.base_serializers.model2serializer",
+            return_value=_FormattedUserSerializer,
+        ):
+            serializer_map = get_serializer_map_for_model(
+                _FakeHistoryModel, default_fields=None
             )
 
         self.assertEqual(set(serializer_map.keys()), {"default"})
