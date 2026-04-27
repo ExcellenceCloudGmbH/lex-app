@@ -67,6 +67,9 @@ Destructive methods exercised
 * ``Command.handle`` end-to-end via ``call_command("init", …)`` with
   ``--skip-migrations`` + ``--no-makemigrations`` so the only side
   effect is the Keycloak round-trip — no DB schema changes.
+* Clean-slate rebuild: empty the dedicated test client's authorization
+  resources, run the sync path, then export from live Keycloak and
+  assert every Django model resource and default scope was recreated.
 
 Scenario numbering extends ``docs/test-plan/test-clusters.md`` —
 sub-cluster 1l picks up at **1.95**.
@@ -75,8 +78,11 @@ sub-cluster 1l picks up at **1.95**.
 from __future__ import annotations
 
 import io
+import json
 import os
+import time
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest import TestCase
 
@@ -437,7 +443,7 @@ class TestCluster01l_PipelineReads(_RealKeycloakBase):
 # ---------------------------------------------------------------------
 @unittest.skipUnless(_destructive_enabled(), _SKIP_REASON_DESTRUCTIVE)
 class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
-    """1.100 / 1.101 — run the actual ``lex init`` pipeline end-to-end.
+    """1.100 / 1.101 / 1.102 — actual ``lex init`` pipeline end-to-end.
 
     These tests **mutate** the configured Keycloak client's
     authorization config — the same way ``lex init`` does in
@@ -445,6 +451,121 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
     Idempotency is the contract: a second run on the same input
     must not produce drift.
     """
+
+    @staticmethod
+    def _resource_names_from_config(auth_config: dict) -> set[str]:
+        return {
+            resource["name"]
+            for resource in auth_config.get("resources", [])
+            if resource.get("name")
+        }
+
+    @staticmethod
+    def _scope_names(resource: dict) -> set[str]:
+        names: set[str] = set()
+        for scope in resource.get("scopes", []) or []:
+            if isinstance(scope, dict) and scope.get("name"):
+                names.add(scope["name"])
+            elif isinstance(scope, str) and scope:
+                names.add(scope)
+        return names
+
+    @staticmethod
+    def _policy_references_any_resource(policy: dict, resource_names: set[str]) -> bool:
+        config = policy.get("config")
+        if not isinstance(config, dict):
+            return False
+        raw_resources = config.get("resources")
+        if raw_resources is None:
+            return False
+        if isinstance(raw_resources, str):
+            try:
+                resources = json.loads(raw_resources)
+            except Exception:
+                resources = [raw_resources]
+        elif isinstance(raw_resources, list):
+            resources = raw_resources
+        else:
+            resources = [raw_resources]
+        return any(resource in resource_names for resource in resources)
+
+    def _fresh_export(self) -> dict:
+        self.mgr.exported_configs = None
+        return self.mgr.export_configs()
+
+    def _assert_clean_rebuild_target_is_dedicated(self, client_rep: dict) -> None:
+        """Extra guard for the only test that intentionally empties resources."""
+        client_label = str(client_rep.get("clientId") or self.mgr.kc_manager.client_uuid)
+        realm = str(getattr(self.mgr.kc_manager, "realm_name", ""))
+        if realm.lower() == "master":
+            self.fail("Refusing to clean Keycloak resources in the master realm.")
+        if "test" not in client_label.lower() and os.getenv(
+            "LEX_ALLOW_CLEAN_REBUILD_NON_TEST_CLIENT",
+            "",
+        ).strip() != "1":
+            self.fail(
+                "Refusing to clean Keycloak resources for a client whose "
+                f"clientId does not look test-only: {client_label!r}. Point "
+                "OIDC_RP_CLIENT_ID/OIDC_RP_CLIENT_UUID at the dedicated "
+                "LEX-Test client, or set "
+                "LEX_ALLOW_CLEAN_REBUILD_NON_TEST_CLIENT=1 only for an "
+                "ephemeral disposable client."
+            )
+
+    def _wait_for_resource_names(
+        self,
+        expected: set[str],
+        *,
+        timeout_seconds: float = 20.0,
+        poll_interval: float = 0.5,
+    ) -> tuple[dict, set[str]]:
+        deadline = time.monotonic() + timeout_seconds
+        last_config: dict = {}
+        last_names: set[str] = set()
+
+        while time.monotonic() <= deadline:
+            last_config = self._fresh_export()
+            last_names = self._resource_names_from_config(last_config)
+            if last_names == expected:
+                return last_config, last_names
+            time.sleep(poll_interval)
+
+        self.fail(
+            "Timed out waiting for live Keycloak resources to match the "
+            "expected set.\n"
+            f"  expected-only = {expected - last_names}\n"
+            f"  actual-only = {last_names - expected}"
+        )
+
+    def _empty_live_keycloak_resources(self, auth_config: dict) -> None:
+        """Rewrite the dedicated client's authz config with zero resources.
+
+        This is deliberately narrower than deleting the realm/client: it
+        removes only authorization resources and resource/scope permissions
+        that reference them, while preserving role policies so the rebuild
+        path starts from a realistic but clean authorization server state.
+        """
+        resource_names = self._resource_names_from_config(auth_config)
+        if not resource_names:
+            return
+
+        cleaned_config = deepcopy(auth_config)
+        cleaned_config["resources"] = []
+        cleaned_config["policies"] = [
+            policy
+            for policy in cleaned_config.get("policies", [])
+            if policy.get("type") not in {"scope", "resource"}
+            and not self._policy_references_any_resource(policy, resource_names)
+        ]
+
+        self.mgr.kc_manager.last_authz_import_error = None
+        success = self.mgr.kc_manager.import_authorization_settings(cleaned_config)
+        self.assertTrue(success, "Keycloak clean-state import returned False.")
+        self.assertIsNone(
+            self.mgr.kc_manager.last_authz_import_error,
+            "Clean-state import must not leave last_authz_import_error set.",
+        )
+        self._wait_for_resource_names(set())
 
     # -- 1.100 ---------------------------------------------------------
     def test_1_100_process_model_changes_no_op_round_trip(self):
@@ -571,3 +692,119 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
             f"  first - second = {first_resources - second_resources}\n"
             f"  second - first = {second_resources - first_resources}",
         )
+
+    # -- 1.102 ---------------------------------------------------------
+    def test_1_102_clean_state_sync_recreates_and_verifies_resources(self):
+        """1.102: empty live Keycloak resources, sync, then verify read-back.
+
+        This is the destructive complement to the mocked 1.8 drift test:
+        it proves the real Keycloak server accepts a clean-slate rebuild.
+
+        Flow:
+
+        1. Assert the configured client passes the same safety preflight
+           ``lex init`` uses.
+        2. Export the live authorization config for the dedicated test
+           client and keep a copy for emergency restore if the rebuild
+           fails.
+        3. Rewrite the live authz config to contain **zero resources**
+           and verify the live export is empty.
+        4. Call ``process_model_changes`` with every syncable Django
+           model as an add.
+        5. Export from live Keycloak again and assert every expected
+           resource exists, has the default scopes, and no duplicate
+           resource names were created.
+
+        The test intentionally uses ``process_model_changes`` directly
+        instead of ``call_command("init")``: the command's
+        ``check_missing`` branch is already covered in read-only form by
+        1.98, while this scenario needs a tightly controlled clean state
+        with no migration-autodetector delete noise mixed in.
+        """
+        client_rep = self.mgr.assert_client_is_safe_for_init()
+        self._assert_clean_rebuild_target_is_dedicated(client_rep)
+        expected_resources = self.mgr.get_all_django_models()
+        self.assertGreater(
+            len(expected_resources), 0,
+            "Clean-state rebuild needs at least one syncable Django model.",
+        )
+
+        original_config = self._fresh_export()
+
+        try:
+            self._empty_live_keycloak_resources(original_config)
+            empty_config = self._fresh_export()
+            self.assertEqual(
+                self._resource_names_from_config(empty_config),
+                set(),
+                "The dedicated Keycloak test client must be empty before "
+                "the rebuild assertion starts.",
+            )
+
+            adds: list[tuple[str, str]] = []
+            for resource_name in expected_resources:
+                app_label, model_name = resource_name.split(".", 1)
+                adds.append((app_label, model_name))
+            self.mgr.exported_configs = None
+            self.mgr.process_model_changes(
+                adds=adds,
+                deletes=[],
+                renames=[],
+                preserve_permissions=True,
+                ensure_default_authz=False,
+            )
+            self.assertIsNone(
+                self.mgr.kc_manager.last_authz_import_error,
+                "Rebuild sync must leave last_authz_import_error as None.",
+            )
+
+            synced_config, synced_resources = self._wait_for_resource_names(
+                expected_resources,
+            )
+            self.assertEqual(
+                synced_resources,
+                expected_resources,
+                "After clean-state sync, live Keycloak resources must match "
+                "the syncable Django model set exactly.",
+            )
+
+            resources_by_name = {
+                resource["name"]: resource
+                for resource in synced_config.get("resources", [])
+                if resource.get("name")
+            }
+            self.assertEqual(
+                len(resources_by_name),
+                len(synced_config.get("resources", [])),
+                "Clean-state sync must not create duplicate resource names.",
+            )
+
+            expected_scopes = set(self.mgr.default_scopes)
+            for resource_name in sorted(expected_resources):
+                with self.subTest(resource=resource_name):
+                    self.assertEqual(
+                        self._scope_names(resources_by_name[resource_name]),
+                        expected_scopes,
+                        "Every recreated resource must carry the documented "
+                        "default CRUD+export scopes.",
+                    )
+
+            missing_after_sync = self.mgr.find_missing_models(
+                expected_resources,
+                synced_resources,
+                set(),
+            )
+            self.assertEqual(
+                missing_after_sync,
+                set(),
+                "After clean-state sync, find_missing_models must report "
+                "that all Django resources are synced.",
+            )
+        except Exception:
+            # The client is dedicated, but if the rebuild fails midway we still
+            # try to restore the pre-test export so one failed CI run does not
+            # leave the live test client empty for subsequent investigations.
+            self.mgr.kc_manager.import_authorization_settings(original_config)
+            self.mgr.exported_configs = None
+            raise
+
