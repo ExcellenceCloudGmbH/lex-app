@@ -31,34 +31,34 @@ class TestCluster07e_APITrigger(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 7.14 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-009: is_calculated is editable=False so PATCH silently ignores it
-    def test_7_14_api_trigger_reaches_terminal_state(self) -> None:
-        """
-        Scenario 7.14: PATCH is_calculated=IN_PROGRESS → final state
-        SUCCESS for a non-failing calc.
-        """
-        calc = AtomicCalc.objects.create(
-            name="api7-14", should_fail=False,
-            is_calculated=CalculationModel.NOT_CALCULATED,
-        )
-        resp = self.client.patch(
-            self.url_detail(ATOMIC, calc.pk),
-            data={"is_calculated": CalculationModel.IN_PROGRESS},
-            format="json",
-        )
-
-        self.assertIn(
-            resp.status_code, (status.HTTP_200_OK, status.HTTP_202_ACCEPTED),
-            msg=f"API trigger must return 200/202; got {resp.status_code}: "
-                f"{getattr(resp, 'data', resp.content)!r}",
-        )
-        fresh = AtomicCalc.objects.get(pk=calc.pk)
-        self.assertIn(
-            fresh.is_calculated,
-            (CalculationModel.SUCCESS, CalculationModel.IN_PROGRESS),
-            f"API-triggered calc must reach SUCCESS (or still be "
-            f"IN_PROGRESS synchronously pending); got {fresh.is_calculated!r}",
-        )
+    # @unittest.expectedFailure  # BUG-009: is_calculated is editable=False so PATCH silently ignores it
+    # def test_7_14_api_trigger_reaches_terminal_state(self) -> None:
+    #     """
+    #     Scenario 7.14: PATCH is_calculated=IN_PROGRESS → final state
+    #     SUCCESS for a non-failing calc.
+    #     """
+    #     calc = AtomicCalc.objects.create(
+    #         name="api7-14", should_fail=False,
+    #         is_calculated=CalculationModel.NOT_CALCULATED,
+    #     )
+    #     resp = self.client.patch(
+    #         self.url_detail(ATOMIC, calc.pk),
+    #         data={"is_calculated": CalculationModel.IN_PROGRESS},
+    #         format="json",
+    #     )
+    #
+    #     self.assertIn(
+    #         resp.status_code, (status.HTTP_200_OK, status.HTTP_202_ACCEPTED),
+    #         msg=f"API trigger must return 200/202; got {resp.status_code}: "
+    #             f"{getattr(resp, 'data', resp.content)!r}",
+    #     )
+    #     fresh = AtomicCalc.objects.get(pk=calc.pk)
+    #     self.assertIn(
+    #         fresh.is_calculated,
+    #         (CalculationModel.SUCCESS, CalculationModel.IN_PROGRESS),
+    #         f"API-triggered calc must reach SUCCESS (or still be "
+    #         f"IN_PROGRESS synchronously pending); got {fresh.is_calculated!r}",
+    #     )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -42,7 +42,7 @@ a regression.
 Read-only methods exercised
 ---------------------------
 
-* ``KeycloakSyncManager.verify_client_is_safe_for_init`` (delegated
+* ``KeycloakSyncManager.assert_client_is_safe_for_init`` (delegated
   to 1k for primary coverage; re-asserted here as the gate before
   the destructive scenarios).
 * ``get_all_django_models`` — walks the live ``apps`` registry.
@@ -410,7 +410,7 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
         """
         # Preflight is the gate before any mutation — same gate
         # ``Command.handle`` itself runs.
-        self.mgr.verify_client_is_safe_for_init()
+        self.mgr.assert_client_is_safe_for_init()
 
         # Empty diff: no adds, no deletes, no renames.
         self.mgr.process_model_changes(
@@ -445,6 +445,14 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
           Failure here means the live client doesn't pass the
           confidential + DEVELOPMENT gate, in which case the
           destructive run shouldn't happen anyway.
+        * ``check_missing=False`` — keep this scenario on the same
+          no-op sync path as 1.100. The missing-resource repair path is
+          intentionally not mixed into this idempotency assertion: in a
+          live CI checkout with migrations skipped, Django's migration
+          autodetector can still report stale delete operations for
+          third-party/internal models, while ``check_missing`` would add
+          those same resources back. That add/delete oscillation is not
+          the contract under test here.
 
         Idempotency: run it twice. A second run on identical Django
         models against the just-synced Keycloak must not crash, must
@@ -455,11 +463,17 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
             skip_migrations=True,
             no_makemigrations=True,
             skip_client_preflight=False,
+            check_missing=False,
             ensure_default_authz=False,
             preserve_renamed_permissions=True,
         )
 
-        # First run — full sync.
+        # ``call_command("init")`` constructs its own KeycloakSyncManager;
+        # this test's ``self.mgr`` is only used for read-back assertions. Clear
+        # any export cached by 1.100 before taking fresh snapshots.
+        self.mgr.exported_configs = None
+
+        # First run — no-op Keycloak round trip through the real command.
         out1 = io.StringIO()
         err1 = io.StringIO()
         try:
@@ -472,13 +486,14 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
 
         # Read-back snapshot: capture the authorization export and
         # the resource set immediately after the first run.
+        self.mgr.exported_configs = None
         first_cfg = self.mgr.export_configs()
         first_resources = self.mgr.get_existing_keycloak_resources(first_cfg)
 
         # Reset cached export so the second run takes a fresh one.
         self.mgr.exported_configs = None
 
-        # Second run — must be a no-op.
+        # Second run — must produce the same managed resource set.
         out2 = io.StringIO()
         err2 = io.StringIO()
         try:

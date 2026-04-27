@@ -173,7 +173,6 @@ class TestCluster10a_CRUDEndpoints(E2ETestCase):
         self.assertEqual(len(rows), 0, f"Expected empty list; got {rows!r}")
 
     # -- 10.9 ----------------------------------------------------------
-    @unittest.skip("Duplicate BUG-005 validation-error path; CRUD cluster owns the framework fix for now.")
     def test_10_9_invalid_data_returns_400(self) -> None:
         """Scenario 10.9: Invalid data → 400.
 

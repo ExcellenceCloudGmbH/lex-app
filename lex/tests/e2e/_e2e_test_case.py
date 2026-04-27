@@ -293,10 +293,54 @@ class E2ETestCase(TransactionTestCase):
         Returns:
             The raw API-key string that was installed on the client.
         """
+        import hashlib
+
         from django.conf import settings as _dj_settings
+        from django.contrib.auth.hashers import BasePasswordHasher
         from rest_framework_api_key.models import APIKey
+        from rest_framework_api_key.crypto import KeyGenerator
 
         self.client.logout()
+
+        class _CompactAPIKeyHasher(BasePasswordHasher):
+            """Short deterministic test hasher for old APIKey DB schemas.
+
+            ``djangorestframework-api-key`` now generates SHA-512 hashes that
+            need 150-character ``id`` / ``hashed_key`` columns, but some CI
+            databases can still be created from the package's older migration
+            shape (100-character columns). E2E tests only need a valid API key
+            identity, not the production hash length, so keep the real model,
+            manager, parser, and ``HasAPIKey`` verification path while using a
+            compact SHA-256 representation that fits both schemas.
+            """
+
+            algorithm = "lex_test_sha256"
+
+            def salt(self) -> str:
+                return ""
+
+            def encode(self, password: str, salt: str) -> str:
+                if salt != "":
+                    raise ValueError("salt is unnecessary for high entropy API tokens.")
+                digest = hashlib.sha256(password.encode()).hexdigest()
+                return f"{self.algorithm}$${digest}"
+
+            def verify(self, password: str, encoded: str) -> bool:
+                from django.utils.crypto import constant_time_compare
+
+                return constant_time_compare(encoded, self.encode(password, ""))
+
+        class _CompactAPIKeyGenerator(KeyGenerator):
+            preferred_hasher = _CompactAPIKeyHasher()
+
+        p_key_generator = patch.object(
+            APIKey.objects,
+            "key_generator",
+            _CompactAPIKeyGenerator(),
+        )
+        p_key_generator.start()
+        self._patch_objs.append(p_key_generator)
+
         _, raw_key = APIKey.objects.create_key(name=name)
 
         # The framework configures ``API_KEY_CUSTOM_HEADER = "HTTP_API_KEY"``
