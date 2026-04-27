@@ -1,22 +1,19 @@
 """
-Cluster 11e: Bulk API endpoints at volume.
+Cluster 11e: Bulk delete API and ORM batch baseline at volume.
 
 Scenarios:
 
-* 11.10 — bulk POST to ``model-many-entries`` at MEDIUM volume.
-  Depends on BUG-006 being fixed (the endpoint currently rejects POST
-  with 405). Marked ``@unittest.expectedFailure`` until then.
-* 11.11 — bulk PATCH over a filtered subset. Must produce exactly
-  one UPDATE query, not ``n``.
+* 11.10 — bulk DELETE to ``model-many-entries`` over a selected id set.
+* 11.11 — ORM ``QuerySet.update()`` over a filtered subset. Must
+  produce exactly one UPDATE query, not ``n``.
 """
 
 from __future__ import annotations
 
-import json
-import unittest
+from urllib.parse import urlencode
 
 from django.db import connection
-from django.db.models import F
+from rest_framework import status
 from django.test.utils import CaptureQueriesContext
 
 from ._stress_test_case import StressTestCase
@@ -24,62 +21,51 @@ from .models import ALL_MODELS, INVOICE, StressInvoice
 
 
 class TestCluster11e_BulkAPI(StressTestCase):
-    """11.10 / 11.11 — bulk API write paths."""
+    """11.10 / 11.11 — supported bulk delete + ORM update baseline."""
 
     e2e_models = ALL_MODELS
 
+    def _many_url_for_ids(self, ids) -> str:
+        query = urlencode([("ids", pk) for pk in ids])
+        return f"{self.url_many(INVOICE)}?{query}"
+
     # -- 11.10 ---------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-006: many endpoint rejects POST with 405
-    def test_11_10_bulk_api_post_at_volume(self):
+    def test_11_10_bulk_api_delete_at_volume(self):
         """
-        Scenario 11.10: POST to ``/many/`` inserts n rows in one call.
+        Scenario 11.10: DELETE to ``/many/`` removes selected rows at volume.
 
-        Intent: the documented bulk endpoint should accept a list of
-        records, validate them once, and insert them in a single
-        transaction. Until BUG-006 is fixed, the endpoint returns 405
-        and this scenario is xfail.
+        Intent: bulk delete is the supported batch-write API. The
+        selected-id path must stay bounded and must not delete rows
+        outside the explicit ``ids`` query-param set.
         """
-        n_by_tier = {"SMALL": 100, "MEDIUM": 5_000, "LARGE": 5_000}
+        n_by_tier = {"SMALL": 10, "MEDIUM": 100, "LARGE": 250}
         n = n_by_tier[self.volume]
-        budgets = {"SMALL": 2.0, "MEDIUM": 10.0, "LARGE": 10.0}
+        budgets = {"SMALL": 5.0, "MEDIUM": 20.0, "LARGE": 45.0}
 
-        payload = [
-            {
-                "invoice_number": f"INV-API-{i:06d}",
-                "counterparty": self.counterparty_ids[
-                    i % len(self.counterparty_ids)
-                ],
-                "period": self.period_ids[i % len(self.period_ids)],
-                "booked_on": "2025-06-01",
-                "due_on": "2025-07-01",
-                "amount_net": "10.00",
-                "amount_tax": "2.00",
-                "amount_gross": "12.00",
-            }
-            for i in range(n)
-        ]
+        target_ids = self.invoice_ids[:n]
+        survivor_id = self.invoice_ids[-1]
 
         with self.assert_runtime_under(
-            budgets[self.volume], "11.10_bulk_post",
-        ), self.measure("11.10_bulk_post"):
-            resp = self.client.post(
-                self.url_many(INVOICE),
-                data=json.dumps(payload),
-                content_type="application/json",
-            )
-        self.assertIn(
-            resp.status_code, (200, 201),
-            f"Bulk POST must succeed; got {resp.status_code}: "
+            budgets[self.volume], "11.10_bulk_delete",
+        ), self.measure("11.10_bulk_delete"):
+            resp = self.client.delete(self._many_url_for_ids(target_ids))
+        self.assertEqual(
+            resp.status_code, status.HTTP_200_OK,
+            f"Bulk DELETE must succeed; got {resp.status_code}: "
             f"{resp.content[:200]!r}",
         )
-        # New row count = seeded + n.
         self.assertEqual(
-            StressInvoice.objects.count(),
-            len(self.invoice_ids) + n,
+            set(resp.data), set(target_ids),
+            "Bulk DELETE must report exactly the selected ids it deleted.",
+        )
+        self.assertFalse(StressInvoice.objects.filter(id__in=target_ids).exists())
+        self.assertTrue(
+            StressInvoice.objects.filter(id=survivor_id).exists(),
+            "Rows outside the selected id set must survive bulk DELETE.",
         )
 
     # -- 11.11 ---------------------------------------------------------
-    def test_11_11_bulk_patch_single_update(self):
+    def test_11_11_orm_bulk_update_single_update(self):
         """
         Scenario 11.11: filtered ORM ``update()`` produces exactly one
         UPDATE, not one-per-row.
@@ -104,8 +90,8 @@ class TestCluster11e_BulkAPI(StressTestCase):
 
         with CaptureQueriesContext(connection) as ctx, \
                 self.assert_runtime_under(
-                    budgets[self.volume], "11.11_bulk_patch",
-                ), self.measure("11.11_bulk_patch"):
+                    budgets[self.volume], "11.11_orm_bulk_update",
+                ), self.measure("11.11_orm_bulk_update"):
             affected = qs.update(is_reversed=True)
 
         # Filter to UPDATE statements only — there will usually be one

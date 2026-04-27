@@ -97,6 +97,131 @@ class ChildCalc(CalculationModel):
 
 
 @_permissive
+class NonAtomicChildCalc(CalculationModel):
+    """Leaf child calc with ``is_atomic=False`` for hierarchy matrix tests."""
+
+    name = models.CharField(max_length=200)
+    should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        if self.should_fail:
+            raise RuntimeError(
+                f"NonAtomicChildCalc({self.name!r}) failing on purpose"
+            )
+
+
+def _run_matrix_parent(parent, child_cls):
+    """Shared parent implementation for the atomicity matrix tests."""
+    child = child_cls(
+        name=f"{parent.name}-child",
+        should_fail=parent.child_should_fail,
+    )
+    child.is_calculated = CalculationModel.IN_PROGRESS
+    child.save()
+    if child.is_calculated == CalculationModel.ERROR:
+        raise RuntimeError(
+            f"{type(parent).__name__}({parent.name!r}) propagating child failure"
+        )
+    if parent.parent_should_fail:
+        raise RuntimeError(
+            f"{type(parent).__name__}({parent.name!r}) failing after child"
+        )
+
+
+@_permissive
+class AtomicParentAtomicChildMatrixCalc(CalculationModel):
+    """Atomic parent spawning an atomic child; parent/child failures are toggleable."""
+
+    name = models.CharField(max_length=200)
+    parent_should_fail = models.BooleanField(default=False)
+    child_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_matrix_parent(self, ChildCalc)
+
+
+@_permissive
+class AtomicParentNonAtomicChildMatrixCalc(CalculationModel):
+    """Atomic parent spawning a non-atomic child."""
+
+    name = models.CharField(max_length=200)
+    parent_should_fail = models.BooleanField(default=False)
+    child_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_matrix_parent(self, NonAtomicChildCalc)
+
+
+@_permissive
+class NonAtomicParentAtomicChildMatrixCalc(CalculationModel):
+    """Non-atomic parent spawning an atomic child."""
+
+    name = models.CharField(max_length=200)
+    parent_should_fail = models.BooleanField(default=False)
+    child_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_matrix_parent(self, ChildCalc)
+
+
+@_permissive
+class NonAtomicParentNonAtomicChildMatrixCalc(CalculationModel):
+    """Non-atomic parent spawning a non-atomic child."""
+
+    name = models.CharField(max_length=200)
+    parent_should_fail = models.BooleanField(default=False)
+    child_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_matrix_parent(self, NonAtomicChildCalc)
+
+
+@_permissive
 class ParentCalc(CalculationModel):
     """
     Parent calc. Its ``calculate()`` creates a :class:`ChildCalc` and
@@ -240,7 +365,12 @@ class FailingCalc(CalculationModel):
 
 ALL_MODELS = [
     AtomicCalc, NonAtomicCalc,
-    ChildCalc, ParentCalc,
+    ChildCalc, NonAtomicChildCalc,
+    AtomicParentAtomicChildMatrixCalc,
+    AtomicParentNonAtomicChildMatrixCalc,
+    NonAtomicParentAtomicChildMatrixCalc,
+    NonAtomicParentNonAtomicChildMatrixCalc,
+    ParentCalc,
     GrandchildCalc, MidCalc,
     NonAtomicParentCalc,
     FailingCalc,
@@ -251,6 +381,7 @@ ALL_MODELS = [
 ATOMIC = "atomiccalc"
 NON_ATOMIC = "nonatomiccalc"
 CHILD = "childcalc"
+NON_ATOMIC_CHILD = "nonatomicchildcalc"
 PARENT = "parentcalc"
 MID = "midcalc"
 GRANDCHILD = "grandchildcalc"

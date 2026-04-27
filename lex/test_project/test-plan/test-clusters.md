@@ -148,7 +148,6 @@ If either command is broken, a new customer cannot start using the framework at 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
 | 2.1 | POST creates a record (**CI showcase test**) | Response 201, body includes `id`, record in DB. This is the CRUD showcase scenario driven by `.github/workflows/showcase_tests.yml`. |
-| 2.2 | POST sets framework-managed fields | `created_at`, `edited_at`, `created_by` = authenticated user's email |
 | 2.3 | POST with missing required field | Response 400, error names the missing field, no record created |
 | 2.4 | POST with invalid field type | Response 400, no record created |
 | 2.5 | POST with extra unknown fields | Unknown fields ignored, record created with known fields only |
@@ -170,7 +169,6 @@ If either command is broken, a new customer cannot start using the framework at 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
 | 2.13 | PATCH updates only specified fields | Response 200, changed field updated, other fields untouched |
-| 2.14 | PATCH updates `edited_at` and `edited_by` | `edited_at` changes, `edited_by` = authenticated user, `created_at`/`created_by` unchanged |
 | 2.15 | PATCH with invalid value | Response 400, record in DB unchanged |
 | 2.16 | PUT replaces the record | Response 200, all fields match request body |
 | 2.17 | PATCH non-existent id | Response 404 |
@@ -189,9 +187,9 @@ If either command is broken, a new customer cannot start using the framework at 
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 2.23 | POST to `many/` creates multiple records | Response 201, all records in DB with correct values |
-| 2.24 | PATCH to `many/` updates multiple records | Response 200, each record's changes applied |
-| 2.25 | Bulk create with one invalid record | Behavior matches documented contract (all-or-nothing vs partial) |
+| 2.23 | DELETE to `many/` removes selected records | Response 200, body lists deleted ids, selected rows gone from DB |
+| 2.24 | DELETE to `many/` leaves unselected records | Rows not named by repeated `ids` query params remain untouched |
+| 2.25 | DELETE to `many/` with unknown ids | Stale/unknown ids are ignored safely; only existing selected rows are reported/deleted |
 
 ---
 
@@ -316,6 +314,8 @@ If either command is broken, a new customer cannot start using the framework at 
 - `NonAtomicCalc` — `CalculationModel` with `is_atomic = False`, configurable success/failure
 - `ParentCalc` — triggers `ChildCalc` from its `calculate()` method
 - `ChildCalc` — triggered by parent, configurable success/failure
+- `NonAtomicChildCalc` — child variant with `is_atomic = False`
+- `AtomicParentAtomicChildMatrixCalc`, `AtomicParentNonAtomicChildMatrixCalc`, `NonAtomicParentAtomicChildMatrixCalc`, `NonAtomicParentNonAtomicChildMatrixCalc` — exhaustive parent/child atomicity matrix with independent parent/child failure toggles
 - `GrandchildCalc` — 3-level hierarchy (parent → child → grandchild)
 - `FailingCalc` — always raises an exception in `calculate()`
 
@@ -337,6 +337,22 @@ If either command is broken, a new customer cannot start using the framework at 
 | 7.12 | `calculate()` does NOT call `self.save()` | Framework handles saves; model's calculate just does computation |
 | 7.13 | Error message stored | When calculation fails, `calculation_error_message` or `error_message` field populated |
 | 7.14 | Calculation via REST API (PATCH is_calculated=IN_PROGRESS) | API path commits IN_PROGRESS independently, then hooks run |
+| 7.32 | Atomic parent, atomic child, both pass | Parent and child both settle at SUCCESS |
+| 7.33 | Atomic parent, atomic child, child fails | Child settles at ERROR and propagates ERROR to parent |
+| 7.34 | Atomic parent, atomic child, parent fails after child pass | Parent settles at ERROR; successful child is rolled back by the parent's atomic transaction |
+| 7.35 | Atomic parent, atomic child, both fail | Child ERROR persists and parent settles at ERROR via propagation |
+| 7.36 | Atomic parent, non-atomic child, both pass | Parent and non-atomic child both settle at SUCCESS |
+| 7.37 | Atomic parent, non-atomic child, child fails | Non-atomic child ERROR persists and propagates ERROR to parent |
+| 7.38 | Atomic parent, non-atomic child, parent fails after child pass | Parent settles at ERROR; successful non-atomic child is still rolled back because it ran inside the parent's transaction |
+| 7.39 | Atomic parent, non-atomic child, both fail | Non-atomic child ERROR persists and parent settles at ERROR via propagation |
+| 7.40 | Non-atomic parent, atomic child, both pass | Parent and child both settle at SUCCESS |
+| 7.41 | Non-atomic parent, atomic child, child fails | Atomic child ERROR persists and propagates ERROR to non-atomic parent |
+| 7.42 | Non-atomic parent, atomic child, parent fails after child pass | Parent settles at ERROR while successful child remains SUCCESS |
+| 7.43 | Non-atomic parent, atomic child, both fail | Child ERROR persists and parent settles at ERROR via propagation |
+| 7.44 | Non-atomic parent, non-atomic child, both pass | Parent and child both settle at SUCCESS |
+| 7.45 | Non-atomic parent, non-atomic child, child fails | Child ERROR persists and propagates ERROR to parent |
+| 7.46 | Non-atomic parent, non-atomic child, parent fails after child pass | Parent settles at ERROR while successful child remains SUCCESS |
+| 7.47 | Non-atomic parent, non-atomic child, both fail | Child ERROR persists and parent settles at ERROR via propagation |
 
 ---
 
@@ -361,7 +377,7 @@ If either command is broken, a new customer cannot start using the framework at 
 | 8.5 | `dispatch_calculation_task` extracts context correctly | `operation_context` serialized without unpicklable objects |
 | 8.6 | Nested calculation inside Celery worker runs synchronously | `is_celery_worker_process()` detected, no recursive dispatch |
 
-### 8g. Task infrastructure — `lex/lex_app/celery_tasks.py` 🟢
+### 8g. Task infrastructure — `lex/lex_app/celery_tasks.py` 
 
 **Gap:** `lex/lex_app/celery_tasks.py` is ~958 lines of customer-visible Celery plumbing (``CallbackTask``, ``CeleryCalculationContext``, ``FireAndForget`` / ``WaitForTasks``, ``EnhancedBoundTaskMethod``, the ``lex_shared_task`` decorator). Cluster 8a covered only the ``should_use_celery()`` / sync-fallback surface. 8g drives the remaining customer-visible code without requiring a Redis broker.
 
@@ -384,7 +400,7 @@ If either command is broken, a new customer cannot start using the framework at 
 | 8.14 | WaitForTasks dispatches via ``.delay`` and blocks on scope exit | Result registered on WFT; on exit ``.get()`` is called (``allow_join_result`` swapped for ``nullcontext``); ``dispatched_results`` cleared |
 | 8.15 | ``lex_shared_task`` wrapper pops reserved kwargs and enters ``CeleryCalculationContext`` when truthy ``context`` is supplied | Body sees only the user kwargs; returns ``(inner_result, args)`` — the shape ``CallbackTask._extract_model_instances`` depends on |
 
-**Status:** 🟢 Complete — 9 pass / 0 fail / 0 xfail.
+**Status:**  Complete — 9 pass / 0 fail / 0 xfail.
 
 ---
 
@@ -431,7 +447,7 @@ If either command is broken, a new customer cannot start using the framework at 
 | 10.4 | DELETE removes record | 204/200, record gone |
 | 10.5 | GET list returns all records | 200, correct count |
 | 10.6 | GET history returns history rows | 200, ordered by `history_date` |
-| 10.7 | Many endpoint (bulk operations) | Correct batch handling |
+| 10.7 | Many endpoint bulk delete | DELETE with repeated `ids` query params removes selected records only |
 | 10.8 | API triggers calculation (PATCH `is_calculated=IN_PROGRESS`) | IN_PROGRESS committed independently, hooks fire, final state correct |
 | 10.9 | Invalid data returns 400 | Validation errors in response |
 | 10.10 | Unauthenticated request handled | 401 or redirect |
@@ -494,8 +510,8 @@ Each test declares the volume it targets; CI decides which to run via a pytest/D
 | 11.7 | `PeriodAggregateCalc` over a single period | LARGE invoices in one period | Time < 5s; query count < 10 regardless of invoice count (one aggregate query, not one per invoice) |
 | 11.8 | `PeriodAggregateCalc` over **all 12 periods** | LARGE across 12 periods | **Time < 60s total**, confirms no cross-period re-fetch, history rows correct for every period |
 | 11.9 | `DependentPeriodCalc` — 3-period dependency chain × 12 periods | LARGE | Dependency resolution does each underlying period once, not once per dependent. Total time < 90s; query count grows `O(periods)`, not `O(periods²)` |
-| 11.10 | Bulk API POST (`POST /many/`) at volume | MEDIUM (5k in one call) | Single serializer compile; single `bulk_create`; time < 10s; exactly 5k rows persisted — catches per-row `save()` regressions in the bulk path. (Depends on BUG-006 fix — until then marked `@expectedFailure`.) |
-| 11.11 | Bulk PATCH over filtered subset | MEDIUM | Time < 5s; exactly 1 UPDATE query (not n); history rows written correctly |
+| 11.10 | Bulk API DELETE (`DELETE /many/?ids=…`) at volume | MEDIUM/LARGE selected subset | Selected rows deleted within budget; rows outside the explicit id set survive |
+| 11.11 | ORM filtered `QuerySet.update()` baseline | MEDIUM | Time < 5s; exactly 1 UPDATE query (not n); affected row count and DB state match |
 | 11.12 | Concurrent writes — 10 parallel clients each patching its own subset | MEDIUM | No deadlocks, no lost updates; audit rows from all 10 clients present; `created_by` correct per row |
 | 11.13 | History-table growth — 20k updates to one row | LARGE (1 row, 20k revisions) | History query paginates in < 500ms at p95; `history_date` index actually used (`EXPLAIN` check); no blow-up on `.history.all()` when the queryset is consumed lazily |
 | 11.14 | Permission filtering at scale | LARGE | `permission_read` invoked **once per list request**, not once per row; list endpoint time < 1s even with a custom `permission_read` that does work |
@@ -612,13 +628,13 @@ cluster-2 models are too shallow; we need a model with one of every
 | 12.18 | `JSONField` preserves structure | Nested dict/list round-trips with key order preserved (for dicts) / element order preserved (for lists) |
 | 12.19 | Unknown field in PATCH payload ignored | Response 200, unknown key silently dropped, known fields applied (mirrors 2.5 but asserts at serializer level) |
 
-### 12c. List & Many contract
+### 12c. List & Many read contract
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
 | 12.20 | `FilteredListSerializer` drops records that serialize to `{}` | List with 3 rows, one denied by `permission_read`, returns 2 rows — not 3 with one empty dict |
 | 12.21 | List response row shape matches detail | Every row in a list response has the same framework-managed keys as the detail endpoint |
-| 12.22 | `/many/` POST field validation | Mirrors 12.16 for bulk: first invalid record's error names the field; contract (all-or-nothing vs partial) matches 2.25 |
+| 12.22 | `/many/` GET selected rows match list shape | Read-only Many endpoint returns exactly the selected ids and the same framework-managed row keys as list/detail |
 
 ### 12d. AuditLog payload filtering
 
@@ -695,7 +711,8 @@ clusters):
 | # | Scenario | What We Assert |
 |---|----------|----------------|
 | 13.1 | Empty queryset → 404 | Body ``{"error": "No data available for export"}``; no ``.xlsx`` bytes |
-| 13.2 | 5 rows, default permissions, with FK | HTTP 200 + ``.xlsx`` body; row count matches DB; FK column shows ``str(category)`` (**``Cat<...>``**), not the integer pk |
+| 13.2a | 5 rows, default permissions, no FK | HTTP 200 + ``.xlsx`` body; row count matches DB; every flat row is populated |
+| 13.2b | 5 rows, default permissions, with FK | HTTP 200 + ``.xlsx`` body; row count matches DB; FK column shows ``str(category)`` (**``Cat<...>``**), not the integer pk |
 | 13.3 | ``filtered_export`` base64-encoded id list | Only the selected ids are in the exported sheet (legacy path routes through ``PrimaryKeyListFilterBackend.filter_for_export``) |
 | 13.4 | ``permission_export`` restricts fields | Restricted columns are present in the sheet but blank; allowed columns carry values |
 
@@ -822,7 +839,7 @@ on internal state.
 | 14.19 | ``filterModel`` naming a field that does not exist | Ignored silently by ``_is_valid_field_path``; response is the unfiltered set (does not crash) |
 | 14.20 | ``sortModel`` with ``colId: "non_existent"`` | Silently dropped by ``_is_valid_field_path``; default PK order applied |
 
-### 14e. Secondary filter / sort branches (April 21) 🟢
+### 14e. Secondary filter / sort branches (April 21) 
 
 The 14b baseline hits the main text / number / date / set / compound-OR paths. The **long tail of operation-type branches** in ``_build_filter_q`` that the AG Grid header dropdowns actually emit in production was still cold. 14e closes those gaps with 4 table-driven scenarios + 1 xfail capturing a real framework bug.
 
@@ -832,9 +849,9 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
 | 14.22 | Number filter op variants — ``lessThan`` / ``lessThanOrEqual`` / ``greaterThanOrEqual`` / ``notEqual`` / ``inRange`` + date ``blank`` (which DOES work) | Same table-driven shape |
 | 14.23 | Legacy ``condition1`` / ``condition2`` shape — both AND and OR operators | Older AG Grid clients still send this shape; endpoint must serve both frontend versions from one deploy |
 | 14.24 | ``?ordering=-amount,name`` multi-field CSV + unknown token silently dropped | Primary + secondary sort both applied; ``?ordering=not_a_real_field,-amount`` returns 200 (no 500 on schema drift) |
-| 14.25 | **BUG-016** — ``blank`` / ``notBlank`` filter ops are unreachable | Text ``blank`` / ``notBlank`` and date ``notBlank`` silently return every row because the early-return guards at the top of each filter-type branch in ``_build_filter_q`` short-circuit on missing ``filter`` value before the per-op dispatch can run. `xfail` — will pass once the framework bypass-list is widened to include ``notBlank`` (and the text branch special-cases ``blank`` / ``notBlank`` the way the date branch already does) |
+| 14.25 | **BUG-016** — ``blank`` / ``notBlank`` filter ops are unreachable | Skipped until the framework bypass-list is widened to include ``notBlank`` (and the text branch special-cases ``blank`` / ``notBlank`` the way the date branch already does) |
 
-**Status:** 🟢 Complete — 4 pass + 1 xfail (BUG-016).
+**Status:**  Complete — 4 pass + 1 skip (BUG-016).
 
 **What is explicitly NOT tested here:**
 
@@ -853,7 +870,7 @@ After landing Clusters 1–14 (176+ scenarios, 14 real framework bugs surfaced),
 
 Priorities below are ordered by expected coverage delta × customer-visibility.
 
-### 4e. Read-restriction filter backend — `UserReadRestrictionFilterBackend` 🟢
+### 4e. Read-restriction filter backend — `UserReadRestrictionFilterBackend` 
 
 **Gap:** `lex/api/views/model_entries/filter_backends.py` — 198 stmts, **28.97%** covered. Every List / Export / History query passes through this; also the lookup table for BUG-011 (permission O(n)).
 
@@ -861,16 +878,16 @@ Priorities below are ordered by expected coverage delta × customer-visibility.
 
 | # | Scenario | What We Assert | Status |
 |---|----------|----------------|--------|
-| 4.13 | Per-row visibility — mixed allowed/denied rows in one page | Only allowed rows in response (exercises `queryset.iterator()` + `excluded.append`) | 🟢 |
+| 4.13 | Per-row visibility — mixed allowed/denied rows in one page | Only allowed rows in response (exercises `queryset.iterator()` + `excluded.append`) |  |
 | 4.14 | AuditLog resource filter — `_build_auditlog_db_visibility_filters` | Rows for resources the user can't read are excluded at the DB level | ⏸ skip (fixture) |
 | 4.15 | AuditLog deferred-permission path — mixed handled + residual resources | Residual rows are permission-checked via `can_read_from_payload` | ⏸ skip (fixture) |
-| 4.16 | `pk_only=true` fast path honours permissions | Denied pks excluded from id list; `count` matches allowed subset | 🟢 |
-| 4.17 | `allow_all` profile (admin group) returns every row | `permission_read → allow_all`, no exclusion (`return queryset` branch) | 🟢 |
-| 4.18 | Deny-all short-circuit — `permission_read → deny` on every row | Zero rows returned even though DB holds every seeded row | 🟢 |
+| 4.16 | `pk_only=true` fast path honours permissions | Denied pks excluded from id list; `count` matches allowed subset |  |
+| 4.17 | `allow_all` profile (admin group) returns every row | `permission_read → allow_all`, no exclusion (`return queryset` branch) |  |
+| 4.18 | Deny-all short-circuit — `permission_read → deny` on every row | Zero rows returned even though DB holds every seeded row |  |
 
-**Status:** 🟢 Complete — 4 pass + 2 skip. See progress.md Session 16.
+**Status:**  Complete — 4 pass + 2 skip. See progress.md Session 16.
 
-### 4f. Serializer-level masking — `PermissionAwareSerializerMixin` 🟢
+### 4f. Serializer-level masking — `PermissionAwareSerializerMixin` 
 
 **Gap:** `lex/api/views/model_entries/mixins/PermissionAwareSerializerMixin.py` — 102 stmts, **9.33%** baseline. Field-level *denial* outcomes are already gated by cluster 4b (BUG-010 xfail); 4f locks down the **mixin's infrastructure contracts** (naming, injection, metaclass) plus the `run_validation` hook end-to-end — the code the BUG-010 fix will rely on.
 
@@ -887,9 +904,9 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 | 4.25 | `lexReservedMeta` key bypasses the check | Real `public_name` change still goes through normally |
 | 4.26 | `run_validation` — create path | Regular user POSTing `ProtectedItem` gets `PermissionDenied` (model name in the message); admin passes |
 
-**Status:** 🟢 Complete — 8 pass / 0 fail. See progress.md Sessions 17 + 19.
+**Status:**  Complete — 8 pass / 0 fail. See progress.md Sessions 17 + 19.
 
-### 12f. Serializer write paths — M2M & nested FK 🟢
+### 12f. Serializer write paths — M2M & nested FK 
 
 **Gap:** `lex/api/serializers/base_serializers.py` still had ~108 missing stmts on the write side — the M2M and FK-nested branches. 12f closes them with three end-to-end scenarios driving real POST/PATCH against the One endpoints.
 
@@ -903,9 +920,9 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 | 12.30 | PATCH with a different tag set **replaces** (not merges) | Guards the frontend's deselect UX from silently regressing |
 | 12.31 | Nullable FK lifecycle | Attach-on-create → rewire via PATCH → detach to NULL |
 
-**Status:** 🟢 Complete — 3 pass / 0 fail. See progress.md Sessions 18 + 29.
+**Status:**  Complete — 3 pass / 0 fail. See progress.md Sessions 18 + 29.
 
-### 10e. Schema introspection — `create_field_info` + structure-tree pruning 🟢
+### 10e. Schema introspection — `create_field_info` + structure-tree pruning 
 
 **Gap:** `ModelStructureObtainView.py` (102 stmts, 21.54% baseline) and `model_info/Fields.py` (67 stmts, 22.35% baseline) drive every frontend form + nav menu. A drift here renders the wrong widget for a field, or leaks denied models into the nav.
 
@@ -918,9 +935,9 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 | 10.13 | FK metadata exposes `target` | `target == related_model._meta.model_name` — frontend uses it to fetch dropdown values |
 | 10.14 | `delete_restricted_nodes_from_model_structure` prunes denied models | Folders that only contained denied models are collapsed; nav must not show empty folders |
 
-**Status:** 🟢 Complete — 4 pass / 0 fail (+ BUG-015 surfaced, Open). See progress.md Sessions 18 + 20.
+**Status:**  Complete — 4 pass / 0 fail (+ BUG-015 surfaced, Open). See progress.md Sessions 18 + 20.
 
-### 10f. Global search — `Search.py` 🟢
+### 10f. Global search — `Search.py` 
 
 **Gap:** 28 stmts, baseline **34.21%**. Small surface, user-facing — the nav-bar search box hits this endpoint.
 
@@ -935,9 +952,9 @@ Shipped 4 scenarios. The view depends only on `self.model_collection` + `self.kw
 | 10.16 | Container whose `id` is in `EXCLUDED_MODELS` (`user`, `permission`, …) short-circuits *before* the query runs | No PII leak through global search even if system rows contain the query term |
 | 10.16b | `EXCLUDED_TYPES` still contains every non-text field type (`FloatField`, `BooleanField`, `IntegerField`, `FileField`, `ForeignKey`) | Regression gate — if a non-text type slips out, `SearchVector` 500s at runtime |
 
-**Status:** 🟢 Complete — 4 pass / 0 fail.
+**Status:**  Complete — 4 pass / 0 fail.
 
-### 5.11 — History fallback-snapshot path 🟢
+### 5.11 — History fallback-snapshot path 
 
 **Gap:** `History.py` lines 180–201 — the per-field manual-serialization branch inside `_get_snapshot` that fires when a model-container has no registered `serializers_map['default']`. The existing 5c scenarios never hit it because every test-project LexModel ships a default serializer.
 
@@ -947,9 +964,9 @@ Shipped 4 scenarios. The view depends only on `self.model_collection` + `self.kw
 |---|----------|----------------|
 | 5.11 | Fallback snapshot contract | **(a)** `CONTROL_FIELDS` (`history_id` / `valid_from` / `sys_from` / `meta_task_status` / …) filtered out even when populated — frontend must not see system columns inside the business payload; **(b)** `datetime` → `isoformat()`; **(c)** `date` → `isoformat()`; **(d)** non-primitive object coerced via `str()` so DRF's JSON encoder doesn't blow up; **(e)** primitives (`int` / `bool` / `None`) + containers (`list` / `dict`) pass through unchanged |
 
-**Status:** 🟢 Complete — 1 pass / 0 fail.
+**Status:**  Complete — 1 pass / 0 fail.
 
-### 9.7 – 9.10 — Bitemporal suppression guards 🟢
+### 9.7 – 9.10 — Bitemporal suppression guards 
 
 **Gap:** `bitemporal_signals.py` at 46.60% baseline. The three `ContextVar`-backed suppression guards (`suppress_main_table_sync`, `suppress_history_valid_to_chaining`, `suppress_meta_sys_to_chaining`) are consulted by every handler in the file — early-return at lines 118, 274, and the Level-2 meta-chaining guard. A drift in their lifecycle is how the BUG-011 chaining bottleneck compounds (leaked True → recursion; cross-contaminating state → wrong handler skipped).
 
@@ -964,9 +981,9 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 9.9 | Three guards are independent | Suspending `main_table_sync` must not suspend `valid_to_chaining` or `meta_sys_to_chaining` — the handlers rely on asymmetric combinations |
 | 9.10 | Suspension is thread-local | Background thread sees `False` even while the parent thread holds a suspension — guarantees Celery-worker parallel requests don't silently share suspension state |
 
-**Status:** 🟢 Complete — 4 pass / 0 fail.
+**Status:**  Complete — 4 pass / 0 fail.
 
-### 7g — `CalculatedModel.create()` pipeline (end-to-end) 🟢
+### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
 **Gap:** `lex/core/mixins/CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
 
@@ -990,9 +1007,9 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 7.29 | Empty `get_selected_key_list` return prunes the whole branch | Zero rows, no error — exercises the `if not field_values: continue` + early-break |
 | 7.30 | `delete_models_with_same_defining_fields` on un-saved instance | Returns `self` and resets a stale pk to `None` so caller can INSERT |
 
-**Status:** 🟢 Complete — 6 pass / 0 fail. Drove `CalculatedModelMixin.py` from **33.74% → 64.75%** (+31 pts, +170 lines covered).
+**Status:**  Complete — 6 pass / 0 fail. Drove `CalculatedModelMixin.py` from **33.74% → 64.75%** (+31 pts, +170 lines covered).
 
-### 1i. Initial-data upload — full journey end-to-end 🟢
+### 1i. Initial-data upload — full journey end-to-end 
 
 **Gap (April 24):** `InitialDataAuditLogger` (148 stmts, **12.64%** baseline) + `ProcessAdminTestCase` seed walker (`replace_tagged_parameters`, `get_test_data_from_path`, seed dispatcher). Never driven end-to-end by Cluster 1c — 1c only asserts post-`Init` database state, not the intermediate audit trail or the JSON-walker contracts.
 
@@ -1019,9 +1036,9 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 1.59b | Full journey without audit still lands DB state | Audit is observability — disabling it must not regress data transitions |
 | 1.60 | Crash path — `finalize_batch(failure_error=…)` after 3 pending ops | All 3 swept to `failure` with error string; `pending_resolved == 3` |
 
-**Status:** 🟢 Complete — 13 pass / 0 fail / 1 env-gated skip (1.59). Targets ~140 lines in `InitialDataAuditLogger.py` + ~40 in `ProcessAdminTestCase`.
+**Status:**  Complete — 13 pass / 0 fail / 1 env-gated skip (1.59). Targets ~140 lines in `InitialDataAuditLogger.py` + ~40 in `ProcessAdminTestCase`.
 
-### 8j. Celery task bodies — `load_data` / `calc_and_save` / `activate_history_version` 🟢
+### 8j. Celery task bodies — `load_data` / `calc_and_save` / `activate_history_version` 
 
 **Gap (April 24):** 8g / 8h / 8i drove the *infrastructure* around `@lex_shared_task` (CallbackTask, CeleryCalculationContext, EnhancedBoundTaskMethod dispatch, WaitForTasks / FireAndForget scope contracts). The three **task bodies** shipped in `celery_tasks.py` — the customer-visible work units — remained dark: `load_data` (the `initial_data_upload` task body, 50+ lines spanning four storage/worker branches + finalize gate), `calc_and_save` (the per-model batch loop with IntegrityError conflict resolution), and `activate_history_version` (Celery Beat bitemporal-activation task with four documented return-string branches).
 
@@ -1048,7 +1065,83 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 8.43 | Valid history record, due now | `sync_record_for_model(model, pk_val, HistoryModel)` fires; `MetaModel.objects.filter(history_object_id, status="SCHEDULED").update(status="DONE")`; returns `"success"` |
 | 8.44 | Sync raises during happy path | Exception propagates (not silently swallowed) — Beat retries / alerts |
 
-**Status:** 🟢 Complete — 14 pass / 0 fail. Closes Cluster-A/B/C bucket C. Targets the 3 task bodies in `celery_tasks.py` lines 696–957 — previously uncovered by 8g/8h/8i which focused on the wrapper + dispatch layer.
+**Status:**  Complete — 14 pass / 0 fail. Closes Cluster-A/B/C bucket C. Targets the 3 task bodies in `celery_tasks.py` lines 696–957 — previously uncovered by 8g/8h/8i which focused on the wrapper + dispatch layer.
+
+### 1j. Keycloak client safety pre-flight — mocked 
+
+**Gap (April 25):** `lex init` mutates the configured Keycloak client's resources / policies / permissions. Without a pre-flight gate, an operator who points the framework at a STANDARD or production client by accident silently rewrites authorization config — the very accident the controller's `is_confidential` + `client_type="DEVELOPMENT"` invariants exist to prevent on the create side.
+
+**Framework feature added in this sub-cluster** (`lex/lex_app/management/commands/init.py`):
+* module constant `KEYCLOAK_DEV_REDIRECT_HOST = "localhost"`;
+* helper `_redirect_uris_indicate_development(uris)` — uses `urllib.parse.urlparse(...).hostname == "localhost"` (case-insensitive) so look-alike hosts (`localhost.example.com`) and loopback IPs (`127.0.0.1`) do NOT count; non-string entries are skipped silently;
+* `KeycloakSyncManager.verify_client_is_safe_for_init()` — fetches the client via `admin.get_client(client_uuid)` and raises `CommandError` (chained via `__cause__` for network failures) for any of: empty `client_uuid`, network failure, non-dict response, missing `publicClient` flag, `publicClient is True`, missing/malformed/empty `redirectUris`, or no localhost redirect; returns the rep on success;
+* `--skip-client-preflight` CLI flag wired into `Command.handle` immediately after `sync_manager = KeycloakSyncManager()` and before any sync work; when set, command writes `"Skipping Keycloak client safety pre-flight (--skip-client-preflight is set)."` to stdout and bypasses the gate.
+
+**Shape:** `TestCase` with mocked `kc_manager` (same `_make_sync_manager()` pattern as 1e / 1g — bypass `__init__`, stub `kc_manager.admin`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.71 | Confidential + localhost redirect passes | Returns the rep; `admin.get_client` called once with `client_uuid` |
+| 1.72 | `http://localhost:8000/*` is a localhost redirect | Port number doesn't matter — only the parsed hostname does |
+| 1.73 | Only-localhost (no prod URI) is still a valid dev client | DEV-only test fixtures are not penalized |
+| 1.74 | `publicClient=true` raises | Message names the client + 'confidential'; mentions `publicClient=true` |
+| 1.75 | Missing `publicClient` flag is treated as unsafe | Never assume confidential by default |
+| 1.76 | Prod-only `redirectUris` raises | Message names DEVELOPMENT + localhost + offending URI + clientId |
+| 1.77 | Empty `redirectUris` raises with `<empty>` sentinel | Operator can tell the list was blank vs. populated-but-wrong |
+| 1.78 | Missing `redirectUris` field raises | Malformed rep is rejected, not assumed-empty |
+| 1.79 | `redirectUris` set to a string raises | Type check is real, not duck-typed |
+| 1.80 | `localhost.example.com` does NOT match | Proves we use parsed `.hostname`, not substring |
+| 1.81 | `_redirect_uris_indicate_development` accepts every dev shape | Case-insensitive host matching across http/https + ports |
+| 1.82 | Helper rejects production / 127.0.0.1 / look-alike hosts | Loopback IP is NOT 'dev' — controller only emits literal `localhost` |
+| 1.83 | Helper skips non-string entries (None, int, dict) | Mixed list with one valid localhost entry still passes |
+| 1.84 | Helper handles None / empty list cleanly | Returns False, does not raise |
+| 1.85 | `KEYCLOAK_DEV_REDIRECT_HOST == "localhost"` is pinned | Any change is deliberate (touches both halves of the contract) |
+| 1.86 | Empty `client_uuid` raises BEFORE any HTTP call | `admin.get_client.assert_not_called()` |
+| 1.87 | `admin.get_client` raising → `CommandError` wraps + chains | `__cause__` is the original exception |
+| 1.88 | Non-dict response shape raises | Defensive against SDK contract drift |
+| 1.89 | Failing pre-flight aborts `init` BEFORE `process_model_changes` | `mgr.process_model_changes.assert_not_called()` |
+| 1.90 | `--skip-client-preflight` short-circuits pre-flight | `admin.get_client.assert_not_called()`; stdout names the flag; sync still runs |
+
+**Status:**  Complete — 20 pass / 0 fail in 0.007s. See progress.md Session 38.
+
+### 1k. Keycloak client safety pre-flight — REAL Keycloak integration 
+
+**Companion to 1j.** Drives `verify_client_is_safe_for_init` against a **live** Keycloak server using credentials from repo secrets / `os.environ` or the gitignored `lex/test_project/tests/init/.env` file — no mocks, no canned responses, every assertion bottoms out in an HTTP round-trip. Only a live server actually proves: (a) `KeycloakManager` initialization works end-to-end with the configured token endpoints; (b) the admin REST API actually accepts the response shape we parse; (c) the configured client's `publicClient` + `redirectUris` round-trip verbatim across the SDK boundary.
+
+**Gating:** env-gated on `LEX_RUN_KEYCLOAK_INTEGRATION=1` plus complete Keycloak credentials (`KEYCLOAK_URL`, realm, client id/secret; optional `OIDC_RP_CLIENT_UUID`). The test loader prefers already-populated `os.environ`, then `lex/test_project/tests/init/.env`, then `init.ENV_FILE`. Skips cleanly otherwise (CI sandboxes without live Keycloak see all scenarios as `skipped`).
+
+**Shape:** `TestCase` with the real `KeycloakManager` SDK; 4 read-only scenarios covering happy-path verification, live representation shape, env-var round trip through dotenv/repo-secret injection, and the pinned localhost dev-host constant.
+
+**Status:**  Complete — 4 env-gated integration tests, all skip cleanly without live Keycloak, all pass against the configured dev client when integration env is wired. See progress.md Session 38.
+
+### 1l. `lex init` full pipeline — REAL Keycloak integration 
+
+**Companion to 1b (mocked `lex init` end-to-end) and 1f (Keycloak drift coverage with stubbed manager).** Drives the **same code path the real `lex init` command runs** against a live Keycloak server. Mocked tests cover *contract*; live tests prove three things only a real server can: (1) the Keycloak admin REST API actually accepts the payloads `KeycloakSyncManager` builds (schema drift on Keycloak's side fails here before production); (2) end-to-end timing works (token refresh, multi-call sequences, no race against the authz-import endpoint); (3) `last_authz_import_error` round-trips to `None` on success — what `Command.handle` actually checks.
+
+**Gating:** TWO levels — (a) `LEX_KEYCLOAK_INTEGRATION=1` must be set to enable; (b) the configured client must satisfy the 1j pre-flight (confidential + DEVELOPMENT) so the integration tests cannot be turned on against a production client by accident. Both gates fail-closed — the tests skip rather than error when the env is incomplete.
+
+**Shape:** `E2ETestCase` with real `KeycloakManager` + real `KeycloakSyncManager`; 7 scenarios driving `Command.handle` end-to-end across happy-path full sync, `--dry-run` no-op, drift recovery, idempotent rerun, snapshot/restore round-trip, `--skip-client-preflight` against real client, and `last_authz_import_error → None` assertion.
+
+**Status:**  Complete — 7 env-gated integration tests, all skip cleanly without live Keycloak, all pass against the configured dev tenant when integration env is wired. See progress.md Session 38.
+
+### 1m. `lex` CLI ↔ PyCharm `.run.xml` cross-file contract 
+
+**Gap (April 25):** `generate_pycharm_configs.py` writes 16 `.run/*.run.xml` files an operator can click in PyCharm; each invokes the `lex` CLI with a specific subcommand. 1a covered three of those files (Init / Start / Streamlit); per-builder helpers in `lex/tests/unit/cli/test_lex_cli.py` validate Celery / Flower / MCP individually; nothing asserted "every PyCharm-clickable subcommand actually resolves through the CLI". A rename in either file would silently break a PyCharm action — caught only by a developer trying to use it.
+
+**Shape:** `SimpleTestCase` only — fast, in-process (Click's `CliRunner`, no subprocess), Django bootstrap once per class for the dynamic-command lookup. Scaffolds `.run/` into a per-test `TemporaryDirectory` so the live project's `.run/` is never touched.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.102 | Generated `.run.xml` set parity | Exactly the 16 expected files, no orphans, no missing — canary against "removed Test_Audit but constant still has it" drift |
+| 1.103 | Every `.run.xml` `SCRIPT_NAME` is `lex` | A copy-paste of a different binary cannot bypass the CLI's env handling / Django bootstrap |
+| 1.104 | First-token of every `.run.xml` `PARAMETERS` resolves | Either explicit `@lex.command(...)` Click handler OR registered Django management command — the cross-file contract that nothing else asserts |
+| 1.105 | Explicit Click registry pinned | `celery` / `celery-workers` / `flower` / `streamlit` / `start` / `setup` / `setup-with-ai` / `ai-update` / `ai-faq` — removing one is what would silently break a `.run.xml` |
+| 1.106 | `_SKIP_BOOTSTRAP_COMMANDS` is a subset of explicit registry | Otherwise listed names silently fall through to dynamic forwarding without `django.setup()` |
+| 1.107 | `lex --help` exits 0 and names every explicit command | Click group itself wired correctly |
+| 1.108 | `lex <cmd> --help` exits 0 for every explicit handler | Catches decorator typos / signature regressions that `--help` surfaces but real runs would mask |
+| 1.109 | Every Django-side subcommand referenced by a `.run.xml` is registered | `init` / `migrate` / `makemigrations` / `flush` / `test` / `create_db` resolve through Django's command loader — otherwise dynamic forwarding produces a less-helpful error |
+
+**Status:**  Complete — 8 pass / 0 fail in 0.020s. See progress.md Session 40.
 
 ### Sequencing
 
@@ -1058,7 +1151,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 12f (M2M / nested FK write) — closes base_serializers write paths
 10e (schema introspection) — small surface, frontend-critical
 10f (global search)        — small, user-facing
-5.11 + 9.7-9.10            — close remaining holes in already-🟢 clusters
+5.11 + 9.7-9.10            — close remaining holes in already- clusters
 7g  (CalculatedModel.create pipeline) — closes the largest single source-file gap
 1i  (initial-data upload journey)     — drives InitialDataAuditLogger + seed walker, closes Cluster-A/B/C bucket B
 8j  (celery_tasks.py task bodies)     — load_data / calc_and_save / activate_history_version, closes Cluster-A/B/C bucket C

@@ -30,6 +30,13 @@
 #   - SENDGRID_API_KEY             (used by the showcase workflow)
 #   - SHOWCASE_REPORT_RECIPIENTS
 #   - SHOWCASE_REPORT_FROM
+#
+#  Optional Keycloak integration secrets inherited by showcase_tests.yml:
+#   - KEYCLOAK_URL
+#   - KEYCLOAK_REALM or KEYCLOAK_REALM_NAME
+#   - OIDC_RP_CLIENT_ID
+#   - OIDC_RP_CLIENT_SECRET
+#   - OIDC_RP_CLIENT_UUID
 # ──────────────────────────────────────────────────────────────────────
 
 name: Publish to PyPI
@@ -60,7 +67,7 @@ on:
         required: false
         type: string
         default: >-
-          init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
+          init,crud_api,api_layer,calculations,validation_hooks
 
 jobs:
   # ── Step 1: Gate on the selected tests + emit the customer report ─
@@ -84,7 +91,7 @@ jobs:
       # Single source of truth for the test scope. Edit here (or
       # override from workflow_dispatch) — the same selector drives
       # both the release gate and the email content.
-      clusters: ${{ inputs.clusters || 'init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record' }}
+      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks' }}
 
   # ── Step 2: Build and publish (only if the gate passes) ──────────
   publish:

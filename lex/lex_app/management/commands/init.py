@@ -16,7 +16,7 @@ import webbrowser
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import requests
 import uvicorn
@@ -56,6 +56,42 @@ DEFAULT_SCOPE_POLICY_MAPPING = {
     "export": ["Policy - admin", "Policy - standard"],
 }
 NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS = frozenset({"timeout", "gateway_timeout"})
+
+# ---------------------------------------------------------------------
+# Keycloak client safety pre-flight (Cluster 1j / 1k / 1l)
+# ---------------------------------------------------------------------
+# ``lex init`` rewrites authorization config on the configured Keycloak
+# client. Before doing so it must verify the client is BOTH:
+#   * confidential (``publicClient is False``), and
+#   * a DEVELOPMENT client — observable as at least one ``redirectUris``
+#     entry whose parsed host is ``localhost``. The lex-instance-controller
+#     emits ``http://localhost/*`` only for ``client_type="DEVELOPMENT"``.
+# A drift either way means we are about to mutate a STANDARD / production
+# client and must abort. ``--skip-client-preflight`` is the explicit
+# escape hatch for environments that intentionally rewrite a non-dev
+# client (e.g. controller-driven bootstrap of a fresh tenant).
+KEYCLOAK_DEV_REDIRECT_HOST = "localhost"
+
+
+def _redirect_uris_indicate_development(redirect_uris) -> bool:
+    """Return True iff any entry in ``redirect_uris`` is a localhost URL.
+
+    Uses ``urllib.parse.urlparse`` so look-alike hosts
+    (``localhost.example.com``) and loopback IPs (``127.0.0.1``) do
+    NOT count. Non-string / malformed entries are skipped silently.
+    """
+    if not redirect_uris:
+        return False
+    for entry in redirect_uris:
+        if not isinstance(entry, str) or not entry:
+            continue
+        try:
+            host = urlparse(entry).hostname
+        except Exception:  # pragma: no cover - urlparse is extremely lenient
+            continue
+        if host and host.lower() == KEYCLOAK_DEV_REDIRECT_HOST:
+            return True
+    return False
 
 from lex.lex_app.keycloak_exclusions import (
     KEYCLOAK_SYNC_EXCLUDED_APPS,
@@ -414,6 +450,85 @@ class KeycloakSyncManager:
 
         if changed:
             self.kc_manager.admin.update_client(client_id, rep)
+
+    def assert_client_is_safe_for_init(self) -> dict:
+        """Pre-flight gate run before ``lex init`` mutates anything.
+
+        Raises ``CommandError`` (and never partially mutates) unless
+        the configured Keycloak client is BOTH confidential
+        (``publicClient is False``) AND a DEVELOPMENT client (at least
+        one ``redirectUris`` entry whose host is ``localhost``).
+
+        Returns the fetched client representation on success so callers
+        that already need it can avoid a second round-trip.
+        """
+        client_id = self.kc_manager.client_uuid
+        if not client_id:
+            raise CommandError(
+                "Keycloak client safety pre-flight: no client UUID resolved "
+                "(`OIDC_RP_CLIENT_UUID` is empty). Refusing to run `lex init` "
+                "against an unidentified client."
+            )
+
+        try:
+            rep = self.kc_manager.admin.get_client(client_id)
+        except Exception as exc:
+            raise CommandError(
+                f"Keycloak client safety pre-flight: failed to fetch client "
+                f"representation for {client_id!r}: {exc}"
+            ) from exc
+
+        if not isinstance(rep, dict):
+            raise CommandError(
+                f"Keycloak client safety pre-flight: unexpected response shape "
+                f"from `admin.get_client({client_id!r})` — expected dict, got "
+                f"{type(rep).__name__}."
+            )
+
+        client_label = rep.get("clientId", client_id)
+
+        if "publicClient" not in rep:
+            raise CommandError(
+                f"Keycloak client safety pre-flight: client {client_label!r} "
+                f"({client_id}) representation is missing the `publicClient` "
+                f"flag — refusing to assume it is confidential."
+            )
+
+        public_client = rep.get("publicClient")
+        if public_client is not False:
+            raise CommandError(
+                f"Keycloak client safety pre-flight: client {client_label!r} "
+                f"({client_id}) must be confidential (`publicClient=false`) "
+                f"but reports publicClient=true. Reconfigure the client in "
+                f"the Keycloak admin console to be confidential, or pass "
+                f"`--skip-client-preflight` to bypass this check."
+            )
+
+        if "redirectUris" not in rep:
+            raise CommandError(
+                f"Keycloak client safety pre-flight: client {client_label!r} "
+                f"({client_id}) representation has malformed `redirectUris` "
+                f"(field missing)."
+            )
+        redirect_uris = rep.get("redirectUris")
+        if not isinstance(redirect_uris, list):
+            raise CommandError(
+                f"Keycloak client safety pre-flight: client {client_label!r} "
+                f"({client_id}) representation has malformed `redirectUris` "
+                f"— expected list, got {type(redirect_uris).__name__}."
+            )
+
+        if not _redirect_uris_indicate_development(redirect_uris):
+            shown = redirect_uris if redirect_uris else "<empty>"
+            raise CommandError(
+                f"Keycloak client safety pre-flight: client {client_label!r} "
+                f"({client_id}) is not a DEVELOPMENT client — none of its "
+                f"`redirectUris` point at host '{KEYCLOAK_DEV_REDIRECT_HOST}'. "
+                f"Got: {shown}. `lex init` only mutates DEVELOPMENT clients; "
+                f"pass `--skip-client-preflight` to bypass this check."
+            )
+
+        return rep
 
     @staticmethod
     def _resource_name(app_label: str, model_name: str) -> str:
@@ -1215,6 +1330,17 @@ class Command(BaseCommand):
             default=3,  # fail-fast by default
             help="Number of attempts for the Keycloak sync step (default: 1).",
         )
+        parser.add_argument(
+            "--skip-client-preflight",
+            action="store_true",
+            default=False,
+            help=(
+                "Skip the Keycloak client safety pre-flight that refuses to "
+                "run `lex init` against non-confidential or non-DEVELOPMENT "
+                "clients. Use only when you intentionally need to mutate a "
+                "STANDARD/production client (e.g. controller-driven bootstrap)."
+            ),
+        )
 
     def check_unapplied_migrations(self, database: str = DEFAULT_DB_ALIAS) -> bool:
         from django.db.migrations.executor import MigrationExecutor
@@ -1367,6 +1493,17 @@ class Command(BaseCommand):
 
             # Initialize the sync manager.
             sync_manager = KeycloakSyncManager()
+
+            # Keycloak client safety pre-flight (Cluster 1j / 1k / 1l).
+            # MUST run before any sync-side work so a misconfigured client
+            # aborts before we touch resources, policies, or permissions.
+            if options.get("skip_client_preflight", False):
+                self.stdout.write(
+                    "Skipping Keycloak client safety pre-flight "
+                    "(--skip-client-preflight is set)."
+                )
+            else:
+                sync_manager.assert_client_is_safe_for_init()
 
             # Detect model changes BEFORE migrations
             self.stdout.write("Detecting model changes BEFORE migrations...")

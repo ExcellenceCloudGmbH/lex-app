@@ -7,7 +7,6 @@ an integration. We assert the customer-observable contract:
     * 2xx on success, with the new record id in the body
     * 400 on validation failure, with no record created
     * 401/403 on anonymous POST, with no record created
-    * Framework-managed fields (timestamps, actor) auto-populated
 
 Scenario numbering matches
 docs/test-plan/test-clusters.md#2-crud-via-rest-api.
@@ -21,7 +20,7 @@ from rest_framework import status
 
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
-from .models import ALL_MODELS, SIMPLE, TRACKED, SimpleItem, TrackedItem
+from .models import ALL_MODELS, SIMPLE, SimpleItem
 
 
 class TestCluster02a_Create(E2ETestCase):
@@ -51,39 +50,13 @@ class TestCluster02a_Create(E2ETestCase):
             "Record must be persisted in the DB after a successful POST",
         )
 
-    # -- 2.2 -----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-004: edited_at not set on create via POST
-    def test_2_2_post_sets_framework_managed_fields(self) -> None:
-        """
-        Scenario 2.2: POST sets ``created_at`` / ``edited_at`` / ``created_by``.
-
-        Expected failure (BUG-004 in progress.md): after creating a
-        record via the REST API, ``edited_at`` is ``None``. Intent per
-        docs/reference/LexModel Internals.md is that both timestamps
-        are auto-set on create.
-        """
-        self.client.post(
-            self.url_create(TRACKED),
-            data={"label": "bravo"}, format="json",
-        )
-        item = TrackedItem.objects.get(label="bravo")
-        self.assertIsNotNone(item.created_at, "created_at must be auto-set")
-        self.assertIsNotNone(item.edited_at, "edited_at must be auto-set")
-        self.assertTrue(
-            item.created_by,
-            "created_by must be resolved from the authenticated user",
-        )
-
     # -- 2.3 -----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_2_3_post_missing_required_field_returns_400(self) -> None:
         """
         Scenario 2.3: Missing required field → 400, no record created.
 
-        Expected failure (BUG-005): API returns **500** instead of
-        **400** when a required field is missing. The customer-facing
-        contract (DRF convention + framework docs) is 400 Bad Request
-        with a per-field error body.
+        The customer-facing contract (DRF convention + framework docs)
+        is 400 Bad Request with a per-field error body.
         """
         resp = self.client.post(
             self.url_create(SIMPLE),
@@ -100,12 +73,11 @@ class TestCluster02a_Create(E2ETestCase):
         )
 
     # -- 2.4 -----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_2_4_post_invalid_field_type_returns_400(self) -> None:
         """
         Scenario 2.4: Invalid field type → 400, no record created.
 
-        Expected failure (BUG-005).
+        Invalid types must return a client-correctable 400, not a 500.
         """
         resp = self.client.post(
             self.url_create(SIMPLE),

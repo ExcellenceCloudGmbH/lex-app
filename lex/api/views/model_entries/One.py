@@ -11,7 +11,7 @@ from django.db.models import Model, QuerySet
 from rest_framework_api_key.permissions import HasAPIKey
 
 from lex.audit_logging.utils.ModelContext import model_logging_context
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
 from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 
@@ -285,6 +285,16 @@ class OneModelEntry(
                 getattr(target, "__name__", target),
             )
 
+    def _validation_error_response(self, exc: ValidationError) -> Response:
+        """Return DRF validation failures as customer-visible HTTP 400.
+
+        The view wraps mutation paths so it can add audit logging. That
+        wrapper must not turn serializer validation errors into generic
+        ``APIException`` responses, because DRF's public contract is a
+        400 with field-level details.
+        """
+        return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+
     def create(self, request, *args, **kwargs):
         self.reset_failed_audit_log_state()
         model_container = self.kwargs["model_container"]
@@ -325,6 +335,14 @@ class OneModelEntry(
                 with atomic_context:
                     response = CreateModelMixin.create(self, request, *args, **kwargs)
 
+            except ValidationError as e:
+                self._log_failed_request_audit_if_needed(
+                    action="create",
+                    target=model_container.model_class,
+                    payload=getattr(request, "data", {}),
+                    exception=e,
+                )
+                return self._validation_error_response(e)
             except Exception as e:
                 self._log_failed_request_audit_if_needed(
                     action="create",
@@ -403,6 +421,15 @@ class OneModelEntry(
                         instance,
                         partial=kwargs.get("partial", False),
                     )
+                except ValidationError as e:
+                    self._log_failed_request_audit_if_needed(
+                        action="update",
+                        target=model_container.model_class,
+                        payload=getattr(request, "data", {}),
+                        exception=e,
+                        related_instance=instance,
+                    )
+                    return self._validation_error_response(e)
                 except Exception as e:
                     self._log_failed_request_audit_if_needed(
                         action="update",
@@ -444,6 +471,15 @@ class OneModelEntry(
                             )
                         return response
 
+                    except ValidationError as e:
+                        self._log_failed_request_audit_if_needed(
+                            action="update",
+                            target=model_container.model_class,
+                            payload=audit_payload,
+                            exception=e,
+                            related_instance=instance,
+                        )
+                        return self._validation_error_response(e)
                     except Exception as e:
                         self._log_failed_request_audit_if_needed(
                             action="update",
@@ -531,6 +567,15 @@ class OneModelEntry(
                         }
                     ) from exc
 
+                except ValidationError as e:
+                    self._log_failed_request_audit_if_needed(
+                        action="update",
+                        target=model_container.model_class,
+                        payload=audit_payload,
+                        exception=e,
+                        related_instance=instance,
+                    )
+                    return self._validation_error_response(e)
                 except Exception as e:
                     self._log_failed_request_audit_if_needed(
                         action="update",

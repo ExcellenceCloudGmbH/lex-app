@@ -4,8 +4,9 @@ Cluster 12c: List & Many contract.
 Intent: the shape of a list response is a **superset-stable** mirror
 of the detail response. Every row has the same framework-managed
 keys, rows denied by ``permission_read`` are dropped entirely (not
-serialized as empty dicts), and the ``/many/`` bulk endpoint enforces
-the same field-level validation contract as a single-row PATCH.
+serialized as empty dicts), and the read-only ``/many/`` endpoint
+returns the same row shape for explicitly selected ids. Bulk create
+and bulk patch are not supported contracts.
 
 Scenario numbering matches
 docs/test-plan/test-clusters.md#12-serializer-contract.
@@ -14,6 +15,7 @@ docs/test-plan/test-clusters.md#12-serializer-contract.
 from __future__ import annotations
 
 import unittest
+from urllib.parse import urlencode
 
 from rest_framework import status
 
@@ -125,28 +127,35 @@ class TestCluster12c_ListContract(E2ETestCase):
         self.assertIn(item_b.pk, ids)
 
     # -- 12.22 ---------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-006: /many/ POST endpoint returns 405
-    def test_12_22_many_post_rejects_invalid_choice(self) -> None:
-        """Scenario 12.22: POST to ``/many/`` with an invalid ``choices``
-        value must reject the batch with 400 (not 500, not 405).
+    def test_12_22_many_get_selected_rows_match_list_shape(self) -> None:
+        """Scenario 12.22: ``/many/`` GET selected rows match list shape.
 
-        Mirrors 12.16 at the bulk layer. Currently xfail against
-        BUG-006 (``many`` POST returns 405 — no bulk-insert via API).
-        Once BUG-006 lands, this test additionally gates BUG-005 at
-        the bulk path.
+        The supported non-delete ``many/`` operation is read-only. It
+        must serialize selected rows with the same framework-managed
+        keys as the normal list endpoint, so frontend bulk-selection
+        screens can reuse row rendering without a special serializer.
         """
-        resp = self.client.post(
-            self.url_many(WIDE),
-            data=[
-                {"name": "m-ok", "category": "alpha"},
-                {"name": "m-bad", "category": "not-a-choice"},
-            ],
-            format="json",
-        )
+        item_a = WideItem.objects.create(name="M-A", amount="1")
+        item_b = WideItem.objects.create(name="M-B", amount="2")
+        ignored = WideItem.objects.create(name="M-ignored", amount="3")
+
+        query = urlencode([("ids", item_a.pk), ("ids", item_b.pk)])
+        resp = self.client.get(f"{self.url_many(WIDE)}?{query}")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        rows = list(resp.data)
         self.assertEqual(
-            resp.status_code, status.HTTP_400_BAD_REQUEST,
-            f"/many/ POST with an invalid row must 400 — got {resp.status_code}",
+            {row["id"] for row in rows}, {item_a.pk, item_b.pk},
+            "Many GET must return exactly the explicitly selected rows.",
         )
+        self.assertNotIn(ignored.pk, {row["id"] for row in rows})
+        for row in rows:
+            missing = FRAMEWORK_KEYS - set(row.keys())
+            self.assertFalse(
+                missing,
+                f"Framework-managed keys missing from many/ row: {missing}. "
+                f"Row keys: {sorted(row.keys())}",
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

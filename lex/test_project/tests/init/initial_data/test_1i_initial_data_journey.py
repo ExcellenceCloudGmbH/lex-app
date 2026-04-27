@@ -58,7 +58,7 @@ from lex.test_project.tests.crud_api.models import SimpleItem
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 
-FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+FIXTURES = Path(__file__).resolve().parent.parent.parent / "fixtures"
 
 
 # =====================================================================
@@ -72,7 +72,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 class TestCluster01i_ReplaceTaggedParameters(unittest.TestCase):
     """Scenario 1.51 — ``tag:`` and ``datetime:`` prefix resolution."""
 
-    def test_1_51_tag_prefix_resolves_to_tagged_object(self) -> None:
+    def test_1_51a_tag_prefix_resolves_to_tagged_object(self) -> None:
         """Scenario 1.51a: ``tag:foo`` is replaced by the in-memory
         object previously stored at ``tagged_objects['foo']`` — this
         is the FK-by-reference mechanism.
@@ -151,7 +151,7 @@ class TestCluster01i_SubprocessFlattening(unittest.TestCase):
         # exposes ``lex/`` as the root, so the in-file subprocess
         # references live at ``test_project/tests/fixtures/…``.
         project_root = str(
-            Path(__file__).resolve().parents[3]  # → …/lex-app/lex/
+            Path(__file__).resolve().parents[4]  # → …/lex-app/lex/
         )
         with mock.patch.dict(os.environ, {"PROJECT_ROOT": project_root}):
             flat = harness.get_test_data_from_path(
@@ -352,7 +352,7 @@ class TestCluster01i_AuditLoggerFinalize(E2ETestCase):
     e2e_models = [SimpleItem]
     e2e_framework_models = [AuditLog, AuditLogStatus]
 
-    def test_1_58_finalize_resolves_lingering_pending_to_success(self) -> None:
+    def test_1_58a_finalize_resolves_lingering_pending_to_success(self) -> None:
         """Scenario 1.58a: clean run → ``finalize_batch()`` with no
         error parameter resolves any pending rows to ``success`` and
         returns a summary with the right counts.

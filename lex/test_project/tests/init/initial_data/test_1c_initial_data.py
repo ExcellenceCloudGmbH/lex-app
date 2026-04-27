@@ -27,8 +27,9 @@ import unittest
 from pathlib import Path
 from unittest import TestCase
 
-# Seed file is at tests/fixtures/test_seed.json — one level up from this file.
-FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+# Seed file is at tests/fixtures/test_seed.json — two levels up from
+# this file (we live in tests/init/initial_data/).
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
 
 class TestCluster01c_InitialDataContract(TestCase):

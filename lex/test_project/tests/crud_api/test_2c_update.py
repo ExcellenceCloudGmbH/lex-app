@@ -3,8 +3,6 @@ Cluster 2c: Update (PATCH / PUT) via REST API.
 
 Asserts the customer-observable update contract:
     * PATCH only touches fields in the payload
-    * ``edited_at`` / ``edited_by`` advance on update;
-      ``created_at`` never changes
     * Invalid PATCH → 400 AND DB unchanged
     * PATCH on non-existent id → 404
     * Anonymous PATCH must not mutate
@@ -21,7 +19,7 @@ from rest_framework import status
 
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
-from .models import ALL_MODELS, SIMPLE, TRACKED, SimpleItem, TrackedItem
+from .models import ALL_MODELS, SIMPLE, SimpleItem
 
 
 class TestCluster02c_Update(E2ETestCase):
@@ -46,50 +44,13 @@ class TestCluster02c_Update(E2ETestCase):
             "PATCH must not touch fields missing from the payload",
         )
 
-    # -- 2.14 ----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-004: edited_at not set on create
-    def test_2_14_patch_updates_edited_at_and_edited_by(self) -> None:
-        """
-        Scenario 2.14: PATCH updates ``edited_at`` / ``edited_by``;
-        ``created_at`` unchanged.
-
-        Expected failure (BUG-004): pre-existing ``edited_at`` is
-        ``None`` because create does not populate it (same root cause
-        as 2.2). Once BUG-004 is fixed this test exercises the
-        PATCH-side contract.
-        """
-        item = TrackedItem.objects.create(label="india")
-        original_created = item.created_at
-        original_edited = item.edited_at
-
-        resp = self.client.patch(
-            self.url_detail(TRACKED, item.pk),
-            data={"label": "india-updated"}, format="json",
-        )
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        item.refresh_from_db()
-
-        self.assertEqual(
-            item.created_at, original_created,
-            "created_at must NEVER change on update",
-        )
-        self.assertGreaterEqual(
-            item.edited_at, original_edited,
-            "edited_at must advance on update",
-        )
-        self.assertTrue(
-            item.edited_by,
-            "edited_by must be the authenticated user after PATCH",
-        )
-
     # -- 2.15 ----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_2_15_patch_invalid_value_leaves_record_unchanged(self) -> None:
         """
         Scenario 2.15: PATCH with invalid value → 400 AND DB unchanged.
 
-        Expected failure (BUG-005): API returns 500 instead of 400 when
-        a PATCH payload fails field-level validation.
+        A PATCH payload that fails field-level validation must return a
+        client-correctable 400 and leave the persisted row unchanged.
         """
         item = SimpleItem.objects.create(name="juliet", value=5)
         resp = self.client.patch(

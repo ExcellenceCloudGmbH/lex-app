@@ -81,6 +81,13 @@ class TestCluster01b_LexInit(TestCase):
         self.mock_autodetector_cls.return_value = autodetector
 
         self.mock_manager = MagicMock()
+        # ``Command.handle`` now runs a Keycloak client-safety preflight before
+        # syncing resources. Because the method starts with ``assert_``, plain
+        # MagicMock treats it as a reserved assertion helper unless we attach it
+        # explicitly.
+        self.mock_manager.assert_client_is_safe_for_init = MagicMock(
+            return_value={"status": "ok"}
+        )
         self.mock_manager_cls.return_value = self.mock_manager
 
     def tearDown(self) -> None:

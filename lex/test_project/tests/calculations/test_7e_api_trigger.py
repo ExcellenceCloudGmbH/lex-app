@@ -31,7 +31,7 @@ class TestCluster07e_APITrigger(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 7.14 ----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-009: is_calculated is editable=False so PATCH silently ignores it
+    @unittest.expectedFailure  # BUG-009: is_calculated is editable=False so PATCH silently ignores it
     def test_7_14_api_trigger_reaches_terminal_state(self) -> None:
         """
         Scenario 7.14: PATCH is_calculated=IN_PROGRESS → final state

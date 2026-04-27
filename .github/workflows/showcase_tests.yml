@@ -19,6 +19,17 @@ name: Showcase Tests (Business View)
 #    SHOWCASE_REPORT_RECIPIENTS   comma-separated recipient emails
 #    SHOWCASE_REPORT_FROM         SendGrid-verified sender address
 #
+#  Optional Keycloak integration secrets. When present, the full init
+#  cluster can run its live-Keycloak read-only tests without a local
+#  .env file. Destructive Keycloak tests remain opt-in via the
+#  LEX_RUN_KEYCLOAK_DESTRUCTIVE repo variable.
+#    KEYCLOAK_URL
+#    KEYCLOAK_REALM
+#    KEYCLOAK_REALM_NAME          optional alias if your env uses this name
+#    OIDC_RP_CLIENT_ID
+#    OIDC_RP_CLIENT_SECRET
+#    OIDC_RP_CLIENT_UUID
+#
 #  Optional:
 #    SHOWCASE_REPORT_FROM_NAME    sender display name
 #    SHOWCASE_BRAND (repo var)    brand shown on the report
@@ -40,10 +51,11 @@ on:
           ``run_showcase_suite.py --only``. Each entry is either
           ``<cluster_key>`` (whole cluster) or
           ``<cluster_key>:<test_suffix>`` (single test inside cluster).
-          Default runs ONE test per cluster for init and crud_api.
+          Default runs the release-gating init, CRUD API, API layer,
+          calculation, and validation-hook clusters.
         required: false
         default: >-
-          init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
+          init,crud_api,api_layer,calculations,validation_hooks
   workflow_call:
     inputs:
       clusters:
@@ -53,7 +65,7 @@ on:
         required: false
         type: string
         default: >-
-          init:test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline,crud_api:test_2a_create.TestCluster02a_Create.test_2_1_post_creates_record
+          init,crud_api,api_layer,calculations,validation_hooks
     outputs:
       overall_ok:
         description: "true if every cluster passed, else false"
@@ -129,6 +141,17 @@ jobs:
           DJANGO_SETTINGS_MODULE: lex_app.settings
           DATABASE_DEPLOYMENT_TARGET: default
           CELERY_ACTIVE: "False"
+          # Enable the env-first path in the init Keycloak integration
+          # tests. If any secret is missing, those tests skip cleanly;
+          # no local .env file is required in CI.
+          LEX_RUN_KEYCLOAK_INTEGRATION: "1"
+          LEX_RUN_KEYCLOAK_DESTRUCTIVE: ${{ vars.LEX_RUN_KEYCLOAK_DESTRUCTIVE || '0' }}
+          KEYCLOAK_URL: ${{ secrets.KEYCLOAK_URL }}
+          KEYCLOAK_REALM: ${{ secrets.KEYCLOAK_REALM }}
+          KEYCLOAK_REALM_NAME: ${{ secrets.KEYCLOAK_REALM_NAME }}
+          OIDC_RP_CLIENT_ID: ${{ secrets.OIDC_RP_CLIENT_ID }}
+          OIDC_RP_CLIENT_SECRET: ${{ secrets.OIDC_RP_CLIENT_SECRET }}
+          OIDC_RP_CLIENT_UUID: ${{ secrets.OIDC_RP_CLIENT_UUID }}
           # The cluster subset (and optionally per-cluster single-test
           # selectors) is supplied by the caller. We intentionally refuse
           # to fall back to "run every cluster" implicitly — the showcase
