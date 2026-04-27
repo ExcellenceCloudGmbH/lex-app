@@ -414,8 +414,9 @@ class KeycloakSyncManager:
 
         env_config = dotenv_values(str(ENV_FILE))
         for key in KEYCLOAK_ENV_VARS:
-            if key in env_config and env_config[key] is not None:
-                os.environ[key] = str(env_config[key])
+            value = env_config.get(key)
+            if value:
+                os.environ[key] = str(value)
 
         self.kc_manager = KeycloakManager()
         self.default_scopes = ["list", "read", "create", "edit", "delete", "export"]

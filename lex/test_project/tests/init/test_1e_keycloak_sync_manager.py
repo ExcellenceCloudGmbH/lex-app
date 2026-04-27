@@ -26,7 +26,10 @@ docs/test-plan/test-clusters.md#1-init--project-bootstrap
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import TestCase, mock
 
 from django.core.management.base import CommandError
@@ -52,6 +55,59 @@ def _make_sync_manager(client_uuid: str = "test-client-uuid"):
     mgr.default_scopes = ["list", "read", "create", "edit", "delete", "export"]
     mgr.exported_configs = None
     return mgr
+
+
+# ---------------------------------------------------------------------
+# 1.30c — Environment loading
+# ---------------------------------------------------------------------
+class TestCluster01e_EnvironmentLoading(TestCase):
+    """``KeycloakSyncManager.__init__`` must not erase CI-provided secrets."""
+
+    def test_1_30c_empty_dotenv_values_do_not_clobber_exported_env(self):
+        """Scenario 1.30c: blank placeholder ``.env`` values are ignored.
+
+        The lex-app source tree can contain an empty placeholder ``.env``.
+        In CI, the real Keycloak credentials arrive through environment
+        variables. Initialising ``KeycloakSyncManager`` must therefore never
+        replace an exported secret with ``""`` from that placeholder file.
+        """
+        from lex.lex_app.management.commands import init as init_module
+
+        exported_env = {
+            "KEYCLOAK_URL": "https://auth.example.test",
+            "KEYCLOAK_REALM": "real-realm",
+            "OIDC_RP_CLIENT_ID": "real-client",
+            "OIDC_RP_CLIENT_SECRET": "real-secret",
+            "OIDC_RP_CLIENT_UUID": "real-uuid",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = Path(tmpdir) / ".env"
+            env_file.write_text(
+                "KEYCLOAK_URL=\n"
+                "KEYCLOAK_REALM=\n"
+                "OIDC_RP_CLIENT_ID=\n"
+                "OIDC_RP_CLIENT_SECRET=\n"
+                "OIDC_RP_CLIENT_UUID=\n",
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.dict(os.environ, exported_env, clear=True),
+                mock.patch.object(init_module, "ENV_FILE", env_file),
+                mock.patch(
+                    "lex.api.views.authentication.KeycloakManager.KeycloakManager",
+                ) as manager_cls,
+            ):
+                mgr = KeycloakSyncManager()
+
+                manager_cls.assert_called_once_with()
+                self.assertIs(mgr.kc_manager, manager_cls.return_value)
+                for key, expected in exported_env.items():
+                    self.assertEqual(
+                        os.environ[key], expected,
+                        f"Blank .env value for {key} must not clobber exported env.",
+                    )
 
 
 # ---------------------------------------------------------------------

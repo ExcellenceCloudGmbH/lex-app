@@ -26,7 +26,8 @@ Gating — TWO levels
 -------------------
 
 * **Read-only tests** require ``LEX_RUN_KEYCLOAK_INTEGRATION=1`` and
-  a populated ``.env`` (same gate as ``test_1k_*``).
+  either exported Keycloak env vars (CI secrets / sourced ``.env``) or
+  a populated local ``.env`` (same gate as ``test_1k_*``).
 * **Destructive tests** (the ones that actually call
   ``import_authorization_settings`` to rewrite the client's authz
   config) ALSO require ``LEX_RUN_KEYCLOAK_DESTRUCTIVE=1``. Default
@@ -126,6 +127,59 @@ def _load_integration_env_into_os(env_file: Path) -> dict[str, str]:
     return loaded
 
 
+def _snapshot_keycloak_env() -> dict[str, str | None]:
+    return {key: os.environ.get(key) for key in KEYCLOAK_ENV_VARS}
+
+
+def _restore_keycloak_env(snapshot: dict[str, str | None]) -> None:
+    for key in KEYCLOAK_ENV_VARS:
+        value = snapshot.get(key)
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _normalize_keycloak_realm_env() -> None:
+    """Mirror ``KEYCLOAK_REALM_NAME`` into ``KEYCLOAK_REALM`` when needed.
+
+    ``get_missing_keycloak_env`` accepts either spelling. The runtime
+    Keycloak client historically read ``KEYCLOAK_REALM`` directly, so
+    the integration fixture normalizes too to keep CI-secret and .env
+    based runs equivalent.
+    """
+    if not os.getenv("KEYCLOAK_REALM") and os.getenv("KEYCLOAK_REALM_NAME"):
+        os.environ["KEYCLOAK_REALM"] = os.environ["KEYCLOAK_REALM_NAME"]
+
+
+def _reset_keycloak_manager_singleton() -> None:
+    try:
+        from lex.api.views.authentication.KeycloakManager import (
+            KeycloakManager,
+        )
+        KeycloakManager._singleton_instance = None
+        KeycloakManager._singleton_initialized = False
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def _keycloak_manager_diagnostic(env_file: Path | None, mgr: KeycloakSyncManager) -> str:
+    kc = mgr.kc_manager
+    return " | ".join(
+        [
+            f"env_file={env_file}",
+            f"client_uuid={getattr(kc, 'client_uuid', None)!r}",
+            f"realm={getattr(kc, 'realm_name', None)!r}",
+            f"admin={'OK' if getattr(kc, 'admin', None) else 'None (init failed)'}",
+            f"oidc={'OK' if getattr(kc, 'oidc', None) else 'None (init failed)'}",
+            f"KEYCLOAK_REALM={os.getenv('KEYCLOAK_REALM')!r}",
+            f"KEYCLOAK_REALM_NAME={os.getenv('KEYCLOAK_REALM_NAME')!r}",
+            f"OIDC_RP_CLIENT_UUID={os.getenv('OIDC_RP_CLIENT_UUID')!r}",
+            f"OIDC_RP_CLIENT_ID={os.getenv('OIDC_RP_CLIENT_ID')!r}",
+        ]
+    )
+
+
 _REQUIRED_KEYCLOAK_VARS = (
     "KEYCLOAK_URL",
     "OIDC_RP_CLIENT_ID",
@@ -210,6 +264,7 @@ class _RealKeycloakBase(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls._original_keycloak_env = _snapshot_keycloak_env()
 
         # Resolution priority — match 1k:
         #
@@ -229,22 +284,16 @@ class _RealKeycloakBase(TestCase):
                     "Keycloak vars are not in os.environ."
                 )
             cls._loaded_keys = _load_integration_env_into_os(env_file)
+        _normalize_keycloak_realm_env()
         cls._integration_env_file = env_file
 
-        try:
-            from lex.api.views.authentication.KeycloakManager import (
-                KeycloakManager,
-            )
-            KeycloakManager._singleton_instance = None
-            KeycloakManager._singleton_initialized = False
-        except Exception:  # pragma: no cover - defensive
-            pass
+        _reset_keycloak_manager_singleton()
 
         try:
             cls._original_env_file = init_module.ENV_FILE
             init_module.ENV_FILE = (
                 env_file if env_file is not None
-                else Path("/dev/null/lex-no-dotenv")
+                else Path(os.devnull)
             )
             cls.mgr = KeycloakSyncManager()
         except Exception as exc:  # pragma: no cover - operator env fault
@@ -257,7 +306,8 @@ class _RealKeycloakBase(TestCase):
             raise unittest.SkipTest(
                 "KeycloakManager could not resolve the configured "
                 "client — check KEYCLOAK_URL / KEYCLOAK_REALM and the "
-                "client secret."
+                "client secret. Diagnostic: "
+                + _keycloak_manager_diagnostic(env_file, cls.mgr)
             )
 
     @classmethod
@@ -265,6 +315,10 @@ class _RealKeycloakBase(TestCase):
         original = getattr(cls, "_original_env_file", None)
         if original is not None:
             init_module.ENV_FILE = original
+        snapshot = getattr(cls, "_original_keycloak_env", None)
+        if snapshot is not None:
+            _restore_keycloak_env(snapshot)
+        _reset_keycloak_manager_singleton()
         super().tearDownClass()
 
 

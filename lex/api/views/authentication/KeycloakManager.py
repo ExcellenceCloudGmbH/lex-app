@@ -90,7 +90,7 @@ class KeycloakManager:
         return normalized_client_uuid
 
     def initialize(self):
-        self.realm_name = os.getenv("KEYCLOAK_REALM")
+        self.realm_name = os.getenv("KEYCLOAK_REALM") or os.getenv("KEYCLOAK_REALM_NAME")
         configured_client_id = os.getenv("OIDC_RP_CLIENT_ID")
         configured_client_uuid = os.getenv("OIDC_RP_CLIENT_UUID")
         self.client_uuid = configured_client_uuid

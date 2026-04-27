@@ -2,7 +2,7 @@
 Cluster 1k: ``lex init`` Keycloak client safety pre-flight — REAL Keycloak.
 
 Companion to ``test_1j_client_preflight.py``. 1j drives the
-``verify_client_is_safe_for_init`` logic in isolation with a stubbed
+``assert_client_is_safe_for_init`` logic in isolation with a stubbed
 ``kc_manager``; this file wires the same code against a **real**
 Keycloak server using the credentials from the project's local
 ``.env`` file. No mocking of the SDK, no canned responses — every
@@ -112,16 +112,61 @@ def _load_integration_env_into_os(env_file: Path) -> dict[str, str]:
     return loaded
 
 
+_REQUIRED_KEYCLOAK_VARS = (
+    "KEYCLOAK_URL",
+    "OIDC_RP_CLIENT_ID",
+    "OIDC_RP_CLIENT_SECRET",
+)
+
+
+def _snapshot_keycloak_env() -> dict[str, str | None]:
+    return {key: os.environ.get(key) for key in KEYCLOAK_ENV_VARS}
+
+
+def _restore_keycloak_env(snapshot: dict[str, str | None]) -> None:
+    for key in KEYCLOAK_ENV_VARS:
+        value = snapshot.get(key)
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _required_env_already_set() -> bool:
+    if any(not os.getenv(k) for k in _REQUIRED_KEYCLOAK_VARS):
+        return False
+    if not (os.getenv("KEYCLOAK_REALM") or os.getenv("KEYCLOAK_REALM_NAME")):
+        return False
+    return True
+
+
+def _normalize_keycloak_realm_env() -> None:
+    if not os.getenv("KEYCLOAK_REALM") and os.getenv("KEYCLOAK_REALM_NAME"):
+        os.environ["KEYCLOAK_REALM"] = os.environ["KEYCLOAK_REALM_NAME"]
+
+
+def _reset_keycloak_manager_singleton() -> None:
+    try:
+        from lex.api.views.authentication.KeycloakManager import (
+            KeycloakManager,
+        )
+        KeycloakManager._singleton_instance = None
+        KeycloakManager._singleton_initialized = False
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 def _integration_enabled() -> bool:
     if os.getenv("LEX_RUN_KEYCLOAK_INTEGRATION", "").strip() != "1":
         return False
+    if _required_env_already_set():
+        return True
     env_file = _resolve_integration_env_file()
     if env_file is None or not env_file.exists():
         return False
     from dotenv import dotenv_values
     values = dotenv_values(str(env_file))
-    needed = ("KEYCLOAK_URL", "OIDC_RP_CLIENT_ID", "OIDC_RP_CLIENT_SECRET")
-    if any(not values.get(k) for k in needed):
+    if any(not values.get(k) for k in _REQUIRED_KEYCLOAK_VARS):
         return False
     if not (values.get("KEYCLOAK_REALM") or values.get("KEYCLOAK_REALM_NAME")):
         return False
@@ -130,10 +175,11 @@ def _integration_enabled() -> bool:
 
 _SKIP_REASON = (
     "Real-Keycloak integration tests are off by default. Set "
-    "LEX_RUN_KEYCLOAK_INTEGRATION=1 and drop a populated .env at "
-    "lex/test_project/tests/init/.env (gitignored) — or override "
-    "with LEX_KEYCLOAK_INTEGRATION_ENV=/path/to/.env. The file must "
-    "carry KEYCLOAK_URL / KEYCLOAK_REALM / OIDC_RP_CLIENT_ID / "
+    "LEX_RUN_KEYCLOAK_INTEGRATION=1, then EITHER export the Keycloak "
+    "vars directly (CI secrets / sourced .env) OR drop a populated "
+    ".env at lex/test_project/tests/init/.env (gitignored) — or "
+    "override with LEX_KEYCLOAK_INTEGRATION_ENV=/path/to/.env. Required: "
+    "KEYCLOAK_URL / KEYCLOAK_REALM / OIDC_RP_CLIENT_ID / "
     "OIDC_RP_CLIENT_SECRET."
 )
 
@@ -145,23 +191,22 @@ class TestCluster01k_RealKeycloakPreflight(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls._original_keycloak_env = _snapshot_keycloak_env()
 
-        env_file = _resolve_integration_env_file()
-        if env_file is None:  # pragma: no cover - guarded by skipUnless
-            raise unittest.SkipTest("No integration .env file found.")
-        cls._loaded_keys = _load_integration_env_into_os(env_file)
+        if _required_env_already_set():
+            env_file = None
+            cls._loaded_keys = {}
+        else:
+            env_file = _resolve_integration_env_file()
+            if env_file is None:  # pragma: no cover - guarded by skipUnless
+                raise unittest.SkipTest("No integration .env file found.")
+            cls._loaded_keys = _load_integration_env_into_os(env_file)
+        _normalize_keycloak_realm_env()
         cls._integration_env_file = env_file
 
         # Reset the LexSingleton cache so we connect with the env we
         # just loaded (not whatever earlier import baked in).
-        try:
-            from lex.api.views.authentication.KeycloakManager import (
-                KeycloakManager,
-            )
-            KeycloakManager._singleton_instance = None
-            KeycloakManager._singleton_initialized = False
-        except Exception:  # pragma: no cover - defensive
-            pass
+        _reset_keycloak_manager_singleton()
 
         try:
             # Patch ENV_FILE so KeycloakSyncManager.__init__ loads our
@@ -169,7 +214,7 @@ class TestCluster01k_RealKeycloakPreflight(TestCase):
             # source tree.
             from lex.lex_app.management.commands import init as init_module
             cls._original_env_file = init_module.ENV_FILE
-            init_module.ENV_FILE = env_file
+            init_module.ENV_FILE = env_file if env_file is not None else Path(os.devnull)
             cls.mgr = KeycloakSyncManager()
         except Exception as exc:  # pragma: no cover - operator env fault
             raise unittest.SkipTest(
@@ -201,6 +246,10 @@ class TestCluster01k_RealKeycloakPreflight(TestCase):
         if original is not None:
             from lex.lex_app.management.commands import init as init_module
             init_module.ENV_FILE = original
+        snapshot = getattr(cls, "_original_keycloak_env", None)
+        if snapshot is not None:
+            _restore_keycloak_env(snapshot)
+        _reset_keycloak_manager_singleton()
         super().tearDownClass()
 
     # -- 1.91 ----------------------------------------------------------
@@ -218,7 +267,7 @@ class TestCluster01k_RealKeycloakPreflight(TestCase):
         configured_uuid = os.environ.get("OIDC_RP_CLIENT_UUID", "")
 
         try:
-            rep = self.mgr.verify_client_is_safe_for_init()
+            rep = self.mgr.assert_client_is_safe_for_init()
         except CommandError as exc:
             self.fail(
                 "Real Keycloak preflight failed against the configured "
