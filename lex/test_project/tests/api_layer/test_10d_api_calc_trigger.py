@@ -32,7 +32,17 @@ class TestCluster10d_APICalcTrigger(E2ETestCase):
     # -- 10.8 ----------------------------------------------------------
     @unittest.expectedFailure  # BUG-009: is_calculated is editable=False so PATCH silently ignores it
     def test_10_8_patch_in_progress_triggers_calculation(self) -> None:
-        """Scenario 10.8: PATCH is_calculated=IN_PROGRESS → calc runs."""
+        """Scenario 10.8: PATCH is_calculated=IN_PROGRESS → calc runs.
+
+        Tracked as ``@expectedFailure`` against BUG-009 — the same bug
+        7.14 documents at the calculation-state-machine layer. The API
+        path here is the customer-visible symptom: ``is_calculated``
+        is ``editable=False`` on ``CalculationModel``, so DRF's
+        serializer silently drops it from PATCH payloads and the
+        calculation never starts. Keep the assertion live so the day
+        the framework exposes a write-through trigger this test goes
+        green and we get notified to retire the bug.
+        """
         calc = ApiAtomicCalc.objects.create(
             name="api10-8", should_fail=False,
             is_calculated=CalculationModel.NOT_CALCULATED,
@@ -53,7 +63,6 @@ class TestCluster10d_APICalcTrigger(E2ETestCase):
             f"API-triggered calc must reach SUCCESS (or still be "
             f"IN_PROGRESS if async); got {fresh.is_calculated!r}",
         )
-
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

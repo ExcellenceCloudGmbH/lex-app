@@ -1118,11 +1118,22 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Companion to 1b (mocked `lex init` end-to-end) and 1f (Keycloak drift coverage with stubbed manager).** Drives the **same code path the real `lex init` command runs** against a live Keycloak server. Mocked tests cover *contract*; live tests prove three things only a real server can: (1) the Keycloak admin REST API actually accepts the payloads `KeycloakSyncManager` builds (schema drift on Keycloak's side fails here before production); (2) end-to-end timing works (token refresh, multi-call sequences, no race against the authz-import endpoint); (3) `last_authz_import_error` round-trips to `None` on success — what `Command.handle` actually checks.
 
-**Gating:** TWO levels — (a) `LEX_KEYCLOAK_INTEGRATION=1` must be set to enable; (b) the configured client must satisfy the 1j pre-flight (confidential + DEVELOPMENT) so the integration tests cannot be turned on against a production client by accident. Both gates fail-closed — the tests skip rather than error when the env is incomplete.
+**Gating:** THREE levels — (a) `LEX_RUN_KEYCLOAK_INTEGRATION=1` enables the **read-only** scenarios (1.95–1.99); (b) `LEX_RUN_KEYCLOAK_DESTRUCTIVE=1` is **additionally** required for the destructive scenarios (1.100 / 1.101 / 1.110) that mutate the configured client's authz config — the same mutation `lex init` does in production, so the second opt-in keeps an integration-on CI run from accidentally rewriting a live client; (c) the destructive clean-state scenario (1.110) further refuses to run unless the configured `clientId` contains the literal string `test`, with `LEX_ALLOW_CLEAN_REBUILD_NON_TEST_CLIENT=1` as the explicit override for ephemeral disposable clients.
 
-**Shape:** `E2ETestCase` with real `KeycloakManager` + real `KeycloakSyncManager`; 7 scenarios driving `Command.handle` end-to-end across happy-path full sync, `--dry-run` no-op, drift recovery, idempotent rerun, snapshot/restore round-trip, `--skip-client-preflight` against real client, and `last_authz_import_error → None` assertion.
+**Shape:** `TestCase` with real `KeycloakManager` + real `KeycloakSyncManager`. Scenarios are split into two classes — `TestCluster01l_PipelineReads` (5 read-only) and `TestCluster01l_FullPipelineDestructive` (3 destructive, gated as above). The destructive class targets `LEX-Test-*` clients by design and is **idempotent** — a second run that produces drift is a regression.
 
-**Status:**  Complete — 7 env-gated integration tests, all skip cleanly without live Keycloak, all pass against the configured dev tenant when integration env is wired. See progress.md Session 38.
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.95 | `get_all_django_models` walks live apps | Returns a non-empty set of `app.Model` strings |
+| 1.96 | `export_configs` round-trips live authz | `resources` and `policies` keys present and lists |
+| 1.97 | `get_existing_keycloak_resources` extracts from live export | Pure-function step asserted against a real export |
+| 1.98 | `find_missing_models` against live state | Returns disjoint subset of Django models — never overlaps with existing |
+| 1.99 | `get_client_roles` returns the three default roles | `admin` / `standard` / `view-only` present (lazy-creates on first run) |
+| 1.100 | `process_model_changes` with empty diff against live | Round-trip export → snapshot → import → restore; `last_authz_import_error == None` after |
+| 1.101 | `call_command("init", …)` end-to-end, twice | Real `lex init` runs; second run is idempotent — same managed resource set as first run, no drift |
+| 1.110 | Clean-state rebuild — empty live KC, sync, verify read-back | Lists live resources via admin REST, deletes each individually (`import_authorization_settings` is merge-only and cannot empty resources); then runs `process_model_changes(adds=…)` and asserts (a) every Django resource recreated with the documented default scopes, (b) no duplicate names, (c) `find_missing_models` returns empty against the post-sync export. The destructive complement to the mocked 1.8 drift scenario — only a live server can prove the rebuild path actually lands. |
+
+**Status:**  Complete — 8 env-gated integration tests (5 read-only + 3 destructive). All skip cleanly without live Keycloak. All pass against the configured dev tenant when integration env is wired (verified against `auth.excellence-cloud.de` / realm `lex` / client `LEX-Test-1771257005`, 153 resources, 921 policies, full clean-state rebuild ~78s end-to-end). See progress.md Sessions 38 + 43.
 
 ### 1m. `lex` CLI ↔ PyCharm `.run.xml` cross-file contract 
 
