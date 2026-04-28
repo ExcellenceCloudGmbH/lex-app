@@ -538,34 +538,115 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
         )
 
     def _empty_live_keycloak_resources(self, auth_config: dict) -> None:
-        """Rewrite the dedicated client's authz config with zero resources.
+        """Empty the dedicated client's authorization resources.
 
-        This is deliberately narrower than deleting the realm/client: it
-        removes only authorization resources and resource/scope permissions
-        that reference them, while preserving role policies so the rebuild
-        path starts from a realistic but clean authorization server state.
+        Keycloak's ``import_authorization_settings`` endpoint is a
+        **merge** — re-importing the same export with ``resources: []``
+        does NOT delete the existing resources on the server, it just
+        leaves them untouched. To genuinely reach a clean-state we have
+        to iterate every resource and delete it via the UMA endpoint
+        (``DELETE …/authz/resource-server/resource/{id}``), then follow
+        up with an empty-resources authz import to drop the now-orphaned
+        resource-bound permissions and scope permissions while keeping
+        the role policies intact. This is the same per-resource delete
+        path ``init.process_model_changes`` uses for a real ``deletes=``
+        diff — we just run it for every live resource at once.
         """
         resource_names = self._resource_names_from_config(auth_config)
         if not resource_names:
             return
 
-        cleaned_config = deepcopy(auth_config)
-        cleaned_config["resources"] = []
-        cleaned_config["policies"] = [
-            policy
-            for policy in cleaned_config.get("policies", [])
-            if policy.get("type") not in {"scope", "resource"}
-            and not self._policy_references_any_resource(policy, resource_names)
-        ]
+        kc = self.mgr.kc_manager
+        # 1) Delete every resource-/scope-typed permission that
+        #    references one of the doomed resources, then delete the
+        #    resource itself. The authz **export** endpoint
+        #    (``/authz/resource-server/settings``) returns resources
+        #    without ``_id`` fields — to delete by id we have to list
+        #    them via the admin **resources** endpoint
+        #    (``/authz/resource-server/resource``) instead.
+        permissions = kc.admin.get_client_authz_permissions(
+            client_id=kc.client_uuid,
+        ) or []
+        permission_ids_by_resource: dict[str, set[str]] = {}
+        for permission in permissions:
+            perm_id = permission.get("id")
+            if not perm_id:
+                continue
+            for rid in permission.get("resources", []) or []:
+                permission_ids_by_resource.setdefault(rid, set()).add(perm_id)
 
-        self.mgr.kc_manager.last_authz_import_error = None
-        success = self.mgr.kc_manager.import_authorization_settings(cleaned_config)
-        self.assertTrue(success, "Keycloak clean-state import returned False.")
-        self.assertIsNone(
-            self.mgr.kc_manager.last_authz_import_error,
-            "Clean-state import must not leave last_authz_import_error set.",
+        live_resources = kc.admin.get_client_authz_resources(
+            client_id=kc.client_uuid,
+        ) or []
+
+        deleted_permission_ids: set[str] = set()
+        deleted_resource_count = 0
+        # Loop in pages: ``get_client_authz_resources`` defaults to
+        # Keycloak's first-page max (100 on most servers), so for >100
+        # resources we re-list after each pass until the listing is
+        # empty.
+        seen_ids: set[str] = set()
+        while live_resources:
+            for resource in live_resources:
+                resource_id = resource.get("_id") or resource.get("id")
+                if not resource_id or resource_id in seen_ids:
+                    continue
+                seen_ids.add(resource_id)
+                for perm_id in permission_ids_by_resource.get(resource_id, set()):
+                    if perm_id in deleted_permission_ids:
+                        continue
+                    try:
+                        kc.admin.delete_client_authz_permission(
+                            client_id=kc.client_uuid,
+                            permission_id=perm_id,
+                        )
+                        deleted_permission_ids.add(perm_id)
+                    except Exception:
+                        # Best-effort: if the permission is already
+                        # gone (cascaded by a previous delete), keep
+                        # going.
+                        deleted_permission_ids.add(perm_id)
+                try:
+                    # Use the admin endpoint
+                    # (DELETE …/authz/resource-server/resource/{id})
+                    # rather than the UMA endpoint. UMA's
+                    # ``resource_set_delete`` is scoped to resources
+                    # owned by the authenticated service account,
+                    # which silently does nothing for admin-managed
+                    # resources on the LEX-Test client.
+                    kc.admin.delete_client_authz_resource(
+                        client_id=kc.client_uuid,
+                        resource_id=resource_id,
+                    )
+                    deleted_resource_count += 1
+                except Exception as exc:  # pragma: no cover - server-side error path
+                    self.fail(
+                        f"Failed to delete live Keycloak resource "
+                        f"{resource.get('name')!r} (id={resource_id!r}): {exc}"
+                    )
+            live_resources = kc.admin.get_client_authz_resources(
+                client_id=kc.client_uuid,
+            ) or []
+
+        # 2) Verify the per-resource deletes converged the live state
+        #    to zero resources. We do NOT follow up with an empty-resources
+        #    authz import here: ``import_authorization_settings`` is a
+        #    merge endpoint, not an authoritative replace, and on this
+        #    server an empty-resources merge has been observed to leave
+        #    everything untouched. The admin-REST per-resource delete
+        #    path is the only thing that actually empties the client.
+        #    Resource-bound permissions are already cleaned up above;
+        #    any stragglers (orphan scope permissions on now-deleted
+        #    resources) get rebuilt by the subsequent
+        #    ``process_model_changes`` call anyway.
+        synced_config, synced_names = self._wait_for_resource_names(set())
+        self.assertEqual(
+            deleted_resource_count,
+            len(seen_ids),
+            "Every resource returned by get_client_authz_resources must be "
+            f"deleted (deleted={deleted_resource_count}, "
+            f"unique_seen={len(seen_ids)}).",
         )
-        self._wait_for_resource_names(set())
 
     # -- 1.100 ---------------------------------------------------------
     def test_1_100_process_model_changes_no_op_round_trip(self):
