@@ -33,9 +33,11 @@ django-lifecycle
 python-keycloak==3.9.1
 markdown
 mistune
+jinja2
 django-simple-history
 markdown2
 xhtml2pdf
+weasyprint
 tabulate
 django-db-views
 pre-commit

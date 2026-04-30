@@ -20,9 +20,11 @@ is the contract that future renderer will consume.
 
 from __future__ import annotations
 
+import base64
 import datetime as _dt
 import csv
 import json
+import mimetypes
 import os
 from dataclasses import dataclass, field
 from email.utils import formataddr
@@ -411,22 +413,27 @@ def _normalize_email_settings(value: Any, path: Path | str) -> dict[str, Any]:
 class ParsedPytestArgs:
     forwarded: list[str]
     report: bool
+    send_emails: bool
 
 
 def parse_lex_pytest_args(argv: list[str]) -> ParsedPytestArgs:
     """Pop Lex-only flags from *argv*; everything else flows to pytest verbatim.
 
-    Currently only ``--report`` is intercepted.  Keep the implementation tiny
-    and explicit so future custom flags slot in obviously.
+    Currently only ``--report`` and ``--send-emails`` are intercepted. Keep the
+    implementation tiny and explicit so future custom flags slot in obviously.
     """
     forwarded: list[str] = []
     report = False
+    send_emails = False
     for arg in argv:
         if arg == "--report":
             report = True
             continue
+        if arg == "--send-emails":
+            send_emails = True
+            continue
         forwarded.append(arg)
-    return ParsedPytestArgs(forwarded=forwarded, report=report)
+    return ParsedPytestArgs(forwarded=forwarded, report=report, send_emails=send_emails)
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +450,7 @@ class GroupResult:
     skipped: int = 0
     errors: int = 0
     test_count: int = 0  # distinct tests carrying this marker
+    tests: list["TestResult"] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -457,6 +465,16 @@ class GroupResult:
         if self.passed == 0 and self.skipped:
             return "SKIPPED"
         return "PASSED"
+
+
+@dataclass
+class TestResult:
+    nodeid: str
+    name: str
+    location: str = ""
+    status: str = "NOT RUN"
+    duration_seconds: float = 0.0
+    details: str = ""
 
 
 @dataclass
@@ -496,6 +514,7 @@ class LexGroupsPlugin:
         # into group attribution (e.g. a folder named `creation2` would otherwise
         # show up as a keyword for tests inside it).
         self._test_groups: dict[str, set[str]] = {}
+        self._test_details: dict[tuple[str, str], TestResult] = {}
 
     # -- pytest hooks ------------------------------------------------------
 
@@ -511,6 +530,16 @@ class LexGroupsPlugin:
             # Record only configured group markers; the rest (parametrize,
             # skip, asyncio, ...) are filtered out by `& configured`.
             self._test_groups[item.nodeid] = marker_names & configured
+            location = item.location[0]
+            if len(item.location) > 1:
+                location = f"{location}:{int(item.location[1]) + 1}"
+            test_name = getattr(item, "name", "") or item.nodeid.split("::")[-1]
+            for group_name in self._test_groups[item.nodeid]:
+                self._test_details[(group_name, item.nodeid)] = TestResult(
+                    nodeid=item.nodeid,
+                    name=test_name,
+                    location=location,
+                )
             for name in marker_names:
                 if name in _BUILTIN_MARKERS or name in configured:
                     continue
@@ -546,19 +575,32 @@ class LexGroupsPlugin:
             if report.when == "call":
                 if report.passed:
                     self._record(group_name, key, "passed")
+                    self._update_test_result(group_name, key, "passed", report)
                 elif report.failed:
                     self._record(group_name, key, "failed")
+                    self._update_test_result(group_name, key, "failed", report)
                 elif report.skipped:
                     self._record(group_name, key, "skipped")
+                    self._update_test_result(group_name, key, "skipped", report)
             else:  # setup / teardown
                 if report.failed:
                     self._record(group_name, key, "errors")
+                    self._update_test_result(group_name, key, "errors", report)
                 elif report.skipped and report.when == "setup":
                     self._record(group_name, key, "skipped")
+                    self._update_test_result(group_name, key, "skipped", report)
 
     def pytest_sessionfinish(self, session, exitstatus) -> None:  # noqa: D401
         for name, result in self.results.items():
             result.test_count = len(self._counted[name])
+            result.tests = sorted(
+                [
+                    test_result
+                    for (group_name, _), test_result in self._test_details.items()
+                    if group_name == name
+                ],
+                key=lambda item: (item.location, item.name, item.nodeid),
+            )
 
     # -- internal ----------------------------------------------------------
 
@@ -582,6 +624,28 @@ class LexGroupsPlugin:
             getattr(self.results[group_name], outcome) + 1,
         )
         self._final_outcome[key] = outcome
+
+    def _update_test_result(self, group_name: str, key: tuple[str, str], outcome: str, report) -> None:
+        test_result = self._test_details.get((group_name, key[1]))
+        if test_result is None:
+            return
+
+        test_result.duration_seconds += float(getattr(report, "duration", 0.0) or 0.0)
+        severity = {"NOT RUN": -1, "PASSED": 0, "SKIPPED": 1, "FAILED": 2, "ERROR": 3}
+        status_map = {
+            "passed": "PASSED",
+            "skipped": "SKIPPED",
+            "failed": "FAILED",
+            "errors": "ERROR",
+        }
+        next_status = status_map[outcome]
+        if severity[next_status] >= severity.get(test_result.status, -1):
+            test_result.status = next_status
+
+        if outcome in {"failed", "errors"}:
+            details = _extract_report_details(report)
+            if details:
+                test_result.details = details
 
 
 # Markers that pytest (or common plugins) ship out of the box. Tests carrying
@@ -741,6 +805,36 @@ def write_simulated_email_deliveries(
     return output_path
 
 
+def build_report_email_recap(
+    *,
+    config: LexTestConfig,
+    deliveries: list[RecipientDelivery],
+) -> str:
+    """Build a compact operator-facing recap before sending report emails."""
+
+    if not deliveries:
+        return "No Lex test report emails are configured for this run."
+
+    backend = os.getenv(TEST_EMAIL_BACKEND_ENV_VAR, "").strip()
+    lines = [
+        f"Lex will send {len(deliveries)} report email(s).",
+        f"From: {_formatted_sender(config)}",
+    ]
+    if config.email.get("reply_to"):
+        lines.append(f"Reply-To: {config.email['reply_to']}")
+    if backend:
+        lines.append(f"Backend override: {backend}")
+    else:
+        lines.append("Backend: Django default (expects SENDGRID_API_KEY in the environment)")
+
+    for index, delivery in enumerate(deliveries, start=1):
+        recipient = f"{delivery.name} <{delivery.email}>" if delivery.name else delivery.email
+        lines.append(f"{index}. To: {recipient}")
+        lines.append(f"   Subject: {_build_delivery_subject(config=config, delivery=delivery)}")
+        lines.append(f"   Groups: {delivery.groups_csv or '(none)'}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # PDF report
 # ---------------------------------------------------------------------------
@@ -756,98 +850,25 @@ def write_pdf_report(
     title: str = "Lex test report",
 ) -> Path:
     """Write a PDF summary for all configured groups or a selected subset."""
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.units import mm
-    from reportlab.platypus import (
-        Paragraph,
-        SimpleDocTemplate,
-        Spacer,
-        Table,
-        TableStyle,
-    )
-
     output_dir = config.project_root / config.report_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = filename_stem or f"lex-test-report-{timestamp}"
     output_path = output_dir / f"{filename}.pdf"
-    selected_names = set(group_names) if group_names is not None else None
-    selected_groups = [
-        group for group in config.groups
-        if selected_names is None or group.name in selected_names
-    ]
-
-    styles = getSampleStyleSheet()
-    doc = SimpleDocTemplate(
-        str(output_path),
-        pagesize=A4,
-        leftMargin=18 * mm,
-        rightMargin=18 * mm,
-        topMargin=18 * mm,
-        bottomMargin=18 * mm,
-        title=title,
+    context = _build_delivery_template_context(
+        config=config,
+        group_results=[plugin.results[group.name] for group in _select_config_groups(config, group_names)],
+        pytest_exit_code=pytest_exit_code,
+        recipient_name=None,
+        recipient_email=None,
+        report_title=title,
+        subject_context=", ".join(group_names) if group_names else "All configured groups",
+        headline=None,
+        intro=None,
+        outro=None,
     )
-
-    story: list[Any] = []
-    story.append(Paragraph(title, styles["Title"]))
-    story.append(
-        Paragraph(
-            f"Generated {_dt.datetime.now().isoformat(timespec='seconds')} — "
-            f"pytest exit code: {pytest_exit_code}",
-            styles["Normal"],
-        )
-    )
-    story.append(Spacer(1, 6 * mm))
-
-    header = ["Group", "Status", "Passed", "Failed", "Skipped", "Errors", "Tests"]
-    rows: list[list[str]] = [header]
-    for g in selected_groups:
-        r = plugin.results[g.name]
-        rows.append(
-            [
-                g.name,
-                r.status,
-                str(r.passed),
-                str(r.failed),
-                str(r.skipped),
-                str(r.errors),
-                str(r.test_count),
-            ]
-        )
-
-    table = Table(rows, repeatRows=1, hAlign="LEFT")
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e6e6e6")),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-                ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ]
-        )
-    )
-    story.append(table)
-    story.append(Spacer(1, 6 * mm))
-
-    for g in selected_groups:
-        story.append(Paragraph(f"<b>{g.name}</b> — {g.description or '(no description)'}", styles["Normal"]))
-        receivers = config.receivers_for(g.name)
-        if receivers:
-            joined = ", ".join(
-                f"{r.get('name', '?')} &lt;{r.get('email', '?')}&gt;" for r in receivers
-            )
-            story.append(Paragraph(f"Receivers: {joined}", styles["BodyText"]))
-        else:
-            story.append(Paragraph("Receivers: (none configured)", styles["BodyText"]))
-        story.append(Spacer(1, 3 * mm))
-
-    doc.build(story)
+    html_content = _render_report_template("pdf.html", context)
+    _write_pdf_from_html(html_content, output_path)
     return output_path
 
 
@@ -902,7 +923,11 @@ def send_report_emails(
             connection=connection,
         )
         message.attach_alternative(
-            _render_delivery_html_body(delivery=delivery, pytest_exit_code=pytest_exit_code),
+            _render_delivery_html_body(
+                config=config,
+                delivery=delivery,
+                pytest_exit_code=pytest_exit_code,
+            ),
             "text/html",
         )
         message.attach_file(str(pdf_path), mimetype="application/pdf")
@@ -935,6 +960,244 @@ def _build_delivery_subject(*, config: LexTestConfig, delivery: RecipientDeliver
     return f"[{_delivery_status(delivery)}] {prefix} — {delivery.groups_csv or delivery.email}"
 
 
+def _template_assets_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "assets" / "lex-test-report"
+
+
+def _asset_data_uri(asset_path: Path) -> str:
+    mime_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
+    encoded = base64.b64encode(asset_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _branding_context() -> dict[str, Any]:
+    branding = {
+        "name": "Excellence Cloud",
+        "logo_text": "EC",
+        "primary_color": "#14213d",
+        "accent_color": "#f97316",
+        "surface_color": "#eef3f8",
+        "logo_text_color": "#14213d",
+        "logo_alt": "Excellence Cloud",
+    }
+    logo_path = _template_assets_dir() / "lex-logo.png"
+    if logo_path.exists():
+        branding["logo_image_uri"] = _asset_data_uri(logo_path)
+    return branding
+
+
+def _build_template_environment():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    environment = Environment(
+        loader=FileSystemLoader(str(_template_assets_dir())),
+        autoescape=select_autoescape(["html", "xml"]),
+    )
+    environment.filters["status_badge"] = _status_badge
+    environment.filters["status_tone"] = _status_tone
+    environment.filters["format_timestamp"] = _format_timestamp
+    return environment
+
+
+def _write_pdf_from_html(html_content: str, output_path: Path) -> None:
+    from weasyprint import HTML
+
+    HTML(string=html_content, base_url=str(_template_assets_dir())).write_pdf(str(output_path))
+
+
+def _render_report_template(template_name: str, context: dict[str, Any]) -> str:
+    environment = _build_template_environment()
+    return environment.get_template(template_name).render(**context)
+
+
+def _select_config_groups(config: LexTestConfig, group_names: list[str] | None) -> list[GroupConfig]:
+    selected_names = set(group_names) if group_names is not None else None
+    return [group for group in config.groups if selected_names is None or group.name in selected_names]
+
+
+def _format_timestamp(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return _dt.datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M UTC")
+    except ValueError:
+        return value
+
+
+def _status_badge(status: str | None) -> str:
+    labels = {
+        "success": "PASSED",
+        "failure": "FAILED",
+        "error": "ERROR",
+        "warning": "SKIPPED",
+        "skipped": "NO TESTS",
+    }
+    return labels.get((status or "").lower(), (status or "UNKNOWN").upper())
+
+
+def _status_tone(status: str | None) -> str:
+    tones = {
+        "success": "#1b5e20",
+        "failure": "#b91c1c",
+        "error": "#7f1d1d",
+        "warning": "#9a3412",
+        "skipped": "#475569",
+    }
+    return tones.get((status or "").lower(), "#1a2230")
+
+
+def _format_duration(value: float) -> str:
+    if value <= 0:
+        return ""
+    if value >= 60:
+        minutes, seconds = divmod(value, 60)
+        return f"{int(minutes)}m {seconds:.1f}s"
+    return f"{value:.2f}s"
+
+
+def _extract_report_details(report) -> str:
+    details = getattr(report, "longreprtext", "") or ""
+    lines = [line.strip() for line in details.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return " | ".join(lines[:3])[:600]
+
+
+def _template_status(value: str) -> str:
+    normalized = value.upper()
+    if normalized == "PASSED":
+        return "success"
+    if normalized == "FAILED":
+        return "failure"
+    if normalized == "ERROR":
+        return "error"
+    if normalized == "SKIPPED":
+        return "warning"
+    if normalized == "NO TESTS":
+        return "skipped"
+    return "warning"
+
+
+def _build_template_group(
+    *,
+    config: LexTestConfig,
+    group_config: GroupConfig,
+    group_result: GroupResult,
+) -> dict[str, Any]:
+    receivers: list[str] = []
+    for receiver in config.receivers_for(group_config.name):
+        email = receiver.get("email")
+        name = receiver.get("name")
+        receivers.append(f"{name} <{email}>" if name and email else name or email or "?")
+
+    return {
+        "name": group_config.name,
+        "description": group_config.description,
+        "status": _template_status(group_result.status),
+        "counts": {
+            "tests": group_result.test_count,
+            "passed": group_result.passed,
+            "failed": group_result.failed,
+            "skipped": group_result.skipped,
+            "errors": group_result.errors,
+        },
+        "coverage": None,
+        "receivers": receivers,
+        "tests": [
+            {
+                "name": test.name,
+                "status": _template_status(test.status),
+                "duration": _format_duration(test.duration_seconds),
+                "location": test.location,
+                "details": test.details,
+            }
+            for test in group_result.tests
+        ],
+    }
+
+
+def _build_summary(groups: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = {
+        "tests": sum(group["counts"]["tests"] for group in groups),
+        "passed": sum(group["counts"]["passed"] for group in groups),
+        "failed": sum(group["counts"]["failed"] for group in groups),
+        "skipped": sum(group["counts"]["skipped"] for group in groups),
+        "errors": sum(group["counts"]["errors"] for group in groups),
+    }
+    statuses = {group["status"] for group in groups}
+    if "failure" in statuses:
+        status = "failure"
+    elif "error" in statuses:
+        status = "error"
+    elif counts["tests"] == 0:
+        status = "skipped"
+    elif "warning" in statuses:
+        status = "warning"
+    else:
+        status = "success"
+    return {"status": status, "group_count": len(groups), "counts": counts}
+
+
+def _build_delivery_template_context(
+    *,
+    config: LexTestConfig,
+    group_results: list[GroupResult],
+    pytest_exit_code: int,
+    recipient_name: str | None,
+    recipient_email: str | None,
+    report_title: str,
+    subject_context: str,
+    headline: str | None,
+    intro: str | None,
+    outro: str | None,
+) -> dict[str, Any]:
+    group_config_by_name = {group.name: group for group in config.groups}
+    groups = [
+        _build_template_group(
+            config=config,
+            group_config=group_config_by_name[group_result.name],
+            group_result=group_result,
+        )
+        for group_result in group_results
+        if group_result.name in group_config_by_name
+    ]
+    summary = _build_summary(groups)
+    return {
+        "subject": report_title,
+        "config": {
+            "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "branding": _branding_context(),
+            "traceability": {
+                "duration": "",
+                "build_id": "",
+                "branch": "",
+                "run_url": "",
+            },
+        },
+        "delivery": {
+            "recipient_email": recipient_email,
+            "name": recipient_name,
+            "report_title": report_title,
+            "subject_context": subject_context,
+            "summary": summary,
+            "report": {
+                "subtitle": f"Lex pytest exit code {pytest_exit_code}",
+                "notes": [],
+            },
+            "email": {
+                "headline": headline or "",
+                "intro": intro or "",
+                "outro": outro or "",
+            },
+        },
+        "summary": summary,
+        "groups": groups,
+        "coverage": None,
+        "has_group_coverage": False,
+        "has_group_tests": any(group["tests"] for group in groups),
+    }
+
+
 def _render_delivery_text_body(
     *,
     delivery: RecipientDelivery,
@@ -959,43 +1222,24 @@ def _render_delivery_text_body(
 
 def _render_delivery_html_body(
     *,
+    config: LexTestConfig,
     delivery: RecipientDelivery,
     pytest_exit_code: int,
 ) -> str:
-    rows = "".join(
-        (
-            "<tr>"
-            f"<td style='padding:8px;border:1px solid #cbd5e1;'>{group.name}</td>"
-            f"<td style='padding:8px;border:1px solid #cbd5e1;'>{group.status}</td>"
-            f"<td style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>{group.test_count}</td>"
-            f"<td style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>{group.passed}</td>"
-            f"<td style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>{group.failed}</td>"
-            f"<td style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>{group.skipped}</td>"
-            f"<td style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>{group.errors}</td>"
-            "</tr>"
-        )
-        for group in delivery.group_results
+    subject = _build_delivery_subject(config=config, delivery=delivery)
+    context = _build_delivery_template_context(
+        config=config,
+        group_results=delivery.group_results,
+        pytest_exit_code=pytest_exit_code,
+        recipient_name=delivery.name,
+        recipient_email=delivery.email,
+        report_title=subject,
+        subject_context=delivery.groups_csv or "(none)",
+        headline=None,
+        intro=f"Lex pytest finished with exit code {pytest_exit_code}.",
+        outro="The matching PDF report is attached to this email.",
     )
-    return (
-        "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#0f172a;'>"
-        f"<p>Hello {delivery.name or delivery.email},</p>"
-        f"<p>Lex pytest finished with exit code <strong>{pytest_exit_code}</strong>. "
-        f"This delivery contains the groups: <strong>{delivery.groups_csv or '(none)'}</strong>.</p>"
-        "<table style='border-collapse:collapse;'>"
-        "<thead><tr>"
-        "<th style='padding:8px;border:1px solid #cbd5e1;text-align:left;'>Group</th>"
-        "<th style='padding:8px;border:1px solid #cbd5e1;text-align:left;'>Status</th>"
-        "<th style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>Tests</th>"
-        "<th style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>Passed</th>"
-        "<th style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>Failed</th>"
-        "<th style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>Skipped</th>"
-        "<th style='padding:8px;border:1px solid #cbd5e1;text-align:right;'>Errors</th>"
-        "</tr></thead><tbody>"
-        f"{rows}"
-        "</tbody></table>"
-        "<p>The matching PDF report is attached.</p>"
-        "</body></html>"
-    )
+    return _render_report_template("email.html", context)
 
 
 def _slug(value: str) -> str:

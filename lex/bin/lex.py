@@ -36,6 +36,28 @@ LEX_APP_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.as_posix()
 PROJECT_ROOT_DIR = Path(find_project_root(os.getcwd())).resolve()
 sys.path.append(LEX_APP_PACKAGE_ROOT)
 
+
+def _load_project_env_file(project_root: Path) -> None:
+    env_path = project_root / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+_load_project_env_file(PROJECT_ROOT_DIR)
+
 # Set essential env vars early so they are available when any downstream code
 # (celery.py, settings.py, asgi.py) eventually triggers Django setup.
 # This is cheap — the expensive part (django.setup()) remains deferred.
@@ -287,6 +309,8 @@ def pytest_cmd(ctx):
       --report           Generate a per-group PDF summary at
                           <output_dir>/lex-test-report-<ts>.pdf
                           (output_dir comes from the effective Lex test config).
+      --send-emails      Skip the interactive confirmation prompt and send
+                          report emails immediately. Intended for CI runs.
 
     \b
     Selecting / excluding groups (standard pytest `-m` marker expressions —
@@ -307,8 +331,9 @@ def pytest_cmd(ctx):
     registers each group as a marker, validates that every used marker maps to
     a configured group (hard error otherwise), and aggregates
     pass/fail/skip/error counts per group. If ``email.enabled`` is true in the
-    resolved config, `lex pytest` also sends one report email per resolved
-    recipient delivery after the run finishes.
+    resolved config, `lex pytest` prepares one report email per resolved
+    recipient delivery after the run finishes and asks for confirmation before
+    sending unless ``--send-emails`` is supplied.
     """
     # Bootstrap Django so tests can import models, use ORM, and pytest-django
     # can pick up DJANGO_SETTINGS_MODULE without a second setup pass.
@@ -319,9 +344,11 @@ def pytest_cmd(ctx):
     os.chdir(PROJECT_ROOT_DIR.as_posix())
 
     from lex.tools.test_groups import (
+        build_report_email_recap,
         LexGroupsPlugin,
         LexTestConfigError,
         parse_lex_pytest_args,
+        plan_recipient_deliveries,
         resolve_config,
         send_report_emails,
         write_pdf_report,
@@ -366,17 +393,31 @@ def pytest_cmd(ctx):
             click.echo(f"Lex test report: {pdf_path}")
 
     if lex_test_config.email.get("enabled"):
-        try:
-            deliveries = send_report_emails(
-                config=lex_test_config,
-                plugin=plugin,
-                pytest_exit_code=int(exit_code),
-            )
-        except Exception as exc:
-            raise click.ClickException(f"Failed to send Lex test report emails: {exc}") from exc
-        else:
-            if deliveries:
-                click.echo(f"Sent {len(deliveries)} Lex test report email(s).")
+        deliveries = plan_recipient_deliveries(config=lex_test_config, group_results=plugin.results)
+        should_send = bool(deliveries)
+        if deliveries and not parsed.send_emails:
+            if not sys.stdin.isatty() or not sys.stdout.isatty():
+                raise click.ClickException(
+                    "Lex test report emails are enabled, but this session cannot confirm the send. "
+                    "Re-run with --send-emails for CI or other non-interactive environments."
+                )
+            click.echo(build_report_email_recap(config=lex_test_config, deliveries=deliveries))
+            should_send = click.confirm("Send these Lex test report emails now?", default=False)
+            if not should_send:
+                click.echo("Skipped Lex test report emails.")
+
+        if should_send:
+            try:
+                deliveries = send_report_emails(
+                    config=lex_test_config,
+                    plugin=plugin,
+                    pytest_exit_code=int(exit_code),
+                )
+            except Exception as exc:
+                raise click.ClickException(f"Failed to send Lex test report emails: {exc}") from exc
+            else:
+                if deliveries:
+                    click.echo(f"Sent {len(deliveries)} Lex test report email(s).")
 
     raise SystemExit(int(exit_code))
 
