@@ -46,3 +46,4 @@ coverage
 django-oauth2-codeflow
 psycopg2-binary
 django-celery-beat
+pytest
