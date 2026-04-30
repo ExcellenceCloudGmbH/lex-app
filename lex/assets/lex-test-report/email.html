@@ -18,9 +18,11 @@
                 <div style="font-size:11px;line-height:1;letter-spacing:2px;text-transform:uppercase;opacity:.70;">Lex test report</div>
                 <div style="margin-top:12px;">
                   {% if config.branding.logo_image_uri %}
-                  <img src="{{ config.branding.logo_image_uri }}" alt="{{ config.branding.logo_alt or config.branding.name }}" style="display:block;width:260px;max-width:100%;height:auto;border:0;outline:0;">
+                  <div style="display:inline-block;padding:10px 16px;border-radius:14px;background:#ffffff;border:1px solid rgba(15,23,42,.08);box-shadow:0 10px 24px rgba(15,23,42,.14);">
+                    <img src="{{ config.branding.logo_image_uri }}" alt="{{ config.branding.logo_alt or config.branding.name }}" style="display:block;width:228px;max-width:100%;height:auto;border:0;outline:0;">
+                  </div>
                   {% else %}
-                  <div style="display:inline-block;padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.12);font-size:24px;line-height:1;font-weight:700;">{{ config.branding.logo_text }}</div>
+                  <div style="display:inline-block;padding:12px 16px;border-radius:14px;background:#ffffff;color:{{ config.branding.primary_color }};border:1px solid rgba(15,23,42,.08);box-shadow:0 10px 24px rgba(15,23,42,.14);font-size:24px;line-height:1;font-weight:700;">{{ config.branding.logo_text }}</div>
                   {% endif %}
                 </div>
                 <div style="font-size:13px;line-height:1.4;margin-top:12px;opacity:.82;">
