@@ -413,27 +413,38 @@ def _normalize_email_settings(value: Any, path: Path | str) -> dict[str, Any]:
 class ParsedPytestArgs:
     forwarded: list[str]
     report: bool
+    report_and_email: bool
     send_emails: bool
 
 
 def parse_lex_pytest_args(argv: list[str]) -> ParsedPytestArgs:
     """Pop Lex-only flags from *argv*; everything else flows to pytest verbatim.
 
-    Currently only ``--report`` and ``--send-emails`` are intercepted. Keep the
-    implementation tiny and explicit so future custom flags slot in obviously.
+    Currently only ``--report``, ``--report-and-email``, and ``--send-emails``
+    are intercepted. Keep the implementation tiny and explicit so future custom
+    flags slot in obviously.
     """
     forwarded: list[str] = []
     report = False
+    report_and_email = False
     send_emails = False
     for arg in argv:
         if arg == "--report":
             report = True
             continue
+        if arg == "--report-and-email":
+            report_and_email = True
+            continue
         if arg == "--send-emails":
             send_emails = True
             continue
         forwarded.append(arg)
-    return ParsedPytestArgs(forwarded=forwarded, report=report, send_emails=send_emails)
+    return ParsedPytestArgs(
+        forwarded=forwarded,
+        report=report,
+        report_and_email=report_and_email,
+        send_emails=send_emails,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +526,8 @@ class LexGroupsPlugin:
         # show up as a keyword for tests inside it).
         self._test_groups: dict[str, set[str]] = {}
         self._test_details: dict[tuple[str, str], TestResult] = {}
+        self.coverage_summary: dict[str, Any] | None = None
+        self.run_duration: str = ""
 
     # -- pytest hooks ------------------------------------------------------
 
@@ -866,6 +879,8 @@ def write_pdf_report(
         headline=None,
         intro=None,
         outro=None,
+        coverage_summary=plugin.coverage_summary,
+        run_duration=plugin.run_duration,
     )
     html_content = _render_report_template("pdf.html", context)
     _write_pdf_from_html(html_content, output_path)
@@ -916,17 +931,25 @@ def send_report_emails(
         )
         message = EmailMultiAlternatives(
             subject=_build_delivery_subject(config=config, delivery=delivery),
-            body=_render_delivery_text_body(delivery=delivery, pytest_exit_code=pytest_exit_code),
+            body=_render_delivery_text_body(
+                delivery=delivery,
+                pytest_exit_code=pytest_exit_code,
+                coverage_summary=plugin.coverage_summary,
+            ),
             from_email=_formatted_sender(config),
             to=[delivery.email],
             reply_to=[config.email["reply_to"]] if config.email.get("reply_to") else None,
             connection=connection,
         )
+        logo_image_uri = _attach_inline_logo(message) or _branding_context().get("logo_image_uri")
         message.attach_alternative(
             _render_delivery_html_body(
                 config=config,
                 delivery=delivery,
                 pytest_exit_code=pytest_exit_code,
+                coverage_summary=plugin.coverage_summary,
+                run_duration=plugin.run_duration,
+                logo_image_uri=logo_image_uri,
             ),
             "text/html",
         )
@@ -974,10 +997,10 @@ def _branding_context() -> dict[str, Any]:
     branding = {
         "name": "Excellence Cloud",
         "logo_text": "EC",
-        "primary_color": "#14213d",
-        "accent_color": "#f97316",
-        "surface_color": "#eef3f8",
-        "logo_text_color": "#14213d",
+        "primary_color": "#283067",
+        "accent_color": "#24b6bb",
+        "surface_color": "#f5f7fb",
+        "logo_text_color": "#ffffff",
         "logo_alt": "Excellence Cloud",
     }
     logo_path = _template_assets_dir() / "lex-logo.png"
@@ -1040,10 +1063,25 @@ def _status_tone(status: str | None) -> str:
         "success": "#1b5e20",
         "failure": "#b91c1c",
         "error": "#7f1d1d",
-        "warning": "#9a3412",
+        "warning": "#475569",
         "skipped": "#475569",
     }
     return tones.get((status or "").lower(), "#1a2230")
+
+
+def _attach_inline_logo(message) -> str | None:
+    logo_path = _template_assets_dir() / "lex-logo.png"
+    if not logo_path.exists():
+        return None
+
+    from email.mime.image import MIMEImage
+
+    content_id = "lex-report-logo"
+    image = MIMEImage(logo_path.read_bytes())
+    image.add_header("Content-ID", f"<{content_id}>")
+    image.add_header("Content-Disposition", "inline", filename=logo_path.name)
+    message.attach(image)
+    return f"cid:{content_id}"
 
 
 def _format_duration(value: float) -> str:
@@ -1124,6 +1162,7 @@ def _build_summary(groups: list[dict[str, Any]]) -> dict[str, Any]:
         "skipped": sum(group["counts"]["skipped"] for group in groups),
         "errors": sum(group["counts"]["errors"] for group in groups),
     }
+    groups_passed = sum(1 for group in groups if group["status"] == "success")
     statuses = {group["status"] for group in groups}
     if "failure" in statuses:
         status = "failure"
@@ -1135,7 +1174,12 @@ def _build_summary(groups: list[dict[str, Any]]) -> dict[str, Any]:
         status = "warning"
     else:
         status = "success"
-    return {"status": status, "group_count": len(groups), "counts": counts}
+    return {
+        "status": status,
+        "group_count": len(groups),
+        "groups_passed": groups_passed,
+        "counts": counts,
+    }
 
 
 def _build_delivery_template_context(
@@ -1150,6 +1194,8 @@ def _build_delivery_template_context(
     headline: str | None,
     intro: str | None,
     outro: str | None,
+    coverage_summary: dict[str, Any] | None,
+    run_duration: str | None,
 ) -> dict[str, Any]:
     group_config_by_name = {group.name: group for group in config.groups}
     groups = [
@@ -1168,7 +1214,7 @@ def _build_delivery_template_context(
             "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "branding": _branding_context(),
             "traceability": {
-                "duration": "",
+                "duration": run_duration or "",
                 "build_id": "",
                 "branch": "",
                 "run_url": "",
@@ -1192,7 +1238,7 @@ def _build_delivery_template_context(
         },
         "summary": summary,
         "groups": groups,
-        "coverage": None,
+        "coverage": coverage_summary,
         "has_group_coverage": False,
         "has_group_tests": any(group["tests"] for group in groups),
     }
@@ -1202,6 +1248,7 @@ def _render_delivery_text_body(
     *,
     delivery: RecipientDelivery,
     pytest_exit_code: int,
+    coverage_summary: dict[str, Any] | None = None,
 ) -> str:
     lines = [
         f"Hello {delivery.name or delivery.email},",
@@ -1216,6 +1263,8 @@ def _render_delivery_text_body(
             f"(tests={group.test_count}, passed={group.passed}, failed={group.failed}, "
             f"skipped={group.skipped}, errors={group.errors})"
         )
+    if coverage_summary:
+        lines.extend(["", f"{coverage_summary['label']}: {coverage_summary['display']}"])
     lines.extend(["", "The matching PDF report is attached."])
     return "\n".join(lines)
 
@@ -1225,6 +1274,9 @@ def _render_delivery_html_body(
     config: LexTestConfig,
     delivery: RecipientDelivery,
     pytest_exit_code: int,
+    coverage_summary: dict[str, Any] | None,
+    run_duration: str,
+    logo_image_uri: str | None,
 ) -> str:
     subject = _build_delivery_subject(config=config, delivery=delivery)
     context = _build_delivery_template_context(
@@ -1238,7 +1290,11 @@ def _render_delivery_html_body(
         headline=None,
         intro=f"Lex pytest finished with exit code {pytest_exit_code}.",
         outro="The matching PDF report is attached to this email.",
+        coverage_summary=coverage_summary,
+        run_duration=run_duration,
     )
+    if logo_image_uri:
+        context["config"]["branding"]["logo_image_uri"] = logo_image_uri
     return _render_report_template("email.html", context)
 
 

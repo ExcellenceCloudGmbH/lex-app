@@ -1,4 +1,5 @@
 # lex/bin/lex.py
+import io
 import os
 import sys
 import time
@@ -307,10 +308,14 @@ def pytest_cmd(ctx):
     \b
     Lex-only flags (intercepted, NOT forwarded to pytest):
       --report           Generate a per-group PDF summary at
-                          <output_dir>/lex-test-report-<ts>.pdf
-                          (output_dir comes from the effective Lex test config).
+                           <output_dir>/lex-test-report-<ts>.pdf
+                           (output_dir comes from the effective Lex test config).
+      --report-and-email Generate the PDF summary and then prepare/send
+                           report emails if email delivery is enabled in the
+                           effective Lex test config.
       --send-emails      Skip the interactive confirmation prompt and send
-                          report emails immediately. Intended for CI runs.
+                           report emails immediately. Only applies together
+                           with --report-and-email. Intended for CI runs.
 
     \b
     Selecting / excluding groups (standard pytest `-m` marker expressions —
@@ -330,10 +335,11 @@ def pytest_cmd(ctx):
     ``$LEX_TEST_CONFIG_PAYLOAD`` JSON object. An in-process pytest plugin
     registers each group as a marker, validates that every used marker maps to
     a configured group (hard error otherwise), and aggregates
-    pass/fail/skip/error counts per group. If ``email.enabled`` is true in the
-    resolved config, `lex pytest` prepares one report email per resolved
-    recipient delivery after the run finishes and asks for confirmation before
-    sending unless ``--send-emails`` is supplied.
+    pass/fail/skip/error counts per group. `lex pytest --report` writes only
+    the PDF report. `lex pytest --report-and-email` additionally prepares one
+    report email per resolved recipient delivery when ``email.enabled`` is true
+    in the resolved config and asks for confirmation before sending unless
+    ``--send-emails`` is supplied.
     """
     # Bootstrap Django so tests can import models, use ORM, and pytest-django
     # can pick up DJANGO_SETTINGS_MODULE without a second setup pass.
@@ -355,6 +361,7 @@ def pytest_cmd(ctx):
     )
 
     parsed = parse_lex_pytest_args(list(ctx.args))
+    should_generate_report = parsed.report or parsed.report_and_email
 
     try:
         lex_test_config = resolve_config(PROJECT_ROOT_DIR)
@@ -374,13 +381,57 @@ def pytest_cmd(ctx):
     plugin = LexGroupsPlugin(lex_test_config, strict=True)
 
     import pytest as _pytest
+
+    coverage_runner = None
+    collect_coverage = should_generate_report
+    if collect_coverage:
+        try:
+            from coverage import Coverage
+        except Exception:
+            Coverage = None
+        if Coverage is not None:
+            coverage_runner = Coverage(
+                data_file=None,
+                source=[PROJECT_ROOT_DIR.as_posix()],
+                omit=[
+                    str(PROJECT_ROOT_DIR / ".venv" / "*"),
+                    str(PROJECT_ROOT_DIR / "Tests" / "*"),
+                    str(PROJECT_ROOT_DIR / "tests" / "*"),
+                    str(PROJECT_ROOT_DIR / "reports" / "*"),
+                    "*/site-packages/*",
+                ],
+            )
+            coverage_runner.start()
+
+    started_at = time.perf_counter()
     try:
         exit_code = _pytest.main(forwarded, plugins=[plugin])
     except LexTestConfigError as exc:
         # Raised from pytest_collection_modifyitems on marker/group mismatch.
         raise click.ClickException(str(exc)) from exc
+    finally:
+        plugin.run_duration = f"{time.perf_counter() - started_at:.1f} s"
+        if coverage_runner is not None:
+            try:
+                coverage_runner.stop()
+                with io.StringIO() as stream:
+                    total = float(
+                        coverage_runner.report(
+                            file=stream,
+                            show_missing=False,
+                            ignore_errors=True,
+                        )
+                    )
+            except Exception:
+                plugin.coverage_summary = None
+            else:
+                plugin.coverage_summary = {
+                    "label": "Framework-wide code coverage",
+                    "display": f"{total:.1f}%",
+                    "percentage": round(total, 1),
+                }
 
-    if parsed.report:
+    if should_generate_report:
         try:
             pdf_path = write_pdf_report(
                 config=lex_test_config,
@@ -392,7 +443,7 @@ def pytest_cmd(ctx):
         else:
             click.echo(f"Lex test report: {pdf_path}")
 
-    if lex_test_config.email.get("enabled"):
+    if parsed.report_and_email and lex_test_config.email.get("enabled"):
         deliveries = plan_recipient_deliveries(config=lex_test_config, group_results=plugin.results)
         should_send = bool(deliveries)
         if deliveries and not parsed.send_emails:
