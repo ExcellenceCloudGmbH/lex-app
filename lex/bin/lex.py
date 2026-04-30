@@ -277,6 +277,169 @@ def streamlit(ctx):
     streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"])
 
 
+@lex.command(name="pytest", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.pass_context
+def pytest_cmd(ctx):
+    """Run pytest with Django bootstrapped (mirrors celery/flower handlers).
+
+    \b
+    Lex-only flags (intercepted, NOT forwarded to pytest):
+      --report           Generate a per-group PDF summary at
+                          <output_dir>/lex-test-report-<ts>.pdf
+                          (output_dir comes from the effective Lex test config).
+
+    \b
+    Selecting / excluding groups (standard pytest `-m` marker expressions —
+    every configured group name is registered as a marker):
+      lex pytest -m creation                  # only the `creation` group
+      lex pytest -m "creation or creation2"   # union of two groups
+      lex pytest -m "not creation2"           # exclude one group
+      lex pytest -m "creation and smoke"      # tests tagged with BOTH
+
+    \b
+    Discovery:
+      lex pytest-groups                       # list groups + their tests (no run)
+
+    Group metadata, receivers, and the tests entrypoint are read from
+    the resolved effective Lex test config: repo-local ``lex_test_config.yaml``
+    when present, otherwise a workflow/backend supplied
+    ``$LEX_TEST_CONFIG_PAYLOAD`` JSON object. An in-process pytest plugin
+    registers each group as a marker, validates that every used marker maps to
+    a configured group (hard error otherwise), and aggregates
+    pass/fail/skip/error counts per group. If ``email.enabled`` is true in the
+    resolved config, `lex pytest` also sends one report email per resolved
+    recipient delivery after the run finishes.
+    """
+    # Bootstrap Django so tests can import models, use ORM, and pytest-django
+    # can pick up DJANGO_SETTINGS_MODULE without a second setup pass.
+    _bootstrap_django()
+
+    # Run from project root so lex_test_config.yaml and the tests entrypoint
+    # are auto-discovered regardless of where `lex pytest` was invoked.
+    os.chdir(PROJECT_ROOT_DIR.as_posix())
+
+    from lex.tools.test_groups import (
+        LexGroupsPlugin,
+        LexTestConfigError,
+        parse_lex_pytest_args,
+        resolve_config,
+        send_report_emails,
+        write_pdf_report,
+    )
+
+    parsed = parse_lex_pytest_args(list(ctx.args))
+
+    try:
+        lex_test_config = resolve_config(PROJECT_ROOT_DIR)
+    except LexTestConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    # Inject the configured tests entrypoint only if the user did not already
+    # pass a positional path (heuristic: any argv element that doesn't start
+    # with '-' and exists on disk relative to project root).
+    forwarded = list(parsed.forwarded)
+    if not any(
+        (not a.startswith("-")) and (PROJECT_ROOT_DIR / a).exists()
+        for a in forwarded
+    ):
+        forwarded.insert(0, lex_test_config.tests_entrypoint)
+
+    plugin = LexGroupsPlugin(lex_test_config, strict=True)
+
+    import pytest as _pytest
+    try:
+        exit_code = _pytest.main(forwarded, plugins=[plugin])
+    except LexTestConfigError as exc:
+        # Raised from pytest_collection_modifyitems on marker/group mismatch.
+        raise click.ClickException(str(exc)) from exc
+
+    if parsed.report:
+        try:
+            pdf_path = write_pdf_report(
+                config=lex_test_config,
+                plugin=plugin,
+                pytest_exit_code=int(exit_code),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            click.echo(f"Warning: failed to write PDF report: {exc}", err=True)
+        else:
+            click.echo(f"Lex test report: {pdf_path}")
+
+    if lex_test_config.email.get("enabled"):
+        try:
+            deliveries = send_report_emails(
+                config=lex_test_config,
+                plugin=plugin,
+                pytest_exit_code=int(exit_code),
+            )
+        except Exception as exc:
+            raise click.ClickException(f"Failed to send Lex test report emails: {exc}") from exc
+        else:
+            if deliveries:
+                click.echo(f"Sent {len(deliveries)} Lex test report email(s).")
+
+    raise SystemExit(int(exit_code))
+
+
+@lex.command(
+    name="pytest-groups",
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
+)
+@click.pass_context
+def pytest_groups_cmd(ctx):
+    """List configured Lex test groups and the tests attributed to each.
+
+    Runs pytest in `--collect-only` mode (no tests are executed) and prints
+    the mapping group -> [test nodeids] using the same marker-based
+    attribution as `lex pytest`.  Any extra args are forwarded to pytest's
+    collection phase, so you can scope the listing, e.g.:
+
+    \b
+      lex pytest-groups                     # full listing
+      lex pytest-groups -m creation         # only tests in the `creation` group
+      lex pytest-groups Tests/creation2     # only tests under that path
+    """
+    _bootstrap_django()
+    os.chdir(PROJECT_ROOT_DIR.as_posix())
+
+    from lex.tools.test_groups import (
+        LexTestConfigError,
+        collect_groups,
+        resolve_config,
+    )
+
+    try:
+        config = resolve_config(PROJECT_ROOT_DIR)
+    except LexTestConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    listing = collect_groups(config, extra_args=list(ctx.args))
+
+    click.echo("")
+    click.echo(f"Lex test groups (from {config.source}):")
+    click.echo(f"  tests_entrypoint: {config.tests_entrypoint}")
+    click.echo("")
+
+    for group in config.groups:
+        tests = listing.group_to_tests.get(group.name, [])
+        header = f"[{group.name}] {group.description or '(no description)'}"
+        click.echo(click.style(header, bold=True))
+        click.echo(f"  tests: {len(tests)}")
+        for nodeid in tests:
+            click.echo(f"    - {nodeid}")
+        if not tests:
+            click.echo("    (no tests carry this marker)")
+        click.echo("")
+
+    if listing.untagged:
+        click.echo(click.style(f"Untagged tests ({len(listing.untagged)}):", fg="yellow"))
+        for nodeid in listing.untagged:
+            click.echo(f"  - {nodeid}")
+        click.echo("")
+
+    raise SystemExit(listing.exit_code)
+
+
 def _collect_static_if_deployed():
     if not os.getenv("DEPLOYMENT_ENVIRONMENT"):
         return
@@ -520,7 +683,7 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "setup", "setup-with-ai", "ai-update", "ai-faq"}
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq"}
 )
 
 
