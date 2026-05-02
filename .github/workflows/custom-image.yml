@@ -31,6 +31,8 @@ jobs:
         run: |
           if [[ -n "${{ inputs.tag }}" ]]; then
             TAG="${{ inputs.tag }}"
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            TAG="${{ github.event.workflow_run.head_branch }}"
           else
             TAG=$(git describe --tags --abbrev=0 HEAD)
           fi
