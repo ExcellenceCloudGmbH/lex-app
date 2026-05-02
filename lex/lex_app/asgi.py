@@ -22,12 +22,16 @@ from channels.security.websocket import AllowedHostsOriginValidator
 
 from lex.lex_app import routing
 from lex.lex_app.fast_health import health_asgi_app, is_fast_health_path
+from lex.mcp_server.asgi import is_mcp_path, mcp_asgi_app
 
 
 async def http_application(scope, receive, send):
     path = scope.get("path", "")
     if scope.get("type") == "http" and is_fast_health_path(path):
         await health_asgi_app(scope, receive, send)
+        return
+    if scope.get("type") == "http" and is_mcp_path(path):
+        await mcp_asgi_app()(scope, receive, send)
         return
     await django_asgi_app(scope, receive, send)
 

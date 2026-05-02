@@ -130,6 +130,20 @@ class ProcessAdminSite:
                 # TODO why was this in here in the first place?
                 # if not issubclass(model, CalculatedModelMixin):
                 post_save.connect(do_post_save, sender=model)
+                # Wire the global-search incremental indexer alongside
+                # the calculation pipeline. Idempotent — repeated
+                # registrations don't fan out duplicate handlers.
+                try:
+                    from lex.api.views.global_search_for_models.indexer import (
+                        connect_indexing_signals,
+                    )
+
+                    connect_indexing_signals(model)
+                except Exception:
+                    # Indexer failures must never block model
+                    # registration (e.g. during initial migrate before
+                    # the lex_search_document table exists).
+                    pass
 
     def create_model_objects(self, request):
         for model in self.registered_models:
@@ -233,9 +247,17 @@ class ProcessAdminSite:
                 name="calculationlog-tree",
             ),
             path(
-                "api/global-search/<str:query>",
+                "api/global-search/",
                 Search.as_view(model_collection=self.model_collection),
                 name="global-search",
+            ),
+            # Legacy path-based contract — kept for backward compatibility
+            # with clients that still build ``api/global-search/<query>``
+            # instead of ``api/global-search/?q=<query>``.
+            path(
+                "api/global-search/<str:query>",
+                Search.as_view(model_collection=self.model_collection),
+                name="global-search-legacy",
             ),
             path(
                 "api/<model:model_container>/model-permissions",
@@ -314,6 +336,25 @@ class ProcessAdminSite:
                 auto_include_missing_models=self.auto_include_missing_models_in_structure,
             )
             self.initialized = True
+
+            # Hand the global-search indexer a way to map a Django
+            # model class back to its container (needed for the URL
+            # slug + the human-readable label). Done here rather than
+            # in ``register`` because the ``ModelCollection`` is built
+            # lazily and the resolver depends on it.
+            try:
+                from lex.api.views.global_search_for_models.indexer import (
+                    set_container_resolver,
+                )
+
+                _by_model = {
+                    getattr(c, "model_class", None): c
+                    for c in self.model_collection.all_containers
+                    if getattr(c, "model_class", None) is not None
+                }
+                set_container_resolver(lambda mc, _map=_by_model: _map.get(mc))
+            except Exception:
+                pass
 
         return (
             self._get_urls(),
