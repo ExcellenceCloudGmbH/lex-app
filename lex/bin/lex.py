@@ -337,8 +337,8 @@ def pytest_cmd(ctx):
     a configured group (hard error otherwise), and aggregates
     pass/fail/skip/error counts per group. `lex pytest --report` writes only
     the PDF report. `lex pytest --report-and-email` additionally prepares one
-    report email per resolved recipient delivery when ``email.enabled`` is true
-    in the resolved config and asks for confirmation before sending unless
+    report email per resolved recipient delivery using the configured sender and
+    recipient data and asks for confirmation before sending unless
     ``--send-emails`` is supplied.
     """
     # Bootstrap Django so tests can import models, use ORM, and pytest-django
@@ -443,13 +443,17 @@ def pytest_cmd(ctx):
         else:
             click.echo(f"Lex test report: {pdf_path}")
 
-    if parsed.report_and_email and lex_test_config.email.get("enabled"):
+    if parsed.report_and_email:
+        if not lex_test_config.email.get("from_email"):
+            raise click.ClickException(
+                "email.from_email is required for `lex pytest --report-and-email`."
+            )
         deliveries = plan_recipient_deliveries(config=lex_test_config, group_results=plugin.results)
         should_send = bool(deliveries)
         if deliveries and not parsed.send_emails:
             if not sys.stdin.isatty() or not sys.stdout.isatty():
                 raise click.ClickException(
-                    "Lex test report emails are enabled, but this session cannot confirm the send. "
+                    "Lex test report emails were requested, but this session cannot confirm the send. "
                     "Re-run with --send-emails for CI or other non-interactive environments."
                 )
             click.echo(build_report_email_recap(config=lex_test_config, deliveries=deliveries))

@@ -57,7 +57,6 @@ class ReportPayload(TypedDict, total=False):
 
 
 class EmailPayload(TypedDict, total=False):
-    enabled: bool
     from_email: str
     from_name: str
     reply_to: str
@@ -75,6 +74,7 @@ class LexTestConfigPayload(TypedDict):
     receivers: list[ReceiverPayload]
     report: ReportPayload
     groups: list[GroupPayload]
+    group_assignments: dict[str, str]
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +109,7 @@ class LexTestConfig:
     global_receivers: list[dict[str, Any]]
     email: dict[str, Any]
     groups: list[GroupConfig]
+    group_assignments: dict[str, str]
 
     @property
     def group_names(self) -> set[str]:
@@ -126,6 +127,7 @@ class LexTestConfig:
             "receivers": [dict(receiver) for receiver in self.global_receivers],
             "report": {"output_dir": self.report_output_dir},
             "groups": [group.to_payload() for group in self.groups],
+            "group_assignments": dict(self.group_assignments),
         }
 
 
@@ -143,6 +145,7 @@ def default_config_payload(*, tests_entrypoint: str = "") -> LexTestConfigPayloa
         "receivers": [],
         "report": {"output_dir": DEFAULT_REPORT_OUTPUT_DIR},
         "groups": [],
+        "group_assignments": {},
     }
 
 
@@ -282,6 +285,25 @@ def _load_config_mapping(
         receivers = _normalize_receivers(item.get("receivers"), source, f"groups[{idx}].receivers")
         groups.append(GroupConfig(name=name, description=description, receivers=receivers))
 
+    raw_group_assignments = raw.get("group_assignments") or {}
+    if not isinstance(raw_group_assignments, Mapping):
+        raise LexTestConfigError(f"{source}: 'group_assignments' must be a mapping.")
+    group_assignments: dict[str, str] = {}
+    for nodeid, group_name in raw_group_assignments.items():
+        if not isinstance(nodeid, str) or not nodeid.strip():
+            raise LexTestConfigError(
+                f"{source}: group_assignments keys must be non-empty test nodeids."
+            )
+        if not isinstance(group_name, str) or not group_name.strip():
+            raise LexTestConfigError(
+                f"{source}: group_assignments[{nodeid!r}] must be a non-empty group name."
+            )
+        if group_name not in seen:
+            raise LexTestConfigError(
+                f"{source}: group_assignments[{nodeid!r}] references unknown group {group_name!r}."
+            )
+        group_assignments[nodeid] = group_name
+
     return LexTestConfig(
         project_root=project_root,
         source=str(source),
@@ -290,6 +312,7 @@ def _load_config_mapping(
         global_receivers=global_receivers,
         email=email,
         groups=groups,
+        group_assignments=group_assignments,
     )
 
 
@@ -324,6 +347,14 @@ def _normalize_payload(raw: Mapping[str, Any] | None) -> LexTestConfigPayload:
             }
             for item in raw_groups
         ]
+
+    raw_group_assignments = raw.get("group_assignments") or {}
+    if isinstance(raw_group_assignments, Mapping):
+        payload["group_assignments"] = {
+            str(nodeid): group_name.strip()
+            for nodeid, group_name in raw_group_assignments.items()
+            if isinstance(nodeid, str) and isinstance(group_name, str) and group_name.strip()
+        }
 
     return payload
 
@@ -379,7 +410,6 @@ def _normalize_receivers(value: Any, path: Path | str, location: str) -> list[di
 def _normalize_email_settings(value: Any, path: Path | str) -> dict[str, Any]:
     if value is None:
         return {
-            "enabled": False,
             "from_email": "",
             "from_name": "",
             "reply_to": "",
@@ -388,19 +418,12 @@ def _normalize_email_settings(value: Any, path: Path | str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise LexTestConfigError(f"{path}: 'email' must be a mapping.")
 
-    enabled = value.get("enabled", False)
-    if not isinstance(enabled, bool):
-        raise LexTestConfigError(f"{path}: 'email.enabled' must be a boolean.")
-
     normalized = {
-        "enabled": str(enabled).lower() == "true" if isinstance(enabled, str) else enabled,
         "from_email": str(value.get("from_email", "")).strip(),
         "from_name": str(value.get("from_name", "")).strip(),
         "reply_to": str(value.get("reply_to", "")).strip(),
         "subject_prefix": str(value.get("subject_prefix", "")).strip(),
     }
-    if normalized["enabled"] and not normalized["from_email"]:
-        raise LexTestConfigError(f"{path}: 'email.from_email' is required when email.enabled is true.")
     return normalized
 
 
@@ -511,6 +534,11 @@ class LexGroupsPlugin:
     def __init__(self, config: LexTestConfig, strict: bool = True) -> None:
         self._config = config
         self._strict = strict
+        self._group_assignments = {
+            nodeid: group_name
+            for nodeid, group_name in config.group_assignments.items()
+            if group_name in config.group_names
+        }
         self.results: dict[str, GroupResult] = {
             g.name: GroupResult(name=g.name, description=g.description) for g in config.groups
         }
@@ -542,7 +570,10 @@ class LexGroupsPlugin:
             marker_names = {m.name for m in item.iter_markers()}
             # Record only configured group markers; the rest (parametrize,
             # skip, asyncio, ...) are filtered out by `& configured`.
-            self._test_groups[item.nodeid] = marker_names & configured
+            explicit_group = self._group_assignments.get(item.nodeid)
+            self._test_groups[item.nodeid] = (
+                {explicit_group} if explicit_group else marker_names & configured
+            )
             location = item.location[0]
             if len(item.location) > 1:
                 location = f"{location}:{int(item.location[1]) + 1}"
@@ -902,8 +933,13 @@ def send_report_emails(
     from django.core.mail import EmailMultiAlternatives, get_connection
 
     deliveries = plan_recipient_deliveries(config=config, group_results=plugin.results)
-    if not deliveries or not config.email.get("enabled"):
+    if not deliveries:
         return []
+
+    if not config.email.get("from_email"):
+        raise LexTestConfigError(
+            "email.from_email is required when using `lex pytest --report-and-email`."
+        )
 
     backend = os.getenv(TEST_EMAIL_BACKEND_ENV_VAR, "").strip() or None
     connection_kwargs: dict[str, Any] = {"fail_silently": False}
