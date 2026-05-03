@@ -80,6 +80,17 @@ FLOWER_PORT=5555
 FLOWER_URL_PREFIX=
 """
 
+
+def _has_explicit_pytest_target(project_root: Path, forwarded_args: list[str]) -> bool:
+    for arg in forwarded_args:
+        if arg.startswith("-"):
+            continue
+        target = arg.split("::", 1)[0]
+        if (project_root / target).exists():
+            return True
+    return False
+
+
 def ensure_env_file(project_root: str, content: str = DEFAULT_ENV):
     p = Path(project_root) / ".env"
     if p.exists():
@@ -369,13 +380,9 @@ def pytest_cmd(ctx):
         raise click.ClickException(str(exc)) from exc
 
     # Inject the configured tests entrypoint only if the user did not already
-    # pass a positional path (heuristic: any argv element that doesn't start
-    # with '-' and exists on disk relative to project root).
+    # pass an explicit pytest path or nodeid target.
     forwarded = list(parsed.forwarded)
-    if not any(
-        (not a.startswith("-")) and (PROJECT_ROOT_DIR / a).exists()
-        for a in forwarded
-    ):
+    if not _has_explicit_pytest_target(PROJECT_ROOT_DIR, forwarded):
         forwarded.insert(0, lex_test_config.tests_entrypoint)
 
     plugin = LexGroupsPlugin(lex_test_config, strict=True)
