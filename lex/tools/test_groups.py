@@ -26,6 +26,7 @@ import csv
 import json
 import mimetypes
 import os
+import subprocess
 from dataclasses import dataclass, field
 from email.utils import formataddr
 from pathlib import Path
@@ -117,10 +118,12 @@ class LexTestConfig:
         return {g.name for g in self.groups}
 
     def receivers_for(self, group_name: str) -> list[dict[str, Any]]:
+        receivers = list(self.global_receivers)
         for g in self.groups:
             if g.name == group_name:
-                return g.receivers if g.receivers else list(self.global_receivers)
-        return list(self.global_receivers)
+                receivers.extend(g.receivers)
+                break
+        return receivers
 
     def to_payload(self) -> LexTestConfigPayload:
         return {
@@ -814,10 +817,11 @@ def plan_recipient_deliveries(
 ) -> list[RecipientDelivery]:
     """Aggregate configured group summaries into one delivery per recipient.
 
-    Group-level receivers override the global list; when a recipient appears in
-    multiple groups they should receive one combined email containing all of
-    those group summaries. Duplicate addresses within the same group are
-    de-duplicated so a single group is never attached twice to one delivery.
+    Global receivers always receive every configured group summary. Group-level
+    receivers are added for their group. When a recipient appears in multiple
+    groups they receive one combined email containing all relevant group
+    summaries. Duplicate addresses within the same group are de-duplicated so a
+    single group is never attached twice to one delivery.
     """
 
     deliveries_by_email: dict[str, RecipientDelivery] = {}
@@ -1235,6 +1239,46 @@ def _build_summary(groups: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _git_command_output(project_root: Path, *args: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    return completed.stdout.strip()
+
+
+def _build_traceability_context(project_root: Path, run_duration: str | None) -> dict[str, str]:
+    build_id = (
+        os.getenv("GITHUB_SHA", "").strip()
+        or _git_command_output(project_root, "rev-parse", "HEAD")
+    )
+    branch = (
+        os.getenv("GITHUB_HEAD_REF", "").strip()
+        or os.getenv("GITHUB_REF_NAME", "").strip()
+        or _git_command_output(project_root, "branch", "--show-current")
+    )
+
+    run_url = ""
+    server_url = os.getenv("GITHUB_SERVER_URL", "").strip()
+    repository = os.getenv("GITHUB_REPOSITORY", "").strip()
+    run_id = os.getenv("GITHUB_RUN_ID", "").strip()
+    if server_url and repository and run_id:
+        run_url = f"{server_url.rstrip('/')}/{repository}/actions/runs/{run_id}"
+
+    return {
+        "duration": run_duration or "",
+        "build_id": build_id,
+        "branch": branch,
+        "run_url": run_url,
+    }
+
+
 def _build_delivery_template_context(
     *,
     config: LexTestConfig,
@@ -1266,12 +1310,7 @@ def _build_delivery_template_context(
         "config": {
             "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "branding": _branding_context(),
-            "traceability": {
-                "duration": run_duration or "",
-                "build_id": "",
-                "branch": "",
-                "run_url": "",
-            },
+            "traceability": _build_traceability_context(config.project_root, run_duration),
         },
         "delivery": {
             "recipient_email": recipient_email,
