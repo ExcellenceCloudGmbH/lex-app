@@ -588,8 +588,10 @@ class LexGroupsPlugin:
         unknown: dict[str, list[str]] = {}
         for item in items:
             marker_names = {m.name for m in item.iter_markers()}
-            # Record only configured group markers; the rest (parametrize,
-            # skip, asyncio, ...) are filtered out by `& configured`.
+            # A workflow/runtime assignment is authoritative for this selected
+            # test. That lets IC regroup tests under arbitrary run-time group
+            # names even when the source still carries older repo markers such
+            # as `creation` / `creation2`.
             explicit_group = self._group_assignments.get(item.nodeid)
             self._test_groups[item.nodeid] = (
                 {explicit_group} if explicit_group else marker_names & configured
@@ -605,6 +607,8 @@ class LexGroupsPlugin:
                     location=location,
                 )
             for name in marker_names:
+                if explicit_group:
+                    continue
                 if name in _BUILTIN_MARKERS or name in configured:
                     continue
                 unknown.setdefault(name, []).append(item.nodeid)
