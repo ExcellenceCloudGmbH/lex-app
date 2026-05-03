@@ -73,6 +73,7 @@ class LexTestConfigPayload(TypedDict):
     tests_entrypoint: str
     receivers: list[ReceiverPayload]
     report: ReportPayload
+    email: EmailPayload
     groups: list[GroupPayload]
     group_assignments: dict[str, str]
 
@@ -126,6 +127,7 @@ class LexTestConfig:
             "tests_entrypoint": self.tests_entrypoint,
             "receivers": [dict(receiver) for receiver in self.global_receivers],
             "report": {"output_dir": self.report_output_dir},
+            "email": dict(self.email),
             "groups": [group.to_payload() for group in self.groups],
             "group_assignments": dict(self.group_assignments),
         }
@@ -144,6 +146,12 @@ def default_config_payload(*, tests_entrypoint: str = "") -> LexTestConfigPayloa
         "tests_entrypoint": tests_entrypoint,
         "receivers": [],
         "report": {"output_dir": DEFAULT_REPORT_OUTPUT_DIR},
+        "email": {
+            "from_email": "",
+            "from_name": "",
+            "reply_to": "",
+            "subject_prefix": "",
+        },
         "groups": [],
         "group_assignments": {},
     }
@@ -332,6 +340,15 @@ def _normalize_payload(raw: Mapping[str, Any] | None) -> LexTestConfigPayload:
         output_dir = report.get("output_dir")
         if isinstance(output_dir, str) and output_dir.strip():
             payload["report"]["output_dir"] = output_dir.strip()
+
+    email = raw.get("email")
+    if isinstance(email, Mapping):
+        payload["email"] = {
+            "from_email": str(email.get("from_email", "")).strip(),
+            "from_name": str(email.get("from_name", "")).strip(),
+            "reply_to": str(email.get("reply_to", "")).strip(),
+            "subject_prefix": str(email.get("subject_prefix", "")).strip(),
+        }
 
     payload["receivers"] = _normalize_payload_receivers(raw.get("receivers"))
 
