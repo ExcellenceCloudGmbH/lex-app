@@ -35,10 +35,6 @@ def _format_env_value(value) -> str:
 
 
 def _extract_bootstrap_env_values(data: dict) -> dict[str, str]:
-    payload_data = data.get("payload")
-    if not isinstance(payload_data, dict):
-        payload_data = {}
-
     client_data = data.get("client")
     if not isinstance(client_data, dict):
         client_data = {}
@@ -47,35 +43,30 @@ def _extract_bootstrap_env_values(data: dict) -> dict[str, str]:
         "KEYCLOAK_URL": str(
             _first_present(
                 _mapping_value(data, "keycloak_url", "keycloakUrl", "KEYCLOAK_URL"),
-                _mapping_value(payload_data, "keycloak_url", "keycloakUrl", "KEYCLOAK_URL"),
                 _mapping_value(client_data, "keycloak_url", "keycloakUrl", "url"),
             )
         ),
         "KEYCLOAK_REALM": str(
             _first_present(
                 _mapping_value(data, "realm", "realm_name", "realmName", "KEYCLOAK_REALM", "KEYCLOAK_REALM_NAME"),
-                _mapping_value(payload_data, "realm", "realm_name", "realmName", "KEYCLOAK_REALM", "KEYCLOAK_REALM_NAME"),
                 _mapping_value(client_data, "realm", "realm_name", "realmName"),
             )
         ),
         "OIDC_RP_CLIENT_ID": str(
             _first_present(
                 _mapping_value(data, "client_id", "clientId", "OIDC_RP_CLIENT_ID"),
-                _mapping_value(payload_data, "client_id", "clientId", "OIDC_RP_CLIENT_ID"),
                 _mapping_value(client_data, "client_id", "clientId", "name"),
             )
         ),
         "OIDC_RP_CLIENT_SECRET": str(
             _first_present(
                 _mapping_value(data, "client_secret", "clientSecret", "OIDC_RP_CLIENT_SECRET"),
-                _mapping_value(payload_data, "client_secret", "clientSecret", "OIDC_RP_CLIENT_SECRET"),
                 _mapping_value(client_data, "client_secret", "clientSecret", "secret"),
             )
         ),
         "OIDC_RP_CLIENT_UUID": str(
             _first_present(
                 _mapping_value(data, "client_uuid", "clientUuid", "clientUUID", "OIDC_RP_CLIENT_UUID"),
-                _mapping_value(payload_data, "client_uuid", "clientUuid", "clientUUID", "OIDC_RP_CLIENT_UUID"),
                 _mapping_value(client_data, "client_uuid", "clientUuid", "clientUUID", "uuid", "id"),
             )
         ),

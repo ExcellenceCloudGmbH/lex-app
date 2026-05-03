@@ -51,28 +51,3 @@ class BootstrapCallbackServerEnvFormattingTests(TestCase):
         self.assertEqual(values["OIDC_RP_CLIENT_ID"], "LEX/transactionmonitoringv1[594]")
         self.assertEqual(values["OIDC_RP_CLIENT_SECRET"], "super-secret")
         self.assertEqual(values["OIDC_RP_CLIENT_UUID"], "client-uuid")
-
-    def test_build_env_lines_accepts_controller_payload_wrapper(self):
-        payload = {
-            "state": "bootstrap-state",
-            "payload": {
-                "KEYCLOAK_URL": "https://auth.example.com",
-                "KEYCLOAK_REALM": "lex",
-                "OIDC_RP_CLIENT_ID": "client-id",
-                "OIDC_RP_CLIENT_SECRET": "super-secret",
-                "OIDC_RP_CLIENT_UUID": "client-uuid",
-            },
-        }
-
-        env_lines = build_env_lines(payload)
-
-        with TemporaryDirectory() as tmp_dir:
-            env_file = Path(tmp_dir) / ".env"
-            env_file.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
-            values = dotenv_values(str(env_file))
-
-        self.assertEqual(values["KEYCLOAK_URL"], "https://auth.example.com")
-        self.assertEqual(values["KEYCLOAK_REALM"], "lex")
-        self.assertEqual(values["OIDC_RP_CLIENT_ID"], "client-id")
-        self.assertEqual(values["OIDC_RP_CLIENT_SECRET"], "super-secret")
-        self.assertEqual(values["OIDC_RP_CLIENT_UUID"], "client-uuid")
