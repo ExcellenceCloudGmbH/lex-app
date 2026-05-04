@@ -424,6 +424,12 @@ def main(argv: list[str]) -> int:
     # project-wide coverage on every cluster row, computed once from
     # the combined .coverage file. It's honest: "here is how much
     # of the framework this release exercised in total".
+    # Compute the framework-wide coverage once and reuse it. The
+    # earlier code called ``_overall_coverage_pct()`` twice — once
+    # here per row, once again in the overall block below — which
+    # shells out to ``coverage report`` twice for no benefit (and
+    # opens a small race window where the two calls could disagree
+    # if anything else touched ``.coverage`` between them).
     overall_pct = _overall_coverage_pct()
     print("\n── Project-wide coverage (same on every cluster row) ──",
           flush=True)
@@ -443,7 +449,7 @@ def main(argv: list[str]) -> int:
         "wall_s":   round(sum(r["wall_s"] for r in results), 2),
         "clusters_total":   len(results),
         "clusters_passing": sum(1 for r in results if r["outcome"] == "success"),
-        "coverage_pct":     _overall_coverage_pct(),
+        "coverage_pct":     overall_pct,
         "outcome": "success" if all(r["outcome"] == "success" for r in results) else "failure",
     }
 

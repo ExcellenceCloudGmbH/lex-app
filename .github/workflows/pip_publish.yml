@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────────────
 #  Publish lex-app to PyPI.
 #
-#  A PyPI release is gated on a single check:
+#  A PyPI release is gated on two checks:
 #    showcase_tests.yml — runs the selected tests from
 #                         ``lex/test_project/tests/`` with coverage,
 #                         emits coverage.xml as a CI artifact, builds
@@ -10,6 +10,9 @@
 #                         SendGrid on EVERY run — pass or fail — so
 #                         stakeholders always get a status update on
 #                         release day.
+#    celery_redis_broker_example.yml — runs the opt-in real Redis broker
+#                         examples, including CalculationModel +
+#                         WaitForTasks through an in-process worker.
 #
 #  History: ``django_tests.yml`` used to run as a second, parallel
 #  gate. On 22 April 2026 it was absorbed into ``showcase_tests.yml``
@@ -60,18 +63,19 @@ on:
         type: string
       clusters:
         description: >-
-          Cluster selector fed to BOTH gate-tests and gate-showcase.
-          Same syntax as ``run_showcase_suite.py --only``. Default is
-          the release-blessed subset. Change this to trial-run a wider
-          (or narrower) subset from a manual dispatch.
+          Cluster selector fed to gate-release. Same syntax as
+          ``run_showcase_suite.py --only``. The default ``release-gate``
+          token expands to every cluster flagged ``release_gate=True``
+          in showcase_clusters.py — so the canonical release subset
+          lives in exactly one place. Override with explicit keys to
+          trial-run a wider (or narrower) subset from a manual dispatch.
         required: false
         type: string
-        default: >-
-          init,crud_api,api_layer,calculations,validation_hooks
+        default: release-gate
 
 jobs:
-  # ── Step 1: Gate on the selected tests + emit the customer report ─
-  # showcase_tests.yml is the ONLY release gate (the former
+  # ── Step 1a: Gate on the selected tests + emit the customer report ─
+  # showcase_tests.yml is the main functional release gate (the former
   # django_tests.yml was absorbed into it on 22 April 2026 — it ran
   # the same tests twice with the same selector, so we consolidated).
   #
@@ -88,16 +92,26 @@ jobs:
     uses: ./.github/workflows/showcase_tests.yml
     secrets: inherit
     with:
-      # Single source of truth for the test scope. Edit here (or
-      # override from workflow_dispatch) — the same selector drives
-      # both the release gate and the email content.
-      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks' }}
+      # Single source of truth for the test scope. The ``release-gate``
+      # token is expanded by ``run_showcase_suite.py`` against the flags
+      # in ``showcase_clusters.py`` — change the cluster registry, not
+      # this YAML, to alter the release subset.
+      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'release-gate' }}
 
-  # ── Step 2: Build and publish (only if the gate passes) ──────────
+  # ── Step 1b: Gate on the real Redis broker example ───────────────
+  # This stays in its own reusable workflow because it needs an explicit
+  # Redis service and proves the environment boundary that the default
+  # broker-free/eager Celery clusters intentionally avoid.
+  gate-celery-broker:
+    name: "Release Gate: Celery Redis Broker"
+    uses: ./.github/workflows/celery_redis_broker_example.yml
+
+  # ── Step 2: Build and publish (only if both gates pass) ──────────
   publish:
     name: "Build & Publish"
-    needs: [gate-release]   # ← hard dependency — skipped if gate fails
-                            #   (no PyPI push when tests fail)
+    needs: [gate-release, gate-celery-broker]
+                            # ← hard dependencies — skipped if either gate fails
+                            #   (no PyPI push when tests or broker example fail)
     runs-on: ubuntu-latest
 
     permissions:

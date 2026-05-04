@@ -49,23 +49,24 @@ on:
         description: >-
           Comma-separated cluster selector for
           ``run_showcase_suite.py --only``. Each entry is either
-          ``<cluster_key>`` (whole cluster) or
-          ``<cluster_key>:<test_suffix>`` (single test inside cluster).
-          Default runs the release-gating init, CRUD API, API layer,
-          calculation, and validation-hook clusters.
+          ``<cluster_key>`` (whole cluster), ``<cluster_key>:<test_suffix>``
+          (single test inside cluster), or the magic token
+          ``release-gate`` which expands to every cluster flagged
+          ``release_gate=True`` in showcase_clusters.py. The default
+          ``release-gate`` keeps the release subset defined in exactly
+          one place — the cluster registry.
         required: false
-        default: >-
-          init,crud_api,api_layer,calculations,validation_hooks
+        default: release-gate
   workflow_call:
     inputs:
       clusters:
         description: >-
-          Same syntax as workflow_dispatch.inputs.clusters. Callers
-          (e.g. pip_publish.yml) pass their curated subset.
+          Same syntax as workflow_dispatch.inputs.clusters. Default
+          ``release-gate`` expands to the cluster registry's tagged
+          subset; callers can override with explicit keys.
         required: false
         type: string
-        default: >-
-          init,crud_api,api_layer,calculations,validation_hooks
+        default: release-gate
     outputs:
       overall_ok:
         description: "true if every cluster passed, else false"
@@ -207,16 +208,26 @@ jobs:
           fi
           echo "clusters_passing=$PASSING" >> "$GITHUB_OUTPUT"
       # ── Build the customer-facing report (HTML + PDF) ────────────
+      # ``--require-logo`` makes the build hard-fail if the wordmark
+      # cannot be rasterised — release-day reports must ship with the
+      # branded image, not the text fallback.
+      # ``SHOWCASE_VERSION`` / ``SHOWCASE_PYTHON_VERSION`` /
+      # ``SHOWCASE_POSTGRES_VERSION`` are picked up from the env by
+      # the script and rendered in the accent stripe and env strip.
       - name: Build customer report
         if: always()
         env:
           SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'Excellence Cloud' }}
+          SHOWCASE_VERSION: ${{ github.ref_name }}
+          SHOWCASE_PYTHON_VERSION: ${{ matrix.python-version }}
+          SHOWCASE_POSTGRES_VERSION: "16"
         run: |
           python .github/scripts/build_showcase_report.py \
             --manifest manifest.json \
             --out-html report.html \
             --out-pdf report.pdf \
-            --out-logo logo.png
+            --out-logo logo.png \
+            --require-logo
       - name: Upload report artefact
         if: always()
         uses: actions/upload-artifact@v4
