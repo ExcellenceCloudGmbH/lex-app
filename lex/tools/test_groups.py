@@ -23,7 +23,6 @@ from __future__ import annotations
 import base64
 import datetime as _dt
 import csv
-import hashlib
 import json
 import mimetypes
 import os
@@ -575,7 +574,6 @@ class LexGroupsPlugin:
         # show up as a keyword for tests inside it).
         self._test_groups: dict[str, set[str]] = {}
         self._test_details: dict[tuple[str, str], TestResult] = {}
-        self._coverage_runner: Any | None = None
         self.coverage_summary: dict[str, Any] | None = None
         self.run_duration: str = ""
 
@@ -660,14 +658,6 @@ class LexGroupsPlugin:
                     self._record(group_name, key, "skipped")
                     self._update_test_result(group_name, key, "skipped", report)
 
-    def pytest_runtest_setup(self, item) -> None:  # noqa: D401
-        if self._coverage_runner is not None:
-            self._coverage_runner.switch_context(self.coverage_context_for_nodeid(item.nodeid))
-
-    def pytest_runtest_logfinish(self, nodeid, location) -> None:  # noqa: D401
-        if self._coverage_runner is not None:
-            self._coverage_runner.switch_context("")
-
     def pytest_sessionfinish(self, session, exitstatus) -> None:  # noqa: D401
         for name, result in self.results.items():
             result.test_count = len(self._counted[name])
@@ -681,20 +671,6 @@ class LexGroupsPlugin:
             )
 
     # -- internal ----------------------------------------------------------
-
-    def set_coverage_runner(self, coverage_runner: Any | None) -> None:
-        self._coverage_runner = coverage_runner
-
-    @staticmethod
-    def coverage_context_for_nodeid(nodeid: str) -> str:
-        digest = hashlib.sha1(nodeid.encode("utf-8")).hexdigest()
-        return f"lex-test:{digest}"
-
-    def coverage_contexts_for_group(self, group_name: str) -> list[str]:
-        return sorted(
-            self.coverage_context_for_nodeid(nodeid)
-            for nodeid in self._counted.get(group_name, set())
-        )
 
     def _record(self, group_name: str, key: tuple[str, str], outcome: str) -> None:
         # Promote to the most severe outcome seen for this (group, test).
@@ -1206,7 +1182,6 @@ def _build_template_group(
     config: LexTestConfig,
     group_config: GroupConfig,
     group_result: GroupResult,
-    coverage_by_group: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     receivers: list[str] = []
     for receiver in config.receivers_for(group_config.name):
@@ -1225,7 +1200,7 @@ def _build_template_group(
             "skipped": group_result.skipped,
             "errors": group_result.errors,
         },
-        "coverage": (coverage_by_group or {}).get(group_config.name),
+        "coverage": None,
         "receivers": receivers,
         "tests": [
             {
@@ -1324,13 +1299,11 @@ def _build_delivery_template_context(
     run_duration: str | None,
 ) -> dict[str, Any]:
     group_config_by_name = {group.name: group for group in config.groups}
-    coverage_by_group = (coverage_summary or {}).get("groups") or {}
     groups = [
         _build_template_group(
             config=config,
             group_config=group_config_by_name[group_result.name],
             group_result=group_result,
-            coverage_by_group=coverage_by_group,
         )
         for group_result in group_results
         if group_result.name in group_config_by_name
@@ -1362,7 +1335,7 @@ def _build_delivery_template_context(
         "summary": summary,
         "groups": groups,
         "coverage": coverage_summary,
-        "has_group_coverage": any(group["coverage"] for group in groups),
+        "has_group_coverage": False,
         "has_group_tests": any(group["tests"] for group in groups),
     }
 
