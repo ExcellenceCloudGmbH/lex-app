@@ -59,7 +59,10 @@ DJANGO_BUILTIN_MODELS = {
     
     # Simple history's own models
     'historicalrecord',
-    
+
+    # lex-app's own search index — not user data, never needs auditing.
+    'lexsearchdocument',
+
     # Add any other system models you want to exclude
 }
 
