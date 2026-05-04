@@ -363,6 +363,262 @@ class FailingCalc(CalculationModel):
         raise RuntimeError(f"FailingCalc({self.name!r}) always fails")
 
 
+# ---------------------------------------------------------------------
+# 3-level grandparent / parent / child matrix (sub-cluster 7j)
+# ---------------------------------------------------------------------
+#
+# Eight grandparent classes — one per (gp, p, c) atomicity triplet.
+# Each grandparent's ``calculate()`` spawns the matching 2-level
+# matrix-parent class from above, which itself spawns the matching
+# child. We reuse the existing 2-level matrix parents instead of
+# defining new "mid" classes because the 2-level matrix already
+# encodes (p_atomic × c_atomic) and is exhaustively tested in 7i —
+# the 3-level layer only needs to add the GP dimension.
+#
+# Naming convention: ``Triple_<GP><P><C>_Calc`` where each letter is
+# ``A`` (atomic) or ``N`` (non-atomic). Eight classes total.
+# ---------------------------------------------------------------------
+
+# Pick the right 2-level matrix parent for a given (p_atomic, c_atomic).
+def _matrix_parent_for(p_atomic: bool, c_atomic: bool):
+    if p_atomic and c_atomic:
+        return AtomicParentAtomicChildMatrixCalc
+    if p_atomic and not c_atomic:
+        return AtomicParentNonAtomicChildMatrixCalc
+    if not p_atomic and c_atomic:
+        return NonAtomicParentAtomicChildMatrixCalc
+    return NonAtomicParentNonAtomicChildMatrixCalc
+
+
+def _run_3l_grandparent(gp, parent_cls):
+    """Shared grandparent ``calculate()`` body.
+
+    Spawns the configured 2-level matrix parent, then propagates that
+    parent's failure (if any), or raises its own failure
+    (``gp_should_fail``) only after the parent succeeds. This gives the
+    documented failure precedence: ``c_fail`` > ``p_fail`` > ``gp_fail``.
+    """
+    parent = parent_cls(
+        name=f"{gp.name}-p",
+        parent_should_fail=gp.p_should_fail,
+        child_should_fail=gp.c_should_fail,
+    )
+    parent.is_calculated = CalculationModel.IN_PROGRESS
+    try:
+        parent.save()
+    except Exception:
+        # Failures from the parent calc surface through .save(); the
+        # framework persists the row at ERROR via persist_error_state.
+        # Re-fetch so we can branch on the persisted terminal state.
+        pass
+
+    # Re-read parent's persisted state — it may exist at ERROR even if
+    # an atomic ancestor rolled back its IN_PROGRESS row, because
+    # ``persist_error_state`` writes outside the transaction.
+    try:
+        parent.refresh_from_db()
+    except Exception:
+        # Parent row vanished entirely (atomic GP rollback wiped the
+        # IN_PROGRESS row before any failure could be recorded → all
+        # three calcs succeeded but GP itself is going to raise). Fall
+        # through; gp_should_fail handling below covers it.
+        return
+
+    if parent.is_calculated == CalculationModel.ERROR:
+        raise RuntimeError(
+            f"{type(gp).__name__}({gp.name!r}) propagating parent failure",
+        )
+    if gp.gp_should_fail:
+        raise RuntimeError(
+            f"{type(gp).__name__}({gp.name!r}) failing after parent",
+        )
+
+
+# Helper for the 8 thin grandparent class bodies. Each just sets
+# ``is_atomic`` and binds the right matrix-parent. Defined inline
+# because Django needs an explicit class per model for the ORM /
+# migration system.
+
+@_permissive
+class Triple_AAA_Calc(CalculationModel):
+    """3-level matrix: atomic GP → atomic P → atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, AtomicParentAtomicChildMatrixCalc)
+
+
+@_permissive
+class Triple_AAN_Calc(CalculationModel):
+    """3-level matrix: atomic GP → atomic P → non-atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, AtomicParentNonAtomicChildMatrixCalc)
+
+
+@_permissive
+class Triple_ANA_Calc(CalculationModel):
+    """3-level matrix: atomic GP → non-atomic P → atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, NonAtomicParentAtomicChildMatrixCalc)
+
+
+@_permissive
+class Triple_ANN_Calc(CalculationModel):
+    """3-level matrix: atomic GP → non-atomic P → non-atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, NonAtomicParentNonAtomicChildMatrixCalc)
+
+
+@_permissive
+class Triple_NAA_Calc(CalculationModel):
+    """3-level matrix: non-atomic GP → atomic P → atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, AtomicParentAtomicChildMatrixCalc)
+
+
+@_permissive
+class Triple_NAN_Calc(CalculationModel):
+    """3-level matrix: non-atomic GP → atomic P → non-atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, AtomicParentNonAtomicChildMatrixCalc)
+
+
+@_permissive
+class Triple_NNA_Calc(CalculationModel):
+    """3-level matrix: non-atomic GP → non-atomic P → atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, NonAtomicParentAtomicChildMatrixCalc)
+
+
+@_permissive
+class Triple_NNN_Calc(CalculationModel):
+    """3-level matrix: non-atomic GP → non-atomic P → non-atomic C."""
+    name = models.CharField(max_length=200)
+    gp_should_fail = models.BooleanField(default=False)
+    p_should_fail = models.BooleanField(default=False)
+    c_should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        _run_3l_grandparent(self, NonAtomicParentNonAtomicChildMatrixCalc)
+
+
+TRIPLE_CLASSES = {
+    (True,  True,  True):  Triple_AAA_Calc,
+    (True,  True,  False): Triple_AAN_Calc,
+    (True,  False, True):  Triple_ANA_Calc,
+    (True,  False, False): Triple_ANN_Calc,
+    (False, True,  True):  Triple_NAA_Calc,
+    (False, True,  False): Triple_NAN_Calc,
+    (False, False, True):  Triple_NNA_Calc,
+    (False, False, False): Triple_NNN_Calc,
+}
+
+
 ALL_MODELS = [
     AtomicCalc, NonAtomicCalc,
     ChildCalc, NonAtomicChildCalc,
@@ -374,6 +630,9 @@ ALL_MODELS = [
     GrandchildCalc, MidCalc,
     NonAtomicParentCalc,
     FailingCalc,
+    # 3-level matrix grandparents (sub-cluster 7j)
+    Triple_AAA_Calc, Triple_AAN_Calc, Triple_ANA_Calc, Triple_ANN_Calc,
+    Triple_NAA_Calc, Triple_NAN_Calc, Triple_NNA_Calc, Triple_NNN_Calc,
     # Combinatorial / create()-pipeline model (7g + 7h).
     # (Declared below so the mixin import is nearby.)
 ]

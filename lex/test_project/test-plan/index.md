@@ -2,7 +2,7 @@
 
 > **Audience:** Engineering leadership, QA supervisors, developers  
 > **Status:** Living document — updated as clusters are implemented  
-> **Last updated:** April 28, 2026
+> **Last updated:** April 17, 2026
 
 ---
 

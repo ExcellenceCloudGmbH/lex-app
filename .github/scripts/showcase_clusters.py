@@ -37,6 +37,11 @@ class Cluster:
     what_it_proves: str
     what_it_means_if_broken: str
     why_it_matters: str
+    # ``release_gate=True`` clusters are the curated subset that blocks
+    # a PyPI publish. The CI workflows pass ``--only release-gate`` and
+    # the runner expands that token to every cluster flagged here, so
+    # the cluster list lives in exactly one place.
+    release_gate: bool = False
 
 
 CLUSTERS: tuple[Cluster, ...] = (
@@ -61,7 +66,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Day-one onboarding is the single highest-risk moment in "
             "the customer journey."
-        )
+        ),
+        release_gate=True,
     ),
     Cluster(
         key="crud_api",
@@ -82,7 +88,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "CRUD is the most fundamental operation of the platform — "
             "if it is broken, no other feature matters."
-        )
+        ),
+        release_gate=True,
     ),
     Cluster(
         key="validation_hooks",
@@ -103,7 +110,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Data integrity is the foundation of every downstream "
             "calculation and report."
-        )
+        ),
+        release_gate=True,
     ),
     Cluster(
         key="permissions",
@@ -125,7 +133,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Enforcement of access rules is a hard compliance and "
             "security requirement."
-        )
+        ),
+        release_gate=True,
     ),
     Cluster(
         key="history",
@@ -188,7 +197,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Calculated outputs drive customer dashboards and "
             "reports — silent failures cannot be tolerated."
-        )
+        ),
+        release_gate=True,
     ),
     Cluster(
         key="celery_async",
@@ -251,7 +261,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Every customer-facing frontend and every external "
             "integration depends on a stable API contract."
-        )
+        ),
+        release_gate=True,
     ),
     Cluster(
         key="stress",
@@ -336,9 +347,23 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Grids are where customers spend 90% of their time on the "
             "platform."
-        )
+        ),
+        release_gate=True,
     ),
 )
+
+
+# ── Release-gate helpers ───────────────────────────────────────────
+RELEASE_GATE_TOKEN = "release-gate"
+
+
+def release_gate_keys() -> tuple[str, ...]:
+    """Return the keys of every cluster flagged ``release_gate=True``,
+    in CLUSTERS declaration order. Used by ``run_showcase_suite.py``
+    to expand the magic ``--only release-gate`` selector and by the
+    workflow YAMLs to avoid duplicating this list.
+    """
+    return tuple(c.key for c in CLUSTERS if c.release_gate)
 
 
 def cluster_by_key(key: str) -> Cluster | None:

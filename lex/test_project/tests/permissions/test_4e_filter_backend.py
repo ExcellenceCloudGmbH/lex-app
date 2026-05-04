@@ -181,6 +181,39 @@ class TestCluster04e_FilterBackend_DenyAll(AuthenticatedE2ETestCase):
             ),
         )
 
+    # -- 4.41 ----------------------------------------------------------
+    def test_4_41_read_deny_detail_response_leaks_no_domain_fields(self) -> None:
+        """
+        Scenario 4.41: A detail GET for a row whose
+        ``permission_read`` returns :meth:`PermissionResult.deny` must
+        not leak any domain fields.
+
+        List endpoints already drop denied rows through
+        :class:`UserReadRestrictionFilterBackend` (4.18). Detail GETs
+        do not run that list filter, so the final guard is
+        ``LexSerializer.to_representation`` returning an empty object.
+        This pins the customer-visible contract: even if the URL is
+        guessed, a fully read-denied row exposes no ``name`` / secret
+        data and no framework-injected ``id``.
+        """
+        item = FilterBackendItem.objects.create(name="hidden-detail", is_secret=False)
+
+        resp = self.client.get(self.url_detail(FILTER_BACKEND, item.pk))
+
+        self.assertEqual(
+            resp.status_code, status.HTTP_200_OK,
+            msg=f"Detail endpoint currently represents read-deny as 200 + {{}}; got {resp.status_code}",
+        )
+        data = getattr(resp, "data", None)
+        self.assertEqual(
+            data, {},
+            msg=(
+                "A full read deny must serialize as an empty object on detail GET. "
+                "Leaking even the primary key would let a guessed URL confirm row existence; "
+                f"got {data!r}."
+            ),
+        )
+
 
 class TestCluster04e_FilterBackend_AuditLog(AuthenticatedE2ETestCase):
     """

@@ -38,7 +38,12 @@ from typing import Any
 # Allow running either as ``python .github/scripts/run_showcase_suite.py``
 # or via ``python -m``.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from showcase_clusters import CLUSTERS, Cluster  # noqa: E402
+from showcase_clusters import (  # noqa: E402
+    CLUSTERS,
+    Cluster,
+    RELEASE_GATE_TOKEN,
+    release_gate_keys,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -336,12 +341,17 @@ def main(argv: list[str]) -> int:
     p.add_argument("--only", default=None,
                    help="Comma-separated cluster selector. Each entry is "
                         "either ``<cluster_key>`` (run every test in the "
-                        "cluster) or ``<cluster_key>:<test_suffix>`` (run "
+                        "cluster), ``<cluster_key>:<test_suffix>`` (run "
                         "a single test — the suffix is appended to "
-                        "``lex.test_project.tests.<cluster_key>.``). "
-                        "Example: ``init:test_1b_lex_init.TestCluster01b_"
-                        "LexInit.test_1_6b_init_runs_full_pipeline,"
-                        "crud_api:test_2a_create.TestCluster02a_Create."
+                        "``lex.test_project.tests.<cluster_key>.``), or "
+                        "the magic token ``release-gate`` which expands "
+                        "to every cluster flagged ``release_gate=True`` "
+                        "in showcase_clusters.py. The token can be mixed "
+                        "with explicit keys. Example: "
+                        "``release-gate`` (full release subset), or "
+                        "``init:test_1b_lex_init.TestCluster01b_LexInit."
+                        "test_1_6b_init_runs_full_pipeline,crud_api:"
+                        "test_2a_create.TestCluster02a_Create."
                         "test_2_1_post_creates_record``.")
     p.add_argument("--quiet", action="store_true",
                    help="Capture test output per cluster (heartbeat "
@@ -351,7 +361,10 @@ def main(argv: list[str]) -> int:
                         "big speed-up on local runs (don't use in CI).")
     args = p.parse_args(argv)
 
-    # Parse --only: each entry is "<key>" or "<key>:<test_suffix>".
+    # Parse --only: each entry is "<key>", "<key>:<test_suffix>", or the
+    # magic token ``release-gate`` which expands to every cluster flagged
+    # ``release_gate=True`` in showcase_clusters.py. Mixing the token with
+    # explicit keys is allowed — the union is run.
     # ``selectors`` preserves the caller's order and maps key → suffix (or None).
     selectors: dict[str, str | None]
     if args.only:
@@ -359,6 +372,12 @@ def main(argv: list[str]) -> int:
         for raw in args.only.split(","):
             entry = raw.strip()
             if not entry:
+                continue
+            if entry == RELEASE_GATE_TOKEN:
+                # Expand the token in declaration order; do not overwrite
+                # an explicit suffix already set for one of these keys.
+                for key in release_gate_keys():
+                    selectors.setdefault(key, None)
                 continue
             if ":" in entry:
                 key, suffix = entry.split(":", 1)
