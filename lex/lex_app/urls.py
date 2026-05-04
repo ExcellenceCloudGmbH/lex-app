@@ -26,7 +26,6 @@ from lex.lex_app import settings
 from . import views
 from lex.process_admin.settings import processAdminSite, adminSite
 from lex.authentication.views.user_api import CurrentUser
-from lex.mcp_server.discovery import McpServerInfoView, OAuthProtectedResourceView
 
 _raw_base_path = os.getenv("DJANGO_BASE_PATH")
 url_prefix = _raw_base_path.strip("/") if _raw_base_path else ""
@@ -37,12 +36,6 @@ urlpatterns = [
     path("health", views.HealthCheck.as_view(), name="health_view"),
     path("api/health", views.HealthCheck.as_view(), name="api_health_view"),
     path("api/user/", CurrentUser.as_view(), name="current-user"),
-    path(".well-known/mcp", McpServerInfoView.as_view(), name="mcp-server-info"),
-    path(
-        ".well-known/oauth-protected-resource",
-        OAuthProtectedResourceView.as_view(),
-        name="mcp-oauth-protected-resource",
-    ),
     path(admin_route, adminSite.urls),
     path(process_admin_route, processAdminSite.urls),
     # path("oidc/", include("mozilla_django_oidc.urls")),
