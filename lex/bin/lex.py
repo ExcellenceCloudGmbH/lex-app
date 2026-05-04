@@ -91,6 +91,68 @@ def _has_explicit_pytest_target(project_root: Path, forwarded_args: list[str]) -
     return False
 
 
+def _create_coverage_runner(project_root: Path):
+    try:
+        from coverage import Coverage
+    except Exception:
+        return None
+
+    return Coverage(
+        data_file=None,
+        source=[project_root.as_posix()],
+        omit=[
+            str(project_root / ".venv" / "*"),
+            str(project_root / "Tests" / "*"),
+            str(project_root / "tests" / "*"),
+            str(project_root / "reports" / "*"),
+            "*/site-packages/*",
+        ],
+    )
+
+
+def _coverage_percentage(coverage_runner, *, contexts: list[str] | None = None) -> float | None:
+    try:
+        with io.StringIO() as stream:
+            return float(
+                coverage_runner.report(
+                    file=stream,
+                    show_missing=False,
+                    ignore_errors=True,
+                    contexts=contexts,
+                )
+            )
+    except Exception:
+        return None
+
+
+def _coverage_entry(label: str, percentage: float) -> dict[str, float | str]:
+    rounded = round(percentage, 1)
+    return {
+        "label": label,
+        "display": f"{rounded:.1f}%",
+        "percentage": rounded,
+    }
+
+
+def _build_coverage_summary(coverage_runner, plugin) -> dict[str, object] | None:
+    total = _coverage_percentage(coverage_runner)
+    if total is None:
+        return None
+
+    summary: dict[str, object] = _coverage_entry("Framework-wide code coverage", total)
+    group_entries: dict[str, dict[str, float | str]] = {}
+    for group_name in sorted(plugin.results):
+        contexts = plugin.coverage_contexts_for_group(group_name)
+        if not contexts:
+            continue
+        group_total = _coverage_percentage(coverage_runner, contexts=contexts)
+        if group_total is None:
+            continue
+        group_entries[group_name] = _coverage_entry("Group code coverage", group_total)
+    summary["groups"] = group_entries
+    return summary
+
+
 def ensure_env_file(project_root: str, content: str = DEFAULT_ENV):
     p = Path(project_root) / ".env"
     if p.exists():
@@ -352,10 +414,6 @@ def pytest_cmd(ctx):
     recipient data and asks for confirmation before sending unless
     ``--send-emails`` is supplied.
     """
-    # Bootstrap Django so tests can import models, use ORM, and pytest-django
-    # can pick up DJANGO_SETTINGS_MODULE without a second setup pass.
-    _bootstrap_django()
-
     # Run from project root so lex_test_config.yaml and the tests entrypoint
     # are auto-discovered regardless of where `lex pytest` was invoked.
     os.chdir(PROJECT_ROOT_DIR.as_posix())
@@ -379,6 +437,10 @@ def pytest_cmd(ctx):
     except LexTestConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
+    coverage_runner = _create_coverage_runner(PROJECT_ROOT_DIR) if should_generate_report else None
+    if coverage_runner is not None:
+        coverage_runner.start()
+
     # Inject the configured tests entrypoint only if the user did not already
     # pass an explicit pytest path or nodeid target.
     forwarded = list(parsed.forwarded)
@@ -386,32 +448,15 @@ def pytest_cmd(ctx):
         forwarded.insert(0, lex_test_config.tests_entrypoint)
 
     plugin = LexGroupsPlugin(lex_test_config, strict=True)
-
-    import pytest as _pytest
-
-    coverage_runner = None
-    collect_coverage = should_generate_report
-    if collect_coverage:
-        try:
-            from coverage import Coverage
-        except Exception:
-            Coverage = None
-        if Coverage is not None:
-            coverage_runner = Coverage(
-                data_file=None,
-                source=[PROJECT_ROOT_DIR.as_posix()],
-                omit=[
-                    str(PROJECT_ROOT_DIR / ".venv" / "*"),
-                    str(PROJECT_ROOT_DIR / "Tests" / "*"),
-                    str(PROJECT_ROOT_DIR / "tests" / "*"),
-                    str(PROJECT_ROOT_DIR / "reports" / "*"),
-                    "*/site-packages/*",
-                ],
-            )
-            coverage_runner.start()
+    plugin.set_coverage_runner(coverage_runner)
 
     started_at = time.perf_counter()
     try:
+        # Bootstrap Django after coverage starts so import-time application code
+        # is measured the same way it would be under `coverage run`.
+        _bootstrap_django()
+        import pytest as _pytest
+
         exit_code = _pytest.main(forwarded, plugins=[plugin])
     except LexTestConfigError as exc:
         # Raised from pytest_collection_modifyitems on marker/group mismatch.
@@ -421,22 +466,10 @@ def pytest_cmd(ctx):
         if coverage_runner is not None:
             try:
                 coverage_runner.stop()
-                with io.StringIO() as stream:
-                    total = float(
-                        coverage_runner.report(
-                            file=stream,
-                            show_missing=False,
-                            ignore_errors=True,
-                        )
-                    )
             except Exception:
                 plugin.coverage_summary = None
             else:
-                plugin.coverage_summary = {
-                    "label": "Framework-wide code coverage",
-                    "display": f"{total:.1f}%",
-                    "percentage": round(total, 1),
-                }
+                plugin.coverage_summary = _build_coverage_summary(coverage_runner, plugin)
 
     if should_generate_report:
         try:
