@@ -32,7 +32,6 @@ import base64
 import datetime as dt
 import os
 import sys
-import time
 
 
 def main(argv: list[str]) -> int:
@@ -94,14 +93,10 @@ def main(argv: list[str]) -> int:
         pdf_bytes = fh.read()
 
     overall_ok = args.overall_ok.strip().lower() == "true"
-    # Use plain ASCII markers in the subject — Outlook and a number of
-    # corporate relays mangle U+2713 / U+2717 in headers, which makes
-    # mail rules and inbox filters unreliable. The HTML body is free
-    # to use any glyph it likes; the *subject* stays portable.
-    marker = "PASS" if overall_ok else "FAIL"
-    cluster_tag = f" - {args.clusters_passing} clusters passing" if args.clusters_passing else ""
+    marker = "✓ all green" if overall_ok else "✗ action required"
+    cluster_tag = f" — {args.clusters_passing} clusters passing" if args.clusters_passing else ""
     today = dt.datetime.now(dt.timezone.utc).strftime("%d %b %Y")
-    subject = f"[{marker}{cluster_tag}] {brand} - Platform Health Report, {today}"
+    subject = f"[{marker}{cluster_tag}] {brand} — Platform Health Report, {today}"
 
     message = Mail(
         from_email=From(sender, sender_name),
@@ -141,30 +136,8 @@ def main(argv: list[str]) -> int:
     message.attachment = attachments
 
     client = SendGridAPIClient(api_key)
-
-    # Retry on 5xx with exponential backoff. SendGrid edge nodes
-    # occasionally bounce a request with a transient 5xx during
-    # incident windows; we don't want a release-day report email to
-    # be lost just because the first POST was unlucky. 4xx is left
-    # un-retried — those are caller errors (auth, bad sender, rate
-    # limit) where retrying just papers over the real problem.
-    max_attempts = 4
-    backoff_s = 2.0
-    response = None
-    for attempt in range(1, max_attempts + 1):
-        response = client.send(message)
-        status = response.status_code
-        print(f"SendGrid status: {status} (attempt {attempt}/{max_attempts})")
-        if status < 500:
-            break
-        if attempt == max_attempts:
-            break
-        sleep_s = backoff_s * (2 ** (attempt - 1))
-        print(f"  transient {status} — retrying in {sleep_s:.1f}s",
-              file=sys.stderr)
-        time.sleep(sleep_s)
-
-    assert response is not None
+    response = client.send(message)
+    print(f"SendGrid status: {response.status_code}")
     if response.status_code >= 300:
         print("SendGrid response body:", response.body, file=sys.stderr)
         return 1

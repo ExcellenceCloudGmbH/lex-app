@@ -6,8 +6,7 @@ Build the Platform Health Report from a manifest produced by
 Outputs:
   * ``report.html``           — email body, tabular; passes single-line,
                                 failures expand with the "what it means"
-                                paragraph plus the cluster's
-                                ``worst_case_outcome``.
+                                paragraph.
   * ``report.pdf``            — detailed archive, every row expanded,
                                 plus the "What we test and why" glossary.
   * ``logo.png``              — rasterised wordmark, attached inline by
@@ -16,17 +15,11 @@ Outputs:
                                 browser-openable copy of the email with
                                 the logo inlined as a data URI.
 
-The report shows ONE ROW PER CLUSTER, grouped by section
-(Foundations / Engine / Surface), with columns:
+The report shows ONE ROW PER CLUSTER, with columns:
     Status | Capability | Scenarios
-A row tagged ``release_gate=True`` carries a small "RELEASE GATE"
-pill next to its label. The verdict band leads with the headline
-metric; supporting numbers move to the totals row and the
-environment strip.
-
-Per-cluster coverage was removed on 22 April 2026 — see the long
+(Per-cluster coverage was removed on 22 April 2026 — see the long
 comment in ``_results_table`` for the rationale. Framework-wide
-coverage still appears in the totals row.
+coverage still appears in the verdict band and totals row.)
 """
 
 from __future__ import annotations
@@ -42,14 +35,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from showcase_clusters import (  # noqa: E402
-    CLUSTERS,
-    Cluster,
-    SECTION_LABELS,
-    SECTION_ORDER,
-    cluster_by_key,
-    clusters_by_section,
-)
+from showcase_clusters import CLUSTERS, Cluster, cluster_by_key  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -59,7 +45,6 @@ DEFAULT_LOGO_SVG = REPO_ROOT / "images" / "dark-lex-logo.svg"
 # ── Brand palette — Excellence Cloud ────────────────────────────────
 C = {
     "brand":      "#283067",
-    "brand_dim":  "#3b4683",
     "accent":     "#24b6bb",
     "ink":        "#1a2230",
     "muted":      "#5d6b7a",
@@ -76,39 +61,10 @@ C = {
     "bad_tint":   "#fff5f6",
     "warn_bg":    "#fff8e1",
     "warn_ink":   "#8a6d00",
-    "warn_border":"#c79100",
-    "gate_bg":    "#eef0fa",
-    "gate_ink":   "#283067",
-    "gate_border":"#c4cae8",
 }
 SANS = ("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
         "'Helvetica Neue', Arial, sans-serif")
 SERIF = "Georgia, 'Times New Roman', Times, serif"
-
-# ── Style fragments — kept here so visual tweaks live in one place ──
-S = {
-    "section_h": (
-        f"font:700 11px/1 {SANS};color:{C['brand']};"
-        "letter-spacing:1.6px;text-transform:uppercase;"
-    ),
-    "th": (
-        f"padding:12px 16px;background:{C['bg']};"
-        f"border-bottom:1px solid {C['rule']};"
-        f"font:700 11px/1 {SANS};color:{C['muted']};"
-        "letter-spacing:1.2px;text-transform:uppercase;"
-    ),
-    "td": (
-        f"padding:14px 16px;border-bottom:1px solid {C['rule']};"
-        "vertical-align:top;"
-    ),
-    "label": f"font:600 14px/1.3 {SANS};color:{C['ink']};",
-    "muted_sm": f"font:400 12px/1.5 {SANS};color:{C['muted']};",
-    "body":  f"font:400 13px/1.6 {SANS};color:{C['ink']};",
-    "kicker": (
-        f"font:400 11px/1 {SANS};color:#fff;"
-        "letter-spacing:2px;text-transform:uppercase;opacity:.70;"
-    ),
-}
 
 
 # ── Logo ─────────────────────────────────────────────────────────────
@@ -144,156 +100,53 @@ def _fmt_pct(pct: float | None) -> str:
     return "—" if pct is None else f"{pct:.1f}%"
 
 
-def _row_state(row: dict[str, Any]) -> str:
-    """Reduce a row to one of: pass / pass_with_skips / fail.
-
-    A "pass with skips" row is still green — Django reports outcome
-    success — but we want to flag visually that some scenarios were
-    not run, so a reader doesn't read the green chip as 'every
-    scenario executed cleanly'.
-    """
-    if row.get("outcome") != "success":
-        return "fail"
-    if row.get("skipped", 0) or row.get("xfailed", 0):
-        return "pass_with_skips"
-    return "pass"
-
-
-def _outcome_chip(state: str) -> str:
-    """A small status chip. Uses a coloured square plus a word — no
-    Unicode glyphs in the chip body so Outlook/Exchange relays don't
-    mangle the header. The colour + the word together convey state
-    even if the user is colour-blind.
-    """
-    if state == "pass":
-        bg, ink, border, dot, word = (
-            C["ok_bg"], C["ok_ink"], C["ok_border"], C["ok_border"], "Pass"
-        )
-    elif state == "pass_with_skips":
-        bg, ink, border, dot, word = (
-            C["warn_bg"], C["warn_ink"], C["warn_border"], C["warn_border"],
-            "Pass · skipped",
-        )
-    elif state == "fail":
-        bg, ink, border, dot, word = (
-            C["bad_bg"], C["bad_ink"], C["bad_border"], C["bad_border"], "Fail"
-        )
-    else:
-        bg, ink, border, dot, word = (
-            C["bg"], C["muted"], C["rule"], C["muted"], state.title() or "—"
-        )
+def _outcome_chip(outcome: str) -> str:
+    table = {
+        "success":   (C["ok_bg"],  C["ok_ink"],  C["ok_border"],  "✓", "Passed"),
+        "failure":   (C["bad_bg"], C["bad_ink"], C["bad_border"], "✗", "Failed"),
+    }
+    bg, ink, border, icon, word = table.get(
+        outcome, (C["bg"], C["muted"], C["rule"], "?", outcome.title())
+    )
     return (
-        f'<span style="display:inline-block;padding:5px 10px;'
+        f'<span style="display:inline-block;padding:4px 10px;'
         f'background:{bg};color:{ink};border:1px solid {border};'
         f'border-radius:999px;font:600 11px/1 {SANS};letter-spacing:.4px;'
-        f'white-space:nowrap;">'
-        f'<span style="display:inline-block;width:8px;height:8px;'
-        f'background:{dot};border-radius:50%;vertical-align:middle;'
-        f'margin-right:6px;"></span>'
-        f'{word}</span>'
-    )
-
-
-def _release_gate_pill() -> str:
-    return (
-        f'<span style="display:inline-block;margin-left:8px;'
-        f'padding:2px 7px;background:{C["gate_bg"]};color:{C["gate_ink"]};'
-        f'border:1px solid {C["gate_border"]};border-radius:4px;'
-        f'font:700 9px/1.4 {SANS};letter-spacing:1.1px;'
-        f'text-transform:uppercase;vertical-align:middle;">'
-        f'Release gate</span>'
-    )
-
-
-def _progress_bar(passed: int, total: int) -> str:
-    """A single horizontal bar showing passed/total. Pure inline CSS,
-    width-percent driven, so it renders in every email client."""
-    if total <= 0:
-        pct = 0
-    else:
-        pct = max(0, min(100, int(round(100 * passed / total))))
-    fill = C["ok_border"] if pct == 100 else (
-        C["warn_border"] if pct >= 80 else C["bad_border"]
-    )
-    return (
-        f'<div style="width:100%;height:6px;background:{C["rule"]};'
-        f'border-radius:3px;overflow:hidden;">'
-        f'<div style="width:{pct}%;height:6px;background:{fill};"></div>'
-        f'</div>'
+        f'white-space:nowrap;">{icon}&nbsp; {word}</span>'
     )
 
 
 def _verdict_band(overall: dict[str, Any]) -> str:
     ok = overall["outcome"] == "success"
-    has_skips = ok and (overall.get("skipped", 0) or overall.get("xfailed", 0))
-    if not ok:
-        bg, ink, border = C["bad_bg"], C["bad_ink"], C["bad_border"]
-        title = "One or more capabilities are broken"
-    elif has_skips:
-        bg, ink, border = C["warn_bg"], C["warn_ink"], C["warn_border"]
-        title = "All capabilities passing — some scenarios skipped"
-    else:
-        bg, ink, border = C["ok_bg"], C["ok_ink"], C["ok_border"]
-        title = "All capabilities are working"
-
-    headline = (
-        f"{overall['clusters_passing']} of "
-        f"{overall['clusters_total']} capabilities passing"
-    )
+    bg     = C["ok_bg"]     if ok else C["bad_bg"]
+    ink    = C["ok_ink"]    if ok else C["bad_ink"]
+    border = C["ok_border"] if ok else C["bad_border"]
+    icon   = "✓" if ok else "✗"
+    title  = ("All capabilities are working"
+              if ok else "One or more capabilities are broken")
+    counts = (f"{overall['clusters_passing']} of "
+              f"{overall['clusters_total']} capabilities passing"
+              f"  &middot;  {overall['passed']} of {overall['ran']} scenarios passing"
+              f"  &middot;  overall coverage {_fmt_pct(overall.get('coverage_pct'))}")
     return f"""
     <tr>
       <td style="padding:24px 32px;background:{bg};">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
-            <td style="vertical-align:middle;padding-right:18px;">
-              <div style="font:700 22px/1.2 {SERIF};color:{ink};">
+            <td style="vertical-align:middle;width:60px;">
+              <div style="width:52px;height:52px;border-radius:50%;
+                          background:{border};color:#fff;
+                          font:700 28px/52px {SANS};text-align:center;">
+                {icon}
+              </div>
+            </td>
+            <td style="vertical-align:middle;padding-left:18px;">
+              <div style="font:700 19px/1.25 {SANS};color:{ink};">
                 {title}
               </div>
-              <div style="font:600 14px/1.4 {SANS};color:{ink};
-                          margin-top:6px;opacity:.9;">
-                {headline}
-              </div>
-            </td>
-            <td align="right" style="vertical-align:middle;width:120px;">
-              <div style="display:inline-block;padding:8px 14px;
-                          background:{border};color:#fff;border-radius:6px;
-                          font:700 13px/1.2 {SANS};letter-spacing:.5px;
-                          text-transform:uppercase;white-space:nowrap;">
-                {'Action required' if not ok else ('Review skipped' if has_skips else 'All clear')}
-              </div>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-    """
-
-
-def _empty_verdict_band() -> str:
-    """Used when no manifest was produced at all (infrastructure
-    crash). The previous version silently rendered '0 / 0' — which
-    looks like a green run with nothing to do. Make it loud instead."""
-    return f"""
-    <tr>
-      <td style="padding:24px 32px;background:{C['bad_bg']};">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-          <tr>
-            <td style="vertical-align:middle;padding-right:18px;">
-              <div style="font:700 22px/1.2 {SERIF};color:{C['bad_ink']};">
-                No test manifest produced
-              </div>
-              <div style="font:600 14px/1.4 {SANS};color:{C['bad_ink']};
-                          margin-top:6px;opacity:.9;">
-                The test runner did not finish. Treat this release as
-                <strong>blocked</strong> until the run log is investigated.
-              </div>
-            </td>
-            <td align="right" style="vertical-align:middle;width:120px;">
-              <div style="display:inline-block;padding:8px 14px;
-                          background:{C['bad_border']};color:#fff;border-radius:6px;
-                          font:700 13px/1.2 {SANS};letter-spacing:.5px;
-                          text-transform:uppercase;white-space:nowrap;">
-                Blocked
+              <div style="font:400 13px/1.5 {SANS};color:{ink};
+                          margin-top:4px;opacity:.85;">
+                {counts}
               </div>
             </td>
           </tr>
@@ -319,27 +172,12 @@ def _logo_block(*, logo_src: str | None, text_fallback: str) -> str:
 
 
 def _header_band(brand: str, *, logo_src: str | None,
-                 generated_at: dt.datetime,
-                 commit_sha: str | None,
-                 branch: str | None,
-                 version: str | None) -> str:
-    # Accent stripe now carries the version + short SHA so a reader can
-    # identify exactly which build this report describes without
-    # scrolling to the footer.
-    stripe_bits: list[str] = []
-    if version:
-        stripe_bits.append(f"version <strong>{html.escape(version)}</strong>")
-    elif branch:
-        stripe_bits.append(f"branch <strong>{html.escape(branch)}</strong>")
-    if commit_sha:
-        stripe_bits.append(f"commit <code style=\"font:600 11px/1 "
-                           f"'SFMono-Regular',Menlo,Consolas,monospace;\">"
-                           f"{html.escape(commit_sha[:8])}</code>")
-    stripe = " &nbsp;·&nbsp; ".join(stripe_bits) or "&nbsp;"
+                 generated_at: dt.datetime) -> str:
     return f"""
     <tr>
       <td style="background:{C['brand']};padding:26px 32px;color:#fff;">
-        <div style="{S['kicker']}">
+        <div style="font:400 11px/1 {SANS};letter-spacing:2px;
+                    text-transform:uppercase;opacity:.70;">
           Platform Health Report
         </div>
         <div style="margin-top:12px;">
@@ -353,35 +191,8 @@ def _header_band(brand: str, *, logo_src: str | None,
       </td>
     </tr>
     <tr>
-      <td style="background:{C['accent']};padding:8px 32px;
-                 font:500 11px/1.4 {SANS};color:{C['brand']};
-                 letter-spacing:.3px;">
-        {stripe}
-      </td>
-    </tr>
-    """
-
-
-def _env_strip(overall: dict[str, Any], *, python_version: str | None,
-               postgres_version: str | None) -> str:
-    bits: list[str] = []
-    bits.append(f"<strong style=\"color:{C['ink']};\">"
-                f"{_fmt_duration(overall.get('wall_s'))}</strong> wall time")
-    cov = overall.get("coverage_pct")
-    if cov is not None:
-        bits.append(f"coverage <strong style=\"color:{C['ink']};\">"
-                    f"{_fmt_pct(cov)}</strong>")
-    if python_version:
-        bits.append(f"Python {html.escape(python_version)}")
-    if postgres_version:
-        bits.append(f"PostgreSQL {html.escape(postgres_version)}")
-    return f"""
-    <tr>
-      <td style="padding:14px 32px;background:{C['bg']};
-                 border-bottom:1px solid {C['rule']};
-                 font:400 12px/1.6 {SANS};color:{C['muted']};">
-        {' &nbsp;·&nbsp; '.join(bits)}
-      </td>
+      <td style="height:4px;background:{C['accent']};line-height:0;
+                 font-size:0;">&nbsp;</td>
     </tr>
     """
 
@@ -459,51 +270,6 @@ def _scenarios_cell(row: dict[str, Any]) -> str:
     )
 
 
-def _section_header_row(label: str) -> str:
-    return f"""
-      <tr>
-        <td colspan="3"
-            style="padding:18px 16px 10px 16px;background:{C['card']};
-                   border-bottom:1px solid {C['rule']};">
-          <div style="{S['section_h']}">{html.escape(label)}</div>
-        </td>
-      </tr>
-    """
-
-
-def _capability_cell(cluster: Cluster) -> str:
-    pill = _release_gate_pill() if cluster.release_gate else ""
-    return (
-        f'<div style="{S["label"]}">{html.escape(cluster.label)}{pill}</div>'
-        f'<div style="{S["muted_sm"]};margin-top:3px;">'
-        f'{cluster.short_description}</div>'
-    )
-
-
-def _failure_detail(cluster: Cluster) -> str:
-    """Used on a failing row in the email view. Leads with the
-    customer-visible worst case so a reader's first read of a red row
-    is the consequence, not the framing."""
-    pieces: list[str] = []
-    if cluster.worst_case_outcome:
-        pieces.append(
-            f'<div style="font:600 13px/1.5 {SANS};color:{C["bad_ink"]};">'
-            f'Customer-visible impact: '
-            f'<span style="font-weight:400;">'
-            f'{html.escape(cluster.worst_case_outcome)}</span></div>'
-        )
-    pieces.append(
-        f'<div style="font:400 13px/1.6 {SANS};color:{C["bad_ink"]};'
-        f'margin-top:6px;">{cluster.what_it_means_if_broken}</div>'
-    )
-    return "".join(pieces)
-
-
-def _success_detail(cluster: Cluster) -> str:
-    return (
-        f'<div style="{S["body"]}">{cluster.what_it_proves}</div>'
-    )
-
 
 def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
                    overall: dict[str, Any]) -> str:
@@ -517,71 +283,90 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
     # regime — because Django's app loading imports the same framework
     # code under every test. A column where every cluster reports the
     # same value is noise, not signal. We keep ONE framework-wide
-    # number, in the Totals row.
+    # number, in the Totals row and the verdict band.
     header = f"""
       <thead>
         <tr>
-          <th align="left" style="{S['th']}width:120px;">Status</th>
-          <th align="left" style="{S['th']}">Capability</th>
-          <th align="left" style="{S['th']}width:130px;">Scenarios</th>
+          <th align="left"
+              style="padding:12px 16px;background:{C['bg']};
+                     border-bottom:1px solid {C['rule']};
+                     font:700 11px/1 {SANS};color:{C['muted']};
+                     letter-spacing:1.2px;text-transform:uppercase;
+                     width:110px;">
+            Status
+          </th>
+          <th align="left"
+              style="padding:12px 16px;background:{C['bg']};
+                     border-bottom:1px solid {C['rule']};
+                     font:700 11px/1 {SANS};color:{C['muted']};
+                     letter-spacing:1.2px;text-transform:uppercase;">
+            Capability
+          </th>
+          <th align="left"
+              style="padding:12px 16px;background:{C['bg']};
+                     border-bottom:1px solid {C['rule']};
+                     font:700 11px/1 {SANS};color:{C['muted']};
+                     letter-spacing:1.2px;text-transform:uppercase;
+                     width:130px;">
+            Scenarios
+          </th>
         </tr>
       </thead>
     """
-    rows_by_key = {r["key"]: r for r in rows}
     body_rows: list[str] = []
-
-    # Walk sections in declaration order. Only emit a section header
-    # if at least one cluster in that section appears in the manifest.
-    grouped = clusters_by_section()
-    zebra = 0
-    for section_key in SECTION_ORDER:
-        clusters_in_section = grouped.get(section_key, [])
-        section_rows = [
-            (c, rows_by_key[c.key]) for c in clusters_in_section
-            if c.key in rows_by_key
-        ]
-        if not section_rows:
+    for i, row in enumerate(rows):
+        cluster: Cluster | None = cluster_by_key(row["key"])
+        if cluster is None:
             continue
-        body_rows.append(_section_header_row(SECTION_LABELS[section_key]))
-        for cluster, row in section_rows:
-            state = _row_state(row)
-            row_bg = (C["bad_tint"] if state == "fail"
-                      else (C["zebra"] if zebra % 2 else C["card"]))
-            zebra += 1
+        outcome = row.get("outcome", "failure")
+        failing = outcome != "success"
+        row_bg = (C['bad_tint'] if failing
+                  else (C['zebra'] if i % 2 else C['card']))
+
+        body_rows.append(f"""
+          <tr>
+            <td style="padding:14px 16px;background:{row_bg};
+                       border-bottom:1px solid {C['rule']};vertical-align:top;">
+              {_outcome_chip(outcome)}
+            </td>
+            <td style="padding:14px 16px;background:{row_bg};
+                       border-bottom:1px solid {C['rule']};vertical-align:top;">
+              <div style="font:600 14px/1.3 {SANS};color:{C['ink']};">
+                {html.escape(cluster.label)}
+              </div>
+              <div style="font:400 12px/1.5 {SANS};color:{C['muted']};
+                          margin-top:3px;">
+                {cluster.short_description}
+              </div>
+            </td>
+            <td style="padding:14px 16px;background:{row_bg};
+                       border-bottom:1px solid {C['rule']};vertical-align:top;">
+              {_scenarios_cell(row)}
+            </td>
+          </tr>
+        """)
+
+        show_detail = failing or expand_passes
+        if show_detail:
+            body = (cluster.what_it_proves if not failing
+                    else cluster.what_it_means_if_broken)
+            body_ink = C['bad_ink'] if failing else C['ink']
+            body_bg = C['bad_tint'] if failing else row_bg
             body_rows.append(f"""
               <tr>
-                <td style="{S['td']}background:{row_bg};">
-                  {_outcome_chip(state)}
-                </td>
-                <td style="{S['td']}background:{row_bg};">
-                  {_capability_cell(cluster)}
-                </td>
-                <td style="{S['td']}background:{row_bg};">
-                  {_scenarios_cell(row)}
+                <td colspan="3"
+                    style="padding:0 16px 16px 16px;background:{body_bg};
+                           border-bottom:1px solid {C['rule']};">
+                  <div style="font:400 13px/1.6 {SANS};color:{body_ink};">
+                    {body}
+                  </div>
                 </td>
               </tr>
             """)
 
-            failing = state == "fail"
-            show_detail = failing or expand_passes
-            if show_detail:
-                body_bg = C["bad_tint"] if failing else row_bg
-                detail = (_failure_detail(cluster) if failing
-                          else _success_detail(cluster))
-                body_rows.append(f"""
-                  <tr>
-                    <td colspan="3"
-                        style="padding:0 16px 16px 16px;background:{body_bg};
-                               border-bottom:1px solid {C['rule']};">
-                      {detail}
-                    </td>
-                  </tr>
-                """)
-
     # ── Totals row.  Appended to <tbody> (not <tfoot>) because WeasyPrint
-    # treats <tfoot> as a repeating page-footer group and duplicates it on
-    # every printed page. The totals row carries the scenario progress bar
-    # so a reader can see at-a-glance how complete the run was.
+    # treats <tfoot> as a repeating page-footer group (CSS display:
+    # table-footer-group) and duplicates it on every printed page.
     total_ran     = overall.get("ran", 0)
     total_passed  = overall.get("passed", 0)
     total_failed  = overall.get("failed", 0) + overall.get("errors", 0)
@@ -597,37 +382,32 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
         totals_detail_bits.append(f"{total_xfailed} expected failures")
     totals_detail = " &middot; ".join(totals_detail_bits)
     cov_fmt = _fmt_pct(overall.get("coverage_pct"))
-    totals_bg = C["brand"]
-    totals_ink = "#ffffff"
     totals_row = f"""
       <tr>
-        <td style="padding:18px 16px;background:{totals_bg};
+        <td style="padding:14px 16px;background:{C['bg']};
                    border-top:2px solid {C['rule']};
-                   font:700 11px/1 {SANS};color:#fff;
-                   letter-spacing:1.4px;text-transform:uppercase;">
+                   font:700 11px/1 {SANS};color:{C['brand']};
+                   letter-spacing:1.2px;text-transform:uppercase;">
           Totals
         </td>
-        <td style="padding:18px 16px;background:{totals_bg};
+        <td style="padding:14px 16px;background:{C['bg']};
                    border-top:2px solid {C['rule']};
-                   font:600 13px/1.4 {SANS};color:{totals_ink};">
-          <div>{overall.get('clusters_passing', 0)} of
-          {overall.get('clusters_total', 0)} capabilities passing</div>
-          <div style="margin-top:8px;max-width:380px;">
-            {_progress_bar(total_passed, total_ran)}
-          </div>
-          <div style="font:400 11px/1.5 {SANS};color:#fff;opacity:.78;
-                      margin-top:6px;">
+                   font:600 13px/1.4 {SANS};color:{C['ink']};">
+          {overall.get('clusters_passing', 0)} of
+          {overall.get('clusters_total', 0)} capabilities passing
+          <div style="font:400 11px/1.5 {SANS};color:{C['muted']};
+                      margin-top:2px;">
             Total run time {_fmt_duration(overall.get('wall_s'))}
             &nbsp;&middot;&nbsp;
-            Framework-wide coverage <strong>{cov_fmt}</strong>
+            Framework-wide code coverage <strong style="color:{C['ink']};">{cov_fmt}</strong>
           </div>
         </td>
-        <td style="padding:18px 16px;background:{totals_bg};
+        <td style="padding:14px 16px;background:{C['bg']};
                    border-top:2px solid {C['rule']};
-                   font:700 16px/1.2 {SANS};color:{totals_ink};
+                   font:600 14px/1.3 {SANS};color:{C['ink']};
                    vertical-align:top;">
           {totals_scenarios}
-          {(f'<div style="font:400 11px/1.4 {SANS};color:#fff;opacity:.78;'
+          {(f'<div style="font:400 11px/1.4 {SANS};color:{C["muted"]};'
             f'margin-top:2px;">{totals_detail}</div>')
            if totals_detail else ''}
         </td>
@@ -663,7 +443,7 @@ def _why_section(rows: list[dict[str, Any]]) -> str:
               <div style="font:700 13px/1.4 {SANS};color:{C['ink']};">
                 {html.escape(c.label)}
               </div>
-              <div style="{S['muted_sm']};margin-top:2px;">
+              <div style="font:400 13px/1.6 {SANS};color:{C['muted']};margin-top:2px;">
                 {c.why_it_matters}
               </div>
             </td>
@@ -717,58 +497,29 @@ def _scaffold(inner: str, title: str) -> str:
 """
 
 
-def _is_empty_manifest(manifest: dict[str, Any]) -> bool:
-    overall = manifest.get("overall") or {}
-    return (overall.get("clusters_total", 0) == 0
-            and overall.get("ran", 0) == 0
-            and not manifest.get("clusters"))
-
-
-def _verdict(manifest: dict[str, Any]) -> str:
-    if _is_empty_manifest(manifest):
-        return _empty_verdict_band()
-    return _verdict_band(manifest["overall"])
-
-
 def render_email_html(manifest, *, brand, logo_src, commit_sha, branch,
-                      run_url, generated_at, version, python_version,
-                      postgres_version):
-    rows = manifest.get("clusters", [])
+                      run_url, generated_at):
+    rows = manifest["clusters"]
     inner = (
-        _header_band(brand, logo_src=logo_src, generated_at=generated_at,
-                     commit_sha=commit_sha, branch=branch, version=version)
-        + _verdict(manifest)
-        + (_env_strip(manifest["overall"],
-                      python_version=python_version,
-                      postgres_version=postgres_version)
-           if not _is_empty_manifest(manifest) else "")
-        + (_results_table(rows, expand_passes=False,
-                          overall=manifest["overall"])
-           if not _is_empty_manifest(manifest) else "")
+        _header_band(brand, logo_src=logo_src, generated_at=generated_at)
+        + _verdict_band(manifest["overall"])
+        + _results_table(rows, expand_passes=False, overall=manifest["overall"])
         + _footer(commit_sha, branch, run_url,
-                  manifest.get("overall", {}).get("wall_s"), for_email=True)
+                  manifest["overall"].get("wall_s"), for_email=True)
     )
     return _scaffold(inner, f"{brand} — Platform Health Report")
 
 
 def render_pdf_html(manifest, *, brand, logo_src, commit_sha, branch,
-                    run_url, generated_at, version, python_version,
-                    postgres_version):
-    rows = manifest.get("clusters", [])
+                    run_url, generated_at):
+    rows = manifest["clusters"]
     inner = (
-        _header_band(brand, logo_src=logo_src, generated_at=generated_at,
-                     commit_sha=commit_sha, branch=branch, version=version)
-        + _verdict(manifest)
-        + (_env_strip(manifest["overall"],
-                      python_version=python_version,
-                      postgres_version=postgres_version)
-           if not _is_empty_manifest(manifest) else "")
-        + (_results_table(rows, expand_passes=True,
-                          overall=manifest["overall"])
-           if not _is_empty_manifest(manifest) else "")
-        + (_why_section(rows) if rows else "")
+        _header_band(brand, logo_src=logo_src, generated_at=generated_at)
+        + _verdict_band(manifest["overall"])
+        + _results_table(rows, expand_passes=True, overall=manifest["overall"])
+        + _why_section(rows)
         + _footer(commit_sha, branch, run_url,
-                  manifest.get("overall", {}).get("wall_s"), for_email=False)
+                  manifest["overall"].get("wall_s"), for_email=False)
     )
     return _scaffold(inner, f"{brand} — Platform Health Report")
 
@@ -786,8 +537,7 @@ def render_pdf(html_str: str, out_path: str) -> None:
 # ── Manifest loader + CLI ───────────────────────────────────────────
 def _empty_manifest() -> dict[str, Any]:
     """Used when the runner didn't produce a manifest (e.g. infrastructure
-    crash). Ensures the email step always has *something* to render —
-    and ``_empty_verdict_band`` makes that 'something' visibly red."""
+    crash). Ensures the email step always has *something* to render."""
     return {
         "generated_at": int(dt.datetime.now(dt.timezone.utc).timestamp()),
         "overall": {
@@ -807,10 +557,6 @@ def main(argv: list[str]) -> int:
     p.add_argument("--logo-svg", default=str(DEFAULT_LOGO_SVG))
     p.add_argument("--commit-sha", default=os.environ.get("GITHUB_SHA"))
     p.add_argument("--branch", default=os.environ.get("GITHUB_REF_NAME"))
-    p.add_argument("--version", default=os.environ.get("SHOWCASE_VERSION"),
-                   help="Version label for the accent stripe (e.g. 2.0.0rc124).")
-    p.add_argument("--python-version", default=os.environ.get("SHOWCASE_PYTHON_VERSION"))
-    p.add_argument("--postgres-version", default=os.environ.get("SHOWCASE_POSTGRES_VERSION"))
     p.add_argument("--run-url", default=(
         f"{os.environ.get('GITHUB_SERVER_URL', '')}/"
         f"{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/"
@@ -823,10 +569,6 @@ def main(argv: list[str]) -> int:
     p.add_argument("--out-email-preview", default=None)
     p.add_argument("--cid-logo", default="logo")
     p.add_argument("--skip-pdf", action="store_true")
-    p.add_argument("--require-logo", action="store_true",
-                   help="Hard-fail if the logo cannot be rasterised. Set "
-                        "this in release-gate runs so a missing logo "
-                        "doesn't ship a wordmark fallback to customers.")
     args = p.parse_args(argv)
 
     # Load (or synthesise) the manifest.
@@ -847,26 +589,21 @@ def main(argv: list[str]) -> int:
         email_logo_src = f"cid:{args.cid_logo}"
         pdf_logo_src = _png_data_uri(png_bytes)
     else:
-        msg = (f"logo not rasterised from {args.logo_svg} — "
-               "wordmark fallback will be used.")
-        if args.require_logo:
-            raise SystemExit(f"error: {msg} (--require-logo set)")
-        print(f"note: {msg}", file=sys.stderr)
+        print(f"note: logo not rasterised — using text wordmark fallback.",
+              file=sys.stderr)
         email_logo_src = pdf_logo_src = None
 
     generated_at = dt.datetime.now(dt.timezone.utc)
 
-    common_kwargs = dict(
-        brand=args.brand, commit_sha=args.commit_sha, branch=args.branch,
-        run_url=args.run_url, generated_at=generated_at,
-        version=args.version, python_version=args.python_version,
-        postgres_version=args.postgres_version,
-    )
     email_html = render_email_html(
-        manifest, logo_src=email_logo_src, **common_kwargs,
+        manifest, brand=args.brand, logo_src=email_logo_src,
+        commit_sha=args.commit_sha, branch=args.branch,
+        run_url=args.run_url, generated_at=generated_at,
     )
     pdf_html = render_pdf_html(
-        manifest, logo_src=pdf_logo_src, **common_kwargs,
+        manifest, brand=args.brand, logo_src=pdf_logo_src,
+        commit_sha=args.commit_sha, branch=args.branch,
+        run_url=args.run_url, generated_at=generated_at,
     )
 
     with open(args.out_html, "w", encoding="utf-8") as fh:
@@ -889,3 +626,14 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
+
+
+
+
+
+
+
+
+
