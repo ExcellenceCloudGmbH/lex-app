@@ -28,6 +28,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Per-test descriptions are defined in their own module so this file
+# stays a clean cluster-structure catalogue and the prose lives next to
+# the rest of the descriptions. See ``showcase_test_descriptions.py``
+# for the writing-style guide.
+from showcase_test_descriptions import (  # noqa: E402
+    CRUD_API_TESTS,
+    EXPORTS_TESTS,
+    PERMISSIONS_TESTS,
+    QUERIES_TESTS,
+    SERIALIZERS_TESTS,
+    SIGNALS_WS_TESTS,
+)
+
 
 @dataclass(frozen=True)
 class Cluster:
@@ -199,7 +212,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "CRUD is the most fundamental operation of the platform — "
             "if it is broken, no other feature matters."
-        )
+        ),
+        test_descriptions=CRUD_API_TESTS,
     ),
     Cluster(
         key="validation_hooks",
@@ -243,7 +257,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Enforcement of access rules is a hard compliance and "
             "security requirement."
-        )
+        ),
+        test_descriptions=PERMISSIONS_TESTS,
     ),
     Cluster(
         key="history",
@@ -348,7 +363,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Live status is a core part of the platform's perceived "
             "responsiveness."
-        )
+        ),
+        test_descriptions=SIGNALS_WS_TESTS,
     ),
     Cluster(
         key="api_layer",
@@ -413,7 +429,8 @@ CLUSTERS: tuple[Cluster, ...] = (
             "Serialiser bugs are some of the most dangerous — they "
             "corrupt data at the presentation layer without raising "
             "errors."
-        )
+        ),
+        test_descriptions=SERIALIZERS_TESTS,
     ),
     Cluster(
         key="exports",
@@ -434,28 +451,35 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Exports are the primary way customers share data outside "
             "the platform."
-        )
+        ),
+        test_descriptions=EXPORTS_TESTS,
     ),
     Cluster(
         key="queries",
-        label="AG Grid filter & sort",
+        label="AG Grid filter, sort, group & pivot",
         short_description=(
-            "The grid's filter and sort UI translates correctly into "
-            "database queries."
+            "The AG Grid query layer — filter, sort, group, pivot — "
+            "translates correctly into ORM queries on top of the REST "
+            "CRUD endpoints."
         ),
         what_it_proves=(
-            "Every filter operation the frontend grid can produce "
-            "(text, number, date, multi-condition, legacy shape) is "
-            "translated into a correct ORM query with correct sort."
+            "Every filter shape the AG Grid frontend can produce — text, "
+            "number, date, set, multi-condition, the legacy v1 condition "
+            "model, plus row grouping, value aggregation and pivoting — "
+            "is translated into a correct ORM query with correct sort "
+            "and pagination on top of the CRUD endpoints."
         ),
         what_it_means_if_broken=(
-            "Grids may show wrong rows, empty results, or the wrong "
-            "sort order — customers lose trust in their own data."
+            "Grids may show wrong rows, empty results, the wrong sort "
+            "order, or grouped/pivoted views that don't sum correctly — "
+            "customers lose trust in their own data."
         ),
         why_it_matters=(
             "Grids are where customers spend 90% of their time on the "
-            "platform."
-        )
+            "platform; the query layer underneath is what makes those "
+            "grids actually useful for analysis, not just listing."
+        ),
+        test_descriptions=QUERIES_TESTS,
     ),
 )
 
