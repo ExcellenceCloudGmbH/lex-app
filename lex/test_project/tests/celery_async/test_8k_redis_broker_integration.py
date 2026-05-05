@@ -175,7 +175,13 @@ def _redis_celery_overrides(redis_url: str, queue_name: str) -> dict:
     }
 
 
-def _make_redis_result_backend(app, redis_url: str):
+def _make_redis_result_backend(
+    app,
+    redis_url: str,
+    *,
+    serializer: str = "json",
+    accept: tuple[str, ...] = ("json", "pickle"),
+):
     """Construct a :class:`RedisBackend` instance bound to ``redis_url``.
 
     We inject this directly as ``app._backend`` instead of letting
@@ -183,9 +189,27 @@ def _make_redis_result_backend(app, redis_url: str):
     — see ``_temporary_celery_config`` for why that resolution path
     re-reads the project's hardcoded Postgres URL even after a conf
     update in this Celery version.
+
+    ``serializer`` and ``accept`` are pinned EXPLICITLY at construction
+    time. ``BaseBackend.__init__`` reads ``conf.result_serializer`` /
+    ``conf.result_accept_content`` to populate ``self.serializer``,
+    ``self.content_type`` and ``self.accept`` ONCE and then never
+    re-reads them — the values are frozen on the instance. Because
+    Python evaluates ``_make_redis_result_backend(celery_app, ...)``
+    as an argument *before* ``_temporary_celery_config`` runs the
+    ``app.conf.update`` overrides, the backend would otherwise capture
+    the project defaults (``result_serializer="pickle"``) and decode
+    every later JSON-encoded result as pickle, producing
+    ``UnpicklingError: invalid load key, '{'``. Passing the values
+    here side-steps the ordering trap entirely.
     """
     from celery.backends.redis import RedisBackend
-    return RedisBackend(app=app, url=redis_url)
+    return RedisBackend(
+        app=app,
+        url=redis_url,
+        serializer=serializer,
+        accept=list(accept),
+    )
 
 
 def _require_redis_broker() -> str:
@@ -386,7 +410,11 @@ def _redis_celery_runtime(task_app, redis_url: str, queue_name: str):
         # Redis result backend default would still be JSON, so force
         # pickle here for the result side too.
         result_serializer="pickle",
-        backend=_make_redis_result_backend(task_app, redis_url),
+        backend=_make_redis_result_backend(
+            task_app, redis_url,
+            serializer="pickle",
+            accept=("pickle", "json"),
+        ),
     ), _temporary_env(CELERY_ACTIVE="true"), patch(
         "lex.lex_app.celery_tasks.ensure_terminal_calculation_audit",
     ) as audit_spy, patch(
