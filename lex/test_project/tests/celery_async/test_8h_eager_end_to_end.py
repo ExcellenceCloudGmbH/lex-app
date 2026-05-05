@@ -89,18 +89,41 @@ def _celery_eager(propagate: bool = True):
     With ``propagate=False`` failures are captured on the
     ``EagerResult`` instead, which is what lets Celery invoke
     ``CallbackTask.on_failure`` before the caller sees the error.
+
+    We also force the result backend to an **in-process cache+memory**
+    backend for the duration of the scope. The project default is
+    ``db+postgresql://django:lundadminlocal@localhost/db_<repo>`` — a
+    SQLAlchemy backend that issues ``CREATE TABLE`` DDL the moment
+    Celery instantiates it (``celery.backends.database.__init__`` calls
+    ``_create_tables`` from ``__init__``). In CI the runner Postgres
+    has a single database named ``db_lex`` (or whatever the runner
+    bootstraps), not ``db_<repo_name>``, so accessing ``app.backend``
+    crashes with ``database "db_<repo>-app" does not exist`` even
+    though we never wanted to *use* the result backend — eager mode
+    triggers the lookup unconditionally. Routing the result backend
+    through ``cache+memory://`` keeps the eager-mode tests fully
+    self-contained and free of external storage dependencies. The
+    cached ``app._backend`` is cleared on enter and exit so the
+    override actually takes effect (Celery memoises the resolved
+    backend on first read — see ``celery/app/base.py::_get_backend``).
     """
     prior_eager = celery_app.conf.task_always_eager
     prior_propagates = celery_app.conf.task_eager_propagates
+    prior_backend_url = celery_app.conf.result_backend
+    prior_backend = getattr(celery_app, "_backend", None)
     prior_env = os.environ.get("CELERY_ACTIVE")
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = propagate
+    celery_app.conf.result_backend = "cache+memory://"
+    celery_app._backend = None
     os.environ["CELERY_ACTIVE"] = "true"
     try:
         yield
     finally:
         celery_app.conf.task_always_eager = prior_eager
         celery_app.conf.task_eager_propagates = prior_propagates
+        celery_app.conf.result_backend = prior_backend_url
+        celery_app._backend = prior_backend
         if prior_env is None:
             os.environ.pop("CELERY_ACTIVE", None)
         else:
