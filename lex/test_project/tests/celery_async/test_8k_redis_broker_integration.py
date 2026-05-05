@@ -271,6 +271,13 @@ class TestCluster08k_RedisBrokerIntegration(SimpleTestCase):
                 pool="solo",
                 concurrency=1,
                 queues=[queue_name],
+                # ``perform_ping_check=True`` cannot be used here: the
+                # worker only consumes ``queue_name`` (a per-test
+                # uuid-suffixed queue) but ``celery.contrib.testing``
+                # publishes its readiness ping to the *default* queue,
+                # so the ping would hang forever and ``start_worker``
+                # would never return. The 30s ``result.get`` budget
+                # below absorbs the cold-boot latency instead.
                 perform_ping_check=False,
                 loglevel="INFO",
             ):
@@ -281,7 +288,14 @@ class TestCluster08k_RedisBrokerIntegration(SimpleTestCase):
                         connection=connection,
                     )
                 with allow_join_result():
-                    observed = result.get(timeout=10)
+                    # 30s, not 10s. Cold-boot worker latency on the CI
+                    # runner plus the pubsub/poll fallback in the Redis
+                    # backend's ``wait_for_pending`` means a 10s budget
+                    # races on the very first scenario in the cluster
+                    # while the rest (8.46-8.48) already use 30s via
+                    # ``_make_bounded_wait_for_tasks``. Keep the budgets
+                    # consistent across the cluster.
+                    observed = result.get(timeout=30)
 
         self.assertEqual(observed["message"], "cluster-8k")
         self.assertEqual(observed["correlation_id"], correlation_id)
