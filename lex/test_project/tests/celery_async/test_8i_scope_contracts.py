@@ -65,27 +65,25 @@ from .models import ALL_MODELS, CeleryCalc
 # ---------------------------------------------------------------------
 @contextmanager
 def _celery_eager(propagate: bool = True):
-    # See lex/test_project/tests/celery_async/test_8h_eager_end_to_end.py
-    # ::_celery_eager for why ``result_backend`` must also be flipped:
-    # the project default is a SQLAlchemy Postgres backend and Celery's
-    # eager mode triggers backend instantiation (``_create_tables``)
-    # the moment ``app.backend`` is read, even when no result is being
-    # stored. ``cache+memory://`` keeps these scope-contract tests free
-    # of external storage dependencies in CI.
+    # See test_8h_eager_end_to_end.py::_celery_eager for the full
+    # rationale. Short version: ``conf.result_backend = X`` does NOT
+    # propagate through ``_get_backend`` in this Celery version, and
+    # ``app._backend = None`` crashes the Celery 5.5+ property setter
+    # (``if backend.thread_safe`` on None). The reliable fix is to
+    # construct a real in-process ``CacheBackend(app, "memory://")``
+    # and inject it via the public setter. That keeps the eager-mode
+    # scope-contract tests free of external storage dependencies.
+    from celery.backends.cache import CacheBackend
+
     prior = (
         celery_app.conf.task_always_eager,
         celery_app.conf.task_eager_propagates,
         os.environ.get("CELERY_ACTIVE"),
-        celery_app.conf.result_backend,
         celery_app.__dict__.get("_backend"),
     )
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = propagate
-    celery_app.conf.result_backend = "cache+memory://"
-    # Drop the memoised backend; ``app._backend = None`` would invoke
-    # the Celery 5.5+ property setter which crashes on None. See the
-    # 8h docstring for the full rationale.
-    celery_app.__dict__.pop("_backend", None)
+    celery_app._backend = CacheBackend(app=celery_app, url="memory://")
     os.environ["CELERY_ACTIVE"] = "true"
     try:
         yield
@@ -96,11 +94,10 @@ def _celery_eager(propagate: bool = True):
             os.environ.pop("CELERY_ACTIVE", None)
         else:
             os.environ["CELERY_ACTIVE"] = prior[2]
-        celery_app.conf.result_backend = prior[3]
-        if prior[4] is None:
+        if prior[3] is None:
             celery_app.__dict__.pop("_backend", None)
         else:
-            celery_app.__dict__["_backend"] = prior[4]
+            celery_app._backend = prior[3]
 
 
 def _reset_ctx():

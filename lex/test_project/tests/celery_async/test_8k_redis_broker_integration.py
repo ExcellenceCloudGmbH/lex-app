@@ -64,34 +64,39 @@ def _redis_broker_probe(payload: dict[str, str]) -> dict[str, str | bool]:
 def _temporary_celery_config(app=None, **overrides):
     """Temporarily override Celery app config and restore it exactly after use.
 
-    Celery caches ``app.backend`` after the first read so a runtime
-    ``result_backend`` override is silently ignored unless we also wipe
-    the cache. The cache lives in two places depending on the Celery
-    version:
+    A ``backend`` keyword (a result-backend INSTANCE, not a URL or a
+    config key) is special-cased: it is injected as ``app._backend``
+    so it bypasses Celery's conf-driven backend resolution entirely.
 
-    * Celery < 5.5 — ``_backend`` is a plain instance attribute; setting
-      it to ``None`` is enough.
-    * Celery >= 5.5 — ``_backend`` is a property whose setter does
-      ``if backend.thread_safe`` before storing, so passing ``None``
-      crashes with ``AttributeError: 'NoneType' object has no attribute
-      'thread_safe'``. The property's getter still reads from
-      ``self.__dict__['_backend']``, so we bypass the setter by writing
-      to the instance dict directly — that forces ``app.backend`` to
-      re-resolve via ``_get_backend()`` against our overridden conf.
+    Why we don't rely on ``conf.update(result_backend=...)``:
 
-    Setting the wrong attribute is a silent bug: the test reads stale
-    config, the cached backend (the project default — usually
-    ``database+postgresql://...``) is reused, and ``apply_async``
-    crashes trying to create result-backend tables in a Postgres DB
-    that doesn't exist in the test environment.
+    * Celery caches the resolved backend on ``app._backend`` after the
+      first read of ``app.backend``.
+    * In this Celery version, ``app.config_from_object('django.conf:
+      settings', namespace='CELERY')`` does not always honour a
+      subsequent ``conf.update`` for the resolved backend URL —
+      ``_get_backend()`` re-resolves to the OLD URL even after the
+      conf write. CI then crashes trying to ``CREATE TABLE`` against
+      the project's hardcoded Postgres URL (``db_<repo>-app``) which
+      doesn't exist on the runner.
+    * Setting ``app._backend = None`` to force re-resolution crashes
+      the Celery 5.5+ property setter, which begins with
+      ``if backend.thread_safe:`` (``AttributeError: 'NoneType'`` on
+      None).
+
+    Injecting a fully-constructed backend instance through the public
+    setter avoids both problems: the setter is happy with any non-None
+    backend (``thread_safe`` is a real boolean), and ``app.backend``
+    short-circuits to the cached instance instead of re-resolving from
+    conf.
     """
     app = app or celery_app
+    backend = overrides.pop("backend", None)
     previous = {key: app.conf.get(key) for key in overrides}
     previous_backend = app.__dict__.get("_backend")
     app.conf.update(**overrides)
-    # Drop the cached backend so the next ``app.backend`` read re-runs
-    # ``_get_backend()`` against the freshly-overridden conf.
-    app.__dict__.pop("_backend", None)
+    if backend is not None:
+        app._backend = backend
     try:
         yield
     finally:
@@ -99,7 +104,7 @@ def _temporary_celery_config(app=None, **overrides):
         if previous_backend is None:
             app.__dict__.pop("_backend", None)
         else:
-            app.__dict__["_backend"] = previous_backend
+            app._backend = previous_backend
 
 
 @contextmanager
@@ -139,6 +144,19 @@ def _redis_celery_overrides(redis_url: str, queue_name: str) -> dict:
         "task_create_missing_queues": True,
         "task_default_queue": queue_name,
     }
+
+
+def _make_redis_result_backend(app, redis_url: str):
+    """Construct a :class:`RedisBackend` instance bound to ``redis_url``.
+
+    We inject this directly as ``app._backend`` instead of letting
+    Celery's lazy ``_get_backend`` resolve from ``conf.result_backend``
+    — see ``_temporary_celery_config`` for why that resolution path
+    re-reads the project's hardcoded Postgres URL even after a conf
+    update in this Celery version.
+    """
+    from celery.backends.redis import RedisBackend
+    return RedisBackend(app=app, url=redis_url)
 
 
 def _require_redis_broker() -> str:
@@ -213,6 +231,7 @@ class TestCluster08k_RedisBrokerIntegration(SimpleTestCase):
             task_serializer="json",
             result_serializer="json",
             accept_content=["json"],
+            backend=_make_redis_result_backend(celery_app, redis_url),
         ):
             # Fail fast if Celery cannot establish the Redis broker connection.
             with celery_app.connection_for_write() as conn:
@@ -288,6 +307,7 @@ def _redis_celery_runtime(task_app, redis_url: str, queue_name: str):
         # Redis result backend default would still be JSON, so force
         # pickle here for the result side too.
         result_serializer="pickle",
+        backend=_make_redis_result_backend(task_app, redis_url),
     ), _temporary_env(CELERY_ACTIVE="true"), patch(
         "lex.lex_app.celery_tasks.ensure_terminal_calculation_audit",
     ) as audit_spy, patch(
