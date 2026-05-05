@@ -169,11 +169,44 @@ class FilterBackendItem(LexModel):
         return True
 
 
-ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem]
+class ExportDeniedItem(LexModel):
+    """
+    Cluster 4h: ``permission_export`` returns full deny.
+
+    Drives :class:`ModelExportView`'s deny path:
+    ``permission_export(...)`` returns
+    :meth:`PermissionResult.deny` for any caller. Read is open so
+    the row materialises; the export endpoint must produce a sheet
+    in which **no** declared field carries data — only the framework
+    identity columns (``id`` / ``created_by`` / ``edited_by``) the
+    view force-unions onto every row survive.
+    """
+
+    name = models.CharField(max_length=200)
+    payload = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4h: read open so row appears")
+
+    def permission_export(self, uc):
+        return PermissionResult.deny("cluster 4h: export fully denied")
+
+    def permission_list(self, uc):
+        return True
+
+
+ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, ExportDeniedItem]
 
 # URL names expected by process_admin_rest_api — lowercased model name.
 PROTECTED = "protecteditem"
 FIELD_LEVEL = "fieldlevelitem"
 KEYCLOAK = "keycloakitem"
 FILTER_BACKEND = "filterbackenditem"
+EXPORT_DENIED = "exportdenieditem"
 

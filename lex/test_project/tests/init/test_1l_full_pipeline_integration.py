@@ -443,7 +443,7 @@ class TestCluster01l_PipelineReads(_RealKeycloakBase):
 # ---------------------------------------------------------------------
 @unittest.skipUnless(_destructive_enabled(), _SKIP_REASON_DESTRUCTIVE)
 class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
-    """1.100 / 1.101 / 1.102 — actual ``lex init`` pipeline end-to-end.
+    """1.100 / 1.101 / 1.110 — actual ``lex init`` pipeline end-to-end.
 
     These tests **mutate** the configured Keycloak client's
     authorization config — the same way ``lex init`` does in
@@ -774,9 +774,9 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
             f"  second - first = {second_resources - first_resources}",
         )
 
-    # -- 1.102 ---------------------------------------------------------
-    def test_1_102_clean_state_sync_recreates_and_verifies_resources(self):
-        """1.102: empty live Keycloak resources, sync, then verify read-back.
+    # -- 1.110 ---------------------------------------------------------
+    def test_1_110_clean_state_sync_recreates_and_verifies_resources(self):
+        """1.110: empty live Keycloak resources, sync, then verify read-back.
 
         This is the destructive complement to the mocked 1.8 drift test:
         it proves the real Keycloak server accepts a clean-slate rebuild.

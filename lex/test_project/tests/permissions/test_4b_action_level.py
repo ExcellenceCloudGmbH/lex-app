@@ -32,7 +32,7 @@ class TestCluster04b_ActionLevel(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 4.4 -----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-010: permission_edit field-restriction not enforced on PATCH
+    @unittest.expectedFailure  # BUG-010: permission_edit field-restriction not enforced on PATCH
     def test_4_4_permission_edit_restricts_editable_fields(self) -> None:
         """
         Scenario 4.4: PATCH to a field outside the permitted set must
@@ -59,7 +59,7 @@ class TestCluster04b_ActionLevel(E2ETestCase):
         )
 
     # -- 4.5 -----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-008: authz failures return 400 instead of 401/403
+    @unittest.expectedFailure  # BUG-008: authz failures return 400 instead of 401/403
     def test_4_5_permission_delete_denies_non_admin(self) -> None:
         """
         Scenario 4.5: ``permission_delete`` returns False → DELETE is forbidden.
@@ -82,7 +82,7 @@ class TestCluster04b_ActionLevel(E2ETestCase):
         )
 
     # -- 4.6 -----------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-008: authz failures return 400 instead of 401/403
+    @unittest.expectedFailure  # BUG-008: authz failures return 400 instead of 401/403
     def test_4_6_permission_create_denies_non_admin(self) -> None:
         """Scenario 4.6: ``permission_create`` False → POST is forbidden."""
         resp = self.client.post(

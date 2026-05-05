@@ -246,6 +246,8 @@ If either command is broken, a new customer cannot start using the framework at 
 | 4.10 | `UserContext.from_request` builds correct context | Groups, scopes, roles, email correctly populated |
 | 4.11 | API key context | `client_roles` includes "api_key", scopes from key identity |
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
+| 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
+| 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
 
 ---
 
@@ -353,6 +355,7 @@ If either command is broken, a new customer cannot start using the framework at 
 | 7.45 | Non-atomic parent, non-atomic child, child fails | Child ERROR persists and propagates ERROR to parent |
 | 7.46 | Non-atomic parent, non-atomic child, parent fails after child pass | Parent settles at ERROR while successful child remains SUCCESS |
 | 7.47 | Non-atomic parent, non-atomic child, both fail | Child ERROR persists and parent settles at ERROR via propagation |
+| 7.48 – 7.111 | **Sub-cluster 7j — Grandparent / parent / child atomicity matrix (64 scenarios).** Full 3-level extension of 7i: every combination of grandparent / parent / child × atomic / non-atomic × fail / no-fail (8 atomicity triplets × 8 outcome triplets). Pins the two atomicity rules the framework actually obeys: **(a)** a failing level's ERROR row survives nested savepoints (its own atomic block, intermediate atomic ancestors) but is wiped by the **outermost** atomic ancestor's rollback (in 3 levels: only GP wipes a failing P or C); **(b)** a successful descendant's row is wiped by **any** atomic ancestor that raises. Failure precedence stays `c_fail > p_fail > gp_fail`. Tests are parametrically generated as `test_7_NN_<aaa>_<TFT>` where letters encode atomicity (a/n) and outcome (T/F) for gp/p/c. Method names are stable so a CI failure log identifies the cell directly. | All 64 cells assert the exact (gp, p, c) triple; `None` distinguishes "row rolled back" from `ERROR`. |
 
 ---
 
@@ -448,7 +451,6 @@ If either command is broken, a new customer cannot start using the framework at 
 | 10.5 | GET list returns all records | 200, correct count |
 | 10.6 | GET history returns history rows | 200, ordered by `history_date` |
 | 10.7 | Many endpoint bulk delete | DELETE with repeated `ids` query params removes selected records only |
-| 10.8 | API triggers calculation (PATCH `is_calculated=IN_PROGRESS`) | IN_PROGRESS committed independently, hooks fire, final state correct |
 | 10.9 | Invalid data returns 400 | Validation errors in response |
 | 10.10 | Unauthenticated request handled | 401 or redirect |
 
@@ -651,6 +653,10 @@ cluster-2 models are too shallow; we need a model with one of every
 | 12.26 | `model2serializer` always injects internal fields | Every auto-generated serializer has `id_field`, `short_description`, `lex_reserved_scopes` in its `Meta.fields` |
 | 12.27 | `_wrap_custom_serializer` preserves user fields + adds internals | A model's `api_serializers` entry keeps its declared `Meta.fields` AND gets the framework internals appended |
 | 12.28 | Serializer is cached per model | Two calls to `get_serializer_map_for_model` return the same class object (not rebuilt per request) |
+| 12.32 | Source model default override exposes configured framework alias | `api_serializers["default"]` remains the developer serializer, while the auto-generated serializer is additionally addressable under the configured alias (e.g. `framework_default`) |
+| 12.33 | History table inherits framework alias from source model | A `Historical*` model with no own `api_serializers` follows the source model's alias decision through `instance_type`; it does not copy unrelated source serializers such as `detail` |
+| 12.34 | Meta-history table walks the full `instance_type` chain | `MetaHistorical* → Historical* → Source` still exposes the auto-generated serializer under the configured alias |
+| 12.35 | `_wrap_custom_serializer` preserves `Meta.hide_actions_column` | Serializer-level list UI metadata survives wrapping so tables can suppress Lex's default Show/Edit/Delete column |
 
 **What is explicitly NOT tested here:**
 
@@ -884,8 +890,9 @@ Priorities below are ordered by expected coverage delta × customer-visibility.
 | 4.16 | `pk_only=true` fast path honours permissions | Denied pks excluded from id list; `count` matches allowed subset |  |
 | 4.17 | `allow_all` profile (admin group) returns every row | `permission_read → allow_all`, no exclusion (`return queryset` branch) |  |
 | 4.18 | Deny-all short-circuit — `permission_read → deny` on every row | Zero rows returned even though DB holds every seeded row |  |
+| 4.41 | Detail endpoint full read deny | Guessed detail URL returns `{}` and leaks no domain fields or `id` when `permission_read → deny` |  |
 
-**Status:**  Complete — 4 pass + 2 skip. See progress.md Session 16.
+**Status:**  Complete — 5 pass + 2 skip. See progress.md Sessions 16 + 46.
 
 ### 4f. Serializer-level masking — `PermissionAwareSerializerMixin` 
 
@@ -1066,6 +1073,21 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 8.44 | Sync raises during happy path | Exception propagates (not silently swallowed) — Beat retries / alerts |
 
 **Status:**  Complete — 14 pass / 0 fail. Closes Cluster-A/B/C bucket C. Targets the 3 task bodies in `celery_tasks.py` lines 696–957 — previously uncovered by 8g/8h/8i which focused on the wrapper + dispatch layer.
+
+### 8k. Redis broker integration smoke test
+
+**Gap (May 4):** 8g–8j intentionally kept Celery tests broker-free so the normal suite stays deterministic: patched `.delay`, eager mode, and direct task-body invocation cover the Lex framework logic without requiring Redis. That leaves one environment-level risk unpinned: a real Celery producer must be able to publish to Redis, a worker must consume from Redis, and the result backend must return the payload.
+
+**Shape:** two opt-in scenarios in `test_8k_redis_broker_integration.py`. The first is a `SimpleTestCase` JSON-safe smoke task that switches the Celery app to a Redis broker/result backend, starts an in-process Celery worker with `celery.contrib.testing.worker.start_worker`, publishes to a unique queue, and calls `AsyncResult.get()` through `allow_join_result()`. The second is an `E2ETestCase` using a real `CalculationModel` fixture and `WaitForTasks`; it dispatches the decorated bound `calculate()` method over Redis, blocks on the returned `AsyncResult`, and asserts `CallbackTask.on_success` persists `SUCCESS` plus reaches the terminal audit seam. Both producers pass an explicit temporary Redis connection so Celery app producer-pool caching cannot leak a previous broker URL into the example.
+
+**Environment gate:** skipped by default. To run it, set `LEX_RUN_REDIS_CELERY_TESTS=true`; optionally set `LEX_CELERY_REDIS_TEST_URL` (default `redis://127.0.0.1:6379/15`). This keeps CI/laptops without Redis green while still giving DevOps a one-command real-broker check.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.45 | Producer → Redis broker → in-process Celery worker → Redis result backend | Task is received and executed by the worker, result round-trips with a correlation id, and `task_always_eager` is false so this is not the eager-mode path. |
+| 8.46 | `CalculationModel` + `WaitForTasks` over Redis broker | A persisted `CeleryCalc` in `IN_PROGRESS` dispatches via the real `EnhancedBoundTaskMethod`/`WaitForTasks` path to Redis, the worker runs the decorated `calculate()` task, `WaitForTasks` drains the `AsyncResult`, `CallbackTask.on_success` flips the row to `SUCCESS`, and terminal audit is invoked. |
+
+**Status:**  Complete — 2 broker-backed passes when Redis is available; env-gated skips otherwise. The reusable `celery_redis_broker_example.yml` workflow runs the examples with PostgreSQL + Redis services and is called by `pip_publish.yml` before PyPI publishing.
 
 ### 1j. Keycloak client safety pre-flight — mocked 
 

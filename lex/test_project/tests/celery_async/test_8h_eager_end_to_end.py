@@ -89,18 +89,65 @@ def _celery_eager(propagate: bool = True):
     With ``propagate=False`` failures are captured on the
     ``EagerResult`` instead, which is what lets Celery invoke
     ``CallbackTask.on_failure`` before the caller sees the error.
+
+    We also force the result backend to an **in-process cache+memory**
+    backend for the duration of the scope. The project default is
+    ``db+postgresql://django:lundadminlocal@localhost/db_<repo>`` — a
+    SQLAlchemy backend that issues ``CREATE TABLE`` DDL the moment
+    Celery instantiates it (``celery.backends.database.__init__`` calls
+    ``_create_tables`` from ``__init__``). In CI the runner Postgres
+    has ``db_lex`` (or whatever the runner bootstraps), not
+    ``db_<repo_name>``, so accessing ``app.backend`` crashes with
+    ``database "db_<repo>-app" does not exist`` even though we never
+    wanted to *use* the result backend — eager mode triggers the
+    lookup unconditionally.
+
+    Two earlier attempts didn't survive contact with CI:
+
+    * ``celery_app.conf.result_backend = "cache+memory://"`` +
+      ``app.__dict__.pop("_backend")`` — the cache pop succeeded but
+      ``_get_backend()`` re-resolved to the **old** Postgres URL on
+      next read. ``app.config_from_object('django.conf:settings',
+      namespace='CELERY')`` does not always honour subsequent
+      ``conf.update`` for the resolved backend URL in this Celery
+      version.
+    * ``app._backend = None`` — Celery 5.5+ added a property setter on
+      ``_backend`` whose first line is ``if backend.thread_safe:``,
+      which crashes with ``AttributeError: 'NoneType' object has no
+      attribute 'thread_safe'`` before the value is even stored.
+
+    The reliable fix is to **construct a real in-process backend and
+    inject it directly** as ``app._backend``. ``CacheBackend(app,
+    "memory://")`` is a fully in-process result backend that satisfies
+    every contract Celery's trace function needs (``mark_as_done``,
+    ``mark_as_failure``, ``get_status``) without any external service.
+    Its ``thread_safe`` is a real boolean so the 5.5+ property setter
+    is happy, and bypassing ``_get_backend`` means it doesn't matter
+    whether ``conf.result_backend`` updates propagate.
     """
+    from celery.backends.cache import CacheBackend
+
     prior_eager = celery_app.conf.task_always_eager
     prior_propagates = celery_app.conf.task_eager_propagates
+    prior_backend = celery_app.__dict__.get("_backend")
     prior_env = os.environ.get("CELERY_ACTIVE")
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = propagate
+    # Inject the in-memory backend through the public setter — it
+    # accepts non-None backends and stashes them in __dict__ which is
+    # what the property getter reads on subsequent ``app.backend``
+    # accesses.
+    celery_app._backend = CacheBackend(app=celery_app, url="memory://")
     os.environ["CELERY_ACTIVE"] = "true"
     try:
         yield
     finally:
         celery_app.conf.task_always_eager = prior_eager
         celery_app.conf.task_eager_propagates = prior_propagates
+        if prior_backend is None:
+            celery_app.__dict__.pop("_backend", None)
+        else:
+            celery_app._backend = prior_backend
         if prior_env is None:
             os.environ.pop("CELERY_ACTIVE", None)
         else:

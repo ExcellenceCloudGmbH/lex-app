@@ -169,7 +169,6 @@ else:
     DEBUG = False
 
 ALLOWED_HOSTS = [
-    "*",
     os.getenv("DOMAIN_HOSTED", "localhost"),
     "127.0.0.1",
     "localhost",
@@ -223,15 +222,7 @@ INSTALLED_APPS = [
     "django_db_views",
     "oauth2_authcodeflow",
     "lex.legacy_data.apps.LegacyDataConfig",
-    "lex.mcp_server.apps.McpServerConfig",
 ]
-
-# Embedded MCP (Model Context Protocol) server configuration. See
-# lex.mcp_server.config for the full list of supported keys and defaults.
-MCP_SERVER = {
-    "ENABLED": os.getenv("MCP_SERVER_ENABLED", "true").lower() == "true",
-    "MOUNT_PATH": os.getenv("MCP_SERVER_MOUNT_PATH", "/mcp"),
-}
 
 if not repo_name.startswith("lex"):
     INSTALLED_APPS.append(repo_name)

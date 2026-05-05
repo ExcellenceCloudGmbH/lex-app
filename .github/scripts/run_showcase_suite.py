@@ -55,6 +55,113 @@ _DETAIL_RE = re.compile(
     r"(?:FAILED|OK)\s*(?:\((?P<kv>[^)]*)\))?", re.MULTILINE
 )
 
+# ── Per-test parsing for the customer report ───────────────────────
+# Django's ``--verbosity=2`` runner prints a status word at the end
+# of each test line:
+#   ``test_x (mod.Class.test_x) ... ok``
+#   ``test_x (mod.Class.test_x) ... FAIL``
+#   ``test_x (mod.Class.test_x) ... ERROR``
+#   ``test_x (mod.Class.test_x) ... skipped 'reason'``
+#   ``test_x (mod.Class.test_x) ... expected failure``
+# Sometimes a docstring gets sandwiched between the header and the
+# status, so the status may show up on a later line. We anchor on
+# the dotted path inside the parens because that's stable.
+_TEST_HEADER_RE = re.compile(
+    r"^(?P<method>\S+)\s+\((?P<dotted>[\w.]+)\)\s*(?P<rest>.*)$",
+    re.MULTILINE,
+)
+# A FAIL/ERROR block at the end of the run carries the traceback we
+# want to surface to humans.
+_FAIL_BLOCK_RE = re.compile(
+    r"^(?P<kind>FAIL|ERROR):\s+(?P<method>\S+)\s+\((?P<dotted>[\w.]+)\)\s*"
+    r"\n-+\n(?P<body>.*?)(?=\n=+\n|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _classify_status(rest: str) -> str | None:
+    """Map the trailing ``... ok``/``FAIL``/``ERROR``/``skipped`` token
+    to one of: ``passed``, ``failed``, ``errored``, ``skipped``,
+    ``xfailed``, ``xpassed``. Returns ``None`` if no terminal token is
+    present (e.g. the status is on the next line because of a docstring)."""
+    s = rest.strip().lower()
+    if not s:
+        return None
+    # Strip leading ``...`` separator if any.
+    if s.startswith("..."):
+        s = s[3:].strip()
+    if s.startswith("ok"):
+        return "passed"
+    if s.startswith("fail"):
+        return "failed"
+    if s.startswith("error"):
+        return "errored"
+    if s.startswith("skipped"):
+        return "skipped"
+    if s.startswith("expected failure"):
+        return "xfailed"
+    if s.startswith("unexpected success"):
+        return "xpassed"
+    return None
+
+
+def _parse_per_test(stderr: str) -> list[dict[str, Any]]:
+    """Extract one entry per test method from a verbose Django run.
+
+    Output entries::
+
+        {"name": "test_8_45_real_redis_round_trip",
+         "dotted": "lex...test_8k_redis_broker_integration.TestCluster08k.test_8_45_...",
+         "outcome": "failed",
+         "message": "AssertionError: ..."}
+    """
+    # Index FAIL/ERROR blocks by dotted path so we can pin a short
+    # message onto each failed test.
+    fail_messages: dict[str, str] = {}
+    for m in _FAIL_BLOCK_RE.finditer(stderr):
+        body = m.group("body").strip()
+        # Last non-empty line of the traceback is usually the
+        # exception type + message — exactly what we want to show.
+        last_line = ""
+        for line in reversed(body.splitlines()):
+            line = line.rstrip()
+            if line.strip():
+                last_line = line.strip()
+                break
+        fail_messages[m.group("dotted")] = last_line[:400]
+
+    tests: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    lines = stderr.splitlines()
+    for i, line in enumerate(lines):
+        m = _TEST_HEADER_RE.match(line)
+        if not m:
+            continue
+        dotted = m.group("dotted")
+        if dotted in seen:
+            continue
+        rest = m.group("rest")
+        outcome = _classify_status(rest)
+        # If the status didn't fit on this line, peek at the next
+        # non-empty line — it's where the runner put it after the
+        # docstring.
+        if outcome is None:
+            for nxt in lines[i + 1: i + 6]:
+                outcome = _classify_status(nxt)
+                if outcome is not None:
+                    break
+        if outcome is None:
+            continue
+        seen.add(dotted)
+        method = dotted.rsplit(".", 1)[-1]
+        tests.append({
+            "name": method,
+            "dotted": dotted,
+            "outcome": outcome,
+            "message": fail_messages.get(dotted, ""),
+        })
+    return tests
+
 
 def _parse_summary(stderr: str) -> dict[str, int | float | str]:
     """
@@ -308,6 +415,11 @@ def _run_cluster(
     # Prefer the wall-clock measurement over Django's internal one —
     # includes DB setup cost the stakeholder also pays.
     parsed["wall_s"] = round(wall_s, 2)
+
+    # Capture every individual test the runner emitted, so the
+    # customer report can list which scenarios actually broke (and
+    # the short error message), not just "this cluster is red".
+    parsed["tests"] = _parse_per_test(stderr)
 
     # Per-cluster coverage is computed in one pass after all clusters
     # finish (see _per_cluster_coverage_from_contexts). Leave the key

@@ -55,7 +55,21 @@ on:
           calculation, and validation-hook clusters.
         required: false
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
+      run_kind:
+        description: >-
+          Where this run came from — shown in the email subject so
+          recipients can tell a manual operator-triggered run apart
+          from an automated release-pipeline run. Use ``manual`` for
+          ad-hoc dispatches and ``release`` when invoked as part of
+          ``pip_publish.yml``.
+        required: false
+        type: choice
+        default: manual
+        options:
+          - manual
+          - release
+          - scheduled
   workflow_call:
     inputs:
       clusters:
@@ -65,7 +79,15 @@ on:
         required: false
         type: string
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
+      run_kind:
+        description: >-
+          Where this run came from. Callers (notably pip_publish.yml)
+          should pass ``release`` so the email subject reflects that
+          this is a release-gating run, not an operator-driven one.
+        required: false
+        type: string
+        default: manual
     outputs:
       overall_ok:
         description: "true if every cluster passed, else false"
@@ -97,6 +119,23 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 3
+      # Redis service is provisioned so the Cluster 8k Celery broker
+      # tests (test_8k_redis_broker_integration.py — scenarios 8.45-8.48)
+      # run a real producer → broker → in-process Celery worker → result
+      # backend round-trip on every release. Without this service the
+      # 8k tests skip silently (LEX_RUN_REDIS_CELERY_TESTS unset), which
+      # is the "tests passed but proved nothing" failure mode the broker
+      # gate exists to prevent. DB 15 is used so it never collides with
+      # any other Redis usage on the runner.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -141,6 +180,13 @@ jobs:
           DJANGO_SETTINGS_MODULE: lex_app.settings
           DATABASE_DEPLOYMENT_TARGET: default
           CELERY_ACTIVE: "False"
+          # Opt the Cluster 8k Redis broker integration tests in. When
+          # this flag is set, the 8k scenarios fail loudly if the Redis
+          # service isn't reachable (instead of skipping silently) — so
+          # a misconfigured release pipeline can't ship a green PyPI
+          # build that never actually exercised the broker.
+          LEX_RUN_REDIS_CELERY_TESTS: "true"
+          LEX_CELERY_REDIS_TEST_URL: redis://127.0.0.1:6379/15
           # Enable the env-first path in the init Keycloak integration
           # tests. If any secret is missing, those tests skip cleanly;
           # no local .env file is required in CI.
@@ -243,7 +289,8 @@ jobs:
             --logo-path logo.png \
             --logo-cid logo \
             --overall-ok "${{ steps.manifest.outputs.overall_ok }}" \
-            --clusters-passing "${{ steps.manifest.outputs.clusters_passing }}"
+            --clusters-passing "${{ steps.manifest.outputs.clusters_passing }}" \
+            --run-kind "${{ inputs.run_kind || 'manual' }}"
       # ── Final gate — fail the job if any cluster failed ──────────
       # (This runs AFTER the email step so the email always fires.)
       - name: Fail job if any cluster failed
