@@ -91,7 +91,7 @@ jobs:
       # Single source of truth for the test scope. Edit here (or
       # override from workflow_dispatch) — the same selector drives
       # both the release gate and the email content.
-      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks' }}
+      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks,celery_async' }}
 
   # ── Step 2: Build and publish (only if the gate passes) ──────────
   publish:

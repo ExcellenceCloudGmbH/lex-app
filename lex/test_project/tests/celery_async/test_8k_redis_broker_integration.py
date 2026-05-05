@@ -62,20 +62,30 @@ def _redis_broker_probe(payload: dict[str, str]) -> dict[str, str | bool]:
 
 @contextmanager
 def _temporary_celery_config(app=None, **overrides):
-    """Temporarily override Celery app config and restore it exactly after use."""
+    """Temporarily override Celery app config and restore it exactly after use.
+
+    Celery caches ``app.backend`` on ``app._backend`` after the first read
+    (see ``celery/app/base.py``: ``self._backend = self._get_backend()``).
+    We must clear *that* attribute — not ``_backend_cache``, which is not
+    a real attribute on the App class — for the temporary
+    ``result_backend`` override to actually take effect.
+
+    Setting the wrong attribute is a silent bug: the test reads stale
+    config, the cached backend (the project default — usually
+    ``database+postgresql://...``) is reused, and ``apply_async``
+    crashes trying to create result-backend tables in a Postgres DB
+    that doesn't exist in the test environment.
+    """
     app = app or celery_app
     previous = {key: app.conf.get(key) for key in overrides}
-    previous_backend = getattr(app, "_backend_cache", None)
+    previous_backend = getattr(app, "_backend", None)
     app.conf.update(**overrides)
-    # Celery caches ``app.backend`` after first access. Reset it so this
-    # test really uses the temporary Redis result backend rather than the
-    # project default configured during app import.
-    app._backend_cache = None
+    app._backend = None
     try:
         yield
     finally:
         app.conf.update(**previous)
-        app._backend_cache = previous_backend
+        app._backend = previous_backend
 
 
 @contextmanager
