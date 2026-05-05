@@ -92,6 +92,9 @@ jobs:
       # override from workflow_dispatch) — the same selector drives
       # both the release gate and the email content.
       clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks,celery_async' }}
+      # Mark this as a release-pipeline run so the email subject can
+      # distinguish it from operator-triggered manual dispatches.
+      run_kind: release
 
   # ── Step 2: Build and publish (only if the gate passes) ──────────
   publish:

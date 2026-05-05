@@ -33,8 +33,11 @@ from celery.contrib.testing.worker import start_worker
 from celery.result import allow_join_result
 from kombu.serialization import enable_insecure_serializers
 
+from django.conf import settings as django_settings
 from django.test import SimpleTestCase
 from unittest.mock import patch
+
+_UNSET = object()
 
 from lex.core.models.CalculationModel import CalculationModel
 from lex.lex_app.celery import app as celery_app
@@ -94,6 +97,24 @@ def _temporary_celery_config(app=None, **overrides):
     backend = overrides.pop("backend", None)
     previous = {key: app.conf.get(key) for key in overrides}
     previous_backend = app.__dict__.get("_backend")
+
+    # Also override the corresponding namespaced ``CELERY_*`` keys on
+    # ``django.conf.settings``. The Lex Celery app is wired up with
+    # ``app.config_from_object('django.conf:settings', namespace='CELERY')``,
+    # so any code path that re-resolves the backend through the loader
+    # (notably ``Celery._get_backend`` when ``app._backend`` is cleared
+    # by worker boot) reads ``settings.CELERY_RESULT_BACKEND`` directly.
+    # Without this guard the worker resolves the production Postgres URL
+    # (``db+postgresql://.../db_<repo>-app``) and crashes inside
+    # ``store_result`` / ``process_cleanup`` on the CI runner where that
+    # database does not exist. ``app.conf.update(result_backend=...)``
+    # alone is not enough — see the cluster docstring.
+    django_previous: dict[str, object] = {}
+    for key, value in overrides.items():
+        django_key = f"CELERY_{key.upper()}"
+        django_previous[django_key] = getattr(django_settings, django_key, _UNSET)
+        setattr(django_settings, django_key, value)
+
     app.conf.update(**overrides)
     if backend is not None:
         app._backend = backend
@@ -101,6 +122,14 @@ def _temporary_celery_config(app=None, **overrides):
         yield
     finally:
         app.conf.update(**previous)
+        for django_key, prior in django_previous.items():
+            if prior is _UNSET:
+                try:
+                    delattr(django_settings, django_key)
+                except AttributeError:
+                    pass
+            else:
+                setattr(django_settings, django_key, prior)
         if previous_backend is None:
             app.__dict__.pop("_backend", None)
         else:

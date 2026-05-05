@@ -26,7 +26,7 @@ of its lines. No manual ``cov_include`` list to maintain.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,123 @@ class Cluster:
     what_it_proves: str
     what_it_means_if_broken: str
     why_it_matters: str
+    # Per-test human-readable descriptions, keyed by the unittest
+    # method name (e.g. ``test_8_45_real_redis_round_trip``). When a
+    # cluster fails, the report renders one row per failed test using
+    # this mapping — so a stakeholder sees "what specifically broke"
+    # and "why we care", not just "celery_async failed".
+    #
+    # Populating these is intentionally incremental: covering every
+    # test in the suite would be a sizeable writing effort, so we
+    # start with the clusters that fail loudest and matter most
+    # (celery, validation). Tests without an entry fall back to a
+    # generic description rendered from the method name.
+    test_descriptions: dict[str, str] = field(default_factory=dict)
+
+
+# ── Per-cluster per-test descriptions ───────────────────────────────
+# Keep these short (one or two sentences). They appear in a
+# table cell so anything longer than ~250 characters wraps poorly.
+# The mapping key is the **method name only** (the part after the
+# final ``.`` in the dotted path), because that's what's stable when
+# tests get reorganised across modules.
+
+_CELERY_ASYNC_TESTS: dict[str, str] = {
+    # Cluster 8a/8b — eager mode + dispatch routing
+    "test_8_1_lex_shared_task_runs_inline_when_celery_inactive":
+        "When CELERY_ACTIVE is False the @lex_shared_task decorator must "
+        "execute the task body in-process so a developer without a broker "
+        "still sees results. If this fails the framework's sync fallback is "
+        "broken.",
+    "test_8_2_lex_shared_task_dispatches_to_celery_when_active":
+        "When CELERY_ACTIVE is True the same decorator must enqueue work to "
+        "the worker instead of running inline. If this fails background "
+        "processing silently runs on the request thread.",
+    "test_8_3_callback_task_marks_calculation_success":
+        "After a calculation task completes its CallbackTask hook must flip "
+        "is_calculated to SUCCESS. If broken, finished calculations stay "
+        "stuck in IN_PROGRESS forever.",
+    "test_8_4_callback_task_marks_calculation_error":
+        "When a calculation task raises, the CallbackTask hook must flip the "
+        "calculation to ERROR and capture the message. If broken, failures "
+        "are silently swallowed and the UI keeps spinning.",
+    # Cluster 8g — task body / context
+    "test_8_25_tasks_context_collects_results":
+        "WaitForTasks must collect every task it dispatched into "
+        "tasks_context so the caller can join on them. If broken, callers "
+        "lose the ability to wait for parallel work.",
+    "test_8_26_unblock_tasks_context_releases":
+        "FireAndForget (UnblockCelery) must clear tasks_context on exit so a "
+        "follow-up WaitForTasks block doesn't accidentally inherit stale "
+        "tasks. If broken, scopes leak between calculations.",
+    # Cluster 8h — eager E2E
+    "test_8_29_eager_calculation_completes":
+        "End-to-end check that a CalculationModel dispatched in eager mode "
+        "transitions IN_PROGRESS → SUCCESS using only the in-process cache "
+        "backend. If this fails the customer-facing happy path is broken.",
+    "test_8_30_eager_calculation_records_error":
+        "End-to-end check that a CalculationModel raising mid-run lands in "
+        "ERROR with the exception text captured. If broken, error capture is "
+        "lost in eager mode.",
+    # Cluster 8i — scope contracts
+    "test_8_33_waitfortasks_blocks_until_done":
+        "Inside a WaitForTasks block, exiting must not return until every "
+        "dispatched task has finished. If broken, callers get a false "
+        "'all done' signal while work is still running.",
+    "test_8_34_fireandforget_does_not_block":
+        "Inside a FireAndForget block, exiting returns immediately even with "
+        "tasks still queued. If broken, the platform loses its non-blocking "
+        "dispatch primitive.",
+    # Cluster 8k — real Redis broker integration (the gate-critical ones)
+    "test_8_45_real_redis_round_trip_dispatches_and_succeeds":
+        "Producer enqueues a task to a real Redis broker, an in-process "
+        "Celery worker consumes it, and the result lands in the Redis "
+        "result backend. The single most important integration test: "
+        "if this fails, no background work actually crosses the broker.",
+    "test_8_46_real_redis_failure_is_captured":
+        "When a task raises while running on the real broker+worker, the "
+        "failure message must round-trip through the Redis result backend "
+        "to the producer. If broken, customer errors disappear behind "
+        "the queue.",
+    "test_8_47_real_redis_skips_when_unreachable":
+        "If the Redis service is not reachable AND opt-in flag is off, this "
+        "test skips cleanly — but if the opt-in flag is on (CI release "
+        "gate) it MUST fail loudly. Prevents shipping a green release "
+        "that never actually exercised the broker.",
+    "test_8_48_real_redis_concurrent_tasks_complete":
+        "Multiple tasks dispatched to the real broker in parallel must all "
+        "finish and report results. If broken, parallel calculations race "
+        "or lose results under realistic load.",
+}
+
+_VALIDATION_HOOKS_TESTS: dict[str, str] = {
+    "test_3_1_pre_save_rejects_invalid_record":
+        "Records that fail the model's pre-save validator must be rejected "
+        "before any database write. If broken, invalid data lands in the "
+        "database and corrupts downstream calculations.",
+    "test_3_2_pre_save_accepts_valid_record":
+        "A record that satisfies every validator must be saved unchanged. "
+        "If broken, validators reject legitimate data and customers can't "
+        "save valid records.",
+    "test_3_3_post_save_rolls_back_on_invariant_violation":
+        "If a post-save hook raises (e.g. business invariant violated by "
+        "the combination of fields), the transaction must roll back so no "
+        "trace of the bad record remains. If broken, half-committed rows "
+        "leak into the dataset.",
+    "test_3_4_validation_error_message_surfaces_to_caller":
+        "The exact validation error message must reach the API caller as a "
+        "400 with the field name. If broken, the frontend shows a generic "
+        "'something went wrong' and the user can't fix the input.",
+    "test_3_5_validation_runs_on_update_not_just_create":
+        "Updates must re-run validation, not just creates. If broken, a "
+        "record that was valid at creation can be edited into an invalid "
+        "state without anyone noticing.",
+    "test_3_6_validation_skipped_when_explicitly_suppressed":
+        "When code paths legitimately need to bypass validation (data "
+        "migration, audit replay) the suppression context must work. If "
+        "broken, those paths can't operate or they re-run validation and "
+        "fail unexpectedly.",
+}
 
 
 CLUSTERS: tuple[Cluster, ...] = (
@@ -103,7 +220,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Data integrity is the foundation of every downstream "
             "calculation and report."
-        )
+        ),
+        test_descriptions=_VALIDATION_HOOKS_TESTS,
     ),
     Cluster(
         key="permissions",
@@ -209,7 +327,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Customers rely on background calculations for workloads "
             "too large to run inline."
-        )
+        ),
+        test_descriptions=_CELERY_ASYNC_TESTS,
     ),
     Cluster(
         key="signals_ws",

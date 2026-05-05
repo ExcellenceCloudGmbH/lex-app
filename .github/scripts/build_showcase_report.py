@@ -271,6 +271,109 @@ def _scenarios_cell(row: dict[str, Any]) -> str:
 
 
 
+def _humanise_test_name(name: str) -> str:
+    """Turn ``test_8_45_real_redis_round_trip_dispatches_and_succeeds``
+    into ``Real Redis round trip dispatches and succeeds`` — readable
+    enough for a stakeholder who has never seen the test code."""
+    base = name
+    if base.startswith("test_"):
+        base = base[5:]
+    # Strip a leading numeric scenario id like ``8_45_`` or ``3_1_``.
+    parts = base.split("_")
+    while parts and parts[0].isdigit():
+        parts.pop(0)
+    text = " ".join(parts).strip()
+    return text[:1].upper() + text[1:] if text else name
+
+
+def _failed_tests_block(row: dict[str, Any], cluster: Cluster) -> str:
+    """Render a sub-table of failed/errored tests for one cluster.
+
+    Only invoked when the cluster row is failing. Each entry shows:
+      • Humanised test name + raw method name
+      • Description (from ``cluster.test_descriptions``) — falls back to
+        a generic line if the test isn't catalogued yet
+      • Short error message captured from the traceback
+    """
+    tests = row.get("tests") or []
+    failed = [t for t in tests if t.get("outcome") in ("failed", "errored")]
+    if not failed:
+        return ""
+
+    items: list[str] = []
+    for t in failed:
+        method = t.get("name", "")
+        outcome = t.get("outcome", "failed")
+        message = t.get("message") or ""
+        description = cluster.test_descriptions.get(method) if cluster.test_descriptions else None
+        if not description:
+            description = (
+                "This scenario does not yet have a written description in "
+                "the showcase catalogue. Engineering can add one in "
+                "<code>showcase_clusters.py</code> so future failures explain "
+                "themselves to stakeholders."
+            )
+        kind_label = "Errored" if outcome == "errored" else "Failed"
+        kind_bg = C['bad_bg']
+        kind_ink = C['bad_ink']
+        kind_border = C['bad_border']
+        message_html = (
+            f'<div style="margin-top:6px;font:500 12px/1.5 '
+            f"'SFMono-Regular',Menlo,Consolas,monospace;"
+            f'color:{C["bad_ink"]};background:#fff;'
+            f'border:1px solid {C["rule"]};border-radius:4px;'
+            f'padding:6px 8px;word-break:break-word;">'
+            f'{html.escape(message)}</div>'
+            if message else ""
+        )
+        items.append(f"""
+          <tr>
+            <td style="padding:10px 0;border-bottom:1px solid {C['rule']};">
+              <div style="display:flex;align-items:baseline;gap:8px;">
+                <span style="display:inline-block;padding:2px 8px;
+                             background:{kind_bg};color:{kind_ink};
+                             border:1px solid {kind_border};
+                             border-radius:999px;
+                             font:600 10px/1.4 {SANS};
+                             letter-spacing:.4px;text-transform:uppercase;">
+                  {kind_label}
+                </span>
+                <strong style="font:600 13px/1.4 {SANS};color:{C['ink']};">
+                  {html.escape(_humanise_test_name(method))}
+                </strong>
+              </div>
+              <div style="margin-top:3px;font:400 11px/1.4 {SANS};
+                          color:{C['muted']};">
+                <code style="font:500 11px/1.4 'SFMono-Regular',Menlo,Consolas,monospace;
+                             color:{C['muted']};">{html.escape(method)}</code>
+              </div>
+              <div style="margin-top:6px;font:400 12px/1.6 {SANS};
+                          color:{C['ink']};">
+                {description}
+              </div>
+              {message_html}
+            </td>
+          </tr>
+        """)
+
+    return f"""
+      <tr>
+        <td colspan="3"
+            style="padding:0 16px 14px 16px;background:{C['bad_tint']};
+                   border-bottom:1px solid {C['rule']};">
+          <div style="font:700 11px/1 {SANS};color:{C['bad_ink']};
+                      letter-spacing:1.2px;text-transform:uppercase;
+                      padding:6px 0 4px 0;">
+            Failed scenarios
+          </div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            {''.join(items)}
+          </table>
+        </td>
+      </tr>
+    """
+
+
 def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
                    overall: dict[str, Any]) -> str:
     # Three columns only — Status / Capability / Scenarios.
@@ -363,6 +466,17 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
                 </td>
               </tr>
             """)
+
+        # When the cluster failed, list the individual scenarios that
+        # broke with their descriptions and the captured error
+        # message. This is the "less generic" detail layer requested
+        # by stakeholders — instead of "background processing
+        # failed", they see "Real Redis round trip — AssertionError:
+        # expected SUCCESS, got ERROR".
+        if failing:
+            block = _failed_tests_block(row, cluster)
+            if block:
+                body_rows.append(block)
 
     # ── Totals row.  Appended to <tbody> (not <tfoot>) because WeasyPrint
     # treats <tfoot> as a repeating page-footer group (CSS display:
