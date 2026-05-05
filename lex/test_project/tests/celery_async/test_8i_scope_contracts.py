@@ -77,12 +77,15 @@ def _celery_eager(propagate: bool = True):
         celery_app.conf.task_eager_propagates,
         os.environ.get("CELERY_ACTIVE"),
         celery_app.conf.result_backend,
-        getattr(celery_app, "_backend", None),
+        celery_app.__dict__.get("_backend"),
     )
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = propagate
     celery_app.conf.result_backend = "cache+memory://"
-    celery_app._backend = None
+    # Drop the memoised backend; ``app._backend = None`` would invoke
+    # the Celery 5.5+ property setter which crashes on None. See the
+    # 8h docstring for the full rationale.
+    celery_app.__dict__.pop("_backend", None)
     os.environ["CELERY_ACTIVE"] = "true"
     try:
         yield
@@ -94,7 +97,10 @@ def _celery_eager(propagate: bool = True):
         else:
             os.environ["CELERY_ACTIVE"] = prior[2]
         celery_app.conf.result_backend = prior[3]
-        celery_app._backend = prior[4]
+        if prior[4] is None:
+            celery_app.__dict__.pop("_backend", None)
+        else:
+            celery_app.__dict__["_backend"] = prior[4]
 
 
 def _reset_ctx():

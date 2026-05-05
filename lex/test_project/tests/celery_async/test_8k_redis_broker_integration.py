@@ -64,11 +64,20 @@ def _redis_broker_probe(payload: dict[str, str]) -> dict[str, str | bool]:
 def _temporary_celery_config(app=None, **overrides):
     """Temporarily override Celery app config and restore it exactly after use.
 
-    Celery caches ``app.backend`` on ``app._backend`` after the first read
-    (see ``celery/app/base.py``: ``self._backend = self._get_backend()``).
-    We must clear *that* attribute — not ``_backend_cache``, which is not
-    a real attribute on the App class — for the temporary
-    ``result_backend`` override to actually take effect.
+    Celery caches ``app.backend`` after the first read so a runtime
+    ``result_backend`` override is silently ignored unless we also wipe
+    the cache. The cache lives in two places depending on the Celery
+    version:
+
+    * Celery < 5.5 — ``_backend`` is a plain instance attribute; setting
+      it to ``None`` is enough.
+    * Celery >= 5.5 — ``_backend`` is a property whose setter does
+      ``if backend.thread_safe`` before storing, so passing ``None``
+      crashes with ``AttributeError: 'NoneType' object has no attribute
+      'thread_safe'``. The property's getter still reads from
+      ``self.__dict__['_backend']``, so we bypass the setter by writing
+      to the instance dict directly — that forces ``app.backend`` to
+      re-resolve via ``_get_backend()`` against our overridden conf.
 
     Setting the wrong attribute is a silent bug: the test reads stale
     config, the cached backend (the project default — usually
@@ -78,14 +87,19 @@ def _temporary_celery_config(app=None, **overrides):
     """
     app = app or celery_app
     previous = {key: app.conf.get(key) for key in overrides}
-    previous_backend = getattr(app, "_backend", None)
+    previous_backend = app.__dict__.get("_backend")
     app.conf.update(**overrides)
-    app._backend = None
+    # Drop the cached backend so the next ``app.backend`` read re-runs
+    # ``_get_backend()`` against the freshly-overridden conf.
+    app.__dict__.pop("_backend", None)
     try:
         yield
     finally:
         app.conf.update(**previous)
-        app._backend = previous_backend
+        if previous_backend is None:
+            app.__dict__.pop("_backend", None)
+        else:
+            app.__dict__["_backend"] = previous_backend
 
 
 @contextmanager

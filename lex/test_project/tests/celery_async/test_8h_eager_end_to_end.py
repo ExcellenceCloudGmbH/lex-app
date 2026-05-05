@@ -103,19 +103,24 @@ def _celery_eager(propagate: bool = True):
     triggers the lookup unconditionally. Routing the result backend
     through ``cache+memory://`` keeps the eager-mode tests fully
     self-contained and free of external storage dependencies. The
-    cached ``app._backend`` is cleared on enter and exit so the
-    override actually takes effect (Celery memoises the resolved
-    backend on first read — see ``celery/app/base.py::_get_backend``).
+    cached ``_backend`` is dropped via ``app.__dict__.pop`` so the
+    override actually takes effect — Celery memoises the resolved
+    backend on first read (``celery/app/base.py::_get_backend``). We
+    must NOT use ``app._backend = None``: in Celery 5.5+ ``_backend``
+    is a property whose setter calls ``backend.thread_safe`` before
+    storing, which crashes on ``None``. ``__dict__.pop`` works on
+    every Celery version because the property's getter reads from the
+    instance dict and a plain attribute lives there too.
     """
     prior_eager = celery_app.conf.task_always_eager
     prior_propagates = celery_app.conf.task_eager_propagates
     prior_backend_url = celery_app.conf.result_backend
-    prior_backend = getattr(celery_app, "_backend", None)
+    prior_backend = celery_app.__dict__.get("_backend")
     prior_env = os.environ.get("CELERY_ACTIVE")
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = propagate
     celery_app.conf.result_backend = "cache+memory://"
-    celery_app._backend = None
+    celery_app.__dict__.pop("_backend", None)
     os.environ["CELERY_ACTIVE"] = "true"
     try:
         yield
@@ -123,7 +128,10 @@ def _celery_eager(propagate: bool = True):
         celery_app.conf.task_always_eager = prior_eager
         celery_app.conf.task_eager_propagates = prior_propagates
         celery_app.conf.result_backend = prior_backend_url
-        celery_app._backend = prior_backend
+        if prior_backend is None:
+            celery_app.__dict__.pop("_backend", None)
+        else:
+            celery_app.__dict__["_backend"] = prior_backend
         if prior_env is None:
             os.environ.pop("CELERY_ACTIVE", None)
         else:
