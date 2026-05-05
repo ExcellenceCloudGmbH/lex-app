@@ -67,7 +67,7 @@ on:
         required: false
         type: string
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
 
 jobs:
   # ── Step 1: Gate on the selected tests + emit the customer report ─
@@ -91,7 +91,7 @@ jobs:
       # Single source of truth for the test scope. Edit here (or
       # override from workflow_dispatch) — the same selector drives
       # both the release gate and the email content.
-      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks,celery_async' }}
+      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries' }}
       # Mark this as a release-pipeline run so the email subject can
       # distinguish it from operator-triggered manual dispatches.
       run_kind: release

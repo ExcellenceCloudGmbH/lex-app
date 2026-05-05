@@ -55,7 +55,7 @@ on:
           calculation, and validation-hook clusters.
         required: false
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks,celery_async
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
       run_kind:
         description: >-
           Where this run came from — shown in the email subject so
@@ -79,7 +79,7 @@ on:
         required: false
         type: string
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks,celery_async
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
       run_kind:
         description: >-
           Where this run came from. Callers (notably pip_publish.yml)
