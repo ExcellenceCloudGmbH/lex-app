@@ -259,9 +259,26 @@ class TestCluster08k_RedisBrokerIntegration(SimpleTestCase):
             **_redis_celery_overrides(redis_url, queue_name),
             task_serializer="json",
             result_serializer="json",
-            accept_content=["json"],
+            # Accept both content types on the worker side. The
+            # producer is pinned to JSON via the explicit
+            # ``serializer="json"`` argument on ``apply_async`` below;
+            # listing pickle here is purely defensive — if the
+            # producer-side override ever regresses, we'd rather see
+            # the test FAIL on a deserialised payload assertion than
+            # silently hang for 30 s on a worker that quietly
+            # discarded the message.
+            accept_content=["json", "pickle"],
             backend=_make_redis_result_backend(celery_app, redis_url),
         ):
+            # Keep the kombu trusted-serializer registry permissive for
+            # the duration of this scope so the worker's pickle
+            # fallback can actually deserialise if the producer-side
+            # override regresses (see ``accept_content`` comment
+            # above). Without this, ``loads()`` raises
+            # ``ContentDisallowed`` instead of decoding, and we lose
+            # the producer-side regression signal.
+            enable_insecure_serializers(["pickle"])
+
             # Fail fast if Celery cannot establish the Redis broker connection.
             with celery_app.connection_for_write() as conn:
                 conn.ensure_connection(max_retries=1, timeout=1)
@@ -286,6 +303,25 @@ class TestCluster08k_RedisBrokerIntegration(SimpleTestCase):
                         args=[payload],
                         queue=queue_name,
                         connection=connection,
+                        # Pin the producer-side serializer EXPLICITLY.
+                        # The Lex project finalises its Celery app
+                        # with ``task_serializer="pickle"`` (needed
+                        # for CalculationModel instances) and Celery
+                        # caches ``Task._exec_options`` on first
+                        # touch, so mutating ``app.conf`` afterwards
+                        # via ``_temporary_celery_config`` does NOT
+                        # always re-bind the cached snapshot. Passing
+                        # ``serializer="json"`` here bypasses every
+                        # cached default and forces JSON onto the
+                        # wire — which is what the worker's
+                        # ``accept_content=["json"]`` is configured
+                        # to validate. Without this argument the
+                        # message goes out as pickle, the worker
+                        # discards it with ``Refusing to deserialize
+                        # untrusted content of type pickle``, the
+                        # result is never stored, and the producer
+                        # hangs on ``result.get`` until timeout.
+                        serializer="json",
                     )
                 with allow_join_result():
                     # 30s, not 10s. Cold-boot worker latency on the CI
