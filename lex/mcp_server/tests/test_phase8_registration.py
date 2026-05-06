@@ -45,7 +45,7 @@ def _fresh_server():
     return server_module.get_server()
 
 
-_PERMISSION_TOOLS = {"lex.permissions.user", "lex.permissions.model"}
+_PERMISSION_TOOLS = {"lex_permissions_user", "lex_permissions_model"}
 
 
 def test_permission_tools_register_when_enabled():
@@ -66,7 +66,7 @@ def test_permission_tools_register_when_enabled():
 
     prompts = asyncio.run(server.list_prompts())
     prompt_names = {p.name for p in prompts}
-    assert "lex.check_permissions" in prompt_names
+    assert "lex_check_permissions" in prompt_names
 
 
 def test_permission_tools_omitted_when_disabled():

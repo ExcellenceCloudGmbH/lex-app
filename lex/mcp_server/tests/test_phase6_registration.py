@@ -41,18 +41,18 @@ def test_phase6_tools_register():
     names = {t.name for t in tools}
 
     expected = {
-        "lex.models.list",
-        "lex.entries.list",
-        "lex.entries.get",
-        "lex.entries.create",
-        "lex.entries.update",
-        "lex.entries.delete",
-        "lex.calculations.run",
-        "lex.calculations.tail_logs",
-        "lex.calculations.list_logs",
-        "lex.calculations.clean",
-        "lex.entries.history",
-        "lex.search.global",
+        "lex_models_list",
+        "lex_entries_list",
+        "lex_entries_get",
+        "lex_entries_create",
+        "lex_entries_update",
+        "lex_entries_delete",
+        "lex_calculations_run",
+        "lex_calculations_tail_logs",
+        "lex_calculations_list_logs",
+        "lex_calculations_clean",
+        "lex_entries_history",
+        "lex_search_global",
     }
     missing = expected - names
     assert not missing, f"missing tools: {missing}"
@@ -83,7 +83,7 @@ def test_phase6_prompts_register():
     names = {p.name for p in prompts}
 
     assert {
-        "lex.investigate_calculation",
-        "lex.summarize_model",
-        "lex.audit_record",
+        "lex_investigate_calculation",
+        "lex_summarize_model",
+        "lex_audit_record",
     } <= names

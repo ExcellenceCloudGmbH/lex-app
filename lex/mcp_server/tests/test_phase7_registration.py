@@ -44,12 +44,12 @@ def _fresh_server():
 
 
 _FILE_TOOLS = {
-    "lex.files.download",
-    "lex.files.export",
-    "lex.sharepoint.download",
-    "lex.sharepoint.preview_link",
-    "lex.sharepoint.share_link",
-    "lex.calculations.download_pdf",
+    "lex_files_download",
+    "lex_files_export",
+    "lex_sharepoint_download",
+    "lex_sharepoint_preview_link",
+    "lex_sharepoint_share_link",
+    "lex_calculations_download_pdf",
 }
 
 

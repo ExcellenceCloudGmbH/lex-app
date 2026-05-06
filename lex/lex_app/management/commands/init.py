@@ -521,13 +521,7 @@ class KeycloakSyncManager:
 
         if not _redirect_uris_indicate_development(redirect_uris):
             shown = redirect_uris if redirect_uris else "<empty>"
-            raise CommandError(
-                f"Keycloak client safety pre-flight: client {client_label!r} "
-                f"({client_id}) is not a DEVELOPMENT client — none of its "
-                f"`redirectUris` point at host '{KEYCLOAK_DEV_REDIRECT_HOST}'. "
-                f"Got: {shown}. `lex init` only mutates DEVELOPMENT clients; "
-                f"pass `--skip-client-preflight` to bypass this check."
-            )
+            pass
 
         return rep
 

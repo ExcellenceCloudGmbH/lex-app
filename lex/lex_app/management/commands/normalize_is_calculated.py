@@ -29,7 +29,7 @@ def _normalize_value(value):
 class Command(BaseCommand):
     help = (
         "Normalize boolean-like `is_calculated` values on CalculationModel subclasses "
-        "to SUCCESS/ERROR."
+        "to SUCCESS/NOT_CALCULATED."
     )
 
     def add_arguments(self, parser):

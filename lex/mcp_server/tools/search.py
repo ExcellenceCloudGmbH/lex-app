@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def register(server: FastMCP) -> None:
     server.add_tool(
         _global_search,
-        name="lex.search.global",
+        name="lex_search_global",
         description=(
             "Run the cross-model full-text search. Returns a list of hit "
             "objects with `model`, `id`, `url` and a short `content` summary. "

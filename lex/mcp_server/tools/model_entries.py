@@ -32,12 +32,12 @@ def register(server: FastMCP) -> None:
 
     server.add_tool(
         _list_models,
-        name="lex.models.list",
+        name="lex_models_list",
         description="List all model containers exposed over MCP, with read/write capability flags.",
     )
     server.add_tool(
         _list_entries,
-        name="lex.entries.list",
+        name="lex_entries_list",
         description=(
             "Page through entries of a model container. "
             "Filters use the same query-parameter syntax as the HTTP API "
@@ -47,14 +47,14 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _get_entry,
-        name="lex.entries.get",
+        name="lex_entries_get",
         description="Retrieve a single entry by primary key from a model container.",
     )
 
     if enable_write:
         server.add_tool(
             _create_entry,
-            name="lex.entries.create",
+            name="lex_entries_create",
             description=(
                 "Create a new entry in a model container. The 'data' object is "
                 "validated by the model's DRF serializer."
@@ -62,7 +62,7 @@ def register(server: FastMCP) -> None:
         )
         server.add_tool(
             _update_entry,
-            name="lex.entries.update",
+            name="lex_entries_update",
             description=(
                 "Partially update an existing entry. Pass `calculate=true` to "
                 "trigger a recalculation for CalculationModel-backed records."
@@ -70,7 +70,7 @@ def register(server: FastMCP) -> None:
         )
         server.add_tool(
             _delete_entry,
-            name="lex.entries.delete",
+            name="lex_entries_delete",
             description="Delete an entry by primary key.",
         )
 

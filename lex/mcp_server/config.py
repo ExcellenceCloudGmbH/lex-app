@@ -28,6 +28,16 @@ _DEFAULTS: Dict[str, Any] = {
     "ENABLE_PERMISSIONS": True,
     # Phase 7 — file/SharePoint/PDF tools.
     "ENABLE_FILES": True,
+    # Phase 10 — embeddable frontend URL tool.
+    "ENABLE_EMBED": True,
+    # Base URL of the React frontend for embed URL generation.
+    # Resolution order: this setting → REACT_APP_URL env → LEX_FRONTEND_URL
+    # env → http://localhost:8000.
+    "FRONTEND_BASE_URL": "https://melihs-macbook-pro.tail604752.ts.net",
+    # Extra origins the embed widget iframe may navigate to (e.g. auth/SSO
+    # provider).  These are added to frameDomains, connectDomains, and
+    # resourceDomains in the ChatGPT sandbox CSP.
+    "EMBED_EXTRA_CSP_ORIGINS": ["https://auth.excellence-cloud.de"],
     # Hard caps applied to base64-encoded MCP file envelopes. Over-cap
     # responses are returned as 413 envelopes (no `base64` payload).
     "FILE_MAX_BYTES": 5 * 1024 * 1024,

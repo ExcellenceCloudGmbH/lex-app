@@ -46,7 +46,7 @@ def _model_collection():
 def register(server: FastMCP) -> None:
     server.add_tool(
         _file_download,
-        name="lex.files.download",
+        name="lex_files_download",
         description=(
             "Download a file field from a model entry. Returns a base64 "
             "payload for LOCAL/SharePoint storage (capped by FILE_MAX_BYTES) "
@@ -55,7 +55,7 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _model_export,
-        name="lex.files.export",
+        name="lex_files_export",
         description=(
             "Export a model container to xlsx via the same pipeline used by "
             "the AG Grid UI. Forward `ag_export`, `filtered_export` and "
@@ -64,7 +64,7 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _sharepoint_download,
-        name="lex.sharepoint.download",
+        name="lex_sharepoint_download",
         description=(
             "Download a file field via SharePoint storage (uses the configured "
             "default_storage). Returns a base64 envelope capped by FILE_MAX_BYTES."
@@ -72,17 +72,17 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _sharepoint_preview_link,
-        name="lex.sharepoint.preview_link",
+        name="lex_sharepoint_preview_link",
         description="Return an embeddable SharePoint preview URL for the given file field.",
     )
     server.add_tool(
         _sharepoint_share_link,
-        name="lex.sharepoint.share_link",
+        name="lex_sharepoint_share_link",
         description="Return a SharePoint share URL for the given file field.",
     )
     server.add_tool(
         _calculation_pdf,
-        name="lex.calculations.download_pdf",
+        name="lex_calculations_download_pdf",
         description=(
             "Render a CalculationLog markdown report to PDF and return it as "
             "a base64 envelope capped by FILE_MAX_BYTES."

@@ -1,7 +1,7 @@
 """Smoke-test the embedded MCP server end-to-end.
 
 Runs an in-process MCP client over ``httpx.ASGITransport`` against the
-real Django ASGI app, calls ``tools/list`` and ``lex.models.list``, and
+real Django ASGI app, calls ``tools/list`` and ``lex_models_list``, and
 prints the result. Useful for CI sanity checks and local debugging.
 
 Usage::
@@ -36,7 +36,7 @@ class Command(BaseCommand):
             metavar=("MODEL", "PK", "FIELD"),
             default=None,
             help=(
-                "Optional: actually call lex.files.download with the given "
+                "Optional: actually call lex_files_download with the given "
                 "model container, pk and file field, then report size_bytes."
             ),
         )
@@ -45,7 +45,7 @@ class Command(BaseCommand):
             type=int,
             default=0,
             help=(
-                "Optional: fire N rapid lex.models.list HTTP requests against "
+                "Optional: fire N rapid lex_models_list HTTP requests against "
                 "the discovery endpoint and report when (and if) HTTP 429 appears."
             ),
         )
@@ -97,18 +97,18 @@ async def _run(api_key: str, mount: str, stdout, *, exercise_files=None, burst=0
                 stdout.write(f"prompts: {[p.name for p in prompts.prompts]}\n")
             except Exception as exc:
                 stdout.write(f"prompts: <unavailable: {exc}>\n")
-            result = await session.call_tool("lex.models.list", {})
+            result = await session.call_tool("lex_models_list", {})
             stdout.write(json.dumps(result.model_dump(), indent=2, default=str) + "\n")
             try:
-                logs = await session.call_tool("lex.calculations.list_logs", {"limit": 5})
+                logs = await session.call_tool("lex_calculations_list_logs", {"limit": 5})
                 stdout.write("calculations.list_logs (limit=5):\n")
                 stdout.write(json.dumps(logs.model_dump(), indent=2, default=str) + "\n")
             except Exception as exc:
                 stdout.write(f"calculations.list_logs failed: {exc}\n")
 
-            file_tool_names = {"lex.files.download", "lex.files.export",
-                               "lex.sharepoint.download", "lex.sharepoint.preview_link",
-                               "lex.sharepoint.share_link", "lex.calculations.download_pdf"}
+            file_tool_names = {"lex_files_download", "lex_files_export",
+                               "lex_sharepoint_download", "lex_sharepoint_preview_link",
+                               "lex_sharepoint_share_link", "lex_calculations_download_pdf"}
             registered = {t.name for t in tools.tools}
             missing = file_tool_names - registered
             if missing:
@@ -116,14 +116,14 @@ async def _run(api_key: str, mount: str, stdout, *, exercise_files=None, burst=0
             else:
                 stdout.write("file tools registered: OK\n")
 
-            permission_tool_names = {"lex.permissions.user", "lex.permissions.model"}
+            permission_tool_names = {"lex_permissions_user", "lex_permissions_model"}
             missing_perms = permission_tool_names - registered
             if missing_perms:
                 stdout.write(f"permission tools missing: {sorted(missing_perms)}\n")
             else:
                 stdout.write("permission tools registered: OK\n")
                 try:
-                    res = await session.call_tool("lex.permissions.user", {})
+                    res = await session.call_tool("lex_permissions_user", {})
                     dump = res.model_dump()
                     # Trim to first 5 entries to keep stdout readable.
                     structured = dump.get("structuredContent") or {}
@@ -138,7 +138,7 @@ async def _run(api_key: str, mount: str, stdout, *, exercise_files=None, burst=0
                 model, pk, field = exercise_files
                 try:
                     res = await session.call_tool(
-                        "lex.files.download",
+                        "lex_files_download",
                         {"model_container": model, "pk": pk, "field": field},
                     )
                     dump = res.model_dump()

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 def register(server: FastMCP) -> None:
     server.add_tool(
         _entry_history,
-        name="lex.entries.history",
+        name="lex_entries_history",
         description=(
             "Return the simple_history timeline for one record. Pass an "
             "ISO-8601 `as_of` to time-travel to a system-time snapshot. "

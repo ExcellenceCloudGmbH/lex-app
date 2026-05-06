@@ -181,6 +181,7 @@ LOGIN_REDIRECT_URL = "/process_admin/all"
 CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
     "http://localhost:3000",
+    "https://melihs-macbook-pro.tail604752.ts.net",
 ]
 
 REACT_APP_BUILD_PATH = (
@@ -250,12 +251,16 @@ OIDC_ENABLED = all(
 )
 
 MIDDLEWARE = [
+    # Must be first so process_response runs last (after SessionMiddleware
+    # and XFrameOptionsMiddleware have written their values).
+    "lex.core.middleware.embed_xframe.EmbedXFrameOptionsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "lex.core.middleware.embed_token_auth.EmbedTokenAuthMiddleware",
     "oauth2_authcodeflow.middleware.BearerAuthMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -540,6 +545,7 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8000",
+    "https://melihs-macbook-pro.tail604752.ts.net",
     "*"
     # add any other hosts your front-end uses
 ]
@@ -583,6 +589,7 @@ CORS_ORIGIN_WHITELIST = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:8000",
+    "https://melihs-macbook-pro.tail604752.ts.net",
     "*",
 ]
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Optional
 
 from lex.mcp_server.auth import McpAuthError, resolve_principal
@@ -39,6 +40,81 @@ def is_mcp_path(path: str) -> bool:
         return False
     mount = _mount_path()
     return path == mount or path.startswith(mount + "/")
+
+
+# ---------------------------------------------------------------------------
+# RFC 9728 — OAuth 2.0 Protected Resource Metadata
+# ---------------------------------------------------------------------------
+
+_WELL_KNOWN_PREFIXES = (
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-authorization-server",
+)
+
+
+def is_well_known_mcp_oauth_path(path: str) -> bool:
+    """Return True for /.well-known/oauth-* paths that MCP clients query."""
+    if not mcp_setting("ENABLED"):
+        return False
+    return any(path == p or path.startswith(p + "/") for p in _WELL_KNOWN_PREFIXES)
+
+
+def _keycloak_issuer() -> Optional[str]:
+    """Return the Keycloak issuer URL (e.g. https://auth.example.com/realms/lex)."""
+    kc_url = os.getenv("KEYCLOAK_URL")
+    kc_realm = os.getenv("KEYCLOAK_REALM")
+    if kc_url and kc_realm:
+        return f"{kc_url.rstrip('/')}/realms/{kc_realm}"
+    return None
+
+
+def _server_origin(scope: dict) -> str:
+    """Reconstruct the origin (scheme + host) from the ASGI scope."""
+    scheme = scope.get("scheme", "https")
+    headers = dict(scope.get("headers", []))
+    host = (headers.get(b"host") or b"localhost").decode("latin-1")
+    return f"{scheme}://{host}"
+
+
+async def _well_known_oauth(scope, receive, send) -> None:
+    """Serve RFC 9728 OAuth metadata so MCP clients can discover Keycloak."""
+    path = scope.get("path", "")
+    issuer = _keycloak_issuer()
+
+    if not issuer:
+        await _send_json(send, 404, {"error": "OIDC not configured"})
+        return
+
+    origin = _server_origin(scope)
+    mount = _mount_path()
+
+    if path.startswith("/.well-known/oauth-authorization-server"):
+        # RFC 8414 — Authorization Server Metadata
+        # Redirect the client to Keycloak's own discovery document.
+        # Most clients follow redirects, but we can also inline the essentials.
+        oidc_config_url = f"{issuer}/.well-known/openid-configuration"
+        body = json.dumps({"issuer": issuer, "_redirect": oidc_config_url}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": 302,
+            "headers": [
+                (b"location", oidc_config_url.encode("latin-1")),
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
+        return
+
+    # /.well-known/oauth-protected-resource[/mcp]
+    resource = f"{origin}{mount}"
+    metadata = {
+        "resource": resource,
+        "authorization_servers": [issuer],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": ["openid", "email", "profile"],
+    }
+    await _send_json(send, 200, metadata)
 
 
 async def _send_json(send, status: int, payload: dict, *, headers: Optional[list] = None) -> None:
@@ -127,11 +203,16 @@ async def _asgi(scope, receive, send):
     try:
         principal = await resolve_principal(headers)
     except McpAuthError as exc:
+        # Build WWW-Authenticate with resource_metadata pointer (RFC 9728).
+        origin = _server_origin(scope)
+        mount = _mount_path()
+        resource_meta_url = f"{origin}/.well-known/oauth-protected-resource{mount}"
+        www_auth = f'{exc.www_authenticate} resource_metadata="{resource_meta_url}"'
         await _send_json(
             send,
             401,
             {"error": str(exc)},
-            headers=[(b"www-authenticate", exc.www_authenticate.encode("latin-1"))],
+            headers=[(b"www-authenticate", www_auth.encode("latin-1"))],
         )
         return
 

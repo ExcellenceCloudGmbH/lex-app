@@ -4,8 +4,8 @@ Wrap the existing DRF permission views so an LLM client can check what
 the current principal is allowed to do **before** attempting CRUD or
 calculation tools, and explain why a write was refused.
 
-* ``lex.permissions.user``  → :class:`lex.api.views.authentication.UserPermissionView.UserPermissionsView`
-* ``lex.permissions.model`` → :class:`lex.api.views.permissions.ModelPermissions.ModelPermissions`
+* ``lex_permissions_user``  → :class:`lex.api.views.authentication.UserPermissionView.UserPermissionsView`
+* ``lex_permissions_model`` → :class:`lex.api.views.permissions.ModelPermissions.ModelPermissions`
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 def register(server: FastMCP) -> None:
     server.add_tool(
         _user_permissions,
-        name="lex.permissions.user",
+        name="lex_permissions_user",
         description=(
             "Return the current principal's permissions in the ra-rbac shape "
             "[{action, resource, record?}]. Backed by Keycloak UMA when "
@@ -37,11 +37,11 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _model_permissions,
-        name="lex.permissions.model",
+        name="lex_permissions_model",
         description=(
             "Return the per-container modification restrictions that apply to "
             "the current principal for `model_container`. Useful to check "
-            "before issuing `lex.entries.create/update/delete`."
+            "before issuing `lex_entries_create/update/delete`."
         ),
     )
 

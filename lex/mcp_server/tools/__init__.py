@@ -8,13 +8,14 @@ toggled via ``MCP_SERVER`` settings:
 * :mod:`lex.mcp_server.tools.history`       — ``simple_history`` timeline.
 * :mod:`lex.mcp_server.tools.search`        — global PostgreSQL search.
 * :mod:`lex.mcp_server.tools.files`         — file/SharePoint/PDF download/export.
+* :mod:`lex.mcp_server.tools.embed`         — embeddable frontend URL generation.
 """
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
 from lex.mcp_server.config import mcp_setting
-from lex.mcp_server.tools import calculations, files, history, model_entries, permissions, search
+from lex.mcp_server.tools import calculations, embed, files, history, model_entries, permissions, search
 
 
 def register(server: FastMCP) -> None:
@@ -30,3 +31,5 @@ def register(server: FastMCP) -> None:
         files.register(server)
     if mcp_setting("ENABLE_PERMISSIONS"):
         permissions.register(server)
+    if mcp_setting("ENABLE_EMBED"):
+        embed.register(server)

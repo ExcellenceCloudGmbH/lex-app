@@ -4,10 +4,10 @@ All four tools delegate to existing DRF views so RBAC, audit logging and
 the calculation-cache machinery (``CacheManager``) behave identically to
 the regular HTTP API:
 
-* ``lex.calculations.run`` → :class:`lex.api.views.process_flow.CreateOrUpdate.CreateOrUpdate`
-* ``lex.calculations.tail_logs`` → :class:`lex.api.views.calculations.InitCalculationLogs.InitCalculationLogs`
-* ``lex.calculations.list_logs`` → :class:`lex.api.views.model_entries.CalculationLogTreeView.CalculationLogTreeView`
-* ``lex.calculations.clean`` → :class:`lex.api.views.calculations.CleanCalculations.CleanCalculations`
+* ``lex_calculations_run`` → :class:`lex.api.views.process_flow.CreateOrUpdate.CreateOrUpdate`
+* ``lex_calculations_tail_logs`` → :class:`lex.api.views.calculations.InitCalculationLogs.InitCalculationLogs`
+* ``lex_calculations_list_logs`` → :class:`lex.api.views.model_entries.CalculationLogTreeView.CalculationLogTreeView`
+* ``lex_calculations_clean`` → :class:`lex.api.views.calculations.CleanCalculations.CleanCalculations`
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def register(server: FastMCP) -> None:
     server.add_tool(
         _run_calculation,
-        name="lex.calculations.run",
+        name="lex_calculations_run",
         description=(
             "Trigger (or re-trigger) a calculation by writing to a model "
             "via the run_step pipeline. Pass `next_step=true` to advance "
@@ -40,7 +40,7 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _tail_logs,
-        name="lex.calculations.tail_logs",
+        name="lex_calculations_tail_logs",
         description=(
             "Return the cached log tail for a running or recently finished "
             "calculation. Output is truncated to ~64 KB to fit MCP message "
@@ -49,7 +49,7 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _list_logs,
-        name="lex.calculations.list_logs",
+        name="lex_calculations_list_logs",
         description=(
             "List persisted CalculationLog rows (audit-grade), optionally "
             "filtered by `calculation_id`. Bounded by the LOG_TREE_MAX_ROWS "
@@ -58,7 +58,7 @@ def register(server: FastMCP) -> None:
     )
     server.add_tool(
         _clean,
-        name="lex.calculations.clean",
+        name="lex_calculations_clean",
         description=(
             "Identify which of the supplied {model, record_id} pairs can "
             "have their cached calculation state cleaned up. Mirrors the "
