@@ -99,23 +99,16 @@ class CeleryTaskDispatcher:
 
             with wait_scope:
                 for i, group in enumerate(non_empty_groups):
-                    try:
+                    task_result = CeleryTaskDispatcher._dispatch_single_group(
+                        group, i, *args, context=context
+                    )
 
-                        task_result = CeleryTaskDispatcher._dispatch_single_group(
-                            group, i, *args, context=context
-                        )
-
-                        if task_result:
-                            task_results.append(task_result)
-                            group_mapping[task_result.id] = group
-                        else:
-                            failed_dispatch_count += 1
-                            logger.warning(f"Failed to dispatch group {i + 1}, processed synchronously as fallback")
-
-                    except Exception as dispatch_error:
+                    if task_result:
+                        task_results.append(task_result)
+                        group_mapping[task_result.id] = group
+                    else:
                         failed_dispatch_count += 1
-                        logger.error(f"Error dispatching group {i + 1}: {str(dispatch_error)}")
-                        # The _dispatch_single_group method handles synchronous fallback
+                        logger.warning(f"Group {i + 1} processed synchronously as fallback")
 
             # Log dispatch statistics
             successful_dispatches = len(task_results)
@@ -373,34 +366,13 @@ class CeleryTaskDispatcher:
                         f"({failed_models_count} models) synchronously"
                     )
 
-                    sync_success_count = 0
-                    sync_failure_count = 0
-
                     for group_index, group in enumerate(failed_groups):
-                        try:
-                            logger.debug(
-                                f"Processing failed group {group_index + 1}/{len(failed_groups)} synchronously")
-                            calc_and_save_sync(group, *args)
-                            sync_success_count += 1
-                            logger.info(
-                                f"Successfully processed failed group {group_index + 1} "
-                                f"of {len(group)} models synchronously"
-                            )
-                        except Exception as sync_error:
-                            sync_failure_count += 1
-                            logger.error(
-                                f"Synchronous fallback failed for group {group_index + 1} "
-                                f"({len(group)} models): {str(sync_error)}"
-                            )
-                            # Continue processing other groups, but raise error at the end
-
-                    if sync_failure_count > 0:
-                        raise CeleryDispatchError(
-                            f"Synchronous fallback failed for {sync_failure_count}/{len(failed_groups)} groups",
-                            total_tasks=total_tasks,
-                            failed_groups=len(failed_groups),
-                            sync_failures=sync_failure_count,
-                            sync_successes=sync_success_count
+                        logger.debug(
+                            f"Processing failed group {group_index + 1}/{len(failed_groups)} synchronously")
+                        calc_and_save_sync(group, *args)
+                        logger.info(
+                            f"Successfully processed failed group {group_index + 1} "
+                            f"of {len(group)} models synchronously"
                         )
 
                     logger.info(
