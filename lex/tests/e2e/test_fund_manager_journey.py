@@ -28,6 +28,7 @@ Act 5 — Permission Boundaries
 """
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection, models
@@ -267,7 +268,7 @@ class TestAct1_DataEntry(E2ETestCase):
 
     def test_audit_fields_set_on_create(self):
         """created_at and created_by are populated on ORM create."""
-        with OperationContext(actor="Fund Manager"):
+        with OperationContext(request=SimpleNamespace(user="Fund Manager")):
             cur = E2ECurrency.objects.create(code="EUR", name="Euro")
         cur.refresh_from_db()
         self.assertIsNotNone(cur.created_at)
@@ -298,7 +299,7 @@ class TestAct2_TheMistake(E2ETestCase):
         """pre_validation raises → position is NOT created."""
         usd = E2ECurrency.objects.create(code="USD", name="US Dollar")
         fund = E2EFund.objects.create(name="Bad Fund", currency=usd)
-        with OperationContext(actor="Careless Trader"):
+        with OperationContext(request=SimpleNamespace(user="Careless Trader")):
             with self.assertRaises(ValidationError):
                 E2EPosition.objects.create(
                     fund=fund, instrument="TSLA", quantity=-100, market_value=50_000,
@@ -308,7 +309,7 @@ class TestAct2_TheMistake(E2ETestCase):
     def test_wrong_nav_is_saved_without_pre_validation(self):
         """No pre_validation on nav → wrong value persists."""
         usd = E2ECurrency.objects.create(code="USD", name="US Dollar")
-        with OperationContext(actor="Junior Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Junior Analyst")):
             fund = E2EFund.objects.create(
                 name="Gamma Fund", currency=usd, nav=999_999_999,
             )
@@ -350,9 +351,9 @@ class TestAct3_CorrectionAndAudit(E2ETestCase):
 
     def test_edited_by_updates_on_save(self):
         """edited_by is set on the correcting save."""
-        with OperationContext(actor="Creator"):
+        with OperationContext(request=SimpleNamespace(user="Creator")):
             usd = E2ECurrency.objects.create(code="JPY", name="Yen")
-        with OperationContext(actor="Corrector"):
+        with OperationContext(request=SimpleNamespace(user="Corrector")):
             usd.name = "Japanese Yen"
             usd.save()
         usd.refresh_from_db()

@@ -314,23 +314,24 @@ class TestLexModelDBSaveFlow(TransactionTestCase):
         self.assertEqual(obj.edited_by, LexModel.FALLBACK_AUDIT_ACTOR)
 
     @patch("lex.core.models.LexModel.operation_context")
-    def test_create_with_explicit_actor(self, mock_ctx):
-        """Operation context actor overrides the fallback."""
-        mock_ctx.get.return_value = {"actor": "jane@test.com", "request_obj": None}
+    def test_create_with_request_user(self, mock_ctx):
+        """Operation context request user populates created_by."""
+        mock_ctx.get.return_value = {"request_obj": SimpleNamespace(user="jane@test.com")}
         obj = CoreTestModel(name="explicit-actor")
         obj.save()
         obj.refresh_from_db()
         self.assertEqual(obj.created_by, "jane@test.com")
 
-    # ── explicit overrides ───────────────────────────────────────────
+    # ── immutability of audit fields ────────────────────────────────
 
-    def test_explicit_created_by_preserved(self):
-        """If created_by is set before save, the hook does not overwrite it."""
+    def test_explicit_created_by_is_overwritten(self):
+        """created_by is immutable - hook always overwrites any preset value."""
         obj = CoreTestModel(name="preserved-actor")
         obj.created_by = "preset-user"
         obj.save()
         obj.refresh_from_db()
-        self.assertEqual(obj.created_by, "preset-user")
+        # Should be overwritten by the resolved actor (request user from context)
+        self.assertNotEqual(obj.created_by, "preset-user")
 
     def test_explicit_created_at_preserved(self):
         """If created_at is passed to __init__, the hook does not overwrite it."""

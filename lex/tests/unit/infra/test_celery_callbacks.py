@@ -82,7 +82,6 @@ class CallbackTaskAuditRecoveryTests(TestCase):
             "request_obj": {},
             "calculation_id": "calc-worker-1",
             "audit_log_temp": None,
-            "actor": None,
         }
 
         with patch(

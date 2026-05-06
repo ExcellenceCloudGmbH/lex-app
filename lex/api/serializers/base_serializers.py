@@ -804,6 +804,7 @@ def get_serializer_map_for_model(model_class, default_fields=None):
     custom = getattr(model_class, "api_serializers", None)
     has_custom_default_override = (
             isinstance(custom, dict) and "default" in custom
+            and not getattr(model_class, "_lex_skip_serializer_alias", False)
     )
 
     # History / meta-history tables of tracked models do not carry their own

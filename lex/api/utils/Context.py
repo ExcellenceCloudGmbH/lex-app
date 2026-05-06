@@ -9,17 +9,15 @@ _DEFAULT_CONTEXT = {
     'request_obj': '',
     'calculation_id': '',
     'audit_log_temp': None,
-    'actor': None,
 }
 
 
-def _build_context(request='', calculation_id='', audit_log=None, actor=None, operation_id=''):
+def _build_context(request='', calculation_id='', audit_log=None, operation_id=''):
     return {
         'operation_id': operation_id,
         'request_obj': request,
         'calculation_id': calculation_id,
         'audit_log_temp': audit_log,
-        'actor': actor,
     }
 
 
@@ -36,11 +34,10 @@ for module_alias in ('api.utils.Context', 'lex.api.utils.Context'):
 # Context manager to set operation id
 class OperationContext:
     
-    def __init__(self, request=None, calculation_id=None, audit_log=None, actor=None):
+    def __init__(self, request=None, calculation_id=None, audit_log=None):
         self.request = request
         self.calculation_id = calculation_id
         self.audit_log = audit_log
-        self.actor = actor
         self._token = None
 
     def __enter__(self):
@@ -54,14 +51,11 @@ class OperationContext:
                 next_context['calculation_id'] = self.calculation_id
             if self.audit_log is not None:
                 next_context['audit_log_temp'] = self.audit_log
-            if self.actor is not None:
-                next_context['actor'] = self.actor
         else:
             next_context = _build_context(
                 request=self.request or '',
                 calculation_id=self.calculation_id or '',
                 audit_log=self.audit_log,
-                actor=self.actor,
                 operation_id=str(uuid4()),
             )
 

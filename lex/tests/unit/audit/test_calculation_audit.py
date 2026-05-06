@@ -231,11 +231,6 @@ class TestResolveActor(SimpleTestCase):
     to indicate WHO triggered the calculation.
     """
 
-    def test_actor_from_context(self):
-        """Explicit 'actor' key in context_data is used directly."""
-        result = _resolve_actor({"actor": "admin@example.com"})
-        self.assertEqual(result, "admin@example.com")
-
     def test_actor_from_request_user_dict(self):
         """When request_obj is a dict with 'user' key."""
         result = _resolve_actor({

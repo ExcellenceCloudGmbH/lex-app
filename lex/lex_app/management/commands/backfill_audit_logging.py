@@ -171,8 +171,6 @@ class Command(BaseCommand):
         payload_field = AuditLog._meta.get_field("payload")
 
         audit_columns = [
-            AuditLog._meta.get_field("created_at").column,
-            AuditLog._meta.get_field("edited_at").column,
             AuditLog._meta.get_field("date").column,
             AuditLog._meta.get_field("author").column,
             AuditLog._meta.get_field("resource").column,
@@ -188,7 +186,6 @@ class Command(BaseCommand):
             AuditLogStatus._meta.get_field("error_traceback").column,
             AuditLogStatus._meta.get_field("created_at").column,
             AuditLogStatus._meta.get_field("updated_at").column,
-            AuditLogStatus._meta.get_field("edited_at").column,
         ]
         calculation_log_columns = [
             CalculationLog._meta.get_field("timestamp").column,
@@ -353,8 +350,6 @@ class Command(BaseCommand):
                                 audit_rows.append(
                                     (
                                         event_timestamp,
-                                        event_timestamp,
-                                        event_timestamp,
                                         (row.trigger_name or "legacy_migration"),
                                         (resource_name or "legacy_calculation"),
                                         "update",
@@ -393,7 +388,6 @@ class Command(BaseCommand):
                                     audit_id,
                                     "success",
                                     None,
-                                    status_timestamp,
                                     status_timestamp,
                                     status_timestamp,
                                 )
@@ -489,8 +483,6 @@ class Command(BaseCommand):
                                 audit_rows.append(
                                     (
                                         event_timestamp,
-                                        event_timestamp,
-                                        event_timestamp,
                                         (row.user_name or "legacy_user"),
                                         (resource_name or "legacy_user_change"),
                                         "update",
@@ -518,7 +510,6 @@ class Command(BaseCommand):
                                     audit_id,
                                     "success",
                                     None,
-                                    status_timestamp,
                                     status_timestamp,
                                     status_timestamp,
                                 )

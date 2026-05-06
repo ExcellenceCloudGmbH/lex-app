@@ -318,30 +318,34 @@ class ProgrammaticCreationTest(TransactionTestCase):
         self.assertIn("+", types, "Should have a creation record")
         self.assertIn("-", types, "Should have a deletion record")
 
-    def test_create_preserves_explicit_created_by_override(self):
+    def test_create_ignores_explicit_created_by_override(self):
+        """created_by is immutable - explicit values are always overwritten by the system."""
         obj = ProgrammaticTestModel.objects.create(
             name="manual_created_by",
             value=1,
             created_by="Streamlit Override",
         )
 
-        self.assertEqual(obj.created_by, "Streamlit Override")
+        # The system should overwrite the manual value with the fallback
+        self.assertEqual(obj.created_by, "Initial Data Upload")
         self.assertEqual(
             ProgrammaticTestModel.objects.get(pk=obj.pk).created_by,
-            "Streamlit Override",
+            "Initial Data Upload",
         )
 
-    def test_update_preserves_explicit_edited_by_override(self):
+    def test_update_ignores_explicit_edited_by_override(self):
+        """edited_by is immutable - explicit values are always overwritten by the system."""
         obj = ProgrammaticTestModel.objects.create(name="manual_edited_by", value=1)
 
         obj.value = 2
         obj.edited_by = "Streamlit Override"
         obj.save()
 
-        self.assertEqual(obj.edited_by, "Streamlit Override")
+        # The system should overwrite the manual value with the fallback
+        self.assertEqual(obj.edited_by, "Initial Data Upload")
         self.assertEqual(
             ProgrammaticTestModel.objects.get(pk=obj.pk).edited_by,
-            "Streamlit Override",
+            "Initial Data Upload",
         )
 
     def test_create_sets_created_at_only(self):
@@ -400,39 +404,8 @@ class ProgrammaticCreationTest(TransactionTestCase):
         self.assertEqual(obj.created_at, explicit_created_ts)
         self.assertEqual(obj.edited_at, manual_edit_ts)
 
-    def test_operation_context_actor_populates_programmatic_audit_fields(self):
-        with OperationContext(actor="Streamlit User"):
-            obj = ProgrammaticTestModel.objects.create(
-                name="context_actor_create",
-                value=1,
-            )
-
-        self.assertEqual(obj.created_by, "Streamlit User")
-
-        with OperationContext(actor="Streamlit User"):
-            obj.value = 2
-            obj.save()
-
-        self.assertEqual(obj.edited_by, "Streamlit User")
-
-    def test_explicit_override_takes_precedence_over_context_actor(self):
-        with OperationContext(actor="Context Actor"):
-            obj = ProgrammaticTestModel.objects.create(
-                name="explicit_wins_on_create",
-                value=1,
-                created_by="Manual Actor",
-            )
-
-        self.assertEqual(obj.created_by, "Manual Actor")
-
-        with OperationContext(actor="Context Actor"):
-            obj.value = 2
-            obj.edited_by = "Manual Actor"
-            obj.save()
-
-        self.assertEqual(obj.edited_by, "Manual Actor")
-
-    def test_request_context_still_populates_audit_actor(self):
+    def test_request_context_populates_audit_actor(self):
+        """OperationContext with request user correctly populates audit fields."""
         request = SimpleNamespace(user="Request User")
 
         with OperationContext(request=request):
@@ -442,3 +415,33 @@ class ProgrammaticCreationTest(TransactionTestCase):
             )
 
         self.assertEqual(obj.created_by, "Request User")
+
+    def test_explicit_created_by_is_overwritten_by_request_context(self):
+        """Even with explicit created_by, the request user always wins."""
+        request = SimpleNamespace(user="Request User")
+
+        with OperationContext(request=request):
+            obj = ProgrammaticTestModel.objects.create(
+                name="explicit_ignored_on_create",
+                value=1,
+                created_by="Manual Actor",
+            )
+
+        self.assertEqual(obj.created_by, "Request User")
+
+    def test_explicit_edited_by_is_overwritten_by_request_context(self):
+        """Even with explicit edited_by, the request user always wins."""
+        request = SimpleNamespace(user="Request User")
+
+        with OperationContext(request=request):
+            obj = ProgrammaticTestModel.objects.create(
+                name="explicit_ignored_on_update",
+                value=1,
+            )
+
+        with OperationContext(request=request):
+            obj.value = 2
+            obj.edited_by = "Manual Actor"
+            obj.save()
+
+        self.assertEqual(obj.edited_by, "Request User")

@@ -43,7 +43,6 @@ class GenericAppConfig(AppConfig):
         self.discovered_models = {}
         predefined_structure = {"AuditLog": {
             "auditlog": None,
-            "auditlogstatus": None
         },
         "CalculationLog" : {
             "calculationlog": None,

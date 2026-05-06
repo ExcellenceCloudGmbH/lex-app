@@ -47,21 +47,18 @@ class TestBuildContext(SimpleTestCase):
         self.assertEqual(ctx["request_obj"], "")
         self.assertEqual(ctx["calculation_id"], "")
         self.assertIsNone(ctx["audit_log_temp"])
-        self.assertIsNone(ctx["actor"])
 
     def test_all_explicit(self):
         ctx = _build_context(
             request="req",
             calculation_id="calc_1",
             audit_log="log",
-            actor="user",
             operation_id="op_1",
         )
         self.assertEqual(ctx["operation_id"], "op_1")
         self.assertEqual(ctx["request_obj"], "req")
         self.assertEqual(ctx["calculation_id"], "calc_1")
         self.assertEqual(ctx["audit_log_temp"], "log")
-        self.assertEqual(ctx["actor"], "user")
 
 
 class TestExtractInfoRequest(SimpleTestCase):

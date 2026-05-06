@@ -95,10 +95,6 @@ def _resolve_calculation_id(instance, *, context_data=None) -> Optional[str]:
 def _resolve_actor(context_data=None) -> str:
     resolved_context = _resolve_context_data(context_data)
 
-    actor = resolved_context.get("actor")
-    if actor:
-        return str(actor)
-
     request_obj = resolved_context.get("request_obj")
     if isinstance(request_obj, dict):
         request_user = request_obj.get("user")

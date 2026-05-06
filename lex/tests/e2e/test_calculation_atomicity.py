@@ -10,6 +10,7 @@ Focused tests for CalculationModel atomicity guarantees:
 """
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection, models
@@ -286,7 +287,7 @@ class TestNestedCalculation(E2ETestCase):
 
     def test_parent_triggers_children(self):
         """Parent calculates total from 3 child outputs."""
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             ChildCalcModel.objects.create(factor=1)
             ChildCalcModel.objects.create(factor=2)
             ChildCalcModel.objects.create(factor=3)
@@ -309,7 +310,7 @@ class TestNestedCalculation(E2ETestCase):
 
     def test_parent_with_no_children(self):
         """Parent with no children → total=0, child_count=0."""
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             parent = ParentCalcModel.objects.create()
 
         with OperationContext(calculation_id="empty-parent"):
@@ -330,11 +331,11 @@ class TestPostValidationRollback(E2ETestCase):
 
     def test_over_budget_rolls_back(self):
         """Budget exceeds limit → post_validation rolls back."""
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             fund = PostValidationFund.objects.create(
                 name="Growth Fund", budget=50_000, budget_limit=100_000,
             )
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             with self.assertRaises(ValidationError):
                 fund.budget = 150_000
                 fund.save()
@@ -344,11 +345,11 @@ class TestPostValidationRollback(E2ETestCase):
 
     def test_within_budget_succeeds(self):
         """Budget within limit → save succeeds."""
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             fund = PostValidationFund.objects.create(
                 name="Safe Fund", budget=30_000, budget_limit=100_000,
             )
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             fund.budget = 90_000
             fund.save()
 
@@ -617,7 +618,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         the transaction commits, so every level retains
         IN_PROGRESS → SUCCESS in history.
         """
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             HistChild.objects.create(factor=2)
             HistChild.objects.create(factor=3)
             parent = HistParent.objects.create()
@@ -655,7 +656,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         only roll back the data changes from calculate(), not the
         state-machine transitions.
         """
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             HistChild.objects.create(factor=5, should_fail=True)
             parent = HistParent.objects.create()
 
@@ -696,7 +697,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         controls whether *data* changes in calculate() are rolled back,
         not the state-machine history.
         """
-        with OperationContext(actor="Trader"):
+        with OperationContext(request=SimpleNamespace(user="Trader")):
             HistChild.objects.create(factor=7, should_fail=True)
             parent = HistNonAtomicParent.objects.create()
 
@@ -742,7 +743,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         Correct parent history: NOT_CALCULATED → IN_PROGRESS → ERROR.
         IN_PROGRESS must survive — atomicity only rolls back data.
         """
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             HistChild.objects.create(factor=2, should_fail=False)
             HistChild.objects.create(factor=5, should_fail=True)
             parent = HistParent.objects.create()
@@ -767,7 +768,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         Grandparent → Parent → 2 Children, all succeed:
         every level shows IN_PROGRESS → SUCCESS in history.
         """
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             HistChild.objects.create(factor=1)
             HistChild.objects.create(factor=2)
             HistParent.objects.create()
@@ -808,7 +809,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         IN_PROGRESS must survive at the root level.
         Intermediate and leaf must end in ERROR.
         """
-        with OperationContext(actor="Risk"):
+        with OperationContext(request=SimpleNamespace(user="Risk")):
             HistChild.objects.create(factor=3, should_fail=True)
             HistParent.objects.create()
             gp = HistGrandparent.objects.create()
@@ -852,7 +853,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
 
         IN_PROGRESS must survive for both levels.
         """
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             child = HistChild.objects.create(factor=9, should_fail=True)
             parent = HistNonAtomicParent.objects.create()
 
@@ -905,7 +906,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         Parent:  NOT_CALCULATED → IN_PROGRESS → SUCCESS   (3 entries)
         Child:   NOT_CALCULATED → IN_PROGRESS → SUCCESS   (3 entries)
         """
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             child = HistChild.objects.create(factor=4, should_fail=False)
             parent = HistNonAtomicParent.objects.create()
 
@@ -954,7 +955,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         Correct parent history: NOT_CALCULATED → IN_PROGRESS → ERROR.
         No duplicate rows.
         """
-        with OperationContext(actor="Risk"):
+        with OperationContext(request=SimpleNamespace(user="Risk")):
             HistChild.objects.create(factor=3, should_fail=True)
             parent = HistParent.objects.create()
 
@@ -982,7 +983,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
         Every level: exactly one IN_PROGRESS, exactly one SUCCESS,
         no duplicates.
         """
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             HistChild.objects.create(factor=6)
             parent = HistParent.objects.create()
 
@@ -1091,7 +1092,7 @@ class TestCalculationHistoryInAtomicity(E2ETestCase):
 
         No duplicate IN_PROGRESS entries at any level.
         """
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             child1 = HistChild.objects.create(factor=2, should_fail=False)
             child2 = HistChild.objects.create(factor=5, should_fail=True)
             parent = HistParent.objects.create()

@@ -742,9 +742,6 @@ class LexModel(LifecycleModel):
 
     def _resolve_audit_actor(self) -> str:
         context = self._get_operation_context()
-        explicit_actor = self._normalize_audit_actor(context.get('actor'))
-        if explicit_actor:
-            return explicit_actor
 
         request_actor = self._resolve_request_audit_actor(context.get('request_obj'))
         if request_actor:
@@ -752,14 +749,16 @@ class LexModel(LifecycleModel):
 
         return self.FALLBACK_AUDIT_ACTOR
 
-    def _has_explicit_created_by_override(self) -> bool:
-        return self._normalize_audit_actor(self.created_by) is not None
+    def _has_field(self, field_name: str) -> bool:
+        """Return True if this model actually has the given field (not removed via None override)."""
+        try:
+            self._meta.get_field(field_name)
+            return True
+        except Exception:
+            return False
 
     def _has_explicit_created_at_override(self) -> bool:
         return self._explicit_timestamp_overrides.get('created_at', False) and self.created_at is not None
-
-    def _has_explicit_edited_by_override(self) -> bool:
-        return self.has_changed('edited_by') and self._normalize_audit_actor(self.edited_by) is not None
 
     def _has_explicit_edited_at_override(self) -> bool:
         return self.has_changed('edited_at') and self.edited_at is not None
@@ -768,6 +767,8 @@ class LexModel(LifecycleModel):
     def update_timestamps_on_create(self):
         # Skip if we are syncing from history (bitemporal sync)
         if getattr(self, 'skip_history_when_saving', False):
+            return
+        if not self._has_field('created_at'):
             return
 
         current_timestamp = lex_datetime_now()
@@ -781,6 +782,8 @@ class LexModel(LifecycleModel):
         # Skip if we are syncing from history (bitemporal sync)
         if getattr(self, 'skip_history_when_saving', False):
             return
+        if not self._has_field('edited_at'):
+            return
 
         if self._has_explicit_edited_at_override():
             return
@@ -792,8 +795,7 @@ class LexModel(LifecycleModel):
         # Skip if we are syncing from history (bitemporal sync)
         if getattr(self, 'skip_history_when_saving', False):
             return
-
-        if self._has_explicit_edited_by_override():
+        if not self._has_field('edited_by'):
             return
 
         self.edited_by = self._resolve_audit_actor()
@@ -803,8 +805,7 @@ class LexModel(LifecycleModel):
         # Skip if we are syncing from history (bitemporal sync)
         if getattr(self, 'skip_history_when_saving', False):
             return
-
-        if self._has_explicit_created_by_override():
+        if not self._has_field('created_by'):
             return
 
         self.created_by = self._resolve_audit_actor()
