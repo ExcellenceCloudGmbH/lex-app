@@ -869,58 +869,102 @@ def calc_and_save_sync(models, *args):
     logger.info(f"Starting synchronous processing of {model_count} models")
     
     processed_count = 0
+    error_count = 0
+    errors = []
     
     for i, model in enumerate(models):
-        if model is None:
-            raise CalculatedModelError(
-                f"Model {i + 1}/{model_count} is None, cannot process",
-                model_index=i,
-                total_models=model_count
-            )
-        
-        logger.debug(f"Processing model {i + 1}/{model_count} of type {model.__class__.__name__}")
-        
-        # Calculate the model
         try:
-            # Push the child model onto the model_context stack so that
-            # LexLogger / CalculationLog can identify it as the *current*
-            # model while the trigger remains visible as the *parent*.
-            from lex.audit_logging.utils.ModelContext import model_logging_context
-            with model_logging_context(model):
-                model.lex_func()(*args)
-            logger.debug(f"Calculation completed for model {i + 1}")
-        except Exception as calc_error:
-            raise CalculatedModelError(
-                f"Calculation failed for model {i + 1}: {str(calc_error)}",
-                model_class=model.__class__.__name__,
-                model_index=i,
-                total_models=model_count
-            ) from calc_error
-        
-        # Save the model
-        try:
-            model.save()
-            processed_count += 1
-            logger.debug(f"Successfully saved model {i + 1}")
+            if model is None:
+                logger.warning(f"Model {i + 1}/{model_count} is None, skipping")
+                continue
             
-        except Exception as save_error:
-            logger.warning(f"Save failed for model {i + 1}, attempting duplicate handling: {save_error}")
+            logger.debug(f"Processing model {i + 1}/{model_count} of type {model.__class__.__name__}")
             
-            # Handle duplicate models with same defining fields
-            resolved_model = model.delete_models_with_same_defining_fields()
+            # Calculate the model
+            try:
+                # Push the child model onto the model_context stack so that
+                # LexLogger / CalculationLog can identify it as the *current*
+                # model while the trigger remains visible as the *parent*.
+                from lex.audit_logging.utils.ModelContext import model_logging_context
+                with model_logging_context(model):
+                    model.lex_func()(*args)
+                logger.debug(f"Calculation completed for model {i + 1}")
+            except Exception as calc_error:
+                raise CalculatedModelError(
+                    f"Calculation failed for model {i + 1}: {str(calc_error)}",
+                    model_class=model.__class__.__name__,
+                    model_index=i,
+                    total_models=model_count
+                ) from calc_error
+            
+            # Save the model
+            try:
+                model.save()
+                processed_count += 1
+                logger.debug(f"Successfully saved model {i + 1}")
+                
+            except Exception as save_error:
+                logger.warning(f"Save failed for model {i + 1}, attempting duplicate handling: {save_error}")
+                
+                try:
+                    # Handle duplicate models with same defining fields
+                    resolved_model = model.delete_models_with_same_defining_fields()
 
-            if resolved_model != model:
-                # Existing model found, use its PK
-                model.pk = resolved_model.pk
-                logger.info(f"Using existing model with PK {resolved_model.pk}")
+                    if resolved_model != model:
+                        # Existing model found, use its PK
+                        model.pk = resolved_model.pk
+                        logger.info(f"Using existing model with PK {resolved_model.pk}")
 
-            # Single save attempt with the resolved model
-            model.save()
+                    # Single save attempt with the resolved model
+                    model.save()
 
-            processed_count += 1
-            logger.info(f"Successfully saved model {i + 1} after duplicate handling")
+                    processed_count += 1
+                    logger.info(f"Successfully saved model {i + 1} after duplicate handling")
+                    
+                except Exception as duplicate_error:
+                    error_count += 1
+                    error_msg = f"Model {i + 1} save failed even after duplicate handling: {str(duplicate_error)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+            
+        except CalculatedModelError as calc_model_error:
+            error_count += 1
+            error_msg = f"Model {i + 1}: {str(calc_model_error)}"
+            errors.append(error_msg)
+            logger.error(error_msg)
+            
+        except Exception as unexpected_error:
+            error_count += 1
+            error_msg = f"Unexpected error processing model {i + 1}: {str(unexpected_error)}"
+            errors.append(error_msg)
+            logger.error(error_msg)
     
-    logger.info(f"Synchronous processing completed successfully: {processed_count}/{model_count} models processed")
+    # Log final results
+    if error_count == 0:
+        logger.info(f"Synchronous processing completed successfully: {processed_count}/{model_count} models processed")
+    elif processed_count > 0:
+        logger.warning(
+            f"Synchronous processing completed with errors: {processed_count}/{model_count} models processed successfully, "
+            f"{error_count} failed"
+        )
+        if errors:
+            error_sample = "; ".join(errors[:3])
+            if len(errors) > 3:
+                error_sample += f" (and {len(errors) - 3} more errors)"
+            logger.warning(f"Sample errors: {error_sample}")
+    else:
+        # All models failed
+        error_summary = "; ".join(errors[:5])
+        if len(errors) > 5:
+            error_summary += f" (and {len(errors) - 5} more errors)"
+        
+        raise CalculatedModelError(
+            f"Synchronous processing failed for all {model_count} models. Errors: {error_summary}",
+            total_models=model_count,
+            processed_models=processed_count,
+            failed_models=error_count,
+            error_count=len(errors)
+        )
 
 
 class CalculatedModelMixinMeta(ModelBase):

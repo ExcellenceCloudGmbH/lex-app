@@ -10,7 +10,12 @@ def is_excluded(field):
     # non-concrete virtual fields (e.g. GenericForeignKey).  Virtual fields
     # cannot be serialised by DRF's ModelSerializer – they resolve to raw
     # model instances at runtime which are not JSON-serializable.
-    return field.auto_created or not getattr(field, 'concrete', True)
+    # ManyToManyField is non-concrete but DRF handles it properly, so keep it.
+    if field.auto_created:
+        return True
+    if not getattr(field, 'concrete', True) and not getattr(field, 'many_to_many', False):
+        return True
+    return False
 
 
 def get_all_fields(model):
