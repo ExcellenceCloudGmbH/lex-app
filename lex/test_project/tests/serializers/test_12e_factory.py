@@ -23,7 +23,9 @@ exercise the factory functions in
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from django.db import models
 from django.test import SimpleTestCase
 from rest_framework import serializers as drf_serializers
 
@@ -34,6 +36,7 @@ from lex.api.serializers.base_serializers import (
     _wrap_custom_serializer,
     get_serializer_map_for_model,
     model2serializer,
+    resolve_requested_serializer_name,
 )
 
 from .models import WideItem
@@ -158,6 +161,170 @@ class TestCluster12e_FactoryContract(SimpleTestCase):
             test_12_28_get_serializer_map_returns_same_class_per_model,
         )
     )
+
+    def _with_wide_api_serializers(self, serializers_map: dict[str, type]) -> None:
+        """Temporarily install ``WideItem.api_serializers`` for one test."""
+        had_api_serializers = hasattr(WideItem, "api_serializers")
+        original_api_serializers = getattr(WideItem, "api_serializers", None)
+
+        def _restore() -> None:
+            if had_api_serializers:
+                WideItem.api_serializers = original_api_serializers
+            elif hasattr(WideItem, "api_serializers"):
+                delattr(WideItem, "api_serializers")
+
+        self.addCleanup(_restore)
+        WideItem.api_serializers = serializers_map
+
+    @staticmethod
+    def _configured_alias():
+        """Patch the project-level default serializer alias to a non-default name."""
+        return patch(
+            "lex.core.config.get_configured_default_serializer_name",
+            return_value="framework_default",
+        )
+
+    # -- 12.32 ---------------------------------------------------------
+    def test_12_32_source_default_override_exposes_framework_alias(self) -> None:
+        """Scenario 12.32: overriding ``api_serializers['default']``
+        keeps the developer serializer at ``default`` and exposes the
+        auto-generated framework serializer under the configured alias.
+        """
+
+        class WideDefaultOverride(drf_serializers.ModelSerializer):
+            class Meta:
+                model = WideItem
+                fields = ["name"]
+
+        class WideDetailSerializer(drf_serializers.ModelSerializer):
+            class Meta:
+                model = WideItem
+                fields = ["name", "amount", "notes"]
+
+        self._with_wide_api_serializers(
+            {"default": WideDefaultOverride, "detail": WideDetailSerializer},
+        )
+
+        with self._configured_alias():
+            serializers_map = get_serializer_map_for_model(
+                WideItem,
+                default_fields=["name", "amount", "notes"],
+            )
+
+        self.assertEqual(
+            set(serializers_map.keys()),
+            {"default", "framework_default", "detail"},
+        )
+        self.assertIsNot(
+            serializers_map["default"], serializers_map["framework_default"],
+        )
+        self.assertIn(
+            "framework_default", serializers_map,
+            "The framework auto-generated serializer must be addressable by "
+            "the configured alias when api_serializers['default'] is overridden.",
+        )
+        self.assertEqual(
+            resolve_requested_serializer_name(serializers_map, "default"),
+            "default",
+            "Public API requests for ?serializer=default keep resolving to the "
+            "developer override; the framework alias is an additional explicit view.",
+        )
+        self.assertEqual(
+            resolve_requested_serializer_name(serializers_map, "framework_default"),
+            "framework_default",
+        )
+        self.assertEqual(
+            resolve_requested_serializer_name(serializers_map, "detail"),
+            "detail",
+        )
+
+    # -- 12.33 ---------------------------------------------------------
+    def test_12_33_history_table_inherits_framework_alias_from_source(self) -> None:
+        """Scenario 12.33: history tables inherit the source model's
+        framework-alias decision without copying its custom serializers.
+        """
+
+        class WideDefaultOverride(drf_serializers.ModelSerializer):
+            class Meta:
+                model = WideItem
+                fields = ["name"]
+
+        class WideDetailSerializer(drf_serializers.ModelSerializer):
+            class Meta:
+                model = WideItem
+                fields = ["name", "amount"]
+
+        class SerializerAliasHistoryProbe(models.Model):
+            instance_type = WideItem
+            name = models.CharField(max_length=200)
+            history_id = models.AutoField(primary_key=True)
+
+            class Meta:
+                app_label = "lex_app"
+                managed = False
+
+        self._with_wide_api_serializers(
+            {"default": WideDefaultOverride, "detail": WideDetailSerializer},
+        )
+
+        with self._configured_alias():
+            serializers_map = get_serializer_map_for_model(SerializerAliasHistoryProbe)
+
+        self.assertEqual(set(serializers_map.keys()), {"default", "framework_default"})
+        self.assertIs(serializers_map["default"], serializers_map["framework_default"])
+        self.assertIs(serializers_map["framework_default"].Meta.model, SerializerAliasHistoryProbe)
+
+    # -- 12.34 ---------------------------------------------------------
+    def test_12_34_meta_history_table_walks_instance_type_chain_for_alias(self) -> None:
+        """Scenario 12.34: meta-history tables inherit through the full
+        ``MetaHistorical → Historical → Source`` instance_type chain.
+        """
+
+        class WideDefaultOverride(drf_serializers.ModelSerializer):
+            class Meta:
+                model = WideItem
+                fields = ["name"]
+
+        class SerializerAliasHistoryChainProbe(models.Model):
+            instance_type = WideItem
+            name = models.CharField(max_length=200)
+            history_id = models.AutoField(primary_key=True)
+
+            class Meta:
+                app_label = "lex_app"
+                managed = False
+
+        class SerializerAliasMetaHistoryProbe(models.Model):
+            instance_type = SerializerAliasHistoryChainProbe
+            meta_history_id = models.AutoField(primary_key=True)
+
+            class Meta:
+                app_label = "lex_app"
+                managed = False
+
+        self._with_wide_api_serializers({"default": WideDefaultOverride})
+
+        with self._configured_alias():
+            serializers_map = get_serializer_map_for_model(SerializerAliasMetaHistoryProbe)
+
+        self.assertEqual(set(serializers_map.keys()), {"default", "framework_default"})
+        self.assertIs(serializers_map["default"], serializers_map["framework_default"])
+        self.assertIs(serializers_map["framework_default"].Meta.model, SerializerAliasMetaHistoryProbe)
+
+    # -- 12.35 ---------------------------------------------------------
+    def test_12_35_wrap_custom_serializer_preserves_hide_actions_column(self) -> None:
+        """Scenario 12.35: ``Meta.hide_actions_column`` survives wrapping."""
+
+        class HiddenActionsSerializer(drf_serializers.ModelSerializer):
+            class Meta:
+                model = WideItem
+                fields = ["name", "amount"]
+                hide_actions_column = True
+
+        wrapped = _wrap_custom_serializer(HiddenActionsSerializer, WideItem)
+
+        self.assertTrue(wrapped.Meta.hide_actions_column)
+        self.assertEqual(wrapped.get_list_ui_options(), {"hide_actions_column": True})
 
 
 if __name__ == "__main__":  # pragma: no cover

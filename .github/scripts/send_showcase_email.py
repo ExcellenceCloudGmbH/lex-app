@@ -45,6 +45,12 @@ def main(argv: list[str]) -> int:
                    help="'true' or 'false' — shapes the subject line")
     p.add_argument("--clusters-passing", default=None,
                    help="e.g. '14/14' — included in the subject when provided")
+    p.add_argument("--run-kind", default="manual",
+                   help="Where this run came from: 'release' (called from "
+                        "pip_publish.yml), 'manual' (operator-dispatched "
+                        "showcase_tests.yml), or 'scheduled'. Surfaces in the "
+                        "subject line so recipients can tell a release-gating "
+                        "run apart from an ad-hoc manual one.")
     args = p.parse_args(argv)
 
     api_key = os.environ.get("SENDGRID_API_KEY")
@@ -96,7 +102,22 @@ def main(argv: list[str]) -> int:
     marker = "✓ all green" if overall_ok else "✗ action required"
     cluster_tag = f" — {args.clusters_passing} clusters passing" if args.clusters_passing else ""
     today = dt.datetime.now(dt.timezone.utc).strftime("%d %b %Y")
-    subject = f"[{marker}{cluster_tag}] {brand} — Platform Health Report, {today}"
+    # Subject prefix tells stakeholders at a glance whether this email
+    # was triggered by an automated release pipeline (gating a PyPI
+    # publish) or by someone manually invoking the showcase workflow
+    # for ad-hoc validation. The two have very different urgencies:
+    # a manual run that fails is informational, a release run that
+    # fails actively blocks a publish.
+    run_kind = (args.run_kind or "manual").strip().lower()
+    kind_label = {
+        "release":   "Release",
+        "manual":    "Manual",
+        "scheduled": "Scheduled",
+    }.get(run_kind, run_kind.title() or "Manual")
+    subject = (
+        f"[{kind_label}] [{marker}{cluster_tag}] "
+        f"{brand} — Platform Health Report, {today}"
+    )
 
     message = Mail(
         from_email=From(sender, sender_name),
