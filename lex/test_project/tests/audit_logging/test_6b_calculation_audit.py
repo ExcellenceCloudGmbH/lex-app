@@ -393,10 +393,102 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
             "the docs promise the audit survives any rollback.",
         )
 
+    # -- 6.10e: real end-to-end through calc.save() -------------------
+    @unittest.expectedFailure  # BUG-001b end-to-end: failed atomic calc.save() drops its terminal audit row on rollback
+    def test_6_10e_real_failed_atomic_calc_save_loses_audit(self) -> None:
+        """
+        Scenario 6.10e — BUG-001b reproduced through the *real*
+        customer code path, with no synthetic ``transaction.atomic``
+        wrappers in the test.
+
+        Path traced through the framework (May 2026):
+
+          1. ``calc.is_calculated = IN_PROGRESS; calc.save()``
+             enters ``LexModel.save()``'s outer atomic block.
+          2. ``AFTER_UPDATE`` hook fires ``calculate_hook`` →
+             ``execute_calculation_sync()``.
+          3. ``execute_calculation_sync`` opens its own savepoint:
+             ``with transaction.atomic(): func()`` (line 453 of
+             ``CalculationModel.py``). ``func()`` calls
+             ``calculate()``, which raises ``RuntimeError`` because
+             ``should_fail=True``.
+          4. Savepoint rolls back. The exception propagates up to
+             ``LexModel.save()``'s ``except`` branch (line 531).
+          5. The except branch calls
+             ``self._finalize_pending_terminal_audit()`` (line 533),
+             which in turn calls ``ensure_terminal_calculation_audit
+             (audit_status='failure', stack_trace=...)``. **This call
+             happens INSIDE the still-open outer atomic.**
+          6. The except re-raises (line 534).
+          7. The outer atomic rolls back — and takes the audit row
+             with it.
+
+        Customer-visible expectation: after ``calc.save()`` raises,
+        an ``AuditLog`` row with ``status='failure'`` and the
+        traceback exists for that calc instance. That's the
+        operator's only forensic evidence the calc was attempted.
+
+        Observed under BUG-001b: ``AuditLog`` table is empty for
+        that calc. The framework wrote the audit row, but the same
+        atomic that wrapped the calc body wiped it on the way out.
+
+        This is the test 6.10/6.10b/6.10c/6.10d simulate
+        synthetically — but driven through the actual production
+        code path. If this xfail flips green, BUG-001b is fixed at
+        the customer-visible level.
+        """
+        AuditLog.objects.all().delete()
+
+        calc = AuditAtomicCalc.objects.create(
+            name="c6-10e", should_fail=True,
+        )
+
+        # Customer-realistic trigger: flip is_calculated to IN_PROGRESS
+        # (the documented "API triggers calculation" path) and save.
+        # The AFTER_UPDATE WhenFieldValueIs(IN_PROGRESS) hook will fire
+        # the calc body, which will raise RuntimeError.
+        calc.is_calculated = calc.IN_PROGRESS
+        try:
+            calc.save()
+        except Exception:
+            # The calc body raised; LexModel.save() re-raises after
+            # finalising the audit. That's the documented behaviour
+            # — the test cares about what landed in the audit table,
+            # not about whether the save() raised.
+            pass
+
+        # Customer expectation: a terminal failure audit exists for
+        # this calc. (Either at least one row with failure status,
+        # OR — if the framework consolidates per-calc — exactly one
+        # row whose status is 'failure'.)
+        rows = AuditLog.objects.filter(
+            resource="auditatomiccalc", object_id=calc.pk,
+        )
+        self.assertGreaterEqual(
+            rows.count(), 1,
+            "After a real failed atomic calc.save(), at least one "
+            "terminal AuditLog row must exist for the calc — got "
+            "%d. The framework's failure path calls "
+            "ensure_terminal_calculation_audit, but the call sits "
+            "inside the same outer atomic that's about to roll back, "
+            "so the row never reaches durable storage. This is the "
+            "BUG-001b failure mode in its customer-visible form."
+            % rows.count(),
+        )
+        # And the audit row must carry 'failure' status (otherwise
+        # the operator sees a phantom 'success' row for a calc that
+        # actually crashed).
+        log = rows.order_by("-id").first()
+        status_row = AuditLogStatus.objects.filter(audit_log=log).first()
+        self.assertEqual(
+            getattr(status_row, "status", None), "failure",
+            "Terminal audit for a failed calc must carry "
+            "status='failure'. Got %r." % (
+                getattr(status_row, "status", None),
+            ),
+        )
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-
-
-
 
