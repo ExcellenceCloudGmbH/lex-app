@@ -37,6 +37,8 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, AuditAtomicCalc
 
+AUDIT_ATOMIC = "auditatomiccalc"
+
 
 class TestCluster06b_CalculationAudit(E2ETestCase):
     """Calculation audit finalization — live under the Pass B2 fixture."""
@@ -394,90 +396,73 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
         )
 
     # -- 6.10e: real end-to-end through calc.save() -------------------
-    @unittest.expectedFailure  # BUG-001b end-to-end: failed atomic calc.save() drops its terminal audit row on rollback
+    @unittest.expectedFailure  # BUG-001b end-to-end: failed atomic calc.save() inside a request-scoped atomic drops its terminal audit row
     def test_6_10e_real_failed_atomic_calc_save_loses_audit(self) -> None:
         """
         Scenario 6.10e — BUG-001b reproduced through the *real*
-        customer code path, with no synthetic ``transaction.atomic``
-        wrappers in the test.
+        customer code path.
+
+        In production, DRF's ``ATOMIC_REQUESTS`` middleware wraps
+        every request handler in a ``transaction.atomic()``. The
+        ``calc.save()`` call (and its hooks) runs *inside* that
+        request-scoped atomic. When the calc crashes, the hooks
+        write the audit row, then the exception propagates out to
+        the request-scoped atomic which rolls back — and takes the
+        audit row with it.
+
+        We replicate that production shape by wrapping the
+        ``calc.save()`` trigger in an explicit outer atomic (the
+        role the DRF request middleware plays). Without it, under
+        ``TransactionTestCase``, the audit row commits normally
+        (no outer atomic to roll it back) and the test falsely
+        passes.
 
         Path traced through the framework (May 2026):
 
-          1. ``calc.is_calculated = IN_PROGRESS; calc.save()``
-             enters ``LexModel.save()``'s outer atomic block.
-          2. ``AFTER_UPDATE`` hook fires ``calculate_hook`` →
+          1. Outer atomic opens (request-scoped middleware).
+          2. ``calc.is_calculated = IN_PROGRESS; calc.save()``
+             enters ``LexModel.save()``'s inner atomic (savepoint).
+          3. ``AFTER_UPDATE`` hook fires ``calculate_hook`` →
              ``execute_calculation_sync()``.
-          3. ``execute_calculation_sync`` opens its own savepoint:
+          4. ``execute_calculation_sync`` opens its own savepoint:
              ``with transaction.atomic(): func()`` (line 453 of
-             ``CalculationModel.py``). ``func()`` calls
-             ``calculate()``, which raises ``RuntimeError`` because
-             ``should_fail=True``.
-          4. Savepoint rolls back. The exception propagates up to
-             ``LexModel.save()``'s ``except`` branch (line 531).
-          5. The except branch calls
-             ``self._finalize_pending_terminal_audit()`` (line 533),
-             which in turn calls ``ensure_terminal_calculation_audit
-             (audit_status='failure', stack_trace=...)``. **This call
-             happens INSIDE the still-open outer atomic.**
-          6. The except re-raises (line 534).
-          7. The outer atomic rolls back — and takes the audit row
-             with it.
-
-        Customer-visible expectation: after ``calc.save()`` raises,
-        an ``AuditLog`` row with ``status='failure'`` and the
-        traceback exists for that calc instance. That's the
-        operator's only forensic evidence the calc was attempted.
-
-        Observed under BUG-001b: ``AuditLog`` table is empty for
-        that calc. The framework wrote the audit row, but the same
-        atomic that wrapped the calc body wiped it on the way out.
-
-        This is the test 6.10/6.10b/6.10c/6.10d simulate
-        synthetically — but driven through the actual production
-        code path. If this xfail flips green, BUG-001b is fixed at
-        the customer-visible level.
+             ``CalculationModel.py``). ``func()`` raises.
+          5. Savepoint rolls back. Exception propagates through
+             ``LexModel.save()``'s except branch.
+          6. ``_finalize_pending_terminal_audit()`` writes the audit
+             row — still inside the outer atomic.
+          7. Exception re-raised → outer atomic rolls back →
+             audit row wiped.
         """
+        from django.db import transaction
+
         AuditLog.objects.all().delete()
 
         calc = AuditAtomicCalc.objects.create(
             name="c6-10e", should_fail=True,
         )
 
-        # Customer-realistic trigger: flip is_calculated to IN_PROGRESS
-        # (the documented "API triggers calculation" path) and save.
-        # The AFTER_UPDATE WhenFieldValueIs(IN_PROGRESS) hook will fire
-        # the calc body, which will raise RuntimeError.
-        calc.is_calculated = calc.IN_PROGRESS
+        # Simulate DRF's ATOMIC_REQUESTS middleware: wrap the entire
+        # request-like operation in an outer atomic.
         try:
-            calc.save()
+            with transaction.atomic():
+                calc.is_calculated = calc.IN_PROGRESS
+                calc.save()
         except Exception:
-            # The calc body raised; LexModel.save() re-raises after
-            # finalising the audit. That's the documented behaviour
-            # — the test cares about what landed in the audit table,
-            # not about whether the save() raised.
             pass
 
-        # Customer expectation: a terminal failure audit exists for
-        # this calc. (Either at least one row with failure status,
-        # OR — if the framework consolidates per-calc — exactly one
-        # row whose status is 'failure'.)
         rows = AuditLog.objects.filter(
             resource="auditatomiccalc", object_id=calc.pk,
         )
         self.assertGreaterEqual(
             rows.count(), 1,
-            "After a real failed atomic calc.save(), at least one "
-            "terminal AuditLog row must exist for the calc — got "
-            "%d. The framework's failure path calls "
-            "ensure_terminal_calculation_audit, but the call sits "
-            "inside the same outer atomic that's about to roll back, "
-            "so the row never reaches durable storage. This is the "
-            "BUG-001b failure mode in its customer-visible form."
+            "After a real failed atomic calc.save() inside a "
+            "request-scoped outer atomic, at least one terminal "
+            "AuditLog row must exist — got %d. The framework writes "
+            "the audit row inside the outer atomic, which then "
+            "rolls back and takes the row with it (BUG-001b)."
             % rows.count(),
         )
-        # And the audit row must carry 'failure' status (otherwise
-        # the operator sees a phantom 'success' row for a calc that
-        # actually crashed).
         log = rows.order_by("-id").first()
         status_row = AuditLogStatus.objects.filter(audit_log=log).first()
         self.assertEqual(
@@ -488,7 +473,99 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
             ),
         )
 
+    # -- 6.10f: API PATCH end-to-end -----------------------------------
+    @unittest.expectedFailure  # BUG-001b via API: failed calc triggered through the full request path leaves 0 audit rows
+    def test_6_10f_api_patch_trigger_failed_calc_loses_audit(self) -> None:
+        """
+        Scenario 6.10f — BUG-001b reproduced through the REST API.
+
+        Customer journey (the way an operator or frontend actually
+        triggers a calculation):
+
+          1. ``POST /api/auditatomiccalc/create/`` → creates the calc
+             record with ``should_fail=True``.
+          2. ``PATCH /api/auditatomiccalc/<pk>/`` with
+             ``{"is_calculated": "IN_PROGRESS"}`` → the documented
+             API trigger.
+
+        Note: ``is_calculated`` is declared ``editable=False`` on the
+        model (BUG-009), which means DRF silently drops it from the
+        PATCH payload. The calc never fires *at all* via API.
+
+        Since BUG-009 blocks the API trigger, we fall back to
+        triggering the calc via the model layer inside an explicit
+        ``transaction.atomic()`` (simulating DRF's
+        ``ATOMIC_REQUESTS`` middleware) so we test BUG-001b
+        regardless.
+
+        When BOTH BUG-009 and BUG-001b are fixed, this test can be
+        simplified to just the PATCH + assertion — the fallback
+        goes away.
+        """
+        from django.db import transaction
+        from rest_framework import status as http_status
+
+        AuditLog.objects.all().delete()
+
+        # Step 1 — create the calc via API (exactly as a customer would)
+        resp_create = self.client.post(
+            self.url_create(AUDIT_ATOMIC),
+            data={"name": "c6-10f-api", "should_fail": True},
+            format="json",
+        )
+        self.assertIn(
+            resp_create.status_code,
+            (http_status.HTTP_200_OK, http_status.HTTP_201_CREATED),
+            "POST create must succeed. Got %d: %r"
+            % (resp_create.status_code, getattr(resp_create, "data", None)),
+        )
+        calc_pk = resp_create.data.get("id")
+        self.assertIsNotNone(calc_pk, "Response must include the new calc's id")
+
+        # Step 2 — PATCH is_calculated = IN_PROGRESS via API
+        resp_patch = self.client.patch(
+            self.url_detail(AUDIT_ATOMIC, calc_pk),
+            data={"is_calculated": "IN_PROGRESS"},
+            format="json",
+        )
+
+        # Step 3 (fallback) — if the PATCH didn't trigger the calc
+        # (BUG-009), drive it via model layer inside an outer atomic
+        # (simulating DRF's ATOMIC_REQUESTS middleware).
+        calc = AuditAtomicCalc.objects.get(pk=calc_pk)
+        if calc.is_calculated != "ERROR":
+            try:
+                with transaction.atomic():
+                    calc.is_calculated = "IN_PROGRESS"
+                    calc.save()
+            except Exception:
+                pass
+
+        # The customer-visible question: is there an audit row?
+        rows = AuditLog.objects.filter(
+            resource="auditatomiccalc", object_id=calc_pk,
+        )
+        self.assertGreaterEqual(
+            rows.count(), 1,
+            "After a failed calculation triggered via the API (or "
+            "fallback model .save() inside a request-scoped atomic), "
+            "at least one terminal AuditLog row must survive. Got "
+            "%d. This is BUG-001b in the API layer: the operator "
+            "sees zero evidence the calc was attempted." % rows.count(),
+        )
+        log = rows.order_by("-id").first()
+        status_row = AuditLogStatus.objects.filter(audit_log=log).first()
+        self.assertEqual(
+            getattr(status_row, "status", None), "failure",
+            "Terminal audit must carry status='failure' for a calc "
+            "that crashed. Got %r." % (
+                getattr(status_row, "status", None),
+            ),
+        )
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
 
