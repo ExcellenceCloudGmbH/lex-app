@@ -65,13 +65,25 @@ from .models import ALL_MODELS, CeleryCalc
 # ---------------------------------------------------------------------
 @contextmanager
 def _celery_eager(propagate: bool = True):
+    # See test_8h_eager_end_to_end.py::_celery_eager for the full
+    # rationale. Short version: ``conf.result_backend = X`` does NOT
+    # propagate through ``_get_backend`` in this Celery version, and
+    # ``app._backend = None`` crashes the Celery 5.5+ property setter
+    # (``if backend.thread_safe`` on None). The reliable fix is to
+    # construct a real in-process ``CacheBackend(app, "memory://")``
+    # and inject it via the public setter. That keeps the eager-mode
+    # scope-contract tests free of external storage dependencies.
+    from celery.backends.cache import CacheBackend
+
     prior = (
         celery_app.conf.task_always_eager,
         celery_app.conf.task_eager_propagates,
         os.environ.get("CELERY_ACTIVE"),
+        celery_app.__dict__.get("_backend"),
     )
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = propagate
+    celery_app._backend = CacheBackend(app=celery_app, url="memory://")
     os.environ["CELERY_ACTIVE"] = "true"
     try:
         yield
@@ -82,6 +94,10 @@ def _celery_eager(propagate: bool = True):
             os.environ.pop("CELERY_ACTIVE", None)
         else:
             os.environ["CELERY_ACTIVE"] = prior[2]
+        if prior[3] is None:
+            celery_app.__dict__.pop("_backend", None)
+        else:
+            celery_app._backend = prior[3]
 
 
 def _reset_ctx():

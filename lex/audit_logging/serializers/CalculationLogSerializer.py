@@ -35,3 +35,4 @@ class CalculationLogDefaultSerializer(serializers.ModelSerializer):
 CalculationLog.api_serializers = {
     "default": CalculationLogDefaultSerializer,
 }
+CalculationLog._lex_skip_serializer_alias = True

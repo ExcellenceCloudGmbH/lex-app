@@ -55,7 +55,7 @@ class TestCluster12b_TypeRoundTrip(E2ETestCase):
         )
 
     # -- 12.10 ---------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-012: DateTimeField serialized as naive ISO string
+    @unittest.expectedFailure  # BUG-012: DateTimeField serialized as naive ISO string
     def test_12_10_datetime_roundtrip_keeps_timezone(self) -> None:
         """Scenario 12.10: UTC ISO-8601 → same instant on the way back."""
         sent = datetime(2026, 4, 21, 13, 30, 45, tzinfo=timezone.utc)
@@ -160,7 +160,7 @@ class TestCluster12b_TypeRoundTrip(E2ETestCase):
             )
 
     # -- 12.15 ---------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-013: PATCH does not accept FK-as-{"id": X} dict payload
+    @unittest.expectedFailure  # BUG-013: PATCH does not accept FK-as-{"id": X} dict payload
     def test_12_15_patch_accepts_foreign_key_dict_payload(self) -> None:
         """Scenario 12.15: PATCH with ``{"related": {"id": X}}`` resolves
         to the target row (``_parse_value_for_field`` contract)."""
@@ -181,7 +181,6 @@ class TestCluster12b_TypeRoundTrip(E2ETestCase):
         )
 
     # -- 12.16 ---------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_12_16_patch_rejects_invalid_choice(self) -> None:
         """Scenario 12.16: PATCH with a value outside the ``choices`` set → 400."""
         item = WideItem.objects.create(name="c", category=CHOICE_BETA)

@@ -926,21 +926,18 @@ def calc_and_save_sync(models, *args):
                     error_msg = f"Model {i + 1} save failed even after duplicate handling: {str(duplicate_error)}"
                     errors.append(error_msg)
                     logger.error(error_msg)
-                    # Continue processing other models rather than failing completely
             
         except CalculatedModelError as calc_model_error:
             error_count += 1
             error_msg = f"Model {i + 1}: {str(calc_model_error)}"
             errors.append(error_msg)
             logger.error(error_msg)
-            # Continue processing other models
             
         except Exception as unexpected_error:
             error_count += 1
             error_msg = f"Unexpected error processing model {i + 1}: {str(unexpected_error)}"
             errors.append(error_msg)
             logger.error(error_msg)
-            # Continue processing other models
     
     # Log final results
     if error_count == 0:
@@ -950,7 +947,6 @@ def calc_and_save_sync(models, *args):
             f"Synchronous processing completed with errors: {processed_count}/{model_count} models processed successfully, "
             f"{error_count} failed"
         )
-        # Log first few errors for debugging
         if errors:
             error_sample = "; ".join(errors[:3])
             if len(errors) > 3:
@@ -1435,61 +1431,35 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
         logger.debug(f"Preparing {len(model_combinations)} model combinations for {cls.__name__}")
         
         prepared_models = []
-        preparation_errors = []
         
         for i, model in enumerate(model_combinations):
-            try:
-                if model is None:
-                    logger.warning(f"Model {i + 1}/{len(model_combinations)} is None, skipping")
-                    continue
-                
-                if not isinstance(model, cls):
-                    logger.warning(
-                        f"Model {i + 1} is not an instance of {cls.__name__} "
-                        f"(got {type(model).__name__}), skipping"
-                    )
-                    continue
-                
-                logger.debug(f"Preparing model {i + 1}/{len(model_combinations)}")
-                
-                # Handle duplicate models with same defining fields
-                prepared_model = model.delete_models_with_same_defining_fields()
-                prepared_models.append(prepared_model)
-                
-                logger.debug(f"Successfully prepared model {i + 1}")
-                
-            except CalculatedModelError as calc_error:
-                preparation_errors.append(f"Model {i + 1}: {str(calc_error)}")
-                logger.error(f"Failed to prepare model {i + 1}/{len(model_combinations)}: {calc_error}")
-                
-            except Exception as e:
-                preparation_errors.append(f"Model {i + 1}: {str(e)}")
-                logger.error(f"Unexpected error preparing model {i + 1}/{len(model_combinations)}: {e}")
-        
-        # Check if we have any prepared models
-        if not prepared_models and model_combinations:
-            error_summary = "; ".join(preparation_errors[:5])  # Limit to first 5 errors
-            if len(preparation_errors) > 5:
-                error_summary += f" (and {len(preparation_errors) - 5} more errors)"
+            if model is None:
+                raise CalculatedModelError(
+                    f"Model {i + 1}/{len(model_combinations)} is None, cannot prepare",
+                    model_class=cls.__name__,
+                    model_index=i
+                )
             
-            raise CalculatedModelError(
-                f"Failed to prepare any models for {cls.__name__}. "
-                f"Errors: {error_summary}",
-                model_class=cls.__name__,
-                total_combinations=len(model_combinations),
-                preparation_errors=len(preparation_errors)
-            )
+            if not isinstance(model, cls):
+                raise CalculatedModelError(
+                    f"Model {i + 1} is not an instance of {cls.__name__} "
+                    f"(got {type(model).__name__})",
+                    model_class=cls.__name__,
+                    model_index=i,
+                    actual_type=type(model).__name__
+                )
+            
+            logger.debug(f"Preparing model {i + 1}/{len(model_combinations)}")
+            
+            # Handle duplicate models with same defining fields
+            prepared_model = model.delete_models_with_same_defining_fields()
+            prepared_models.append(prepared_model)
+            
+            logger.debug(f"Successfully prepared model {i + 1}")
         
-        # Log preparation summary
-        if preparation_errors:
-            logger.warning(
-                f"Model preparation completed with {len(preparation_errors)} errors: "
-                f"{len(prepared_models)}/{len(model_combinations)} models prepared successfully"
-            )
-        else:
-            logger.info(
-                f"Successfully prepared all {len(prepared_models)} model combinations for {cls.__name__}"
-            )
+        logger.info(
+            f"Successfully prepared all {len(prepared_models)} model combinations for {cls.__name__}"
+        )
         
         return prepared_models
     

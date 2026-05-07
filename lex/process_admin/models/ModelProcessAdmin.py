@@ -6,7 +6,16 @@ def subtract_from_list(minuend_list, subtrahend_set):
 
 
 def is_excluded(field):
-    return field.auto_created
+    # Exclude auto-created fields (e.g. reverse FK relations) and
+    # non-concrete virtual fields (e.g. GenericForeignKey).  Virtual fields
+    # cannot be serialised by DRF's ModelSerializer – they resolve to raw
+    # model instances at runtime which are not JSON-serializable.
+    # ManyToManyField is non-concrete but DRF handles it properly, so keep it.
+    if field.auto_created:
+        return True
+    if not getattr(field, 'concrete', True) and not getattr(field, 'many_to_many', False):
+        return True
+    return False
 
 
 def get_all_fields(model):

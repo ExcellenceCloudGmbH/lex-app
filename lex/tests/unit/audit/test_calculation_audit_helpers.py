@@ -97,10 +97,7 @@ class TestResolveContextData(SimpleTestCase):
 
 
 class TestResolveActor(SimpleTestCase):
-    """Prove ``_resolve_actor`` resolves user from multiple sources."""
-
-    def test_explicit_actor(self):
-        self.assertEqual(_resolve_actor({"actor": "admin"}), "admin")
+    """Prove ``_resolve_actor`` resolves user from request context."""
 
     def test_request_obj_dict_with_user(self):
         ctx = {"request_obj": {"user": "jane"}}
@@ -118,8 +115,8 @@ class TestResolveActor(SimpleTestCase):
     def test_none_context_returns_system(self):
         self.assertEqual(_resolve_actor(None), "system")
 
-    def test_actor_takes_precedence(self):
+    def test_request_user_is_used(self):
         request = MagicMock()
         request.user = "bob"
-        ctx = {"actor": "admin", "request_obj": request}
-        self.assertEqual(_resolve_actor(ctx), "admin")
+        ctx = {"request_obj": request}
+        self.assertEqual(_resolve_actor(ctx), "bob")

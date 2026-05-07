@@ -97,9 +97,12 @@ class ModelStructureObtainView(APIView):
                         if hasattr(container, "get_serializers_map")
                         else container.serializers_map
                     )
-                    node["available_serializers"] = list(
-                        serializers_map.keys()
+                    hidden = getattr(
+                        container.model_class, "_lex_hidden_serializers", set()
                     )
+                    node["available_serializers"] = [
+                        k for k in serializers_map.keys() if k not in hidden
+                    ]
                     # See ``model_relation_views.ModelStructureObtainView``.
                     from lex.api.serializers import (
                         resolve_default_serializer_name,

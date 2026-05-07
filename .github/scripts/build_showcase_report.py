@@ -271,8 +271,149 @@ def _scenarios_cell(row: dict[str, Any]) -> str:
 
 
 
+def _humanise_test_name(name: str) -> str:
+    """Turn ``test_8_45_real_redis_round_trip_dispatches_and_succeeds``
+    into ``Real Redis round trip dispatches and succeeds`` — readable
+    enough for a stakeholder who has never seen the test code."""
+    base = name
+    if base.startswith("test_"):
+        base = base[5:]
+    # Strip a leading numeric scenario id like ``8_45_`` or ``3_1_``.
+    parts = base.split("_")
+    while parts and parts[0].isdigit():
+        parts.pop(0)
+    text = " ".join(parts).strip()
+    return text[:1].upper() + text[1:] if text else name
+
+
+def _failed_tests_block(row: dict[str, Any], cluster: Cluster) -> str:
+    """Render a sub-table of failed/errored tests for one cluster.
+
+    Only invoked when the cluster row is failing AND the report is the
+    PDF archive copy (not the lean email body). Each entry shows:
+      • Humanised test name + raw method name
+      • Description (from ``cluster.test_descriptions``) — falls back to
+        a generic line if the test isn't catalogued yet
+      • Short error message captured from the traceback
+    """
+    tests = row.get("tests") or []
+    failed = [t for t in tests if t.get("outcome") in ("failed", "errored")]
+    if not failed:
+        return ""
+
+    items: list[str] = []
+    for t in failed:
+        method = t.get("name", "")
+        outcome = t.get("outcome", "failed")
+        message = t.get("message") or ""
+        description = cluster.test_descriptions.get(method) if cluster.test_descriptions else None
+        if not description:
+            description = (
+                "This scenario does not yet have a written description in "
+                "the showcase catalogue. Engineering can add one in "
+                "<code>showcase_clusters.py</code> so future failures explain "
+                "themselves to stakeholders."
+            )
+        kind_label = "Errored" if outcome == "errored" else "Failed"
+        kind_bg = C['bad_bg']
+        kind_ink = C['bad_ink']
+        kind_border = C['bad_border']
+        message_html = (
+            f'<div style="margin-top:6px;font:500 12px/1.5 '
+            f"'SFMono-Regular',Menlo,Consolas,monospace;"
+            f'color:{C["bad_ink"]};background:#fff;'
+            f'border:1px solid {C["rule"]};border-radius:4px;'
+            f'padding:6px 8px;word-break:break-word;">'
+            f'{html.escape(message)}</div>'
+            if message else ""
+        )
+        items.append(f"""
+          <tr>
+            <td style="padding:10px 0;border-bottom:1px solid {C['rule']};">
+              <div style="display:flex;align-items:baseline;gap:8px;">
+                <span style="display:inline-block;padding:2px 8px;
+                             background:{kind_bg};color:{kind_ink};
+                             border:1px solid {kind_border};
+                             border-radius:999px;
+                             font:600 10px/1.4 {SANS};
+                             letter-spacing:.4px;text-transform:uppercase;">
+                  {kind_label}
+                </span>
+                <strong style="font:600 13px/1.4 {SANS};color:{C['ink']};">
+                  {html.escape(_humanise_test_name(method))}
+                </strong>
+              </div>
+              <div style="margin-top:3px;font:400 11px/1.4 {SANS};
+                          color:{C['muted']};">
+                <code style="font:500 11px/1.4 'SFMono-Regular',Menlo,Consolas,monospace;
+                             color:{C['muted']};">{html.escape(method)}</code>
+              </div>
+              <div style="margin-top:6px;font:400 12px/1.6 {SANS};
+                          color:{C['ink']};">
+                {description}
+              </div>
+              {message_html}
+            </td>
+          </tr>
+        """)
+
+    return f"""
+      <tr>
+        <td colspan="3"
+            style="padding:0 16px 14px 16px;background:{C['bad_tint']};
+                   border-bottom:1px solid {C['rule']};">
+          <div style="font:700 11px/1 {SANS};color:{C['bad_ink']};
+                      letter-spacing:1.2px;text-transform:uppercase;
+                      padding:6px 0 4px 0;">
+            Failed scenarios
+          </div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            {''.join(items)}
+          </table>
+        </td>
+      </tr>
+    """
+
+
+def _failed_tests_summary_line(row: dict[str, Any]) -> str:
+    """Tiny one-liner shown in the EMAIL body when a cluster failed.
+
+    The full per-scenario detail (humanised name, description, captured
+    error) is intentionally PDF-only — putting that in the email creates
+    a wall of red text in stakeholder inboxes, which the user explicitly
+    asked us not to do. The line below points the reader at the
+    attached PDF and gives them just enough to know whether to open it.
+    """
+    tests = row.get("tests") or []
+    failed = [t for t in tests if t.get("outcome") in ("failed", "errored")]
+    if not failed:
+        return ""
+    n = len(failed)
+    word = "scenario" if n == 1 else "scenarios"
+    sample = ", ".join(_humanise_test_name(t.get("name", "")) for t in failed[:3])
+    if n > 3:
+        sample += f", +{n - 3} more"
+    return f"""
+      <tr>
+        <td colspan="3"
+            style="padding:0 16px 14px 16px;background:{C['bad_tint']};
+                   border-bottom:1px solid {C['rule']};">
+          <div style="font:500 12px/1.5 {SANS};color:{C['bad_ink']};">
+            <strong style="font-weight:700;">{n} {word} failed</strong>
+            &nbsp;&middot;&nbsp;
+            {html.escape(sample)}
+          </div>
+          <div style="margin-top:4px;font:400 11px/1.5 {SANS};color:{C['muted']};">
+            See the attached PDF for the per-scenario description and
+            captured error message.
+          </div>
+        </td>
+      </tr>
+    """
+
+
 def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
-                   overall: dict[str, Any]) -> str:
+                   overall: dict[str, Any], for_pdf: bool = False) -> str:
     # Three columns only — Status / Capability / Scenarios.
     #
     # The per-cluster Coverage column was removed on 22 April 2026:
@@ -363,6 +504,20 @@ def _results_table(rows: list[dict[str, Any]], *, expand_passes: bool,
                 </td>
               </tr>
             """)
+
+        # When the cluster failed, list the individual scenarios that
+        # broke. The email body gets a single-line summary to keep the
+        # inbox readable; the PDF archive gets the full detail block
+        # with every test's description and captured error message.
+        # This split is the "don't clutter the email" directive — full
+        # context lives in the attached PDF, not in the email body.
+        if failing:
+            if for_pdf:
+                block = _failed_tests_block(row, cluster)
+            else:
+                block = _failed_tests_summary_line(row)
+            if block:
+                body_rows.append(block)
 
     # ── Totals row.  Appended to <tbody> (not <tfoot>) because WeasyPrint
     # treats <tfoot> as a repeating page-footer group (CSS display:
@@ -467,7 +622,36 @@ def _why_section(rows: list[dict[str, Any]]) -> str:
 
 
 # ── Scaffold ────────────────────────────────────────────────────────
-def _scaffold(inner: str, title: str) -> str:
+def _scaffold(inner: str, title: str, *, for_pdf: bool = False) -> str:
+    # PDF gets extra @page styling: tighter margins for content density,
+    # a page-counter footer, and the brand accent colour as a thin top
+    # rule so multi-page archives look like one cohesive document
+    # rather than a stack of unconnected screenshots. The email body
+    # uses the simpler scaffold because email clients ignore @page
+    # rules anyway and the extra CSS just bloats the HTML.
+    pdf_styles = (
+        f"""
+      @page {{
+        size: A4;
+        margin: 16mm 14mm 18mm 14mm;
+        @bottom-right {{
+          content: "Page " counter(page) " of " counter(pages);
+          font: 400 9pt {SANS};
+          color: {C['muted']};
+        }}
+        @bottom-left {{
+          content: "{html.escape(title)}";
+          font: 400 9pt {SANS};
+          color: {C['muted']};
+        }}
+      }}
+      tr.page-break-before {{ page-break-before: always; }}
+      table {{ page-break-inside: auto; }}
+      tr    {{ page-break-inside: avoid; }}
+        """
+        if for_pdf else
+        "@page { size: A4; margin: 14mm; }"
+    )
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -475,7 +659,7 @@ def _scaffold(inner: str, title: str) -> str:
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{html.escape(title)}</title>
     <style>
-      @page {{ size: A4; margin: 14mm; }}
+      {pdf_styles}
       body {{ margin: 0; padding: 0; }}
     </style>
   </head>
@@ -497,17 +681,87 @@ def _scaffold(inner: str, title: str) -> str:
 """
 
 
+def _stat_cards(overall: dict[str, Any]) -> str:
+    """A row of four "by-the-numbers" cards for the PDF archive.
+
+    Email recipients see the same numbers in the verdict band already;
+    repeating them in card form would be noise in their inbox. The
+    PDF is a stand-alone archive document, though, so a clean stat
+    strip near the top makes it readable on its own.
+    """
+    failed = overall.get("failed", 0) + overall.get("errors", 0)
+    total_scenarios = overall.get("ran", 0)
+    passed_scenarios = overall.get("passed", 0)
+
+    def card(label: str, value: str, tone: str = "ink",
+             subtitle: str = "") -> str:
+        ink = C["bad_ink"] if tone == "bad" else (
+            C["ok_ink"] if tone == "ok" else C["ink"])
+        return f"""
+          <td style="width:25%;padding:14px 16px;background:{C['card']};
+                     border:1px solid {C['rule']};border-radius:8px;
+                     vertical-align:top;">
+            <div style="font:600 10px/1 {SANS};color:{C['muted']};
+                        letter-spacing:1.2px;text-transform:uppercase;">
+              {html.escape(label)}
+            </div>
+            <div style="margin-top:8px;font:700 24px/1.1 {SANS};color:{ink};">
+              {value}
+            </div>
+            <div style="margin-top:4px;font:400 11px/1.4 {SANS};color:{C['muted']};">
+              {subtitle}
+            </div>
+          </td>
+          <td style="width:8px;"></td>
+        """
+
+    cards = (
+        card(
+            "Capabilities",
+            f"{overall.get('clusters_passing', 0)} / {overall.get('clusters_total', 0)}",
+            tone="ok" if overall.get("outcome") == "success" else "bad",
+            subtitle="passing this run",
+        )
+        + card(
+            "Scenarios",
+            f"{passed_scenarios} / {total_scenarios}",
+            tone="bad" if failed else "ok",
+            subtitle=(f"{failed} failing" if failed else "all passing"),
+        )
+        + card(
+            "Coverage",
+            _fmt_pct(overall.get("coverage_pct")),
+            subtitle="framework-wide",
+        )
+        + card(
+            "Run time",
+            _fmt_duration(overall.get("wall_s")),
+            subtitle="end-to-end",
+        )
+    )
+    return f"""
+    <tr>
+      <td style="padding:18px 32px 6px 32px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>{cards}</tr>
+        </table>
+      </td>
+    </tr>
+    """
+
+
 def render_email_html(manifest, *, brand, logo_src, commit_sha, branch,
                       run_url, generated_at):
     rows = manifest["clusters"]
     inner = (
         _header_band(brand, logo_src=logo_src, generated_at=generated_at)
         + _verdict_band(manifest["overall"])
-        + _results_table(rows, expand_passes=False, overall=manifest["overall"])
+        + _results_table(rows, expand_passes=False,
+                         overall=manifest["overall"], for_pdf=False)
         + _footer(commit_sha, branch, run_url,
                   manifest["overall"].get("wall_s"), for_email=True)
     )
-    return _scaffold(inner, f"{brand} — Platform Health Report")
+    return _scaffold(inner, f"{brand} — Platform Health Report", for_pdf=False)
 
 
 def render_pdf_html(manifest, *, brand, logo_src, commit_sha, branch,
@@ -516,12 +770,14 @@ def render_pdf_html(manifest, *, brand, logo_src, commit_sha, branch,
     inner = (
         _header_band(brand, logo_src=logo_src, generated_at=generated_at)
         + _verdict_band(manifest["overall"])
-        + _results_table(rows, expand_passes=True, overall=manifest["overall"])
+        + _stat_cards(manifest["overall"])
+        + _results_table(rows, expand_passes=True,
+                         overall=manifest["overall"], for_pdf=True)
         + _why_section(rows)
         + _footer(commit_sha, branch, run_url,
                   manifest["overall"].get("wall_s"), for_email=False)
     )
-    return _scaffold(inner, f"{brand} — Platform Health Report")
+    return _scaffold(inner, f"{brand} — Platform Health Report", for_pdf=True)
 
 
 def render_pdf(html_str: str, out_path: str) -> None:

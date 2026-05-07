@@ -37,6 +37,7 @@ How to run
 """
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection, models
@@ -290,7 +291,7 @@ class TestDataEntryLifecycle(UserStoryTestCase):
         Creating a domain model via the API sets created_by, edited_by,
         created_at, and edited_at automatically.
         """
-        with OperationContext(actor="Portfolio Manager"):
+        with OperationContext(request=SimpleNamespace(user="Portfolio Manager")):
             inv = Investor.objects.create(
                 name="Alpha Capital", committed_capital=1_000_000
             )
@@ -309,7 +310,7 @@ class TestDataEntryLifecycle(UserStoryTestCase):
         Updating a record changes edited_at and edited_by but preserves
         created_at and created_by.
         """
-        with OperationContext(actor="Creator"):
+        with OperationContext(request=SimpleNamespace(user="Creator")):
             inv = Investor.objects.create(
                 name="Beta Fund", committed_capital=500_000
             )
@@ -317,7 +318,7 @@ class TestDataEntryLifecycle(UserStoryTestCase):
         original_created_at = inv.created_at
         original_created_by = inv.created_by
 
-        with OperationContext(actor="Editor"):
+        with OperationContext(request=SimpleNamespace(user="Editor")):
             inv.committed_capital = 750_000
             inv.save()
 
@@ -331,11 +332,11 @@ class TestDataEntryLifecycle(UserStoryTestCase):
         """
         Each record tracks its own metadata independently.
         """
-        with OperationContext(actor="User A"):
+        with OperationContext(request=SimpleNamespace(user="User A")):
             inv1 = Investor.objects.create(
                 name="Fund A", committed_capital=100
             )
-        with OperationContext(actor="User B"):
+        with OperationContext(request=SimpleNamespace(user="User B")):
             inv2 = Investor.objects.create(
                 name="Fund B", committed_capital=200
             )
@@ -362,7 +363,7 @@ class TestCalculationLifecycle(UserStoryTestCase):
         The calculate() reads the investor's committed_capital and
         computes nav_value = capital * 1.05.  Status goes to SUCCESS.
         """
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             inv = Investor.objects.create(
                 name="Gamma LP", committed_capital=1_000_000
             )
@@ -384,7 +385,7 @@ class TestCalculationLifecycle(UserStoryTestCase):
         The framework catches it, sets is_calculated=ERROR, and
         raises CalculationModelException so the caller knows.
         """
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             report = FailingReport.objects.create()
 
         with self.assertRaises(CalculationModelException):
@@ -402,7 +403,7 @@ class TestCalculationLifecycle(UserStoryTestCase):
         User story: after updating the input data, the user re-triggers
         calculation.  The report must pick up the new data.
         """
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             inv = Investor.objects.create(
                 name="Delta Partners", committed_capital=500_000
             )
@@ -419,7 +420,7 @@ class TestCalculationLifecycle(UserStoryTestCase):
         self.assertAlmostEqual(report.nav_value, 525_000.0)
 
         # Update the input data
-        with OperationContext(actor="Analyst"):
+        with OperationContext(request=SimpleNamespace(user="Analyst")):
             inv.committed_capital = 2_000_000
             inv.save()
 
@@ -450,7 +451,7 @@ class TestNestedCalculation(UserStoryTestCase):
         creates a NAVReport for each, triggers its calculation inside
         model_logging_context, and sums up the results.
         """
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             Investor.objects.create(name="LP-1", committed_capital=100_000)
             Investor.objects.create(name="LP-2", committed_capital=200_000)
             Investor.objects.create(name="LP-3", committed_capital=300_000)
@@ -478,7 +479,7 @@ class TestNestedCalculation(UserStoryTestCase):
         Edge case: no investors exist.  Parent should still succeed
         with zero totals.
         """
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             summary = PortfolioSummary.objects.create()
 
         with OperationContext(calculation_id="calc-empty"):
@@ -510,7 +511,7 @@ class TestValidationGuards(UserStoryTestCase):
         ValidationError and blocks the save.
         No row should be written to the database.
         """
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             with self.assertRaises(ValidationError) as ctx:
                 Investor.objects.create(
                     name="Bad LP", committed_capital=-100
@@ -523,7 +524,7 @@ class TestValidationGuards(UserStoryTestCase):
         """
         Positive capital passes pre_validation; row is persisted.
         """
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             inv = Investor.objects.create(
                 name="Good LP", committed_capital=100_000
             )
@@ -538,12 +539,12 @@ class TestValidationGuards(UserStoryTestCase):
         that budget exceeds budget_limit.  The save is rolled back and
         the field reverts to its previous value.
         """
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             fund = Fund.objects.create(
                 name="Growth Fund", budget=50_000, budget_limit=100_000
             )
 
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             with self.assertRaises(ValidationError) as ctx:
                 fund.budget = 150_000
                 fund.save()
@@ -557,12 +558,12 @@ class TestValidationGuards(UserStoryTestCase):
         """
         Budget within limit passes post_validation; update persists.
         """
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             fund = Fund.objects.create(
                 name="Balanced Fund", budget=30_000, budget_limit=100_000
             )
 
-        with OperationContext(actor="User"):
+        with OperationContext(request=SimpleNamespace(user="User")):
             fund.budget = 90_000
             fund.save()
 
@@ -589,7 +590,7 @@ class TestDataChangeDrivesRecalculation(UserStoryTestCase):
         5. Assert the new total reflects the change.
         """
         # Step 1: seed data
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             inv1 = Investor.objects.create(
                 name="Anchor LP", committed_capital=1_000_000
             )
@@ -611,7 +612,7 @@ class TestDataChangeDrivesRecalculation(UserStoryTestCase):
         self.assertEqual(summary.investor_count, 2)
 
         # Step 3: update investor
-        with OperationContext(actor="PM"):
+        with OperationContext(request=SimpleNamespace(user="PM")):
             inv1.committed_capital = 2_000_000
             inv1.save()
 

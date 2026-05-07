@@ -10,13 +10,21 @@ class AuditLog(LexModel):
         ('update', 'Update'),
         ('delete', 'Delete'),
     )
+
+    # Remove inherited audit fields from LexModel – AuditLog has its own
+    # 'date' and 'author' fields that serve the same purpose.
+    created_at = None
+    edited_at = None
+    created_by = None
+    edited_by = None
+
     modification_restriction = AdminReportsModificationRestriction()
     date = models.DateTimeField(auto_now_add=True)
     author = models.CharField(max_length=255)
     resource = models.CharField(max_length=255)
     action = models.CharField(max_length=10, choices=ACTION_CHOICES)
     payload = models.JSONField(blank=True, null=True)
-    calculation_id = models.TextField(default='test_id', null=True, blank=True)
+    calculation_id = models.TextField(default='test_id', null=True, blank=True, verbose_name='Calculation Log')
     calculatable_object = GenericForeignKey("content_type", "object_id")
     content_type = models.ForeignKey(
         ContentType, on_delete=models.CASCADE, null=True, blank=True

@@ -14,6 +14,8 @@ import uvicorn
 
 from lex.tools.project_root import find_project_root
 from lex.tools.ai_faq import launch_ai_faq
+from lex.tools.ai_dashboard import launch_ai_dashboard
+from lex.tools.verify_ai_assets import verify_ai_assets
 from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
@@ -594,11 +596,19 @@ def setup(project_root):
     help="Remote MCP HTTP endpoint used by lex-mcp-local.",
 )
 @click.option(
+    "--mcp-mode",
+    default="forward",
+    show_default=True,
+    type=click.Choice(["forward", "backward"], case_sensitive=False),
+    help="MCP workflow mode. Determines which .github directory is copied and "
+         "which mode the server runs in (written to LEX_MCP_MODE in .env and mcp.json).",
+)
+@click.option(
     "--no-browser",
     is_flag=True,
     help="Skip the local setup page and prompt in the terminal instead.",
 )
-def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url, no_browser):
+def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url, mcp_mode, no_browser):
     root = Path(find_project_root(project_root or os.getcwd())).resolve()
     python_executable = resolve_active_python_executable(root)
 
@@ -615,13 +625,39 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
         no_browser=no_browser,
     )
 
+    # The browser form lets the user pick forward/backward; use that choice
+    # unless the CLI flag was explicitly set by the caller.
+    effective_mcp_mode = credentials.mcp_mode if credentials.mcp_mode else mcp_mode
+    click.echo(f"MCP workflow mode: {effective_mcp_mode}")
+
     click.echo("Installing lex-mcp-local into the active virtual environment...")
     try:
-        install_lex_mcp_local(python_executable, credentials.remote_mcp_api_key)
+        install_lex_mcp_local(python_executable, credentials.remote_mcp_api_key, upgrade=True)
     except subprocess.CalledProcessError as exc:
         raise click.ClickException(
             f"Failed to install lex-mcp-local into {python_executable}."
         ) from exc
+
+    # Post-install validation: check the installed version supports the
+    # requested mode and warn loudly if not.
+    from lex.tools.setup_with_ai import (
+        get_installed_lex_mcp_local_version,
+        MINIMUM_DUAL_MODE_VERSION,
+        _has_unified_mcp_entry_point,
+    )
+    installed_version = get_installed_lex_mcp_local_version(python_executable)
+    if installed_version:
+        click.echo(f"Installed lex-mcp-local {installed_version}.")
+    else:
+        click.echo("Warning: could not detect installed lex-mcp-local version.")
+    if effective_mcp_mode == "backward" and not _has_unified_mcp_entry_point(python_executable):
+        click.echo(
+            f"Warning: backward mode requires lex-mcp-local >= {MINIMUM_DUAL_MODE_VERSION}, "
+            f"but {installed_version or 'an older version'} is installed. "
+            f"The server will start in forward-only (legacy) mode. "
+            f"Ask your administrator to publish >= {MINIMUM_DUAL_MODE_VERSION} to Cloudsmith."
+        )
+        effective_mcp_mode = "forward"
 
     try:
         artifacts = configure_ai_integration(
@@ -629,6 +665,7 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
             github_token=credentials.github_token,
             remote_mcp_api_key=credentials.remote_mcp_api_key,
             remote_mcp_url=remote_mcp_url,
+            mcp_mode=effective_mcp_mode,
             python_executable=python_executable,
             verify_server=False,
         )
@@ -650,6 +687,7 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
                 github_token=credentials.github_token,
                 remote_mcp_api_key=credentials.remote_mcp_api_key,
                 remote_mcp_url=remote_mcp_url,
+                mcp_mode=effective_mcp_mode,
             ),
         )
     except SetupWithAIError as exc:
@@ -755,6 +793,106 @@ def ai_faq():
     launch_ai_faq(reporter=click.echo)
 
 
+@lex.command(name="ai-verify", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+@click.option(
+    "--mode",
+    "mode",
+    type=click.Choice(["auto", "forward", "backward", "all"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help=(
+        "Which MCP mode's assets to verify. 'auto' (default) detects the active "
+        "mode from --mode > LEX_MCP_MODE env > project .env > mcp.json server "
+        "entry > forward. 'all' verifies both forward and backward."
+    ),
+)
+@click.option(
+    "--quiet",
+    is_flag=True,
+    help="Suppress per-file output; only print a summary line (or nothing on success).",
+)
+@click.option(
+    "--silent",
+    is_flag=True,
+    help="Print nothing on success. Implies --quiet. Intended for use as a fast pre-flight "
+         "guard at the start of every MCP tool call.",
+)
+def ai_verify(project_root, mode, quiet, silent):
+    """Verify (and silently restore) the LEX AI asset directories.
+
+    Walks the canonical ``.github`` directory shipped by the active MCP mode's
+    package (``lex_mcp_local`` for forward, ``lex_mcp_reverse`` for backward)
+    and the ``docs`` directory shipped by ``lex``, then rewrites any file under
+    the project root that is missing or whose contents have drifted. Existing
+    user-only files are left untouched.
+    """
+    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    quiet = quiet or silent
+    explicit_mode = None if mode == "auto" else mode.lower()
+
+    try:
+        result = verify_ai_assets(project_root=root, mode=explicit_mode)
+    except SetupWithAIError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    restored_total = len(result.restored_files)
+
+    if not quiet:
+        click.echo(f"Active MCP mode: {result.mode} (source: {result.mode_source})")
+
+    for directory_result in result.directories:
+        if directory_result.skipped_reason is not None:
+            if not quiet:
+                click.echo(
+                    f"[skip] {directory_result.directory_name}: "
+                    f"{directory_result.skipped_reason}"
+                )
+            continue
+
+        if not directory_result.restored_files:
+            if not quiet:
+                click.echo(f"[ok]   {directory_result.directory_name}: up to date.")
+            continue
+
+        if not quiet:
+            click.echo(
+                f"[fix]  {directory_result.directory_name}: "
+                f"restored {len(directory_result.restored_files)} file(s) "
+                f"({len(directory_result.missing_files)} missing, "
+                f"{len(directory_result.modified_files)} modified) "
+                f"into {directory_result.destination_directory}"
+            )
+            for relative_path in directory_result.restored_files:
+                click.echo(f"        - {relative_path}")
+
+    if restored_total == 0:
+        if not silent:
+            click.echo("AI assets verified: nothing to restore.")
+        return
+
+    click.echo(f"AI assets verified: restored {restored_total} file(s).")
+
+
+@lex.command(name="ai-dashboard", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+def ai_dashboard(project_root):
+    """Open the LEX AI Dashboard in your browser.
+
+    Displays and lets you edit the MCP server mode, GitHub token, Remote MCP
+    API key, and other configuration. Changes are written to .env and mcp.json.
+    Press Ctrl+C to stop the dashboard server.
+    """
+    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    try:
+        launch_ai_dashboard(
+            project_root=root,
+            reporter=click.echo,
+        )
+    except SetupWithAIError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 def _collect_setup_with_ai_credentials(
     *,
     github_token: str | None,
@@ -799,7 +937,7 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq"}
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard"}
 )
 
 

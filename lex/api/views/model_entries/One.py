@@ -497,6 +497,29 @@ class OneModelEntry(
                     audit_payload = getattr(request, "data", {})
                     if self._calculate_requested:
                         calculation_record = f"{instance._meta.model_name}_{instance.pk}"
+
+                        # ── Duplicate calculation guard ─────────────────────
+                        # If this record already has an active calculation
+                        # (DB shows IN_PROGRESS or the in-memory state store
+                        # has a registered entry), refuse to start a second
+                        # calculation.  Return the current record state so the
+                        # frontend stays in sync without side effects.
+                        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+                        instance.refresh_from_db()
+                        already_running = (
+                            instance.is_calculated == CalculationModel.IN_PROGRESS
+                            or ActiveCalculationStateStore.get_calculation_id(calculation_record) is not None
+                        )
+                        if already_running:
+                            logger.info(
+                                "Duplicate calculation request ignored for %s (already IN_PROGRESS)",
+                                calculation_record,
+                            )
+                            return Response(
+                                self.get_serializer(instance).data,
+                                status=status.HTTP_200_OK,
+                            )
+
                         CalculationModel._clear_terminal_state_persistence(instance)
                         instance.is_calculated = CalculationModel.IN_PROGRESS
                         instance.save(skip_hooks=True)
@@ -509,7 +532,6 @@ class OneModelEntry(
                         #      snapshot (no DB read needed).
                         #   b) Other users/tabs receive the IN_PROGRESS
                         #      WebSocket message immediately.
-                        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
                         ActiveCalculationStateStore.mark_in_progress(
                             record_id=calculation_record,
                             calculation_id=calculationId,

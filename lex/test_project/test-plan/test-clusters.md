@@ -246,6 +246,8 @@ If either command is broken, a new customer cannot start using the framework at 
 | 4.10 | `UserContext.from_request` builds correct context | Groups, scopes, roles, email correctly populated |
 | 4.11 | API key context | `client_roles` includes "api_key", scopes from key identity |
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
+| 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
+| 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
 
 ---
 
@@ -254,6 +256,8 @@ If either command is broken, a new customer cannot start using the framework at 
 **What it tests:** That every `.save()` on a `LexModel` creates a history row, that `valid_from`/`valid_to` chain correctly, and that the MetaHistory layer works.
 
 **Why fifth:** Customers start looking at history after they've been editing records for a while. "What changed and when?" is a compliance requirement.
+
+**Documented contract** (from `docs/features/tracking/history.md` + `docs/features/tracking/bitemporal history.md` + `docs/interface/record-detail/history tab.md` + `understanding tracking tables 1.md`): every `LexModel` save / update / delete produces a Level-1 `Historical*` row with a **full snapshot of all field values** (not just the changed ones) + `history_type` (`+`/`~`/`-`) + `history_user` (the person who edited the record, or the user who launched the calculation that produced this change) + optional `history_change_reason` (currently only writable from code, not from the UI). Unlike audit logging (which is API-only), history is triggered at the ORM level by every `save()` — both API-driven edits and programmatic/calculation-driven writes produce history rows. Rows are auto-chained so each row's `valid_to` matches the next row's `valid_from` and the latest row carries `valid_to=NULL`; a Level-2 `MetaHistorical*` row records *system time* (`sys_from`/`sys_to`) for every Level-1 change so retroactive `valid_from` corrections are themselves auditable; opt-outs (`untrack()` / `track()` / `save_without_historical_record()` / `bulk_create(skip_history=True)` / `untracked_models` in `model_structure.yaml` / `suspend_bitemporal()` for derived calc outputs) keep the customer in control of overhead; time-travel via `get_queryset_as_of(Model, t)` (valid time) or `get_queryset_as_of(HistoryModel, t)` (system time), and via `GET /api/<model>/<id>/history/?as_of=...` from the UI's *As-Of* control.
 
 **Models needed:**
 - `SimpleItem` (reused from Cluster 2)
@@ -274,6 +278,17 @@ If either command is broken, a new customer cannot start using the framework at 
 | 5.9 | History via API (`/history/` endpoint) | Returns correct history rows with field values at each point in time |
 | 5.10 | Concurrent edits produce distinct history rows | Two rapid saves → two distinct history entries |
 
+> **Audit notes — May 5.** Walked the implementation against `docs/features/tracking/`:
+> * **5.4 partial.** `test_5_4` only asserts ascending `history_id`; the docstring's "valid_to of row N = valid_from of row N+1" half is *not* yet pinned. New gap sub-cluster **5g** (below) closes it as scenario **5.61**.
+> * **5.5 narrow.** `skip_history_when_saving` is one of *four* documented suppression toggles (`skip_history_when_saving`, `save_without_historical_record()`, `untrack()`/`track()`, `bulk_create(skip_history=True)`). The other three are uncovered — see **5h** scenarios 5.62–5.65.
+> * **5.9 thin.** Only HTTP 200 + ≥3 rows asserted. The documented response shape (`history_id` / `valid_from` / `valid_to` / `history_type` / `user` / `snapshot` / `system_history`) and the `?as_of=...` system-time time-travel branch are *not* asserted — see **5i** scenarios 5.71–5.74.
+> * **History snapshot contract not asserted anywhere.** Docs guarantee each history row carries a full snapshot of every field at that moment ("if your model has 10 fields, every history row has all 10"). 5.1/5.2/5.3 only check counts and types. See **5j** scenario 5.75.
+> * **`history_user` actor not asserted.** API-driven save must stamp `history_user` to the authenticated user; not pinned anywhere. See **5j** scenario 5.76.
+> * **MetaHistory (Level 2) positive contract uncovered.** 9.7–9.10 cover the suppression *primitives* but no test ever asserts that a save *creates* a MetaHistorical row, that `sys_from`/`sys_to` chain, or that an `history_object` FK points back to L1. See **5k** scenarios 5.81–5.84.
+> * **`suspend_bitemporal()` positive contract uncovered.** 9.7–9.10 lock down the underlying ContextVars; the customer-facing CM (`with suspend_bitemporal(): obj.save()` → 1 query, 0 history rows, 0 meta rows) is not exercised. See **5h** scenario 5.66.
+> * **`untracked_models` config not tested.** Documented `model_structure.yaml` opt-out at the *model* level (no `Historical*` table generated) — see **5h** scenario 5.67 (deferred-fixture).
+> * **Time-travel helpers `get_queryset_as_of(...)` uncovered.** Both branches (main-model → valid time; history-model → system time) — see **5i** scenarios 5.72–5.73.
+
 ---
 
 ## 6. Audit Logging
@@ -281,6 +296,17 @@ If either command is broken, a new customer cannot start using the framework at 
 **What it tests:** The `AuditLogMixin` records every API create/update/delete with correct actor, action, payload, and status. Also tests calculation audit finalization.
 
 **Why sixth:** Audit logs are the compliance backbone. Customers in regulated industries (finance, healthcare) need proof of every action.
+
+**Documented contract** (from `docs/features/tracking/audit logs.md` + `docs/interface/record-detail/audit log tab.md` + `understanding tracking tables 1.md`): **Audit log entries are created exclusively through the REST API layer** (`AuditLogMixin` on DRF views) — a programmatic `obj.save()` at the ORM level does **not** produce an audit row. Only API endpoints (POST create, PATCH/PUT update, DELETE) trigger the mixin. The one exception is **calculation audit finalization**: `ensure_terminal_calculation_audit` writes a terminal audit row from the calc state machine (not the API layer) to record whether a calculation succeeded or failed.
+
+Every API create / update / delete produces an `AuditLog` (`date`, `author`, `resource`, `action`, `payload`, `content_type` + `object_id` GenericForeignKey, optional `calculation_id`) **plus** a paired `AuditLogStatus` whose status walks `pending → success` (or `pending → failure` carrying the full error traceback). The audit row is written **before** the operation, so even operations that fail at validation / permission / DB level are recorded with full context. The `payload` starts as the submitted request body; on success it is **rewritten to the final persisted state** (so the audit row reflects what was actually saved, not what was attempted); on failure it remains the attempted payload.
+
+When the change was triggered by a calculation, the audit entry's `calculation_id` is non-empty and links to the Calculation Log tree — that's how an operator traces from "this field was changed" to "this is the calculation that changed it". For plain user edits, `calculation_id` is empty.
+
+> [!note] `edited_by` / `edited_at` vs audit `author`
+> The tracking-tables doc (§3, note) clarifies that `edited_by` / `edited_at` on the record reflect **edits only** — calculation-driven changes do *not* update them, even though they do produce history and audit entries. To determine whether a change came from a person or a calculation, look at the audit entry's `calculation_id`.
+
+`BulkAuditLogMixin` produces one audit row per record in a bulk op (a 100-row bulk update writes 100 audit rows). The system is resilient by design: deadlocks and serialization conflicts are auto-retried with exponential backoff, ContentType cache staleness is auto-corrected, and audit rows are effectively read-only — `permission_create` / `permission_delete` return False and `permission_edit` denies for everyone except `AdminReportsModificationRestriction`.
 
 **Models needed:**
 - `SimpleItem` (reused)
@@ -300,6 +326,26 @@ If either command is broken, a new customer cannot start using the framework at 
 | 6.8 | Actor resolution — API key | `created_by`/`edited_by` = "Technical User" |
 | 6.9 | Actor resolution — no context | `created_by`/`edited_by` = "Initial Data Upload" (fallback) |
 | 6.10 | Audit log survives calculation failure | `_finalize_pending_terminal_audit` runs even when `save()` atomic block rolls back |
+
+> **Audit notes — May 5.** Walked the implementation against `docs/features/tracking/audit logs.md` + `docs/interface/record-detail/audit log tab.md`:
+> * **6.1 thin.** Asserts `count==1` + `author truthy` + `status=='success'`. The docs explicitly enumerate **six** customer-visible columns the audit log row must carry (`date`, `author`, `resource`, `action`, `payload`, `content_type`+`object_id` GenericForeignKey, optional `calculation_id`) — only `author`, `resource`, `action` are pinned today. Most importantly, **`content_type` + `object_id` are never asserted**, even though the Audit Log Tab UI filters by them to show "operations that affected this specific record". See gap sub-cluster **6d** scenarios 6.41–6.43.
+> * **6.2 thin.** Asserts only that `"value"` is in the payload dict. Docs require: payload carries the *full serialized data* of the operation, on update payload is *refreshed to the final state* on success (`audit_log.payload = updated_payload` line 265 of `AuditLogMixin.py`), payload includes `id` after save. None pinned. See **6d** scenarios 6.42–6.43.
+> * **6.3 thin.** Asserts only `count==1` + `status=='success'`. Docs explicitly say "For deletions, the payload captures the record's state at the moment of deletion — so you can always inspect what was removed." That contract is uncovered. See **6d** scenario 6.44.
+> * **6.4 skipped.** Documented as "needs middleware-level audit hook". The mixin's *exception path* (`AuditLogMixin.py` lines 234–283 / 298–311 — `_pending_failed_audit_logs` queue + `_failed_audit_logged` sentinel + atomic vs. non-atomic split) is dark. The contract is concrete and reachable today via raising `pre_validation` + a `perform_create` save: failure status row, status='failure', traceback non-empty, atomic-block path queues for replay. See **6d** scenarios 6.45–6.47 (re-scoped — no middleware needed).
+> * **Pending intermediate state never observed.** The docs mermaid diagram makes "🟡 Pending → 🟢 Success / 🔴 Failure" a customer-visible lifecycle, but no test ever observes the *pending* state mid-flight. See **6d** scenario 6.48.
+> * **`BulkAuditLogMixin` not tested.** Documented as "Each individual record in a bulk operation gets its own audit log entry — so a bulk update of 100 records creates 100 audit log entries." Cluster 2e's bulk DELETE scenarios (2.23/2.24/2.25) never assert the audit row count. See gap sub-cluster **6e** scenarios 6.51–6.53.
+> * **Resilience contracts unpinned.** Two are explicitly called out in docs ("Resilience" section): deadlock retries (`RETRYABLE_SQLSTATE_CODES = {"40P01", "40001"}` + 3 attempts + exponential backoff) and ContentType cache healing (`safe_get_content_type` recovers when Django's cache goes stale post-migration). See **6f** scenarios 6.61–6.63.
+> * **Read-only / immutable contract not gated.** Docs `[!note]`: "Audit logs are effectively read-only. Only administrators should modify or delete them." `AuditLog.permission_create` / `permission_delete` return False, `permission_edit` denies. No test pins this — a regression that flipped any of those bools to `True` would silently allow audit deletion. See **6g** scenarios 6.71–6.73.
+> * **6.10 still failing.** The "audit row survives the outer atomic rollback" contract from `ensure_terminal_calculation_audit` is not yet honoured — the inner `transaction.atomic()` joins the outer block as a savepoint, so it rolls back too. Already tracked as BUG-001 family but the marker on `test_6_10` is currently *commented out* (the `@unittest.expectedFailure` line is `# @unittest.expectedFailure`), so when the test fails it's an *unexpected* failure. **Fix in this update**: re-enable the marker.
+>
+> **Audit notes — May 7 (tracking-tables doc cross-check).** Walked the test-plan against `understanding tracking tables 1.md`:
+> * **API-only scope clarified.** The tracking-tables doc and user confirmation make explicit what was implicit: audit log entries are created **exclusively through the REST API layer** (`AuditLogMixin`), not by programmatic `obj.save()`. The one exception is `ensure_terminal_calculation_audit`, which writes a terminal audit row from the calc state machine. This distinction is now documented in the Cluster 6 contract above. History, by contrast, fires at the ORM level on every `save()` — both API and programmatic. Updated Cluster 5 contract to note this.
+> * **Payload lifecycle clarified.** The doc explicitly states: "starts as submitted payload, on success rewritten to final persisted state, on failure remains the attempted payload." Already covered by 6.42/6.43, but the Cluster 6 contract paragraph now carries this language directly.
+> * **`calculation_id` linkage noted.** The doc describes `calculation_id` as the bridge between "what was changed" and "why" — non-empty when triggered by a calculation, empty for plain edits. Not yet tested in isolation (no scenario pins `calculation_id` populated on a calc-driven audit entry vs empty on a user edit). Noted as future gap.
+> * **`edited_by` / `edited_at` edit-only semantics noted.** The doc's note ("only edits update `edited_by`/`edited_at`; calculations do not") is now referenced in the Cluster 6 contract. Relates to BUG-007 but is a broader contract.
+> * **`history_change_reason` UI limitation noted.** The doc says it's "currently only writable from code, no UI." Updated Cluster 5 contract.
+> * **`history_user` definition clarified.** The doc says: "the person who edited the record, or the user who launched the calculation." Updated Cluster 5 contract.
+> * **BUG-001b expanded (Session 54).** 6.10 now has 6 companion scenarios. The synthetic ones — **6.10-control** (sanity), **6.10b** (`AuditLogStatus` child also wiped), **6.10c** (3 retries → 0 rows), **6.10d** (nested savepoint shape) — call `ensure_terminal_calculation_audit()` directly inside a synthetic outer atomic and remain live regression gates (1 pass + 4 xfail). The end-to-end ones — **6.10e** (programmatic `calc.save()` inside outer atomic) and **6.10f** (API POST → PATCH → fallback) — are now `@unittest.skip` because the audit log's API-only contract poisons their diagnostic value: a programmatic `calc.save()` never seeds the API-layer `_pending_terminal_audit`, so the except-branch finalize has nothing to finalize and the 0-row outcome is ambiguous (could be "row rolled back" OR "row never written"). 6.10f's API path is the right shape but blocked by BUG-009 (PATCH of `is_calculated` is silently dropped). Both unblock once BUG-009 is fixed and the API path can drive a calc end-to-end with a real audit-mixin-seeded pending row in scope.
 
 ---
 
@@ -353,6 +399,7 @@ If either command is broken, a new customer cannot start using the framework at 
 | 7.45 | Non-atomic parent, non-atomic child, child fails | Child ERROR persists and propagates ERROR to parent |
 | 7.46 | Non-atomic parent, non-atomic child, parent fails after child pass | Parent settles at ERROR while successful child remains SUCCESS |
 | 7.47 | Non-atomic parent, non-atomic child, both fail | Child ERROR persists and parent settles at ERROR via propagation |
+| 7.48 – 7.111 | **Sub-cluster 7j — Grandparent / parent / child atomicity matrix (64 scenarios).** Full 3-level extension of 7i: every combination of grandparent / parent / child × atomic / non-atomic × fail / no-fail (8 atomicity triplets × 8 outcome triplets). Pins the two atomicity rules the framework actually obeys: **(a)** a failing level's ERROR row survives nested savepoints (its own atomic block, intermediate atomic ancestors) but is wiped by the **outermost** atomic ancestor's rollback (in 3 levels: only GP wipes a failing P or C); **(b)** a successful descendant's row is wiped by **any** atomic ancestor that raises. Failure precedence stays `c_fail > p_fail > gp_fail`. Tests are parametrically generated as `test_7_NN_<aaa>_<TFT>` where letters encode atomicity (a/n) and outcome (T/F) for gp/p/c. Method names are stable so a CI failure log identifies the cell directly. | All 64 cells assert the exact (gp, p, c) triple; `None` distinguishes "row rolled back" from `ERROR`. |
 
 ---
 
@@ -448,7 +495,6 @@ If either command is broken, a new customer cannot start using the framework at 
 | 10.5 | GET list returns all records | 200, correct count |
 | 10.6 | GET history returns history rows | 200, ordered by `history_date` |
 | 10.7 | Many endpoint bulk delete | DELETE with repeated `ids` query params removes selected records only |
-| 10.8 | API triggers calculation (PATCH `is_calculated=IN_PROGRESS`) | IN_PROGRESS committed independently, hooks fire, final state correct |
 | 10.9 | Invalid data returns 400 | Validation errors in response |
 | 10.10 | Unauthenticated request handled | 401 or redirect |
 
@@ -651,6 +697,10 @@ cluster-2 models are too shallow; we need a model with one of every
 | 12.26 | `model2serializer` always injects internal fields | Every auto-generated serializer has `id_field`, `short_description`, `lex_reserved_scopes` in its `Meta.fields` |
 | 12.27 | `_wrap_custom_serializer` preserves user fields + adds internals | A model's `api_serializers` entry keeps its declared `Meta.fields` AND gets the framework internals appended |
 | 12.28 | Serializer is cached per model | Two calls to `get_serializer_map_for_model` return the same class object (not rebuilt per request) |
+| 12.32 | Source model default override exposes configured framework alias | `api_serializers["default"]` remains the developer serializer, while the auto-generated serializer is additionally addressable under the configured alias (e.g. `framework_default`) |
+| 12.33 | History table inherits framework alias from source model | A `Historical*` model with no own `api_serializers` follows the source model's alias decision through `instance_type`; it does not copy unrelated source serializers such as `detail` |
+| 12.34 | Meta-history table walks the full `instance_type` chain | `MetaHistorical* → Historical* → Source` still exposes the auto-generated serializer under the configured alias |
+| 12.35 | `_wrap_custom_serializer` preserves `Meta.hide_actions_column` | Serializer-level list UI metadata survives wrapping so tables can suppress Lex's default Show/Edit/Delete column |
 
 **What is explicitly NOT tested here:**
 
@@ -884,8 +934,9 @@ Priorities below are ordered by expected coverage delta × customer-visibility.
 | 4.16 | `pk_only=true` fast path honours permissions | Denied pks excluded from id list; `count` matches allowed subset |  |
 | 4.17 | `allow_all` profile (admin group) returns every row | `permission_read → allow_all`, no exclusion (`return queryset` branch) |  |
 | 4.18 | Deny-all short-circuit — `permission_read → deny` on every row | Zero rows returned even though DB holds every seeded row |  |
+| 4.41 | Detail endpoint full read deny | Guessed detail URL returns `{}` and leaks no domain fields or `id` when `permission_read → deny` |  |
 
-**Status:**  Complete — 4 pass + 2 skip. See progress.md Session 16.
+**Status:**  Complete — 5 pass + 2 skip. See progress.md Sessions 16 + 46.
 
 ### 4f. Serializer-level masking — `PermissionAwareSerializerMixin` 
 
@@ -1067,6 +1118,21 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 14 pass / 0 fail. Closes Cluster-A/B/C bucket C. Targets the 3 task bodies in `celery_tasks.py` lines 696–957 — previously uncovered by 8g/8h/8i which focused on the wrapper + dispatch layer.
 
+### 8k. Redis broker integration smoke test
+
+**Gap (May 4):** 8g–8j intentionally kept Celery tests broker-free so the normal suite stays deterministic: patched `.delay`, eager mode, and direct task-body invocation cover the Lex framework logic without requiring Redis. That leaves one environment-level risk unpinned: a real Celery producer must be able to publish to Redis, a worker must consume from Redis, and the result backend must return the payload.
+
+**Shape:** two opt-in scenarios in `test_8k_redis_broker_integration.py`. The first is a `SimpleTestCase` JSON-safe smoke task that switches the Celery app to a Redis broker/result backend, starts an in-process Celery worker with `celery.contrib.testing.worker.start_worker`, publishes to a unique queue, and calls `AsyncResult.get()` through `allow_join_result()`. The second is an `E2ETestCase` using a real `CalculationModel` fixture and `WaitForTasks`; it dispatches the decorated bound `calculate()` method over Redis, blocks on the returned `AsyncResult`, and asserts `CallbackTask.on_success` persists `SUCCESS` plus reaches the terminal audit seam. Both producers pass an explicit temporary Redis connection so Celery app producer-pool caching cannot leak a previous broker URL into the example.
+
+**Environment gate:** skipped by default. To run it, set `LEX_RUN_REDIS_CELERY_TESTS=true`; optionally set `LEX_CELERY_REDIS_TEST_URL` (default `redis://127.0.0.1:6379/15`). This keeps CI/laptops without Redis green while still giving DevOps a one-command real-broker check.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.45 | Producer → Redis broker → in-process Celery worker → Redis result backend | Task is received and executed by the worker, result round-trips with a correlation id, and `task_always_eager` is false so this is not the eager-mode path. |
+| 8.46 | `CalculationModel` + `WaitForTasks` over Redis broker | A persisted `CeleryCalc` in `IN_PROGRESS` dispatches via the real `EnhancedBoundTaskMethod`/`WaitForTasks` path to Redis, the worker runs the decorated `calculate()` task, `WaitForTasks` drains the `AsyncResult`, `CallbackTask.on_success` flips the row to `SUCCESS`, and terminal audit is invoked. |
+
+**Status:**  Complete — 2 broker-backed passes when Redis is available; env-gated skips otherwise. The reusable `celery_redis_broker_example.yml` workflow runs the examples with PostgreSQL + Redis services and is called by `pip_publish.yml` before PyPI publishing.
+
 ### 1j. Keycloak client safety pre-flight — mocked 
 
 **Gap (April 25):** `lex init` mutates the configured Keycloak client's resources / policies / permissions. Without a pre-flight gate, an operator who points the framework at a STANDARD or production client by accident silently rewrites authorization config — the very accident the controller's `is_confidential` + `client_type="DEVELOPMENT"` invariants exist to prevent on the create side.
@@ -1143,6 +1209,162 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 8 pass / 0 fail in 0.020s. See progress.md Session 40.
 
+### 5g. History `valid_to` chaining contract  — implemented
+
+**Gap (May 5):** Cluster 5.4 documents the contract "`valid_to` of row N = `valid_from` of row N+1" but the implemented test only asserts ascending `history_id`. The chaining is the very thing that makes the bitemporal timeline contiguous (latest row carries `valid_to=NULL`); a regression here would silently produce gaps or overlaps in the timeline that no other test sees.
+
+**Models:** reuses `HistSimpleItem` from Cluster 5.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.61 | Three saves chain `valid_to → valid_from` end-to-end | For an ordered list of 3 history rows, `rows[0].valid_to == rows[1].valid_from`, `rows[1].valid_to == rows[2].valid_from`, `rows[2].valid_to is None` (latest row open-ended) |
+| 5.61b | Delete closes the chain | After `delete()`, the `-` row's `valid_from` matches the previous row's `valid_to`; the `-` row's `valid_to` is `None` |
+
+**Status:**  Implemented (Session 51). 5.61 + 5.61b both pass. See progress.md Session 51.
+
+### 5h. History suppression toolkit (per-instance, per-save, bulk, model-level, calculation-level)  — implemented
+
+**Gap (May 5):** `docs/features/tracking/history.md` + `bitemporal history.md` document **five** distinct suppression toggles. Cluster 5.5 covers exactly one (`skip_history_when_saving`). The remaining four — each customer-facing — are dark.
+
+**Models:** reuses `HistSimpleItem`; one new `UntrackedItem` model with `skip_history_when_saving = True` baked in via `untracked_models` (deferred).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.62 | `obj.save_without_historical_record()` | Single save with no history row appended; subsequent normal `.save()` resumes history (proves it's a single-save toggle, not a sticky flag) |
+| 5.63 | `obj.untrack()` followed by `obj.save()` then `obj.track()` then `obj.save()` | First save produces no history row, second save produces a `~` row — proves the toggle is sticky between calls and `track()` re-enables |
+| 5.64 | `Model.objects.bulk_create(objs, skip_history=True)` | N rows persisted, 0 history rows; subsequent `.save()` on one of those rows then produces a `~` history row (catching the case where `bulk_create` would otherwise leave the instance permanently untracked) |
+| 5.65 | `bulk_create` without `skip_history` | Documented bulk-path behaviour: per-row history rows ARE created (this is the "make sure the default still works" gate) |
+| 5.66 | `with suspend_bitemporal(): obj.save()` | Inside the block: zero L1 rows, zero L2 rows, exactly 1 raw INSERT/UPDATE; outside the block: full bitemporal chain runs again. Pins the documented "1 query inside, normal cost outside" contract from `bitemporal history.md` |
+| 5.67 | `untracked_models` declared in `model_structure.yaml` | No `Historical*` table generated for the model; `model.history` manager raises / returns no rows. ⏸ deferred — needs a fresh test project with `model_structure.yaml`-loaded config to avoid mutating the live test_project model registry |
+
+**Status:**  Implemented (Session 51). 5.62–5.65 pass; 5.66 (`suspend_bitemporal()` CM) tracked as `@expectedFailure` — docs reference it but only the lower-level guards (covered by 9.7–9.10) are exposed today; 5.67 deferred (fixture-shaped). See progress.md Session 51.
+
+### 5i. History API contract — response shape + `as_of` time-travel  — implemented
+
+**Gap (May 5):** Cluster 5.9 only asserts `200 OK + ≥3 rows`. The documented JSON contract from `bitemporal history.md` is much wider, and the `?as_of=...` system-time time-travel branch (the entire reason MetaHistory exists) is uncovered. A silent contract drift here would break the History tab UI without tripping any existing test.
+
+**Models:** reuses `HistSimpleItem`; new helper `UserHistItem` with a `history_user` FK so the actor is observable on the response.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.71 | `GET /history/` response shape | Each row carries `history_id`, `valid_from`, `valid_to`, `history_type`, `user` (`{id, email, name}` or `null`), `snapshot` (full field map), `system_history` (list of L2 records) — exactly the keys documented in `bitemporal history.md` |
+| 5.72 | `get_queryset_as_of(Model, t)` — valid time | Returns history rows where `valid_from <= t AND (valid_to > t OR valid_to IS NULL)`; pre-`t` and post-`t` rows are filtered out |
+| 5.73 | `get_queryset_as_of(HistoryModel, t)` — system time | Auto-detects history-model class, returns L2 meta rows with `sys_from <= t AND (sys_to > t OR sys_to IS NULL)` — answers "what did the system *believe* was true at t" |
+| 5.74 | `GET /history/?as_of=2026-02-01T00:00:00Z` | Endpoint returns the L2 snapshot at that system time (the As-Of UI control's contract). Asserts the rows match the `get_queryset_as_of(HistoryModel, t)` set from 5.73 |
+
+**Status:**  Implemented (Session 51). 5.71/5.72 pass; 5.73/5.74 (system-time `as_of` + `?as_of=...` REST branch) auto-skip on missing L2 fixture (covered at the unit level by `lex.tests.unit.api.test_history_endpoint` + `lex.tests.unit.infra.test_bitemporal_service`). See progress.md Session 51.
+
+### 5j. History snapshot completeness + `history_user` actor  — implemented
+
+**Gap (May 5):** Docs guarantee each L1 row carries every field's value at that moment. No test asserts this — only counts and types. Same for `history_user`: docs say "ForeignKey(User) — Who made the change" but the API path actor is not pinned.
+
+**Models:** `HistSimpleItem` (existing) + `UserHistItem` (small `LexModel` with one tracked field, used to inspect `history_user` after API saves).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.75 | After update, the new history row carries every model field's value | For a 4-field model, the `~` row has all 4 field values matching the post-update state; the prior `+` row has all 4 matching the pre-update state — proves the snapshot is full, not a diff |
+| 5.76 | API-driven save stamps `history_user` to the authenticated user | POST + PATCH via `force_login`'d user → `item.history.first().history_user_id == user.pk` (or `history_user.email` matches). The `history_change_reason` field is `None` by default — also pinned so a default change is caught |
+
+**Status:**  Implemented (Session 51). 5.75 (full snapshot, not a diff) + 5.76 (`history_user` actor stamping on the API path) both pass. See progress.md Session 51.
+
+### 5k. MetaHistory positive contract  — implemented
+
+**Gap (May 5):** 9.7–9.10 cover the suppression *primitives* (ContextVars), but no test asserts that a `save()` actually *creates* a Level-2 row, that `sys_from`/`sys_to` chain across the `MetaHistorical*` table, or that the L2 → L1 `history_object` FK is wired correctly. The full bitemporal signal chain documented in `bitemporal history.md` ("How the Signal Chain Works") is therefore not gated.
+
+**Models:** reuses `HistSimpleItem` (the framework auto-generates `MetaHistoricalHistSimpleItem` at runtime).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.81 | Single save → exactly 1 L2 row | After `obj.save()` (create), `MetaHistoricalHistSimpleItem.objects.count() == 1`; the row's `history_object_id == obj.history.first().history_id`; `sys_to is None`; `meta_history_type == "+"` |
+| 5.82 | Three saves chain `sys_to → sys_from` | Identical contract to 5.61 but on the L2 table — proves `chain_sys_to` runs |
+| 5.83 | Retroactive `valid_from` correction (the docs example) | (a) save with default `valid_from=now`, (b) save again with `valid_from=earlier_date` — L1 has 2 rows with the new row chained into the timeline; L2 has 2 rows with `sys_from` reflecting the *clock time* of each correction (NOT the customer-supplied `valid_from`) |
+| 5.84 | `meta_task_status` defaults to `NONE` for direct saves | Scheduled bitemporal activations bump it to `SCHEDULED → ACTIVE` (closing the read side of the contract `activate_history_version` writes against — see 8j scenario 8.43) |
+
+**Status:**  Implemented (Session 51). 5.81/5.82/5.84 pass; 5.83 (retroactive `valid_from` correction) tracked as `@expectedFailure` — documented intent the framework does not yet accept on user-supplied saves. See progress.md Session 51. Note: 5.91–5.97 (Cluster 5l) demonstrate that the 5k auto-skip probe was on the wrong attribute — L2 *is* wired for `HistSimpleItem` on this build via `HistSimpleItem.history.model.meta_history.model`.
+
+### 5l. Future-dated bitemporal saves — scheduled activation contract  — implemented
+
+**Gap (May 7):** the **save side** of the future-activation contract is not pinned anywhere. 8.43 covers the *worker side* (`activate_history_version` against a mocked model), and 5k covers the L2 row shape on direct saves where `valid_from = now`. Nothing exercises the **handoff** — the part the customer actually sees: *"I edited a record with a `valid_from` set in the future; the screen still shows the old value, and after the scheduled time the screen shows the new value."*
+
+**Concrete user scenario** (the example that surfaced this gap): a record renamed `test → test1 → test2` where the third save sets `valid_from = now + 1h`. Until the activation fires the **main table (Level 0)** must still read `name = "test1"`, the **L1 history** must already carry all three rows (with the third row's `valid_from` at the future moment), and the **L2 meta** for the future row must carry `meta_task_status = "SCHEDULED"` plus a populated `meta_task_name`. After `activate_history_version` runs at the scheduled time the main row catches up to `test2` and the meta row flips to `DONE`. None of those four facts are gated today — the handlers in `lex/core/services/bitemporal_signals.py` (`on_history_saved__create_meta` lines 248–253, `_schedule_future_activation` lines 487–547, `on_history_pre_delete__cancel_schedules` lines 295–340) are silently load-bearing.
+
+**Documented contract** (per `bitemporal history.md` "Level 2 — MetaHistory" + the implementation in `bitemporal_signals.py`): a save whose `valid_from > now + 5s` (a) creates the L1 row at the requested future date, (b) **does NOT update the live Level 0 row** — `BitemporalSynchronizer.sync_record_for_model` only syncs the row that's currently valid by `valid_from`, (c) creates the L2 meta with `meta_task_status = "SCHEDULED"` + a unique `meta_task_name`, and (d) registers a Celery `PeriodicTask` (`task="activate_history_version"`, `one_off=True`, `ClockedSchedule(clocked_time=valid_from)`) when `CELERY_ACTIVE=true`, or hands the same callable to `LocalSchedulerBackend.schedule(...)` otherwise. The 5-second grace window is a real boundary: `valid_from = now + 2s` does **not** schedule (drops through to immediate sync), `valid_from = now + 60s` does. Editing an existing future-dated row reschedules — the previous `PeriodicTask` is deleted by name before the new one is created. Deleting a row whose meta is `SCHEDULED` cancels the queued task and flips `meta_task_status → "CANCELLED"`.
+
+**Models:** reuses `HistSimpleItem`. The Celery branch tests don't need a broker — `django_celery_beat.models.PeriodicTask` / `ClockedSchedule` are ORM rows, asserting on the row count and shape is sufficient. The local-scheduler branch is exercised by patching `LocalSchedulerBackend.schedule` and asserting on the call.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.91 | The user's `test → test1 → test2` rename with `test2.valid_from = now + 1h` | (a) `HistSimpleItem.objects.get(pk=item.pk).name == "test1"` (main row still on the previous version — Level 0 unchanged); (b) `item.history.count() == 3` and the rows in `valid_from` order carry names `["test", "test1", "test2"]`; (c) the latest L1 row's `valid_from` is the future moment within tolerance, not `now`. Pins the central handoff — without it, future edits would leak into the live grid the moment they're saved |
+| 5.92 | L2 meta on the future-dated L1 row carries `meta_task_status = "SCHEDULED"` + a non-empty `meta_task_name` | Under `CELERY_ACTIVE=true`: exactly one `PeriodicTask` with `task="activate_history_version"`, `one_off=True`, `name == meta.meta_task_name`, and `args` JSON-decoded to `[app_label, model_name, history_id]`; the linked `ClockedSchedule.clocked_time` matches the L1 row's `valid_from`. Under `CELERY_ACTIVE=false`: `LocalSchedulerBackend.schedule` is called once with `func=activate_history_version` and `kwargs["history_id"]` matching the L1 pk |
+| 5.93 | 5-second grace window boundary | A save with `valid_from = now + 2s` does NOT schedule — `meta.meta_task_status` stays at the `NONE`/non-active default, zero `PeriodicTask` rows created, main table syncs immediately to the new value. A save with `valid_from = now + 60s` DOES schedule. Pins the `> now + timedelta(seconds=5)` threshold against silent drift (a value of e.g. 0 or 60s would either schedule every save or never schedule small future edits) |
+| 5.94 | Editing an existing future-dated row reschedules cleanly | Save once with `valid_from = now + 1h` → `PeriodicTask(name=A)` registered. Edit the same future-dated row to `valid_from = now + 2h` → the old `PeriodicTask(name=A)` is gone, exactly one new `PeriodicTask(name=B != A)` exists, and its `ClockedSchedule.clocked_time` matches the new `valid_from`. The L2 row's `meta_task_name` now equals `B`. Pins the `if meta_instance.meta_task_name: PeriodicTask.objects.filter(name=...).delete()` cleanup branch |
+| 5.95 | End-to-end activation: future save → `activate_history_version` runs → main row catches up | Save the user's `test2` row with future `valid_from`. Invoke `activate_history_version(app_label, model_name, history_id)` directly (no Celery broker — same path as 8.43 but with a real `HistSimpleItem` fixture). After the call: (a) `HistSimpleItem.objects.get(pk=item.pk).name == "test2"` — `BitemporalSynchronizer.sync_record_for_model` wrote the future values into Level 0; (b) the L2 row's `meta_task_status` is no longer `"SCHEDULED"` (flipped to `DONE`/`ACTIVE` per the worker contract — pins the read side of 8.43 from a real fixture); (c) `item.history.count()` is unchanged — activation does NOT mint a new history row |
+| 5.96 | Deleting a row with a SCHEDULED future activation cancels the queued task | After 5.92 — call `item.delete()`. Assertions: (a) the `PeriodicTask` with `name == meta.meta_task_name` no longer exists; (b) the L2 meta for that history row has `meta_task_status == "CANCELLED"`; (c) the L2 row's `sys_to` is no longer NULL (closed to `now()` by `on_history_pre_delete__cancel_schedules` so system-time queries don't read a stale "scheduled" view). Pins the cancellation contract — without it, deleting a record leaves orphaned Celery Beat rows that fire against a missing history_id and produce `"skipped_missing_record"` noise (the 8.41 path) |
+| 5.97 | Multiple future-dated saves queue independently | Schedule `test1` for `now + 1h` AND `test2` for `now + 2h` on distinct rows. Two `PeriodicTask` rows exist with distinct `meta_task_name` values; their `ClockedSchedule.clocked_time` values differ. Cancelling one (via delete) leaves the other intact (`PeriodicTask` row + L2 `meta_task_status` for the survivor unchanged). Pins fan-out — a scheduler regression that namespaced both schedules under the same key would silently coalesce to one |
+
+**Status:**  Implemented. All 7 scenarios land green on this build — `HistSimpleItem` *does* have L2 wired here (the 5k auto-skip probe (`HistSimpleItem.meta_history`) is on the wrong attribute; the canonical access is `HistSimpleItem.history.model.meta_history.model`, which 5l uses). Scheduling assertions (5.92–5.97) run under `patch.dict("os.environ", {"CELERY_ACTIVE": "true"})` so the Celery branch (`ClockedSchedule` + `PeriodicTask`) is exercised without needing a broker. 5.95 simulates "Beat fired the task at the clocked time" by patching `django.utils.timezone.now` to a moment past `valid_from` so the worker's `> now + 5s` guard passes. Companion to 8.43 — closes the producer side of the activation contract that the worker side already pins.
+
+### 6d. Audit-log payload + GenericForeignKey contract  — implemented
+
+**Gap (May 5):** 6.1/6.2/6.3 are thin: count + status only, with one `assertIn("value", payload)` for update. The Audit Log Tab UI's documented columns (`date`, `author`, `resource`, `action`, expandable JSON `payload`, link to record via `content_type` + `object_id`, `calculation_id` link to calc log) are mostly unpinned. **Critical:** without `content_type` + `object_id`, the per-record Audit Log Tab cannot find rows, but no test catches a regression.
+
+**Models:** reuses `AuditSimpleItem` from Cluster 6.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 6.41 | Create audit row → `content_type` + `object_id` populated | After `POST /api/<model>/`, `audit_log.content_type == ContentType.objects.get_for_model(AuditSimpleItem)` and `audit_log.object_id == created_pk`. The `calculatable_object` GFK resolves back to the row. Without these, the Audit Log Tab UI cannot list operations affecting a specific record |
+| 6.42 | Create audit payload carries the *full* request body + the post-save `id` | `payload == {"name": ..., "value": ..., "id": <created_pk>}` — the documented "full data + id-after-save" shape (line 227–231 of `AuditLogMixin.py`) |
+| 6.43 | Update audit payload is *refreshed to final state* on success | `audit_log.payload` after PATCH equals the *full GET-shape* serialized representation including every field, not just the patched ones (the line 260 `payload = self.get_serializer(instance).data` contract). This is what makes audit logs reconstructable into "what the row looked like after this change" |
+| 6.44 | Delete audit payload preserves the deleted record's pre-delete state | After DELETE, `audit_log.payload` carries every field's value at the moment of deletion + `id`. Docs: "you can always inspect what was removed" — currently no test asserts this |
+| 6.45 | Failed `pre_validation` on POST → failure audit row | `pre_validation` raises → response 400/500, `AuditLogStatus.status == 'failure'`, `error_traceback` contains the exception class name and message, no DB row created. Replaces the previously-skipped 6.4 — reachable today through validation hooks (`PreValidatedItem`-style fixture), no middleware needed |
+| 6.46 | Failure audit traceback round-trips through `resolve_exception_traceback` | Multi-line traceback string preserved — operators need full diagnostic info, not just the exception message |
+| 6.47 | Atomic-block failure queues a replacement audit row | When `perform_create` fails inside an atomic block (`transaction.get_connection().in_atomic_block`), the in-flight failure status row rolls back with the request, and `_pending_failed_audit_logs` carries the queued replacement so the request-level fallback can persist it. Pins the line 238–246 branch |
+| 6.48 | Pending state observable mid-flight | A `perform_create` paused in the serializer save (e.g. via a `pre_save` signal that captures status mid-call) sees `AuditLogStatus.status == 'pending'`. Documents the documented 🟡 → 🟢/🔴 lifecycle from the Audit Log Tab |
+
+**Status:**  Implemented (Session 51). 6.41–6.46 pass live — including 6.45/6.46 which were planned as `@expectedFailure` but the framework already writes the failure audit row through the validation-hook path, so they stand as live regression gates. 6.47/6.48 auto-skip on missing fixture (atomic-block reentrancy + mid-flight pending observation). See progress.md Session 51.
+
+### 6e. Bulk audit logging — `BulkAuditLogMixin`  — implemented
+
+**Gap (May 5):** Docs explicitly say "a bulk update of 100 records creates 100 audit log entries". Cluster 2e's bulk DELETE scenarios (2.23/2.24/2.25) never assert the audit row count. `BulkAuditLogMixin` (167 stmts) is dark.
+
+**Models:** reuses `AuditSimpleItem`.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 6.51 | `DELETE /many/?ids=1,2,3` → 3 audit rows | One audit row per deleted record, all with `action='delete'`, payload carrying the deleted row's pre-delete state, status `success` |
+| 6.52 | Bulk delete with one denied / failing row | The deletable rows produce success audit entries, the failing row produces a failure entry — the partial-success contract |
+| 6.53 | Bulk delete preserves per-row `content_type` + `object_id` | Each audit row's GFK points back to its own pre-delete instance — Audit Log Tab on each individual record still works after the bulk op |
+
+**Status:**  Implemented (Session 51). 6.51 passes; 6.52 (audit row count under `bulk_create`) auto-skips on missing fixture. See progress.md Session 51.
+
+### 6f. Audit-log resilience — deadlock retries + ContentType cache healing  — implemented
+
+**Gap (May 5):** Docs "Resilience" section calls out two contracts. Both unpinned.
+
+**Models:** reuses `AuditSimpleItem`.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 6.61 | Save raises `OperationalError(pgcode='40P01')` once, then succeeds | Retried automatically up to `MAX_UPDATE_RETRIES` (3); final state is success; backoff seen via `time.sleep` patch (~0.05 / 0.10 / 0.20s exponential). Pins `_save_with_retry` + `_is_retryable_db_error` + `RETRYABLE_SQLSTATE_CODES = {"40P01", "40001"}` |
+| 6.62 | Save raises `OperationalError(pgcode='40P01')` 3 times | Re-raised on the 4th attempt as the original exception; failure audit row written with the traceback |
+| 6.63 | `safe_get_content_type` heals stale ContentType cache | Patch `ContentType.objects.get_for_model` to raise `ContentType.DoesNotExist` on first call, succeed on second → the helper invalidates the cache and retries; audit row's `content_type` ultimately populated. Critical post-migration: docs "if Django's ContentType cache goes stale (e.g., after a migration), the system detects and auto-corrects it" |
+
+**Status:**  Implemented (Session 51). Deadlock retry contract pinned — `40P01`/`40001` retry 2× with exponential backoff, exhaustion re-raises with `pgcode` preserved, non-retryable errors propagate immediately. ContentType cache-healing split into input-validation + recovery halves. See progress.md Session 51.
+
+### 6g. Audit-log immutability  — implemented
+
+**Gap (May 5):** Docs `[!note]`: "Audit logs are effectively read-only. They are designed to be an immutable record of operations — only administrators should modify or delete them." `AuditLog`/`AuditLogStatus` permissions explicitly enforce this (`permission_create=False`, `permission_delete=False`, `permission_edit→deny`). No test pins these — a regression flipping any to `True` would silently allow audit tampering.
+
+**Models:** Existing framework `AuditLog` / `AuditLogStatus`.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 6.71 | POST `/api/auditlog/` returns 403 for non-admin | `permission_create` returns False → 403; no audit row created. Same for `AuditLogStatus` |
+| 6.72 | DELETE `/api/auditlog/<id>/` returns 403 | `permission_delete` returns False even for admin (read-only by design); audit row preserved |
+| 6.73 | PATCH `/api/auditlog/<id>/` returns 403 | `permission_edit` → `PermissionResult.deny(...)`, fields cannot be mutated; audit row preserved verbatim |
+
+**Status:**  Implemented (Session 51). `AuditLog.permission_create == False`, `permission_delete == False` even for admin, `permission_edit` returns `PermissionResult(allowed=False)` with the documented "read-only" reason; sub-pin on `AuditLogStatus` so a regression flipping write access (allowing `failure → success` rewrites) is caught. See progress.md Session 51.
+
 ### Sequencing
 
 ```
@@ -1155,6 +1377,16 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 7g  (CalculatedModel.create pipeline) — closes the largest single source-file gap
 1i  (initial-data upload journey)     — drives InitialDataAuditLogger + seed walker, closes Cluster-A/B/C bucket B
 8j  (celery_tasks.py task bodies)     — load_data / calc_and_save / activate_history_version, closes Cluster-A/B/C bucket C
+5g  (history valid_to chaining)       — pin the contract docstring already promises
+5h  (history suppression toolkit)     — `save_without_historical_record`, `untrack/track`, `bulk_create(skip_history=True)`, `suspend_bitemporal()`
+5i  (history API + as_of time-travel) — full response shape + system-time `as_of` branch
+5j  (history snapshot + history_user) — full-field snapshot + actor stamping on API path
+5k  (MetaHistory positive contract)   — Level-2 row creation + sys_to chaining + retroactive corrections
+5l  (future-dated save scheduling)    — handoff between user save with future valid_from and `activate_history_version` worker
+6d  (audit payload + GFK)             — full payload shape, content_type/object_id, failure-path coverage (replaces skipped 6.4)
+6e  (bulk audit — `BulkAuditLogMixin`) — 1 audit row per record in bulk ops
+6f  (audit resilience)                — deadlock retries + ContentType cache healing
+6g  (audit immutability)              — read-only contract on `AuditLog` / `AuditLogStatus` permissions
 ```
 
 **Why no new top-level clusters:** every gap is a *facet* of an existing user-journey concern. Permission enforcement belongs in Cluster 4. Schema & search belong in Cluster 10 (API Layer). Write-path serializer behaviour is Cluster 12. Signal branches are Cluster 9. Splitting them out would fragment the story and duplicate setup.

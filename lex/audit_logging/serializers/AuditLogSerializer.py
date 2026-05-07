@@ -21,6 +21,11 @@ class AuditLogReadOnlySerializerMixin:
 
 class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.ModelSerializer):
     calculation_record = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+    error_traceback = serializers.SerializerMethodField()
+    status_created_at = serializers.SerializerMethodField()
+    status_updated_at = serializers.SerializerMethodField()
+    duration = serializers.SerializerMethodField()
 
     class Meta:
         model = AuditLog
@@ -33,8 +38,40 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
             'payload',
             'calculation_id',
             'calculation_record',
+            'status',
+            'error_traceback',
+            'status_created_at',
+            'status_updated_at',
+            'duration',
         ]
         read_only_fields = [f.name for f in AuditLog._meta.fields]
+
+    def _get_latest_status_record(self, obj):
+        """Return the latest AuditLogStatus record for this AuditLog, or None."""
+        if hasattr(obj, '_prefetched_objects_cache') and 'status_records' in obj._prefetched_objects_cache:
+            records = obj._prefetched_objects_cache['status_records']
+            return records[-1] if records else None
+        return obj.status_records.order_by('-created_at').first()
+
+    def get_status(self, obj):
+        record = self._get_latest_status_record(obj)
+        return record.status if record else None
+
+    def get_error_traceback(self, obj):
+        record = self._get_latest_status_record(obj)
+        return record.error_traceback if record else None
+
+    def get_status_created_at(self, obj):
+        record = self._get_latest_status_record(obj)
+        return record.created_at.isoformat() if record and record.created_at else None
+
+    def get_status_updated_at(self, obj):
+        record = self._get_latest_status_record(obj)
+        return record.updated_at.isoformat() if record and record.updated_at else None
+
+    def get_duration(self, obj):
+        record = self._get_latest_status_record(obj)
+        return record.duration if record else None
 
     def get_calculation_record(self, obj):
         """
@@ -103,3 +140,5 @@ AuditLog.api_serializers = {
     "default": AuditLogDefaultSerializer,
     "reference": AuditLogReferenceSerializer,
 }
+AuditLog._lex_skip_serializer_alias = True
+AuditLog._lex_hidden_serializers = {"reference"}

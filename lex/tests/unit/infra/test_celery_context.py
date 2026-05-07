@@ -40,7 +40,6 @@ class CeleryCalculationContextTests(SimpleTestCase):
                 "request_obj": "",
                 "calculation_id": "",
                 "audit_log_temp": None,
-                "actor": None,
             }
         )
         _model_context.get()["model_context"] = ModelContext()
@@ -56,7 +55,6 @@ class CeleryCalculationContextTests(SimpleTestCase):
             "request_obj": {"path": "/api/calculate"},
             "calculation_id": "calc-123",
             "audit_log_temp": "audit-entry",
-            "actor": "tester",
         }
         operation_context.set(original_context)
 
@@ -65,7 +63,6 @@ class CeleryCalculationContextTests(SimpleTestCase):
             self.assertEqual(current_context["calculation_id"], "calc-123")
             self.assertEqual(current_context["request_obj"], {"path": "/api/calculate"})
             self.assertEqual(current_context["audit_log_temp"], "audit-entry")
-            self.assertEqual(current_context["actor"], "tester")
             self.assertNotEqual(current_context["operation_id"], "request-op")
             self.assertTrue(current_context["celery_task"])
             self.assertEqual(current_context["task_name"], "calc_and_save")
@@ -113,7 +110,6 @@ class LexSharedTaskContextTests(SimpleTestCase):
             "request_obj": {"path": "/api/calculate"},
             "calculation_id": "calc-789",
             "audit_log_temp": None,
-            "actor": "tester",
         }
 
         @lex_shared_task(name="test_task_with_context")

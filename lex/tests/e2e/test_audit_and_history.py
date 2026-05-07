@@ -11,6 +11,7 @@ Tests that verify:
 
 import os
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection, models
@@ -170,17 +171,17 @@ class TestActorTracking(E2ETestCase):
     e2e_models = ALL_MODELS
 
     def test_created_by_set_on_create(self):
-        """OperationContext actor appears in created_by."""
-        with OperationContext(actor="Alice"):
+        """Request user from OperationContext appears in created_by."""
+        with OperationContext(request=SimpleNamespace(user="Alice")):
             asset = AuditedAsset.objects.create(name="Bond A", value=100)
         asset.refresh_from_db()
         self.assertEqual(asset.created_by, "Alice")
 
     def test_edited_by_set_on_update(self):
         """A different actor editing sets edited_by."""
-        with OperationContext(actor="Alice"):
+        with OperationContext(request=SimpleNamespace(user="Alice")):
             asset = AuditedAsset.objects.create(name="Bond B", value=100)
-        with OperationContext(actor="Bob"):
+        with OperationContext(request=SimpleNamespace(user="Bob")):
             asset.value = 200
             asset.save()
         asset.refresh_from_db()
@@ -189,12 +190,12 @@ class TestActorTracking(E2ETestCase):
 
     def test_actor_chain_across_three_operations(self):
         """Create → edit → edit: each operation has the correct actor."""
-        with OperationContext(actor="Creator"):
+        with OperationContext(request=SimpleNamespace(user="Creator")):
             asset = AuditedAsset.objects.create(name="Bond C", value=50)
-        with OperationContext(actor="Editor1"):
+        with OperationContext(request=SimpleNamespace(user="Editor1")):
             asset.value = 75
             asset.save()
-        with OperationContext(actor="Editor2"):
+        with OperationContext(request=SimpleNamespace(user="Editor2")):
             asset.value = 100
             asset.save()
 

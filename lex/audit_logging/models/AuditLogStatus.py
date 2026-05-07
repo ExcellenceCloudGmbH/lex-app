@@ -3,6 +3,11 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 class AuditLogStatus(LexModel):
+    # Remove inherited audit fields from LexModel – not needed for status tracking.
+    edited_at = None
+    created_by = None
+    edited_by = None
+
     audit_log = models.ForeignKey(
         AuditLog,
         related_name='status_records',
@@ -12,6 +17,13 @@ class AuditLogStatus(LexModel):
     error_traceback = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def duration(self):
+        """Duration in seconds between created_at and updated_at when status is success or failure."""
+        if self.status in ('success', 'failure') and self.created_at and self.updated_at:
+            return (self.updated_at - self.created_at).total_seconds()
+        return None
 
     class Meta:
         app_label = 'audit_logging'
