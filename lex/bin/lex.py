@@ -352,10 +352,6 @@ def pytest_cmd(ctx):
     recipient data and asks for confirmation before sending unless
     ``--send-emails`` is supplied.
     """
-    # Bootstrap Django so tests can import models, use ORM, and pytest-django
-    # can pick up DJANGO_SETTINGS_MODULE without a second setup pass.
-    _bootstrap_django()
-
     # Run from project root so lex_test_config.yaml and the tests entrypoint
     # are auto-discovered regardless of where `lex pytest` was invoked.
     os.chdir(PROJECT_ROOT_DIR.as_posix())
@@ -402,13 +398,30 @@ def pytest_cmd(ctx):
                 source=[PROJECT_ROOT_DIR.as_posix()],
                 omit=[
                     str(PROJECT_ROOT_DIR / ".venv" / "*"),
+                    str(PROJECT_ROOT_DIR / "venv" / "*"),
+                    str(PROJECT_ROOT_DIR / "env" / "*"),
                     str(PROJECT_ROOT_DIR / "Tests" / "*"),
                     str(PROJECT_ROOT_DIR / "tests" / "*"),
                     str(PROJECT_ROOT_DIR / "reports" / "*"),
+                    str(PROJECT_ROOT_DIR / "htmlcov" / "*"),
+                    str(PROJECT_ROOT_DIR / "static" / "*"),
+                    str(PROJECT_ROOT_DIR / "media" / "*"),
+                    str(PROJECT_ROOT_DIR / "build" / "*"),
+                    str(PROJECT_ROOT_DIR / "dist" / "*"),
+                    str(PROJECT_ROOT_DIR / "_authentication_settings.py"),
+                    str(PROJECT_ROOT_DIR / "_streamlit_structure.py"),
+                    "*/.pytest_cache/*",
+                    "*/__pycache__/*",
+                    "*/migrations/*",
+                    "*/node_modules/*",
                     "*/site-packages/*",
                 ],
             )
             coverage_runner.start()
+
+    # Bootstrap Django after starting report coverage so app/model import-time
+    # code is included in the measured project coverage.
+    _bootstrap_django()
 
     started_at = time.perf_counter()
     try:
