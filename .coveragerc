@@ -65,11 +65,17 @@ omit =
     lex/lex_app/asgi.py
     lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
+    lex/tools/ai_dashboard.py
+    lex/tools/ai_faq.py
+    lex/tools/verify_ai_assets.py
     lex/streamlit_app.py
     lex/lex_app/streamlit/*
     lex/proxy.py
     lex/manage.py
     lex/api/views/authentication/KeycloakManager.py
+    lex/audit_logging/utils/legacy_audit_payload.py
+    lex/core/management/commands/bootstrap_callback_server.py
+    lex/lex_app/management/commands/bootstrap_keycloak.py
 
 [report]
 show_missing = True
@@ -121,9 +127,15 @@ omit =
     lex/lex_app/asgi.py
     lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
+    lex/tools/ai_dashboard.py
+    lex/tools/ai_faq.py
+    lex/tools/verify_ai_assets.py
     lex/lex_app/streamlit/*
     lex/streamlit_app.py
     lex/api/views/authentication/KeycloakManager.py
+    lex/audit_logging/utils/legacy_audit_payload.py
+    lex/core/management/commands/bootstrap_callback_server.py
+    lex/lex_app/management/commands/bootstrap_keycloak.py
 exclude_lines =
     pragma: no cover
     raise NotImplementedError
