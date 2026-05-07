@@ -160,7 +160,7 @@ class TestCluster05h_SuppressionToolkit(E2ETestCase):
         )
 
     # -- 5.66 ----------------------------------------------------------
-    @unittest.expectedFailure  # docs reference a `suspend_bitemporal()` CM that does not exist yet — only the lower-level guards are exposed today
+    @unittest.expectedFailure  # BUG-020: docs reference a `suspend_bitemporal()` CM that does not exist yet — only the lower-level guards are exposed today
     def test_5_66_suspend_bitemporal_context_manager(self) -> None:
         """
         Scenario 5.66: ``with suspend_bitemporal(): obj.save()`` must

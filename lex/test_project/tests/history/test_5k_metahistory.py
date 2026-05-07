@@ -30,31 +30,40 @@ from .models import ALL_MODELS, HistSimpleItem
 
 
 def _meta_model_for(model_class):
-    """Resolve ``MetaHistorical<Model>`` — exposed via the ``meta_history``
-    manager on the source LexModel (matches ``bitemporal_signals.py``'s
-    own ``sender.meta_history.model`` access)."""
-    return model_class.meta_history.model
+    """Resolve ``MetaHistorical<Model>``. The ``meta_history`` manager
+    is attached to the *historical* model by
+    ``ModelRegistration._register_standard_model`` (see
+    ``lex/process_admin/utils/model_registration.py`` line ~334:
+    ``history.contribute_to_class(historical_model, "meta_history")``)
+    — NOT to the source model. The earlier shorthand
+    ``model_class.meta_history.model`` always raised ``AttributeError``
+    and silently sent every 5k test to the skip path even when L2 was
+    wired (see Cluster 5l, Session 52, for the same access pattern
+    landing live)."""
+    return model_class.history.model.meta_history.model
 
 
 def _meta_history_wired() -> bool:
     """Probe at call time — at class body / import time, simple_history's
-    late ``register()`` may not have attached the manager yet."""
+    late ``register()`` may not have attached the manager yet. Uses the
+    canonical access path on the *historical* model."""
     try:
-        _ = HistSimpleItem.meta_history.model
+        _ = HistSimpleItem.history.model.meta_history.model
         return True
     except Exception:
         return False
 
 
 _SKIP_REASON = (
-    "MetaHistorical* is wired by process_admin's register_standard_model() "
-    "at framework boot. The test_project's HistSimpleItem fixture is "
-    "declared as a private test-only model and skips that registration "
-    "path, so the L2 manager is not attached. The documented contract "
-    "(5.81-5.84) holds for production-registered models; see "
-    "lex.tests.unit.api.test_history_endpoint and lex.tests.unit.infra."
-    "test_bitemporal_service for unit-level coverage on a Mock-backed "
-    "L2 manager."
+    "MetaHistorical* is not wired on this build. The L2 manager is "
+    "attached by ``ModelRegistration._register_standard_model`` at "
+    "framework boot; if the test_project's HistSimpleItem fixture "
+    "skipped that path the manager will be missing. The documented "
+    "contract (5.81-5.84) holds for production-registered models; "
+    "see lex.tests.unit.api.test_history_endpoint and lex.tests.unit."
+    "infra.test_bitemporal_service for unit-level coverage on a "
+    "Mock-backed L2 manager. Cluster 5l (Session 52) demonstrates "
+    "the canonical access pattern when L2 *is* wired."
 )
 
 
@@ -98,11 +107,23 @@ class TestCluster05k_MetaHistoryContract(E2ETestCase):
         )
 
     # -- 5.82 ----------------------------------------------------------
+    @unittest.expectedFailure  # BUG-022: every valid_to refinement on a previous L1 row mints an extra L2 row, so 3 saves produce 5 (not 3) — contradicts the in-place-update comment in on_history_saved__chain_valid_to
     def test_5_82_three_saves_chain_sys_to(self) -> None:
         """
         Scenario 5.82: Three saves produce L2 rows whose ``sys_to``
         chains into the next ``sys_from`` — same contract as 5.61 but
         on the L2 table.
+
+        The documented intent (from ``on_history_saved__chain_valid_to``
+        line 109: "mark the record with ``_strict_chaining_update`` so
+        the MetaHistory layer can update the existing meta record
+        **in-place** instead of creating a new version") is one L2
+        row per save.
+
+        Observed: each save after the first mints **two** L2 rows —
+        one for the newly created L1 row, plus one extra for the
+        refinement-update of the previous L1 row's ``valid_to``. The
+        in-place flag is not honoured. Tracked as **BUG-022**.
         """
         item = HistSimpleItem.objects.create(name="s5-82", value=1)
         time.sleep(0.001)
@@ -137,7 +158,7 @@ class TestCluster05k_MetaHistoryContract(E2ETestCase):
         )
 
     # -- 5.83 ----------------------------------------------------------
-    @unittest.expectedFailure  # retroactive valid_from correction is a documented intent that the framework does not yet accept on user-supplied save() — pinning the contract for later
+    @unittest.expectedFailure  # BUG-021: retroactive valid_from correction is documented intent that the framework does not yet accept on user-supplied save() — the L1 row's valid_from is silently rewritten to now()
     def test_5_83_retroactive_valid_from_correction(self) -> None:
         """
         Scenario 5.83: A retroactive ``valid_from`` correction lands in

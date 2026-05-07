@@ -181,7 +181,6 @@ class TestCluster12b_TypeRoundTrip(E2ETestCase):
         )
 
     # -- 12.16 ---------------------------------------------------------
-    # @unittest.expectedFailure  # BUG-005: validation errors return 500, not 400
     def test_12_16_patch_rejects_invalid_choice(self) -> None:
         """Scenario 12.16: PATCH with a value outside the ``choices`` set → 400."""
         item = WideItem.objects.create(name="c", category=CHOICE_BETA)
