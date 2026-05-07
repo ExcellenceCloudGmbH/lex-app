@@ -446,6 +446,73 @@ class TestCluster05k_MetaHistoryContract(E2ETestCase):
             % (original.valid_to,),
         )
 
+    # -- 5.83c ---------------------------------------------------------
+    def test_5_83c_edit_existing_l1_row_value_propagates_to_main(self) -> None:
+        """
+        Scenario 5.83c — alternative correction path.
+
+        Instead of the two-step "save main → edit new L1 row's
+        valid_from" path (5.83b, which trips BUG-021), Maria takes
+        the simpler route:
+
+          1. Open the existing 50K L1 row directly.
+          2. Change ``value`` from 50000 → 60000 in place.
+          3. Save the L1 row.
+
+        Per the docs (``Bitemporal History`` page, "How the Signal
+        Chain Works"), ``post_save`` on an L1 row fires three
+        handlers, one of which is ``sync_main_table`` — "Updates
+        Level 0 (live table) to reflect the currently valid L1 row".
+
+        Customer-visible expectation: after the L1 edit,
+        ``HistSimpleItem.objects.get(name='lukas').value`` returns
+        60000 — the main table is re-synced from the now-current L1
+        row.
+
+        This test pins whether that sync actually happens. If it
+        does, "edit the existing row" is a viable backdated-
+        correction path that sidesteps BUG-021 entirely (no new L1
+        row is created, so no supersede chain logic needs to fire).
+        If it doesn't, we have BUG-021's sibling: an L1 edit doesn't
+        propagate the new value to the main table, and the customer
+        is stuck with a stale Level-0 read.
+        """
+        lukas = HistSimpleItem.objects.create(name="lukas-5-83c", value=50000)
+
+        # Edit the existing L1 row in place — no new main save.
+        existing_l1 = lukas.history.first()
+        self.assertEqual(
+            existing_l1.value, 50000,
+            "Sanity: the only L1 row must hold the original 50K "
+            "value before the in-place edit. Got %r."
+            % (existing_l1.value,),
+        )
+        existing_l1.value = 60000
+        existing_l1.save()
+
+        # Re-read the main table — does the sync handler pick up the
+        # new value?
+        main = HistSimpleItem.objects.get(pk=lukas.pk)
+        self.assertEqual(
+            main.value, 60000,
+            "After editing the only (and currently-valid) L1 row's "
+            "value to 60000, the main table must reflect 60000 — "
+            "that's what sync_main_table is supposed to do per the "
+            "docs' 'How the Signal Chain Works' section. Got %r. "
+            "If this is 50000, an in-place L1 value edit does NOT "
+            "propagate to Level-0; customers who try to correct a "
+            "value by editing the history row directly will see a "
+            "stale main-table read." % (main.value,),
+        )
+
+        # And there's still exactly one L1 row — no new row was
+        # created by editing the existing one.
+        self.assertEqual(
+            lukas.history.count(), 1,
+            "Editing an existing L1 row in place must not spawn a "
+            "second L1 row. Got %d rows." % lukas.history.count(),
+        )
+
     # -- 5.84 ----------------------------------------------------------
     def test_5_84_meta_task_status_default(self) -> None:
         """
