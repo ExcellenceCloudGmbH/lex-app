@@ -396,7 +396,20 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
         )
 
     # -- 6.10e: real end-to-end through calc.save() -------------------
-    @unittest.expectedFailure  # BUG-001b end-to-end: failed atomic calc.save() inside a request-scoped atomic drops its terminal audit row
+    @unittest.skip(
+        "Blocked by audit-log API-only contract. AuditLogMixin only "
+        "fires on REST API requests; a programmatic calc.save() does "
+        "NOT seed _pending_terminal_audit, so the except-branch "
+        "_finalize_pending_terminal_audit() has nothing to finalize. "
+        "A 0-row outcome here is therefore ambiguous: it could be "
+        "BUG-001b (row written then rolled back) OR 'no row was ever "
+        "written'. The test can only validate BUG-001b once BUG-009 "
+        "is fixed (PATCH of is_calculated must accept the field), so "
+        "the API path can drive the calc end-to-end with a real "
+        "AuditLogMixin-seeded pending row in scope. See 6.10/6.10b/"
+        "6.10c/6.10d for the same contract pinned synthetically by "
+        "calling ensure_terminal_calculation_audit() directly."
+    )
     def test_6_10e_real_failed_atomic_calc_save_loses_audit(self) -> None:
         """
         Scenario 6.10e — BUG-001b reproduced through the *real*
@@ -474,7 +487,20 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
         )
 
     # -- 6.10f: API PATCH end-to-end -----------------------------------
-    @unittest.expectedFailure  # BUG-001b via API: failed calc triggered through the full request path leaves 0 audit rows
+    @unittest.skip(
+        "Blocked by BUG-009. The customer-realistic API trigger for a "
+        "calculation is PATCH /api/<calc>/<pk>/ with "
+        "{'is_calculated': 'IN_PROGRESS'}, but is_calculated is "
+        "declared editable=False on CalculationModel, so DRF silently "
+        "drops the field from the PATCH payload and the calc never "
+        "fires. Falling back to a programmatic calc.save() doesn't "
+        "test BUG-001b either — see 6.10e's skip note. This test "
+        "becomes valid (and the right shape) once BUG-009 is fixed: "
+        "the PATCH will drive the calc through the API-seeded "
+        "AuditLogMixin pending row, and the rollback question becomes "
+        "answerable. Until then, BUG-001b is pinned by 6.10/6.10b/"
+        "6.10c/6.10d (synthetic) and the conceptual customer story."
+    )
     def test_6_10f_api_patch_trigger_failed_calc_loses_audit(self) -> None:
         """
         Scenario 6.10f — BUG-001b reproduced through the REST API.
@@ -566,6 +592,7 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
 
 
 
