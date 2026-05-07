@@ -209,43 +209,218 @@ class TestCluster05k_MetaHistoryContract(E2ETestCase):
             "after a chain of saves — got every row closed",
         )
 
-    # -- 5.83 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-021: retroactive valid_from correction is documented intent that the framework does not yet accept on user-supplied save() — the L1 row's valid_from is silently rewritten to now()
-    def test_5_83_retroactive_valid_from_correction(self) -> None:
+    # -- 5.83a -------------------------------------------------------- (LIVE)
+    def test_5_83a_history_date_lands_l1_row_at_earlier_moment(self) -> None:
         """
-        Scenario 5.83: A retroactive ``valid_from`` correction lands in
-        the L1 timeline at the customer-supplied date, but the
-        corresponding L2 row's ``sys_from`` reflects the *clock time*
-        of the correction, not the customer-supplied valid_from.
+        Scenario 5.83a — half of the retroactive-correction contract
+        the framework gets right.
+
+        The framework exposes ``_history_date`` (used by
+        ``backfill_bitemporal_history``, ``Bitemporal.resurrect_object``,
+        and the integration tests in ``lex/tests/integration/``) as the
+        hook for "land the next save's L1 row at an earlier ``valid_from``
+        instead of ``timezone.now()``".
+
+        This scenario asserts that the hook works for what it does ship:
+        the L1 row's ``valid_from`` round-trips to the customer-supplied
+        earlier moment, while the corresponding L2 row's ``sys_from``
+        reflects clock time of the correction (so the "what did the
+        system know on date X?" forensic surface remains honest).
+
+        It does NOT assert the supersede semantic — that's 5.83b's job
+        and is a known framework gap (BUG-021).
         """
-        import datetime as _dt
+        from datetime import timedelta
+        from django.utils import timezone as dj_timezone
 
-        item = HistSimpleItem.objects.create(name="s5-83", value=1)
-        clock_before_correction = _dt.datetime.now(_dt.timezone.utc)
+        item = HistSimpleItem.objects.create(name="lukas", value=50000)
+        clock_before_correction = dj_timezone.now()
 
-        # Retroactive correction — explicit earlier valid_from
-        earlier = clock_before_correction - _dt.timedelta(days=30)
-        item.value = 2
-        item.valid_from = earlier
+        earlier = clock_before_correction - timedelta(days=30)
+        item.value = 60000
+        item._history_date = earlier
         item.save()
 
+        # ── L1 side: the correction row landed at the earlier date ──
         rows = list(item.history.order_by("history_id"))
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            len(rows), 2,
+            "Two saves (create + correction) must yield 2 L1 rows; "
+            "got %d" % len(rows),
+        )
+        correction = rows[1]
+        self.assertEqual(
+            correction.value, 60000,
+            "Correction L1 row must carry the corrected value; "
+            "got %r" % (correction.value,),
+        )
         self.assertLess(
-            rows[1].valid_from, rows[0].valid_from,
-            "Retroactive correction must land with the earlier "
-            "valid_from in the L1 timeline",
+            correction.valid_from, rows[0].valid_from,
+            "Correction L1 row's valid_from must be EARLIER than "
+            "the original row's valid_from — that is the whole point "
+            "of _history_date. Got correction.valid_from=%r vs "
+            "original.valid_from=%r"
+            % (correction.valid_from, rows[0].valid_from),
+        )
+        # Round-trip to within a sub-second tolerance — the saved
+        # value must be the customer-supplied earlier moment.
+        delta = abs((correction.valid_from - earlier).total_seconds())
+        self.assertLess(
+            delta, 1.0,
+            "Correction L1 row's valid_from must round-trip to the "
+            "customer-supplied earlier moment within 1s; got delta=%fs"
+            % delta,
         )
 
+        # ── L2 side: sys_from reflects CLOCK time of the correction ──
         meta_model = _meta_model_for(HistSimpleItem)
-        meta_rows = list(meta_model.objects.filter(id=item.pk).order_by("sys_from"))
-        self.assertEqual(len(meta_rows), 2)
-        # The 2nd L2 row's sys_from must be CLOCK time, not valid_from
+        meta_for_correction = (
+            meta_model.objects.filter(
+                history_object_id=correction.history_id
+            )
+            .order_by("sys_from")
+            .first()
+        )
+        self.assertIsNotNone(
+            meta_for_correction,
+            "L2 meta row for the correction L1 row must exist",
+        )
         self.assertGreaterEqual(
-            meta_rows[1].sys_from, clock_before_correction,
-            "L2.sys_from must reflect clock time of the correction, "
-            "NOT the customer-supplied valid_from — got %r vs clock %r"
-            % (meta_rows[1].sys_from, clock_before_correction),
+            meta_for_correction.sys_from, clock_before_correction,
+            "L2.sys_from must reflect clock time of the correction "
+            "(NOT the customer-supplied earlier valid_from) — that's "
+            "what makes 'what did the system know on date X?' "
+            "queries truthful. Got sys_from=%r vs clock_before=%r"
+            % (meta_for_correction.sys_from, clock_before_correction),
+        )
+
+    # -- 5.83b -------------------------------------------------------- (XFAIL)
+    @unittest.expectedFailure  # BUG-021: framework treats a retroactive _history_date as "fill a past gap" instead of "supersede the open-ended head" — see the 'Backdated raise' user story in the BUG-021 tracker entry. Customer-visible: as-of queries between the correction date and clock-time NOW return the OLD value, not the corrected one
+    def test_5_83b_lukas_backdated_raise_supersedes_original_row(self) -> None:
+        """
+        Scenario 5.83b — the customer-visible failure half of BUG-021.
+
+        The 'Backdated raise that wasn't' user story:
+
+          * **Some time ago** — Acme hires Lukas at €50,000. The system
+            records the original L1 row at the moment of hire.
+          * **Today** — HR realizes the offer was actually €60,000 and
+            issues a correction backdated to the hire date.
+
+        Documented intent (worked HR example in
+        ``docs/features/tracking/bitemporal history.md``):
+        *"Old row chained: valid_to = Jan 1 (superseded)"*. The
+        corrected row becomes the new open-ended head; the original
+        50,000 row is closed at the correction's ``valid_from``.
+
+        Customer-visible expectation that this test pins:
+
+          * an as-of query for *any* moment between the correction
+            date and clock-time NOW must return €60,000 (the
+            corrected, currently-believed-true salary on that date),
+          * NOT €50,000 (which is what the framework returns today —
+            the original row stays open-ended; the correction is
+            squeezed into a past-only [earlier, hire_clock_time)
+            window. A simple ?as_of= query a few seconds after the
+            correction returns 50,000 because clock-time NOW falls in
+            the original row's preserved-open-ended window).
+
+        Downstream consequence: every back-pay calculation, year-end
+        tax filing, and audit-trail ?as_of= query that runs after
+        the correction returns the wrong number. In the user story,
+        Frau Klein (the auditor) catches a €25,000 discrepancy in
+        Lukas's gross salary report and Acme has to file a
+        Lohnsteuer correction with the Finanzamt.
+
+        When BUG-021 is fixed (chain logic clamps the previous
+        open-ended row's ``valid_to`` when a retroactive correction
+        lands earlier than its ``valid_from``), this test goes green
+        and the marker should be removed.
+        """
+        from datetime import timedelta
+        from django.utils import timezone as dj_timezone
+
+        from lex.core.services.Bitemporal import get_queryset_as_of
+
+        # ── "30 days ago" — Acme hires Lukas at €50,000 ──────────────
+        # Real customers create at clock-time NOW (no _history_date),
+        # so we mirror that: the original row's valid_from = now() at
+        # the moment of create. We then sleep a microsecond so the
+        # subsequent correction's clock-time is strictly later.
+        lukas = HistSimpleItem.objects.create(name="lukas", value=50000)
+        original_valid_from = lukas.history.first().valid_from
+        time.sleep(0.001)
+
+        # ── "Today" — HR correction backdated 30 days before hire ───
+        # The customer's intent: "salary was 60K from `earlier`
+        # onward"; the docs' HR example asks for the original row to
+        # be superseded at this earlier moment.
+        earlier = original_valid_from - timedelta(days=30)
+        lukas.value = 60000
+        lukas._history_date = earlier
+        lukas.save()
+
+        # ── Customer-visible question: query the timeline at an
+        # instant strictly between `earlier` and clock-time NOW. The
+        # corrected (60K) row's window must cover this instant.
+        # Pick an instant 1 day before the original hire — squarely
+        # inside what the customer thinks is "Lukas was earning 60K".
+        ask_at = original_valid_from - timedelta(days=1)
+
+        live_at_ask = list(
+            get_queryset_as_of(HistSimpleItem, ask_at).filter(name="lukas")
+        )
+        self.assertEqual(
+            len(live_at_ask), 1,
+            "Exactly one L1 row must be valid for Lukas at the ask "
+            "instant; got %d. Either the timeline has a gap (zero "
+            "rows) or it has overlapping versions (more than one)."
+            % len(live_at_ask),
+        )
+        self.assertEqual(
+            live_at_ask[0].value, 60000,
+            "After a backdated raise (60K, _history_date=earlier), "
+            "an as-of query at any instant between `earlier` and "
+            "clock-time NOW must return 60000 — the corrected, "
+            "currently-believed-true salary. Returning %r means the "
+            "framework treated the correction as a past-gap insert "
+            "instead of a supersede (BUG-021): downstream back-pay, "
+            "tax filings, and audit forensics will all be wrong."
+            % (live_at_ask[0].value,),
+        )
+
+        # And ask the same question at clock-time NOW. The customer
+        # expects the same answer (60K) because the supersede should
+        # leave the corrected row open-ended.
+        live_at_now = list(
+            get_queryset_as_of(
+                HistSimpleItem, dj_timezone.now()
+            ).filter(name="lukas")
+        )
+        self.assertEqual(
+            live_at_now[0].value, 60000,
+            "After the supersede, the corrected row must be the new "
+            "open-ended head — an as-of query at clock-time NOW "
+            "must also return 60000. Returning %r means the original "
+            "50K row was preserved as the open-ended head (the "
+            "BUG-021 gap-fill behaviour)."
+            % (live_at_now[0].value,),
+        )
+
+        # And the historical-record contract from the docs:
+        # "Old row chained: valid_to = Jan 1 (superseded)".
+        rows = list(
+            HistSimpleItem.history.filter(id=lukas.pk).order_by("history_id")
+        )
+        original = rows[0]
+        # The original 50K row should be closed at the correction
+        # date, not left open-ended.
+        self.assertIsNotNone(
+            original.valid_to,
+            "Per the docs' HR-correction example, the original row "
+            "must be superseded — its valid_to must be set, not left "
+            "NULL/open-ended. Got original.valid_to=%r"
+            % (original.valid_to,),
         )
 
     # -- 5.84 ----------------------------------------------------------
