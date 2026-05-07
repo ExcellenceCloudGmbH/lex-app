@@ -52,10 +52,11 @@ on:
           ``<cluster_key>`` (whole cluster) or
           ``<cluster_key>:<test_suffix>`` (single test inside cluster).
           Default runs the release-gating init, CRUD API, API layer,
-          calculation, and validation-hook clusters.
+          calculation, validation-hook, celery, history, and
+          audit-logging clusters.
         required: false
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging
       run_kind:
         description: >-
           Where this run came from — shown in the email subject so
@@ -79,7 +80,7 @@ on:
         required: false
         type: string
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging
       run_kind:
         description: >-
           Where this run came from. Callers (notably pip_publish.yml)

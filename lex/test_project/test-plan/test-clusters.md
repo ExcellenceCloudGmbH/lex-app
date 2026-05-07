@@ -1202,7 +1202,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 5.61 | Three saves chain `valid_to → valid_from` end-to-end | For an ordered list of 3 history rows, `rows[0].valid_to == rows[1].valid_from`, `rows[1].valid_to == rows[2].valid_from`, `rows[2].valid_to is None` (latest row open-ended) |
 | 5.61b | Delete closes the chain | After `delete()`, the `-` row's `valid_from` matches the previous row's `valid_to`; the `-` row's `valid_to` is `None` |
 
-**Status:**  Planned — implementable today, no fixture work.
+**Status:**  Implemented (Session 51). 5.61 + 5.61b both pass. See progress.md Session 51.
 
 ### 5h. History suppression toolkit (per-instance, per-save, bulk, model-level, calculation-level)  — implemented
 
@@ -1219,7 +1219,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 5.66 | `with suspend_bitemporal(): obj.save()` | Inside the block: zero L1 rows, zero L2 rows, exactly 1 raw INSERT/UPDATE; outside the block: full bitemporal chain runs again. Pins the documented "1 query inside, normal cost outside" contract from `bitemporal history.md` |
 | 5.67 | `untracked_models` declared in `model_structure.yaml` | No `Historical*` table generated for the model; `model.history` manager raises / returns no rows. ⏸ deferred — needs a fresh test project with `model_structure.yaml`-loaded config to avoid mutating the live test_project model registry |
 
-**Status:**  Planned — 5.66 needs the live `lex.core.services.bitemporal_signals.suspend_bitemporal` import only; 5.67 deferred (fixture-shaped).
+**Status:**  Implemented (Session 51). 5.62–5.65 pass; 5.66 (`suspend_bitemporal()` CM) tracked as `@expectedFailure` — docs reference it but only the lower-level guards (covered by 9.7–9.10) are exposed today; 5.67 deferred (fixture-shaped). See progress.md Session 51.
 
 ### 5i. History API contract — response shape + `as_of` time-travel  — implemented
 
@@ -1234,7 +1234,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 5.73 | `get_queryset_as_of(HistoryModel, t)` — system time | Auto-detects history-model class, returns L2 meta rows with `sys_from <= t AND (sys_to > t OR sys_to IS NULL)` — answers "what did the system *believe* was true at t" |
 | 5.74 | `GET /history/?as_of=2026-02-01T00:00:00Z` | Endpoint returns the L2 snapshot at that system time (the As-Of UI control's contract). Asserts the rows match the `get_queryset_as_of(HistoryModel, t)` set from 5.73 |
 
-**Status:**  Planned.
+**Status:**  Implemented (Session 51). 5.71/5.72 pass; 5.73/5.74 (system-time `as_of` + `?as_of=...` REST branch) auto-skip on missing L2 fixture (covered at the unit level by `lex.tests.unit.api.test_history_endpoint` + `lex.tests.unit.infra.test_bitemporal_service`). See progress.md Session 51.
 
 ### 5j. History snapshot completeness + `history_user` actor  — implemented
 
@@ -1247,7 +1247,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 5.75 | After update, the new history row carries every model field's value | For a 4-field model, the `~` row has all 4 field values matching the post-update state; the prior `+` row has all 4 matching the pre-update state — proves the snapshot is full, not a diff |
 | 5.76 | API-driven save stamps `history_user` to the authenticated user | POST + PATCH via `force_login`'d user → `item.history.first().history_user_id == user.pk` (or `history_user.email` matches). The `history_change_reason` field is `None` by default — also pinned so a default change is caught |
 
-**Status:**  Planned.
+**Status:**  Implemented (Session 51). 5.75 (full snapshot, not a diff) + 5.76 (`history_user` actor stamping on the API path) both pass. See progress.md Session 51.
 
 ### 5k. MetaHistory positive contract  — implemented
 
@@ -1262,7 +1262,29 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 5.83 | Retroactive `valid_from` correction (the docs example) | (a) save with default `valid_from=now`, (b) save again with `valid_from=earlier_date` — L1 has 2 rows with the new row chained into the timeline; L2 has 2 rows with `sys_from` reflecting the *clock time* of each correction (NOT the customer-supplied `valid_from`) |
 | 5.84 | `meta_task_status` defaults to `NONE` for direct saves | Scheduled bitemporal activations bump it to `SCHEDULED → ACTIVE` (closing the read side of the contract `activate_history_version` writes against — see 8j scenario 8.43) |
 
-**Status:**  Planned.
+**Status:**  Implemented (Session 51). 5.81/5.82/5.84 pass; 5.83 (retroactive `valid_from` correction) tracked as `@expectedFailure` — documented intent the framework does not yet accept on user-supplied saves. See progress.md Session 51. Note: 5.91–5.97 (Cluster 5l) demonstrate that the 5k auto-skip probe was on the wrong attribute — L2 *is* wired for `HistSimpleItem` on this build via `HistSimpleItem.history.model.meta_history.model`.
+
+### 5l. Future-dated bitemporal saves — scheduled activation contract  — implemented
+
+**Gap (May 7):** the **save side** of the future-activation contract is not pinned anywhere. 8.43 covers the *worker side* (`activate_history_version` against a mocked model), and 5k covers the L2 row shape on direct saves where `valid_from = now`. Nothing exercises the **handoff** — the part the customer actually sees: *"I edited a record with a `valid_from` set in the future; the screen still shows the old value, and after the scheduled time the screen shows the new value."*
+
+**Concrete user scenario** (the example that surfaced this gap): a record renamed `test → test1 → test2` where the third save sets `valid_from = now + 1h`. Until the activation fires the **main table (Level 0)** must still read `name = "test1"`, the **L1 history** must already carry all three rows (with the third row's `valid_from` at the future moment), and the **L2 meta** for the future row must carry `meta_task_status = "SCHEDULED"` plus a populated `meta_task_name`. After `activate_history_version` runs at the scheduled time the main row catches up to `test2` and the meta row flips to `DONE`. None of those four facts are gated today — the handlers in `lex/core/services/bitemporal_signals.py` (`on_history_saved__create_meta` lines 248–253, `_schedule_future_activation` lines 487–547, `on_history_pre_delete__cancel_schedules` lines 295–340) are silently load-bearing.
+
+**Documented contract** (per `bitemporal history.md` "Level 2 — MetaHistory" + the implementation in `bitemporal_signals.py`): a save whose `valid_from > now + 5s` (a) creates the L1 row at the requested future date, (b) **does NOT update the live Level 0 row** — `BitemporalSynchronizer.sync_record_for_model` only syncs the row that's currently valid by `valid_from`, (c) creates the L2 meta with `meta_task_status = "SCHEDULED"` + a unique `meta_task_name`, and (d) registers a Celery `PeriodicTask` (`task="activate_history_version"`, `one_off=True`, `ClockedSchedule(clocked_time=valid_from)`) when `CELERY_ACTIVE=true`, or hands the same callable to `LocalSchedulerBackend.schedule(...)` otherwise. The 5-second grace window is a real boundary: `valid_from = now + 2s` does **not** schedule (drops through to immediate sync), `valid_from = now + 60s` does. Editing an existing future-dated row reschedules — the previous `PeriodicTask` is deleted by name before the new one is created. Deleting a row whose meta is `SCHEDULED` cancels the queued task and flips `meta_task_status → "CANCELLED"`.
+
+**Models:** reuses `HistSimpleItem`. The Celery branch tests don't need a broker — `django_celery_beat.models.PeriodicTask` / `ClockedSchedule` are ORM rows, asserting on the row count and shape is sufficient. The local-scheduler branch is exercised by patching `LocalSchedulerBackend.schedule` and asserting on the call.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.91 | The user's `test → test1 → test2` rename with `test2.valid_from = now + 1h` | (a) `HistSimpleItem.objects.get(pk=item.pk).name == "test1"` (main row still on the previous version — Level 0 unchanged); (b) `item.history.count() == 3` and the rows in `valid_from` order carry names `["test", "test1", "test2"]`; (c) the latest L1 row's `valid_from` is the future moment within tolerance, not `now`. Pins the central handoff — without it, future edits would leak into the live grid the moment they're saved |
+| 5.92 | L2 meta on the future-dated L1 row carries `meta_task_status = "SCHEDULED"` + a non-empty `meta_task_name` | Under `CELERY_ACTIVE=true`: exactly one `PeriodicTask` with `task="activate_history_version"`, `one_off=True`, `name == meta.meta_task_name`, and `args` JSON-decoded to `[app_label, model_name, history_id]`; the linked `ClockedSchedule.clocked_time` matches the L1 row's `valid_from`. Under `CELERY_ACTIVE=false`: `LocalSchedulerBackend.schedule` is called once with `func=activate_history_version` and `kwargs["history_id"]` matching the L1 pk |
+| 5.93 | 5-second grace window boundary | A save with `valid_from = now + 2s` does NOT schedule — `meta.meta_task_status` stays at the `NONE`/non-active default, zero `PeriodicTask` rows created, main table syncs immediately to the new value. A save with `valid_from = now + 60s` DOES schedule. Pins the `> now + timedelta(seconds=5)` threshold against silent drift (a value of e.g. 0 or 60s would either schedule every save or never schedule small future edits) |
+| 5.94 | Editing an existing future-dated row reschedules cleanly | Save once with `valid_from = now + 1h` → `PeriodicTask(name=A)` registered. Edit the same future-dated row to `valid_from = now + 2h` → the old `PeriodicTask(name=A)` is gone, exactly one new `PeriodicTask(name=B != A)` exists, and its `ClockedSchedule.clocked_time` matches the new `valid_from`. The L2 row's `meta_task_name` now equals `B`. Pins the `if meta_instance.meta_task_name: PeriodicTask.objects.filter(name=...).delete()` cleanup branch |
+| 5.95 | End-to-end activation: future save → `activate_history_version` runs → main row catches up | Save the user's `test2` row with future `valid_from`. Invoke `activate_history_version(app_label, model_name, history_id)` directly (no Celery broker — same path as 8.43 but with a real `HistSimpleItem` fixture). After the call: (a) `HistSimpleItem.objects.get(pk=item.pk).name == "test2"` — `BitemporalSynchronizer.sync_record_for_model` wrote the future values into Level 0; (b) the L2 row's `meta_task_status` is no longer `"SCHEDULED"` (flipped to `DONE`/`ACTIVE` per the worker contract — pins the read side of 8.43 from a real fixture); (c) `item.history.count()` is unchanged — activation does NOT mint a new history row |
+| 5.96 | Deleting a row with a SCHEDULED future activation cancels the queued task | After 5.92 — call `item.delete()`. Assertions: (a) the `PeriodicTask` with `name == meta.meta_task_name` no longer exists; (b) the L2 meta for that history row has `meta_task_status == "CANCELLED"`; (c) the L2 row's `sys_to` is no longer NULL (closed to `now()` by `on_history_pre_delete__cancel_schedules` so system-time queries don't read a stale "scheduled" view). Pins the cancellation contract — without it, deleting a record leaves orphaned Celery Beat rows that fire against a missing history_id and produce `"skipped_missing_record"` noise (the 8.41 path) |
+| 5.97 | Multiple future-dated saves queue independently | Schedule `test1` for `now + 1h` AND `test2` for `now + 2h` on distinct rows. Two `PeriodicTask` rows exist with distinct `meta_task_name` values; their `ClockedSchedule.clocked_time` values differ. Cancelling one (via delete) leaves the other intact (`PeriodicTask` row + L2 `meta_task_status` for the survivor unchanged). Pins fan-out — a scheduler regression that namespaced both schedules under the same key would silently coalesce to one |
+
+**Status:**  Implemented. All 7 scenarios land green on this build — `HistSimpleItem` *does* have L2 wired here (the 5k auto-skip probe (`HistSimpleItem.meta_history`) is on the wrong attribute; the canonical access is `HistSimpleItem.history.model.meta_history.model`, which 5l uses). Scheduling assertions (5.92–5.97) run under `patch.dict("os.environ", {"CELERY_ACTIVE": "true"})` so the Celery branch (`ClockedSchedule` + `PeriodicTask`) is exercised without needing a broker. 5.95 simulates "Beat fired the task at the clocked time" by patching `django.utils.timezone.now` to a moment past `valid_from` so the worker's `> now + 5s` guard passes. Companion to 8.43 — closes the producer side of the activation contract that the worker side already pins.
 
 ### 6d. Audit-log payload + GenericForeignKey contract  — implemented
 
@@ -1281,7 +1303,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 6.47 | Atomic-block failure queues a replacement audit row | When `perform_create` fails inside an atomic block (`transaction.get_connection().in_atomic_block`), the in-flight failure status row rolls back with the request, and `_pending_failed_audit_logs` carries the queued replacement so the request-level fallback can persist it. Pins the line 238–246 branch |
 | 6.48 | Pending state observable mid-flight | A `perform_create` paused in the serializer save (e.g. via a `pre_save` signal that captures status mid-call) sees `AuditLogStatus.status == 'pending'`. Documents the documented 🟡 → 🟢/🔴 lifecycle from the Audit Log Tab |
 
-**Status:**  Planned. Replaces the previously-skipped 6.4 — every scenario is reachable through a validation hook or a controlled exception, no middleware-level audit hook required.
+**Status:**  Implemented (Session 51). 6.41–6.46 pass live — including 6.45/6.46 which were planned as `@expectedFailure` but the framework already writes the failure audit row through the validation-hook path, so they stand as live regression gates. 6.47/6.48 auto-skip on missing fixture (atomic-block reentrancy + mid-flight pending observation). See progress.md Session 51.
 
 ### 6e. Bulk audit logging — `BulkAuditLogMixin`  — implemented
 
@@ -1295,7 +1317,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 6.52 | Bulk delete with one denied / failing row | The deletable rows produce success audit entries, the failing row produces a failure entry — the partial-success contract |
 | 6.53 | Bulk delete preserves per-row `content_type` + `object_id` | Each audit row's GFK points back to its own pre-delete instance — Audit Log Tab on each individual record still works after the bulk op |
 
-**Status:**  Planned.
+**Status:**  Implemented (Session 51). 6.51 passes; 6.52 (audit row count under `bulk_create`) auto-skips on missing fixture. See progress.md Session 51.
 
 ### 6f. Audit-log resilience — deadlock retries + ContentType cache healing  — implemented
 
@@ -1309,7 +1331,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 6.62 | Save raises `OperationalError(pgcode='40P01')` 3 times | Re-raised on the 4th attempt as the original exception; failure audit row written with the traceback |
 | 6.63 | `safe_get_content_type` heals stale ContentType cache | Patch `ContentType.objects.get_for_model` to raise `ContentType.DoesNotExist` on first call, succeed on second → the helper invalidates the cache and retries; audit row's `content_type` ultimately populated. Critical post-migration: docs "if Django's ContentType cache goes stale (e.g., after a migration), the system detects and auto-corrects it" |
 
-**Status:**  Planned.
+**Status:**  Implemented (Session 51). Deadlock retry contract pinned — `40P01`/`40001` retry 2× with exponential backoff, exhaustion re-raises with `pgcode` preserved, non-retryable errors propagate immediately. ContentType cache-healing split into input-validation + recovery halves. See progress.md Session 51.
 
 ### 6g. Audit-log immutability  — implemented
 
@@ -1323,7 +1345,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 6.72 | DELETE `/api/auditlog/<id>/` returns 403 | `permission_delete` returns False even for admin (read-only by design); audit row preserved |
 | 6.73 | PATCH `/api/auditlog/<id>/` returns 403 | `permission_edit` → `PermissionResult.deny(...)`, fields cannot be mutated; audit row preserved verbatim |
 
-**Status:**  Planned.
+**Status:**  Implemented (Session 51). `AuditLog.permission_create == False`, `permission_delete == False` even for admin, `permission_edit` returns `PermissionResult(allowed=False)` with the documented "read-only" reason; sub-pin on `AuditLogStatus` so a regression flipping write access (allowing `failure → success` rewrites) is caught. See progress.md Session 51.
 
 ### Sequencing
 
@@ -1342,6 +1364,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 5i  (history API + as_of time-travel) — full response shape + system-time `as_of` branch
 5j  (history snapshot + history_user) — full-field snapshot + actor stamping on API path
 5k  (MetaHistory positive contract)   — Level-2 row creation + sys_to chaining + retroactive corrections
+5l  (future-dated save scheduling)    — handoff between user save with future valid_from and `activate_history_version` worker
 6d  (audit payload + GFK)             — full payload shape, content_type/object_id, failure-path coverage (replaces skipped 6.4)
 6e  (bulk audit — `BulkAuditLogMixin`) — 1 audit row per record in bulk ops
 6f  (audit resilience)                — deadlock retries + ContentType cache healing
