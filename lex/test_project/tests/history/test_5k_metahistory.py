@@ -469,12 +469,132 @@ class TestCluster05k_MetaHistoryContract(E2ETestCase):
             "activations; got %r" % (observed,),
         )
 
+    # -- 5.85 ----------------------------------------------------------
+    def test_5_85_l2_carries_business_field_snapshot(self) -> None:
+        """
+        Scenario 5.85: L2 (MetaHistorical*) is a *snapshot* layer, not
+        a pointer layer.
+
+        Per ``lex/core/services/MetaHistory.py`` (class
+        ``MetaLevelHistoricalRecords``, docstring lines 81-86):
+        "Generates a Django model named ``Meta{HistoricalModelName}``
+        with: All data fields copied from the History model (via
+        ``fields_included``)". So every L2 row carries its own copy
+        of the L1 business fields (``name``, ``value``) AND the L1
+        bitemporal-window fields (``valid_from``, ``valid_to``).
+
+        This matters for BUG-021's design discussion: because L2
+        snapshots the data, a hypothetical "delete the superseded L1
+        row" fix would NOT lose the audit trail — L2 keeps the
+        50K state independently of L1 being there.
+        """
+        item = HistSimpleItem.objects.create(name="lukas-5-85", value=50000)
+        l1_row = item.history.first()
+        meta_model = _meta_model_for(HistSimpleItem)
+        meta_field_names = {f.name for f in meta_model._meta.get_fields()}
+
+        # Business fields (copied from the source model into L1, then
+        # into L2 via fields_included).
+        for required in ("name", "value", "valid_from", "valid_to"):
+            self.assertIn(
+                required, meta_field_names,
+                "L2 model must carry a '%s' column copied from the L1 "
+                "snapshot — without it, an L1 delete would erase the "
+                "data the audit trail depends on. Schema fields: %r"
+                % (required, sorted(meta_field_names)),
+            )
+
+        # And the values must match the L1 row at create time.
+        meta = meta_model.objects.filter(history_object_id=l1_row.history_id).first()
+        self.assertEqual(
+            (meta.name, meta.value), (l1_row.name, l1_row.value),
+            "L2 snapshot fields must equal the L1 row's fields at "
+            "create time. Got L2=(%r, %r) vs L1=(%r, %r)."
+            % (meta.name, meta.value, l1_row.name, l1_row.value),
+        )
+
+    # -- 5.86 ----------------------------------------------------------
+    def test_5_86_history_object_fk_is_set_null_on_delete(self) -> None:
+        """
+        Scenario 5.86: The ``history_object`` FK declared in
+        ``MetaLevelHistoricalRecords.get_extra_fields`` (line ~118)
+        uses ``on_delete=models.SET_NULL`` with
+        ``db_constraint=False``. So deleting an L1 row leaves the
+        corresponding L2 row alive with ``history_object_id=None``.
+
+        This is the schema-level guarantee behind BUG-021's "delete
+        is also viable" argument: L2 doesn't cascade-die when L1
+        goes away.
+        """
+        from django.db import models as dj_models
+
+        meta_model = _meta_model_for(HistSimpleItem)
+        fk = meta_model._meta.get_field("history_object")
+        self.assertEqual(
+            fk.remote_field.on_delete, dj_models.SET_NULL,
+            "history_object FK must be on_delete=SET_NULL — got %r. "
+            "If this ever flips to CASCADE, deleting an L1 row would "
+            "wipe the L2 audit trail with it." % (fk.remote_field.on_delete,),
+        )
+        self.assertFalse(
+            fk.db_constraint,
+            "history_object FK must have db_constraint=False so that "
+            "L1 deletes do not raise IntegrityError at the DB layer. "
+            "Got db_constraint=%r" % (fk.db_constraint,),
+        )
+
+    # -- 5.87 ----------------------------------------------------------
+    def test_5_87_l2_snapshot_survives_l1_delete(self) -> None:
+        """
+        Scenario 5.87: End-to-end proof of 5.85 + 5.86 combined.
+
+        Save → L2 row created with the business-field snapshot.
+        Delete the L1 row → L2 row stays alive,
+        ``history_object_id`` is NULL'd, but ``name`` / ``value`` /
+        ``valid_from`` are still queryable and equal to the snapshot
+        taken at save time.
+
+        This is the test that empirically settles the
+        "would deleting the superseded 50K L1 row destroy the audit
+        trail?" question for BUG-021. Answer: no.
+        """
+        item = HistSimpleItem.objects.create(name="lukas-5-87", value=50000)
+        l1_row = item.history.first()
+        l1_history_id = l1_row.history_id
+        snapshot_name = l1_row.name
+        snapshot_value = l1_row.value
+        snapshot_valid_from = l1_row.valid_from
+
+        meta_model = _meta_model_for(HistSimpleItem)
+        meta_pk = meta_model.objects.get(
+            history_object_id=l1_history_id
+        ).pk
+
+        # Delete the L1 row directly. (The customer can do this via
+        # the history-row delete endpoint — it's part of the allowed
+        # surface.)
+        l1_row.delete()
+
+        # L2 row must still exist, with history_object_id NULL'd.
+        meta_after = meta_model.objects.filter(pk=meta_pk).first()
+        self.assertIsNotNone(
+            meta_after,
+            "L2 row must survive L1 delete (SET_NULL semantics). "
+            "Got None — that means CASCADE fired and the audit trail "
+            "is gone.",
+        )
+        self.assertIsNone(
+            meta_after.history_object_id,
+            "After L1 delete, L2.history_object_id must be NULL "
+            "(SET_NULL fired). Got %r." % (meta_after.history_object_id,),
+        )
+
+        # And the snapshot is intact — this is the whole point of
+        # L2 being a snapshot layer rather than a pointer layer.
+        self.assertEqual(meta_after.name, snapshot_name)
+        self.assertEqual(meta_after.value, snapshot_value)
+        self.assertEqual(meta_after.valid_from, snapshot_valid_from)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-
-
-
-
-
-
