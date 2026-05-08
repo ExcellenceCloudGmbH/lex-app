@@ -20,7 +20,12 @@ from generate_pycharm_configs import (
     _build_celery_workers_parameters,
     generate_pycharm_configs,
 )
-from lex.bin.lex import build_celery_worker_command, build_flower_command, lex
+from lex.bin.lex import (
+    _has_explicit_pytest_target,
+    build_celery_worker_command,
+    build_flower_command,
+    lex,
+)
 from lex.tools.setup_with_ai import (
     DEFAULT_LEX_MCP_PRODUCTION,
     DEFAULT_REMOTE_MCP_TRANSPORT,
@@ -123,6 +128,41 @@ class GeneratePyCharmConfigsTests(TestCase):
                 '<env name="IS_RUNNING_IN_CELERY" value="true" />', worker_config
             )
             self.assertIn('<env name="CELERY_ACTIVE" value="true" />', worker_config)
+
+
+class LexPytestTargetDetectionTests(TestCase):
+    def test_detects_direct_pytest_path_targets(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            test_path = project_root / "tests" / "test_example.py"
+            test_path.parent.mkdir(parents=True)
+            test_path.write_text("def test_example():\n    assert True\n", encoding="utf-8")
+
+            self.assertTrue(
+                _has_explicit_pytest_target(project_root, ["-q", "tests/test_example.py"])
+            )
+
+    def test_detects_pytest_nodeid_targets_without_widening_to_entrypoint(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            test_path = project_root / "Tests" / "creation" / "test_creation.py"
+            test_path.parent.mkdir(parents=True)
+            test_path.write_text("def test_example():\n    assert True\n", encoding="utf-8")
+
+            self.assertTrue(
+                _has_explicit_pytest_target(
+                    project_root,
+                    ["Tests/creation/test_creation.py::CreationTest::test_evaluation_date"],
+                )
+            )
+
+    def test_ignores_non_path_pytest_values(self):
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+
+            self.assertFalse(
+                _has_explicit_pytest_target(project_root, ["-k", "creation or smoke"])
+            )
 
 
 class LexFlowerCommandTests(TestCase):

@@ -698,8 +698,9 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
           not Django's migration runner (already covered by Django's
           own tests).
         * ``skip_client_preflight=False`` — leave the preflight ON.
-          Failure here means the live client doesn't pass the
-          confidential + DEVELOPMENT gate, in which case the
+          Failure here means the live client doesn't pass the active
+          safety gate (always confidential; DEVELOPMENT too when
+          ``DEPLOYMENT_ENVIRONMENT`` is unset/empty), in which case the
           destructive run shouldn't happen anyway.
         * ``check_missing=False`` — keep this scenario on the same
           no-op sync path as 1.100. The missing-resource repair path is
@@ -888,4 +889,3 @@ class TestCluster01l_FullPipelineDestructive(_RealKeycloakBase):
             self.mgr.kc_manager.import_authorization_settings(original_config)
             self.mgr.exported_configs = None
             raise
-

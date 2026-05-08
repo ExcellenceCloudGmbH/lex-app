@@ -51,6 +51,10 @@ class TestCluster01b_LexInit(TestCase):
         cmd = Command()
         cmd.stdout = StringIO()
         cmd.stderr = StringIO()
+        # These unit tests patch the migration/autodetector boundaries and
+        # do not boot a full Django app registry, so keep the dry-run
+        # migration probe on the mocked seam unless a scenario overrides it.
+        cmd.check_unapplied_migrations = MagicMock(return_value=False)
         return cmd
 
     def _patches(self):
@@ -223,17 +227,28 @@ class TestCluster01b_LexInit(TestCase):
             "status_code": 504,
             "response_text": "gateway timeout",
         }
-        self.mock_manager.sync_models.side_effect = Exception("keycloak down")
+        self.mock_manager.process_model_changes.side_effect = [
+            Exception("keycloak down"),
+            Exception("keycloak down"),
+        ]
 
         cmd = self._make_command()
         try:
-            cmd.handle(**{**self._DEFAULT_OPTS, "sync_retries": 2})
+            cmd.handle(
+                **{
+                    **self._DEFAULT_OPTS,
+                    "dry_run": False,
+                    "skip_migrations": True,
+                    "sync_retries": 2,
+                }
+            )
         except Exception as exc:  # pragma: no cover — behavioural assertion
             self.fail(
                 "lex Init must treat Keycloak gateway_timeout as non-fatal "
                 "so the customer can retry without losing local state. "
                 f"Got: {exc!r}"
             )
+        self.assertIn("continuing init without aborting", cmd.stderr.getvalue())
 
     # -- 1.14 ----------------------------------------------------------
     def test_1_14_missing_keycloak_env_vars_fails_fast(self) -> None:
