@@ -2,7 +2,7 @@ import os
 import importlib.util
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 #: Built-in serializer name used by the framework when no override is configured.
@@ -17,6 +17,14 @@ class LexProjectConfig:
     #: when a project-defined ``api_serializers`` mapping overrides ``"default"``
     #: for a model. Defaults to ``"default"`` for backward compatibility.
     default_serializer_name: str = DEFAULT_SERIALIZER_NAME
+    #: Per-model overrides for the display names of the History and Audit Log
+    #: tabs shown in the frontend detail/show view and the history toggle
+    #: button in the list view. Keys are model names (lowercase, matching
+    #: ``original_name``). Each value is a dict that may contain
+    #: ``"history_tab"`` and/or ``"audit_log_tab"`` with the desired label.
+    #: A special ``"__default__"`` key applies to all models without an
+    #: explicit override.
+    tab_display_names: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     _loaded: bool = False
 
@@ -60,6 +68,16 @@ class LexProjectConfig:
                 )
                 if isinstance(raw_default_name, str) and raw_default_name.strip():
                     config.default_serializer_name = raw_default_name.strip()
+
+                # Per-model tab display name overrides
+                raw_tab_names = getattr(
+                    module,
+                    "TAB_DISPLAY_NAMES",
+                    getattr(module, "tab_display_names", None),
+                )
+                if isinstance(raw_tab_names, dict):
+                    config.tab_display_names = raw_tab_names
+
                 config._loaded = True
             except Exception as e:
                 print(f"Error loading project config: {e}")
@@ -103,3 +121,37 @@ def reset_default_serializer_name_cache() -> None:
     """Reset the cached default serializer name. Intended for tests."""
     global _default_serializer_name_cache
     _default_serializer_name_cache = None
+
+
+# ---------------------------------------------------------------------------
+# Tab display name resolution
+# ---------------------------------------------------------------------------
+
+_tab_display_names_cache: Optional[Dict[str, Dict[str, str]]] = None
+
+
+def get_tab_display_names_for_model(model_name: str) -> Dict[str, str]:
+    """Return the tab display name overrides for a given model.
+
+    Merges the ``__default__`` entry (if any) with the model-specific entry
+    so that model-level keys take precedence. Returns an empty dict when
+    no overrides are configured.
+    """
+    global _tab_display_names_cache
+    if _tab_display_names_cache is None:
+        try:
+            _tab_display_names_cache = LexProjectConfig.load().tab_display_names or {}
+        except Exception:
+            _tab_display_names_cache = {}
+
+    defaults = _tab_display_names_cache.get("__default__", {})
+    model_specific = _tab_display_names_cache.get(model_name, {})
+    if not defaults and not model_specific:
+        return {}
+    return {**defaults, **model_specific}
+
+
+def reset_tab_display_names_cache() -> None:
+    """Reset the cached tab display names. Intended for tests."""
+    global _tab_display_names_cache
+    _tab_display_names_cache = None

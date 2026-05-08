@@ -110,6 +110,13 @@ class ModelStructureObtainView(APIView):
                     node["default_serializer_name"] = (
                         resolve_default_serializer_name(serializers_map)
                     )
+
+                # Annotate with per-model tab display name overrides from
+                # ``lex_config.py``.
+                from lex.core.config import get_tab_display_names_for_model
+                tab_names = get_tab_display_names_for_model(node_id)
+                if tab_names:
+                    node["tab_display_names"] = tab_names
                 children = node.get("children")
                 if isinstance(children, dict):
                     annotate(children)
