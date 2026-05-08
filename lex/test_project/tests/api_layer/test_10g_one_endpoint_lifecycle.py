@@ -163,4 +163,3 @@ class TestCluster10g_OneEndpointLifecycle(E2ETestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-

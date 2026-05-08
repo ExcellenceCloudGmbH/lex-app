@@ -201,7 +201,33 @@ class ExportDeniedItem(LexModel):
         return True
 
 
-ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, ExportDeniedItem]
+class OwnedItem(LexModel):
+    """Cluster 4i fixture for the ``allow_fields_if_owner`` helper.
+
+    Carries an ``owner`` FK to ``auth.User`` plus a few payload fields.
+    The helper itself is exercised directly from the test (no
+    ``permission_read`` override on the model is required) so the test
+    drives the behaviour of the helper in isolation.
+    """
+
+    owner = models.ForeignKey(
+        "auth.User",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    name = models.CharField(max_length=200)
+    secret = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, ExportDeniedItem, OwnedItem]
 
 # URL names expected by process_admin_rest_api — lowercased model name.
 PROTECTED = "protecteditem"
@@ -209,4 +235,5 @@ FIELD_LEVEL = "fieldlevelitem"
 KEYCLOAK = "keycloakitem"
 FILTER_BACKEND = "filterbackenditem"
 EXPORT_DENIED = "exportdenieditem"
+OWNED = "owneditem"
 

@@ -401,6 +401,34 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 7.47 | Non-atomic parent, non-atomic child, both fail | Child ERROR persists and parent settles at ERROR via propagation |
 | 7.48 – 7.111 | **Sub-cluster 7j — Grandparent / parent / child atomicity matrix (64 scenarios).** Full 3-level extension of 7i: every combination of grandparent / parent / child × atomic / non-atomic × fail / no-fail (8 atomicity triplets × 8 outcome triplets). Pins the two atomicity rules the framework actually obeys: **(a)** a failing level's ERROR row survives nested savepoints (its own atomic block, intermediate atomic ancestors) but is wiped by the **outermost** atomic ancestor's rollback (in 3 levels: only GP wipes a failing P or C); **(b)** a successful descendant's row is wiped by **any** atomic ancestor that raises. Failure precedence stays `c_fail > p_fail > gp_fail`. Tests are parametrically generated as `test_7_NN_<aaa>_<TFT>` where letters encode atomicity (a/n) and outcome (T/F) for gp/p/c. Method names are stable so a CI failure log identifies the cell directly. |
 
+### 7e. Persistence internals + two-phase `save()` ✅
+
+**Gap:** Cluster 7's behavior tests (7a–7d, 7i, 7j) all rely on a single underlying contract: when a `CalculationModel` is saved with `is_calculated=IN_PROGRESS`, the framework writes the IN_PROGRESS row in a short atomic block (Phase 1) and runs `calculate_hook` *outside* that block (Phase 2). If Phase 2 crashes, the IN_PROGRESS row is already committed and the failure is recorded as a clean ERROR — never a forever-spinning IN_PROGRESS. 7e pins both that observable contract and the small set of bookkeeping helpers that hold it up (`_terminal_state_identity`, the terminal-state and IN_PROGRESS persistence markers, the missing-IN_PROGRESS-history recovery queue, and `before_save`'s `is_creation` flag).
+
+**Scenario numbering note:** 7e runs in the **7.112 – 7.121** band (immediately after the 7j matrix ends at 7.111), because the 7.15 – 7.31 range is already claimed by sub-clusters 7f (combination engine, 7.15–7.22) and 7g (`create()` pipeline, 7.25–7.31).
+
+**Models needed:**
+- `AtomicCalc` (reused) — drives the helper-level safety-net checks and the SUCCESS branch of two-phase save.
+- `FailingCalc` (reused) — drives the Phase-2-failure branch.
+- `PersistenceProbeCalc` (new) — same shape as `AtomicCalc` but exposes an instance-level `_probe` callback fired from inside `calculate()`. Lets a test re-query the DB *while* Phase 2 is running and observe what Phase 1 has already committed.
+
+**Test scenarios:**
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 7.112 | `_terminal_state_identity` collapses to `(class, pk)` for saved rows and falls back to `id(obj)` for unsaved rows | Two refs to the same persisted row dedupe; two unsaved instances never collide |
+| 7.113 | Terminal-state persistence marker (`_mark_` / `_has_` / `_clear_terminal_state_persistence`) | State-specific snapshot; `None` is a safe no-op; clear actually removes the attribute |
+| 7.114 | `_apply_in_progress_state_persistence` sets the marker for IN_PROGRESS (and drops any pending history snapshot), clears it for SUCCESS/ERROR, and is a no-op on `None` | Pending-history attribute is removed once IN_PROGRESS is committed |
+| 7.115 | `_register_in_progress_state_persistence` runs immediately when `connection.in_atomic_block` is False, but defers to `transaction.on_commit` when True | The deferred callback is captured and only sets the marker after commit fires — so a rollback can never leave a marker claiming "IN_PROGRESS persisted" for a row that never landed on disk |
+| 7.116 | `_queue_missing_in_progress_history` skips when the marker is already set; otherwise stashes a snapshot + history metadata for replay; `None` is safe | Pending snapshot is discarded if IN_PROGRESS is known committed; otherwise carries `snapshot`, `history_date`, `history_change_reason` |
+| 7.117 | `before_save` sets `is_creation = True` for inserts (`_state.adding`) and `False` for updates | Customer signal handlers can branch reliably on this flag |
+| 7.118 | Two-phase save: while `calculate()` is running, a fresh DB query for the same pk already returns `is_calculated = IN_PROGRESS` | If Phase 1 wrapped Phase 2 in the same atomic block, other clients (and the spinner) would never see IN_PROGRESS |
+| 7.119 | Two-phase save: after a successful save, the SUCCESS terminal-state marker is recorded on the instance | Protects `persist_error_state` idempotency (scenario 7.10) on retry / Celery callback paths |
+| 7.120 | Two-phase save: a Phase-2 raise leaves the row at ERROR (never stuck at IN_PROGRESS) | The customer-visible promise of two-phase save: a crash is a clean ERROR, not a hung spinner |
+| 7.121 | A regular save with no IN_PROGRESS flip skips the two-phase path entirely | `calculate()` is NOT called when only a non-state field changes — two-phase is reserved for the IN_PROGRESS transition |
+
+**Status:** ✅ Complete — covers `lex/test_project/tests/calculations/test_7e_persistence_internals.py`.
+
 ---
 
 ## 8. Celery & Async
@@ -946,6 +974,34 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 | 4.26 | `run_validation` — create path | Regular user POSTing `ProtectedItem` gets `PermissionDenied` (model name in the message); admin passes |
 
 **Status:**  Complete — 8 pass / 0 fail. See progress.md Sessions 17 + 19.
+
+### 4i. `LexModel` permission helper convenience methods ✅
+
+**Gap:** `lex/core/models/LexModel.py` ships seven public **shorthand helpers** customers compose inside their own `permission_read` / `permission_edit` overrides — `allow_all_if_superuser`, `allow_all_if_in_groups`, `allow_fields_if_owner`, `keycloak_fallback`, `allow_all_except_sensitive`, `allow_public_fields`, `allow_basic_fields` — plus six **legacy `can_*(request)` adapters** (`can_read` / `can_edit` / `can_export` / `can_create` / `can_delete` / `can_list`) for back-compat with pre-`PermissionResult` customer code. Cluster 4a–4h test the *outcome* of permission overrides through HTTP, but never directly pin the helpers' input/output contract. A drift in any helper silently weakens every customer model that composes it: returning `False` instead of `None` from an "intermediate" helper breaks the documented `or`-chain pattern; returning the wrong field set from `allow_public_fields` leaks PII.
+
+**Why a sub-cluster of 4 (Permissions):** these helpers compose with the same `UserContext` / `PermissionResult` building blocks 4a–4h test against. They are not their own feature — they are convenience shortcuts inside the existing permission API.
+
+**Scenario numbering** runs **4.27 – 4.34** in the free band between 4f's last (4.26) and 4h's first (4.40).
+
+**Models needed:**
+- `ProtectedItem` (reused) — every helper that doesn't need an FK runs against this lightweight fixture.
+- `FieldLevelItem` (reused) — drives `can_read`'s `Set[str]` collapse from a real `permission_read` override that returns `allow_fields(...)`.
+- `OwnedItem` (new) — adds an `owner` FK to `auth.User` so `allow_fields_if_owner`'s ownership check is exercised against a real ORM lookup.
+
+**Test scenarios:**
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 4.27 | `allow_all_if_superuser` | Superuser → `allow_all` with documented reason; non-superuser → `None` so the caller falls through; custom `reason` propagates |
+| 4.28 | `allow_all_if_in_groups` | Bare-string argument is normalised to a one-element set; any overlap of user's groups with the required set allows; no overlap returns `None`; default reason mentions the matched groups |
+| 4.29 | `allow_fields_if_owner` | Owner + explicit `fields=` → `allow_fields(...)`; owner + `excluded_fields=` → `allow_all_except(...)`; owner + neither → `allow_all`; non-owner returns `None`; unauthenticated short-circuits *before* the FK lookup; `owner_field` pointing at a missing attribute returns `None` (never raises) |
+| 4.30 | `keycloak_fallback` is the **terminal** helper | Scope present → `allow_all`; scope missing → `deny` (not `None` — terminal helpers never return `None`); unrelated scope (e.g. `write` for a `read` check) does not satisfy |
+| 4.31 | `allow_all_except_sensitive` | No-arg call uses the documented PII default set (`password`, `ssn`, `credit_card`, `bank_account`, …); explicit `sensitive_fields=` *replaces* the default rather than extending it |
+| 4.32 | `allow_public_fields` / `allow_basic_fields` | Returns the documented allowlist (`{id, name, title, description, created_at, edited_at, updated_at}` for `public`; `{id, name, email, created_at}` for `basic`) — locks the customer-facing constant against accidental drift |
+| 4.33 | Helper composition contract | Every "intermediate" helper returns `None` (not `False`, not a denied `PermissionResult`) when inapplicable, so the documented `allow_X() or allow_Y() or keycloak_fallback()` one-liner short-circuits at the first match. The `or`-chain is exercised end-to-end and the short-circuit is asserted. |
+| 4.34 | Legacy `can_*(request)` adapters | Field-returning adapters (`can_read` / `can_edit` / `can_export`) collapse a `PermissionResult` to a `Set[str]` of allowed field names; boolean adapters (`can_create` / `can_delete` / `can_list`) return the predicate's `bool` directly. Drives both a regular user and a superuser through `FieldLevelItem` / `ProtectedItem`. |
+
+**Status:** ✅ Complete — 26 pass / 0 fail. Covers `lex/test_project/tests/permissions/test_4i_permission_helpers.py`.
 
 ### 12f. Serializer write paths — M2M & nested FK 
 
