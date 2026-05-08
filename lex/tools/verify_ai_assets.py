@@ -9,34 +9,36 @@ distribution:
 * **backward** mode — driven by :mod:`lex_mcp_reverse`, ships
   ``src/lex_mcp_reverse/.github`` (existing-project documentation/migration).
 
-Mode selection inside the MCP server is determined exclusively by the CLI
-flag (``--mode``) or a one-shot override file (``~/.lex-mcp/mode-override``);
-the ``LEX_MCP_MODE`` environment variable is **not** consulted for mode
-selection.  Instead, the server *writes* ``LEX_MCP_MODE`` back into the
-process environment and into every ``.env`` file on each start, so the
-variable always reflects the actually-running mode.
+Mode selection inside the MCP server is determined by the CLI flag
+(``--mode``), a one-shot override file (``~/.lex-mcp/mode-override``), or
+the ``LEX_MCP_MODE`` environment variable / ``.env`` entry.  With the
+crash-and-reboot mechanism (lex-mcp-local ≥ 0.2.3), mode switches are
+instant: the server self-terminates via ``os._exit(0)`` and the IDE
+auto-restarts the subprocess with the new mode's tool surface.
 
-This module leverages that server-synced value: it reads ``LEX_MCP_MODE``
-from the project ``.env`` (most reliable, written by the server) or the
-process environment to know which mode's assets to verify.
+The override file is consumed on the fresh start and deleted. During the
+brief auto-restart window it is the authoritative source of the target
+mode.  The server also eagerly syncs ``LEX_MCP_MODE`` into ``.env`` and
+``mcp.json`` *before* dying, so those files reflect the new mode
+immediately.
+
+This module's :func:`resolve_active_mcp_mode` checks the override file
+first, then ``.env``, then project ``mcp.json`` files, then process
+environment, to guarantee the correct mode is used even during a
+mid-restart or live-switch window.
 
 The ``docs/`` directory is shipped by the ``lex`` package itself and is
 required in every mode.
 
 This module exposes :func:`verify_ai_assets`, which:
 
-1. Resolves the active MCP mode (CLI > project ``.env`` (server-synced) >
-   process env > default ``forward``).
+1. Resolves the active MCP mode (CLI > override file > project ``.env`` >
+   ``mcp.json`` > process env > default ``forward``).
 2. Walks the canonical source trees for that mode.
 3. Restores any file under the project root that is missing or whose contents
    have drifted from the canonical copy (byte-for-byte comparison).
 
-User-added files in the destination are never deleted.8. Pre-tool-call hook
-In each MCP tool entrypoint inside lex_mcp_local and lex_mcp_reverse, add a fast pre-flight:
-
---silent produces no output on the happy path (cheap).
-Auto-mode resolution will pick the same mode the running server is in (because LEX_MCP_MODE is set in its own process env — precedence step #2 wins).
-check=False so a missing lex binary never blocks a tool call.
+User-added files in the destination are never deleted.
 """
 
 from __future__ import annotations
@@ -146,6 +148,102 @@ def _read_env_file_value(env_file_path: Path, key: str) -> str | None:
     return None
 
 
+MODE_OVERRIDE_FILE = Path.home() / ".lex-mcp" / "mode-override"
+
+# Server-entry name matching for mcp.json — same logic as lex-mcp-local's
+# mode_switch._update_mcp_json_mode: canonical name or any entry containing
+# "lex-mcp" / "lex_mcp" (case-insensitive).
+_LEX_MCP_SERVER_NAME = "lex-mcp-local"
+
+
+def _read_mode_from_mcp_json(mcp_path: Path) -> str | None:
+    """Extract the active mode from any lex-mcp entry in *mcp_path*.
+
+    Checks both ``servers`` and ``mcpServers`` top-level keys and matches
+    any entry whose name contains ``lex-mcp`` / ``lex_mcp``.  Prefers
+    ``--mode`` CLI arg, then ``LEX_MCP_MODE`` env block.
+    """
+    if not mcp_path.is_file():
+        return None
+    try:
+        import json as _json
+
+        config = _json.loads(mcp_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    for key in ("servers", "mcpServers"):
+        block = config.get(key)
+        if not isinstance(block, dict):
+            continue
+        for entry_name, server_def in block.items():
+            if not isinstance(server_def, dict):
+                continue
+            name_lc = entry_name.lower()
+            if (
+                entry_name != _LEX_MCP_SERVER_NAME
+                and "lex-mcp" not in name_lc
+                and "lex_mcp" not in name_lc
+            ):
+                continue
+            # --mode arg
+            args = server_def.get("args", [])
+            if isinstance(args, list):
+                for i, arg in enumerate(args):
+                    if arg == "--mode" and i + 1 < len(args):
+                        val = str(args[i + 1]).strip().lower()
+                        if val in MCP_MODE_PACKAGE:
+                            return val
+            # env block
+            env_block = server_def.get("env", {})
+            if isinstance(env_block, dict):
+                val = str(env_block.get("LEX_MCP_MODE", "")).strip().lower()
+                if val in MCP_MODE_PACKAGE:
+                    return val
+    return None
+
+
+def _read_override_mode() -> str | None:
+    """Read the mode from the one-shot override file, if present."""
+    try:
+        if not MODE_OVERRIDE_FILE.is_file():
+            return None
+        raw = MODE_OVERRIDE_FILE.read_text(encoding="utf-8").strip()
+        if raw.startswith("{"):
+            import json
+
+            candidate = json.loads(raw).get("mode", "")
+        else:
+            candidate = raw
+        candidate = str(candidate).strip().lower()
+        return candidate if candidate in MCP_MODE_PACKAGE else None
+    except Exception:
+        return None
+
+
+def _resolve_mode_from_mcp_json_files(project_root: Path) -> str | None:
+    """Scan CWD-relative mcp.json files for the active mode.
+
+    Checks the same locations that lex-mcp-local's
+    ``_candidate_mcp_json_paths()`` scans in the working directory:
+    ``mcp.json``, ``.vscode/mcp.json``, ``.cursor/mcp.json``,
+    ``.idea/mcp.json``, ``.pycharm/mcp.json``.
+    Returns the first valid mode found, or *None*.
+    """
+    root = Path(project_root).resolve()
+    candidates = [
+        root / "mcp.json",
+        root / ".vscode" / "mcp.json",
+        root / ".cursor" / "mcp.json",
+        root / ".idea" / "mcp.json",
+        root / ".pycharm" / "mcp.json",
+    ]
+    for path in candidates:
+        mode = _read_mode_from_mcp_json(path)
+        if mode:
+            return mode
+    return None
+
+
 def resolve_active_mcp_mode(
     project_root: Path,
     *,
@@ -157,11 +255,20 @@ def resolve_active_mcp_mode(
     Precedence:
 
     1. *explicit_mode* (e.g. ``lex ai-verify --mode backward``).
-    2. ``LEX_MCP_MODE`` in ``<project_root>/.env`` — the MCP server syncs
-       this value on every start, so it reliably reflects the running mode.
-    3. ``LEX_MCP_MODE`` in *env* / process environment (fallback; may be
+    2. Override file ``~/.lex-mcp/mode-override`` — written by
+       ``switch_to_*_mode`` MCP tools and consumed on the next server
+       start.  With the unified live-switch mechanism the override is
+       very short-lived, but during the auto-restart window it is the
+       authoritative source of the target mode.
+    3. ``LEX_MCP_MODE`` in ``<project_root>/.env`` — eagerly synced by
+       ``apply_mode_change_to_external_state`` before the server dies
+       (or live-switches), so it is accurate immediately after a switch.
+    4. ``mcp.json`` in the project root or CWD-relative IDE config
+       directories (``mcp.json``, ``.vscode/mcp.json``, ``.cursor/mcp.json``,
+       ``.idea/mcp.json``).  The server eagerly syncs these as well.
+    5. ``LEX_MCP_MODE`` in *env* / process environment (fallback; may be
        stale if the server rewrote ``.env`` but the shell was not reloaded).
-    4. :data:`DEFAULT_MCP_MODE` (``forward``).
+    6. :data:`DEFAULT_MCP_MODE` (``forward``).
 
     Returns ``(mode, source)``. Raises :class:`SetupWithAIError` if the
     resolved mode is not one of :data:`ALL_MCP_MODES`.
@@ -169,19 +276,30 @@ def resolve_active_mcp_mode(
     if explicit_mode:
         mode, source = explicit_mode.strip().lower(), "cli"
     else:
-        dotenv_value = _read_env_file_value(
-            Path(project_root).resolve() / ".env",
-            "LEX_MCP_MODE",
-        )
-        if dotenv_value:
-            mode, source = dotenv_value.strip().lower(), "project-dotenv"
+        # Check the override file first — it is the ground truth during
+        # the brief auto-restart window.
+        override_mode = _read_override_mode()
+        if override_mode:
+            mode, source = override_mode, "override-file"
         else:
-            env_map = dict(os.environ if env is None else env)
-            env_mode = env_map.get("LEX_MCP_MODE", "").strip()
-            if env_mode:
-                mode, source = env_mode.lower(), "process-env"
+            dotenv_value = _read_env_file_value(
+                Path(project_root).resolve() / ".env",
+                "LEX_MCP_MODE",
+            )
+            if dotenv_value:
+                mode, source = dotenv_value.strip().lower(), "project-dotenv"
             else:
-                mode, source = DEFAULT_MCP_MODE, "default"
+                # Scan mcp.json files in project root / CWD for mode.
+                mcp_mode = _resolve_mode_from_mcp_json_files(project_root)
+                if mcp_mode:
+                    mode, source = mcp_mode, "mcp-json"
+                else:
+                    env_map = dict(os.environ if env is None else env)
+                    env_mode = env_map.get("LEX_MCP_MODE", "").strip()
+                    if env_mode:
+                        mode, source = env_mode.lower(), "process-env"
+                    else:
+                        mode, source = DEFAULT_MCP_MODE, "default"
 
     if mode not in MCP_MODE_PACKAGE:
         raise SetupWithAIError(

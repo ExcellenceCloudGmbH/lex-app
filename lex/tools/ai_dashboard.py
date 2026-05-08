@@ -4,7 +4,9 @@ Opens a local HTTP page that displays and lets the user edit:
 
 * **MCP workflow mode** (forward / backward) — writes the one-shot override
   file at ``~/.lex-mcp/mode-override`` and updates ``LEX_MCP_MODE`` in the
-  project ``.env`` and ``mcp.json``.
+  project ``.env`` and ``mcp.json``.  With the crash-and-reboot mechanism
+  in lex-mcp-local ≥ 0.2.3, mode changes are instant: the MCP server
+  self-terminates and the IDE auto-restarts it with the new tool surface.
 * **GitHub token** — written to ``GITHUB_TOKEN`` in ``.env`` and ``mcp.json``.
 * **Remote MCP API key** — written to ``REMOTE_MCP_API_KEY`` in ``.env`` and
   ``mcp.json``.
@@ -122,14 +124,45 @@ def _mask_token(token: str) -> str:
     return token[:4] + "\u2022" * min(len(token) - 8, 16) + token[-4:]
 
 
+def _find_server_defs(
+    config: dict[str, Any],
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+) -> list[dict[str, Any]]:
+    """Return all server-definition dicts in *config* whose name matches.
+
+    Looks under both ``servers`` (PyCharm/VS Code) and ``mcpServers``
+    (Claude Desktop, Cursor, Continue) and matches any entry whose name
+    is *server_name* **or** contains ``lex-mcp`` / ``lex_mcp``
+    (case-insensitive).
+    """
+    defs: list[dict[str, Any]] = []
+    for key in ("servers", "mcpServers"):
+        block = config.get(key)
+        if not isinstance(block, dict):
+            continue
+        for entry_name, entry in block.items():
+            if not isinstance(entry, dict):
+                continue
+            name_lc = entry_name.lower()
+            if (
+                entry_name == server_name
+                or "lex-mcp" in name_lc
+                or "lex_mcp" in name_lc
+            ):
+                defs.append(entry)
+    return defs
+
+
 def _read_mode_from_mcp_json(
     mcp_config_path: Path,
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
 ) -> str | None:
     """Extract the active mode from an mcp.json server definition.
 
-    Checks the ``--mode`` CLI arg first, then ``LEX_MCP_MODE`` in the env
-    block.  Returns *None* if neither is present or the file is missing.
+    Checks both ``servers`` and ``mcpServers`` top-level keys and matches
+    any entry whose name is *server_name* or contains ``lex-mcp`` /
+    ``lex_mcp``.  Prefers the ``--mode`` CLI arg, then
+    ``LEX_MCP_MODE`` in the env block.
     """
     if not mcp_config_path.exists():
         return None
@@ -137,23 +170,21 @@ def _read_mode_from_mcp_json(
         config = json.loads(mcp_config_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
-    server_def = config.get("servers", {}).get(server_name)
-    if not isinstance(server_def, dict):
-        return None
-    # Prefer the --mode CLI arg.
-    args = server_def.get("args", [])
-    if isinstance(args, list):
-        for i, arg in enumerate(args):
-            if arg == "--mode" and i + 1 < len(args):
-                val = str(args[i + 1]).strip().lower()
-                if val in ("forward", "backward"):
-                    return val
-    # Fall back to the env block.
-    env_block = server_def.get("env", {})
-    if isinstance(env_block, dict):
-        val = str(env_block.get("LEX_MCP_MODE", "")).strip().lower()
-        if val in ("forward", "backward"):
-            return val
+    for server_def in _find_server_defs(config, server_name):
+        # Prefer the --mode CLI arg.
+        args = server_def.get("args", [])
+        if isinstance(args, list):
+            for i, arg in enumerate(args):
+                if arg == "--mode" and i + 1 < len(args):
+                    val = str(args[i + 1]).strip().lower()
+                    if val in ("forward", "backward"):
+                        return val
+        # Fall back to the env block.
+        env_block = server_def.get("env", {})
+        if isinstance(env_block, dict):
+            val = str(env_block.get("LEX_MCP_MODE", "")).strip().lower()
+            if val in ("forward", "backward"):
+                return val
     return None
 
 
@@ -185,35 +216,45 @@ def _update_mcp_json_mode(
     mode: str,
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
 ) -> bool:
-    """Update ``--mode`` arg and ``LEX_MCP_MODE`` env in an mcp.json entry."""
+    """Update ``--mode`` arg and ``LEX_MCP_MODE`` env in an mcp.json entry.
+
+    Handles both ``servers`` and ``mcpServers`` top-level keys and matches
+    any entry whose name is *server_name* or contains ``lex-mcp`` /
+    ``lex_mcp``.
+    """
     if not mcp_config_path.exists():
         return False
     try:
         config = json.loads(mcp_config_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return False
-    servers = config.get("servers", {})
-    server_def = servers.get(server_name)
-    if not isinstance(server_def, dict):
+
+    changed = False
+    for server_def in _find_server_defs(config, server_name):
+        args = server_def.get("args", [])
+        if isinstance(args, list):
+            found = False
+            for i, arg in enumerate(args):
+                if arg == "--mode" and i + 1 < len(args):
+                    if args[i + 1] != mode:
+                        args[i + 1] = mode
+                        changed = True
+                    found = True
+                    break
+            if not found:
+                args.extend(["--mode", mode])
+                changed = True
+            server_def["args"] = args
+
+        env_block = server_def.get("env", {})
+        if isinstance(env_block, dict):
+            if env_block.get("LEX_MCP_MODE") != mode:
+                env_block["LEX_MCP_MODE"] = mode
+                changed = True
+            server_def["env"] = env_block
+
+    if not changed:
         return False
-
-    args = server_def.get("args", [])
-    if isinstance(args, list):
-        found = False
-        for i, arg in enumerate(args):
-            if arg == "--mode" and i + 1 < len(args):
-                args[i + 1] = mode
-                found = True
-                break
-        if not found:
-            args.extend(["--mode", mode])
-        server_def["args"] = args
-
-    env_block = server_def.get("env", {})
-    if isinstance(env_block, dict):
-        env_block["LEX_MCP_MODE"] = mode
-        server_def["env"] = env_block
-
     _atomic_write_text(mcp_config_path, json.dumps(config, indent=2) + "\n")
     return True
 
@@ -223,22 +264,32 @@ def _update_mcp_json_env_values(
     values: Mapping[str, str],
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
 ) -> bool:
-    """Update env values in an mcp.json server entry."""
+    """Update env values in mcp.json server entries.
+
+    Handles both ``servers`` and ``mcpServers`` top-level keys and matches
+    any entry whose name is *server_name* or contains ``lex-mcp`` /
+    ``lex_mcp``.
+    """
     if not mcp_config_path.exists():
         return False
     try:
         config = json.loads(mcp_config_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return False
-    servers = config.get("servers", {})
-    server_def = servers.get(server_name)
-    if not isinstance(server_def, dict):
+
+    changed = False
+    for server_def in _find_server_defs(config, server_name):
+        env_block = server_def.get("env", {})
+        if not isinstance(env_block, dict):
+            env_block = {}
+        for k, v in values.items():
+            if env_block.get(k) != v:
+                env_block[k] = v
+                changed = True
+        server_def["env"] = env_block
+
+    if not changed:
         return False
-    env_block = server_def.get("env", {})
-    if not isinstance(env_block, dict):
-        env_block = {}
-    env_block.update(values)
-    server_def["env"] = env_block
     _atomic_write_text(mcp_config_path, json.dumps(config, indent=2) + "\n")
     return True
 
@@ -288,16 +339,45 @@ def _read_dashboard_state(
     python_executable: Path,
     mcp_config_path: Path,
 ) -> dict[str, Any]:
+    # ── Resolve mode ──────────────────────────────────────────────────
+    # With the crash-and-reboot mode switch the server eagerly syncs .env
+    # and mcp.json *before* exiting (via apply_mode_change_to_external_state).
+    # The override file is consumed on the fresh start and deleted, so it
+    # is normally very short-lived.
+    #
+    # Resolution order (highest priority first):
+    #   1. Override file — if it still exists, the server is mid-restart
+    #      and hasn't consumed it yet. This is the ground truth.
+    #   2. .env LEX_MCP_MODE — eagerly synced by the switch tool, so it
+    #      is accurate immediately after a switch even before the restart
+    #      completes.
+    #   3. mcp.json --mode arg — secondary persisted source.
+    #   4. Default "forward".
+    override = _read_override_file()
+    override_mode = None
+    if override and isinstance(override, dict):
+        candidate = str(override.get("mode", "")).strip().lower()
+        if candidate in ("forward", "backward"):
+            override_mode = candidate
+    persisted_mode = (
+        _read_dotenv_value(env_file_path, "LEX_MCP_MODE")
+        or _read_mode_from_mcp_json(mcp_config_path)
+        or DEFAULT_LEX_MCP_MODE
+    )
+    effective_mode = override_mode or persisted_mode
+    # The override file may briefly exist during an auto-restart. If .env
+    # disagrees, flag it — but this is transient, not a "pending" state
+    # requiring manual action.
+    restarting = bool(override_mode and override_mode != persisted_mode)
+
     return {
         "project_root": str(project_root),
         "env_file_path": str(env_file_path),
         "python_executable": str(python_executable),
         "mcp_config_path": str(mcp_config_path),
-        "mcp_mode": (
-            _read_dotenv_value(env_file_path, "LEX_MCP_MODE")
-            or _read_mode_from_mcp_json(mcp_config_path)
-            or DEFAULT_LEX_MCP_MODE
-        ),
+        "mcp_mode": effective_mode,
+        "persisted_mcp_mode": persisted_mode,
+        "pending_mode_change": restarting,
         "github_token": _read_dotenv_value(env_file_path, "GITHUB_TOKEN") or "",
         "remote_mcp_api_key": (
             _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY") or ""
@@ -309,7 +389,7 @@ def _read_dashboard_state(
         "lex_mcp_local_version": get_installed_lex_mcp_local_version(
             python_executable,
         ),
-        "override_pending": _read_override_file(),
+        "override_pending": override,
         "mcp_config_exists": mcp_config_path.exists(),
     }
 
@@ -336,19 +416,40 @@ def _handle_save(
     new_remote_url = form_data.get("remote_mcp_url", [""])[0].strip()
 
     stored_mode = _read_dotenv_value(env_file_path, "LEX_MCP_MODE")
-    current_mode = (
-        stored_mode
-        or _read_mode_from_mcp_json(mcp_config_path)
-        or DEFAULT_LEX_MCP_MODE
+    mcp_json_mode = _read_mode_from_mcp_json(mcp_config_path)
+    current_mode = stored_mode or mcp_json_mode or DEFAULT_LEX_MCP_MODE
+
+    # Detect divergence between persisted state (mcp.json/.env) and the
+    # one-shot override file written by the switch_to_*_mode MCP tools.
+    # If they disagree, the mcp.json/.env are stale and we should re-sync
+    # them even when the user picks the same mode the dashboard displays.
+    override = _read_override_file()
+    override_mode = None
+    if override and isinstance(override, dict):
+        candidate = str(override.get("mode", "")).strip().lower()
+        if candidate in ("forward", "backward"):
+            override_mode = candidate
+    state_is_stale = bool(
+        override_mode
+        and (
+            override_mode != stored_mode
+            or override_mode != mcp_json_mode
+        )
     )
 
     # ── Mode change ──────────────────────────────────────────────────
-    # Treat as a change when: (a) the user picked a different mode, OR
-    # (b) the mode was never explicitly written to .env yet.
+    # Treat as a change when:
+    #   (a) the user picked a different mode than current, OR
+    #   (b) the mode was never explicitly written to .env yet, OR
+    #   (c) the persisted state is stale relative to the override file.
     mode_changed = (
         new_mode
         and new_mode in ("forward", "backward")
-        and (new_mode != current_mode or stored_mode is None)
+        and (
+            new_mode != current_mode
+            or stored_mode is None
+            or state_is_stale
+        )
     )
     if mode_changed:
         try:
@@ -361,9 +462,7 @@ def _handle_save(
             stopped = _stop_mcp_server(mcp_config_path, server_name=server_name)
             msg = f"Mode changed to {new_mode}."
             if stopped:
-                msg += " Server stopped; it will restart in the new mode on next use."
-            else:
-                msg += " The new mode takes effect on next server start."
+                msg += " Server stopped; the IDE will auto-restart it in the new mode."
             if cache_cleared:
                 msg += " IDE tool cache cleared."
             successes.append(msg)
@@ -454,11 +553,19 @@ def _build_dashboard_html(
 
     version = config["lex_mcp_local_version"] or "not installed"
     override = config["override_pending"]
-    override_str = (
-        f"Pending: {html.escape(override.get('mode', '?'))}"
-        if override
-        else "None"
-    )
+    persisted_mode = config.get("persisted_mcp_mode", mode)
+    restarting = config.get("pending_mode_change", False)
+    if override:
+        override_mode_label = html.escape(str(override.get("mode", "?")))
+        if restarting:
+            override_str = (
+                f"Restarting: {override_mode_label} "
+                f"(server is auto-restarting with the new tool surface)"
+            )
+        else:
+            override_str = override_mode_label
+    else:
+        override_str = "None"
 
     # Toast messages
     toast_html = ""
@@ -476,6 +583,20 @@ def _build_dashboard_html(
                 f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="toast-icon"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>'
                 f'{html.escape(msg)}</div>'
             )
+
+    # Auto-restart banner: the override file exists and .env hasn't caught
+    # up yet — this is a brief transient state during the automatic
+    # crash-and-reboot mode switch.
+    if restarting and override:
+        restarting_mode_label = html.escape(str(override.get("mode", "?")))
+        toast_html += (
+            f'<div class="toast toast-ok">'
+            f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="toast-icon"><polyline points="20 6 9 17 4 12"/></svg>'
+            f'Mode switch in progress: the MCP server is restarting in '
+            f'<strong>{restarting_mode_label}</strong> mode. '
+            f'The IDE will re-initialize the tool surface automatically.'
+            f'</div>'
+        )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -794,7 +915,7 @@ def _build_dashboard_html(
           </div>
         </label>
       </div>
-      <p class="mode-note">The MCP server must restart for a mode change to take effect. Saving will stop any running server automatically.</p>
+      <p class="mode-note">Mode changes take effect instantly. The unified server switches the tool surface live; the IDE refreshes automatically.</p>
     </section>
 
     <!-- Credentials -->

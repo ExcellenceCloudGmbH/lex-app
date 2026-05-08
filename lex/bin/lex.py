@@ -803,8 +803,8 @@ def ai_faq():
     show_default=True,
     help=(
         "Which MCP mode's assets to verify. 'auto' (default) detects the active "
-        "mode from --mode > LEX_MCP_MODE env > project .env > mcp.json server "
-        "entry > forward. 'all' verifies both forward and backward."
+        "mode from --mode > override file > project .env > mcp.json > "
+        "process env > forward. 'all' verifies both forward and backward."
     ),
 )
 @click.option(
@@ -871,7 +871,12 @@ def ai_verify(project_root, mode, quiet, silent):
             click.echo("AI assets verified: nothing to restore.")
         return
 
-    click.echo(f"AI assets verified: restored {restored_total} file(s).")
+    # --silent must print NOTHING on success — including when files were
+    # restored.  The MCP wrapper invokes this as a pre-flight on every tool
+    # call; any stdout leak corrupts the stdio JSON-RPC stream and causes
+    # the IDE to time out.
+    if not silent:
+        click.echo(f"AI assets verified: restored {restored_total} file(s).")
 
 
 @lex.command(name="ai-dashboard", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -944,6 +949,13 @@ _SKIP_BOOTSTRAP_COMMANDS = frozenset(
 def main():
     argv = sys.argv[1:]
     first_arg = argv[0] if argv else None
+
+    # Top-level help/version requests must never bootstrap Django — Django
+    # setup can fail in directories whose name is not a valid Python
+    # identifier (e.g. "release-smoke"), and `lex --help` should always
+    # work regardless of CWD.
+    if first_arg is None or first_arg in {"--help", "-h", "--version"}:
+        return lex(prog_name="lex")
 
     if first_arg in _SKIP_BOOTSTRAP_COMMANDS:
         # These commands have dedicated Click handlers registered above.

@@ -95,12 +95,12 @@ try:
 except ValueError:
     ok("integer input → ValueError")
 
-# 1f  Bool → ValueError  (bool is a subclass of int but not a valid input)
-try:
-    ModelStructure._normalize_model_list(True, "test")
-    fail("bool input → ValueError", "no exception raised")
-except ValueError:
-    ok("bool input → ValueError")
+# 1f  Bool → treated as "not defined" (empty list), not a crash.
+#     YAML `untracked_models: true` should be silently ignored.
+check(
+    ModelStructure._normalize_model_list(True, "test") == [],
+    "bool input → empty list (not defined)",
+)
 
 
 # ======================================================================
@@ -305,20 +305,40 @@ with tempfile.TemporaryDirectory() as tmpdir:
         "invalid mode 'banana' → None",
     )
 
-    # 7h  Custom server name
+    # 7h  Fuzzy name matching: any entry containing "lex-mcp" is matched
     mcp_path.write_text(json.dumps({
-        "servers": {"my-custom-server": {
+        "servers": {"my-lex-mcp-server": {
             "type": "stdio", "command": "python",
             "args": ["-m", "lex_mcp.server", "--mode", "backward"],
         }}
     }))
     check(
-        _read_mode_from_mcp_json(mcp_path, server_name="my-custom-server") == "backward",
-        "custom server_name works",
+        _read_mode_from_mcp_json(mcp_path) == "backward",
+        "fuzzy match: 'my-lex-mcp-server' matched via 'lex-mcp' substring",
     )
+
+    # 7i  mcpServers key (Claude Desktop / Cursor format)
+    mcp_path.write_text(json.dumps({
+        "mcpServers": {"lex-mcp-local": {
+            "command": "python",
+            "args": ["-m", "lex_mcp.server", "--mode", "backward"],
+        }}
+    }))
+    check(
+        _read_mode_from_mcp_json(mcp_path) == "backward",
+        "mcpServers key works (Claude Desktop format)",
+    )
+
+    # 7j  Non-matching server name → None
+    mcp_path.write_text(json.dumps({
+        "servers": {"totally-unrelated": {
+            "type": "stdio", "command": "python",
+            "args": ["-m", "other_server", "--mode", "backward"],
+        }}
+    }))
     check(
         _read_mode_from_mcp_json(mcp_path) is None,
-        "wrong server_name → None",
+        "non-matching server name → None",
     )
 
 
@@ -327,51 +347,66 @@ with tempfile.TemporaryDirectory() as tmpdir:
 # ======================================================================
 section("8. _read_dashboard_state — mode fallback: .env → mcp.json → default")
 
-from lex.tools.ai_dashboard import _read_dashboard_state
+from lex.tools.ai_dashboard import _read_dashboard_state, MODE_OVERRIDE_FILE as _MOF8
 
-with tempfile.TemporaryDirectory() as tmpdir:
-    root = Path(tmpdir)
-    env_path = root / ".env"
-    mcp_path = root / "mcp.json"
+# Tests 8 and 9 must run with NO override file so the .env/mcp.json
+# fallback chain is the only input.  Save & restore the real one.
+_test8_override_existed = _MOF8.exists()
+_test8_override_content = (
+    _MOF8.read_text(encoding="utf-8") if _test8_override_existed else None
+)
+if _test8_override_existed:
+    _MOF8.unlink()
 
-    # 8a  .env has mode → use it
-    env_path.write_text("LEX_MCP_MODE=backward\n")
-    mcp_path.write_text(json.dumps({
-        "servers": {"lex-mcp-local": {
-            "args": ["-m", "lex_mcp.server", "--mode", "forward"],
-        }}
-    }))
-    state = _read_dashboard_state(root, env_path, py, mcp_path)
-    check(
-        state["mcp_mode"] == "backward",
-        ".env has backward → uses .env (highest priority)",
-    )
+try:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        env_path = root / ".env"
+        mcp_path = root / "mcp.json"
 
-    # 8b  .env has NO mode, mcp.json has backward → falls back to mcp.json
-    env_path.write_text("GITHUB_TOKEN=test\n")
-    state = _read_dashboard_state(root, env_path, py, mcp_path)
-    check(
-        state["mcp_mode"] == "forward",
-        ".env missing mode, mcp.json has forward → uses mcp.json",
-    )
+        # 8a  .env has mode → use it
+        env_path.write_text("LEX_MCP_MODE=backward\n")
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {
+                "args": ["-m", "lex_mcp.server", "--mode", "forward"],
+            }}
+        }))
+        state = _read_dashboard_state(root, env_path, py, mcp_path)
+        check(
+            state["mcp_mode"] == "backward",
+            ".env has backward → uses .env (highest priority)",
+        )
 
-    # 8c  Neither .env nor mcp.json has mode → default "forward"
-    mcp_path.write_text(json.dumps({
-        "servers": {"lex-mcp-local": {"args": []}}
-    }))
-    state = _read_dashboard_state(root, env_path, py, mcp_path)
-    check(
-        state["mcp_mode"] == "forward",
-        "no mode anywhere → defaults to 'forward'",
-    )
+        # 8b  .env has NO mode, mcp.json has backward → falls back to mcp.json
+        env_path.write_text("GITHUB_TOKEN=test\n")
+        state = _read_dashboard_state(root, env_path, py, mcp_path)
+        check(
+            state["mcp_mode"] == "forward",
+            ".env missing mode, mcp.json has forward → uses mcp.json",
+        )
 
-    # 8d  mcp.json missing entirely → default "forward"
-    mcp_path.unlink()
-    state = _read_dashboard_state(root, env_path, py, mcp_path)
-    check(
-        state["mcp_mode"] == "forward",
-        "mcp.json missing → defaults to 'forward'",
-    )
+        # 8c  Neither .env nor mcp.json has mode → default "forward"
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {"args": []}}
+        }))
+        state = _read_dashboard_state(root, env_path, py, mcp_path)
+        check(
+            state["mcp_mode"] == "forward",
+            "no mode anywhere → defaults to 'forward'",
+        )
+
+        # 8d  mcp.json missing entirely → default "forward"
+        mcp_path.unlink()
+        state = _read_dashboard_state(root, env_path, py, mcp_path)
+        check(
+            state["mcp_mode"] == "forward",
+            "mcp.json missing → defaults to 'forward'",
+        )
+finally:
+    if _MOF8.exists():
+        _MOF8.unlink()
+    if _test8_override_existed and _test8_override_content is not None:
+        _MOF8.write_text(_test8_override_content, encoding="utf-8")
 
 
 # ======================================================================
@@ -773,6 +808,720 @@ with tempfile.TemporaryDirectory() as tmpdir:
         mcp_env.get("GITHUB_TOKEN") == "new_gh_token",
         "mcp.json env GITHUB_TOKEN updated",
     )
+
+
+# ======================================================================
+# 16. Dashboard override-awareness  (Part A of mode-sync fix)
+# ======================================================================
+section("16. _read_dashboard_state — override-aware effective mode")
+
+# Save & isolate the real override file so test scenarios don't touch it.
+from lex.tools.ai_dashboard import MODE_OVERRIDE_FILE, _write_mode_override
+
+original_override_existed = MODE_OVERRIDE_FILE.exists()
+original_override_content = (
+    MODE_OVERRIDE_FILE.read_text(encoding="utf-8")
+    if original_override_existed
+    else None
+)
+if original_override_existed:
+    MODE_OVERRIDE_FILE.unlink()
+
+try:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        env_path = root / ".env"
+        mcp_path = root / "mcp.json"
+
+        # Setup: persisted state is "forward" (.env + mcp.json),
+        # but the server just crashed-and-rebooted and the override
+        # file still exists (mid-restart window).
+        env_path.write_text("LEX_MCP_MODE=forward\n")
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {
+                "args": ["-m", "lex_mcp.server", "--mode", "forward"],
+                "env": {"LEX_MCP_MODE": "forward"},
+            }}
+        }))
+        _write_mode_override("backward")
+
+        state = _read_dashboard_state(root, env_path, py, mcp_path)
+        check(
+            state["mcp_mode"] == "backward",
+            "★ effective mode = override mode (backward), not persisted (forward)",
+        )
+        check(
+            state["persisted_mcp_mode"] == "forward",
+            "persisted_mcp_mode = forward (what mcp.json/.env say)",
+        )
+        check(
+            state["pending_mode_change"] is True,
+            "pending_mode_change = True (mid-restart: override differs from persisted)",
+        )
+        check(
+            state["override_pending"] is not None
+            and state["override_pending"].get("mode") == "backward",
+            "override_pending payload preserved",
+        )
+
+        # Same persisted, override agrees → no pending flag
+        _write_mode_override("forward")
+        state = _read_dashboard_state(root, env_path, py, mcp_path)
+        check(
+            state["pending_mode_change"] is False,
+            "override agrees with persisted → no pending flag",
+        )
+        check(
+            state["mcp_mode"] == "forward",
+            "agreement: effective mode = persisted mode",
+        )
+
+        # No override file → behaves like before
+        MODE_OVERRIDE_FILE.unlink()
+        state = _read_dashboard_state(root, env_path, py, mcp_path)
+        check(
+            state["pending_mode_change"] is False,
+            "no override file → no pending flag",
+        )
+        check(
+            state["mcp_mode"] == "forward",
+            "no override → effective = persisted",
+        )
+        check(
+            state["override_pending"] is None,
+            "no override → override_pending = None",
+        )
+
+    # ── Save handler re-syncs stale state from crash-and-reboot ──────
+    section("17. _handle_save — re-syncs stale persisted state")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        env_path = root / ".env"
+        mcp_path = root / "mcp.json"
+
+        # Persisted state stuck on "forward": the crash-and-reboot wrote
+        # the override and eagerly synced .env (but in this scenario .env
+        # sync didn't take effect — simulating a partial failure).
+        env_path.write_text("LEX_MCP_MODE=forward\n")
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {
+                "type": "stdio", "command": "python",
+                "args": ["-m", "lex_mcp.server", "--mode", "forward"],
+                "env": {"LEX_MCP_MODE": "forward"},
+            }}
+        }))
+        _write_mode_override("backward")
+
+        # User opens the dashboard during or after restart, sees
+        # effective=backward, clicks Save to force re-sync.
+        form = {"mcp_mode": ["backward"], "github_token": [""],
+                "remote_mcp_api_key": [""], "remote_mcp_url": [""]}
+        s, e = _handle_save(form, root, env_path, mcp_path)
+
+        check(
+            any("Mode changed to backward" in x for x in s),
+            "★ stale forward + backward override + form=backward → re-syncs to backward",
+        )
+        check(
+            _read_dotenv_value(env_path, "LEX_MCP_MODE") == "backward",
+            ".env now says backward",
+        )
+        data = json.loads(mcp_path.read_text())
+        args = data["servers"]["lex-mcp-local"]["args"]
+        idx = args.index("--mode") + 1
+        check(args[idx] == "backward", "mcp.json --mode now backward")
+        check(
+            data["servers"]["lex-mcp-local"]["env"]["LEX_MCP_MODE"] == "backward",
+            "mcp.json env LEX_MCP_MODE now backward",
+        )
+
+finally:
+    # Restore original override file state
+    if MODE_OVERRIDE_FILE.exists():
+        MODE_OVERRIDE_FILE.unlink()
+    if original_override_existed and original_override_content is not None:
+        MODE_OVERRIDE_FILE.write_text(original_override_content, encoding="utf-8")
+
+
+# ======================================================================
+# 18. lex-mcp-local mode_switch.apply_mode_change_to_external_state  (Part B)
+# ======================================================================
+section("18. mode_switch.apply_mode_change_to_external_state — eager external sync")
+
+# Disable IDE autodiscovery so apply_mode_change_to_external_state does
+# NOT touch the user's real ~/.config/github-copilot/intellij/mcp.json
+# or the equivalent VSCode paths during the test.
+os.environ["LEX_MCP_DISABLE_IDE_AUTODISCOVER"] = "1"
+
+# Import from lex-mcp-local (installed in our venv as lex-mcp-local 0.2.3)
+try:
+    from lex_mcp import mode_switch as _ms
+except ImportError:
+    _ms = None
+    fail("import lex_mcp.mode_switch", "package not importable in this venv")
+
+if _ms is not None:
+    # 18a  _update_mcp_json_mode: changes --mode arg and env block
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mcp_path = Path(tmpdir) / "mcp.json"
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {
+                "type": "stdio", "command": "python",
+                "args": ["-m", "lex_mcp.server", "--mode", "forward"],
+                "env": {"LEX_MCP_MODE": "forward"},
+            }}
+        }))
+        changed = _ms._update_mcp_json_mode(mcp_path, "backward")
+        check(changed is True, "_update_mcp_json_mode returns True on change")
+        data = json.loads(mcp_path.read_text())
+        args = data["servers"]["lex-mcp-local"]["args"]
+        idx = args.index("--mode") + 1
+        check(args[idx] == "backward", "mcp.json --mode arg updated to backward")
+        check(
+            data["servers"]["lex-mcp-local"]["env"]["LEX_MCP_MODE"] == "backward",
+            "mcp.json env block updated to backward",
+        )
+
+        # No-op when already in target mode
+        again = _ms._update_mcp_json_mode(mcp_path, "backward")
+        check(again is False, "_update_mcp_json_mode returns False when no change")
+
+        # Appends --mode when missing
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {
+                "args": ["-m", "lex_mcp.server"],
+                "env": {},
+            }}
+        }))
+        _ms._update_mcp_json_mode(mcp_path, "backward")
+        data = json.loads(mcp_path.read_text())
+        check(
+            "--mode" in data["servers"]["lex-mcp-local"]["args"]
+            and "backward" in data["servers"]["lex-mcp-local"]["args"],
+            "appends --mode <value> when missing from args",
+        )
+
+        # Wrong server name → no-op
+        mcp_path.write_text(json.dumps({
+            "servers": {"other-server": {"args": []}}
+        }))
+        check(
+            _ms._update_mcp_json_mode(mcp_path, "backward") is False,
+            "wrong server_name → no change",
+        )
+
+        # Malformed JSON → False, no crash
+        bad = Path(tmpdir) / "bad.json"
+        bad.write_text("not json")
+        check(
+            _ms._update_mcp_json_mode(bad, "backward") is False,
+            "malformed JSON → False (no crash)",
+        )
+
+    # 18b  _invalidate_pycharm_copilot_cache against synthetic DB
+    with tempfile.TemporaryDirectory() as tmpdir:
+        intellij = Path(tmpdir) / "intellij"
+        intellij.mkdir()
+        mcp_path = intellij / "mcp.json"
+        mcp_path.write_text("{}")
+        db_path = Path(tmpdir) / "copilot-intellij.db"
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE state (key TEXT PRIMARY KEY, "
+            "value TEXT NOT NULL, updated_at INTEGER NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO state(key, value, updated_at) VALUES (?, ?, ?)",
+            ("mcp-servers-cache",
+             # real Copilot value is a JSON string of JSON
+             json.dumps(json.dumps({"lex-mcp-local": {"tools": [{"name": "x"}]},
+                                    "other": {"tools": []}})),
+             1),
+        )
+        conn.execute(
+            "INSERT INTO state(key, value, updated_at) VALUES (?, ?, ?)",
+            ("mcp-first-boot-completed", '"true"', 1),
+        )
+        conn.commit()
+        conn.close()
+
+        ok_invalidate = _ms._invalidate_pycharm_copilot_cache(mcp_path)
+        check(ok_invalidate is True, "PyCharm cache invalidation returns True")
+
+        conn = sqlite3.connect(db_path)
+        cache_row = conn.execute(
+            "SELECT value FROM state WHERE key='mcp-servers-cache'"
+        ).fetchone()
+        first_boot = conn.execute(
+            "SELECT value FROM state WHERE key='mcp-first-boot-completed'"
+        ).fetchone()
+        conn.close()
+        # Cache value is JSON string of JSON
+        cache = json.loads(json.loads(cache_row[0]))
+        check(
+            "lex-mcp-local" not in cache,
+            "lex-mcp-local removed from cache",
+        )
+        check("other" in cache, "other server preserved in cache")
+        check(
+            first_boot is not None and '"false"' in first_boot[0],
+            "mcp-first-boot-completed reset to false",
+        )
+
+        # Idempotent: missing DB → False, no crash
+        nodir = Path(tmpdir) / "nope" / "intellij" / "mcp.json"
+        check(
+            _ms._invalidate_pycharm_copilot_cache(nodir) is False,
+            "missing DB → False (no crash)",
+        )
+
+    # 18c  apply_mode_change_to_external_state full flow
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Synthetic project .env that should get updated via sync_env_var
+        project_dir = Path(tmpdir) / "project"
+        project_dir.mkdir()
+        project_env = project_dir / ".env"
+        project_env.write_text(
+            "GITHUB_TOKEN=ghp_test\nLEX_MCP_MODE=forward\n"
+        )
+
+        # Synthetic mcp.json under intellij/ so cache invalidation runs
+        intellij = Path(tmpdir) / "intellij"
+        intellij.mkdir()
+        mcp_path = intellij / "mcp.json"
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {
+                "args": ["-m", "lex_mcp.server", "--mode", "forward"],
+                "env": {"LEX_MCP_MODE": "forward"},
+            }}
+        }))
+        # Synthetic state DB next to intellij/
+        db_path = Path(tmpdir) / "copilot-intellij.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE state (key TEXT PRIMARY KEY, "
+            "value TEXT NOT NULL, updated_at INTEGER NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO state(key, value, updated_at) VALUES (?, ?, ?)",
+            ("mcp-servers-cache",
+             json.dumps(json.dumps({"lex-mcp-local": {"tools": [{"name": "kickstart"}]}})),
+             1),
+        )
+        conn.commit()
+        conn.close()
+
+        # Point sync_env_var at the project .env via LEX_MCP_PROJECT_DIR
+        old_project_dir = os.environ.get("LEX_MCP_PROJECT_DIR")
+        old_mode = os.environ.get("LEX_MCP_MODE")
+        os.environ["LEX_MCP_PROJECT_DIR"] = str(project_dir)
+        try:
+            report = _ms.apply_mode_change_to_external_state(
+                "backward",
+                extra_mcp_json_paths=[str(mcp_path)],
+            )
+        finally:
+            if old_project_dir is None:
+                os.environ.pop("LEX_MCP_PROJECT_DIR", None)
+            else:
+                os.environ["LEX_MCP_PROJECT_DIR"] = old_project_dir
+            if old_mode is None:
+                os.environ.pop("LEX_MCP_MODE", None)
+            else:
+                os.environ["LEX_MCP_MODE"] = old_mode
+
+        check(report["mode"] == "backward", "report.mode = backward")
+        check(
+            str(mcp_path) in report["mcp_json_updated"],
+            "mcp.json listed in mcp_json_updated",
+        )
+        check(
+            str(mcp_path) in report["ide_caches_cleared"],
+            "intellij/ mcp.json triggered IDE cache invalidation",
+        )
+        check(
+            isinstance(report["env"], dict)
+            and report["env"].get("mode") == "backward",
+            "env sub-report present",
+        )
+
+        # Verify side effects on disk
+        env_text = project_env.read_text()
+        check(
+            'LEX_MCP_MODE="backward"' in env_text or "LEX_MCP_MODE=backward" in env_text,
+            "project .env LEX_MCP_MODE rewritten to backward",
+        )
+        data = json.loads(mcp_path.read_text())
+        args = data["servers"]["lex-mcp-local"]["args"]
+        idx = args.index("--mode") + 1
+        check(args[idx] == "backward", "mcp.json --mode rewritten to backward")
+        check(
+            data["servers"]["lex-mcp-local"]["env"]["LEX_MCP_MODE"] == "backward",
+            "mcp.json env block rewritten to backward",
+        )
+        conn = sqlite3.connect(db_path)
+        cache_row = conn.execute(
+            "SELECT value FROM state WHERE key='mcp-servers-cache'"
+        ).fetchone()
+        conn.close()
+        cache = json.loads(json.loads(cache_row[0]))
+        check(
+            "lex-mcp-local" not in cache,
+            "lex-mcp-local entry removed from PyCharm cache",
+        )
+
+    # 18d  Best-effort: returns a report even when nothing exists
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # No mcp.json files, no project .env
+        old_project_dir = os.environ.get("LEX_MCP_PROJECT_DIR")
+        os.environ["LEX_MCP_PROJECT_DIR"] = tmpdir  # exists but no .env
+        try:
+            report = _ms.apply_mode_change_to_external_state("forward")
+        finally:
+            if old_project_dir is None:
+                os.environ.pop("LEX_MCP_PROJECT_DIR", None)
+            else:
+                os.environ["LEX_MCP_PROJECT_DIR"] = old_project_dir
+
+        check(
+            isinstance(report, dict) and report["mode"] == "forward",
+            "no targets → still returns a report (best-effort)",
+        )
+
+
+# ======================================================================
+# 19. verify_ai_assets.resolve_active_mcp_mode — override-file priority
+# ======================================================================
+section("19. resolve_active_mcp_mode — override file takes priority over .env")
+
+from lex.tools.verify_ai_assets import (
+    resolve_active_mcp_mode,
+    MODE_OVERRIDE_FILE as _VAI_MOF,
+)
+
+_test19_override_existed = _VAI_MOF.is_file()
+_test19_override_content = (
+    _VAI_MOF.read_text(encoding="utf-8") if _test19_override_existed else None
+)
+if _test19_override_existed:
+    _VAI_MOF.unlink()
+
+try:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        env_path = root / ".env"
+
+        # 19a  Override file present → wins over .env
+        env_path.write_text("LEX_MCP_MODE=forward\n")
+        _VAI_MOF.parent.mkdir(parents=True, exist_ok=True)
+        _VAI_MOF.write_text(
+            json.dumps({"mode": "backward", "reason": "test"}),
+            encoding="utf-8",
+        )
+        mode, source = resolve_active_mcp_mode(root)
+        check(mode == "backward", "★ override file wins over .env (backward)")
+        check(source == "override-file", "source = override-file")
+
+        # 19b  Override file removed → falls back to .env
+        _VAI_MOF.unlink()
+        mode, source = resolve_active_mcp_mode(root)
+        check(mode == "forward", "no override → .env used (forward)")
+        check(source == "project-dotenv", "source = project-dotenv")
+
+        # 19c  Neither override nor .env → default
+        env_path.write_text("GITHUB_TOKEN=ghp_test\n")  # no LEX_MCP_MODE
+        # Clear process env to avoid contamination
+        old_env = os.environ.pop("LEX_MCP_MODE", None)
+        try:
+            mode, source = resolve_active_mcp_mode(root)
+            check(mode == "forward", "no override, no .env, no env → default forward")
+            check(source == "default", "source = default")
+        finally:
+            if old_env is not None:
+                os.environ["LEX_MCP_MODE"] = old_env
+
+        # 19d  Explicit mode always wins over everything
+        _VAI_MOF.parent.mkdir(parents=True, exist_ok=True)
+        _VAI_MOF.write_text(
+            json.dumps({"mode": "backward"}), encoding="utf-8",
+        )
+        env_path.write_text("LEX_MCP_MODE=backward\n")
+        mode, source = resolve_active_mcp_mode(root, explicit_mode="forward")
+        check(mode == "forward", "explicit_mode wins over override + .env")
+        check(source == "cli", "source = cli")
+
+        # 19e  Override with bare string (non-JSON) also works
+        _VAI_MOF.write_text("backward", encoding="utf-8")
+        env_path.write_text("LEX_MCP_MODE=forward\n")
+        mode, source = resolve_active_mcp_mode(root)
+        check(mode == "backward", "bare-string override file works")
+        check(source == "override-file", "source = override-file (bare string)")
+
+        # Cleanup
+        if _VAI_MOF.exists():
+            _VAI_MOF.unlink()
+finally:
+    if _VAI_MOF.exists():
+        _VAI_MOF.unlink()
+    if _test19_override_existed and _test19_override_content is not None:
+        _VAI_MOF.write_text(_test19_override_content, encoding="utf-8")
+
+
+# ======================================================================
+# 20. _find_server_defs — fuzzy server lookup (mcpServers + name matching)
+# ======================================================================
+section("20. _find_server_defs — fuzzy server lookup")
+
+from lex.tools.ai_dashboard import _find_server_defs
+
+# 20a  Canonical name under "servers"
+config_a = {"servers": {"lex-mcp-local": {"args": ["--mode", "forward"]}}}
+defs = _find_server_defs(config_a)
+check(len(defs) == 1, "canonical name under 'servers' found")
+
+# 20b  Fuzzy name under "servers"
+config_b = {"servers": {"my-lex-mcp-server": {"args": []}}}
+defs = _find_server_defs(config_b)
+check(len(defs) == 1, "fuzzy 'lex-mcp' match found")
+
+# 20c  mcpServers key
+config_c = {"mcpServers": {"lex-mcp-local": {"args": []}}}
+defs = _find_server_defs(config_c)
+check(len(defs) == 1, "mcpServers key found")
+
+# 20d  Both keys have entries
+config_d = {
+    "servers": {"lex-mcp-local": {"args": []}},
+    "mcpServers": {"lex_mcp_custom": {"args": []}},
+}
+defs = _find_server_defs(config_d)
+check(len(defs) == 2, "entries from both servers + mcpServers found")
+
+# 20e  No match
+config_e = {"servers": {"unrelated-server": {"args": []}}}
+defs = _find_server_defs(config_e)
+check(len(defs) == 0, "non-matching server name → empty list")
+
+# 20f  lex_mcp (underscore) also matches
+config_f = {"mcpServers": {"lex_mcp_tool": {"args": []}}}
+defs = _find_server_defs(config_f)
+check(len(defs) == 1, "lex_mcp (underscore) also matches")
+
+
+# ======================================================================
+# 21. _update_mcp_json_mode — mcpServers + fuzzy matching
+# ======================================================================
+section("21. _update_mcp_json_mode — mcpServers + fuzzy matching")
+
+from lex.tools.ai_dashboard import _update_mcp_json_mode as _dashboard_update_mode
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    mcp_path = Path(tmpdir) / "mcp.json"
+
+    # 21a  mcpServers key: mode is updated
+    mcp_path.write_text(json.dumps({
+        "mcpServers": {"lex-mcp-local": {
+            "command": "python",
+            "args": ["-m", "lex_mcp.server", "--mode", "forward"],
+            "env": {"LEX_MCP_MODE": "forward"},
+        }}
+    }))
+    changed = _dashboard_update_mode(mcp_path, "backward")
+    check(changed is True, "mcpServers: mode updated → True")
+    data = json.loads(mcp_path.read_text())
+    args = data["mcpServers"]["lex-mcp-local"]["args"]
+    idx = args.index("--mode") + 1
+    check(args[idx] == "backward", "mcpServers: --mode arg updated")
+    check(
+        data["mcpServers"]["lex-mcp-local"]["env"]["LEX_MCP_MODE"] == "backward",
+        "mcpServers: env block updated",
+    )
+
+    # 21b  Fuzzy name match: "my-lex-mcp-v2" is updated
+    mcp_path.write_text(json.dumps({
+        "servers": {"my-lex-mcp-v2": {
+            "args": ["-m", "lex_mcp.server", "--mode", "forward"],
+            "env": {"LEX_MCP_MODE": "forward"},
+        }}
+    }))
+    changed = _dashboard_update_mode(mcp_path, "backward")
+    check(changed is True, "fuzzy name: mode updated → True")
+    data = json.loads(mcp_path.read_text())
+    check(
+        data["servers"]["my-lex-mcp-v2"]["env"]["LEX_MCP_MODE"] == "backward",
+        "fuzzy name: env block updated",
+    )
+
+    # 21c  Both keys have entries: all are updated
+    mcp_path.write_text(json.dumps({
+        "servers": {"lex-mcp-local": {
+            "args": ["--mode", "forward"],
+            "env": {"LEX_MCP_MODE": "forward"},
+        }},
+        "mcpServers": {"my-lex-mcp": {
+            "args": ["--mode", "forward"],
+            "env": {"LEX_MCP_MODE": "forward"},
+        }},
+    }))
+    changed = _dashboard_update_mode(mcp_path, "backward")
+    check(changed is True, "both keys: updated → True")
+    data = json.loads(mcp_path.read_text())
+    check(
+        data["servers"]["lex-mcp-local"]["env"]["LEX_MCP_MODE"] == "backward",
+        "both keys: servers entry updated",
+    )
+    check(
+        data["mcpServers"]["my-lex-mcp"]["env"]["LEX_MCP_MODE"] == "backward",
+        "both keys: mcpServers entry updated",
+    )
+
+    # 21d  No-op when already correct
+    changed = _dashboard_update_mode(mcp_path, "backward")
+    check(changed is False, "already correct → False")
+
+    # 21e  Non-matching name → no change
+    mcp_path.write_text(json.dumps({
+        "servers": {"unrelated": {
+            "args": ["--mode", "forward"],
+            "env": {"LEX_MCP_MODE": "forward"},
+        }}
+    }))
+    changed = _dashboard_update_mode(mcp_path, "backward")
+    check(changed is False, "non-matching name → False")
+
+
+# ======================================================================
+# 22. _update_mcp_json_env_values — mcpServers + fuzzy matching
+# ======================================================================
+section("22. _update_mcp_json_env_values — mcpServers + fuzzy matching")
+
+from lex.tools.ai_dashboard import _update_mcp_json_env_values
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    mcp_path = Path(tmpdir) / "mcp.json"
+
+    # 22a  mcpServers: env values are updated
+    mcp_path.write_text(json.dumps({
+        "mcpServers": {"lex-mcp-local": {
+            "command": "python",
+            "args": [],
+            "env": {"GITHUB_TOKEN": "old_gh"},
+        }}
+    }))
+    changed = _update_mcp_json_env_values(mcp_path, {"GITHUB_TOKEN": "new_gh"})
+    check(changed is True, "mcpServers: env updated → True")
+    data = json.loads(mcp_path.read_text())
+    check(
+        data["mcpServers"]["lex-mcp-local"]["env"]["GITHUB_TOKEN"] == "new_gh",
+        "mcpServers: GITHUB_TOKEN updated",
+    )
+
+    # 22b  Fuzzy name match
+    mcp_path.write_text(json.dumps({
+        "servers": {"my-lex-mcp-tool": {
+            "env": {"KEY": "old"},
+        }}
+    }))
+    changed = _update_mcp_json_env_values(mcp_path, {"KEY": "new"})
+    check(changed is True, "fuzzy name: env updated → True")
+    data = json.loads(mcp_path.read_text())
+    check(
+        data["servers"]["my-lex-mcp-tool"]["env"]["KEY"] == "new",
+        "fuzzy name: KEY updated",
+    )
+
+
+# ======================================================================
+# 23. resolve_active_mcp_mode — mcp.json fallback
+# ======================================================================
+section("23. resolve_active_mcp_mode — mcp.json fallback in resolution chain")
+
+from lex.tools.verify_ai_assets import (
+    resolve_active_mcp_mode as _resolve_mode_23,
+    MODE_OVERRIDE_FILE as _VAI_MOF_23,
+)
+
+_test23_override_existed = _VAI_MOF_23.is_file()
+_test23_override_content = (
+    _VAI_MOF_23.read_text(encoding="utf-8") if _test23_override_existed else None
+)
+if _test23_override_existed:
+    _VAI_MOF_23.unlink()
+
+try:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        env_path = root / ".env"
+
+        # 23a  mcp.json in project root is consulted when no .env mode
+        env_path.write_text("GITHUB_TOKEN=ghp_test\n")  # no LEX_MCP_MODE
+        mcp_path = root / "mcp.json"
+        mcp_path.write_text(json.dumps({
+            "servers": {"lex-mcp-local": {
+                "args": ["--mode", "backward"],
+                "env": {"LEX_MCP_MODE": "backward"},
+            }}
+        }))
+        old_env = os.environ.pop("LEX_MCP_MODE", None)
+        try:
+            mode, source = _resolve_mode_23(root)
+            check(mode == "backward", "★ mcp.json fallback: backward")
+            check(source == "mcp-json", "source = mcp-json")
+        finally:
+            if old_env is not None:
+                os.environ["LEX_MCP_MODE"] = old_env
+
+        # 23b  .env takes priority over mcp.json
+        env_path.write_text("LEX_MCP_MODE=forward\n")
+        mode, source = _resolve_mode_23(root)
+        check(mode == "forward", ".env wins over mcp.json")
+        check(source == "project-dotenv", "source = project-dotenv")
+
+        # 23c  mcpServers key in mcp.json also works
+        env_path.write_text("GITHUB_TOKEN=test\n")  # no LEX_MCP_MODE
+        mcp_path.write_text(json.dumps({
+            "mcpServers": {"lex-mcp-local": {
+                "args": ["--mode", "backward"],
+            }}
+        }))
+        old_env = os.environ.pop("LEX_MCP_MODE", None)
+        try:
+            mode, source = _resolve_mode_23(root)
+            check(mode == "backward", "mcpServers key: backward from mcp.json")
+            check(source == "mcp-json", "source = mcp-json (mcpServers)")
+        finally:
+            if old_env is not None:
+                os.environ["LEX_MCP_MODE"] = old_env
+
+        # 23d  .cursor/mcp.json is also scanned
+        mcp_path.unlink()
+        cursor_dir = root / ".cursor"
+        cursor_dir.mkdir()
+        cursor_mcp = cursor_dir / "mcp.json"
+        cursor_mcp.write_text(json.dumps({
+            "mcpServers": {"my-lex-mcp": {
+                "args": ["--mode", "backward"],
+            }}
+        }))
+        old_env = os.environ.pop("LEX_MCP_MODE", None)
+        try:
+            mode, source = _resolve_mode_23(root)
+            check(mode == "backward", ".cursor/mcp.json scanned")
+            check(source == "mcp-json", "source = mcp-json (.cursor)")
+        finally:
+            if old_env is not None:
+                os.environ["LEX_MCP_MODE"] = old_env
+
+        # Cleanup
+        cursor_mcp.unlink()
+        cursor_dir.rmdir()
+finally:
+    if _VAI_MOF_23.exists():
+        _VAI_MOF_23.unlink()
+    if _test23_override_existed and _test23_override_content is not None:
+        _VAI_MOF_23.write_text(_test23_override_content, encoding="utf-8")
 
 
 # ======================================================================

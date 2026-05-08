@@ -330,13 +330,16 @@ class LexFlowerCommandTests(TestCase):
             self.assertEqual(result.exit_code, 0, msg=result.output)
             generate_configs_mock.assert_called_once_with(project_root.resolve().as_posix())
             resolve_python_mock.assert_called_once_with(project_root.resolve())
-            install_mock.assert_called_once_with(artifacts.python_executable, "remote_api_key")
+            install_mock.assert_called_once_with(
+                artifacts.python_executable, "remote_api_key", upgrade=True,
+            )
             launch_form_mock.assert_called_once()
             configure_mock.assert_called_once_with(
                 project_root=project_root.resolve(),
                 github_token="ghu_example",
                 remote_mcp_api_key="remote_api_key",
                 remote_mcp_url=DEFAULT_REMOTE_MCP_URL,
+                mcp_mode="forward",
                 python_executable=artifacts.python_executable,
                 verify_server=False,
             )
@@ -351,6 +354,7 @@ class LexFlowerCommandTests(TestCase):
                     "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
                     "REMOTE_MCP_API_KEY": "remote_api_key",
                     "GITHUB_TOKEN": "ghu_example",
+                    "LEX_MCP_MODE": "forward",
                 },
             )
             bootstrap_copilot_state_mock.assert_called_once_with(
@@ -574,12 +578,15 @@ class SetupWithAIToolsTests(TestCase):
                 encoding="utf-8",
             )
 
-            server_definition = build_mcp_server_definition(
-                python_executable=Path("/venv/bin/python"),
-                wrapper_script_path=Path("/venv/lib/python3.12/site-packages/lex_mcp_local/wrapper_mcp.py"),
-                github_token="ghu_example",
-                remote_mcp_api_key="remote_api_key",
-            )
+            with patch(
+                "lex.tools.setup_with_ai._has_unified_mcp_entry_point",
+                return_value=True,
+            ):
+                server_definition = build_mcp_server_definition(
+                    python_executable=Path("/venv/bin/python"),
+                    github_token="ghu_example",
+                    remote_mcp_api_key="remote_api_key",
+                )
 
             write_github_copilot_mcp_config(mcp_path, server_definition)
 
@@ -1116,12 +1123,13 @@ class AIUpdateTests(TestCase):
                     project_root, mcp_config_path=mcp_path,
                 )
 
-            self.assertEqual(len(results), 2)
+            self.assertEqual(len(results), 3)
             self.assertEqual(results[0].version, "0.2.1")
             self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
             self.assertIn("GEMINI_API_KEY", results[0].mcp_env_keys_removed)
             self.assertEqual(results[1].version, "0.2.2")
             self.assertTrue(results[1].package_upgraded)
+            self.assertEqual(results[2].version, "0.2.3")
 
     def test_ai_update_cli_command_reports_removed_keys(self):
         runner = CliRunner()
@@ -1468,11 +1476,12 @@ class AIUpdate022Tests(TestCase):
                     project_root, mcp_config_path=mcp_path,
                 )
 
-            self.assertEqual(len(results), 2)
+            self.assertEqual(len(results), 3)
             self.assertEqual(results[0].version, "0.2.1")
             self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
             self.assertEqual(results[1].version, "0.2.2")
             self.assertTrue(results[1].package_upgraded)
+            self.assertEqual(results[2].version, "0.2.3")
 
     def test_ai_update_cli_command_reports_0_2_2_actions(self):
         runner = CliRunner()
