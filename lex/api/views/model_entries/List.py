@@ -637,7 +637,14 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
 
         if filter_type == "text":
             value = model.get("filter")
-            if value in (None, ""):
+            # BUG-016 fix: `blank` / `notBlank` are value-less ops —
+            # they ask "is this column empty?" and don't carry a
+            # ``filter`` payload. The early-return below previously
+            # killed them before the per-op dispatch could run, so the
+            # AG Grid dropdown items appeared to do nothing. Skip the
+            # guard for those two ops; every other op still requires a
+            # value.
+            if value in (None, "") and operation_type not in ("blank", "notBlank"):
                 return None
             value = str(value)
             mapping = {
@@ -663,7 +670,10 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         if filter_type == "number":
             value = model.get("filter")
             value_to = model.get("filterTo")
-            if value in (None, "") and operation_type != "blank":
+            # BUG-016 fix: extend the value-less bypass to ``notBlank``
+            # too — previously only ``blank`` was exempted, so the
+            # ``notBlank`` op was unreachable on numeric columns.
+            if value in (None, "") and operation_type not in ("blank", "notBlank"):
                 return None
             mapping = {
                 "equals": field,
@@ -691,7 +701,10 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
             date_from_raw = model.get("dateFrom") or model.get("filter")
             date_to_raw = model.get("dateTo") or model.get("filterTo")
 
-            if operation_type != "blank" and not date_from_raw:
+            # BUG-016 fix: ``notBlank`` is value-less just like
+            # ``blank`` — the original guard only exempted ``blank``,
+            # so ``notBlank`` on date columns was unreachable.
+            if operation_type not in ("blank", "notBlank") and not date_from_raw:
                 return None
             if operation_type == "blank":
                 return Q(**{f"{field}__isnull": True})
