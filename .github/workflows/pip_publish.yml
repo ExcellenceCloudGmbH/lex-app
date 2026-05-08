@@ -60,14 +60,14 @@ on:
         type: string
       clusters:
         description: >-
-          Cluster selector fed to BOTH gate-tests and gate-showcase.
-          Same syntax as ``run_showcase_suite.py --only``. Default is
-          the release-blessed subset. Change this to trial-run a wider
-          (or narrower) subset from a manual dispatch.
+          Cluster selector fed to the release gate.
+          Same syntax as ``run_showcase_suite.py --only``. Default runs
+          all 13 registered clusters. Change this to trial-run a narrower
+          subset from a manual dispatch.
         required: false
         type: string
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries
 
 jobs:
   # ── Step 1: Gate on the selected tests + emit the customer report ─
@@ -91,7 +91,7 @@ jobs:
       # Single source of truth for the test scope. Edit here (or
       # override from workflow_dispatch) — the same selector drives
       # both the release gate and the email content.
-      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries' }}
+      clusters: ${{ inputs.clusters || github.event.inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries' }}
       # Mark this as a release-pipeline run so the email subject can
       # distinguish it from operator-triggered manual dispatches.
       run_kind: release

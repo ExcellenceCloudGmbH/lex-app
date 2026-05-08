@@ -12,10 +12,10 @@ Project convention enforced (matches lex-instance-controller-backend
 on the ``e2e-testing`` branch):
 
 * ``publicClient == False``                       → confidential
-* at least one ``redirectUris`` entry on host
-  ``localhost``                                   → DEVELOPMENT
+* when ``DEPLOYMENT_ENVIRONMENT`` is unset/empty: at least one
+  ``redirectUris`` entry on host ``localhost``    → DEVELOPMENT
 
-Both must hold for the configured client to be safe for ``lex init``.
+That is the full contract for a client to be safe for ``lex init``.
 
 Why a real-Keycloak integration test?
 -------------------------------------
@@ -70,6 +70,7 @@ from lex.lex_app.management.commands.init import (
     KEYCLOAK_DEV_REDIRECT_HOST,
     KEYCLOAK_ENV_VARS,
     KeycloakSyncManager,
+    _deployment_environment_is_set,
     _redirect_uris_indicate_development,
 )
 
@@ -254,14 +255,14 @@ class TestCluster01k_RealKeycloakPreflight(TestCase):
 
     # -- 1.91 ----------------------------------------------------------
     def test_1_91_real_client_passes_preflight(self):
-        """1.91: the configured client is confidential + DEVELOPMENT — preflight passes.
+        """1.91: the configured client satisfies the active preflight contract.
 
         Asserts the operator's ``.env`` actually points at a Keycloak
         client safe for ``lex init``. Failure → fix is on the
         Keycloak / controller side, not the test side: recreate the
-        client with ``client_type="DEVELOPMENT"`` (which adds
-        ``http://localhost/*`` to its redirect URIs) or add that
-        redirect URI manually in the Keycloak admin UI.
+        client as confidential; when ``DEPLOYMENT_ENVIRONMENT`` is
+        unset/empty it must also be a ``client_type="DEVELOPMENT"``
+        client (which adds ``http://localhost/*`` to its redirect URIs).
         """
         configured_client_id = os.environ["OIDC_RP_CLIENT_ID"]
         configured_uuid = os.environ.get("OIDC_RP_CLIENT_UUID", "")
@@ -269,15 +270,20 @@ class TestCluster01k_RealKeycloakPreflight(TestCase):
         try:
             rep = self.mgr.assert_client_is_safe_for_init()
         except CommandError as exc:
+            extra_hint = (
+                f"  Hint: client must be confidential "
+                f"(publicClient=false) AND have a redirect URI on host "
+                f"`{KEYCLOAK_DEV_REDIRECT_HOST}` "
+                "(controller emits this for client_type=DEVELOPMENT)."
+                if not _deployment_environment_is_set()
+                else "  Hint: client must be confidential (publicClient=false)."
+            )
             self.fail(
                 "Real Keycloak preflight failed against the configured "
                 "client. The .env points at a client that is not safe "
                 "for `lex init`. Fix on the Keycloak side, then re-run.\n"
                 f"  CommandError: {exc}\n"
-                f"  Hint: client must be confidential "
-                f"(publicClient=false) AND have a redirect URI on host "
-                f"`{KEYCLOAK_DEV_REDIRECT_HOST}` "
-                "(controller emits this for client_type=DEVELOPMENT)."
+                f"{extra_hint}"
             )
 
         self.assertEqual(
@@ -290,12 +296,18 @@ class TestCluster01k_RealKeycloakPreflight(TestCase):
             rep.get("publicClient"), False,
             "Live client must be publicClient=false (confidential).",
         )
-        self.assertTrue(
-            _redirect_uris_indicate_development(rep.get("redirectUris", [])),
-            f"Live client redirectUris {rep.get('redirectUris')!r} do "
-            "not include a localhost entry — controller-side this is "
-            "the DEVELOPMENT marker.",
-        )
+        if _deployment_environment_is_set():
+            self.assertIsInstance(
+                rep.get("redirectUris", []), list,
+                "Live client redirectUris must still round-trip as a list.",
+            )
+        else:
+            self.assertTrue(
+                _redirect_uris_indicate_development(rep.get("redirectUris", [])),
+                f"Live client redirectUris {rep.get('redirectUris')!r} do "
+                "not include a localhost entry — controller-side this is "
+                "the DEVELOPMENT marker.",
+            )
         if configured_uuid:
             self.assertEqual(
                 self.mgr.kc_manager.client_uuid, configured_uuid,

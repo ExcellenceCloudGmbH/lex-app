@@ -15,6 +15,12 @@ from lex.lex_app.management.commands.init import (
 )
 
 
+def _mock_sync_manager():
+    manager = MagicMock(unsafe=True)
+    manager.assert_client_is_safe_for_init.return_value = {}
+    return manager
+
+
 # ---------------------------------------------------------------------------
 # _parse_extra_args
 # ---------------------------------------------------------------------------
@@ -273,7 +279,8 @@ class InitCommandKeycloakRetryBehaviorTest(TestCase):
         mock_autodetector_cls,
         mock_manager_cls,
     ):
-        mock_manager_cls.return_value = MagicMock()
+        mock_manager_cls.return_value = _mock_sync_manager()
+        self.cmd.check_unapplied_migrations = MagicMock(return_value=False)
 
         mock_loader = MagicMock()
         mock_loader.graph = MagicMock()
@@ -316,7 +323,8 @@ class InitCommandKeycloakRetryBehaviorTest(TestCase):
         mock_manager_cls,
         mock_settings,
     ):
-        mock_manager_cls.return_value = MagicMock()
+        mock_manager_cls.return_value = _mock_sync_manager()
+        self.cmd.check_unapplied_migrations = MagicMock(return_value=False)
 
         mock_loader = MagicMock()
         mock_loader.graph = MagicMock()
@@ -367,7 +375,7 @@ class InitCommandKeycloakRetryBehaviorTest(TestCase):
         mock_autodetector_cls,
         mock_manager_cls,
     ):
-        mock_manager_cls.return_value = MagicMock()
+        mock_manager_cls.return_value = _mock_sync_manager()
 
         mock_loader = MagicMock()
         mock_loader.graph = MagicMock()
@@ -416,7 +424,7 @@ class InitCommandKeycloakRetryBehaviorTest(TestCase):
         mock_autodetector_cls,
         mock_manager_cls,
     ):
-        mock_manager = MagicMock()
+        mock_manager = _mock_sync_manager()
         mock_manager.kc_manager.last_authz_import_error = {
             "kind": "gateway_timeout",
             "status_code": 504,
@@ -468,7 +476,7 @@ class InitCommandKeycloakRetryBehaviorTest(TestCase):
         mock_autodetector_cls,
         mock_manager_cls,
     ):
-        mock_manager = MagicMock()
+        mock_manager = _mock_sync_manager()
         mock_manager.kc_manager.last_authz_import_error = {
             "kind": "http_error",
             "status_code": 500,

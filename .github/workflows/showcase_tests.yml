@@ -51,11 +51,12 @@ on:
           ``run_showcase_suite.py --only``. Each entry is either
           ``<cluster_key>`` (whole cluster) or
           ``<cluster_key>:<test_suffix>`` (single test inside cluster).
-          Default runs the release-gating init, CRUD API, API layer,
-          calculation, and validation-hook clusters.
+          Default runs all registered clusters (init, CRUD, API layer,
+          calculations, validation hooks, celery, history, audit logging,
+          permissions, signals/WS, serializers, exports, queries).
         required: false
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries
       run_kind:
         description: >-
           Where this run came from — shown in the email subject so
@@ -79,7 +80,7 @@ on:
         required: false
         type: string
         default: >-
-          init,crud_api,api_layer,calculations,validation_hooks,celery_async,permissions,signals_ws,serializers,exports,queries
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries
       run_kind:
         description: >-
           Where this run came from. Callers (notably pip_publish.yml)

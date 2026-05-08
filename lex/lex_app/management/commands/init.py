@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import shlex
 import socket
 import threading
@@ -61,15 +62,15 @@ NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS = frozenset({"timeout", "gateway_timeout"}
 # Keycloak client safety pre-flight (Cluster 1j / 1k / 1l)
 # ---------------------------------------------------------------------
 # ``lex init`` rewrites authorization config on the configured Keycloak
-# client. Before doing so it must verify the client is BOTH:
-#   * confidential (``publicClient is False``), and
-#   * a DEVELOPMENT client — observable as at least one ``redirectUris``
-#     entry whose parsed host is ``localhost``. The lex-instance-controller
-#     emits ``http://localhost/*`` only for ``client_type="DEVELOPMENT"``.
-# A drift either way means we are about to mutate a STANDARD / production
-# client and must abort. ``--skip-client-preflight`` is the explicit
-# escape hatch for environments that intentionally rewrite a non-dev
-# client (e.g. controller-driven bootstrap of a fresh tenant).
+# client. Before doing so it must verify the client is confidential
+# (``publicClient is False``). When running outside a deployed environment
+# (``DEPLOYMENT_ENVIRONMENT`` unset / empty) it must additionally verify
+# the client is a DEVELOPMENT client — observable as at least one
+# ``redirectUris`` entry whose parsed host is ``localhost``. The
+# lex-instance-controller emits ``http://localhost/*`` only for
+# ``client_type="DEVELOPMENT"``. ``--skip-client-preflight`` is the
+# explicit escape hatch for environments that intentionally bypass these
+# safeguards.
 KEYCLOAK_DEV_REDIRECT_HOST = "localhost"
 
 
@@ -92,6 +93,11 @@ def _redirect_uris_indicate_development(redirect_uris) -> bool:
         if host and host.lower() == KEYCLOAK_DEV_REDIRECT_HOST:
             return True
     return False
+
+
+def _deployment_environment_is_set() -> bool:
+    """Return True iff DEPLOYMENT_ENVIRONMENT is present and non-empty."""
+    return bool((os.getenv("DEPLOYMENT_ENVIRONMENT") or "").strip())
 
 from lex.lex_app.keycloak_exclusions import (
     KEYCLOAK_SYNC_EXCLUDED_APPS,
@@ -456,9 +462,11 @@ class KeycloakSyncManager:
         """Pre-flight gate run before ``lex init`` mutates anything.
 
         Raises ``CommandError`` (and never partially mutates) unless
-        the configured Keycloak client is BOTH confidential
-        (``publicClient is False``) AND a DEVELOPMENT client (at least
-        one ``redirectUris`` entry whose host is ``localhost``).
+        the configured Keycloak client is confidential
+        (``publicClient is False``). When ``DEPLOYMENT_ENVIRONMENT`` is
+        unset or empty, it must additionally be a DEVELOPMENT client
+        (at least one ``redirectUris`` entry whose host is
+        ``localhost``).
 
         Returns the fetched client representation on success so callers
         that already need it can avoid a second round-trip.
@@ -504,6 +512,9 @@ class KeycloakSyncManager:
                 f"the Keycloak admin console to be confidential, or pass "
                 f"`--skip-client-preflight` to bypass this check."
             )
+
+        if _deployment_environment_is_set():
+            return rep
 
         if "redirectUris" not in rep:
             raise CommandError(
@@ -1337,9 +1348,10 @@ class Command(BaseCommand):
             default=False,
             help=(
                 "Skip the Keycloak client safety pre-flight that refuses to "
-                "run `lex init` against non-confidential or non-DEVELOPMENT "
-                "clients. Use only when you intentionally need to mutate a "
-                "STANDARD/production client (e.g. controller-driven bootstrap)."
+                "run `lex init` against public clients, or against "
+                "non-DEVELOPMENT clients when DEPLOYMENT_ENVIRONMENT is "
+                "unset. Use only when you intentionally need to bypass "
+                "those safeguards."
             ),
         )
 

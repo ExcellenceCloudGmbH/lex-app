@@ -249,27 +249,161 @@ class TestCluster06d_PayloadAndGFK(E2ETestCase):
         )
 
     # -- 6.47 ----------------------------------------------------------
-    @unittest.skip(
-        "Scenario 6.47: atomic-block failure queues a replacement "
-        "audit row through `_pending_failed_audit_logs`. Requires a "
-        "controlled `perform_create` raise inside an atomic block — "
-        "the current pre_validation path runs before the atomic save "
-        "so this branch is not reachable through that fixture. "
-        "Documented for later — a `post_save`-raising fixture or a "
-        "patched serializer.save would unlock it."
-    )
     def test_6_47_atomic_block_failure_queues_replacement(self) -> None:
-        """Scenario 6.47: see skip reason."""
+        """
+        Scenario 6.47: When a mutation fails *inside* an atomic block,
+        ``AuditLogMixin.perform_create`` / ``perform_update`` must
+        queue a replacement audit log via ``queue_failed_audit_log``.
+
+        Why: the original "pending → failure" status update written
+        inside the atomic block rolls back with the surrounding
+        request transaction. Without the queued replacement, the
+        operator would see no audit row at all for the failed
+        request. Spec lives in
+        ``lex/audit_logging/mixins/AuditLogMixin.py`` —
+        the ``if transaction.get_connection().in_atomic_block:``
+        branch in both ``perform_create`` and ``perform_update``.
+
+        We trigger the failure with ``AuditPreValItem`` (the
+        ``pre_validation`` reject path), which raises *inside*
+        ``serializer.save()`` while the surrounding
+        ``OneModelEntry.create`` atomic block is still open. We spy
+        on ``queue_failed_audit_log`` to assert the queue-and-flush
+        path actually fired — and we observe the surviving audit row
+        to confirm the replacement landed.
+        """
+        from unittest.mock import patch as _patch
+
+        from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
+
+        AuditLog.objects.all().delete()
+        AuditPreValItem._should_fail_prevalidation = True
+
+        original_queue = AuditLogMixin.queue_failed_audit_log
+        observed_queue_calls: list[dict] = []
+
+        def _spy(self_inner, action, target, **kwargs):
+            observed_queue_calls.append({
+                "action": action,
+                "in_atomic_block_at_call": True,
+                "kwargs_keys": sorted(kwargs.keys()),
+            })
+            return original_queue(self_inner, action, target, **kwargs)
+
+        try:
+            with _patch.object(
+                AuditLogMixin, "queue_failed_audit_log", _spy,
+            ):
+                resp = self.client.post(
+                    self.url_create(AUDIT_PREVAL),
+                    data={"name": "a6-47", "value": 1}, format="json",
+                )
+        finally:
+            AuditPreValItem._should_fail_prevalidation = False
+
+        self.assertGreaterEqual(
+            resp.status_code, 400,
+            "pre_validation reject must surface as a 4xx/5xx response",
+        )
+        self.assertEqual(
+            len(observed_queue_calls), 1,
+            "Failure inside the request's atomic block must call "
+            "queue_failed_audit_log exactly once so the rolled-back "
+            "audit gets a replacement; observed %d calls."
+            % len(observed_queue_calls),
+        )
+        self.assertEqual(
+            observed_queue_calls[0]["action"], "create",
+            "The queued replacement must mirror the original action",
+        )
+
+        # And the queued replacement actually survives → exactly one
+        # audit row with status='failure' is visible to the operator
+        # after the request returns.
+        rows = AuditLog.objects.filter(
+            resource="auditprevalitem", action="create",
+        )
+        self.assertEqual(
+            rows.count(), 1,
+            "After atomic rollback, the queued replacement must be "
+            "the surviving audit row; got %d rows" % rows.count(),
+        )
+        self.assertEqual(
+            AuditLogStatus.objects.filter(
+                audit_log=rows.first(),
+            ).first().status,
+            "failure",
+            "The surviving (queued-replacement) audit row must carry "
+            "status='failure' — that is the only signal the operator "
+            "has that the request was attempted and failed.",
+        )
 
     # -- 6.48 ----------------------------------------------------------
-    @unittest.skip(
-        "Scenario 6.48: pending intermediate state observable mid-"
-        "flight. Requires a `pre_save` signal handler that captures "
-        "AuditLogStatus.status during the request. Deferred — needs a "
-        "shared signal-spy fixture."
-    )
     def test_6_48_pending_state_observable_mid_flight(self) -> None:
-        """Scenario 6.48: see skip reason."""
+        """
+        Scenario 6.48: ``AuditLogStatus`` is created with
+        ``status='pending'`` *before* the mutation runs, then
+        transitions to ``'success'`` (or ``'failure'``) once the
+        outcome is known.
+
+        Why this matters: a long-running request that never finishes
+        leaves a row stuck on ``pending`` — that's the operator's
+        signal something hung. If the framework ever stopped writing
+        the pending row first, that diagnostic would silently vanish.
+
+        We attach a ``post_save`` signal handler to ``AuditLogStatus``
+        and capture every ``status`` value it sees during the request.
+        The expected sequence is ``[pending, success]``: ``pending``
+        from ``log_change`` and ``success`` from the bulk update at
+        the end of ``perform_create``.
+
+        Note we use ``post_save`` (not ``pre_save``) because the
+        success / failure transitions happen via a queryset
+        ``.update()`` which only fires post-save signals through the
+        framework's manager hooks; ``pre_save`` would not see the
+        transition. ``post_save`` from ``log_change``'s explicit
+        ``AuditLogStatus.objects.create(...)`` does fire, so the
+        pending row is captured too.
+        """
+        from django.db.models.signals import post_save
+
+        observed_statuses: list[str] = []
+
+        def _capture(sender, instance, created, **kwargs):
+            observed_statuses.append(instance.status)
+
+        AuditLog.objects.all().delete()
+        post_save.connect(_capture, sender=AuditLogStatus)
+        try:
+            resp = self.client.post(
+                self.url_create(AUDIT_SIMPLE),
+                data={"name": "a6-48", "value": 1}, format="json",
+            )
+        finally:
+            post_save.disconnect(_capture, sender=AuditLogStatus)
+
+        self.assertIn(resp.status_code, (200, 201))
+        self.assertIn(
+            "pending", observed_statuses,
+            "AuditLogStatus must be created with status='pending' "
+            "before the mutation runs — without it, an interrupted "
+            "request leaves no in-flight audit signal. Observed "
+            "statuses during request: %r" % observed_statuses,
+        )
+        # The pending row must be observed BEFORE any terminal status
+        # (success/failure). If the framework ever flipped the order,
+        # the in-flight diagnostic disappears.
+        first_terminal = next(
+            (s for s in observed_statuses if s in ("success", "failure")),
+            None,
+        )
+        if first_terminal is not None:
+            self.assertEqual(
+                observed_statuses[0], "pending",
+                "The first AuditLogStatus row written during a "
+                "request must be 'pending'; got first=%r, full "
+                "sequence=%r" % (observed_statuses[0], observed_statuses),
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

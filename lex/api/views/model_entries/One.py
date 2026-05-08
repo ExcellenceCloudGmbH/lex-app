@@ -310,11 +310,26 @@ class OneModelEntry(
                 can_create = instance.can_create(request)
 
             if not can_create:
+                # BUG-008 fix: authorization failures must surface as
+                # 401 (anonymous) or 403 (authenticated-but-denied),
+                # not 400 — 400 is for client-side validation errors.
+                # Frontends and API clients route on this status code
+                # (auto-redirect to login on 401, "permission denied"
+                # banner on 403); collapsing both into 400 breaks
+                # both code paths.
+                is_anonymous = not bool(
+                    getattr(getattr(request, "user", None), "is_authenticated", False)
+                )
+                deny_status = (
+                    status.HTTP_401_UNAUTHORIZED
+                    if is_anonymous
+                    else status.HTTP_403_FORBIDDEN
+                )
                 return Response(
                     {
                         "message": f"You are not authorized to create a record in {model_container.model_class.__name__}"
                     },
-                    status=status.HTTP_400_BAD_REQUEST
+                    status=deny_status,
                 )
         except Exception:
             # Allow by default on permission check error

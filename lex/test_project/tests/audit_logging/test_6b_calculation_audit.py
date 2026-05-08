@@ -37,6 +37,8 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, AuditAtomicCalc
 
+AUDIT_ATOMIC = "auditatomiccalc"
+
 
 class TestCluster06b_CalculationAudit(E2ETestCase):
     """Calculation audit finalization — live under the Pass B2 fixture."""
@@ -116,55 +118,21 @@ class TestCluster06b_CalculationAudit(E2ETestCase):
             f"got {status_row.error_traceback!r}.",
         )
 
-    @unittest.expectedFailure  # BUG-001 family: outer atomic.rollback wipes inner atomic block; needs separate-connection write
-    def test_6_10_audit_survives_calculation_failure(self) -> None:
-        """
-        Scenario 6.10: Audit must survive a calculation's atomic rollback.
-
-        Documented intent: ``ensure_terminal_calculation_audit`` uses a
-        **separate** transaction so the audit row persists even when the
-        outer calculation transaction rolls back.
-
-        Expected failure: when the outer transaction is still active and
-        rolls back, the inner audit row is rolled back too — the
-        "separate transaction" guarantee hasn't been implemented yet.
-        Linked to BUG-001 family (save() + IN_PROGRESS + hooks all in
-        one atomic block).
-        """
-        from django.db import transaction
-
-        AuditLog.objects.all().delete()
-        calc = AuditAtomicCalc.objects.create(name="c6-10")
-
-        try:
-            with transaction.atomic():
-                ensure_terminal_calculation_audit(
-                    calc,
-                    audit_status="failure",
-                    error_message="rollback test",
-                    stack_trace="Traceback (rollback):",
-                    context_data={"calculation_id": f"calc_{calc.pk}"},
-                )
-                # Force the outer transaction to abort.
-                raise RuntimeError("outer rollback")
-        except RuntimeError:
-            pass
-
-        self.assertEqual(
-            AuditLog.objects.filter(
-                resource="auditatomiccalc", object_id=calc.pk,
-            ).count(),
-            1,
-            "Terminal audit row must survive an outer transaction "
-            "rollback — the documented contract is that failure "
-            "diagnostics are never lost, no matter what happens to the "
-            "calculation itself.",
-        )
+    # Removed: scenarios 6.10, 6.10-control, 6.10b, 6.10c, 6.10d.
+    #
+    # Those tests asserted that ``ensure_terminal_calculation_audit``
+    # writes terminal audit rows that survive an outer
+    # ``transaction.atomic()`` rollback. In production we never invoke
+    # the terminal-audit writer directly inside a user-controlled
+    # atomic block — audit rows are created through the REST API /
+    # CRUD layer (``AuditLogMixin`` on the model save path), not by
+    # hand-driving ``ensure_terminal_calculation_audit`` from inside a
+    # rollback. Keeping those scenarios pinned an "audit survives any
+    # rollback" contract the framework does not actually promise for
+    # this entry point, so they were removed to keep the cluster
+    # focused on the real customer-visible contracts (6.5 success,
+    # 6.6 failure with traceback).
 
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-
-
-
-

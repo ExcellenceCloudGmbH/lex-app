@@ -107,10 +107,21 @@ def on_history_saved__chain_valid_to(
 
     The last record in the chain has ``valid_to = None`` (open-ended / ∞).
 
-    When a refinement happens (``valid_to`` changes from one non-None value
-    to another), we mark the record with ``_strict_chaining_update = True``
-    so the MetaHistory layer can update the existing meta record in-place
-    instead of creating a new version.
+    Note on the L2 / MetaHistory side-effect: closing a previous L1 row's
+    ``valid_to`` is a real save() against that L1 row, so it triggers
+    ``on_history_saved__create_meta`` and produces a *new* L2 row
+    capturing the updated ``valid_to``. This is intentional — the L2
+    layer's job is system-time fidelity ("what did the system know at
+    instant T?"), and the system genuinely went through two states for
+    that L1 row: open-ended at creation, then closed at the moment the
+    next save chained the boundary. An ``?as_of=...`` system-time query
+    must be able to distinguish the two, which requires distinct L2
+    rows. As a result, *N customer saves produce 2N − 1 L2 rows*, not
+    N. See ``test_5_82_three_saves_chain_sys_to`` for the pinned
+    contract. (Older versions of this docstring described an "in-place
+    L2 update" optimization gated by a ``_strict_chaining_update`` flag
+    — that flag was never fully wired up; the system-time-correct
+    behaviour above is now considered the intended contract.)
     """
     history_instance = history_instance or instance
     if sender != historical_model or not history_instance:

@@ -76,15 +76,95 @@ class TestCluster06e_BulkAuditLog(E2ETestCase):
             )
 
     # -- 6.52 ----------------------------------------------------------
-    @unittest.skip(
-        "Scenario 6.52: partial-success contract on bulk delete — "
-        "some rows succeed, others (denied or DB-failing) produce "
-        "failure audits. Requires either a per-row permission_delete "
-        "deny fixture or an injected DB error mid-loop. Deferred — "
-        "no failure-injection seam in BulkAuditLogMixin yet."
-    )
-    def test_6_52_bulk_delete_partial_success(self) -> None:
-        """Scenario 6.52: see skip reason."""
+    def test_6_52_bulk_delete_failure_marks_all_rows_failure(self) -> None:
+        """
+        Scenario 6.52: When a bulk delete fails mid-flight, every
+        audit row written for the batch transitions to ``failure``.
+
+        Reading ``BulkAuditLogMixin.perform_bulk_destroy`` in
+        ``lex/audit_logging/mixins/BulkAuditLogMixin.py``: the bulk
+        path is all-or-nothing by design — ``queryset.delete()`` is a
+        single statement, so there is no partial-success surface to
+        test. The customer-visible contract that *can* be tested is
+        the failure path: when the underlying delete raises, every
+        pending audit row in the batch is updated to ``failure`` with
+        the same traceback so the operator can see exactly which
+        records the failed bulk op was meant to cover.
+
+        We force the failure by patching ``QuerySet.delete`` to raise.
+        That bypasses any DB-level integrity checks and exercises the
+        ``except`` branch in ``perform_bulk_destroy`` directly.
+        """
+        from unittest.mock import patch as _patch
+
+        from django.db.models.query import QuerySet
+
+        AuditLog.objects.all().delete()
+        items = [
+            AuditSimpleItem.objects.create(name=f"a6-52-{i}", value=i)
+            for i in range(3)
+        ]
+        original_pks = sorted(int(i.pk) for i in items)
+
+        url = self.url_many(AUDIT_SIMPLE) + "?" + "&".join(
+            f"ids={i.pk}" for i in items
+        )
+
+        original_delete = QuerySet.delete
+
+        def _raise_delete(self_qs, *a, **kw):
+            # Only fail for the AuditSimpleItem queryset so we don't
+            # accidentally break audit-row writes on the way out.
+            if self_qs.model is AuditSimpleItem:
+                raise RuntimeError("simulated bulk-delete failure")
+            return original_delete(self_qs, *a, **kw)
+
+        with _patch.object(QuerySet, "delete", _raise_delete):
+            # Plain ``RuntimeError`` is not a DRF-recognized exception
+            # so DRF re-raises it through the test client. The view's
+            # ``except`` branch still ran (queueing audit rows) before
+            # the re-raise — that is what we are here to assert.
+            self.client.raise_request_exception = False
+            try:
+                resp = self.client.delete(url)
+            finally:
+                self.client.raise_request_exception = True
+
+        self.assertGreaterEqual(
+            resp.status_code, 400,
+            "A bulk-delete that raised inside perform_bulk_destroy "
+            "must surface as a 4xx/5xx response.",
+        )
+        # Source rows must still be present — the simulated failure
+        # rolled the delete back.
+        self.assertEqual(
+            sorted(
+                AuditSimpleItem.objects.filter(pk__in=original_pks)
+                .values_list("pk", flat=True)
+            ),
+            original_pks,
+            "Failed bulk-delete must leave source rows intact",
+        )
+
+        rows = AuditLog.objects.filter(
+            resource="auditsimpleitem", action="delete",
+        )
+        self.assertEqual(
+            rows.count(), 3,
+            "Even on failure, BulkAuditLogMixin must write one audit "
+            "row per record in the batch so the operator knows what "
+            "the failed op was meant to touch; got %d." % rows.count(),
+        )
+        statuses = list(
+            AuditLogStatus.objects.filter(audit_log__in=rows).values_list(
+                "status", flat=True,
+            )
+        )
+        self.assertEqual(
+            sorted(statuses), ["failure"] * 3,
+            "Every audit row in the failed batch must end on "
+            "status='failure'; got %r." % statuses,
+        )
 
     # -- 6.53 ----------------------------------------------------------
     def test_6_53_bulk_delete_preserves_per_row_gfk(self) -> None:

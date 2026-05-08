@@ -5,12 +5,13 @@ Intent
 ------
 
 Before ``lex init`` rewrites *any* authorization config, it must
-verify the configured Keycloak client is BOTH:
+verify the configured Keycloak client is:
 
 1. **Confidential** — ``publicClient is False``. Matches the
    controller backend's ``is_confidential=true`` flow (the controller
    sets ``publicClient = not is_confidential`` on the create payload).
-2. **DEVELOPMENT** — at least one ``redirectUris`` entry whose host
+2. **DEVELOPMENT** when ``DEPLOYMENT_ENVIRONMENT`` is unset or empty —
+   at least one ``redirectUris`` entry whose host
    is ``localhost``. The controller's ``Clients.py`` (e2e-testing
    branch) only emits ``http://localhost/*`` for
    ``client_type="DEVELOPMENT"`` clients; STANDARD / SHAREPOINT
@@ -18,9 +19,10 @@ verify the configured Keycloak client is BOTH:
    of a localhost redirect URI is the observable Keycloak-only
    signal that this is a dev client.
 
-Both must hold or ``KeycloakSyncManager.assert_client_is_safe_for_init``
-raises ``CommandError`` with a message naming the client (``clientId``
-+ UUID) and exactly how to fix it.
+These checks are enforced by
+``KeycloakSyncManager.assert_client_is_safe_for_init`` with a
+``CommandError`` that names the client (``clientId`` + UUID) and tells
+the operator what to fix.
 
 Scenarios in this file are pure-unit (mocked ``kc_manager.admin``).
 The real-Keycloak counterpart lives in
@@ -40,6 +42,7 @@ from django.core.management.base import CommandError
 from lex.lex_app.management.commands.init import (
     KEYCLOAK_DEV_REDIRECT_HOST,
     KeycloakSyncManager,
+    _deployment_environment_is_set,
     _redirect_uris_indicate_development,
 )
 
@@ -214,6 +217,29 @@ class TestCluster01j_DevelopmentCheck(TestCase):
             mgr.assert_client_is_safe_for_init()
         self.assertIn("DEVELOPMENT", str(cm.exception))
 
+    @mock.patch.dict("os.environ", {"DEPLOYMENT_ENVIRONMENT": "PROD"}, clear=False)
+    def test_deployment_environment_bypasses_development_client_requirement(self):
+        mgr = _make_sync_manager()
+        mgr.kc_manager.admin.get_client.return_value = _client_rep(
+            redirect_uris=[PROD_REDIRECT],
+        )
+
+        rep = mgr.assert_client_is_safe_for_init()
+
+        self.assertEqual(rep["redirectUris"], [PROD_REDIRECT])
+
+    @mock.patch.dict("os.environ", {"DEPLOYMENT_ENVIRONMENT": ""}, clear=False)
+    def test_empty_deployment_environment_does_not_bypass_development_client_requirement(self):
+        mgr = _make_sync_manager()
+        mgr.kc_manager.admin.get_client.return_value = _client_rep(
+            redirect_uris=[PROD_REDIRECT],
+        )
+
+        with self.assertRaises(CommandError) as cm:
+            mgr.assert_client_is_safe_for_init()
+
+        self.assertIn("DEVELOPMENT", str(cm.exception))
+
 
 # ---------------------------------------------------------------------
 # 1.81 — Helper unit tests (parser correctness)
@@ -284,6 +310,20 @@ class TestCluster01j_RedirectHostParser(TestCase):
         test reminds the maintainer to update both halves of the contract.
         """
         self.assertEqual(KEYCLOAK_DEV_REDIRECT_HOST, "localhost")
+
+
+class TestCluster01j_DeploymentEnvironmentGate(TestCase):
+    def test_helper_is_false_for_unset_or_empty_values(self):
+        with mock.patch.dict("os.environ", {}, clear=False):
+            self.assertFalse(_deployment_environment_is_set())
+        with mock.patch.dict("os.environ", {"DEPLOYMENT_ENVIRONMENT": ""}, clear=False):
+            self.assertFalse(_deployment_environment_is_set())
+        with mock.patch.dict("os.environ", {"DEPLOYMENT_ENVIRONMENT": "   "}, clear=False):
+            self.assertFalse(_deployment_environment_is_set())
+
+    def test_helper_is_true_for_non_empty_value(self):
+        with mock.patch.dict("os.environ", {"DEPLOYMENT_ENVIRONMENT": "PROD"}, clear=False):
+            self.assertTrue(_deployment_environment_is_set())
 
 
 # ---------------------------------------------------------------------
@@ -406,3 +446,15 @@ class TestCluster01j_CommandWiring(TestCase):
         mgr.process_model_changes.assert_called_once()
         mgr.kc_manager.admin.get_client.assert_not_called()
 
+    @mock.patch.dict("os.environ", {"DEPLOYMENT_ENVIRONMENT": "PROD"}, clear=False)
+    def test_deployed_environment_allows_non_development_client_in_handle(self):
+        mgr = _make_sync_manager()
+        mgr.kc_manager.admin.get_client.return_value = _client_rep(
+            redirect_uris=[PROD_REDIRECT],
+        )
+        mgr.process_model_changes = mock.MagicMock()
+
+        _stdout, _stderr, err = self._run_handle(sync_manager=mgr)
+
+        self.assertIsNone(err, f"init should succeed for deployed envs: {err}")
+        mgr.process_model_changes.assert_called_once()
