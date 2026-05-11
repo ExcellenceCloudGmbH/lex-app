@@ -224,6 +224,42 @@ class TestCluster08j_LoadData(SimpleTestCase):
         )
         fake_audit.finalize_batch.assert_called_once_with(failure_error=None)
 
+    # -- 8.34a --------------------------------------------------------------
+    def test_8_34a_non_legacy_storage_with_false_celery_env_uses_asyncio(self) -> None:
+        """
+        Scenario 8.34a: non-LEGACY storage + ``CELERY_ACTIVE=false`` →
+        ``asyncio.run(sync_to_async(setUpCloudStorage))``.
+
+        ``CELERY_ACTIVE`` is an environment string and must be parsed as a
+        boolean, not treated as truthy merely because the variable exists.
+        The string ``"false"`` should behave like the non-worker path and
+        avoid direct ORM work in an async startup thread.
+        """
+        test = self._fake_test()
+        fake_audit = MagicMock()
+        fake_audit.finalize_batch.return_value = {"pending_resolved": 0}
+        models = [object()]
+
+        with patch.dict(os.environ,
+                        {"STORAGE_TYPE": "S3", "CELERY_ACTIVE": "false"},
+                        clear=False), \
+             patch("lex.lex_app.apps._create_audit_logger_for_task",
+                   return_value=fake_audit), \
+             patch("lex.lex_app.celery_tasks.is_running_in_celery",
+                   return_value=False), \
+             patch("lex.lex_app.celery_tasks.asyncio") as mock_asyncio:
+            load_data(test, models, initial_data_load="seed.json")
+
+        self.assertEqual(
+            test.setUpCloudStorage.call_count, 0,
+            "False-string CELERY_ACTIVE must not take the direct cloud-setup path",
+        )
+        self.assertEqual(
+            mock_asyncio.run.call_count, 1,
+            "False-string CELERY_ACTIVE must use asyncio.run for non-worker cloud setup",
+        )
+        fake_audit.finalize_batch.assert_called_once_with(failure_error=None)
+
     # -- 8.35 ---------------------------------------------------------------
     def test_8_35_exception_reraises_and_finalizes_with_failure_error(self) -> None:
         """
@@ -578,4 +614,3 @@ class TestCluster08j_ActivateHistoryVersion(SimpleTestCase):
             activate_history_version("app", "M", 7)
 
         self.assertIn("sync exploded", str(ctx.exception))
-

@@ -718,7 +718,7 @@ def load_data(test, generic_app_models, audit_logging_enabled=None, initial_data
             else:
                 asyncio.run(sync_to_async(test.setUp)(audit_logger))
         else:
-            if os.getenv("CELERY_ACTIVE") or is_running_in_celery():
+            if _celery_is_active() or is_running_in_celery():
                 test.setUpCloudStorage(generic_app_models, audit_logger)
             else:
                 asyncio.run(sync_to_async(test.setUpCloudStorage)(generic_app_models, audit_logger))

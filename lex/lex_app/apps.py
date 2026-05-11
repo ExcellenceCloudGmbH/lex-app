@@ -244,13 +244,19 @@ class LexAppConfig(GenericAppConfig):
             # Prepare audit logging parameters for task execution
             audit_enabled = is_audit_logging_enabled()
 
-            # TODO
-            if False or (os.getenv("DEPLOYMENT_ENVIRONMENT")
-                    and os.getenv("ARCHITECTURE") == "MQ/Worker"):
-                # Pass audit logging parameters to Celery task
+            if os.getenv("DEPLOYMENT_ENVIRONMENT") and os.getenv("ARCHITECTURE") == "MQ/Worker":
                 from lex.lex_app.celery_tasks import load_data, WaitForTasks
-                with WaitForTasks():
-                    load_data(test, generic_app_models, audit_enabled, project_config.initial_data)
+
+                def _load_initial_data_in_context():
+                    with WaitForTasks():
+                        load_data(
+                            test,
+                            generic_app_models,
+                            audit_enabled,
+                            project_config.initial_data,
+                        )
+
+                await sync_to_async(_load_initial_data_in_context, thread_sensitive=False)()
             else:
                 # Pass audit logging parameters to thread
                 from lex.lex_app.celery_tasks import load_data
