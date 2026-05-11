@@ -4,6 +4,7 @@ from django.core.management.base import BaseCommand
 from django.apps import apps
 
 from keycloak import KeycloakOpenIDConnection, KeycloakUMA, KeycloakAdmin
+from lex.lex_app.keycloak_exclusions import is_keycloak_syncable_app
 from keycloak.exceptions import KeycloakGetError
 from keycloak.urls_patterns import (
     URL_ADMIN_CLIENT_AUTHZ_SCOPE_PERMISSION,
@@ -79,8 +80,13 @@ class Command(BaseCommand):
             all_roles = []
 
         # 7) iterate models and delete
-        for model in apps.get_models():
-            res_name = f"{model._meta.app_label}.{model.__name__}"
+        for app_config in apps.get_app_configs():
+            if not is_keycloak_syncable_app(app_config):
+                continue
+            for model in app_config.get_models():
+                if model._meta.abstract or model._meta.proxy:
+                    continue
+                res_name = f"{model._meta.app_label}.{model.__name__}"
             resource = django_resources.get(res_name)
             if not resource:
                 self.stdout.write(f"⚠ No UMA resource found for {res_name}, skipping.")

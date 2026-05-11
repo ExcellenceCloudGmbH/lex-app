@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 from django.apps import apps
 
 from keycloak import KeycloakOpenIDConnection, KeycloakUMA, KeycloakAdmin
+from lex.lex_app.keycloak_exclusions import is_keycloak_syncable_app
 
 
 class Command(BaseCommand):
@@ -33,8 +34,13 @@ class Command(BaseCommand):
         # 4) define the six scopes
         scopes = ["list", "show", "create", "edit", "delete", "export"]
 
-        for model in apps.get_models():
-            res_name = f"{model._meta.app_label}.{model.__name__}"
+        for app_config in apps.get_app_configs():
+            if not is_keycloak_syncable_app(app_config):
+                continue
+            for model in app_config.get_models():
+                if model._meta.abstract or model._meta.proxy:
+                    continue
+                res_name = f"{model._meta.app_label}.{model.__name__}"
 
             # — create or skip UMA resource‐set
             if res_name in existing_by_name:

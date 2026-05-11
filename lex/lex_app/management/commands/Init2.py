@@ -18,6 +18,8 @@ from django.db.migrations.executor import MigrationExecutor
 from django.db import connection
 from typing import Dict, List, Tuple, Set, Any
 
+from lex.lex_app.keycloak_exclusions import is_keycloak_syncable_app
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,14 +38,8 @@ class KeycloakSyncManager:
         for app_config in apps.get_app_configs():
             app_label = app_config.label
 
-            # Skip Django's built-in apps that we don't want to sync
-            skip_apps = {
-                'admin', 'auth', 'contenttypes', 'sessions', 'messages',
-                'staticfiles', 'migrations', 'django_extensions'
-            }
-
-            if app_label in skip_apps:
-                logger.debug(f"Skipping built-in app: {app_label}")
+            if not is_keycloak_syncable_app(app_config):
+                logger.debug(f"Skipping non-user app: {app_label}")
                 continue
 
             try:

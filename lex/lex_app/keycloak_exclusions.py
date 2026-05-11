@@ -21,6 +21,37 @@ KEYCLOAK_SYNC_EXCLUDED_RESOURCE_NAMES = frozenset(
 KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES = ("historical", "metahistorical")
 
 
+def is_keycloak_syncable_app(app_config) -> bool:
+    """
+    Determine if a Django app is a user-defined business app whose models
+    should be synced to Keycloak as resources.
+
+    Returns ``False`` for:
+    - Django built-in apps (``django.contrib.*``)
+    - Lex framework internal apps (``lex.*``)
+    - Third-party packages installed in ``site-packages``
+
+    Only user apps – those defined in the project directory and not part
+    of the framework or any library – return ``True``.
+    """
+    app_name = getattr(app_config, "name", "") or ""
+
+    # Django built-in apps
+    if app_name.startswith("django."):
+        return False
+
+    # Lex framework internal apps
+    if app_name.startswith("lex."):
+        return False
+
+    # Third-party: check if the app lives in site-packages
+    app_path = getattr(app_config, "path", "") or ""
+    if "site-packages" in app_path:
+        return False
+
+    return True
+
+
 def is_keycloak_sync_excluded_model(app_label: str, model_name: str) -> bool:
     """Check if a model should be excluded from Keycloak sync."""
     if not model_name:

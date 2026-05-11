@@ -103,6 +103,7 @@ from lex.lex_app.keycloak_exclusions import (
     KEYCLOAK_SYNC_EXCLUDED_APPS,
     KEYCLOAK_SYNC_EXCLUDED_RESOURCE_NAMES,
     KEYCLOAK_SYNC_EXCLUDED_MODEL_PREFIXES,
+    is_keycloak_syncable_app,
 )
 
 STATE_FILE = Path(
@@ -578,28 +579,19 @@ class KeycloakSyncManager:
         all_models: Set[str] = set()
         repo_name = settings.repo_name if hasattr(settings, "repo_name") else None
 
-        skip_apps = {
-            "admin",
-            "auth",
-            "contenttypes",
-            "sessions",
-            "messages",
-            "staticfiles",
-            "migrations",
-            "django_extensions",
-            "lex_app"
-        }
-
         for app_config in apps.get_app_configs():
             app_label = app_config.label
 
-            if not repo_name:
-                if app_label in skip_apps:
-                    logger.debug(f"Skipping built-in app: {app_label}")
-                    continue
-            else:
+            if repo_name:
                 logger.debug(f"Using repo_name: {repo_name}")
                 if repo_name != app_label:
+                    continue
+            else:
+                if not is_keycloak_syncable_app(app_config):
+                    logger.debug(
+                        f"Skipping non-user app: {app_label} "
+                        f"(name={getattr(app_config, 'name', '?')})"
+                    )
                     continue
 
             for model in app_config.get_models():

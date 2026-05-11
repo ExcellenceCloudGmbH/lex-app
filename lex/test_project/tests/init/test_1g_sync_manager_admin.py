@@ -69,8 +69,16 @@ def _fake_model(name: str, *, abstract: bool = False, proxy: bool = False):
     )
 
 
-def _fake_app(label: str, models: list):
-    return SimpleNamespace(label=label, get_models=lambda: list(models))
+def _fake_app(label: str, models: list, *, name: str = "", path: str = ""):
+    """Build a fake AppConfig. ``name`` and ``path`` control how
+    ``is_keycloak_syncable_app`` classifies the app (Django built-in,
+    lex-internal, third-party, or user app)."""
+    return SimpleNamespace(
+        label=label,
+        name=name or label,
+        path=path,
+        get_models=lambda: list(models),
+    )
 
 
 # ---------------------------------------------------------------------
@@ -115,7 +123,7 @@ class TestCluster01g_GetAllDjangoModels(TestCase):
             _fake_app("myapp", [_fake_model("Widget"), _fake_model("Gadget")]),
             _fake_app("otherapp", [_fake_model("Thing")]),
             # Built-in app — must be skipped when repo_name is unset.
-            _fake_app("auth", [_fake_model("User")]),
+            _fake_app("auth", [_fake_model("User")], name="django.contrib.auth"),
         ]
         # Ensure settings has no ``repo_name`` attribute for this branch.
         with self._patch_apps(configs), \
@@ -155,14 +163,20 @@ class TestCluster01g_GetAllDjangoModels(TestCase):
     def test_1_44c_excluded_models_are_skipped(self):
         """Scenario 1.44c: ``KEYCLOAK_SYNC_EXCLUDED_*`` rules are
         honoured — ``legacy_data.*``, audit-logging tables, and
-        ``Historical*`` / ``MetaHistorical*`` shadow models."""
+        ``Historical*`` / ``MetaHistorical*`` shadow models.
+
+        Note: ``legacy_data`` and ``audit_logging`` are lex-internal apps
+        (``lex.*`` prefix), so they are skipped at the app level by
+        ``is_keycloak_syncable_app`` before model-level exclusions
+        even apply. The model-level exclusions remain a safety net."""
         configs = [
-            _fake_app("legacy_data", [_fake_model("LegacyThing")]),
+            _fake_app("legacy_data", [_fake_model("LegacyThing")],
+                      name="lex.legacy_data"),
             _fake_app("audit_logging", [
                 _fake_model("AuditLog"),
                 _fake_model("AuditLogStatus"),
-                _fake_model("SomeOtherTable"),  # not excluded
-            ]),
+                _fake_model("SomeOtherTable"),
+            ], name="lex.audit_logging"),
             _fake_app("myapp", [
                 _fake_model("Widget"),
                 _fake_model("HistoricalWidget"),
@@ -174,9 +188,10 @@ class TestCluster01g_GetAllDjangoModels(TestCase):
 
         self.assertEqual(
             result,
-            {"myapp.Widget", "audit_logging.SomeOtherTable"},
-            "Exclusions: legacy_data.* (app-wide), AuditLog/AuditLogStatus "
-            "(by resource name), Historical*/MetaHistorical* (by prefix). "
+            {"myapp.Widget"},
+            "Exclusions: legacy_data (lex-internal app), "
+            "audit_logging (lex-internal app), "
+            "Historical*/MetaHistorical* (by prefix). "
             "Everything else must survive.",
         )
 
@@ -187,7 +202,7 @@ class TestCluster01g_GetAllDjangoModels(TestCase):
         configs = [
             _fake_app("customerapp", [_fake_model("Invoice")]),
             _fake_app("otherapp", [_fake_model("Thing")]),
-            _fake_app("auth", [_fake_model("User")]),  # built-in
+            _fake_app("auth", [_fake_model("User")], name="django.contrib.auth"),
         ]
         with self._patch_apps(configs), \
                 mock.patch.object(
