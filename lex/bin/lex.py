@@ -741,6 +741,39 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
             "Warning: "
             f"{server_probe_warning} GitHub Copilot may still be able to launch the server from mcp.json on demand."
         )
+
+    # Final asset sweep: make sure every required directory (docs, .github,
+    # ...) is on disk and up to date. Catches the case where an earlier
+    # plain `lex setup` left the project partially initialized, or where a
+    # copy step silently no-op'd.
+    click.echo("Verifying AI asset directories...")
+    try:
+        verify_result = verify_ai_assets(project_root=root, mode=effective_mcp_mode)
+    except SetupWithAIError as exc:
+        click.echo(f"Warning: AI asset verification failed: {exc}")
+    else:
+        restored_total = len(verify_result.restored_files)
+        for directory_result in verify_result.directories:
+            if directory_result.skipped_reason is not None:
+                click.echo(
+                    f"  [skip] {directory_result.directory_name}: "
+                    f"{directory_result.skipped_reason}"
+                )
+            elif directory_result.restored_files:
+                click.echo(
+                    f"  [fix]  {directory_result.directory_name}: "
+                    f"restored {len(directory_result.restored_files)} file(s) "
+                    f"into {directory_result.destination_directory}"
+                )
+            else:
+                click.echo(
+                    f"  [ok]   {directory_result.directory_name}: up to date."
+                )
+        if restored_total:
+            click.echo(f"AI assets verified: restored {restored_total} file(s).")
+        else:
+            click.echo("AI assets verified: nothing to restore.")
+
     click.echo(
         "Setup complete. Open GitHub Copilot in PyCharm and write your first prompt."
     )

@@ -592,24 +592,45 @@ def write_github_copilot_mcp_config(
 ) -> None:
     config: dict[str, object]
     if mcp_config_path.exists():
+        raw_text = mcp_config_path.read_text(encoding="utf-8")
+        parsed = None
         try:
-            config = json.loads(mcp_config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise SetupWithAIError(
-                f"GitHub Copilot MCP config is not valid JSON: {mcp_config_path}"
-            ) from exc
-        if not isinstance(config, dict):
-            raise SetupWithAIError(
-                f"GitHub Copilot MCP config must contain a JSON object: {mcp_config_path}"
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            pass
+
+        if parsed is None or not isinstance(parsed, dict):
+            reason = (
+                "is not valid JSON" if parsed is None
+                else "does not contain a JSON object"
             )
+            print(
+                f"\nWarning: GitHub Copilot MCP config {reason}: {mcp_config_path}\n"
+                f"The file will be overwritten with a fresh configuration.\n"
+            )
+            answer = input("Proceed? [y/N]: ").strip().lower()
+            if answer not in ("y", "yes"):
+                raise SetupWithAIError(
+                    "Aborted: user declined to overwrite invalid mcp.json"
+                )
+            config = {}
+        else:
+            config = parsed
     else:
         config = {}
 
     servers = config.get("servers", {})
     if not isinstance(servers, dict):
-        raise SetupWithAIError(
-            f"GitHub Copilot MCP config 'servers' value must be an object: {mcp_config_path}"
+        print(
+            f"\nWarning: GitHub Copilot MCP config 'servers' value is not an object: {mcp_config_path}\n"
+            f"The 'servers' section will be reset.\n"
         )
+        answer = input("Proceed? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            raise SetupWithAIError(
+                "Aborted: user declined to overwrite invalid mcp.json"
+            )
+        servers = {}
 
     for legacy_name in LEGACY_LEX_MCP_SERVER_NAMES:
         if legacy_name != server_name:
@@ -815,7 +836,7 @@ def probe_lex_mcp_local_server_for_pycharm(
     wrapper_script_path: Path,
     env_values: Mapping[str, str],
     base_env: Mapping[str, str] | None = None,
-    startup_timeout_seconds: float = 10.0,
+    startup_timeout_seconds: float = 30.0,
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
 ) -> SetupWithAIMCPProbeResult:
     process_env = _build_process_env(env_values, base_env=base_env)
@@ -968,6 +989,9 @@ def probe_lex_mcp_local_server_for_pycharm(
                 f"{server_name} never completed the MCP initialize handshake that PyCharm uses. "
                 f"Process exit code: {return_code}. Recent output: {_format_recent_output()}"
             )
+        # Reset deadline after each successful step so slow startup
+        # does not starve subsequent inventory calls.
+        deadline = time.monotonic() + startup_timeout_seconds
         if "error" in init_response:
             raise SetupWithAIError(
                 f"{server_name} rejected the MCP initialize handshake: {init_response['error']}"
@@ -1002,6 +1026,7 @@ def probe_lex_mcp_local_server_for_pycharm(
             result_key="tools",
             deadline=deadline,
         )
+        deadline = time.monotonic() + startup_timeout_seconds
         prompts = _read_inventory(
             process,
             request_id=3,
@@ -1009,6 +1034,7 @@ def probe_lex_mcp_local_server_for_pycharm(
             result_key="prompts",
             deadline=deadline,
         )
+        deadline = time.monotonic() + startup_timeout_seconds
         resources = _read_inventory(
             process,
             request_id=4,
@@ -1016,6 +1042,7 @@ def probe_lex_mcp_local_server_for_pycharm(
             result_key="resources",
             deadline=deadline,
         )
+        deadline = time.monotonic() + startup_timeout_seconds
         resource_templates = _read_inventory(
             process,
             request_id=5,
@@ -1053,7 +1080,7 @@ def verify_lex_mcp_local_server_starts(
     wrapper_script_path: Path,
     env_values: Mapping[str, str],
     base_env: Mapping[str, str] | None = None,
-    startup_timeout_seconds: float = 10.0,
+    startup_timeout_seconds: float = 30.0,
 ) -> SetupWithAIMCPProbeResult:
     return probe_lex_mcp_local_server_for_pycharm(
         project_root=project_root,
