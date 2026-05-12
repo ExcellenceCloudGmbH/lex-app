@@ -1,0 +1,117 @@
+# ──────────────────────────────────────────────────────────────────────
+#  THIS FILE GOES IN: lex-app-docs/.github/workflows/auto-close-empty-pr.yml
+#
+#  Copy this file to the lex-app-docs repository.
+#
+#  Auto-close empty docs PRs opened by the Copilot coding agent.
+#
+#  Context:
+#   After a lex-app release, `auto-update-docs.yml` files an issue in
+#   lex-app-docs and assigns it to `copilot-swe-agent[bot]`. Copilot
+#   then opens a PR — even when the code changes don't require any
+#   documentation updates (e.g. test-only releases, internal refactors,
+#   CI/CD changes). Those PRs land empty (or whitespace-only) and used
+#   to require a maintainer to close them by hand.
+#
+#   This workflow is the cleanup step: when Copilot opens a PR with
+#   no real content to apply, we close it automatically with a comment
+#   explaining why, so the maintainer queue stays clean.
+#
+#  Targets only PRs whose author is `copilot-swe-agent[bot]` — human
+#  PRs and any other bot's PRs are ignored.
+#
+#  No additional secrets needed; uses the repo's default GITHUB_TOKEN.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Auto-Close Empty Docs PR
+
+on:
+  pull_request:
+    # `synchronize` covers the case where Copilot opens an empty PR
+    # first, then pushes a real change later — we re-evaluate and only
+    # close while it's still empty. `reopened` keeps the behaviour
+    # consistent if a maintainer reopens a closed empty PR.
+    types: [opened, synchronize, reopened]
+
+jobs:
+  close-if-empty:
+    name: "Close PR if Copilot found nothing to apply"
+    runs-on: ubuntu-latest
+
+    # Gate on author: only act on PRs authored by Copilot's coding
+    # agent. The login GitHub uses is `copilot-swe-agent[bot]`.
+    # `pull_request.user.login` is the PR author (not the merger),
+    # which is what we want here.
+    if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
+
+    permissions:
+      # `pull-requests: write` is the minimum to comment + close.
+      # We deliberately do NOT request `contents: write` — this
+      # workflow never modifies the branch, only the PR state.
+      pull-requests: write
+      contents: read
+
+    steps:
+      # ── 1. Measure how much the PR actually changes ──────────────
+      # We use the GitHub API (via `gh pr view`) rather than checking
+      # out the branch — no checkout means no race with a still-pushing
+      # Copilot agent, and we get the same numbers GitHub itself shows
+      # in the PR's "Files changed" tab.
+      - name: Measure PR delta
+        id: delta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # `files | length` — count of files touched by the PR.
+          CHANGED=$(gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json files \
+            --jq '.files | length')
+
+          # Total additions + deletions across all files. Catches the
+          # case where Copilot opened a PR that touches files but only
+          # added/removed whitespace or rewrote a file to its own
+          # current content — both yield (additions + deletions) == 0
+          # in the PR's own diff stats.
+          DELTA=$(gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json files \
+            --jq '[.files[] | .additions + .deletions] | add // 0')
+
+          echo "changed_files=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "total_delta=${DELTA}"     >> "$GITHUB_OUTPUT"
+          echo "PR #${PR_NUMBER}: ${CHANGED} files, ${DELTA} line(s) changed"
+
+      # ── 2. Close if the PR has nothing to apply ──────────────────
+      # "Empty" = either zero files touched, or zero lines added/
+      # removed. Both reliably mean "Copilot found no docs to update".
+      - name: Close empty PR with comment
+        if: steps.delta.outputs.changed_files == '0' || steps.delta.outputs.total_delta == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(cat <<'EOF'
+          Closing automatically — Copilot opened this PR for the release-triggered docs update issue, but the diff is empty (no files changed, or no net additions/deletions).
+
+          This is the expected outcome when a release contains only test-only changes, internal refactors, or CI/CD edits — there are no user-facing docs to update.
+
+          If you believe documentation **was** needed for this release, reopen the originating issue with a more specific prompt (which doc page, which behaviour) or open a manual PR.
+
+          — `auto-close-empty-pr.yml`
+          EOF
+          )"
+
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+          echo "Closed empty PR #${PR_NUMBER}"
+
+      # ── 3. Otherwise: log and exit cleanly ───────────────────────
+      # Non-empty PRs are left alone — the maintainer reviews them as
+      # normal. This step exists purely for log readability.
+      - name: Skip (PR has content)
+        if: steps.delta.outputs.changed_files != '0' && steps.delta.outputs.total_delta != '0'
+        run: |
+          echo "PR #${{ github.event.pull_request.number }} has real changes — leaving open for review."

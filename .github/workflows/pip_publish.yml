@@ -25,6 +25,12 @@
 #  → 2.0.0rc124). The version in pyproject.toml is dynamic — it reads
 #  from lex/_version.py which this workflow writes before building.
 #
+#  Trigger: `release: created`. This fires on draft saves AND direct
+#  publishes (no draft), so a maintainer can ship a release just by
+#  saving a draft — they don't have to flip it to "Published" first.
+#  We deliberately do NOT also listen on `published` (that would
+#  double-fire when a draft is later published manually).
+#
 #  Required secrets:
 #   - PYPI_API_TOKEN               (PyPI API token with upload permission)
 #   - SENDGRID_API_KEY             (used by the showcase workflow)
@@ -43,7 +49,15 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [published]
+    # Fire on draft save too, so a draft release publishes to PyPI without
+    # requiring the maintainer to manually flip the draft to "Published".
+    # `created` covers both flows:
+    #   (a) a draft is saved   → `created` fires (we want this — auto-publish)
+    #   (b) a release is published directly (no draft) → `created` fires
+    # `published` is intentionally NOT listed: if it were, flow (a)'s draft
+    # being manually published later would trigger a second run (publish
+    # twice). Listening only on `created` gives a single shot per release.
+    types: [created]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -124,8 +138,17 @@ jobs:
           if [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            # Strip leading 'v' from tag: v2.0.0rc124 → 2.0.0rc124
-            VERSION="${GITHUB_REF_NAME#v}"
+            # For release events (including drafts triggered via `created`),
+            # GITHUB_REF_NAME points at the default branch, not the tag — the
+            # tag is not a real git ref until the release is published. Read
+            # the requested tag from the release payload instead.
+            # Strip leading 'v': v2.0.0rc124 → 2.0.0rc124.
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+          fi
+          if [[ -z "${VERSION}" ]]; then
+            echo "::error::Could not determine version (no inputs.version and release.tag_name was empty)."
+            exit 1
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Publishing version: ${VERSION}"
