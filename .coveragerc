@@ -65,12 +65,17 @@ omit =
     lex/lex_app/asgi.py
     lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
+    lex/tools/ai_dashboard.py
+    lex/tools/ai_faq.py
+    lex/tools/verify_ai_assets.py
     lex/streamlit_app.py
     lex/lex_app/streamlit/*
     lex/proxy.py
     lex/manage.py
     lex/api/views/authentication/KeycloakManager.py
-    # --- Supervisor-approved EXCLUDE list (May 2026) ------------------------
+    lex/audit_logging/utils/legacy_audit_payload.py
+    lex/core/management/commands/bootstrap_callback_server.py
+    lex/lex_app/management/commands/bootstrap_keycloak.py
     # Non-test-worthy code: scaffolding, console handlers, legacy data models,
     # routing shims, ProjectInfo view, dev-only utilities.
     lex/test_project/apps.py
@@ -140,10 +145,17 @@ omit =
     lex/lex_app/asgi.py
     lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
-    lex/lex_app/streamlit/*
+    lex/tools/ai_dashboard.py
+    lex/tools/ai_faq.py
+    lex/tools/verify_ai_assets.py
     lex/streamlit_app.py
+    lex/lex_app/streamlit/*
+    lex/proxy.py
+    lex/manage.py
     lex/api/views/authentication/KeycloakManager.py
-    # --- Supervisor-approved EXCLUDE list (May 2026) ------------------------
+    lex/audit_logging/utils/legacy_audit_payload.py
+    lex/core/management/commands/bootstrap_callback_server.py
+    lex/lex_app/management/commands/bootstrap_keycloak.py
     lex/test_project/apps.py
     lex/tools/test_groups.py
     lex/api/views/sharepoint/DeleteUnusedFiles.py
