@@ -16,8 +16,6 @@ from lex.audit_logging.handlers.LexLogger import LexLogger
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.models.CalculationLog import CalculationLog
-from lex.audit_logging.utils.ModelContext import model_logging_context
-from lex.core.models.CalculationModel import CalculationModel
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS
@@ -149,26 +147,28 @@ class _CalcLogTestCase(E2ETestCase):
             f"calculationId={self.calc_id}, got {actual}.",
         )
 
-    # ── shared driver ────────────────────────────────────────────────
+    # ── pipeline helper ──────────────────────────────────────────────
 
-    def drive_root(self, root):
-        """
-        Run a root ``CalculationModel`` end-to-end the way the REST API
-        does it: wrap the IN_PROGRESS save in ``model_logging_context``
-        so any ``LexLogger().log()`` calls inside ``calculate()`` resolve
-        to the root as the current model. Mirrors
-        :func:`lex.api.views.model_entries.One` (which wraps every
-        update in ``with model_logging_context(instance):``).
+    def _save_root(self, *, child_mode: str, units_csv: str) -> "LogRootCalc":
+        """Save a fresh LogRootCalc through the full pipeline.
 
-        Swallows exceptions so error-path scenarios can still inspect
-        the post-state. Refreshes the instance from the DB so the
-        caller sees the post-calc state.
+        is_calculated=IN_PROGRESS arms the calculate_hook (its
+        WhenFieldValueIs condition); the model_logging_context wrap is
+        required because CalculationModel.save() does not auto-push the
+        root (that wrap happens at the API layer in production at
+        lex/api/views/model_entries/One.py).
         """
-        root.is_calculated = CalculationModel.IN_PROGRESS
+        # Local import to avoid circular import at module load time —
+        # __init__.py is imported before models.py finishes registering.
+        from lex.audit_logging.utils.ModelContext import model_logging_context
+        from .models import LogRootCalc
+
+        root = LogRootCalc(
+            name=f"root-{child_mode}",
+            child_mode=child_mode,
+            units_csv=units_csv,
+            is_calculated=LogRootCalc.IN_PROGRESS,
+        )
         with model_logging_context(root):
-            try:
-                root.save()
-            except Exception:
-                pass
-        root.refresh_from_db()
+            root.save()
         return root

@@ -78,36 +78,6 @@ class LogRootCalc(CalculationModel):
         if self.child_mode == "conditional":
             LogConditionalChild.create(unit=units)
             return
-        if self.child_mode == "kitchen_sink":
-            # Cluster 15.2 — exercises every LexLogger builder method
-            # in a single chained call, so the on-disk markdown shape
-            # of each method is asserted end-to-end.
-            import pandas as pd
-            (
-                LexLogger()
-                .add_heading("KS-Heading", 2)
-                .add_text("ks-text")
-                .add_list(["alpha", "beta"], ordered=True)
-                .add_quote("ks-quote")
-                .add_code("x = 1", "python")
-                .add_link("ks-link", "https://example.test/ks")
-                .add_image("ks-alt", "https://example.test/img.png")
-                .add_horizontal_rule()
-                .add_table(["h1", "h2"], [["v1", "v2"]])
-                .add_dataframe(pd.DataFrame({"col": [7]}))
-                .add_raw_markdown("**ks-bold**")
-                .log()
-            )
-            return
-        if self.child_mode == "double_log":
-            # Cluster 15.3 / 15.4 — two .log() calls inside the same
-            # model context. _get_or_create_locked must dedup the row
-            # and append the second message, AND LexLogger.log() must
-            # reset its own content buffer between calls so the second
-            # call doesn't re-emit the first message.
-            LexLogger().add_text("first-line").log()
-            LexLogger().add_text("second-line").log()
-            return
 
 
 @_permissive
@@ -126,6 +96,8 @@ class LogLoudChild(CalculatedModelMixin):
         return f"loud:{self.unit}"
 
     def get_selected_key_list(self, key):
+        # Fallback only — combinatorial callers (e.g. .create(unit=[...]))
+        # supply unit values as overrides that bypass this method.
         if key == "unit":
             return ["u1"]
         return []
@@ -154,6 +126,8 @@ class LogSilentChild(CalculatedModelMixin):
         return f"silent:{self.unit}"
 
     def get_selected_key_list(self, key):
+        # Fallback only — combinatorial callers (e.g. .create(unit=[...]))
+        # supply unit values as overrides that bypass this method.
         if key == "unit":
             return ["u1"]
         return []
@@ -176,6 +150,8 @@ class LogGrandchildCalc(CalculatedModelMixin):
         app_label = "lex_app"
 
     def get_selected_key_list(self, key):
+        # Fallback only — combinatorial callers (e.g. .create(unit=[...]))
+        # supply unit values as overrides that bypass this method.
         if key == "unit":
             return ["u1"]
         return []
@@ -200,6 +176,8 @@ class LogMiddleCombinatoric(CalculatedModelMixin):
         app_label = "lex_app"
 
     def get_selected_key_list(self, key):
+        # Fallback only — combinatorial callers (e.g. .create(unit=[...]))
+        # supply unit values as overrides that bypass this method.
         if key == "unit":
             return ["u1"]
         return []
@@ -226,10 +204,10 @@ class LogConditionalChild(CalculatedModelMixin):
         app_label = "lex_app"
 
     def get_selected_key_list(self, key):
+        # Fallback only — combinatorial callers (e.g. .create(unit=[...]))
+        # supply unit values as overrides that bypass this method.
         if key == "unit":
-            # Two units so that 15.15 can assert "some log, some don't"
-            # in the same combinatoric fan-out.
-            return ["loud_one", "quiet_one"]
+            return ["loud_one"]
         return []
 
     def calculate(self):

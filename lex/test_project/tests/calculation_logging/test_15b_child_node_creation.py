@@ -7,7 +7,6 @@ combinatorial expansion through calc_and_save_sync.
 from __future__ import annotations
 
 from lex.audit_logging.models.CalculationLog import CalculationLog
-from lex.audit_logging.utils.ModelContext import model_logging_context
 
 from . import _CalcLogTestCase
 from .models import LogLoudChild, LogRootCalc
@@ -17,33 +16,11 @@ class TestCluster15b_LoudChildren(_CalcLogTestCase):
     """Loud children produce a CalculationLog row each, all chaining
     to the root's row via parent_log."""
 
-    def _save_root_through_pipeline(self, *, child_mode: str, units_csv: str) -> LogRootCalc:
-        """Save a fresh LogRootCalc through the full state machine.
-
-        Wraps the root in model_logging_context (Fact #1 — root is NOT
-        auto-pushed by save()).
-
-        is_calculated must be set to IN_PROGRESS before save() so that
-        CalculationModel.save() recognises this as a calculation trigger and
-        fires calculate_hook → execute_calculation_sync → calculate().
-        Without it the hook condition WhenFieldValueIs("is_calculated",
-        IN_PROGRESS) is False and calculate() never runs.
-        """
-        root = LogRootCalc(
-            name=f"root-{child_mode}",
-            child_mode=child_mode,
-            units_csv=units_csv,
-            is_calculated=LogRootCalc.IN_PROGRESS,
-        )
-        with model_logging_context(root):
-            root.save()
-        return root
-
     def test_15_7_root_logs_no_children(self):
         """15.7: Root emits LexLogger in its own calculate(), no
         children triggered. Exactly 1 row, parent_log_id IS NULL.
         """
-        root = self._save_root_through_pipeline(
+        root = self._save_root(
             child_mode="log_only", units_csv="",
         )
         self.assert_log_row(root, parent=None, contains="root root-log_only")
@@ -54,7 +31,7 @@ class TestCluster15b_LoudChildren(_CalcLogTestCase):
         rows: root (parent_log_id IS NULL) + 1 loud child (parent_log
         FK = root's row, content_type=LogLoudChild).
         """
-        root = self._save_root_through_pipeline(
+        root = self._save_root(
             child_mode="loud", units_csv="u1",
         )
         loud = LogLoudChild.objects.get(unit="u1")
@@ -67,7 +44,7 @@ class TestCluster15b_LoudChildren(_CalcLogTestCase):
         all share parent_log = root_row.id; each row's object_id
         matches its instance.
         """
-        root = self._save_root_through_pipeline(
+        root = self._save_root(
             child_mode="loud", units_csv="u1,u2,u3",
         )
         root_row = self.assert_log_row(root, parent=None)
@@ -81,7 +58,7 @@ class TestCluster15b_LoudChildren(_CalcLogTestCase):
         calculationId — operation_context propagates through the
         .create() → calc_and_save_sync boundary.
         """
-        self._save_root_through_pipeline(
+        self._save_root(
             child_mode="loud", units_csv="u1,u2,u3",
         )
         ids = set(
