@@ -444,7 +444,9 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         queryset = super().get_queryset()
         model_class = self.kwargs["model_container"].model_class
         queryset = apply_query_param_filters(queryset, self.request.query_params, model_class)
-        return apply_ordering(queryset, self.request.query_params.get("ordering"), model_class)
+        queryset = apply_ordering(queryset, self.request.query_params.get("ordering"), model_class)
+
+        return queryset
 
     def list(self, request, *args, **kwargs):
         # Fast path: when the client only needs the set of primary keys matching
@@ -873,6 +875,7 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
             )
 
         if self._ag_model_class._meta.model_name.lower() == "auditlog":
+            qs = qs.select_related("content_type").prefetch_related("status_records")
             rows = list(qs[start_row:end_row + 1])
             has_more = len(rows) > page_size
             if has_more:
@@ -880,6 +883,7 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
                 row_count = None
             else:
                 row_count = start_row + len(rows)
+            self._annotate_has_calculation_log(rows)
             serializer = self.get_serializer(rows, many=True)
             return {
                 "rowData": serializer.data,
@@ -958,11 +962,32 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
                 rows = rows[:page_size]
                 break
 
+        from django.db.models import prefetch_related_objects
+        prefetch_related_objects(rows, "status_records")
+        self._annotate_has_calculation_log(rows)
         serializer = self.get_serializer(rows, many=True)
         return {
             "rowData": serializer.data,
             "rowCount": None if has_more else (start_row + len(rows)),
         }
+
+    @staticmethod
+    def _annotate_has_calculation_log(rows):
+        """Batch-set ``_has_calculation_log`` on a list of AuditLog instances."""
+        from lex.audit_logging.models.CalculationLog import CalculationLog
+
+        calc_ids = {r.calculation_id for r in rows if r.calculation_id}
+        if calc_ids:
+            existing = set(
+                CalculationLog.objects.filter(calculationId__in=calc_ids)
+                .values_list("calculationId", flat=True)
+                .distinct()
+            )
+            for r in rows:
+                r._has_calculation_log = (r.calculation_id in existing) if r.calculation_id else False
+        else:
+            for r in rows:
+                r._has_calculation_log = False
 
     def _execute_pivot_mode(
         self,

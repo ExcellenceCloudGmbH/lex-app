@@ -326,7 +326,7 @@ class TestCluster01g_EnsureClientRolePolicies(TestCase):
         role's UUID in the canonical JSON shape."""
         auth_config = {"policies": []}
 
-        ordered = self.mgr.ensure_client_role_policies(auth_config)
+        ordered, newly_created = self.mgr.ensure_client_role_policies(auth_config)
 
         # Return value is the ordered role-name list (defaults first).
         self.assertEqual(
@@ -407,7 +407,7 @@ class TestCluster01g_EnsureClientRolePolicies(TestCase):
         self._client_roles["hr"] = {"id": "uuid-hr", "name": "hr"}
         auth_config = {"policies": []}
 
-        ordered = self.mgr.ensure_client_role_policies(auth_config)
+        ordered, newly_created = self.mgr.ensure_client_role_policies(auth_config)
 
         self.assertEqual(
             ordered, ["admin", "standard", "view-only", "hr"],

@@ -534,7 +534,7 @@ class KeycloakSyncManagerRolePolicyTest(TestCase):
         ]
 
         auth_config = {"policies": []}
-        role_names = manager.ensure_client_role_policies(auth_config)
+        role_names, newly_created = manager.ensure_client_role_policies(auth_config)
 
         self.assertEqual(role_names, ["admin", "standard", "view-only", "auditor"])
         self.assertCountEqual(

@@ -902,10 +902,33 @@ class KeycloakSyncManager:
 
         return scope_policy_mapping
 
-    def sync_standard_client_role_permissions(self, auth_config: Dict, role_names: List[str]) -> None:
+    def sync_standard_client_role_permissions(
+        self,
+        auth_config: Dict,
+        role_names: List[str],
+        newly_created_policy_names: Set[str] | None = None,
+    ) -> None:
+        """Add newly created extra-role policies to existing permissions.
+
+        Only policies whose names appear in *newly_created_policy_names* are
+        injected.  This prevents subsequent ``lex init`` runs from
+        overriding manual permission adjustments made by an administrator
+        in the Keycloak console.  When a brand-new role is created for the
+        first time, its policy is propagated to every permission that
+        already references ``Policy - standard`` (a reasonable default);
+        after that, the administrator's configuration is preserved.
+        """
         extra_policy_names = [
             f"Policy - {role_name}" for role_name in role_names if role_name not in DEFAULT_CLIENT_ROLES
         ]
+        if not extra_policy_names:
+            return
+
+        # Only sync policies that were just created in this run.
+        if newly_created_policy_names is not None:
+            extra_policy_names = [
+                p for p in extra_policy_names if p in newly_created_policy_names
+            ]
         if not extra_policy_names:
             return
 
@@ -944,18 +967,24 @@ class KeycloakSyncManager:
 
         if updated_permissions:
             logger.info(
-                "   ✓ Updated %s permission(s) to inherit the standard-role configuration",
+                "   ✓ Updated %s permission(s) to inherit the standard-role configuration "
+                "for %s newly created role policy/policies",
                 updated_permissions,
+                len(extra_policy_names),
             )
 
-    def ensure_client_role_policies(self, auth_config: Dict) -> List[str]:
+    def ensure_client_role_policies(self, auth_config: Dict) -> Tuple[List[str], Set[str]]:
         """
         Fail-fast: any Keycloak admin API error raises.
+
+        Returns a tuple of (ordered_role_names, newly_created_policy_names)
+        so callers can distinguish pre-existing policies from brand-new ones.
         """
         policies = auth_config.setdefault("policies", [])
         policies_by_name = {p.get("name"): p for p in policies if p.get("name")}
         client_roles = self.get_client_roles()
         ordered_role_names = self._ordered_client_role_names(set(client_roles))
+        newly_created_policy_names: Set[str] = set()
 
         for role_name in ordered_role_names:
             full_policy_name = f"Policy - {role_name}"
@@ -1008,9 +1037,10 @@ class KeycloakSyncManager:
                 }
             )
             policies_by_name[full_policy_name] = policies[-1]
+            newly_created_policy_names.add(full_policy_name)
             logger.info(f"   ✓ Added client role policy to config: {full_policy_name}")
 
-        return ordered_role_names
+        return ordered_role_names, newly_created_policy_names
 
     def process_model_changes(
         self,
@@ -1140,7 +1170,7 @@ class KeycloakSyncManager:
                 self.delete_resources_individual(to_delete_set, all_resources)
 
             logger.info("Ensuring client role-based policies exist before adding resources...")
-            managed_role_names = self.ensure_client_role_policies(auth_config)
+            managed_role_names, newly_created_policy_names = self.ensure_client_role_policies(auth_config)
             client_roles = self.get_client_roles()
             self.normalize_role_policy_references(auth_config, client_roles)
 
@@ -1233,7 +1263,7 @@ class KeycloakSyncManager:
 
                     logger.info(f"  ✓ Added new resource {resource_name} with default permissions")
 
-            self.sync_standard_client_role_permissions(auth_config, managed_role_names)
+            self.sync_standard_client_role_permissions(auth_config, managed_role_names, newly_created_policy_names)
 
             if ensure_default_authz:
                 logger.info("Ensuring default authorization settings...")
