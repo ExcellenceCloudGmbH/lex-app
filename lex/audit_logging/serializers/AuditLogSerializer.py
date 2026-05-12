@@ -1,6 +1,7 @@
+from rest_framework import serializers
+
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.utils.content_types import safe_get_content_type
-from rest_framework import serializers
 
 
 class AuditLogReadOnlySerializerMixin:
@@ -52,10 +53,18 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
 
     def _get_latest_status_record(self, obj):
         """Return the latest AuditLogStatus record for this AuditLog, or None."""
+        cache_attr = '_cached_latest_status'
+        if hasattr(obj, cache_attr):
+            return getattr(obj, cache_attr)
+
         if hasattr(obj, '_prefetched_objects_cache') and 'status_records' in obj._prefetched_objects_cache:
-            records = obj._prefetched_objects_cache['status_records']
-            return records[-1] if records else None
-        return obj.status_records.order_by('-created_at').first()
+            records = list(obj._prefetched_objects_cache['status_records'])
+            result = records[-1] if records else None
+        else:
+            result = obj.status_records.order_by('-created_at').first()
+
+        obj._cached_latest_status = result
+        return result
 
     def get_status(self, obj):
         record = self._get_latest_status_record(obj)
