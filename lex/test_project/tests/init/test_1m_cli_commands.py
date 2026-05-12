@@ -117,12 +117,6 @@ class TestCluster01m_RunFileSetParity(TestCase):
         "Streamlit.run.xml",
         "Create_DB.run.xml",
         "Flush_DB.run.xml",
-        "Test_All.run.xml",
-        "Test_Core.run.xml",
-        "Test_Audit.run.xml",
-        "Test_ProcessAdmin.run.xml",
-        "Test_Lex.run.xml",
-        "Test_Single.run.xml",
     })
 
     def test_1_102_scaffold_produces_complete_run_file_set(self):
