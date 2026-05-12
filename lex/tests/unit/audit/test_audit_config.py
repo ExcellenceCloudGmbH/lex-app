@@ -25,7 +25,6 @@ Run::
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.utils.config import (
     AuditLoggingConfig,
     get_audit_logging_config,

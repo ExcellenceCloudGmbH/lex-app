@@ -16,16 +16,14 @@ Including another URLconf
 import os
 import re
 
-from django.urls import path, include, re_path
 from django.contrib.staticfiles.views import serve as staticfiles_serve
+from django.urls import path, include, re_path
+from lex.authentication.views.user_api import CurrentUser
+from lex.lex_app import settings
+from lex.process_admin.settings import processAdminSite, adminSite
 from lex.react.views import serve_react
 
-from lex.lex_app import settings
-
-
 from . import views
-from lex.process_admin.settings import processAdminSite, adminSite
-from lex.authentication.views.user_api import CurrentUser
 
 _raw_base_path = os.getenv("DJANGO_BASE_PATH")
 url_prefix = _raw_base_path.strip("/") if _raw_base_path else ""

@@ -34,7 +34,6 @@ from unittest.mock import patch
 
 from django.core.cache import caches
 from django.test import SimpleTestCase
-
 from lex.audit_logging.utils.CacheManager import CacheManager
 
 

@@ -126,19 +126,17 @@ Version History:
 import itertools
 import logging
 import os
-from collections.abc import Iterable as IterableABC, Mapping as MappingABC
 from abc import abstractmethod
+from collections.abc import Iterable as IterableABC, Mapping as MappingABC
 from copy import deepcopy
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
+from typing import List, Dict, Any, TYPE_CHECKING
 
-from django.db import transaction
-from django.db.models import Model, UniqueConstraint
+from django.db.models import UniqueConstraint
 from django.db.models.base import ModelBase
-
-from lex.lex_app import settings
 from lex.api.utils import operation_context
 from lex.core.exceptions import *
 from lex.core.models.LexModel import LexModel
+from lex.lex_app import settings
 
 if TYPE_CHECKING:
     pass  # CalculatedModelMixin is defined in this file

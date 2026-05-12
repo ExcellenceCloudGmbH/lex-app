@@ -21,8 +21,8 @@ is the contract that future renderer will consume.
 from __future__ import annotations
 
 import base64
-import datetime as _dt
 import csv
+import datetime as _dt
 import json
 import mimetypes
 import os
@@ -33,7 +33,6 @@ from pathlib import Path
 from typing import Any, Mapping, TypedDict
 
 import yaml
-
 
 CONFIG_FILENAME = "lex_test_config.yaml"
 DEFAULT_REPORT_OUTPUT_DIR = "reports"

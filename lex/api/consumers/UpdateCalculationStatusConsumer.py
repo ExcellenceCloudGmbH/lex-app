@@ -3,7 +3,6 @@ import logging
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
-
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 
 logger = logging.getLogger(__name__)

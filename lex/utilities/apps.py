@@ -1,6 +1,5 @@
-from lex.utilities.config.generic_app_config import GenericAppConfig
-from lex.lex_app.apps import LexAppConfig
 from django.db.migrations.optimizer import MigrationOptimizer
+from lex.lex_app.apps import LexAppConfig
 
 # Monkey patch MigrationOptimizer to skip optimization
 # This is necessary because optimization becomes exponentially slow with many models

@@ -32,7 +32,6 @@ How to run
 """
 
 import datetime
-import unittest
 from datetime import timedelta
 from importlib import reload
 from unittest.mock import MagicMock, patch
@@ -40,7 +39,6 @@ from unittest.mock import MagicMock, patch
 from django.db import connection, models
 from django.test import TransactionTestCase
 from django.utils import timezone
-
 from lex.core.models.LexModel import LexModel
 from lex.core.services.Bitemporal import get_queryset_as_of
 from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer

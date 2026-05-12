@@ -27,11 +27,9 @@ from Cluster 10.
 from __future__ import annotations
 
 import unittest
-from datetime import timedelta
-
-from rest_framework import status
 
 from lex.tests.e2e._authenticated_e2e_test_case import AuthenticatedE2ETestCase
+from rest_framework import status
 
 from .models import ALL_MODELS, INVOICE, Invoice
 

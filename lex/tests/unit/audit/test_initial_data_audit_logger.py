@@ -26,12 +26,9 @@ Tests for ``InitialDataAuditLogger`` — audit trail for bulk data uploads.
         lex test lex.audit_logging.tests.test_initial_data_audit_logger --verbosity=2
 """
 
-import re
-import unittest
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.utils.InitialDataAuditLogger import InitialDataAuditLogger
 
 

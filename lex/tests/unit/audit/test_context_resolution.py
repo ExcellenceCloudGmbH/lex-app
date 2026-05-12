@@ -49,8 +49,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
-from lex.audit_logging.utils.ModelContext import ModelContext, model_logging_context
 from lex.audit_logging.utils.DataModels import (
     ContextInfo,
     CacheCleanupResult,
@@ -58,6 +56,7 @@ from lex.audit_logging.utils.DataModels import (
     CacheOperationError,
     ContextResolutionError,
 )
+from lex.audit_logging.utils.ModelContext import ModelContext, model_logging_context
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

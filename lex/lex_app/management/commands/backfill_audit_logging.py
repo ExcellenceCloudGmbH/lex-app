@@ -6,7 +6,6 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 from django.utils import timezone
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.models.CalculationLog import CalculationLog

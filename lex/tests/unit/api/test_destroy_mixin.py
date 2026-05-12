@@ -28,7 +28,6 @@ Tests for ``DestroyOneWithPayloadMixin`` — delete authorization and response.
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
     _unwrap_historical_instance,
     DestroyOneWithPayloadMixin,

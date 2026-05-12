@@ -45,7 +45,7 @@ from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.models.CalculationLog import CalculationLog
 
 from ._stress_test_case import StressTestCase
-from .models import ALL_MODELS, StressInvoice
+from .models import ALL_MODELS
 
 
 class TestCluster11h_CalculationLogOverhead(StressTestCase):

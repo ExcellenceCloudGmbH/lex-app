@@ -21,7 +21,6 @@ and imported by the sub-cluster test modules.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 

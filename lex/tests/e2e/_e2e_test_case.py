@@ -22,10 +22,8 @@ from django.db import connection
 from django.test import TransactionTestCase
 from django.urls import clear_url_caches
 from django.utils import timezone
-
-from rest_framework.test import APIClient
-
 from lex.process_admin.utils.model_registration import ModelRegistration
+from rest_framework.test import APIClient
 
 
 class _MockContainer:

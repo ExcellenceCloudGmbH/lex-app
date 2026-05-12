@@ -1,6 +1,4 @@
 from django.core.management.base import BaseCommand
-import lex.lex_app.settings as settings
-from pathlib import Path
 from lex.api.views.authentication.KeycloakManager import KeycloakManager
 
 

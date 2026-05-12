@@ -9,15 +9,11 @@ a complex permission/transaction/state-machine workflow.
 Tests are organised by the *behaviour* they verify, not by method.
 """
 
-import copy
 import os
 import sys
-import types
-import traceback
 import unittest
-from contextlib import nullcontext
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import django
 from django.apps import apps
@@ -323,7 +319,6 @@ class UpdateBitemporalPathTests(SimpleTestCase):
     @patch.object(OneModelEntry, "get_object")
     def test_bitemporal_update_calls_update_mixin(self, mock_get_obj, mock_ctx, mock_log_ctx, mock_update):
         """Historical model → uses UpdateModelMixin.update directly, no calculation logic."""
-        from lex.core.models.CalculationModel import CalculationModel
 
         model_cls = MagicMock(spec=[])
         model_cls.valid_from = True

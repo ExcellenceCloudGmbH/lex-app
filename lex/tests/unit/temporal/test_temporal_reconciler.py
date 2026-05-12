@@ -28,7 +28,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import django
 from django.apps import apps

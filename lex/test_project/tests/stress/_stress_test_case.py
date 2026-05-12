@@ -38,9 +38,7 @@ from typing import Any, Callable
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
-
 
 # ── Volume tiers ────────────────────────────────────────────────────
 

@@ -1,14 +1,13 @@
 # yourapp/management/commands/cleanup_keycloak_uma.py
 
-from django.core.management.base import BaseCommand
 from django.apps import apps
-
+from django.core.management.base import BaseCommand
 from keycloak import KeycloakOpenIDConnection, KeycloakUMA, KeycloakAdmin
-from lex.lex_app.keycloak_exclusions import is_keycloak_syncable_app
 from keycloak.exceptions import KeycloakGetError
 from keycloak.urls_patterns import (
     URL_ADMIN_CLIENT_AUTHZ_SCOPE_PERMISSION,
 )  # has `{scope-id}`:contentReference[oaicite:0]{index=0}
+from lex.lex_app.keycloak_exclusions import is_keycloak_syncable_app
 
 
 # ─── Monkey‐patch KeycloakAdmin to add a delete for scope‐type permissions ───

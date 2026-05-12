@@ -44,7 +44,6 @@ from unittest.mock import MagicMock, patch
 from django.db import IntegrityError
 from django.test import SimpleTestCase
 from django.utils import timezone
-
 from lex.lex_app.celery_tasks import (
     activate_history_version,
     calc_and_save,

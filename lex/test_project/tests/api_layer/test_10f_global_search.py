@@ -33,8 +33,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import TestCase
-
 from lex.api.views.global_search_for_models.Search import (
     EXCLUDED_MODELS,
     EXCLUDED_TYPES,

@@ -34,11 +34,8 @@ from unittest.mock import patch, MagicMock
 
 from django.db import connection, models
 from django.test import SimpleTestCase, TransactionTestCase, override_settings
-
 from lex.core.models.LexModel import (
     LexModel,
-    LexManager,
-    PermissionResult,
     UserContext,
     lex_datetime_now,
     should_use_atomic_model_operations,

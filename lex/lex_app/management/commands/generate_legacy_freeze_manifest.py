@@ -7,7 +7,6 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import connections
 from django.utils import timezone
 
-
 EXPLICIT_SYSTEM_TABLES: Set[str] = {
     "django_migrations",
     "django_content_type",

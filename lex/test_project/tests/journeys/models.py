@@ -9,7 +9,6 @@ deliberately small so the journey scripts remain readable.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
 

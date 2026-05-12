@@ -16,13 +16,11 @@ from unittest.mock import MagicMock, patch, PropertyMock
 from uuid import UUID
 
 from django.test import SimpleTestCase
-
 from lex.api.utils.helpers import (
     _parse_value,
     resolve_target_model,
     build_shadow_instance,
     can_read_from_payload,
-    _get_field_map,
 )
 
 

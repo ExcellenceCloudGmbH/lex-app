@@ -5,12 +5,10 @@ from unittest.mock import patch
 
 from django.db import models
 from django.db.models.fields.files import FieldFile
-
 from lex.audit_logging.serializers.AuditLogMixinSerializer import (
     _serialize_payload,
     generic_instance_payload,
 )
-
 from lex.audit_logging.utils.legacy_audit_payload import (
     build_legacy_calculation_payload,
     build_legacy_user_change_payload,

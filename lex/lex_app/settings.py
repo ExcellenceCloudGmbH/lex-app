@@ -1,8 +1,8 @@
 from __future__ import absolute_import
 
+import re
 import sys
 import warnings
-import re
 from pathlib import Path
 
 from django.core.cache import CacheKeyWarning
@@ -23,7 +23,6 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
-from datetime import timedelta
 
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration

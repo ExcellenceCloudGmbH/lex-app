@@ -17,12 +17,10 @@ Scenario numbering matches docs/test-plan/test-clusters.md § 6f.
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from django.contrib.contenttypes.models import ContentType
 from django.db.utils import OperationalError
 from django.test import SimpleTestCase, TestCase
-
 from lex.audit_logging.mixins.AuditLogMixin import (
     BASE_RETRY_DELAY_SECONDS,
     MAX_UPDATE_RETRIES,

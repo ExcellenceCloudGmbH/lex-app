@@ -14,7 +14,6 @@ The original ``AuditSimpleItem`` / ``AuditAtomicCalc`` are unchanged.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.exceptions import ValidationError as LexValidationError
 from lex.core.models.LexModel import LexModel, PermissionResult
 

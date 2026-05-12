@@ -1,9 +1,9 @@
-import os
-import sys
-import types
 import importlib
 import importlib.abc
 import importlib.machinery
+import os
+import sys
+import types
 
 
 class ModuleAliasingFinder(importlib.abc.MetaPathFinder):

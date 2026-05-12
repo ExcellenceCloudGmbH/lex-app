@@ -14,13 +14,12 @@ docs/test-plan/test-clusters.md#12-serializer-contract.
 from __future__ import annotations
 
 import unittest
-from datetime import date, datetime, time, timezone
+from datetime import date, time
 from decimal import Decimal
 from uuid import UUID
 
-from rest_framework import status
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import (
     ALL_MODELS,

@@ -27,24 +27,18 @@ Act 5 — Permission Boundaries
     Verify POST returns 400.
 """
 
-import os
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from django.db import connection, models
-from django.test import TransactionTestCase
-
-from rest_framework import status
-
+from django.db import models
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.exceptions import ValidationError
 from lex.core.models.CalculationModel import (
     CalculationModel,
-    CalculationModelException,
 )
 from lex.core.models.LexModel import LexModel, PermissionResult
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 
 # ====================================================================

@@ -67,36 +67,6 @@ def generate_pycharm_configs(project_root=None):
             "parameters": "create_db",
         },
         "Flush_DB.run.xml": {"name": "Flush DB", "parameters": "flush"},
-        "Test_All.run.xml": {
-            "name": "Test All (Coverage)",
-            "parameters": "test lex.core.tests lex.audit_logging.tests lex.process_admin.tests lex.tests --verbosity=2 --noinput --keepdb",
-            "envs": {"CELERY_ACTIVE": "False"},
-        },
-        "Test_Core.run.xml": {
-            "name": "Test Core (Coverage)",
-            "parameters": "test lex.core.tests --verbosity=2 --noinput --keepdb",
-            "envs": {"CELERY_ACTIVE": "False"},
-        },
-        "Test_Audit.run.xml": {
-            "name": "Test Audit (Coverage)",
-            "parameters": "test lex.audit_logging.tests --verbosity=2 --noinput --keepdb",
-            "envs": {"CELERY_ACTIVE": "False"},
-        },
-        "Test_ProcessAdmin.run.xml": {
-            "name": "Test ProcessAdmin (Coverage)",
-            "parameters": "test lex.process_admin.tests --verbosity=2 --noinput --keepdb",
-            "envs": {"CELERY_ACTIVE": "False"},
-        },
-        "Test_Lex.run.xml": {
-            "name": "Test Lex (Coverage)",
-            "parameters": "test lex.tests --verbosity=2 --noinput --keepdb",
-            "envs": {"CELERY_ACTIVE": "False"},
-        },
-        "Test_Single.run.xml": {
-            "name": "Test Single (Coverage)",
-            "parameters": "test $Prompt:Test label (e.g. lex.core.tests.test_user_context.TestUserContext.test_empty_scopes):lex.tests$ --verbosity=2 --noinput --keepdb",
-            "envs": {"CELERY_ACTIVE": "False"},
-        },
     }
 
     print(f"Generating PyCharm run configurations in: {runconfigs_dir}")

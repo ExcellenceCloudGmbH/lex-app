@@ -26,7 +26,6 @@ Run::
 import unittest
 
 from django.test import SimpleTestCase
-
 from lex.utilities.decorators.injector import inject, LexInjector
 
 

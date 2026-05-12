@@ -1,5 +1,6 @@
 # lex/tools/project_root.py
-import os, subprocess
+import os
+import subprocess
 from pathlib import Path
 
 MARKERS = {".git", "pyproject.toml", "setup.cfg", "manage.py", "requirements.txt", ".idea", ".vscode"}

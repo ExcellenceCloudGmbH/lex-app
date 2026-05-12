@@ -13,11 +13,10 @@ Covers:
 - merge_model_and_legacy_payload
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import UUID
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.utils.legacy_audit_payload import (
     parse_record_id,
     _coerce_model_pk,

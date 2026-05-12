@@ -23,10 +23,9 @@ Run::
     python manage.py test lex.tests.test_temporal_utils
 """
 
-from datetime import datetime, timezone as dt_timezone
+from datetime import timezone as dt_timezone
 
 from django.test import SimpleTestCase, override_settings
-
 from lex.api.utils.temporal import parse_as_of_datetime
 
 

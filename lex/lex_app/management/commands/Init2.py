@@ -1,23 +1,19 @@
 # core/management/commands/Init.py
 import json
-import uuid
 import logging
 import traceback
-import os
-import sys
-from django.core.management.base import BaseCommand, CommandError
-from django.core.management import call_command
-from django.apps import apps
-from django.db import models
-from django.db.migrations.questioner import MigrationQuestioner
-from django.db.migrations.state import ProjectState
-from django.db.migrations.loader import MigrationLoader
-from django.db.migrations.autodetector import MigrationAutodetector
-from django.db.migrations.operations.models import CreateModel, DeleteModel, RenameModel
-from django.db.migrations.executor import MigrationExecutor
-from django.db import connection
 from typing import Dict, List, Tuple, Set, Any
 
+from django.apps import apps
+from django.core.management import call_command
+from django.core.management.base import BaseCommand
+from django.db import connection
+from django.db.migrations.autodetector import MigrationAutodetector
+from django.db.migrations.executor import MigrationExecutor
+from django.db.migrations.loader import MigrationLoader
+from django.db.migrations.operations.models import CreateModel, DeleteModel, RenameModel
+from django.db.migrations.questioner import MigrationQuestioner
+from django.db.migrations.state import ProjectState
 from lex.lex_app.keycloak_exclusions import is_keycloak_syncable_app
 
 logger = logging.getLogger(__name__)

@@ -32,12 +32,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from django.test import TestCase
-
 from lex.lex_app.celery_tasks import load_data
 from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
-from lex.tests.e2e._e2e_test_case import E2ETestCase
 from lex.test_project.tests.crud_api.models import SimpleItem
+from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 

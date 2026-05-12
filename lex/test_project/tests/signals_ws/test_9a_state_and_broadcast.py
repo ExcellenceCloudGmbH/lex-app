@@ -14,7 +14,6 @@ import unittest
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
-
 from lex.api.utils import operation_context
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore

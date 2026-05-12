@@ -9,7 +9,6 @@ from django.apps.registry import apps
 from django.conf import settings
 from keycloak import KeycloakAdmin, KeycloakOpenIDConnection, KeycloakUMA
 from keycloak.exceptions import KeycloakGetError, KeycloakPostError
-
 from lex.utilities.decorators.singleton import LexSingleton
 
 # It's good practice to have a dedicated logger

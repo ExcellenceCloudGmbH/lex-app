@@ -2,7 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.api.views.model_entries.Many import ManyModelEntries
 
 

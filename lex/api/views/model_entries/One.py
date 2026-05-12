@@ -1,6 +1,6 @@
 import copy
-import traceback
 import logging
+import traceback
 from contextlib import nullcontext
 from datetime import date, datetime
 from typing import Iterable, cast
@@ -8,19 +8,6 @@ from typing import Iterable, cast
 from django.core.files.base import File
 from django.db import transaction
 from django.db.models import Model, QuerySet
-from rest_framework_api_key.permissions import HasAPIKey
-
-from lex.audit_logging.utils.ModelContext import model_logging_context
-from rest_framework.exceptions import APIException, ValidationError
-from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
-from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
-
-from rest_framework.response import Response
-from rest_framework import status
-from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
-from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
-
-from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.api.utils.Context import OperationContext
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
     DestroyOneWithPayloadMixin,
@@ -28,13 +15,22 @@ from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import (
     ModelEntryProviderMixin,
 )
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
-
 from lex.api.views.permissions.UserPermission import UserPermission
+from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
+from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
+from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 from lex.core.models.LexModel import should_use_atomic_model_operations
+from rest_framework import status
+from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_api_key.permissions import HasAPIKey
 
 logger = logging.getLogger(__name__)
 

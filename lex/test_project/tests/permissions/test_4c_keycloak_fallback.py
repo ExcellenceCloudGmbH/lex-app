@@ -24,7 +24,6 @@ from __future__ import annotations
 import unittest
 
 from lex.core.models.LexModel import UserContext
-
 from lex.tests.e2e._authenticated_e2e_test_case import AuthenticatedE2ETestCase
 
 from .models import ALL_MODELS, KeycloakItem

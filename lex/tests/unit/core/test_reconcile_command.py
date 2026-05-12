@@ -1,13 +1,15 @@
 import unittest
-from django.test import TransactionTestCase
-from django.core.management import call_command
-from django.utils import timezone
 from datetime import timedelta
-from unittest.mock import patch
 from io import StringIO
+from unittest.mock import patch
+
+from django.core.management import call_command
 from django.db import models, connection
+from django.test import TransactionTestCase
+from django.utils import timezone
 from lex.core.models.LexModel import LexModel
 from lex.process_admin.utils.model_registration import ModelRegistration
+
 
 class TimeCmdTestModel(LexModel):
     """Disposable model for reconcile-command tests."""
@@ -68,7 +70,6 @@ class ReconcileCommandTest(TransactionTestCase):
         """
         Verify that the management command wakes up a record that became valid.
         """
-        import datetime
         T0 = timezone.datetime(2025, 1, 1, 10, 0, 0)
         T_Future = T0 + timedelta(hours=1) # 11:00
         

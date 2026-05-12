@@ -1,9 +1,9 @@
+import logging
 import os
-import traceback
-import urllib.parse
 import threading
 import time
-import logging
+import traceback
+import urllib.parse
 from typing import Optional, Dict
 
 import jwt

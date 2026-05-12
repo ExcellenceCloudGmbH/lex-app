@@ -32,8 +32,6 @@ from uuid import UUID
 
 from django.db.models.fields import DateTimeField, DateField, TimeField
 from django.test import SimpleTestCase
-
-
 from lex.api.utils.helpers import _parse_value
 
 

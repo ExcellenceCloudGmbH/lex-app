@@ -2,7 +2,6 @@ import logging
 
 from django.contrib.contenttypes.models import ContentType
 
-
 logger = logging.getLogger(__name__)
 
 

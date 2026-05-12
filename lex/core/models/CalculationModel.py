@@ -1,7 +1,6 @@
+import logging
 import os
 import traceback
-from abc import abstractmethod
-import logging
 from copy import deepcopy
 
 from django.db import models
@@ -14,9 +13,9 @@ from django_lifecycle import (
     BEFORE_SAVE,
 )
 from django_lifecycle.conditions import WhenFieldValueIs
-from rest_framework.exceptions import APIException
-
-from lex.core.models.LexModel import LexModel
+from lex.api.utils import operation_context, OperationContext
+from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.ContextResolver import ContextResolver
 from lex.core.exceptions import (
     ensure_list,
     find_exception_artifacts,
@@ -25,9 +24,8 @@ from lex.core.exceptions import (
     select_preferred_exception_detail,
     select_preferred_stack_trace,
 )
-from lex.api.utils import operation_context, OperationContext
-from lex.audit_logging.utils.CacheManager import CacheManager
-from lex.audit_logging.utils.ContextResolver import ContextResolver
+from lex.core.models.LexModel import LexModel
+from rest_framework.exceptions import APIException
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +388,6 @@ class CalculationModel(LexModel):
         Returns:
             bool: True if Celery should be used, False for synchronous execution
         """
-        from lex.lex_app import settings
 
         # Check if Celery is enabled in setting
         if not os.getenv("CELERY_ACTIVE", "").lower() == 'true' or not hasattr(self.lex_func(), 'delay'):
@@ -428,7 +425,6 @@ class CalculationModel(LexModel):
         model_context = deepcopy(_model_context.get()['model_context'])
 
         # Dispatch the task
-        from lex.lex_app.celery_tasks import WaitForTasks
         task_result = func.delay(context=new_context, model_context=model_context)
 
         # Register with WaitForTasks context if one exists

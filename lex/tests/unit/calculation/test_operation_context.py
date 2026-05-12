@@ -30,7 +30,6 @@ Run::
 from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.api.utils.Context import (
     _build_context,
     OperationContext,

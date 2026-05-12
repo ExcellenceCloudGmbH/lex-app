@@ -26,7 +26,6 @@ Run::
 from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.api.utils.converters import create_model_converter
 
 

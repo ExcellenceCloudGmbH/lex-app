@@ -33,7 +33,6 @@ from __future__ import annotations
 import unittest
 
 from django.contrib.contenttypes.models import ContentType
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.tests.e2e._e2e_test_case import E2ETestCase

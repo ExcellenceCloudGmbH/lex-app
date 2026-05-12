@@ -47,7 +47,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import RequestFactory, SimpleTestCase, TestCase
-
 from lex.api.middleware.keycloak_permissions import (
     KeycloakPermissionsMiddleware,
 )

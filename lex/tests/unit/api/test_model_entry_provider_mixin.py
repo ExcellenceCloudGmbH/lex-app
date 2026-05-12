@@ -19,7 +19,7 @@ import unittest
 from datetime import datetime, timezone as dt_tz
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import django
 from django.apps import apps

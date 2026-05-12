@@ -50,10 +50,8 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from click.testing import CliRunner
-
 from generate_pycharm_configs import generate_pycharm_configs
 from lex.bin.lex import _SKIP_BOOTSTRAP_COMMANDS, lex
-
 
 # ---------------------------------------------------------------------
 # Helpers

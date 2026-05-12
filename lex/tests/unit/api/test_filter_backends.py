@@ -23,10 +23,9 @@ Tests for ``lex.api.views.model_entries.filter_backends`` — AG Grid filter bac
 """
 
 import base64
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.api.views.model_entries.filter_backends import (
     PrimaryKeyListFilterBackend,
     UserReadRestrictionFilterBackend,

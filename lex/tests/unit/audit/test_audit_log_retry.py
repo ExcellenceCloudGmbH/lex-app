@@ -2,7 +2,6 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from django.db.utils import OperationalError
-
 from lex.audit_logging.mixins.AuditLogMixin import (
     _resolve_audit_failure_traceback,
     _delete_with_retry,

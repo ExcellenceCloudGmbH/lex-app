@@ -7,15 +7,15 @@ Verifies:
     • Meta-history tracks the ``SCHEDULED`` status
 """
 
-from django.test import TransactionTestCase
-from django.utils import timezone
 from datetime import timedelta
 from unittest.mock import patch
+
 from django.db import models, connection
+from django.test import TransactionTestCase
+from django.utils import timezone
+from django_celery_beat.models import PeriodicTask
 from lex.core.models.LexModel import LexModel
 from lex.process_admin.utils.model_registration import ModelRegistration
-
-from django_celery_beat.models import PeriodicTask, ClockedSchedule
 
 
 class SchedTestModel(LexModel):
@@ -68,7 +68,6 @@ class EventSchedulingTest(TransactionTestCase):
 
     def test_future_insert_creates_schedule(self):
         """Inserting a future-valid record creates a ``PeriodicTask``."""
-        import datetime
         T_Now = timezone.datetime(2025, 1, 1, 10, 0, 0)
         T_Future = T_Now + timedelta(hours=2)
 
@@ -93,7 +92,6 @@ class EventSchedulingTest(TransactionTestCase):
         
     def test_deletion_revokes_schedule(self):
         """Deleting a future-valid history record revokes the scheduled task."""
-        import datetime
         T_Now = timezone.datetime(2025, 1, 1, 10, 0, 0)
         T_Future = T_Now + timedelta(hours=2)
 

@@ -37,7 +37,6 @@ import threading
 import unittest
 
 from django.test import SimpleTestCase
-
 from lex.core.services.bitemporal_signals import (
     _suppress_history_valid_to_chaining,
     _suppress_main_table_sync,

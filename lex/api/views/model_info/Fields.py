@@ -1,10 +1,3 @@
-from rest_framework import serializers as drf_serializers
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework_api_key.permissions import HasAPIKey
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import APIException
-from rest_framework.fields import empty
 from django.db.models import (
     ForeignKey,
     IntegerField,
@@ -17,10 +10,16 @@ from django.db.models import (
     AutoField,
     JSONField
 )
-from lex.core.fields import  PDFField, XLSXField
-from lex.api.views.permissions.UserPermission import UserPermission
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
-
+from lex.api.views.permissions.UserPermission import UserPermission
+from lex.core.fields import PDFField, XLSXField
+from rest_framework import serializers as drf_serializers
+from rest_framework.exceptions import APIException
+from rest_framework.fields import empty
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_api_key.permissions import HasAPIKey
 
 DEFAULT_TYPE_NAME = "string"
 
