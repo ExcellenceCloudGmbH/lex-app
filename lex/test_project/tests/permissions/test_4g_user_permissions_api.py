@@ -51,7 +51,6 @@ from lex.api.middleware.keycloak_permissions import (
     KeycloakPermissionsMiddleware,
 )
 from lex.api.utils import helpers as api_helpers
-from lex.api.views.authentication.UserPermissionView import UserPermissionsView
 from lex.core.models.LexModel import LexModel
 
 
