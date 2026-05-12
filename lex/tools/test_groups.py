@@ -117,6 +117,14 @@ class LexTestConfig:
     def group_names(self) -> set[str]:
         return {g.name for g in self.groups}
 
+    @property
+    def report_dir(self) -> Path:
+        return self.project_root / self.report_output_dir
+
+    @property
+    def coverage_html_dir(self) -> Path:
+        return self.report_dir / "coverage-html"
+
     def receivers_for(self, group_name: str) -> list[dict[str, Any]]:
         receivers = list(self.global_receivers)
         for g in self.groups:
@@ -919,7 +927,7 @@ def write_pdf_report(
     title: str = "Lex test report",
 ) -> Path:
     """Write a PDF summary for all configured groups or a selected subset."""
-    output_dir = config.project_root / config.report_output_dir
+    output_dir = config.report_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = filename_stem or f"lex-test-report-{timestamp}"
@@ -973,7 +981,7 @@ def send_report_emails(
         if backend == "django.core.mail.backends.filebased.EmailBackend":
             file_path = os.getenv(TEST_EMAIL_FILE_PATH_ENV_VAR, "").strip()
             if not file_path:
-                file_path = str(config.project_root / config.report_output_dir / "email-outbox")
+                file_path = str(config.report_dir / "email-outbox")
             Path(file_path).mkdir(parents=True, exist_ok=True)
             connection_kwargs["file_path"] = file_path
 
