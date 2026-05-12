@@ -404,17 +404,29 @@ class TestCluster01p_LexProjectConfig(TestCase):
             with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}):
                 second = config_mod.get_configured_default_serializer_name()
 
-        self.assertEqual(first, "first")
-        self.assertEqual(second, "first",
-                         "cache must not re-read the file on second call")
+            self.assertEqual(first, "first")
+            self.assertEqual(
+                second, "first",
+                "cache must not re-read the file on second call",
+            )
 
-        # After explicit reset, the new value comes through.
-        config_mod.reset_default_serializer_name_cache()
-        with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}):
-            third = config_mod.get_configured_default_serializer_name()
-        self.assertEqual(third, "second",
-                         "reset_default_serializer_name_cache() must "
-                         "force a re-load")
+            # After explicit reset, the new value comes through.
+            # IMPORTANT: this call must stay INSIDE the
+            # ``TemporaryDirectory`` context — once ``tmp`` is
+            # deleted, the loader can't read the mutated file and
+            # silently falls back to ``"default"`` (the previous
+            # version of this test made exactly that mistake and
+            # asserted ``third == "second"`` against a deleted dir,
+            # which sometimes worked locally only because the OS
+            # hadn't reclaimed the inode yet).
+            config_mod.reset_default_serializer_name_cache()
+            with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}):
+                third = config_mod.get_configured_default_serializer_name()
+            self.assertEqual(
+                third, "second",
+                "reset_default_serializer_name_cache() must force a "
+                "re-load of the on-disk file",
+            )
 
     def test_1_142_get_tab_display_names_merges_default_and_model(self):
         """1.142: ``get_tab_display_names_for_model`` merges the

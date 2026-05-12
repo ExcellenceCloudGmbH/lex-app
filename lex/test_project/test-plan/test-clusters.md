@@ -332,7 +332,7 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 > * **6.2 thin.** Asserts only that `"value"` is in the payload dict. Docs require: payload carries the *full serialized data* of the operation, on update payload is *refreshed to the final state* on success (`audit_log.payload = updated_payload` line 265 of `AuditLogMixin.py`), payload includes `id` after save. None pinned. See **6d** scenarios 6.42–6.43.
 > * **6.3 thin.** Asserts only `count==1` + `status=='success'`. Docs explicitly say "For deletions, the payload captures the record's state at the moment of deletion — so you can always inspect what was removed." That contract is uncovered. See **6d** scenario 6.44.
 > * **6.4 skipped.** Documented as "needs middleware-level audit hook". The mixin's *exception path* (`AuditLogMixin.py` lines 234–283 / 298–311 — `_pending_failed_audit_logs` queue + `_failed_audit_logged` sentinel + atomic vs. non-atomic split) is dark. The contract is concrete and reachable today via raising `pre_validation` + a `perform_create` save: failure status row, status='failure', traceback non-empty, atomic-block path queues for replay. See **6d** scenarios 6.45–6.47 (re-scoped — no middleware needed).
-> * **Pending intermediate state never observed.** The docs mermaid diagram makes "🟡 Pending → 🟢 Success / 🔴 Failure" a customer-visible lifecycle, but no test ever observes the *pending* state mid-flight. See **6d** scenario 6.48.
+> * **Pending intermediate state never observed.** The docs mermaid diagram makes " Pending →  Success /  Failure" a customer-visible lifecycle, but no test ever observes the *pending* state mid-flight. See **6d** scenario 6.48.
 > * **`BulkAuditLogMixin` not tested.** Documented as "Each individual record in a bulk operation gets its own audit log entry — so a bulk update of 100 records creates 100 audit log entries." Cluster 2e's bulk DELETE scenarios (2.23/2.24/2.25) never assert the audit row count. See gap sub-cluster **6e** scenarios 6.51–6.53.
 > * **Resilience contracts unpinned.** Two are explicitly called out in docs ("Resilience" section): deadlock retries (`RETRYABLE_SQLSTATE_CODES = {"40P01", "40001"}` + 3 attempts + exponential backoff) and ContentType cache healing (`safe_get_content_type` recovers when Django's cache goes stale post-migration). See **6f** scenarios 6.61–6.63.
 > * **Read-only / immutable contract not gated.** Docs `[!note]`: "Audit logs are effectively read-only. Only administrators should modify or delete them." `AuditLog.permission_create` / `permission_delete` return False, `permission_edit` denies. No test pins this — a regression that flipped any of those bools to `True` would silently allow audit deletion. See **6g** scenarios 6.71–6.73.
@@ -1080,6 +1080,43 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 4 pass / 0 fail.
 
+### 9d — `ActiveCalculationStateStore` full surface (coverage-driven — May 12)
+
+**Gap (May 12):** `lex/core/signals/ActiveCalculationStateStore.py` baseline **27.03%** (131 stmts, 86 missed). Two tests exist (9a/9b) but only exercise the store transitively through the `update_calculation_status` signal — the public accessors, the DB-validated `snapshot()` reconciliation path that the WebSocket consumer calls on every reconnect, the startup `validate_and_prune()` sweep, and the private model-resolution helpers (`_resolve_model_and_pk` / `_split_record_id` / `_find_model_by_name`) were all dark.
+
+**Why it matters:** this store is the single source of truth that lets a re-connecting browser tab pick up the spinner mid-calculation. The previous DatabaseCache implementation lost entries written inside `transaction.atomic()` because the ASGI consumer ran on a different DB connection — the bug whose fix this whole file exists to protect. Anything that breaks `snapshot()` (stale entries leaking through, live entries disappearing) directly regresses the customer-visible "did my calculation crash or am I just disconnected?" UX.
+
+**Shape:** `SimpleTestCase` — pure Python, no DB. Models are unmanaged (`Meta.managed = False`); DB-touching paths are MagicMock-driven via `patch.object(ActiveCalculationStateStore, '_resolve_model_and_pk', …)`. 24 tests run in 0.009s.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.11 | `mark_in_progress` with empty `record_id` is a no-op | Early-return guard; store stays empty (line 56) |
+| 9.12 | `mark_in_progress` persists full payload | All 5 fields land verbatim; `int` pk normalised to `str` so JSON-serializable downstream |
+| 9.13 | Optional fields default to `''` not `None` | `record` falls back to `record_id`; `calculation_id` / `model_label` / `record_pk` blank-string defaults — downstream consumers iterate values directly so `None` would force `or ""` everywhere |
+| 9.14 | `clear('')` is a no-op | Symmetric early-return guard (line 71); existing entry untouched |
+| 9.15 | `clear` removes entry and is idempotent | Second `clear` of same id silent — no `KeyError`, no log spam |
+| 9.16 | `clear_all` empties every entry | Startup-only sweep; works regardless of size |
+| 9.17 | `mark_in_progress` overwrites existing entry | Re-marking same id replaces prior entry (re-fire after ABORTED reset) |
+| 9.18 | `get_calculation_id` returns string when set | Live entry → calc id string |
+| 9.19 | `get_calculation_id` returns None for missing or blank | Both dark branches: dict.get default + `isinstance(...) and calculation_id` truthiness guard (line 88) |
+| 9.20 | `get_entry('')` returns `{}` | Symmetric defensive guard (line 94) |
+| 9.21 | `get_entry` returns a defensive copy | Mutating result must NOT affect store; pins `dict(entry)` copy (line 99) — regression to bare `return entry` would let snapshot consumers mutate under the lock |
+| 9.22 | `_split_record_id` parses `model_pk` on rightmost `_` | Handles model names containing underscores (`my_calc_model_7` → `("my_calc_model", "7")`) |
+| 9.23 | `_split_record_id` rejects malformed input | Empty / no underscore / blank halves all → `(None, None)` |
+| 9.24 | `_find_model_by_name` walks app registry | Returns `CalculationModel` subclass when match exists; `None` for unknown names |
+| 9.25 | `_resolve_model_and_pk` prefers explicit `model_label` | `app_label.ModelName` resolves via `apps.get_model` before `record_id` parsing |
+| 9.26 | `_resolve_model_and_pk` falls back to `record_id` parsing | No `model_label` → split + walk app registry |
+| 9.27 | `_resolve_model_and_pk` rejects non-`CalculationModel` classes | Without this guard `snapshot()` would call `.objects.filter(...)` on arbitrary models and could leak unrelated state into the WebSocket payload |
+| 9.27b | `_resolve_model_and_pk` returns `(None, None)` on full resolution failure | Empty entry early-out + `apps.get_model` raise → registry-walk fallback that also fails — no exception bubbles |
+| 9.28 | `snapshot()` empty-store fast path | No entries → `[]` returned without DB hit |
+| 9.28b | `snapshot()` returns live entries and prunes stale | Live IN_PROGRESS pass through; terminal-state entries dropped from BOTH the payload and the store — the WebSocket reconciliation contract |
+| 9.28c | `snapshot()` keeps entry on DB exception | Defensive: better a possibly-stale spinner than a silently-dropped live calculation on a DB blip |
+| 9.28d | `snapshot()` skips DB validation when resolver returns `(None, None)` | Unresolvable entry passes through unchecked; pins the `if model_class is not None and record_pk is not None` guard |
+| 9.28e | `validate_and_prune()` keeps only IN_PROGRESS rows | Empty-store fast-path safe; stale (terminal state) / gone (instance None) / unresolvable all dropped |
+| 9.28f | `validate_and_prune()` drops entry on DB exception | Documented behavioural difference from `snapshot()` — startup sweep is conservative-rebuild ("only keep what we can positively confirm"); a regression that adds "keep on exception" would have to revisit this test |
+
+**Status:**  Complete — 24 pass / 0 fail / 0.009s. Coverage: 27.03% → ~95%+ (whole file minus 1-2 unreachable defensive branches).
+
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
 **Gap (April 25):** `CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
@@ -1307,7 +1344,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 6.45 | Failed `pre_validation` on POST → failure audit row | `pre_validation` raises → response 400/500, `AuditLogStatus.status == 'failure'`, `error_traceback` contains the exception class name and message, no DB row created. Replaces the previously-skipped 6.4 — reachable today through validation hooks (`PreValidatedItem`-style fixture), no middleware needed |
 | 6.46 | Failure audit traceback round-trips through `resolve_exception_traceback` | Multi-line traceback string preserved — operators need full diagnostic info, not just the exception message |
 | 6.47 | Atomic-block failure queues a replacement audit row | When `perform_create` fails inside an atomic block (`transaction.get_connection().in_atomic_block`), the in-flight failure status row rolls back with the request, and `_pending_failed_audit_logs` carries the queued replacement so the request-level fallback can persist it. Pins the line 238–246 branch |
-| 6.48 | Pending state observable mid-flight | A `perform_create` paused in the serializer save (e.g. via a `pre_save` signal that captures status mid-call) sees `AuditLogStatus.status == 'pending'`. Documents the documented 🟡 → 🟢/🔴 lifecycle from the Audit Log Tab |
+| 6.48 | Pending state observable mid-flight | A `perform_create` paused in the serializer save (e.g. via a `pre_save` signal that captures status mid-call) sees `AuditLogStatus.status == 'pending'`. Documents the documented  → / lifecycle from the Audit Log Tab |
 
 **Status:**  Implemented (Session 51). 6.41–6.46 pass live — including 6.45/6.46 which were planned as `@expectedFailure` but the framework already writes the failure audit row through the validation-hook path, so they stand as live regression gates. 6.47/6.48 auto-skip on missing fixture (atomic-block reentrancy + mid-flight pending observation). See progress.md Session 51.
 
@@ -1352,6 +1389,84 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 6.73 | PATCH `/api/auditlog/<id>/` returns 403 | `permission_edit` → `PermissionResult.deny(...)`, fields cannot be mutated; audit row preserved verbatim |
 
 **Status:**  Implemented (Session 51). `AuditLog.permission_create == False`, `permission_delete == False` even for admin, `permission_edit` returns `PermissionResult(allowed=False)` with the documented "read-only" reason; sub-pin on `AuditLogStatus` so a regression flipping write access (allowing `failure → success` rewrites) is caught. See progress.md Session 51.
+
+---
+
+### 6o. `BulkAuditLogMixin._normalize_bulk_payloads` four-branch matrix (coverage-driven — May 12) — implemented
+
+**Gap:** 6e (Session 51) only drove the API-level happy DELETE-many path through `BulkAuditLogMixin`. The static `_normalize_bulk_payloads` helper that drives every bulk-write payload normalisation — the bridge between DRF's bulk serializer and the per-row audit-write loop — had every other branch unexercised. A regression that mis-aligned payloads to targets would silently mis-attribute audit evidence to the wrong row, a compliance regression visible only when an investigator notices the payloads don't match the IDs.
+
+**Models:** None (uses `SimpleNamespace` target stand-ins; `_attach_related_instance_id` patched to a transparent identity).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 6.156 | `len(payloads) == len(targets)` → strict 1-to-1 zip alignment | DRF's bulk serializer produces one payload per instance; helper preserves the mapping. Regression that swapped to broadcast or single-serialize would silently apply the same payload to every target |
+| 6.157 | `len(payloads) == 1` and `len(targets) > 1` → broadcast | Uniform "delete-with-reason" bulk ops; helper replicates the one payload across every target. Regression that zip-truncated would leave N-1 audit rows with empty payloads |
+| 6.158 | Dict / scalar payload (not a list) → `_serialize_payload(...) or {}` then replicated | The "PATCH same fields on N rows" path; pinned to land the dict on every target's audit row, not just the first |
+| 6.159 | Falsy serialised payload → `{}` fallback fires | Empty dict (`_serialize_payload({}) → {}` falsy) and empty list (`_serialize_payload([])` enters list branch with len 0 → fall-through, `[]` falsy) both trigger `or {}`. Without the guard, audit rows would land `payload=None`, masking bulk-write evidence. **Pins documented quirk**: None is NOT rewritten to `{}` because `_serialize_payload(None)` returns the string `"None"` (truthy) and the `or {}` skips — callers must pass `{}` explicitly. Plus mismatched-length list (3 entries / 2 targets) falls through to single-serialize semantics, replicating the whole list across every target — pin so a regression that silently truncated to `targets[:len(payloads)]` would surface here |
+
+**Status:**  Implemented (Session 64). `SimpleTestCase`-only batch, 4 pass in 0.044s combined with 8l. `_attach_related_instance_id` patched to identity so we observe which payload landed on which target without depending on the attacher's internal contract. See `lex/test_project/tests/audit_logging/test_6o_bulk_audit_normalize.py` and progress-session-log.md Session 64.
+
+---
+
+### 8l. `CeleryTaskDispatcher` full surface (coverage-driven — May 12) — implemented
+
+**Gap:** 8h had only ever exercised the happy-path real eager dispatch through this orchestrator (one group, one success), and 8j had only driven the body of `calc_and_save` itself. Everything around the orchestrator's defensive scaffolding (group validation, scope selection, sync fallback, `_handle_task_results`'s ResultSet processing + per-task failure routing, the `_get_calculation_context` swallowing-raise contract) was dark at 45.69% baseline (186 stmts, 98 missed). The orchestrator is the **single seam** between a `CalculatedModelMixin.create()` call and the Celery dispatch / sync-fallback machinery, so a regression in any branch silently turns one customer's calculation into either a runaway crash or a "calculation never finished" ghost row.
+
+**Models:** None — `SimpleTestCase`-only with `MagicMock` Celery / broker / ORM (`from lex.lex_app.celery_tasks import calc_and_save` patched at the runtime import site since that module imports it lazily to dodge a circular import).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.47 | Empty `groups=[]` → log + return without dispatch, never raises | Pin so a stray empty-dispatch from a calc rerun does not surface a CeleryDispatchError to the operator dashboard |
+| 8.48 | Wrong-type `groups` (str / dict / None) → CeleryDispatchError(groups_type=…) | Diagnostic field surfaces in the operator log rather than a generic 500 |
+| 8.49 | All-empty groups `[[], []]` → log + return | "All groups are empty" warning, no dispatch |
+| 8.50 | Mixed `[[a], [], [b]]` filters silently | "Filtered out N empty groups from M total groups" warning that operators key off; valid groups still dispatched |
+| 8.51 | ImportError on `from lex.lex_app.celery_tasks import calc_and_save` | Wrapped CeleryDispatchError with cause-chain via `__cause__` so the missing-module case isn't silently swallowed |
+| 8.52 | No active FF/WFT scope → enters fresh `WaitForTasks()` | Dispatcher always drains so calling code never sees a dangling task |
+| 8.53 | Active FireAndForget scope detected → uses `nullcontext()` | Don't double-wrap and break drain semantics |
+| 8.54 | Active WaitForTasks scope detected → uses `nullcontext()` | Same — outer scope's drain semantics preserved |
+| 8.55 | Setup exception (broker unavailable) → flatten all groups + `calc_and_save_sync` | Recovers the calculation; "complete fallback" log entry visible |
+| 8.56 | Setup-AND-sync-fallback both raising | Wrapped CeleryDispatchError carrying both `celery_error` + `sync_error` strings so operators triage from one log entry without hunting two tracebacks |
+| 8.57 | `_dispatch_single_group([])` → warn-and-skip, returns None | None signals "synchronous fallback used" to the caller |
+| 8.58 | Wrong-type group inside groups list → CeleryDispatchError(group_index=…, group_type=…) | Diagnostic fields name the offending position |
+| 8.59 | `calc_and_save` import failure inside per-group dispatch | Wrapped CeleryDispatchError with chained cause |
+| 8.60 | Dispatch raises CeleryDispatchError → falls back to `calc_and_save_sync` for that group | Returns None to indicate sync fallback; other groups unaffected |
+| 8.61 | Dispatch + sync fallback both fail | Chained CeleryDispatchError with both error strings |
+| 8.62 | Unexpected non-CeleryDispatchError exception during dispatch | Wrapped as CeleryDispatchError so callers can catch one type |
+| 8.63 | `_handle_task_results([])` → warn-and-return | "No task results to handle" log; never raises |
+| 8.64 | Wrong-type `task_results` → CeleryDispatchError | Defensive type check at the entry boundary |
+| 8.65 | Wrong-type `group_mapping` → CeleryDispatchError | Same |
+| 8.66 | All tasks succeed → no sync fallback fires | "tasks successful" log, `calc_and_save_sync` never called |
+| 8.67 | Single failed task → corresponding group routed through `calc_and_save_sync` via retry queue | Group identified via `task_result.id` lookup in `group_mapping` |
+| 8.68 | `task_result.failed()` itself raising (backend connection drop) → group still queued for retry | Pin so a flaky `.failed()` doesn't drop the calculation on the floor |
+| 8.69 | ResultSet processing failure → flatten ALL groups + complete-sync fallback | Recovers every group via `group_mapping.values()` |
+| 8.70 | ResultSet failure AND complete-sync failure both raising | Chained CeleryDispatchError carrying both strings |
+| 8.71 | `_get_calculation_context` happy / missing / raise | Returns calc_id when present, None otherwise, swallows raises so a context-var bug never crashes the dispatcher |
+
+**Status:**  Implemented (Session 63). 25 pass in 0.044s. `SimpleTestCase`-only — Celery, broker, ORM all `MagicMock` / `patch.object`. See `lex/test_project/tests/celery_async/test_8l_celery_dispatcher.py` and progress-session-log.md Session 63.
+
+---
+
+### 10i. `Fields` APIView dispatch + `create_list_ui_info` helper (coverage-driven — May 12) — implemented
+
+**Gap:** 10e (Sessions 18 + 20) had covered `create_field_info` purely as a unit helper; the `/api/<model>/fields/?serializer=…` request handler itself + the small `create_list_ui_info` companion helper feeding it were both still dark at 33.68% baseline (75 stmts / 45 missed). The endpoint is the **single source of truth** the React form layer consults to decide which DRF widget to render for each column, whether the input is editable / required / has a default, whether AG Grid may use the column for row-grouping or pivoting (`is_groupable`), whether the actions column should be hidden on the list view (`list_ui.hide_actions_column`), and which serializer alternates exist. A regression in any of these branches silently mis-renders a form or hides actions an admin needed to fix bad data.
+
+**Models:** None — `SimpleTestCase`-only with `MagicMock` model_container / model._meta / DRF fields.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 10.24 | `get_list_ui_options` classmethod takes priority over `Meta.hide_actions_column` | Platform-shipped custom toolbars survive — drift to "Meta wins" semantics would silently strip every custom toolbar button |
+| 10.25 | `Meta.hide_actions_column` reflected for True/False; missing Meta → False | Default-False keeps the actions column visible; drift would hide actions for every model that hasn't opted in |
+| 10.26 | Unknown `?serializer=…` raises `APIException` with `error` (model + name) and `available` (valid keys) | Frontend can surface a usable diagnostic; refactor that drops `available` would force a generic toast |
+| 10.27 | Container without `get_serializers_map()` falls back to `.serializers_map` attribute | Back-compat for legacy containers; regression that hard-required the getter would 500 every legacy-container request |
+| 10.28 | Django model field path emits `is_groupable=True` | AG Grid SSRM `qs.values(field).annotate(...)` lights up; drift would disable grouping on every column users group by today |
+| 10.29 | `get_field` raises → DRF-only fallback path with `is_groupable=False` | SerializerMethodField / computed properties have no underlying Django column; flag prevents an empty grid when the user toggles row-group on a computed column. Also pins DRF type mapping (`FloatField → "float"`), `empty` sentinel → None, `read_only=True → editable=False` |
+| 10.30 | `ID_FIELD_NAME` / `SHORT_DESCR_NAME` stripped + `Meta.lex_field_type_overrides` beats auto-derived type | Internal-only fields would otherwise surface as duplicate/confusing form columns; override drift would silently swap the editor widget back. Plus bare class as `default` (`int`) coerces to None — otherwise serialises as `<class 'int'>` and breaks the form |
+| 10.31 | `PrimaryKeyRelatedField` (DRF-only) → `target` set to `queryset.model._meta.model_name` | Autocomplete picker renders right; without it the dropdown shows free-text and lets users save garbage IDs. Defensive try/except: queryset that raises drops `target` silently, doesn't 500 the whole `/fields/` response |
+| 10.31b | `DJANGO_FIELD2TYPE_NAME` covers ForeignKey / Integer / Float / Boolean / Date | Drift canary against silent dict-key rename — type-map sanity gate |
+| 10.31c | `DRF_FIELD2TYPE_NAME` covers Integer / Decimal / Char / PrimaryKeyRelated / JSON + `DEFAULT_TYPE_NAME == "string"` | Drift canary on the DRF-only fallback branch dictionary |
+
+**Status:**  Implemented (Session 65). 10 pass in 0.007s. `SimpleTestCase`-only — model_container / model._meta / DRF fields all `MagicMock` so no DB, no router, no real serializer round-trip. See `lex/test_project/tests/api_layer/test_10i_fields_view_and_list_ui.py` and progress-session-log.md Session 65.
 
 ---
 

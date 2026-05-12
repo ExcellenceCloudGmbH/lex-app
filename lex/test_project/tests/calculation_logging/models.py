@@ -38,7 +38,7 @@ class LogRootCalc(CalculationModel):
     """
 
     name = models.CharField(max_length=200)
-    child_mode = models.CharField(max_length=20, default="log_only")
+    child_mode = models.CharField(max_length=40, default="log_only")
     units_csv = models.CharField(max_length=200, default="u1")
     calculation_error_message = models.TextField(blank=True, default="")
 
