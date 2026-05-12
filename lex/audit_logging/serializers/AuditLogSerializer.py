@@ -44,6 +44,11 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
             'duration',
         ]
         read_only_fields = [f.name for f in AuditLog._meta.fields]
+        lex_field_type_overrides = {
+            'status_created_at': 'date_time',
+            'status_updated_at': 'date_time',
+            'duration': 'duration',
+        }
 
     def _get_latest_status_record(self, obj):
         """Return the latest AuditLogStatus record for this AuditLog, or None."""

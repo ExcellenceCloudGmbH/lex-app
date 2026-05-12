@@ -127,6 +127,10 @@ class Fields(APIView):
         # hide internal-only fields
         excluded = {ID_FIELD_NAME, SHORT_DESCR_NAME}
 
+        # Check for explicit type overrides on the serializer Meta
+        meta = getattr(serializer, 'Meta', None)
+        field_type_overrides = getattr(meta, 'lex_field_type_overrides', {}) or {}
+
         for fname, drf_field in serializer.fields.items():
             if fname in excluded:
                 continue
@@ -163,7 +167,7 @@ class Fields(APIView):
                 info = {
                     "name": fname,
                     "readable_name": getattr(drf_field, "label", fname).title(),
-                    "type": ftype,
+                    "type": field_type_overrides.get(fname, ftype),
                     "editable": not getattr(drf_field, "read_only", False),
                     "required": getattr(drf_field, "required", False),
                     "default_value": default_value,
