@@ -399,26 +399,22 @@ class TestCluster01p_LexProjectConfig(TestCase):
             with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}):
                 first = config_mod.get_configured_default_serializer_name()
 
-                # Mutate the file under the cache (still inside the
-                # TemporaryDirectory context — otherwise the dir is
-                # deleted and load() falls back to defaults).
-                self._write_config(tmp, "DEFAULT_SERIALIZER_NAME = 'second'\n")
+            # Mutate the file under the cache.
+            self._write_config(tmp, "DEFAULT_SERIALIZER_NAME = 'second'\n")
+            with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}):
                 second = config_mod.get_configured_default_serializer_name()
 
-                self.assertEqual(first, "first")
-                self.assertEqual(
-                    second, "first",
-                    "cache must not re-read the file on second call",
-                )
+        self.assertEqual(first, "first")
+        self.assertEqual(second, "first",
+                         "cache must not re-read the file on second call")
 
-                # After explicit reset, the new value comes through.
-                config_mod.reset_default_serializer_name_cache()
-                third = config_mod.get_configured_default_serializer_name()
-                self.assertEqual(
-                    third, "second",
-                    "reset_default_serializer_name_cache() must "
-                    "force a re-load",
-                )
+        # After explicit reset, the new value comes through.
+        config_mod.reset_default_serializer_name_cache()
+        with mock.patch.dict(os.environ, {"PROJECT_ROOT": tmp}):
+            third = config_mod.get_configured_default_serializer_name()
+        self.assertEqual(third, "second",
+                         "reset_default_serializer_name_cache() must "
+                         "force a re-load")
 
     def test_1_142_get_tab_display_names_merges_default_and_model(self):
         """1.142: ``get_tab_display_names_for_model`` merges the

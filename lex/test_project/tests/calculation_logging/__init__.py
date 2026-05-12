@@ -12,20 +12,25 @@ from uuid import uuid4
 from django.contrib.contenttypes.models import ContentType
 
 from lex.api.utils import operation_context
+from lex.audit_logging.handlers.LexLogger import LexLogger
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from lex.audit_logging.utils.ModelContext import model_logging_context
+from lex.core.models.CalculationModel import CalculationModel
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS
 
 
-def _seed_operation_context_and_audit_log() -> Tuple[str, AuditLog]:
+def _seed_operation_context_and_audit_log() -> Tuple[str, AuditLog, "object"]:
     """
     Generate a unique calculation_id, write the matching AuditLog row,
     and push the calculation_id into operation_context.
 
-    Returns ``(calculation_id, audit_log)``.
+    Returns ``(calculation_id, audit_log, ctx_token)``. The caller MUST
+    call ``operation_context.reset(ctx_token)`` in tearDown to avoid
+    leaking the calc_id into the next test in the same thread.
     """
     calc_id = f"calc_15_{uuid4().hex}"
     audit_log = AuditLog.objects.create(
@@ -37,8 +42,8 @@ def _seed_operation_context_and_audit_log() -> Tuple[str, AuditLog]:
     current = dict(operation_context.get() or {})
     current["calculation_id"] = calc_id
     current.setdefault("request_obj", None)
-    operation_context.set(current)
-    return calc_id, audit_log
+    token = operation_context.set(current)
+    return calc_id, audit_log, token
 
 
 class _CalcLogTestCase(E2ETestCase):
@@ -58,7 +63,24 @@ class _CalcLogTestCase(E2ETestCase):
         # we clear here so each scenario starts with zero rows.
         CalculationLog.objects.all().delete()
         AuditLog.objects.all().delete()
-        self.calc_id, self.audit_log = _seed_operation_context_and_audit_log()
+        (
+            self.calc_id,
+            self.audit_log,
+            self._ctx_token,
+        ) = _seed_operation_context_and_audit_log()
+
+    def tearDown(self):
+        # Drain the LexLogger singleton's content buffer. LexLogger is a
+        # process-wide singleton; if a test fails mid-build (after
+        # add_text(...) but before .log()), the stale content would leak
+        # into the next test's first .log() call.
+        LexLogger().content = []
+        # Reset operation_context to whatever state predated setUp.
+        # Without this, ContextVar.set() leaks self.calc_id into the
+        # next test in the same Python thread (TransactionTestCase
+        # tests run sequentially per-thread).
+        operation_context.reset(self._ctx_token)
+        super().tearDown()
 
     # ── shared assertion helpers ─────────────────────────────────────
 
@@ -126,3 +148,27 @@ class _CalcLogTestCase(E2ETestCase):
             f"Expected {expected} CalculationLog rows total for "
             f"calculationId={self.calc_id}, got {actual}.",
         )
+
+    # ── shared driver ────────────────────────────────────────────────
+
+    def drive_root(self, root):
+        """
+        Run a root ``CalculationModel`` end-to-end the way the REST API
+        does it: wrap the IN_PROGRESS save in ``model_logging_context``
+        so any ``LexLogger().log()`` calls inside ``calculate()`` resolve
+        to the root as the current model. Mirrors
+        :func:`lex.api.views.model_entries.One` (which wraps every
+        update in ``with model_logging_context(instance):``).
+
+        Swallows exceptions so error-path scenarios can still inspect
+        the post-state. Refreshes the instance from the DB so the
+        caller sees the post-calc state.
+        """
+        root.is_calculated = CalculationModel.IN_PROGRESS
+        with model_logging_context(root):
+            try:
+                root.save()
+            except Exception:
+                pass
+        root.refresh_from_db()
+        return root
