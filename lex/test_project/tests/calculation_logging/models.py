@@ -78,6 +78,26 @@ class LogRootCalc(CalculationModel):
         if self.child_mode == "conditional":
             LogConditionalChild.create(unit=units)
             return
+        if self.child_mode == "calcmodel_chain":
+            # Direct CalculationModel.save() inside root.calculate() — 2 levels.
+            inner = LogInnerSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogInnerSavedCalc.IN_PROGRESS,
+            )
+            inner.save()
+            return
+        if self.child_mode == "calcmodel_chain_3":
+            # Three-level CalcModel chain via direct .save() at each hop.
+            middle = LogMiddleSavedCalc(
+                name=self.units_csv,
+                is_calculated=LogMiddleSavedCalc.IN_PROGRESS,
+            )
+            middle.save()
+            return
+        if self.child_mode == "fanout_then_calcmodel":
+            # Mixin fan-out, then inner CalcModel.save() inside each child.
+            LogChildWithInnerSave.create(unit=units)
+            return
 
 
 @_permissive
@@ -216,6 +236,77 @@ class LogConditionalChild(CalculatedModelMixin):
             LexLogger().add_text(f"conditional {self.unit}").log()
 
 
+@_permissive
+class LogInnerSavedCalc(CalculationModel):
+    """CalculationModel whose calculate() emits a LexLogger line.
+    Used to test hierarchy preservation across the .save() boundary
+    when called from inside another calc's calculate()."""
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+        LexLogger().add_text(f"inner {self.name}").log()
+
+
+@_permissive
+class LogMiddleSavedCalc(CalculationModel):
+    """Middle layer of the 3-level CalculationModel chain — logs
+    AND saves a LogInnerSavedCalc inside calculate()."""
+    name = models.CharField(max_length=100)
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self):  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+        LexLogger().add_text(f"middle {self.name}").log()
+        inner = LogInnerSavedCalc(
+            name=f"inner-from-{self.name}",
+            is_calculated=LogInnerSavedCalc.IN_PROGRESS,
+        )
+        inner.save()
+
+
+@_permissive
+class LogChildWithInnerSave(CalculatedModelMixin):
+    """Combinatorial child that logs AND saves an inner
+    LogInnerSavedCalc from inside its calculate(). Tests the
+    mixed Mixin → CalculationModel.save() boundary."""
+    unit = models.CharField(max_length=50)
+
+    defining_fields = ["unit"]
+    parallelizable_fields: list[str] = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        # Fallback only — combinatorial callers override.
+        if key == "unit":
+            return ["u1"]
+        return []
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+        LexLogger().add_text(f"child {self.unit}").log()
+        inner = LogInnerSavedCalc(
+            name=f"from-{self.unit}",
+            is_calculated=LogInnerSavedCalc.IN_PROGRESS,
+        )
+        inner.save()
+
+
 ALL_MODELS = [
     LogRootCalc,
     LogLoudChild,
@@ -223,4 +314,7 @@ ALL_MODELS = [
     LogMiddleCombinatoric,
     LogGrandchildCalc,
     LogConditionalChild,
+    LogInnerSavedCalc,
+    LogMiddleSavedCalc,
+    LogChildWithInnerSave,
 ]
