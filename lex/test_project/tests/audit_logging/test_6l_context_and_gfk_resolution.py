@@ -357,4 +357,3 @@ class TestCluster06l_ContextResolver(SimpleTestCase):
             "Calculation-Log Tab parses this to render the back-link.",
         )
         self.assertEqual(info.root_record, "current_model_10")
-

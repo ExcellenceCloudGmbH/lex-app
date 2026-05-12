@@ -473,4 +473,3 @@ class TestCluster06k_CalculationLogConstants(SimpleTestCase):
         self.assertEqual(gfk.fk_field, "object_id")
 
 
-
