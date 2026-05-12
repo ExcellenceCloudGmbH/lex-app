@@ -1,6 +1,5 @@
 # from: https://stackoverflow.com/a/52700398
 import logging
-from rest_framework import response, status
 
 logger = logging.getLogger(__name__)
 

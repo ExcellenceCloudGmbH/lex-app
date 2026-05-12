@@ -22,9 +22,8 @@ import html
 import json
 import os
 import secrets
-import sqlite3
-import subprocess
 import signal
+import sqlite3
 import threading
 import time
 import webbrowser
@@ -40,7 +39,6 @@ from lex.tools.setup_with_ai import (
     GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY,
     GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY,
     LEX_MCP_LOCAL_SERVER_NAME,
-    SetupWithAIError,
     _atomic_write_text,
     _ensure_github_copilot_state_table,
     _load_github_copilot_mcp_servers_cache,

@@ -28,7 +28,6 @@ from __future__ import annotations
 import unittest
 
 from django.core.exceptions import ObjectDoesNotExist
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 

@@ -34,9 +34,6 @@ Tests for ``ModelCombinationGenerator``, ``ModelClusterManager``, and
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
-from django.db import models
-from django.test import SimpleTestCase
-
 from core.mixins.CalculatedModelMixin import (
     ModelCombinationGenerator,
     ModelClusterManager,
@@ -44,6 +41,8 @@ from core.mixins.CalculatedModelMixin import (
     calc_and_save_sync,
     CalculatedModelMixin,
 )
+from django.db import models
+from django.test import SimpleTestCase
 from lex.core.exceptions import ModelCombinationError, ModelClusteringError, CalculatedModelError
 
 

@@ -39,7 +39,6 @@ from types import SimpleNamespace
 from unittest import TestCase, mock
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands import init as init_module
 from lex.lex_app.management.commands.init import (
     DEFAULT_CLIENT_ROLES,

@@ -45,7 +45,6 @@ from unittest.mock import MagicMock, patch
 
 from django.db import connection, models
 from django.test import SimpleTestCase, TransactionTestCase
-
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException

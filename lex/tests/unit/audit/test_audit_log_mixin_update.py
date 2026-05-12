@@ -37,10 +37,9 @@ How to run
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 
 

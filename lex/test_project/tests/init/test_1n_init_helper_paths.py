@@ -32,7 +32,6 @@ import unittest
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
-
 from lex.lex_app.management.commands.init import (
     Command,
     _format_keycloak_import_error_details,

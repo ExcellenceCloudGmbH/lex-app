@@ -1,15 +1,8 @@
 # custom_logger.py
-import ast
-import logging
-import time
-import uuid
 
-import mistune
 import pandas as pd
-from django.conf import settings
-
-from lex.utilities.decorators.singleton import LexSingleton
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from lex.utilities.decorators.singleton import LexSingleton
 
 
 class LexLogLevel:

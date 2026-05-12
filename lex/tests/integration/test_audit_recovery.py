@@ -27,7 +27,6 @@ from unittest.mock import patch
 
 from django.db import connection, models
 from django.test import TransactionTestCase
-
 from lex.api.utils import OperationContext
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus

@@ -167,7 +167,6 @@ class ActiveCalculationStateStore:
 
         Intended to be called **once at server startup** only.
         """
-        from django.apps import apps
         from lex.core.models.CalculationModel import CalculationModel
 
         with cls._lock:

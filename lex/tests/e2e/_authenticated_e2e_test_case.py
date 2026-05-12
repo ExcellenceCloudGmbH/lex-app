@@ -50,7 +50,6 @@ from typing import FrozenSet, Set
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
-
 from lex.core.models.LexModel import UserContext
 
 from ._e2e_test_case import E2ETestCase

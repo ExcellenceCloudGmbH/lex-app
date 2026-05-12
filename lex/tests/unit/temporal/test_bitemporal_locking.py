@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from lex.core.services.StandardHistory import MAIN_TABLE_SYNC_NOT_NEEDED_ATTR
 from lex.core.services.MetaHistory import create_meta_history_record
+from lex.core.services.StandardHistory import MAIN_TABLE_SYNC_NOT_NEEDED_ATTR
 from lex.core.services.bitemporal_signals import (
     on_history_saved__chain_valid_to,
     on_history_saved__sync_main_table,

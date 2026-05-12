@@ -39,7 +39,6 @@ it is part of the behavior we are asserting.
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
-
 from lex.api.utils import operation_context
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore

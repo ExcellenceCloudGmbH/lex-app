@@ -1,21 +1,19 @@
 # lex/bin/lex.py
+import asyncio
 import io
 import os
-import sys
-import time
 import platform
 import subprocess
+import sys
 import threading
-import asyncio
+import time
 from pathlib import Path
 
 import click
 import uvicorn
-
-from lex.tools.project_root import find_project_root
-from lex.tools.ai_faq import launch_ai_faq
 from lex.tools.ai_dashboard import launch_ai_dashboard
-from lex.tools.verify_ai_assets import verify_ai_assets
+from lex.tools.ai_faq import launch_ai_faq
+from lex.tools.project_root import find_project_root
 from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
@@ -29,6 +27,7 @@ from lex.tools.setup_with_ai import (
     probe_lex_mcp_local_server_for_pycharm,
     resolve_active_python_executable,
 )
+from lex.tools.verify_ai_assets import verify_ai_assets
 
 # Defer Django imports and setup until needed (NOT at import time)
 _DJANGO_READY = False

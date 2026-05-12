@@ -9,13 +9,9 @@ Focused tests for CalculationModel atomicity guarantees:
 4. ``post_validation`` rollback — model reverts to snapshot after failure.
 """
 
-import os
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from django.db import connection, models
-from django.test import TransactionTestCase
-
+from django.db import models
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.exceptions import ValidationError

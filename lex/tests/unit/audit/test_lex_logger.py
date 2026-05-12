@@ -31,11 +31,10 @@ See also
 - ``docs/reference/LexLogger API.md``
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pandas as pd
 from django.test import SimpleTestCase
-
 from lex.audit_logging.handlers.LexLogger import LexLogger
 
 

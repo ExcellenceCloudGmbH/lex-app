@@ -42,19 +42,15 @@ See also
 - ``docs/reference/CalculatedModelMixin Internals.md``
 """
 
-from copy import deepcopy
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
-from django.db import models
 from django.test import SimpleTestCase
-
+from lex.core.exceptions import ModelCombinationError, ModelClusteringError
 from lex.core.mixins.CalculatedModelMixin import (
     ModelCombinationGenerator,
     ModelClusterManager,
     _normalize_field_values,
 )
-from lex.core.exceptions import ModelCombinationError, ModelClusteringError
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

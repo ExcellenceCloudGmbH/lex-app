@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 from django.db import models
 from django.test import SimpleTestCase
-
 from lex.api.utils import operation_context
 from lex.audit_logging.utils.ModelContext import ModelContext, _model_context
 from lex.core.models.CalculationModel import CalculationModel

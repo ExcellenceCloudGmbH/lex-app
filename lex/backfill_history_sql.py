@@ -7,9 +7,10 @@ Direct History Backfill using Raw SQL (Dynamic)
 3. Backfills Main -> History (Level 1) with valid_from=NOW() IF NOT EXISTS.
 4. Backfills History -> MetaHistory (Level 2) with sys_from=NOW() IF NOT EXISTS.
 """
-import psycopg2
 import os
 import sys
+
+import psycopg2
 
 # DATABASE_DEPLOYMENT_TARGET=default should be set
 DB = os.environ.get("DB_NAME", "db_armiracashflowdb")

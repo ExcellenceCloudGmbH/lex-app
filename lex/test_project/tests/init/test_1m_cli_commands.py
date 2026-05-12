@@ -50,10 +50,8 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from click.testing import CliRunner
-
 from generate_pycharm_configs import generate_pycharm_configs
 from lex.bin.lex import _SKIP_BOOTSTRAP_COMMANDS, lex
-
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -119,12 +117,6 @@ class TestCluster01m_RunFileSetParity(TestCase):
         "Streamlit.run.xml",
         "Create_DB.run.xml",
         "Flush_DB.run.xml",
-        "Test_All.run.xml",
-        "Test_Core.run.xml",
-        "Test_Audit.run.xml",
-        "Test_ProcessAdmin.run.xml",
-        "Test_Lex.run.xml",
-        "Test_Single.run.xml",
     })
 
     def test_1_102_scaffold_produces_complete_run_file_set(self):

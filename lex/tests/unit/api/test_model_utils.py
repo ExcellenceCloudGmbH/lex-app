@@ -24,7 +24,6 @@ Run::
 from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.process_admin.models.utils import get_node_styling
 
 

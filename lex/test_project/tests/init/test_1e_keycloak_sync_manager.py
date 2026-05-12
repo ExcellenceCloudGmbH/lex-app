@@ -33,7 +33,6 @@ from pathlib import Path
 from unittest import TestCase, mock
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands.init import (
     KeycloakSyncManager,
 )

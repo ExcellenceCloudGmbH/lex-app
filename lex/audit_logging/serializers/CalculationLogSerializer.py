@@ -1,7 +1,6 @@
-from rest_framework import serializers
-
 from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.audit_logging.utils.content_types import safe_get_generic_related_object
+from rest_framework import serializers
 
 
 class CalculationLogDefaultSerializer(serializers.ModelSerializer):

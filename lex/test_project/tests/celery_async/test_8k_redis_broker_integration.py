@@ -25,17 +25,16 @@ Scenario numbering continues after Cluster 8j at 8.45.
 from __future__ import annotations
 
 import os
-import uuid
 import unittest
+import uuid
 from contextlib import contextmanager
+from unittest.mock import patch
 
 from celery.contrib.testing.worker import start_worker
 from celery.result import allow_join_result
-from kombu.serialization import enable_insecure_serializers
-
 from django.conf import settings as django_settings
 from django.test import SimpleTestCase
-from unittest.mock import patch
+from kombu.serialization import enable_insecure_serializers
 
 _UNSET = object()
 

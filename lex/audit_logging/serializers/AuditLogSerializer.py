@@ -1,7 +1,6 @@
-from rest_framework import serializers
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.utils.content_types import safe_get_content_type
+from rest_framework import serializers
 
 
 class AuditLogReadOnlySerializerMixin:

@@ -10,10 +10,9 @@ Covers all five filter classes:
 """
 
 import json
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.api.filters.GenericFilters import (
     UserReadRestrictionFilterBackend,
     ForeignKeyFilterBackend,

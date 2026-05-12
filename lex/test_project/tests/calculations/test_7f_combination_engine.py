@@ -41,11 +41,9 @@ docs/test-plan/test-clusters.md § Planned Expansions → 7f.
 
 from __future__ import annotations
 
-import copy
 import unittest
 
 from django.test import SimpleTestCase
-
 from lex.core.exceptions import ModelClusteringError, ModelCombinationError
 from lex.core.mixins.CalculatedModelMixin import (
     ModelClusterManager,

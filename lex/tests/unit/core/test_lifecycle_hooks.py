@@ -29,9 +29,8 @@ Tests for LexModel lifecycle hooks — the django-lifecycle integration.
         lex test lex.core.tests.test_lifecycle_hooks --verbosity=2
 """
 
-from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
 

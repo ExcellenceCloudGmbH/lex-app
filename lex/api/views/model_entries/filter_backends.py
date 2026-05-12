@@ -6,12 +6,11 @@ from urllib.parse import parse_qs
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist
 from django.db.models import Q
-from rest_framework import filters
-
 from lex.api.serializers.base_serializers import LexSerializer, _get_capabilities
 from lex.api.utils import can_read_from_payload
 from lex.api.utils.helpers import get_default_read_permission_scope
 from lex.core.models.LexModel import LexModel, UserContext
+from rest_framework import filters
 
 
 class PrimaryKeyListFilterBackend(filters.BaseFilterBackend):

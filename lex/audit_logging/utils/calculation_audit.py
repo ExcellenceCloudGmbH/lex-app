@@ -3,14 +3,12 @@ from typing import Any, Optional
 
 from django.db import transaction
 from django.utils import timezone
-
 from lex.api.utils import operation_context
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.serializers.AuditLogMixinSerializer import generic_instance_payload
 from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
-
 
 logger = logging.getLogger(__name__)
 

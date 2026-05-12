@@ -1,7 +1,7 @@
 import contextvars
 from contextlib import contextmanager
 from typing import Optional, Any, List, Dict
-from lex.utilities.decorators.singleton import LexSingleton
+
 
 class ModelContext:
     """

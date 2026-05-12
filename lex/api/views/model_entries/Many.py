@@ -1,14 +1,12 @@
 import logging
 import traceback
 
-from rest_framework.generics import GenericAPIView
-from rest_framework.response import Response
-
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
 from lex.audit_logging.mixins.BulkAuditLogMixin import BulkAuditLogMixin
 from lex.core.exceptions import resolve_exception_traceback
-
+from rest_framework.generics import GenericAPIView
+from rest_framework.response import Response
 
 logger = logging.getLogger(__name__)
 

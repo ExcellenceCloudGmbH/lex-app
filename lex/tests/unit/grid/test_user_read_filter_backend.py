@@ -3,7 +3,6 @@ from unittest.mock import Mock
 
 from django.db import models
 from django.test import SimpleTestCase
-
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
 from lex.core.models.LexModel import LexModel
 

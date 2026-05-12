@@ -1,10 +1,9 @@
-import os
 import inspect
+import os
 from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
-
 from lex.full_migration_workflow import (
     WorkflowCommandError,
     WorkflowOptions,

@@ -29,13 +29,12 @@ End-to-end tests for ``CalculatedModelMixin.create()`` and duplicate handling.
 import os
 from unittest.mock import patch, MagicMock
 
-from django.db import connection, models
-from django.test import TransactionTestCase, SimpleTestCase
-
 from core.mixins.CalculatedModelMixin import (
     CalculatedModelMixin,
     ModelCombinationGenerator,
 )
+from django.db import connection, models
+from django.test import TransactionTestCase, SimpleTestCase
 from lex.core.exceptions import CalculatedModelError
 
 

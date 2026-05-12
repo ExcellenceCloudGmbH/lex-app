@@ -7,6 +7,7 @@ the calculation logging system to provide better structure and error handling.
 
 from dataclasses import dataclass
 from typing import Optional, List
+
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 

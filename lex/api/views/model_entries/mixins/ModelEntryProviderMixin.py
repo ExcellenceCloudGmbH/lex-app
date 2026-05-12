@@ -1,13 +1,10 @@
-from rest_framework import serializers
-from rest_framework.permissions import IsAuthenticated
-from rest_framework_api_key.permissions import HasAPIKey
-from rest_framework.exceptions import APIException
 from django.contrib.auth.models import User
-from lex.audit_logging.models.CalculationLog import (
-    CalculationLog,
-)  # Import your CalculationLog model
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.permissions.UserPermission import UserPermission
+from rest_framework import serializers
+from rest_framework.exceptions import APIException
+from rest_framework.permissions import IsAuthenticated
+from rest_framework_api_key.permissions import HasAPIKey
 
 
 class UserModelSerializer(serializers.ModelSerializer):
@@ -26,10 +23,7 @@ class ModelEntryProviderMixin:
 
     def get_queryset(self):
         from lex.core.services.Bitemporal import get_queryset_as_of
-        from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
-        from lex.process_admin.utils.temporal_reconciler import TemporalReconciler
-        from django.utils import timezone
-        
+
         model_class = self.kwargs["model_container"].model_class
         queryset = model_class.objects.all()
         

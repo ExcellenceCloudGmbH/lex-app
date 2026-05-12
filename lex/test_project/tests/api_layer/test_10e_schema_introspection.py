@@ -33,9 +33,8 @@ import unittest
 from unittest.mock import MagicMock
 
 from django.test import TestCase
-
-from lex.api.views.model_info.Fields import create_field_info
 from lex.api.views.ModelStructureObtainView import ModelStructureObtainView
+from lex.api.views.model_info.Fields import create_field_info
 
 from .models import (
     ALL_MODELS,

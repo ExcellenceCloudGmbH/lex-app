@@ -1,10 +1,11 @@
-from rest_framework import serializers
 from lex.legacy_data.models import (
     LegacyCalculationLog,
     LegacyUserChangeLog,
     LegacyCalculationId,
     LegacyLog,
 )
+from rest_framework import serializers
+
 
 class LegacyReadOnlySerializerMixin:
     """

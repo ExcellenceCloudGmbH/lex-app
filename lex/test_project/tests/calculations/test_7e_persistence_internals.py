@@ -43,14 +43,12 @@ from unittest.mock import MagicMock, patch
 
 from django.db import connection
 from django.test import SimpleTestCase
-
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.models.CalculationModel import (
     CalculationModel,
     CalculationModelException,
 )
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import (

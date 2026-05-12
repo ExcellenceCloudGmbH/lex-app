@@ -22,10 +22,9 @@ Tests for ``lex.api.filters.FilterTreeNode`` — tree evaluation and serializati
         lex test lex.tests.test_filter_tree_node --verbosity=2 --noinput
 """
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.api.filters.FilterTreeNode import FilterTreeNode
 
 

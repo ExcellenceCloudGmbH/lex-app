@@ -16,7 +16,6 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import TestCase
 
 import django
 from django.apps import apps

@@ -1,8 +1,10 @@
 
 from unittest.mock import MagicMock, patch
+
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase
 from lex_app.management.commands.init import KeycloakSyncManager, Command
+
 
 class InitCommandRetryTests(SimpleTestCase):
 

@@ -26,13 +26,11 @@ Tests for ``CeleryTaskDispatcher`` — Celery dispatch, fallback, and result han
         lex test lex.core.tests.test_celery_task_dispatcher --verbosity=2 --noinput
 """
 
-from contextvars import ContextVar
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 from django.test import SimpleTestCase
-
-from lex.core.tasks.CeleryTaskDispatcher import CeleryTaskDispatcher
 from lex.core.exceptions import CeleryDispatchError
+from lex.core.tasks.CeleryTaskDispatcher import CeleryTaskDispatcher
 
 
 # ─── helpers ──────────────────────────────────────────────────────────

@@ -13,7 +13,6 @@ and can be asserted on.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import PermissionResult
 

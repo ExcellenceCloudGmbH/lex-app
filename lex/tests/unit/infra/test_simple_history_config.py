@@ -9,10 +9,9 @@ Covers:
 - get_model_exclusion_reason: returns human-readable reason strings
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase, override_settings
-
 from lex.lex_app.simple_history_config import (
     DJANGO_BUILTIN_MODELS,
     THIRD_PARTY_EXCLUDED_MODELS,

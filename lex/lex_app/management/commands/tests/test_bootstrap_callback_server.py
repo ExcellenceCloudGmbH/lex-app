@@ -3,7 +3,6 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from dotenv import dotenv_values
-
 from lex.core.management.commands.bootstrap_callback_server import build_env_lines
 
 

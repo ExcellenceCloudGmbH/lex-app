@@ -1,11 +1,10 @@
 from django.apps import apps
 from django.http import JsonResponse
+from lex.core.models.CalculationModel import CalculationModel
+from lex.lex_app.settings import repo_name
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
-
-from lex.core.models.CalculationModel import CalculationModel
-from lex.lex_app.settings import repo_name
 
 
 class CleanCalculations(APIView):

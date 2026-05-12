@@ -22,11 +22,9 @@ Tests for ``lex.api.utils.helpers`` — model resolution, shadow instances, perm
         lex test lex.tests.test_api_helpers_advanced --verbosity=2 --noinput
 """
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-from django.db import models
 from django.test import SimpleTestCase
-
 from lex.api.utils.helpers import (
     _get_field_map,
     resolve_target_model,

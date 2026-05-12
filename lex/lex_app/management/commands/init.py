@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-# core/management/commands/init.py
-
 import argparse
 import asyncio
 import json
@@ -31,9 +29,10 @@ from django.db.migrations.loader import MigrationLoader
 from django.db.migrations.operations.models import CreateModel, DeleteModel, RenameModel
 from django.db.migrations.questioner import MigrationQuestioner
 from django.db.migrations.state import ProjectState
-
 from lex.core.management.commands.bootstrap_callback_server import start_callback_server
 from lex.runtime_config import format_db_connection_unicode_error
+
+# core/management/commands/init.py
 
 logger = logging.getLogger(__name__)
 

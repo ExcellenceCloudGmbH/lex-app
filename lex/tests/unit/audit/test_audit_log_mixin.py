@@ -27,19 +27,16 @@ Tests for ``AuditLogMixin`` — the view-level audit trail for CRUD operations.
         lex test lex.audit_logging.tests.test_audit_log_mixin --verbosity=2
 """
 
-import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.mixins.AuditLogMixin import (
     AuditLogMixin,
     _execute_with_retry,
     _is_retryable_db_error,
     _iter_exception_chain,
     RETRYABLE_SQLSTATE_CODES,
-    MAX_UPDATE_RETRIES,
 )
 
 

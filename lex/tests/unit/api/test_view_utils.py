@@ -28,7 +28,6 @@ Run::
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.api.views.utils import get_user_name, get_user_email
 
 

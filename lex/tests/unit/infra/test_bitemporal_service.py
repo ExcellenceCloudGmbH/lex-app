@@ -8,12 +8,10 @@ Covers:
 """
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
-from django.test import SimpleTestCase, TransactionTestCase
-from django.db import models
+from django.test import SimpleTestCase
 from django.utils import timezone
-
 from lex.core.services.Bitemporal import get_queryset_as_of, resurrect_object
 
 

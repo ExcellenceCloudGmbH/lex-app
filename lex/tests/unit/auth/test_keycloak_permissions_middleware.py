@@ -26,8 +26,7 @@ How to run::
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import django
 from django.apps import apps

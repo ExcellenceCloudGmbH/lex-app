@@ -23,7 +23,6 @@ docs/test-plan/test-clusters.md#1-init--project-bootstrap
 
 from __future__ import annotations
 
-import json
 import os
 import unittest
 from pathlib import Path
@@ -38,10 +37,8 @@ from lex.lex_app.management.commands.init import (
     KEYCLOAK_ENV_VARS,
     NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS,
     _format_keycloak_import_error_details,
-    _get_keycloak_import_error_details,
     _is_non_fatal_keycloak_import_timeout,
     _load_state_map,
-    _save_state_map,
     get_missing_keycloak_env,
     get_state,
     set_state,

@@ -43,20 +43,18 @@ import os
 import sys
 from datetime import timedelta
 from importlib import reload
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.db import connection, models
-from django.test import TransactionTestCase, override_settings
+from django.test import TransactionTestCase
 from django.urls import clear_url_caches, reverse
 from django.utils import timezone
-
-from rest_framework import status
-from rest_framework.test import APIClient
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
 from lex.process_admin.utils.model_registration import ModelRegistration
+from rest_framework import status
+from rest_framework.test import APIClient
 
 
 # ====================================================================

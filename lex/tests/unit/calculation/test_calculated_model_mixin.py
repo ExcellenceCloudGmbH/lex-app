@@ -9,14 +9,14 @@ Verifies:
 """
 
 import os
-from django.db import models
-from django.test import SimpleTestCase
 from unittest.mock import patch
 
 from core.mixins.CalculatedModelMixin import (
     CalculatedModelMixin,
     ModelCombinationGenerator,
 )
+from django.db import models
+from django.test import SimpleTestCase
 from lex.core.tasks.CeleryTaskDispatcher import CeleryTaskDispatcher
 from lex.lex_app.celery_tasks import WaitForTasks
 

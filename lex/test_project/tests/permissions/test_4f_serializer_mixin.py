@@ -42,22 +42,19 @@ from __future__ import annotations
 
 import unittest
 
+from django.contrib.auth import get_user_model
 from django.db import models
 from django.test import SimpleTestCase, TestCase
-from rest_framework import serializers
-
 from lex.api.views.model_entries.mixins.PermissionAwareSerializerMixin import (
     PermissionAwareSerializerMixin,
     PermissionAwareSerializerMetaclass,
     _camel_to_snake,
     add_permission_checks,
 )
-
-from django.contrib.auth import get_user_model
+from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIRequestFactory
-
-from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import FieldLevelItem, ProtectedItem
 

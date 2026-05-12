@@ -9,7 +9,6 @@ observable REST-layer wiring on top of everything below.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 

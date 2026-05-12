@@ -17,7 +17,6 @@ from django_lifecycle import (
     BEFORE_UPDATE,
     hook,
 )
-
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 

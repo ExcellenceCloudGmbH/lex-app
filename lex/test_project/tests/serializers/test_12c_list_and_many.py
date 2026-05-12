@@ -17,10 +17,9 @@ from __future__ import annotations
 import unittest
 from urllib.parse import urlencode
 
-from rest_framework import status
-
 from lex.core.models.LexModel import PermissionResult
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import (
     ALL_MODELS,

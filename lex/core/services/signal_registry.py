@@ -14,8 +14,6 @@ import logging
 from functools import partial
 
 from django.db.models.signals import post_save, pre_delete, post_delete
-from simple_history.signals import post_create_historical_record
-
 from lex.core.services.bitemporal_signals import (
     on_history_saved__chain_valid_to,
     on_history_saved__create_meta,
@@ -24,6 +22,7 @@ from lex.core.services.bitemporal_signals import (
     on_history_post_delete__repair_chain,
     on_meta_saved__chain_sys_to,
 )
+from simple_history.signals import post_create_historical_record
 
 logger = logging.getLogger(__name__)
 

@@ -167,7 +167,6 @@ class SerializerMapBehaviorTests(TestCase):
         ``history_id`` twice in the table and suppressing the source
         row's ``id`` column entirely. The fix: only alias ``id`` to the PK
         when the PK's attname IS literally ``id``."""
-        from unittest.mock import patch
         from lex.api.serializers.base_serializers import _wrap_custom_serializer
 
         class _DeveloperHistorySerializer(serializers.ModelSerializer):

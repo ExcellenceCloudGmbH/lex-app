@@ -2,7 +2,6 @@ import logging
 from typing import Optional
 
 from django.dispatch import Signal
-
 from lex.api.utils import operation_context
 from lex.core.calculated_updates.update_handler import CalculatedModelUpdateHandler
 from lex.core.models.CalculationModel import CalculationModel

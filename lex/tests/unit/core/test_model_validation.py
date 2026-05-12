@@ -6,11 +6,11 @@ reserved prefixes, reserved field names, or forbidden overrides, and
 accepts valid definitions without error.
 """
 
-from django.test import SimpleTestCase
 from django.db import models
-from lex.process_admin.utils.model_registration import ModelRegistration
-from lex.core.models.LexModel import LexModel
+from django.test import SimpleTestCase
 from lex.core.models.CalculationModel import CalculationModel
+from lex.core.models.LexModel import LexModel
+from lex.process_admin.utils.model_registration import ModelRegistration
 
 
 class ModelValidationTest(SimpleTestCase):

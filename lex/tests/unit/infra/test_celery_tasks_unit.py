@@ -33,11 +33,10 @@ Tests for celery_tasks.py — dispatch utilities, context managers, and detectio
         lex test lex.tests.test_celery_tasks_unit --verbosity=2 --noinput
 """
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from django.db.models import Model
 from django.test import SimpleTestCase
-
 from lex.lex_app.celery_tasks import (
     _celery_is_active,
     is_celery_worker_process,

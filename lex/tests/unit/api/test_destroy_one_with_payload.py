@@ -15,8 +15,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import django
 from django.apps import apps

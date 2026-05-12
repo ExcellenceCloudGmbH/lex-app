@@ -28,9 +28,8 @@ import unittest
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from rest_framework import status
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import (
     ALL_MODELS,

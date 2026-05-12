@@ -1,6 +1,5 @@
-from django.core.management.base import BaseCommand
 from django.apps import apps
-
+from django.core.management.base import BaseCommand
 from keycloak import KeycloakOpenIDConnection, KeycloakUMA, KeycloakAdmin
 from lex.lex_app.keycloak_exclusions import is_keycloak_syncable_app
 

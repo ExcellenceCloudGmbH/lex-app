@@ -24,7 +24,6 @@ from __future__ import annotations
 import uuid
 
 from django.db import models
-
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 

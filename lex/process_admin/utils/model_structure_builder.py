@@ -1,6 +1,6 @@
+import copy
 import importlib
 import os
-import copy
 from typing import Dict, Iterable, List, Set
 
 from lex.process_admin.utils.model_structure import ModelStructure
