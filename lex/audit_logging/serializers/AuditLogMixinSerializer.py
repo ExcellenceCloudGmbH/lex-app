@@ -1,3 +1,6 @@
+import datetime
+from decimal import Decimal
+
 from django.utils.functional import Promise  # Lazy translation objects
 from uuid import UUID
 
