@@ -1,6 +1,8 @@
 import logging
 import os
 import traceback
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 
 from django.db import models
@@ -28,6 +30,25 @@ from lex.core.models.LexModel import LexModel
 from rest_framework.exceptions import APIException
 
 logger = logging.getLogger(__name__)
+
+# ContextVar that is True while user code (calculate/update) is executing
+# inside a calculation cycle.  Child record saves that happen during this
+# window should NOT update edited_by / edited_at because the change is
+# system-triggered, not a direct user edit.
+_in_calculation_execution: ContextVar[bool] = ContextVar(
+    '_in_calculation_execution', default=False,
+)
+
+
+@contextmanager
+def calculation_execution_context():
+    """Mark the current thread as inside a calculation's user-code execution."""
+    token = _in_calculation_execution.set(True)
+    try:
+        yield
+    finally:
+        _in_calculation_execution.reset(token)
+
 
 class CalculationModelException(APIException):
     @staticmethod
@@ -443,11 +464,13 @@ class CalculationModel(LexModel):
         stack_trace = None
         try:
             if hasattr(self, "is_atomic") and not self.is_atomic:
-                func()
+                with calculation_execution_context():
+                    func()
                 self.is_calculated = self.SUCCESS
             else:
                 with transaction.atomic():
-                    func()
+                    with calculation_execution_context():
+                        func()
                     self.is_calculated = self.SUCCESS
 
         except Exception as e:

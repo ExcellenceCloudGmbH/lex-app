@@ -1,16 +1,19 @@
+from datetime import datetime
 import logging
 
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.contrib.contenttypes.models import ContentType
 from django.db import models, transaction
-from lex.audit_logging.utils.CacheManager import CacheManager
-from lex.audit_logging.utils.DataModels import (
-    ContextResolutionError
-)
+
 from lex.core.mixins.ModelModificationRestriction import (
     AdminReportsModificationRestriction,
 )
-
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.DataModels import (
+    CalculationLogError,
+    ContextResolutionError,
+    CacheOperationError
+)
 
 #### Note: Messages shall be delivered in the following format: "Severity: Message" The colon and the whitespace after are required for the code to work correctly ####
 # Severity could be something like 'Error', 'Warning', 'Caution', etc. (See Static variables below!)
