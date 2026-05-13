@@ -78,4 +78,4 @@ Record each work session here so progress is traceable.
 
 ---
 
-> **Back to:** [Progress & Organization](progress.md) | [Test Plan Index](index.md)
+> **Back to:** [Progress & Organization](../progress.md) | [Test Plan Index](../index.md)
