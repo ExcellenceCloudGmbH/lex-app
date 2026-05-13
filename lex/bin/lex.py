@@ -449,6 +449,7 @@ def pytest_cmd(ctx):
                             ignore_errors=True,
                         )
                     )
+                    file_coverage = _parse_coverage_text_report(stream.getvalue())
                 shutil.rmtree(lex_test_config.coverage_html_dir, ignore_errors=True)
                 coverage_runner.html_report(
                     directory=str(lex_test_config.coverage_html_dir),
@@ -467,6 +468,7 @@ def pytest_cmd(ctx):
                     "label": "Framework-wide code coverage",
                     "display": f"{total:.1f}%",
                     "percentage": round(total, 1),
+                    "files": file_coverage,
                 }
 
     if should_generate_report and plugin.coverage_summary is None:
@@ -525,6 +527,35 @@ def pytest_cmd(ctx):
                     click.echo(f"Sent {len(deliveries)} Lex test report email(s).")
 
     raise SystemExit(int(exit_code))
+
+
+def _parse_coverage_text_report(text: str) -> list[dict]:
+    """Parse ``coverage report`` text output into per-file dicts.
+
+    Each dict has keys: ``name``, ``stmts``, ``miss``, ``cover``.
+    The TOTAL row is excluded.
+    """
+    import re
+
+    files: list[dict] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("-") or line.upper().startswith("NAME") or line.upper().startswith("TOTAL"):
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 4:
+            continue
+        name = parts[0]
+        try:
+            stmts = int(parts[1])
+            miss = int(parts[2])
+            cover_str = parts[3].rstrip("%")
+            cover = float(cover_str)
+        except (ValueError, IndexError):
+            continue
+        files.append({"name": name, "stmts": stmts, "miss": miss, "cover": cover})
+    files.sort(key=lambda f: f["cover"])
+    return files
 
 
 @lex.command(
