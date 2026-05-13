@@ -1407,7 +1407,7 @@ if __name__ == "__main__":
 - [ ] **Step 2: Run the tests to verify they pass**
 
 Run: `pytest .github/scripts/tests/test_copilot_validate_pr_shape.py -v`
-Expected: 12 passed.
+Expected: 15 passed.
 
 - [ ] **Step 3: Write the PR-gate workflow**
 
