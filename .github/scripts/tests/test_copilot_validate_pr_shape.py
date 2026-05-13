@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -33,6 +32,7 @@ def test_regression_happy_path_ok() -> None:
     )
     pr_body = "Closes the gap on scenario 7.NN.\n\nFixes #42"
     result = validate_pr_shape(mode="regression", files=files, pr_body=pr_body)
+    assert isinstance(result, ValidationResult)
     assert result.ok, result.errors
 
 
@@ -85,6 +85,17 @@ def test_missing_session_log_append_fails() -> None:
     result = validate_pr_shape(mode="regression", files=files, pr_body="Fixes #1")
     assert not result.ok
     assert any("session-log.md" in e for e in result.errors)
+
+
+def test_missing_test_clusters_modification_fails() -> None:
+    """All three modes require a `test-plan/test-clusters.md` modification per §7."""
+    files = _files(
+        ("lex/test_project/tests/cluster_7/test_7m_thing.py", 60),
+        ("lex/test_project/test-plan/progress/session-log.md", 1),
+    )
+    result = validate_pr_shape(mode="regression", files=files, pr_body="Fixes #1")
+    assert not result.ok
+    assert any("test-clusters.md" in e for e in result.errors)
 
 
 def test_missing_known_bugs_row_fails_bug_repro() -> None:
@@ -156,6 +167,25 @@ def test_fix_and_test_source_file_not_listed_in_body_fails() -> None:
     assert any("source changes" in e.lower() for e in result.errors)
 
 
+def test_fix_and_test_source_path_mismatched_in_body_fails() -> None:
+    """The `### Source changes` section lists a different path than the actual diff."""
+    files = _files(
+        ("lex/test_project/tests/cluster_5/test_5n_thing.py", 50),
+        ("lex/test_project/test-plan/test-clusters.md", 2),
+        ("lex/test_project/test-plan/progress/session-log.md", 1),
+        ("lex/test_project/test-plan/known-bugs.md", 1),
+        ("lex/core/services/foo.py", 12),
+    )
+    pr_body = (
+        "Fixes BUG-100.\n\n"
+        "### Source changes\n- `lex/core/services/bar.py`: wrong path.\n\n"
+        "Fixes #44"
+    )
+    result = validate_pr_shape(mode="fix-and-test", files=files, pr_body=pr_body)
+    assert not result.ok
+    assert any("lex/core/services/foo.py" in e for e in result.errors)
+
+
 def test_missing_fixes_link_fails() -> None:
     files = _files(
         ("lex/test_project/tests/cluster_7/test_7m_thing.py", 60),
@@ -164,6 +194,21 @@ def test_missing_fixes_link_fails() -> None:
     )
     result = validate_pr_shape(
         mode="regression", files=files, pr_body="No issue link here."
+    )
+    assert not result.ok
+    assert any("Fixes #" in e for e in result.errors)
+
+
+def test_missing_fixes_link_fails_bug_repro() -> None:
+    """Check 1 of §7 fails any mode with no issue link — pin that bug-repro is not special-cased."""
+    files = _files(
+        ("lex/test_project/tests/cluster_5/test_5m_thing.py", 60),
+        ("lex/test_project/test-plan/test-clusters.md", 2),
+        ("lex/test_project/test-plan/progress/session-log.md", 1),
+        ("lex/test_project/test-plan/known-bugs.md", 1),
+    )
+    result = validate_pr_shape(
+        mode="bug-repro", files=files, pr_body="No issue link here."
     )
     assert not result.ok
     assert any("Fixes #" in e for e in result.errors)
