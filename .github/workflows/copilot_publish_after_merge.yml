@@ -1,0 +1,97 @@
+# ───────────────────────────────────────────────────────────────────
+#  Copilot Test-Bot — optional post-merge publish.
+#
+#  Fires when a Copilot PR with both `auto-merge` and
+#  `publish-on-merge` labels gets merged. Bumps the rc suffix on
+#  the latest release tag and creates a DRAFT GitHub release; the
+#  existing `pip_publish.yml` (release: created) takes over from
+#  there to publish to PyPI.
+#
+#  Default off — gated by repo variable COPILOT_AUTO_PUBLISH_ENABLED.
+#  Set to "true" only after one full A-mode round-trip has been
+#  observed end-to-end.
+# ───────────────────────────────────────────────────────────────────
+
+name: Copilot Publish After Merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  draft-release:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.user.login == 'copilot-swe-agent[bot]' &&
+      contains(github.event.pull_request.labels.*.name, 'auto-merge') &&
+      contains(github.event.pull_request.labels.*.name, 'publish-on-merge') &&
+      vars.COPILOT_AUTO_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Find latest rc tag
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # gh release list emits one row per release; the first match
+          # for a tag like vX.Y.ZrcN is what we bump from.
+          CURRENT=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+            --json tagName --jq '[.[] | .tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+rc[0-9]+$"))][0]')
+          if [[ -z "$CURRENT" || "$CURRENT" == "null" ]]; then
+            echo "::error::no rc tag found in last 50 releases — manual release required."
+            exit 1
+          fi
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next rc
+        id: next
+        run: |
+          NEXT=$(python .github/scripts/copilot_compute_next_rc.py --current "${{ steps.latest.outputs.current }}")
+          echo "tag=${NEXT}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREV: ${{ steps.latest.outputs.current }}
+          NEXT: ${{ steps.next.outputs.tag }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Release ${NEXT} — auto-cut by copilot_publish_after_merge.yml."
+            echo
+            echo "## PRs since ${PREV}"
+            echo
+            gh pr list --repo "$GITHUB_REPOSITORY" \
+              --state merged --search "merged:>$(gh release view "$PREV" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)" \
+              --json number,title,author \
+              --jq '.[] | "- #\(.number) \(.title) (\(.author.login))"'
+          } > notes.md
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.next.outputs.tag }}
+        run: |
+          gh release create "$NEXT" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "$NEXT" \
+            --notes-file notes.md
+          echo "Draft release $NEXT created — pip_publish.yml takes over."
