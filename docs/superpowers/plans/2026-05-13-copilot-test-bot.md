@@ -1910,6 +1910,14 @@ jobs:
           # publishedAt timestamp via jq to drop PRs merged earlier on
           # PREV_DATE before the previous release was published.
           PREV_PUBLISHED=$(gh release view "$PREV" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)
+          # Refuse to compute notes if the previous release has no
+          # publishedAt — happens when a maintainer paused the chain by
+          # leaving the prior rc as a draft. Same family of silent-empty
+          # failure as C1; fail loud instead.
+          if [[ -z "$PREV_PUBLISHED" || "$PREV_PUBLISHED" == "null" ]]; then
+            echo "::error::previous release '$PREV' has no publishedAt — manual release required."
+            exit 1
+          fi
           PREV_DATE=${PREV_PUBLISHED%%T*}
           {
             echo "Release ${NEXT} — auto-cut by copilot_publish_after_merge.yml."
@@ -1985,7 +1993,7 @@ File an issue describing a behaviour or bug, label it with a `copilot:<mode>` la
 |---|---|---|---|---|
 | **regression** | `copilot:regression` | Writes a **passing** test for the described behaviour | yes (green CI) | none |
 | **bug-repro** | `copilot:bug-repro` | Writes an `@expectedFailure` test that reproduces a bug; appends a row to `known-bugs.md` | yes (green CI) | none |
-| **fix-and-test** | `copilot:fix-and-test` | Writes a failing test, then makes the smallest source change that makes it pass | **no — human review** | ≤ 50 lines, listed in PR body |
+| **fix-and-test** | `copilot:fix-and-test` | Writes a failing test, appends a `known-bugs.md` row, then makes the smallest source change that makes it pass | **no — human review** | ≤ 50 lines, listed in PR body |
 
 ---
 

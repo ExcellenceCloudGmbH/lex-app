@@ -120,7 +120,7 @@ The `issues: [labeled]` event fires for any label add. The first job filters dow
 - **Mode label** (one of three; workflow rejects if missing or ambiguous)
 - **Behavior description** (free-form prose; required)
 - **Reproducer / steps** (required for B and C, optional for A)
-- **Cluster hint** (optional — `7`, `7g`, `next`, `new`, `others`, or blank)
+- **Cluster hint** (optional — `7`, `7g`, `new`, `others`, or blank)
 - **Files involved** (optional)
 - **Publish on merge** (checkbox, default off)
 
@@ -197,9 +197,12 @@ Static checks against the PR diff (parsed via `gh pr diff` — no checkout neede
 | `test-plan/known-bugs.md` has a new BUG-NNN row | — | ✓ | ✓ |
 | **No** files changed outside `lex/test_project/`, `test-plan/`, `.github/workflows/`, `.github/scripts/showcase_clusters.py` | ✓ | ✓ | ✗ (source fix allowed) |
 | For new-cluster placement: `showcase_clusters.py` + selectors in `pip_publish.yml` + `showcase_tests.yml` updated | conditional | conditional | conditional |
-| Test class name matches `TestCluster<NN><x>_<Thing>` regex | ✓ | ✓ | ✓ |
-| `@unittest.expectedFailure` + `BUG-NNN` decorator present on the new test | — | ✓ | — |
+| Test class name matches `TestCluster<NN><x>_<Thing>` regex † | ✓ | ✓ | ✓ |
+| `@unittest.expectedFailure` + `BUG-NNN` decorator present on the new test ‡ | — | ✓ | — |
 | Source diff ≤ 50 changed lines AND listed in PR description | — | — | ✓ |
+
+> **†** Convention only — `copilot_validate_pr_shape.py` does not parse test-class names; this is enforced by code review.
+> **‡** Not a static check. Enforced indirectly by Check 3 mode B's strip-and-assert-failure pass: a missing decorator means the strip is a no-op and the test runs as-written; the gate fails if it does not assert its own failure.
 
 ### Check 3 — Run the new test
 
