@@ -2037,7 +2037,7 @@ Branch protection separately requires `showcase_tests / Run cluster showcase & s
 3. Create a **draft** release with release notes listing every PR merged since the previous tag.
 4. The existing `pip_publish.yml` fires on `release: created` and finishes the publish.
 
-Default is **off** — flip `COPILOT_AUTO_PUBLISH_ENABLED` to `"true"` only after at least one regression-mode round-trip has been observed end-to-end. The draft step exists so a maintainer can edit notes or delete the draft to abort within the few-seconds window before PyPI upload completes.
+Default is **off** — flip `COPILOT_AUTO_PUBLISH_ENABLED` to `"true"` only after at least one regression-mode round-trip has been observed end-to-end. The draft step exists as an audit artifact in the GitHub Releases UI; `pip_publish.yml` triggers on `release: created` (which fires for drafts too), so PyPI upload begins immediately and there is no reliable abort window between draft creation and publish. Per-run aborts must happen by flipping `COPILOT_AUTO_PUBLISH_ENABLED` to `"false"` before merging the PR.
 
 ---
 
@@ -2090,7 +2090,7 @@ Mode C's PR ships a behaviour change. Auto-merge would mean "Copilot fix lands w
 
 ### Why a draft release on the publish path?
 
-The draft visibly exists in the GitHub UI for a few seconds before `pip_publish.yml` finishes uploading to PyPI. A maintainer watching the Releases page can edit notes or delete the draft to abort. Direct publish would leave no abort window.
+The draft surfaces in the GitHub Releases UI with the auto-generated notes — an audit artifact for after-the-fact review. Note: `pip_publish.yml` triggers on `release: created`, which fires for draft releases too, so PyPI publish begins immediately and there is no reliable abort window between draft and upload. Per-run aborts must happen by flipping `COPILOT_AUTO_PUBLISH_ENABLED` to `"false"` before merging the PR; the draft is for visibility, not a manual gate.
 
 ### Why rc-only on publish bumps?
 
