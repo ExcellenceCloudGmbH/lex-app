@@ -2124,7 +2124,7 @@ git commit -m "docs(ci-cd): add copilot-test-bot user-facing doc — modes, rout
 **Files:**
 - None — this is a tracking task. The output is a comment on the integrating PR enumerating the manual steps a maintainer must take before the workflows function end-to-end.
 
-The three workflows + helpers ship as code, but five things only a repo admin can do gate end-to-end activation. Document them in the PR description so they aren't lost.
+The three workflows + helpers ship as code, but six things only a repo admin can do gate end-to-end activation. Document them in the PR description so they aren't lost.
 
 - [ ] **Step 1: Verify all tests pass + workflows lint**
 
@@ -2152,7 +2152,7 @@ When opening the PR that lands this whole plan, include this section in the PR b
 ```markdown
 ## Before merging — manual repo configuration
 
-The following five settings must be in place before this PR's workflows function end-to-end.
+The following six settings must be in place before this PR's workflows function end-to-end.
 Document who applied each one in this comment thread so the next operator can audit.
 
 - [ ] **Create labels** (Repo Settings → Labels): `copilot:regression`, `copilot:bug-repro`,
@@ -2163,11 +2163,22 @@ Document who applied each one in this comment thread so the next operator can au
 - [ ] **Add repo secret** `COPILOT_PAT` mirrored from `lex-app-docs`.
 - [ ] **Enable Copilot coding agent on `lex-app`** at the org Copilot Policies level
       (currently enabled only on `lex-app-docs`).
-- [ ] **Branch protection on `lex-app-v2`**: add `copilot-swe-agent[bot]` to the
-      "Allow specified actors to bypass required pull requests" list; enable
-      repository-level auto-merge.
+- [ ] **Branch protection on `lex-app-v2`** (Repo Settings → Branches → `lex-app-v2`):
+      (a) **Required status check** must include `showcase_tests / Run cluster showcase
+      & send report` — without it the Copilot PR-gate becomes the only blocking check
+      and any green-gate PR auto-merges regardless of showcase results.
+      (b) Require **1 review** for non-bot PRs.
+      (c) Add `copilot-swe-agent[bot]` to the **"Allow specified actors to bypass required
+      pull requests"** list. **Apply (a) and (b) BEFORE adding the bot to the bypass list**
+      — otherwise the first Copilot PR can land before the required-check rule is in place.
+      (d) Enable repository-level auto-merge.
+- [ ] **Create the `lex-maintainers` team** (Org → Teams) and add the maintainers who
+      should be auto-requested as reviewers on every mode-C (`fix-and-test`) Copilot PR.
+      `copilot_pr_gate.yml` requests them via `gh pr edit --add-reviewer lex-maintainers`;
+      if the team is missing the workflow degrades gracefully with a `::warning::` but
+      mode-C PRs land without an automatic reviewer assignment.
 
-After all five are checked, fire `copilot_test_bot.yml` via `workflow_dispatch` against
+After all six are checked, fire `copilot_test_bot.yml` via `workflow_dispatch` against
 a hand-filed `copilot:regression` test issue and confirm one full round-trip
 (issue → Copilot PR → green PR-gate → auto-merge) before flipping
 `COPILOT_AUTO_PUBLISH_ENABLED` to `"true"`.
