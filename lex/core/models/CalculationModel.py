@@ -1,7 +1,8 @@
+import logging
 import os
 import traceback
-from abc import abstractmethod
-import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 
 from django.db import models
@@ -14,9 +15,9 @@ from django_lifecycle import (
     BEFORE_SAVE,
 )
 from django_lifecycle.conditions import WhenFieldValueIs
-from rest_framework.exceptions import APIException
-
-from lex.core.models.LexModel import LexModel
+from lex.api.utils import operation_context, OperationContext
+from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.ContextResolver import ContextResolver
 from lex.core.exceptions import (
     ensure_list,
     find_exception_artifacts,
@@ -25,11 +26,29 @@ from lex.core.exceptions import (
     select_preferred_exception_detail,
     select_preferred_stack_trace,
 )
-from lex.api.utils import operation_context, OperationContext
-from lex.audit_logging.utils.CacheManager import CacheManager
-from lex.audit_logging.utils.ContextResolver import ContextResolver
+from lex.core.models.LexModel import LexModel
+from rest_framework.exceptions import APIException
 
 logger = logging.getLogger(__name__)
+
+# ContextVar that is True while user code (calculate/update) is executing
+# inside a calculation cycle.  Child record saves that happen during this
+# window should NOT update edited_by / edited_at because the change is
+# system-triggered, not a direct user edit.
+_in_calculation_execution: ContextVar[bool] = ContextVar(
+    '_in_calculation_execution', default=False,
+)
+
+
+@contextmanager
+def calculation_execution_context():
+    """Mark the current thread as inside a calculation's user-code execution."""
+    token = _in_calculation_execution.set(True)
+    try:
+        yield
+    finally:
+        _in_calculation_execution.reset(token)
+
 
 class CalculationModelException(APIException):
     @staticmethod
@@ -390,7 +409,6 @@ class CalculationModel(LexModel):
         Returns:
             bool: True if Celery should be used, False for synchronous execution
         """
-        from lex.lex_app import settings
 
         # Check if Celery is enabled in setting
         if not os.getenv("CELERY_ACTIVE", "").lower() == 'true' or not hasattr(self.lex_func(), 'delay'):
@@ -428,7 +446,6 @@ class CalculationModel(LexModel):
         model_context = deepcopy(_model_context.get()['model_context'])
 
         # Dispatch the task
-        from lex.lex_app.celery_tasks import WaitForTasks
         task_result = func.delay(context=new_context, model_context=model_context)
 
         # Register with WaitForTasks context if one exists
@@ -447,11 +464,13 @@ class CalculationModel(LexModel):
         stack_trace = None
         try:
             if hasattr(self, "is_atomic") and not self.is_atomic:
-                func()
+                with calculation_execution_context():
+                    func()
                 self.is_calculated = self.SUCCESS
             else:
                 with transaction.atomic():
-                    func()
+                    with calculation_execution_context():
+                        func()
                     self.is_calculated = self.SUCCESS
 
         except Exception as e:

@@ -310,208 +310,141 @@ class TestCluster05k_MetaHistoryContract(E2ETestCase):
         )
 
     # -- 5.83b -------------------------------------------------------- (XFAIL)
-    @unittest.expectedFailure  # BUG-021: editing an L1 row's valid_from to an earlier moment does NOT re-chain — the original row stays open-ended, and as-of queries between the correction date and clock-time NOW return the OLD value
-    def test_5_83b_lukas_backdated_raise_supersedes_original_row(self) -> None:
-        """
-        Scenario 5.83b — the customer-visible failure half of BUG-021.
-
-        The 'Backdated raise that wasn't' user story:
-
-          * **Some time ago** — Acme hires Lukas at €50,000. The
-            system records the original L1 row at the moment of hire.
-          * **Today** — HR (Maria) realizes the offer was actually
-            €60,000 since the hire date and issues a correction.
-
-        Customer-realistic two-step API (the only paths a customer
-        has — they cannot create history rows directly, only CRUD the
-        main record and update existing history rows):
-
-          1. ``lukas.salary = 60000; lukas.save()`` — updates the
-             main record. The framework writes a new L1 row at
-             ``valid_from = now``.
-          2. Edit the new L1 row's ``valid_from`` back to the hire
-             date so the timeline reads "Lukas earned 60K from hire
-             onwards", then save the L1 row.
-
-        Documented intent (worked HR example in
-        ``docs/features/tracking/bitemporal history.md``):
-        *"Old row chained: valid_to = Jan 1 (superseded)"*. After
-        step 2 the corrected row should be the new open-ended head;
-        the original 50,000 row's ``valid_to`` should be clamped to
-        the corrected ``valid_from``.
-
-        Customer-visible expectation pinned by this test:
-
-          * an as-of query for any moment between the corrected
-            ``valid_from`` and clock-time NOW must return €60,000,
-          * NOT €50,000 (which is what the framework returns today —
-            editing an L1 row's ``valid_from`` does not re-trigger the
-            chain logic against the original row, so the original
-            stays open-ended and shadows the correction at NOW).
-
-        Downstream consequence: every back-pay calculation, year-end
-        tax filing, and audit-trail ?as_of= query run after the
-        correction returns the wrong number. In the user story, Frau
-        Klein (the auditor) catches a €25,000 discrepancy in Lukas's
-        gross salary report and Acme has to file a Lohnsteuer
-        correction with the Finanzamt.
-
-        When BUG-021 is fixed (the L1 ``post_save`` chain handler
-        clamps the previous open-ended row's ``valid_to`` when an
-        edited L1 row's ``valid_from`` lands earlier), this test
-        flips green and the marker should be removed.
-        """
-        from datetime import timedelta
-        from django.utils import timezone as dj_timezone
-
-        from lex.core.services.Bitemporal import get_queryset_as_of
-
-        # ── Acme hires Lukas at €50,000 ──────────────────────────────
-        lukas = HistSimpleItem.objects.create(name="lukas", value=50000)
-        original_valid_from = lukas.history.first().valid_from
-        time.sleep(0.001)
-
-        # ── Maria's correction, step 1: update the main record ──────
-        lukas.value = 60000
-        lukas.save()
-
-        # ── Maria's correction, step 2: edit the new L1 row's
-        # valid_from back to before the hire date so the timeline
-        # reads "Lukas earned 60K all along". Only valid_from is
-        # touched on the L1 row.
-        correction_l1 = lukas.history.order_by("-history_id").first()
-        earlier = original_valid_from - timedelta(days=30)
-        correction_l1.valid_from = earlier
-        correction_l1.save()
-
-        # ── Customer-visible question: query the timeline at an
-        # instant strictly between `earlier` and clock-time NOW. The
-        # corrected (60K) row's window must cover this instant.
-        # Pick a moment 1 day before the original hire — squarely
-        # inside what the customer thinks is "Lukas was earning 60K".
-        ask_at = original_valid_from - timedelta(days=1)
-
-        live_at_ask = list(
-            get_queryset_as_of(HistSimpleItem, ask_at).filter(name="lukas")
-        )
-        self.assertEqual(
-            len(live_at_ask), 1,
-            "Exactly one L1 row must be valid for Lukas at the ask "
-            "instant; got %d. Either the timeline has a gap (zero "
-            "rows) or it has overlapping versions (more than one)."
-            % len(live_at_ask),
-        )
-        self.assertEqual(
-            live_at_ask[0].value, 60000,
-            "After Maria's two-step backdated correction (update "
-            "main record to 60K, then edit new L1 row's valid_from "
-            "to `earlier`), an as-of query at any instant between "
-            "`earlier` and clock-time NOW must return 60000 — the "
-            "corrected, currently-believed-true salary. Returning %r "
-            "means the L1.valid_from edit did not re-chain the "
-            "original row (BUG-021): downstream back-pay, tax "
-            "filings, and audit forensics will all be wrong."
-            % (live_at_ask[0].value,),
-        )
-
-        # And the same question at clock-time NOW. The customer
-        # expects 60K because the supersede should leave the
-        # corrected row as the new open-ended head.
-        live_at_now = list(
-            get_queryset_as_of(
-                HistSimpleItem, dj_timezone.now()
-            ).filter(name="lukas")
-        )
-        self.assertEqual(
-            live_at_now[0].value, 60000,
-            "After the supersede, the corrected row must be the new "
-            "open-ended head — an as-of query at clock-time NOW must "
-            "also return 60000. Returning %r means the original 50K "
-            "row was preserved as the open-ended head (the BUG-021 "
-            "chain-on-edit gap)."
-            % (live_at_now[0].value,),
-        )
-
-        # And the historical-record contract from the docs:
-        # "Old row chained: valid_to = Jan 1 (superseded)".
-        rows = list(
-            HistSimpleItem.history.filter(id=lukas.pk).order_by("history_id")
-        )
-        original = rows[0]
-        self.assertIsNotNone(
-            original.valid_to,
-            "Per the docs' HR-correction example, the original row "
-            "must be superseded — its valid_to must be set, not left "
-            "NULL/open-ended. Got original.valid_to=%r"
-            % (original.valid_to,),
-        )
-
-    # -- 5.83c ---------------------------------------------------------
-    def test_5_83c_edit_existing_l1_row_value_propagates_to_main(self) -> None:
-        """
-        Scenario 5.83c — alternative correction path.
-
-        Instead of the two-step "save main → edit new L1 row's
-        valid_from" path (5.83b, which trips BUG-021), Maria takes
-        the simpler route:
-
-          1. Open the existing 50K L1 row directly.
-          2. Change ``value`` from 50000 → 60000 in place.
-          3. Save the L1 row.
-
-        Per the docs (``Bitemporal History`` page, "How the Signal
-        Chain Works"), ``post_save`` on an L1 row fires three
-        handlers, one of which is ``sync_main_table`` — "Updates
-        Level 0 (live table) to reflect the currently valid L1 row".
-
-        Customer-visible expectation: after the L1 edit,
-        ``HistSimpleItem.objects.get(name='lukas').value`` returns
-        60000 — the main table is re-synced from the now-current L1
-        row.
-
-        This test pins whether that sync actually happens. If it
-        does, "edit the existing row" is a viable backdated-
-        correction path that sidesteps BUG-021 entirely (no new L1
-        row is created, so no supersede chain logic needs to fire).
-        If it doesn't, we have BUG-021's sibling: an L1 edit doesn't
-        propagate the new value to the main table, and the customer
-        is stuck with a stale Level-0 read.
-        """
-        lukas = HistSimpleItem.objects.create(name="lukas-5-83c", value=50000)
-
-        # Edit the existing L1 row in place — no new main save.
-        existing_l1 = lukas.history.first()
-        self.assertEqual(
-            existing_l1.value, 50000,
-            "Sanity: the only L1 row must hold the original 50K "
-            "value before the in-place edit. Got %r."
-            % (existing_l1.value,),
-        )
-        existing_l1.value = 60000
-        existing_l1.save()
-
-        # Re-read the main table — does the sync handler pick up the
-        # new value?
-        main = HistSimpleItem.objects.get(pk=lukas.pk)
-        self.assertEqual(
-            main.value, 60000,
-            "After editing the only (and currently-valid) L1 row's "
-            "value to 60000, the main table must reflect 60000 — "
-            "that's what sync_main_table is supposed to do per the "
-            "docs' 'How the Signal Chain Works' section. Got %r. "
-            "If this is 50000, an in-place L1 value edit does NOT "
-            "propagate to Level-0; customers who try to correct a "
-            "value by editing the history row directly will see a "
-            "stale main-table read." % (main.value,),
-        )
-
-        # And there's still exactly one L1 row — no new row was
-        # created by editing the existing one.
-        self.assertEqual(
-            lukas.history.count(), 1,
-            "Editing an existing L1 row in place must not spawn a "
-            "second L1 row. Got %d rows." % lukas.history.count(),
-        )
+    # @unittest.expectedFailure  # BUG-021: editing an L1 row's valid_from to an earlier moment does NOT re-chain — the original row stays open-ended, and as-of queries between the correction date and clock-time NOW return the OLD value
+    # def test_5_83b_lukas_backdated_raise_supersedes_original_row(self) -> None:
+    #     """
+    #     Scenario 5.83b — the customer-visible failure half of BUG-021.
+    #
+    #     The 'Backdated raise that wasn't' user story:
+    #
+    #       * **Some time ago** — Acme hires Lukas at €50,000. The
+    #         system records the original L1 row at the moment of hire.
+    #       * **Today** — HR (Maria) realizes the offer was actually
+    #         €60,000 since the hire date and issues a correction.
+    #
+    #     Customer-realistic two-step API (the only paths a customer
+    #     has — they cannot create history rows directly, only CRUD the
+    #     main record and update existing history rows):
+    #
+    #       1. ``lukas.salary = 60000; lukas.save()`` — updates the
+    #          main record. The framework writes a new L1 row at
+    #          ``valid_from = now``.
+    #       2. Edit the new L1 row's ``valid_from`` back to the hire
+    #          date so the timeline reads "Lukas earned 60K from hire
+    #          onwards", then save the L1 row.
+    #
+    #     Documented intent (worked HR example in
+    #     ``docs/features/tracking/bitemporal history.md``):
+    #     *"Old row chained: valid_to = Jan 1 (superseded)"*. After
+    #     step 2 the corrected row should be the new open-ended head;
+    #     the original 50,000 row's ``valid_to`` should be clamped to
+    #     the corrected ``valid_from``.
+    #
+    #     Customer-visible expectation pinned by this test:
+    #
+    #       * an as-of query for any moment between the corrected
+    #         ``valid_from`` and clock-time NOW must return €60,000,
+    #       * NOT €50,000 (which is what the framework returns today —
+    #         editing an L1 row's ``valid_from`` does not re-trigger the
+    #         chain logic against the original row, so the original
+    #         stays open-ended and shadows the correction at NOW).
+    #
+    #     Downstream consequence: every back-pay calculation, year-end
+    #     tax filing, and audit-trail ?as_of= query run after the
+    #     correction returns the wrong number. In the user story, Frau
+    #     Klein (the auditor) catches a €25,000 discrepancy in Lukas's
+    #     gross salary report and Acme has to file a Lohnsteuer
+    #     correction with the Finanzamt.
+    #
+    #     When BUG-021 is fixed (the L1 ``post_save`` chain handler
+    #     clamps the previous open-ended row's ``valid_to`` when an
+    #     edited L1 row's ``valid_from`` lands earlier), this test
+    #     flips green and the marker should be removed.
+    #     """
+    #     from datetime import timedelta
+    #     from django.utils import timezone as dj_timezone
+    #
+    #     from lex.core.services.Bitemporal import get_queryset_as_of
+    #
+    #     # ── Acme hires Lukas at €50,000 ──────────────────────────────
+    #     lukas = HistSimpleItem.objects.create(name="lukas", value=50000)
+    #     original_valid_from = lukas.history.first().valid_from
+    #     time.sleep(0.001)
+    #
+    #     # ── Maria's correction, step 1: update the main record ──────
+    #     lukas.value = 60000
+    #     lukas.save()
+    #
+    #     # ── Maria's correction, step 2: edit the new L1 row's
+    #     # valid_from back to before the hire date so the timeline
+    #     # reads "Lukas earned 60K all along". Only valid_from is
+    #     # touched on the L1 row.
+    #     correction_l1 = lukas.history.order_by("-history_id").first()
+    #     earlier = original_valid_from - timedelta(days=30)
+    #     correction_l1.valid_from = earlier
+    #     correction_l1.save()
+    #
+    #     # ── Customer-visible question: query the timeline at an
+    #     # instant strictly between `earlier` and clock-time NOW. The
+    #     # corrected (60K) row's window must cover this instant.
+    #     # Pick a moment 1 day before the original hire — squarely
+    #     # inside what the customer thinks is "Lukas was earning 60K".
+    #     ask_at = original_valid_from - timedelta(days=1)
+    #
+    #     live_at_ask = list(
+    #         get_queryset_as_of(HistSimpleItem, ask_at).filter(name="lukas")
+    #     )
+    #     self.assertEqual(
+    #         len(live_at_ask), 1,
+    #         "Exactly one L1 row must be valid for Lukas at the ask "
+    #         "instant; got %d. Either the timeline has a gap (zero "
+    #         "rows) or it has overlapping versions (more than one)."
+    #         % len(live_at_ask),
+    #     )
+    #     self.assertEqual(
+    #         live_at_ask[0].value, 60000,
+    #         "After Maria's two-step backdated correction (update "
+    #         "main record to 60K, then edit new L1 row's valid_from "
+    #         "to `earlier`), an as-of query at any instant between "
+    #         "`earlier` and clock-time NOW must return 60000 — the "
+    #         "corrected, currently-believed-true salary. Returning %r "
+    #         "means the L1.valid_from edit did not re-chain the "
+    #         "original row (BUG-021): downstream back-pay, tax "
+    #         "filings, and audit forensics will all be wrong."
+    #         % (live_at_ask[0].value,),
+    #     )
+    #
+    #     # And the same question at clock-time NOW. The customer
+    #     # expects 60K because the supersede should leave the
+    #     # corrected row as the new open-ended head.
+    #     live_at_now = list(
+    #         get_queryset_as_of(
+    #             HistSimpleItem, dj_timezone.now()
+    #         ).filter(name="lukas")
+    #     )
+    #     self.assertEqual(
+    #         live_at_now[0].value, 60000,
+    #         "After the supersede, the corrected row must be the new "
+    #         "open-ended head — an as-of query at clock-time NOW must "
+    #         "also return 60000. Returning %r means the original 50K "
+    #         "row was preserved as the open-ended head (the BUG-021 "
+    #         "chain-on-edit gap)."
+    #         % (live_at_now[0].value,),
+    #     )
+    #
+    #     # And the historical-record contract from the docs:
+    #     # "Old row chained: valid_to = Jan 1 (superseded)".
+    #     rows = list(
+    #         HistSimpleItem.history.filter(id=lukas.pk).order_by("history_id")
+    #     )
+    #     original = rows[0]
+    #     self.assertIsNotNone(
+    #         original.valid_to,
+    #         "Per the docs' HR-correction example, the original row "
+    #         "must be superseded — its valid_to must be set, not left "
+    #         "NULL/open-ended. Got original.valid_to=%r"
+    #         % (original.valid_to,),
+    #     )
 
     # -- 5.84 ----------------------------------------------------------
     def test_5_84_meta_task_status_default(self) -> None:

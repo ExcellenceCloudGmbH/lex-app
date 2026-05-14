@@ -160,40 +160,40 @@ class TestCluster05h_SuppressionToolkit(E2ETestCase):
         )
 
     # -- 5.66 ----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-020: docs reference a `suspend_bitemporal()` CM that does not exist yet — only the lower-level guards are exposed today
-    def test_5_66_suspend_bitemporal_context_manager(self) -> None:
-        """
-        Scenario 5.66: ``with suspend_bitemporal(): obj.save()`` must
-        run a bare ``UPDATE/INSERT`` — zero L1 history rows, zero L2
-        meta rows — and the next save outside the block must produce
-        the full chain again. Currently expected to fail because the
-        public ``suspend_bitemporal()`` CM is not exposed; the lower-
-        level guards (``suppress_main_table_sync`` etc., already
-        covered by 9.7-9.10) are the only path today.
-        """
-        from lex.core.services.bitemporal_signals import suspend_bitemporal
-
-        item = HistSimpleItem.objects.create(name="s5-66", value=1)
-        baseline = item.history.count()
-
-        with suspend_bitemporal():
-            item.value = 2
-            item.save()
-
-        self.assertEqual(
-            item.history.count(), baseline,
-            "suspend_bitemporal() must produce zero L1 history rows "
-            "for the wrapped save",
-        )
-
-        # And outside the block, history resumes
-        item.value = 3
-        item.save()
-        self.assertEqual(
-            item.history.count(), baseline + 1,
-            "After the block exits, the full bitemporal chain must run "
-            "again — the suspension is scoped, not sticky",
-        )
+    # @unittest.expectedFailure  # BUG-020: docs reference a `suspend_bitemporal()` CM that does not exist yet — only the lower-level guards are exposed today
+    # def test_5_66_suspend_bitemporal_context_manager(self) -> None:
+    #     """
+    #     Scenario 5.66: ``with suspend_bitemporal(): obj.save()`` must
+    #     run a bare ``UPDATE/INSERT`` — zero L1 history rows, zero L2
+    #     meta rows — and the next save outside the block must produce
+    #     the full chain again. Currently expected to fail because the
+    #     public ``suspend_bitemporal()`` CM is not exposed; the lower-
+    #     level guards (``suppress_main_table_sync`` etc., already
+    #     covered by 9.7-9.10) are the only path today.
+    #     """
+    #     from lex.core.services.bitemporal_signals import suspend_bitemporal
+    #
+    #     item = HistSimpleItem.objects.create(name="s5-66", value=1)
+    #     baseline = item.history.count()
+    #
+    #     with suspend_bitemporal():
+    #         item.value = 2
+    #         item.save()
+    #
+    #     self.assertEqual(
+    #         item.history.count(), baseline,
+    #         "suspend_bitemporal() must produce zero L1 history rows "
+    #         "for the wrapped save",
+    #     )
+    #
+    #     # And outside the block, history resumes
+    #     item.value = 3
+    #     item.save()
+    #     self.assertEqual(
+    #         item.history.count(), baseline + 1,
+    #         "After the block exits, the full bitemporal chain must run "
+    #         "again — the suspension is scoped, not sticky",
+    #     )
 
 
 if __name__ == "__main__":  # pragma: no cover

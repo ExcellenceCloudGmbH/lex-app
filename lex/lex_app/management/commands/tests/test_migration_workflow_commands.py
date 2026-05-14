@@ -1,8 +1,8 @@
 import json
-import tempfile
-from pathlib import Path
 import sys
+import tempfile
 import types
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 

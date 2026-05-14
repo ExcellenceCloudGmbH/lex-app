@@ -24,11 +24,10 @@ Tests for ``CacheManager`` I/O operations — store, get, cleanup, availability.
         lex test lex.tests.test_cache_manager_io --verbosity=2 --noinput
 """
 
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 from django.core.cache.backends.base import InvalidCacheBackendError
 from django.test import SimpleTestCase
-
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.DataModels import CacheCleanupResult
 

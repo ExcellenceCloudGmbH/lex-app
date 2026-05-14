@@ -33,7 +33,6 @@ from unittest.mock import patch
 
 from django.db import connection, models
 from django.test import SimpleTestCase, TransactionTestCase
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import PermissionResult
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
@@ -448,7 +447,6 @@ class TestResolveModelAndPk(TransactionTestCase):
 
     def test_returns_none_for_non_calculation_model(self):
         """LexModel subclasses that are NOT CalculationModel are rejected."""
-        from django.contrib.auth.models import User
 
         entry = {
             "record_id": "user_1",

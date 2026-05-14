@@ -30,7 +30,6 @@ from unittest.mock import MagicMock
 from django.db.models import ForeignKey
 from django.db.models.fields import DateTimeField, DateField, TimeField
 from django.test import SimpleTestCase
-
 from lex.api.serializers.base_serializers import LexSerializer
 
 

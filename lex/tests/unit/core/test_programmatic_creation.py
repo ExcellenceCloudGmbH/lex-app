@@ -14,12 +14,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from api.utils import OperationContext
+from core.models.LexModel import LexModel
 from django.conf import settings
 from django.db import connection, models
 from django.test import TransactionTestCase
-
-from api.utils import OperationContext
-from core.models.LexModel import LexModel
 from process_admin.utils.model_registration import ModelRegistration
 
 

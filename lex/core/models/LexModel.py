@@ -1,17 +1,16 @@
 import logging
-from datetime import datetime
-from abc import ABCMeta
 from contextlib import nullcontext
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, FrozenSet, Mapping, Optional, Set, Union
 
 import streamlit as st
-from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Literal, Mapping, Optional, Set, Union
-
 from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
     BEFORE_UPDATE
+
 try:
     from django_lifecycle.mixins import LifecycleModelMixin, _bypass_state as lifecycle_bypass_state
 except ImportError:
@@ -488,11 +487,15 @@ class LexModel(LifecycleModel):
             if hasattr(self, "_skip_history_for_current_save_only"):
                 delattr(self, "_skip_history_for_current_save_only")
 
+            if hasattr(self, "_is_history_only_skip"):
+                delattr(self, "_is_history_only_skip")
+
         if (
             skip_history_for_current_save_only
             and not getattr(self, "skip_history_when_saving", False)
         ):
             self.skip_history_when_saving = True
+            self._is_history_only_skip = True
             added_transient_skip_history_flag = True
 
         try:
@@ -763,6 +766,30 @@ class LexModel(LifecycleModel):
     def _has_explicit_edited_at_override(self) -> bool:
         return self.has_changed('edited_at') and self.edited_at is not None
 
+    def _should_skip_edited_fields_update(self) -> bool:
+        """
+        Return True when edited_by / edited_at updates should be suppressed.
+
+        Two distinct scenarios:
+        1. Bitemporal sync — ``skip_history_when_saving`` is *permanently* set
+           (i.e. NOT via the transient ``_skip_history_for_current_save_only``
+           flag).  ``_is_history_only_skip`` distinguishes the two.
+        2. Child-record save inside a parent calculation — the ContextVar
+           ``_in_calculation_execution`` is True while the parent's user code
+           (``calculate()`` / ``update()``) is executing.
+        """
+        if (
+            getattr(self, 'skip_history_when_saving', False)
+            and not getattr(self, '_is_history_only_skip', False)
+        ):
+            return True
+
+        from lex.core.models.CalculationModel import _in_calculation_execution
+        if _in_calculation_execution.get(False):
+            return True
+
+        return False
+
     @hook(BEFORE_CREATE)
     def update_timestamps_on_create(self):
         # Skip if we are syncing from history (bitemporal sync)
@@ -779,8 +806,7 @@ class LexModel(LifecycleModel):
 
     @hook(BEFORE_UPDATE)
     def update_edited_at(self):
-        # Skip if we are syncing from history (bitemporal sync)
-        if getattr(self, 'skip_history_when_saving', False):
+        if self._should_skip_edited_fields_update():
             return
         if not self._has_field('edited_at'):
             return
@@ -792,8 +818,7 @@ class LexModel(LifecycleModel):
 
     @hook(BEFORE_UPDATE)
     def update_edited_by(self):
-        # Skip if we are syncing from history (bitemporal sync)
-        if getattr(self, 'skip_history_when_saving', False):
+        if self._should_skip_edited_fields_update():
             return
         if not self._has_field('edited_by'):
             return

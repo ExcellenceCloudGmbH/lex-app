@@ -1,0 +1,217 @@
+# ──────────────────────────────────────────────────────────────────────
+#  THIS FILE GOES IN: lex-app-docs/.github/workflows/auto-update-docs.yml
+#
+#  Copy this file to the lex-app-docs repository.
+#
+#  Auto-update documentation when lex-app publishes a new release.
+#
+#  This workflow:
+#   1. Is triggered by a `repository_dispatch` event from lex-app.
+#   2. Checks out lex-app to compute the code diff between releases.
+#   3. Creates a GitHub issue with the diff and update instructions.
+#   4. Assigns the issue to Copilot, which opens a PR automatically.
+#
+#  Because this runs inside lex-app-docs, the issue and PR are created
+#  using the repo's own GITHUB_TOKEN — no cross-repo auth needed.
+#
+#  The only external dependency is the dispatch event, which is fired
+#  by lex-app's update_docs.yml workflow using a GitHub App token.
+#
+#  Required:
+#   - GitHub Copilot coding agent enabled on lex-app-docs
+#
+#  No additional secrets needed on lex-app-docs.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Auto-Update Documentation
+
+on:
+  repository_dispatch:
+    types: [release-published]
+
+  # Manual trigger for testing / re-running
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: "Base ref (previous release tag, e.g. v2.3.0)"
+        required: false
+        type: string
+      head_tag:
+        description: "Head ref (current release tag, e.g. v2.4.0)"
+        required: false
+        type: string
+
+jobs:
+  create-docs-issue:
+    name: "Create Copilot Documentation Issue"
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      # ── 1. Parse the dispatch payload ──────────────────────────
+      - name: Parse event payload
+        id: tags
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            HEAD_TAG="${{ github.event.client_payload.head_tag }}"
+            BASE_TAG="${{ github.event.client_payload.base_tag }}"
+            SOURCE="${{ github.event.client_payload.source_repo }}"
+          else
+            HEAD_TAG="${{ inputs.head_tag }}"
+            BASE_TAG="${{ inputs.base_tag }}"
+            SOURCE="ExcellenceCloudGmbH/lex-app"
+          fi
+
+          echo "head_tag=${HEAD_TAG}" >> "$GITHUB_OUTPUT"
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "source_repo=${SOURCE}" >> "$GITHUB_OUTPUT"
+          echo "Release diff: ${BASE_TAG:-'(initial)'}..${HEAD_TAG}"
+
+      # ── 2. Checkout lex-app (source code, read-only) ───────────
+      - name: Checkout lex-app
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.tags.outputs.source_repo }}
+          fetch-depth: 0
+          path: lex-app
+
+      # ── 3. Generate the code diff between releases ─────────────
+      - name: Generate release diff
+        id: diff
+        working-directory: lex-app
+        run: |
+          HEAD_TAG="${{ steps.tags.outputs.head_tag }}"
+          BASE_TAG="${{ steps.tags.outputs.base_tag }}"
+
+          # If no head tag from dispatch, resolve from git
+          if [[ -z "${HEAD_TAG}" ]]; then
+            HEAD_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || echo "")
+          fi
+          if [[ -z "${BASE_TAG}" && -n "${HEAD_TAG}" ]]; then
+            BASE_TAG=$(git describe --tags --abbrev=0 "${HEAD_TAG}^" 2>/dev/null || echo "")
+          fi
+
+          # Re-export resolved tags
+          echo "head_tag=${HEAD_TAG}" >> "$GITHUB_OUTPUT"
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "${BASE_TAG}" && -n "${HEAD_TAG}" ]]; then
+            git log --oneline "${BASE_TAG}..${HEAD_TAG}" -- \
+              lex/ ':(exclude)lex/react' | head -50 > /tmp/commits.txt
+
+            git diff "${BASE_TAG}..${HEAD_TAG}" --stat -- \
+              lex/ ':(exclude)lex/react' > /tmp/diffstat.txt
+
+            git diff "${BASE_TAG}..${HEAD_TAG}" -- \
+              lex/ ':(exclude)lex/react' ':(exclude)*.pyc' \
+              | head -800 > /tmp/code_diff.txt
+          else
+            git log --oneline HEAD~10..HEAD -- lex/ | head -50 > /tmp/commits.txt
+            git diff --stat HEAD~10..HEAD -- lex/ > /tmp/diffstat.txt
+            git diff HEAD~10..HEAD -- lex/ | head -800 > /tmp/code_diff.txt
+          fi
+
+          # Store diff size for the summary
+          COMMIT_COUNT=$(wc -l < /tmp/commits.txt)
+          DIFF_LINES=$(wc -l < /tmp/code_diff.txt)
+          echo "commit_count=${COMMIT_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "diff_lines=${DIFF_LINES}" >> "$GITHUB_OUTPUT"
+
+      # ── 4. Create issue ─────────────────────────────────────────
+      - name: Create documentation update issue
+        id: create-issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const headTag = '${{ steps.diff.outputs.head_tag }}' || '${{ steps.tags.outputs.head_tag }}';
+            const baseTag = '${{ steps.diff.outputs.base_tag }}' || '${{ steps.tags.outputs.base_tag }}' || '(initial)';
+            const commitCount = '${{ steps.diff.outputs.commit_count }}';
+            const diffLines = '${{ steps.diff.outputs.diff_lines }}';
+
+            const commits = fs.readFileSync('/tmp/commits.txt', 'utf8').trim();
+            const diffstat = fs.readFileSync('/tmp/diffstat.txt', 'utf8').trim();
+            let codeDiff = fs.readFileSync('/tmp/code_diff.txt', 'utf8').trim();
+
+            // GitHub issue body limit is 65536 chars. Reserve space for the template.
+            const MAX_DIFF = 45000;
+            if (codeDiff.length > MAX_DIFF) {
+              codeDiff = codeDiff.substring(0, MAX_DIFF) + '\n\n... (truncated — see full diff on GitHub)';
+            }
+
+            const body = `## Update documentation for lex-app ${baseTag} → ${headTag}
+
+            **Context:** A new version of \`lex-app\` has been released. The code changes below need to be reflected in the documentation in this repository.
+
+            ### Writing style
+
+            **Read the existing docs first** to match their tone. The docs are written for developers who use the framework — not for contributors to the framework internals. Follow these rules:
+
+            - **Keep it practical and conversational.** Write like you're explaining to a colleague. Example of good tone: "You don't need to pass IDs manually — it figures out which calculation is running."
+            - **Don't expose internals.** Don't mention internal class names, error classes, or implementation patterns (like "LIFO stack", "ContextResolver pipeline") unless they're part of the public API the user calls directly.
+            - **Feature docs (\`content/features/\`) should explain what things do and how to use them.** Save class names, constants, and pgcodes for reference docs (\`content/reference/\`).
+            - **Keep changes minimal.** If the code diff is mostly test files or internal refactoring, the docs probably don't need updating. Say so and make no changes.
+            - **One-liners are fine.** Not every change needs a paragraph. A short addition to an existing bullet point is often better than a new section.
+
+            ### Instructions
+
+            1. Read the existing documentation files under \`content/\` to understand the current writing style and structure.
+            2. Identify which pages are affected by the code changes below.
+            3. Update existing pages to reflect new behavior, parameters, or features — matching the existing tone.
+            4. If a completely new user-facing feature was added and has no doc page, create one following the existing structure and frontmatter format.
+            5. Do **not** modify pages unrelated to the code changes.
+            6. Do **not** create docs for test files, internal refactors, or CI/CD changes.
+            7. Keep all existing Quartz/Obsidian frontmatter (\`---title:---\`) intact.
+
+            ### Commits (${commitCount})
+
+            \`\`\`
+            ${commits}
+            \`\`\`
+
+            ### Diff stat
+
+            \`\`\`
+            ${diffstat}
+            \`\`\`
+
+            ### Code diff (${diffLines} lines, may be truncated)
+
+            \`\`\`diff
+            ${codeDiff}
+            \`\`\`
+
+            ---
+            > This issue was automatically created by the lex-app release pipeline.
+            > Assign to Copilot to auto-generate a PR.
+            `;
+
+            // Create the issue (using default GITHUB_TOKEN)
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `docs: update for lex-app ${headTag}`,
+              body: body,
+              labels: ['documentation', 'automated']
+            });
+
+            core.info(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
+            core.setOutput('issue_number', issue.data.number);
+
+      # ── 5. Assign Copilot coding agent to the issue ────────────
+      - name: Assign Copilot to issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.COPILOT_PAT }}
+          script: |
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.create-issue.outputs.issue_number }},
+              assignees: ['copilot-swe-agent[bot]']
+            });
+            core.info('Assigned Copilot to issue #${{ steps.create-issue.outputs.issue_number }}');

@@ -1,10 +1,10 @@
-import os
 import importlib
+import os
+import sys
 from pathlib import Path
 
 from django.apps import AppConfig
 from django.db import models
-
 from lex.process_admin.utils.model_registration import ModelRegistration
 from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
 from lex.utilities.import_system.import_utils import install_custom_import_system
@@ -145,7 +145,10 @@ class GenericAppConfig(AppConfig):
                             continue
                         self.add_model(name, obj)
         except (RuntimeError, AttributeError, ImportError) as e:
-            print(f"Error importing {full_module_name}: {e}")
+            # Write to stderr — this code can run inside an MCP stdio server
+            # process, where stdout is the JSON-RPC channel and any non-JSON
+            # text corrupts the stream.
+            print(f"Error importing {full_module_name}: {e}", file=sys.stderr)
             raise
 
     def add_model(self, name, model):

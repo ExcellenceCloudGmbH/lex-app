@@ -1,4 +1,4 @@
-from lex.legacy_data.models.legacy_calculation_log import LegacyCalculationLog
-from lex.legacy_data.models.legacy_user_change_log import LegacyUserChangeLog
 from lex.legacy_data.models.legacy_calculation_id import LegacyCalculationId
+from lex.legacy_data.models.legacy_calculation_log import LegacyCalculationLog
 from lex.legacy_data.models.legacy_log import LegacyLog
+from lex.legacy_data.models.legacy_user_change_log import LegacyUserChangeLog

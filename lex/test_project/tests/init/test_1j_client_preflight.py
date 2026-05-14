@@ -38,14 +38,12 @@ import io
 from unittest import TestCase, mock
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands.init import (
     KEYCLOAK_DEV_REDIRECT_HOST,
     KeycloakSyncManager,
     _deployment_environment_is_set,
     _redirect_uris_indicate_development,
 )
-
 
 # ---------------------------------------------------------------------
 # Fixtures (same shape as 1e / 1g): bypass __init__ + stub kc_manager.

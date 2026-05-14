@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
-import os
 import logging
+import os
 from typing import Optional
 
 from celery import Celery

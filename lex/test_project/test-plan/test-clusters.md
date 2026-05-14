@@ -332,7 +332,7 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 > * **6.2 thin.** Asserts only that `"value"` is in the payload dict. Docs require: payload carries the *full serialized data* of the operation, on update payload is *refreshed to the final state* on success (`audit_log.payload = updated_payload` line 265 of `AuditLogMixin.py`), payload includes `id` after save. None pinned. See **6d** scenarios 6.42–6.43.
 > * **6.3 thin.** Asserts only `count==1` + `status=='success'`. Docs explicitly say "For deletions, the payload captures the record's state at the moment of deletion — so you can always inspect what was removed." That contract is uncovered. See **6d** scenario 6.44.
 > * **6.4 skipped.** Documented as "needs middleware-level audit hook". The mixin's *exception path* (`AuditLogMixin.py` lines 234–283 / 298–311 — `_pending_failed_audit_logs` queue + `_failed_audit_logged` sentinel + atomic vs. non-atomic split) is dark. The contract is concrete and reachable today via raising `pre_validation` + a `perform_create` save: failure status row, status='failure', traceback non-empty, atomic-block path queues for replay. See **6d** scenarios 6.45–6.47 (re-scoped — no middleware needed).
-> * **Pending intermediate state never observed.** The docs mermaid diagram makes "🟡 Pending → 🟢 Success / 🔴 Failure" a customer-visible lifecycle, but no test ever observes the *pending* state mid-flight. See **6d** scenario 6.48.
+> * **Pending intermediate state never observed.** The docs mermaid diagram makes " Pending →  Success /  Failure" a customer-visible lifecycle, but no test ever observes the *pending* state mid-flight. See **6d** scenario 6.48.
 > * **`BulkAuditLogMixin` not tested.** Documented as "Each individual record in a bulk operation gets its own audit log entry — so a bulk update of 100 records creates 100 audit log entries." Cluster 2e's bulk DELETE scenarios (2.23/2.24/2.25) never assert the audit row count. See gap sub-cluster **6e** scenarios 6.51–6.53.
 > * **Resilience contracts unpinned.** Two are explicitly called out in docs ("Resilience" section): deadlock retries (`RETRYABLE_SQLSTATE_CODES = {"40P01", "40001"}` + 3 attempts + exponential backoff) and ContentType cache healing (`safe_get_content_type` recovers when Django's cache goes stale post-migration). See **6f** scenarios 6.61–6.63.
 > * **Read-only / immutable contract not gated.** Docs `[!note]`: "Audit logs are effectively read-only. Only administrators should modify or delete them." `AuditLog.permission_create` / `permission_delete` return False, `permission_edit` denies. No test pins this — a regression that flipped any of those bools to `True` would silently allow audit deletion. See **6g** scenarios 6.71–6.73.
@@ -399,7 +399,35 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 7.45 | Non-atomic parent, non-atomic child, child fails | Child ERROR persists and propagates ERROR to parent |
 | 7.46 | Non-atomic parent, non-atomic child, parent fails after child pass | Parent settles at ERROR while successful child remains SUCCESS |
 | 7.47 | Non-atomic parent, non-atomic child, both fail | Child ERROR persists and parent settles at ERROR via propagation |
-| 7.48 – 7.111 | **Sub-cluster 7j — Grandparent / parent / child atomicity matrix (64 scenarios).** Full 3-level extension of 7i: every combination of grandparent / parent / child × atomic / non-atomic × fail / no-fail (8 atomicity triplets × 8 outcome triplets). Pins the two atomicity rules the framework actually obeys: **(a)** a failing level's ERROR row survives nested savepoints (its own atomic block, intermediate atomic ancestors) but is wiped by the **outermost** atomic ancestor's rollback (in 3 levels: only GP wipes a failing P or C); **(b)** a successful descendant's row is wiped by **any** atomic ancestor that raises. Failure precedence stays `c_fail > p_fail > gp_fail`. Tests are parametrically generated as `test_7_NN_<aaa>_<TFT>` where letters encode atomicity (a/n) and outcome (T/F) for gp/p/c. Method names are stable so a CI failure log identifies the cell directly. | All 64 cells assert the exact (gp, p, c) triple; `None` distinguishes "row rolled back" from `ERROR`. |
+| 7.48 – 7.111 | **Sub-cluster 7j — Grandparent / parent / child atomicity matrix (64 scenarios).** Full 3-level extension of 7i: every combination of grandparent / parent / child × atomic / non-atomic × fail / no-fail (8 atomicity triplets × 8 outcome triplets). Pins the two atomicity rules the framework actually obeys: **(a)** a failing level's ERROR row survives nested savepoints (its own atomic block, intermediate atomic ancestors) but is wiped by the **outermost** atomic ancestor's rollback (in 3 levels: only GP wipes a failing P or C); **(b)** a successful descendant's row is wiped by **any** atomic ancestor that raises. Failure precedence stays `c_fail > p_fail > gp_fail`. Tests are parametrically generated as `test_7_NN_<aaa>_<TFT>` where letters encode atomicity (a/n) and outcome (T/F) for gp/p/c. Method names are stable so a CI failure log identifies the cell directly. |
+
+### 7e. Persistence internals + two-phase `save()` ✅
+
+**Gap:** Cluster 7's behavior tests (7a–7d, 7i, 7j) all rely on a single underlying contract: when a `CalculationModel` is saved with `is_calculated=IN_PROGRESS`, the framework writes the IN_PROGRESS row in a short atomic block (Phase 1) and runs `calculate_hook` *outside* that block (Phase 2). If Phase 2 crashes, the IN_PROGRESS row is already committed and the failure is recorded as a clean ERROR — never a forever-spinning IN_PROGRESS. 7e pins both that observable contract and the small set of bookkeeping helpers that hold it up (`_terminal_state_identity`, the terminal-state and IN_PROGRESS persistence markers, the missing-IN_PROGRESS-history recovery queue, and `before_save`'s `is_creation` flag).
+
+**Scenario numbering note:** 7e runs in the **7.112 – 7.121** band (immediately after the 7j matrix ends at 7.111), because the 7.15 – 7.31 range is already claimed by sub-clusters 7f (combination engine, 7.15–7.22) and 7g (`create()` pipeline, 7.25–7.31).
+
+**Models needed:**
+- `AtomicCalc` (reused) — drives the helper-level safety-net checks and the SUCCESS branch of two-phase save.
+- `FailingCalc` (reused) — drives the Phase-2-failure branch.
+- `PersistenceProbeCalc` (new) — same shape as `AtomicCalc` but exposes an instance-level `_probe` callback fired from inside `calculate()`. Lets a test re-query the DB *while* Phase 2 is running and observe what Phase 1 has already committed.
+
+**Test scenarios:**
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 7.112 | `_terminal_state_identity` collapses to `(class, pk)` for saved rows and falls back to `id(obj)` for unsaved rows | Two refs to the same persisted row dedupe; two unsaved instances never collide |
+| 7.113 | Terminal-state persistence marker (`_mark_` / `_has_` / `_clear_terminal_state_persistence`) | State-specific snapshot; `None` is a safe no-op; clear actually removes the attribute |
+| 7.114 | `_apply_in_progress_state_persistence` sets the marker for IN_PROGRESS (and drops any pending history snapshot), clears it for SUCCESS/ERROR, and is a no-op on `None` | Pending-history attribute is removed once IN_PROGRESS is committed |
+| 7.115 | `_register_in_progress_state_persistence` runs immediately when `connection.in_atomic_block` is False, but defers to `transaction.on_commit` when True | The deferred callback is captured and only sets the marker after commit fires — so a rollback can never leave a marker claiming "IN_PROGRESS persisted" for a row that never landed on disk |
+| 7.116 | `_queue_missing_in_progress_history` skips when the marker is already set; otherwise stashes a snapshot + history metadata for replay; `None` is safe | Pending snapshot is discarded if IN_PROGRESS is known committed; otherwise carries `snapshot`, `history_date`, `history_change_reason` |
+| 7.117 | `before_save` sets `is_creation = True` for inserts (`_state.adding`) and `False` for updates | Customer signal handlers can branch reliably on this flag |
+| 7.118 | Two-phase save: while `calculate()` is running, a fresh DB query for the same pk already returns `is_calculated = IN_PROGRESS` | If Phase 1 wrapped Phase 2 in the same atomic block, other clients (and the spinner) would never see IN_PROGRESS |
+| 7.119 | Two-phase save: after a successful save, the SUCCESS terminal-state marker is recorded on the instance | Protects `persist_error_state` idempotency (scenario 7.10) on retry / Celery callback paths |
+| 7.120 | Two-phase save: a Phase-2 raise leaves the row at ERROR (never stuck at IN_PROGRESS) | The customer-visible promise of two-phase save: a crash is a clean ERROR, not a hung spinner |
+| 7.121 | A regular save with no IN_PROGRESS flip skips the two-phase path entirely | `calculate()` is NOT called when only a non-state field changes — two-phase is reserved for the IN_PROGRESS transition |
+
+**Status:** ✅ Complete — covers `lex/test_project/tests/calculations/test_7e_persistence_internals.py`.
 
 ---
 
@@ -592,16 +620,6 @@ Observed on first run (SMALL, 2.5k rows):
 
 **Budgets are hard gates.** A scenario that goes 10% over budget is a failure, not a warning. Budgets are tuned once on the CI runner baseline (recorded in `test_report/stress/baseline.json`) and tightened — never loosened — with each release. If a scenario legitimately needs more time (new feature, new work in the hot path), the PR must update the baseline **in the same commit** that adds the work, so the change is reviewable.
 
-**What is explicitly NOT tested here:**
-
-- ❌ Correctness beyond what the smaller clusters already cover. If `PeriodAggregateCalc` gets the wrong answer, cluster 7 should catch it at 10 rows. Cluster 11 is only about **how long** and **how many queries**.
-- ❌ Network latency / cross-region behaviour. This cluster runs on a single CI runner against a local Postgres.
-- ❌ Frontend performance. Separate concern, different toolchain.
-
-**Reporting:**
-
-Every stress run writes `test_report/stress/<timestamp>.json` with per-scenario `(duration, query_count, peak_memory_mb)`. A nightly CI job appends the latest run to a rolling `test_report/stress/trend.jsonl` and fails the job if any scenario's **90-day moving average** exceeds its budget by 5%. This gives us drift detection that a single-run budget check misses.
-
 ---
 
 ## 12. Serializer Contract
@@ -779,7 +797,7 @@ clusters):
 | # | Scenario | What We Assert |
 |---|----------|----------------|
 | 13.8 | AG ``rowGroupCols`` with 2 levels | Sheet contains group-header rows with indented ``__ag_group_hierarchy_label`` and a recorded group depth (Excel outline level); ``_collect_ag_export_rows`` recursion visits both levels |
-| 13.9 | AG ``selection.groupKeyPaths`` filter | Only rows matching the selected group key are in the sheet; ``_coerce_group_key`` converts ``"1"`` → ``int(1)`` for an integer FK and ``"null"`` → ``__isnull=True`` |
+| 13.9 | AG ``selection.groupKeyPaths`` filter | Only rows matching the selected group key are in the sheet; ``_coerce_group_key`` converts ``"1"`` → ``int(1)`` for an integer FK and ``"null"`` → ``__isnull=True`` for a null FK |
 | 13.10 | AG payload + base64 ``filtered_export`` | ``_extract_selected_ids_for_export`` path taken; only the decoded ids in the sheet (this is the AG-path analogue of 13.3) |
 
 ### 13d. Auth & edge cases
@@ -957,6 +975,34 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 
 **Status:**  Complete — 8 pass / 0 fail. See progress.md Sessions 17 + 19.
 
+### 4i. `LexModel` permission helper convenience methods ✅
+
+**Gap:** `lex/core/models/LexModel.py` ships seven public **shorthand helpers** customers compose inside their own `permission_read` / `permission_edit` overrides — `allow_all_if_superuser`, `allow_all_if_in_groups`, `allow_fields_if_owner`, `keycloak_fallback`, `allow_all_except_sensitive`, `allow_public_fields`, `allow_basic_fields` — plus six **legacy `can_*(request)` adapters** (`can_read` / `can_edit` / `can_export` / `can_create` / `can_delete` / `can_list`) for back-compat with pre-`PermissionResult` customer code. Cluster 4a–4h test the *outcome* of permission overrides through HTTP, but never directly pin the helpers' input/output contract. A drift in any helper silently weakens every customer model that composes it: returning `False` instead of `None` from an "intermediate" helper breaks the documented `or`-chain pattern; returning the wrong field set from `allow_public_fields` leaks PII.
+
+**Why a sub-cluster of 4 (Permissions):** these helpers compose with the same `UserContext` / `PermissionResult` building blocks 4a–4h test against. They are not their own feature — they are convenience shortcuts inside the existing permission API.
+
+**Scenario numbering** runs **4.27 – 4.34** in the free band between 4f's last (4.26) and 4h's first (4.40).
+
+**Models needed:**
+- `ProtectedItem` (reused) — every helper that doesn't need an FK runs against this lightweight fixture.
+- `FieldLevelItem` (reused) — drives `can_read`'s `Set[str]` collapse from a real `permission_read` override that returns `allow_fields(...)`.
+- `OwnedItem` (new) — adds an `owner` FK to `auth.User` so `allow_fields_if_owner`'s ownership check is exercised against a real ORM lookup.
+
+**Test scenarios:**
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 4.27 | `allow_all_if_superuser` | Superuser → `allow_all` with documented reason; non-superuser → `None` so the caller falls through; custom `reason` propagates |
+| 4.28 | `allow_all_if_in_groups` | Bare-string argument is normalised to a one-element set; any overlap of user's groups with the required set allows; no overlap returns `None`; default reason mentions the matched groups |
+| 4.29 | `allow_fields_if_owner` | Owner + explicit `fields=` → `allow_fields(...)`; owner + `excluded_fields=` → `allow_all_except(...)`; owner + neither → `allow_all`; non-owner returns `None`; unauthenticated short-circuits *before* the FK lookup; `owner_field` pointing at a missing attribute returns `None` (never raises) |
+| 4.30 | `keycloak_fallback` is the **terminal** helper | Scope present → `allow_all`; scope missing → `deny` (not `None` — terminal helpers never return `None`); unrelated scope (e.g. `write` for a `read` check) does not satisfy |
+| 4.31 | `allow_all_except_sensitive` | No-arg call uses the documented PII default set (`password`, `ssn`, `credit_card`, `bank_account`, …); explicit `sensitive_fields=` *replaces* the default rather than extending it |
+| 4.32 | `allow_public_fields` / `allow_basic_fields` | Returns the documented allowlist (`{id, name, title, description, created_at, edited_at, updated_at}` for `public`; `{id, name, email, created_at}` for `basic`) — locks the customer-facing constant against accidental drift |
+| 4.33 | Helper composition contract | Every "intermediate" helper returns `None` (not `False`, not a denied `PermissionResult`) when inapplicable, so the documented `allow_X() or allow_Y() or keycloak_fallback()` one-liner short-circuits at the first match. The `or`-chain is exercised end-to-end and the short-circuit is asserted. |
+| 4.34 | Legacy `can_*(request)` adapters | Field-returning adapters (`can_read` / `can_edit` / `can_export`) collapse a `PermissionResult` to a `Set[str]` of allowed field names; boolean adapters (`can_create` / `can_delete` / `can_list`) return the predicate's `bool` directly. Drives both a regular user and a superuser through `FieldLevelItem` / `ProtectedItem`. |
+
+**Status:** ✅ Complete — 26 pass / 0 fail. Covers `lex/test_project/tests/permissions/test_4i_permission_helpers.py`.
+
 ### 12f. Serializer write paths — M2M & nested FK 
 
 **Gap:** `lex/api/serializers/base_serializers.py` still had ~108 missing stmts on the write side — the M2M and FK-nested branches. 12f closes them with three end-to-end scenarios driving real POST/PATCH against the One endpoints.
@@ -977,7 +1023,7 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 
 **Gap:** `ModelStructureObtainView.py` (102 stmts, 21.54% baseline) and `model_info/Fields.py` (67 stmts, 22.35% baseline) drive every frontend form + nav menu. A drift here renders the wrong widget for a field, or leaks denied models into the nav.
 
-**Models:** `SchemaFKTarget`, `SchemaItem` (one field per interesting type), `SchemaHiddenItem` (`permission_list → False`) in `api_layer/models.py`.
+**Models:** new `SchemaFKTarget`, `SchemaItem` (one field per interesting type), `SchemaHiddenItem` (`permission_list → False`) in `api_layer/models.py`.
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
@@ -1007,7 +1053,7 @@ Shipped 4 scenarios. The view depends only on `self.model_collection` + `self.kw
 
 ### 5.11 — History fallback-snapshot path 
 
-**Gap:** `History.py` lines 180–201 — the per-field manual-serialization branch inside `_get_snapshot` that fires when a model-container has no registered `serializers_map['default']`. The existing 5c scenarios never hit it because every test-project LexModel ships a default serializer.
+**Gap (April 25):** `History.py` lines 180–201 — the per-field manual-serialization branch inside `_get_snapshot` that fires when a model-container has no registered `serializers_map['default']`. The existing 5c scenarios never hit it because every test-project LexModel ships a default serializer.
 
 **Shape:** `SimpleTestCase` that drives `_get_snapshot` directly with a synthetic history record (a dynamically-built class whose `_meta.fields` yields `.name`-carrying fakes). Covers five branches in one scenario with named sub-assertions so regressions surface the exact drift.
 
@@ -1019,7 +1065,7 @@ Shipped 4 scenarios. The view depends only on `self.model_collection` + `self.kw
 
 ### 9.7 – 9.10 — Bitemporal suppression guards 
 
-**Gap:** `bitemporal_signals.py` at 46.60% baseline. The three `ContextVar`-backed suppression guards (`suppress_main_table_sync`, `suppress_history_valid_to_chaining`, `suppress_meta_sys_to_chaining`) are consulted by every handler in the file — early-return at lines 118, 274, and the Level-2 meta-chaining guard. A drift in their lifecycle is how the BUG-011 chaining bottleneck compounds (leaked True → recursion; cross-contaminating state → wrong handler skipped).
+**Gap (April 25):** the three `ContextVar`-backed suppression guards (`suppress_main_table_sync`, `suppress_history_valid_to_chaining`, `suppress_meta_sys_to_chaining`) are consulted by every handler in the file — early-return at lines 118, 274, and the Level-2 meta-chaining guard. A drift in their lifecycle is how the BUG-011 chaining bottleneck compounds (leaked True → recursion; cross-contaminating state → wrong handler skipped).
 
 Direct handler coverage of lines 170–340 would need a full history fixture (already exercised happy-path by 5a/5b/5c). This sub-cluster locks down the **suppression primitives** those handlers lean on.
 
@@ -1034,9 +1080,46 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 4 pass / 0 fail.
 
+### 9d — `ActiveCalculationStateStore` full surface (coverage-driven — May 12)
+
+**Gap (May 12):** `lex/core/signals/ActiveCalculationStateStore.py` baseline **27.03%** (131 stmts, 86 missed). Two tests exist (9a/9b) but only exercise the store transitively through the `update_calculation_status` signal — the public accessors, the DB-validated `snapshot()` reconciliation path that the WebSocket consumer calls on every reconnect, the startup `validate_and_prune()` sweep, and the private model-resolution helpers (`_resolve_model_and_pk` / `_split_record_id` / `_find_model_by_name`) were all dark.
+
+**Why it matters:** this store is the single source of truth that lets a re-connecting browser tab pick up the spinner mid-calculation. The previous DatabaseCache implementation lost entries written inside `transaction.atomic()` because the ASGI consumer ran on a different DB connection — the bug whose fix this whole file exists to protect. Anything that breaks `snapshot()` (stale entries leaking through, live entries disappearing) directly regresses the customer-visible "did my calculation crash or am I just disconnected?" UX.
+
+**Shape:** `SimpleTestCase` — pure Python, no DB. Models are unmanaged (`Meta.managed = False`); DB-touching paths are MagicMock-driven via `patch.object(ActiveCalculationStateStore, '_resolve_model_and_pk', …)`. 24 tests run in 0.009s.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.11 | `mark_in_progress` with empty `record_id` is a no-op | Early-return guard; store stays empty (line 56) |
+| 9.12 | `mark_in_progress` persists full payload | All 5 fields land verbatim; `int` pk normalised to `str` so JSON-serializable downstream |
+| 9.13 | Optional fields default to `''` not `None` | `record` falls back to `record_id`; `calculation_id` / `model_label` / `record_pk` blank-string defaults — downstream consumers iterate values directly so `None` would force `or ""` everywhere |
+| 9.14 | `clear('')` is a no-op | Symmetric early-return guard (line 71); existing entry untouched |
+| 9.15 | `clear` removes entry and is idempotent | Second `clear` of same id silent — no `KeyError`, no log spam |
+| 9.16 | `clear_all` empties every entry | Startup-only sweep; works regardless of size |
+| 9.17 | `mark_in_progress` overwrites existing entry | Re-marking same id replaces prior entry (re-fire after ABORTED reset) |
+| 9.18 | `get_calculation_id` returns string when set | Live entry → calc id string |
+| 9.19 | `get_calculation_id` returns None for missing or blank | Both dark branches: dict.get default + `isinstance(...) and calculation_id` truthiness guard (line 88) |
+| 9.20 | `get_entry('')` returns `{}` | Symmetric defensive guard (line 94) |
+| 9.21 | `get_entry` returns a defensive copy | Mutating result must NOT affect store; pins `dict(entry)` copy (line 99) — regression to bare `return entry` would let snapshot consumers mutate under the lock |
+| 9.22 | `_split_record_id` parses `model_pk` on rightmost `_` | Handles model names containing underscores (`my_calc_model_7` → `("my_calc_model", "7")`) |
+| 9.23 | `_split_record_id` rejects malformed input | Empty / no underscore / blank halves all → `(None, None)` |
+| 9.24 | `_find_model_by_name` walks app registry | Returns `CalculationModel` subclass when match exists; `None` for unknown names |
+| 9.25 | `_resolve_model_and_pk` prefers explicit `model_label` | `app_label.ModelName` resolves via `apps.get_model` before `record_id` parsing |
+| 9.26 | `_resolve_model_and_pk` falls back to `record_id` parsing | No `model_label` → split + walk app registry |
+| 9.27 | `_resolve_model_and_pk` rejects non-`CalculationModel` classes | Without this guard `snapshot()` would call `.objects.filter(...)` on arbitrary models and could leak unrelated state into the WebSocket payload |
+| 9.27b | `_resolve_model_and_pk` returns `(None, None)` on full resolution failure | Empty entry early-out + `apps.get_model` raise → registry-walk fallback that also fails — no exception bubbles |
+| 9.28 | `snapshot()` empty-store fast path | No entries → `[]` returned without DB hit |
+| 9.28b | `snapshot()` returns live entries and prunes stale | Live IN_PROGRESS pass through; terminal-state entries dropped from BOTH the payload and the store — the WebSocket reconciliation contract |
+| 9.28c | `snapshot()` keeps entry on DB exception | Defensive: better a possibly-stale spinner than a silently-dropped live calculation on a DB blip |
+| 9.28d | `snapshot()` skips DB validation when resolver returns `(None, None)` | Unresolvable entry passes through unchecked; pins the `if model_class is not None and record_pk is not None` guard |
+| 9.28e | `validate_and_prune()` keeps only IN_PROGRESS rows | Empty-store fast-path safe; stale (terminal state) / gone (instance None) / unresolvable all dropped |
+| 9.28f | `validate_and_prune()` drops entry on DB exception | Documented behavioural difference from `snapshot()` — startup sweep is conservative-rebuild ("only keep what we can positively confirm"); a regression that adds "keep on exception" would have to revisit this test |
+
+**Status:**  Complete — 24 pass / 0 fail / 0.009s. Coverage: 27.03% → ~95%+ (whole file minus 1-2 unreachable defensive branches).
+
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
-**Gap:** `lex/core/mixins/CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
+**Gap (April 25):** `CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
 
 1. `_generate_model_combinations` (1346-1401)
 2. `_prepare_models_for_processing` (1403-1494)
@@ -1091,36 +1174,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 ### 8j. Celery task bodies — `load_data` / `calc_and_save` / `activate_history_version` 
 
-**Gap (April 24):** 8g / 8h / 8i drove the *infrastructure* around `@lex_shared_task` (CallbackTask, CeleryCalculationContext, EnhancedBoundTaskMethod dispatch, WaitForTasks / FireAndForget scope contracts). The three **task bodies** shipped in `celery_tasks.py` — the customer-visible work units — remained dark: `load_data` (the `initial_data_upload` task body, 50+ lines spanning four storage/worker branches + finalize gate), `calc_and_save` (the per-model batch loop with IntegrityError conflict resolution), and `activate_history_version` (Celery Beat bitemporal-activation task with four documented return-string branches).
-
-**Intent** (per source + `docs/lex_topics/12-celery-async-dispatch.md`): `load_data` is the seed-on-boot task — routes through sync vs Celery-worker harness invocation based on `STORAGE_TYPE` + `is_running_in_celery`, always finalizes the audit batch in `finally` (`failure_error` on crash, `None` on clean); `calc_and_save` is what every `CalculatedModelMixin.create(...)` dispatch eventually runs — per-model `lex_func()` → `save()`, with `IntegrityError` triggering `delete_models_with_same_defining_fields` to detect the duplicate and either reassign pk or reset-and-retry; `activate_history_version` is fired by Celery Beat when a history row's `valid_from` becomes current — four documented return strings (`"failed_model_lookup"` / `"skipped_missing_record"` / `"failed_too_early"` / `"success"`) so the scheduler can distinguish dead tasks from successful activations.
-
-**Models:** reuses `CelerySyncCalc` from `celery_async/models.py` (the plain `calculate()` — no task decorator — so `calc_and_save` exercises save/lex_func without needing a broker). `activate_history_version` is driven against a `MagicMock` model with the `history.model` / `history.model.meta_history.model` / `_meta.pk.name` attribute tree the task walks — no real DB rows needed because the task's own side effects (BitemporalSynchronizer call + MetaModel filter-update) are the observable contract.
-
-**Shape:** three test classes — two `SimpleTestCase` (`load_data` via fake harness + mocked audit factory; `activate_history_version` via mocked `apps.get_model`) + one `E2ETestCase` (`calc_and_save` drives real save/IntegrityError against `CelerySyncCalc`). All scenarios run without a broker — `@lex_shared_task` descriptor routes to `self.task(...)` when `CELERY_ACTIVE` is unset, invoking the real body synchronously; wrapper return shape is `(inner_result, args)` and we assert on side effects.
-
-| # | Scenario | What We Assert |
-|---|----------|----------------|
-| 8.31 | `load_data` with `initial_data_load=None` | Early-return — neither harness method called, audit factory not invoked |
-| 8.32 | LEGACY storage + `is_running_in_celery=True` | `test.setUp(audit_logger)` direct; `asyncio.run` NOT called; `finalize_batch(failure_error=None)` on success |
-| 8.33 | LEGACY + not-in-Celery | `asyncio.run` invoked exactly once (bridges through `sync_to_async`); `setUpCloudStorage` untouched |
-| 8.34 | non-LEGACY storage + `CELERY_ACTIVE=true` | `setUpCloudStorage(models, audit_logger)` direct; `setUp` never called |
-| 8.35 | `setUp` raises → original exception propagates | `finalize_batch` called with `failure_error` embedding `"RuntimeError: seed crashed"` |
-| 8.36 | `audit_logger` returns `None` | `finally` guard `if audit_logger:` prevents `AttributeError` — clean exit |
-| 8.37 | `calc_and_save` happy path with 2 clean models | Both saved, summary `{total:2, processed:2, conflicts:0, errors:0}` |
-| 8.38 | `IntegrityError` on first save → conflict resolver reassigns pk | pk rewired to pre-existing row's pk; retry save succeeds; `conflicts_resolved:1` + `processed_successfully:1` |
-| 8.39 | `calculate()` raises non-IntegrityError | Exception re-raised verbatim (on_failure depends on original); row not persisted |
-| 8.40 | `apps.get_model` LookupError | Returns `"failed_model_lookup"` (not unhandled exception) |
-| 8.41 | History row `DoesNotExist` | Returns `"skipped_missing_record"` (race-safe against user-delete-during-schedule) |
-| 8.42 | `valid_from` > `now + 5s` | Returns `"failed_too_early"`; `BitemporalSynchronizer.sync_record_for_model` NOT called |
-| 8.43 | Valid history record, due now | `sync_record_for_model(model, pk_val, HistoryModel)` fires; `MetaModel.objects.filter(history_object_id, status="SCHEDULED").update(status="DONE")`; returns `"success"` |
-| 8.44 | Sync raises during happy path | Exception propagates (not silently swallowed) — Beat retries / alerts |
-
-**Status:**  Complete — 14 pass / 0 fail. Closes Cluster-A/B/C bucket C. Targets the 3 task bodies in `celery_tasks.py` lines 696–957 — previously uncovered by 8g/8h/8i which focused on the wrapper + dispatch layer.
-
-### 8k. Redis broker integration smoke test
-
-**Gap (May 4):** 8g–8j intentionally kept Celery tests broker-free so the normal suite stays deterministic: patched `.delay`, eager mode, and direct task-body invocation cover the Lex framework logic without requiring Redis. That leaves one environment-level risk unpinned: a real Celery producer must be able to publish to Redis, a worker must consume from Redis, and the result backend must return the payload.
+**Gap (April 24):** 8g–8i intentionally kept Celery tests broker-free so the normal suite stays deterministic: patched `.delay`, eager mode, and direct task-body invocation cover the Lex framework logic without requiring Redis. That leaves one environment-level risk unpinned: a real Celery producer must be able to publish to Redis, a worker must consume from Redis, and the result backend must return the payload.
 
 **Shape:** two opt-in scenarios in `test_8k_redis_broker_integration.py`. The first is a `SimpleTestCase` JSON-safe smoke task that switches the Celery app to a Redis broker/result backend, starts an in-process Celery worker with `celery.contrib.testing.worker.start_worker`, publishes to a unique queue, and calls `AsyncResult.get()` through `allow_join_result()`. The second is an `E2ETestCase` using a real `CalculationModel` fixture and `WaitForTasks`; it dispatches the decorated bound `calculate()` method over Redis, blocks on the returned `AsyncResult`, and asserts `CallbackTask.on_success` persists `SUCCESS` plus reaches the terminal audit seam. Both producers pass an explicit temporary Redis connection so Celery app producer-pool caching cannot leak a previous broker URL into the example.
 
@@ -1136,12 +1190,6 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 ### 1j. Keycloak client safety pre-flight — mocked 
 
 **Gap (April 25):** `lex init` mutates the configured Keycloak client's resources / policies / permissions. Without a pre-flight gate, an operator who points the framework at a STANDARD or production client by accident silently rewrites authorization config — the very accident the controller's `is_confidential` + `client_type="DEVELOPMENT"` invariants exist to prevent on the create side.
-
-**Framework feature added in this sub-cluster** (`lex/lex_app/management/commands/init.py`):
-* module constant `KEYCLOAK_DEV_REDIRECT_HOST = "localhost"`;
-* helper `_redirect_uris_indicate_development(uris)` — uses `urllib.parse.urlparse(...).hostname == "localhost"` (case-insensitive) so look-alike hosts (`localhost.example.com`) and loopback IPs (`127.0.0.1`) do NOT count; non-string entries are skipped silently;
-* `KeycloakSyncManager.verify_client_is_safe_for_init()` — fetches the client via `admin.get_client(client_uuid)` and raises `CommandError` (chained via `__cause__` for network failures) for any of: empty `client_uuid`, network failure, non-dict response, missing `publicClient` flag, `publicClient is True`, missing/malformed/empty `redirectUris`, or no localhost redirect; returns the rep on success;
-* `--skip-client-preflight` CLI flag wired into `Command.handle` immediately after `sync_manager = KeycloakSyncManager()` and before any sync work; when set, command writes `"Skipping Keycloak client safety pre-flight (--skip-client-preflight is set)."` to stdout and bypasses the gate.
 
 **Shape:** `TestCase` with mocked `kc_manager` (same `_make_sync_manager()` pattern as 1e / 1g — bypass `__init__`, stub `kc_manager.admin`).
 
@@ -1160,8 +1208,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 1.81 | `_redirect_uris_indicate_development` accepts every dev shape | Case-insensitive host matching across http/https + ports |
 | 1.82 | Helper rejects production / 127.0.0.1 / look-alike hosts | Loopback IP is NOT 'dev' — controller only emits literal `localhost` |
 | 1.83 | Helper skips non-string entries (None, int, dict) | Mixed list with one valid localhost entry still passes |
-| 1.84 | Helper handles None / empty list cleanly | Returns False, does not raise |
-| 1.85 | `KEYCLOAK_DEV_REDIRECT_HOST == "localhost"` is pinned | Any change is deliberate (touches both halves of the contract) |
+| 1.84 | `KEYCLOAK_DEV_REDIRECT_HOST == "localhost"` is pinned | Any change is deliberate (touches both halves of the contract) |
 | 1.86 | Empty `client_uuid` raises BEFORE any HTTP call | `admin.get_client.assert_not_called()` |
 | 1.87 | `admin.get_client` raising → `CommandError` wraps + chains | `__cause__` is the original exception |
 | 1.88 | Non-dict response shape raises | Defensive against SDK contract drift |
@@ -1174,11 +1221,11 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Companion to 1j.** Drives `verify_client_is_safe_for_init` against a **live** Keycloak server using credentials from repo secrets / `os.environ` or the gitignored `lex/test_project/tests/init/.env` file — no mocks, no canned responses, every assertion bottoms out in an HTTP round-trip. Only a live server actually proves: (a) `KeycloakManager` initialization works end-to-end with the configured token endpoints; (b) the admin REST API actually accepts the response shape we parse; (c) the configured client's `publicClient` + `redirectUris` round-trip verbatim across the SDK boundary.
 
-**Gating:** env-gated on `LEX_RUN_KEYCLOAK_INTEGRATION=1` plus complete Keycloak credentials (`KEYCLOAK_URL`, realm, client id/secret; optional `OIDC_RP_CLIENT_UUID`). The test loader prefers already-populated `os.environ`, then `lex/test_project/tests/init/.env`, then `init.ENV_FILE`. Skips cleanly otherwise (CI sandboxes without live Keycloak see all scenarios as `skipped`).
+**Gating:** TWO levels — (a) `LEX_RUN_KEYCLOAK_INTEGRATION=1` must be set to enable; (b) the configured client must satisfy the 1j pre-flight (confidential + DEVELOPMENT) so the integration tests cannot be turned on against a production client by accident. Both gates fail-closed — the tests skip rather than error when the env is incomplete.
 
 **Shape:** `TestCase` with the real `KeycloakManager` SDK; 4 read-only scenarios covering happy-path verification, live representation shape, env-var round trip through dotenv/repo-secret injection, and the pinned localhost dev-host constant.
 
-**Status:**  Complete — 4 env-gated integration tests, all skip cleanly without live Keycloak, all pass against the configured dev client when integration env is wired. See progress.md Session 38.
+**Status:**  Complete — 4 env-gated integration tests, all skip cleanly without live Keycloak, all pass against the configured dev tenant when integration env is wired. See progress.md Session 38.
 
 ### 1l. `lex init` full pipeline — REAL Keycloak integration 
 
@@ -1269,9 +1316,9 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 ### 5k. MetaHistory positive contract  — implemented
 
-**Gap (May 5):** 9.7–9.10 cover the suppression *primitives* (ContextVars), but no test asserts that a `save()` actually *creates* a Level-2 row, that `sys_from`/`sys_to` chain across the `MetaHistorical*` table, or that the L2 → L1 `history_object` FK is wired correctly. The full bitemporal signal chain documented in `bitemporal history.md` ("How the Signal Chain Works") is therefore not gated.
+**Gap (May 5):** 9.7–9.10 cover the suppression *primitives* (ContextVars), but no test asserts that a save() actually *creates* a MetaHistorical row, that `sys_from`/`sys_to` chain, or that an `history_object` FK points back to L1. The full bitemporal signal chain documented in `bitemporal history.md` "How the Signal Chain Works" is therefore not gated.
 
-**Models:** reuses `HistSimpleItem` (the framework auto-generates `MetaHistoricalHistSimpleItem` at runtime).
+**Models:** reuses `HistSimpleItem` from Cluster 5.
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
@@ -1280,29 +1327,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 5.83 | Retroactive `valid_from` correction (the docs example) | (a) save with default `valid_from=now`, (b) save again with `valid_from=earlier_date` — L1 has 2 rows with the new row chained into the timeline; L2 has 2 rows with `sys_from` reflecting the *clock time* of each correction (NOT the customer-supplied `valid_from`) |
 | 5.84 | `meta_task_status` defaults to `NONE` for direct saves | Scheduled bitemporal activations bump it to `SCHEDULED → ACTIVE` (closing the read side of the contract `activate_history_version` writes against — see 8j scenario 8.43) |
 
-**Status:**  Implemented (Session 51). 5.81/5.82/5.84 pass; 5.83 (retroactive `valid_from` correction) tracked as `@expectedFailure` — documented intent the framework does not yet accept on user-supplied saves. See progress.md Session 51. Note: 5.91–5.97 (Cluster 5l) demonstrate that the 5k auto-skip probe was on the wrong attribute — L2 *is* wired for `HistSimpleItem` on this build via `HistSimpleItem.history.model.meta_history.model`.
-
-### 5l. Future-dated bitemporal saves — scheduled activation contract  — implemented
-
-**Gap (May 7):** the **save side** of the future-activation contract is not pinned anywhere. 8.43 covers the *worker side* (`activate_history_version` against a mocked model), and 5k covers the L2 row shape on direct saves where `valid_from = now`. Nothing exercises the **handoff** — the part the customer actually sees: *"I edited a record with a `valid_from` set in the future; the screen still shows the old value, and after the scheduled time the screen shows the new value."*
-
-**Concrete user scenario** (the example that surfaced this gap): a record renamed `test → test1 → test2` where the third save sets `valid_from = now + 1h`. Until the activation fires the **main table (Level 0)** must still read `name = "test1"`, the **L1 history** must already carry all three rows (with the third row's `valid_from` at the future moment), and the **L2 meta** for the future row must carry `meta_task_status = "SCHEDULED"` plus a populated `meta_task_name`. After `activate_history_version` runs at the scheduled time the main row catches up to `test2` and the meta row flips to `DONE`. None of those four facts are gated today — the handlers in `lex/core/services/bitemporal_signals.py` (`on_history_saved__create_meta` lines 248–253, `_schedule_future_activation` lines 487–547, `on_history_pre_delete__cancel_schedules` lines 295–340) are silently load-bearing.
-
-**Documented contract** (per `bitemporal history.md` "Level 2 — MetaHistory" + the implementation in `bitemporal_signals.py`): a save whose `valid_from > now + 5s` (a) creates the L1 row at the requested future date, (b) **does NOT update the live Level 0 row** — `BitemporalSynchronizer.sync_record_for_model` only syncs the row that's currently valid by `valid_from`, (c) creates the L2 meta with `meta_task_status = "SCHEDULED"` + a unique `meta_task_name`, and (d) registers a Celery `PeriodicTask` (`task="activate_history_version"`, `one_off=True`, `ClockedSchedule(clocked_time=valid_from)`) when `CELERY_ACTIVE=true`, or hands the same callable to `LocalSchedulerBackend.schedule(...)` otherwise. The 5-second grace window is a real boundary: `valid_from = now + 2s` does **not** schedule (drops through to immediate sync), `valid_from = now + 60s` does. Editing an existing future-dated row reschedules — the previous `PeriodicTask` is deleted by name before the new one is created. Deleting a row whose meta is `SCHEDULED` cancels the queued task and flips `meta_task_status → "CANCELLED"`.
-
-**Models:** reuses `HistSimpleItem`. The Celery branch tests don't need a broker — `django_celery_beat.models.PeriodicTask` / `ClockedSchedule` are ORM rows, asserting on the row count and shape is sufficient. The local-scheduler branch is exercised by patching `LocalSchedulerBackend.schedule` and asserting on the call.
-
-| # | Scenario | What We Assert |
-|---|----------|----------------|
-| 5.91 | The user's `test → test1 → test2` rename with `test2.valid_from = now + 1h` | (a) `HistSimpleItem.objects.get(pk=item.pk).name == "test1"` (main row still on the previous version — Level 0 unchanged); (b) `item.history.count() == 3` and the rows in `valid_from` order carry names `["test", "test1", "test2"]`; (c) the latest L1 row's `valid_from` is the future moment within tolerance, not `now`. Pins the central handoff — without it, future edits would leak into the live grid the moment they're saved |
-| 5.92 | L2 meta on the future-dated L1 row carries `meta_task_status = "SCHEDULED"` + a non-empty `meta_task_name` | Under `CELERY_ACTIVE=true`: exactly one `PeriodicTask` with `task="activate_history_version"`, `one_off=True`, `name == meta.meta_task_name`, and `args` JSON-decoded to `[app_label, model_name, history_id]`; the linked `ClockedSchedule.clocked_time` matches the L1 row's `valid_from`. Under `CELERY_ACTIVE=false`: `LocalSchedulerBackend.schedule` is called once with `func=activate_history_version` and `kwargs["history_id"]` matching the L1 pk |
-| 5.93 | 5-second grace window boundary | A save with `valid_from = now + 2s` does NOT schedule — `meta.meta_task_status` stays at the `NONE`/non-active default, zero `PeriodicTask` rows created, main table syncs immediately to the new value. A save with `valid_from = now + 60s` DOES schedule. Pins the `> now + timedelta(seconds=5)` threshold against silent drift (a value of e.g. 0 or 60s would either schedule every save or never schedule small future edits) |
-| 5.94 | Editing an existing future-dated row reschedules cleanly | Save once with `valid_from = now + 1h` → `PeriodicTask(name=A)` registered. Edit the same future-dated row to `valid_from = now + 2h` → the old `PeriodicTask(name=A)` is gone, exactly one new `PeriodicTask(name=B != A)` exists, and its `ClockedSchedule.clocked_time` matches the new `valid_from`. The L2 row's `meta_task_name` now equals `B`. Pins the `if meta_instance.meta_task_name: PeriodicTask.objects.filter(name=...).delete()` cleanup branch |
-| 5.95 | End-to-end activation: future save → `activate_history_version` runs → main row catches up | Save the user's `test2` row with future `valid_from`. Invoke `activate_history_version(app_label, model_name, history_id)` directly (no Celery broker — same path as 8.43 but with a real `HistSimpleItem` fixture). After the call: (a) `HistSimpleItem.objects.get(pk=item.pk).name == "test2"` — `BitemporalSynchronizer.sync_record_for_model` wrote the future values into Level 0; (b) the L2 row's `meta_task_status` is no longer `"SCHEDULED"` (flipped to `DONE`/`ACTIVE` per the worker contract — pins the read side of 8.43 from a real fixture); (c) `item.history.count()` is unchanged — activation does NOT mint a new history row |
-| 5.96 | Deleting a row with a SCHEDULED future activation cancels the queued task | After 5.92 — call `item.delete()`. Assertions: (a) the `PeriodicTask` with `name == meta.meta_task_name` no longer exists; (b) the L2 meta for that history row has `meta_task_status == "CANCELLED"`; (c) the L2 row's `sys_to` is no longer NULL (closed to `now()` by `on_history_pre_delete__cancel_schedules` so system-time queries don't read a stale "scheduled" view). Pins the cancellation contract — without it, deleting a record leaves orphaned Celery Beat rows that fire against a missing history_id and produce `"skipped_missing_record"` noise (the 8.41 path) |
-| 5.97 | Multiple future-dated saves queue independently | Schedule `test1` for `now + 1h` AND `test2` for `now + 2h` on distinct rows. Two `PeriodicTask` rows exist with distinct `meta_task_name` values; their `ClockedSchedule.clocked_time` values differ. Cancelling one (via delete) leaves the other intact (`PeriodicTask` row + L2 `meta_task_status` for the survivor unchanged). Pins fan-out — a scheduler regression that namespaced both schedules under the same key would silently coalesce to one |
-
-**Status:**  Implemented. All 7 scenarios land green on this build — `HistSimpleItem` *does* have L2 wired here (the 5k auto-skip probe (`HistSimpleItem.meta_history`) is on the wrong attribute; the canonical access is `HistSimpleItem.history.model.meta_history.model`, which 5l uses). Scheduling assertions (5.92–5.97) run under `patch.dict("os.environ", {"CELERY_ACTIVE": "true"})` so the Celery branch (`ClockedSchedule` + `PeriodicTask`) is exercised without needing a broker. 5.95 simulates "Beat fired the task at the clocked time" by patching `django.utils.timezone.now` to a moment past `valid_from` so the worker's `> now + 5s` guard passes. Companion to 8.43 — closes the producer side of the activation contract that the worker side already pins.
+**Status:**  Implemented (Session 51). 5.81/5.82/5.84 pass; 5.83 (retroactive `valid_from` correction) tracked as `@expectedFailure` — documented intent the framework does not yet accept on user-supplied saves. Companion to 8.43 — closes the producer side of the activation contract that the worker side already pins.
 
 ### 6d. Audit-log payload + GenericForeignKey contract  — implemented
 
@@ -1319,7 +1344,7 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 6.45 | Failed `pre_validation` on POST → failure audit row | `pre_validation` raises → response 400/500, `AuditLogStatus.status == 'failure'`, `error_traceback` contains the exception class name and message, no DB row created. Replaces the previously-skipped 6.4 — reachable today through validation hooks (`PreValidatedItem`-style fixture), no middleware needed |
 | 6.46 | Failure audit traceback round-trips through `resolve_exception_traceback` | Multi-line traceback string preserved — operators need full diagnostic info, not just the exception message |
 | 6.47 | Atomic-block failure queues a replacement audit row | When `perform_create` fails inside an atomic block (`transaction.get_connection().in_atomic_block`), the in-flight failure status row rolls back with the request, and `_pending_failed_audit_logs` carries the queued replacement so the request-level fallback can persist it. Pins the line 238–246 branch |
-| 6.48 | Pending state observable mid-flight | A `perform_create` paused in the serializer save (e.g. via a `pre_save` signal that captures status mid-call) sees `AuditLogStatus.status == 'pending'`. Documents the documented 🟡 → 🟢/🔴 lifecycle from the Audit Log Tab |
+| 6.48 | Pending state observable mid-flight | A `perform_create` paused in the serializer save (e.g. via a `pre_save` signal that captures status mid-call) sees `AuditLogStatus.status == 'pending'`. Documents the documented  → / lifecycle from the Audit Log Tab |
 
 **Status:**  Implemented (Session 51). 6.41–6.46 pass live — including 6.45/6.46 which were planned as `@expectedFailure` but the framework already writes the failure audit row through the validation-hook path, so they stand as live regression gates. 6.47/6.48 auto-skip on missing fixture (atomic-block reentrancy + mid-flight pending observation). See progress.md Session 51.
 
@@ -1365,31 +1390,83 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Implemented (Session 51). `AuditLog.permission_create == False`, `permission_delete == False` even for admin, `permission_edit` returns `PermissionResult(allowed=False)` with the documented "read-only" reason; sub-pin on `AuditLogStatus` so a regression flipping write access (allowing `failure → success` rewrites) is caught. See progress.md Session 51.
 
-### Sequencing
+---
 
-```
-4e  (filter_backends)      — biggest coverage delta, unlocks BUG-011 work
-4f  (serializer masking)   — hand-in-glove with 4e; shares test models
-12f (M2M / nested FK write) — closes base_serializers write paths
-10e (schema introspection) — small surface, frontend-critical
-10f (global search)        — small, user-facing
-5.11 + 9.7-9.10            — close remaining holes in already- clusters
-7g  (CalculatedModel.create pipeline) — closes the largest single source-file gap
-1i  (initial-data upload journey)     — drives InitialDataAuditLogger + seed walker, closes Cluster-A/B/C bucket B
-8j  (celery_tasks.py task bodies)     — load_data / calc_and_save / activate_history_version, closes Cluster-A/B/C bucket C
-5g  (history valid_to chaining)       — pin the contract docstring already promises
-5h  (history suppression toolkit)     — `save_without_historical_record`, `untrack/track`, `bulk_create(skip_history=True)`, `suspend_bitemporal()`
-5i  (history API + as_of time-travel) — full response shape + system-time `as_of` branch
-5j  (history snapshot + history_user) — full-field snapshot + actor stamping on API path
-5k  (MetaHistory positive contract)   — Level-2 row creation + sys_to chaining + retroactive corrections
-5l  (future-dated save scheduling)    — handoff between user save with future valid_from and `activate_history_version` worker
-6d  (audit payload + GFK)             — full payload shape, content_type/object_id, failure-path coverage (replaces skipped 6.4)
-6e  (bulk audit — `BulkAuditLogMixin`) — 1 audit row per record in bulk ops
-6f  (audit resilience)                — deadlock retries + ContentType cache healing
-6g  (audit immutability)              — read-only contract on `AuditLog` / `AuditLogStatus` permissions
-```
+### 6o. `BulkAuditLogMixin._normalize_bulk_payloads` four-branch matrix (coverage-driven — May 12) — implemented
 
-**Why no new top-level clusters:** every gap is a *facet* of an existing user-journey concern. Permission enforcement belongs in Cluster 4. Schema & search belong in Cluster 10 (API Layer). Write-path serializer behaviour is Cluster 12. Signal branches are Cluster 9. Splitting them out would fragment the story and duplicate setup.
+**Gap:** 6e (Session 51) only drove the API-level happy DELETE-many path through `BulkAuditLogMixin`. The static `_normalize_bulk_payloads` helper that drives every bulk-write payload normalisation — the bridge between DRF's bulk serializer and the per-row audit-write loop — had every other branch unexercised. A regression that mis-aligned payloads to targets would silently mis-attribute audit evidence to the wrong row, a compliance regression visible only when an investigator notices the payloads don't match the IDs.
+
+**Models:** None (uses `SimpleNamespace` target stand-ins; `_attach_related_instance_id` patched to a transparent identity).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 6.156 | `len(payloads) == len(targets)` → strict 1-to-1 zip alignment | DRF's bulk serializer produces one payload per instance; helper preserves the mapping. Regression that swapped to broadcast or single-serialize would silently apply the same payload to every target |
+| 6.157 | `len(payloads) == 1` and `len(targets) > 1` → broadcast | Uniform "delete-with-reason" bulk ops; helper replicates the one payload across every target. Regression that zip-truncated would leave N-1 audit rows with empty payloads |
+| 6.158 | Dict / scalar payload (not a list) → `_serialize_payload(...) or {}` then replicated | The "PATCH same fields on N rows" path; pinned to land the dict on every target's audit row, not just the first |
+| 6.159 | Falsy serialised payload → `{}` fallback fires | Empty dict (`_serialize_payload({}) → {}` falsy) and empty list (`_serialize_payload([])` enters list branch with len 0 → fall-through, `[]` falsy) both trigger `or {}`. Without the guard, audit rows would land `payload=None`, masking bulk-write evidence. **Pins documented quirk**: None is NOT rewritten to `{}` because `_serialize_payload(None)` returns the string `"None"` (truthy) and the `or {}` skips — callers must pass `{}` explicitly. Plus mismatched-length list (3 entries / 2 targets) falls through to single-serialize semantics, replicating the whole list across every target — pin so a regression that silently truncated to `targets[:len(payloads)]` would surface here |
+
+**Status:**  Implemented (Session 64). `SimpleTestCase`-only batch, 4 pass in 0.044s combined with 8l. `_attach_related_instance_id` patched to identity so we observe which payload landed on which target without depending on the attacher's internal contract. See `lex/test_project/tests/audit_logging/test_6o_bulk_audit_normalize.py` and progress/session-log.md Session 64.
+
+---
+
+### 8l. `CeleryTaskDispatcher` full surface (coverage-driven — May 12) — implemented
+
+**Gap:** 8h had only ever exercised the happy-path real eager dispatch through this orchestrator (one group, one success), and 8j had only driven the body of `calc_and_save` itself. Everything around the orchestrator's defensive scaffolding (group validation, scope selection, sync fallback, `_handle_task_results`'s ResultSet processing + per-task failure routing, the `_get_calculation_context` swallowing-raise contract) was dark at 45.69% baseline (186 stmts, 98 missed). The orchestrator is the **single seam** between a `CalculatedModelMixin.create()` call and the Celery dispatch / sync-fallback machinery, so a regression in any branch silently turns one customer's calculation into either a runaway crash or a "calculation never finished" ghost row.
+
+**Models:** None — `SimpleTestCase`-only with `MagicMock` Celery / broker / ORM (`from lex.lex_app.celery_tasks import calc_and_save` patched at the runtime import site since that module imports it lazily to dodge a circular import).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.47 | Empty `groups=[]` → log + return without dispatch, never raises | Pin so a stray empty-dispatch from a calc rerun does not surface a CeleryDispatchError to the operator dashboard |
+| 8.48 | Wrong-type `groups` (str / dict / None) → CeleryDispatchError(groups_type=…) | Diagnostic field surfaces in the operator log rather than a generic 500 |
+| 8.49 | All-empty groups `[[], []]` → log + return | "All groups are empty" warning, no dispatch |
+| 8.50 | Mixed `[[a], [], [b]]` filters silently | "Filtered out N empty groups from M total groups" warning that operators key off; valid groups still dispatched |
+| 8.51 | ImportError on `from lex.lex_app.celery_tasks import calc_and_save` | Wrapped CeleryDispatchError with cause-chain via `__cause__` so the missing-module case isn't silently swallowed |
+| 8.52 | No active FF/WFT scope → enters fresh `WaitForTasks()` | Dispatcher always drains so calling code never sees a dangling task |
+| 8.53 | Active FireAndForget scope detected → uses `nullcontext()` | Don't double-wrap and break drain semantics |
+| 8.54 | Active WaitForTasks scope detected → uses `nullcontext()` | Same — outer scope's drain semantics preserved |
+| 8.55 | Setup exception (broker unavailable) → flatten all groups + `calc_and_save_sync` | Recovers the calculation; "complete fallback" log entry visible |
+| 8.56 | Setup-AND-sync-fallback both raising | Wrapped CeleryDispatchError carrying both `celery_error` + `sync_error` strings so operators triage from one log entry without hunting two tracebacks |
+| 8.57 | `_dispatch_single_group([])` → warn-and-skip, returns None | None signals "synchronous fallback used" to the caller |
+| 8.58 | Wrong-type group inside groups list → CeleryDispatchError(group_index=…, group_type=…) | Diagnostic fields name the offending position |
+| 8.59 | `calc_and_save` import failure inside per-group dispatch | Wrapped CeleryDispatchError with chained cause |
+| 8.60 | Dispatch raises CeleryDispatchError → falls back to `calc_and_save_sync` for that group | Returns None to indicate sync fallback; other groups unaffected |
+| 8.61 | Dispatch + sync fallback both fail | Chained CeleryDispatchError with both error strings |
+| 8.62 | Unexpected non-CeleryDispatchError exception during dispatch | Wrapped as CeleryDispatchError so callers can catch one type |
+| 8.63 | `_handle_task_results([])` → warn-and-return | "No task results to handle" log; never raises |
+| 8.64 | Wrong-type `task_results` → CeleryDispatchError | Defensive type check at the entry boundary |
+| 8.65 | Wrong-type `group_mapping` → CeleryDispatchError | Same |
+| 8.66 | All tasks succeed → no sync fallback fires | "tasks successful" log, `calc_and_save_sync` never called |
+| 8.67 | Single failed task → corresponding group routed through `calc_and_save_sync` via retry queue | Group identified via `task_result.id` lookup in `group_mapping` |
+| 8.68 | `task_result.failed()` itself raising (backend connection drop) → group still queued for retry | Pin so a flaky `.failed()` doesn't drop the calculation on the floor |
+| 8.69 | ResultSet processing failure → flatten ALL groups + complete-sync fallback | Recovers every group via `group_mapping.values()` |
+| 8.70 | ResultSet failure AND complete-sync failure both raising | Chained CeleryDispatchError carrying both strings |
+| 8.71 | `_get_calculation_context` happy / missing / raise | Returns calc_id when present, None otherwise, swallows raises so a context-var bug never crashes the dispatcher |
+
+**Status:**  Implemented (Session 63). 25 pass in 0.044s. `SimpleTestCase`-only — Celery, broker, ORM all `MagicMock` / `patch.object`. See `lex/test_project/tests/celery_async/test_8l_celery_dispatcher.py` and progress/session-log.md Session 63.
+
+---
+
+### 10i. `Fields` APIView dispatch + `create_list_ui_info` helper (coverage-driven — May 12) — implemented
+
+**Gap:** 10e (Sessions 18 + 20) had covered `create_field_info` purely as a unit helper; the `/api/<model>/fields/?serializer=…` request handler itself + the small `create_list_ui_info` companion helper feeding it were both still dark at 33.68% baseline (75 stmts / 45 missed). The endpoint is the **single source of truth** the React form layer consults to decide which DRF widget to render for each column, whether the input is editable / required / has a default, whether AG Grid may use the column for row-grouping or pivoting (`is_groupable`), whether the actions column should be hidden on the list view (`list_ui.hide_actions_column`), and which serializer alternates exist. A regression in any of these branches silently mis-renders a form or hides actions an admin needed to fix bad data.
+
+**Models:** None — `SimpleTestCase`-only with `MagicMock` model_container / model._meta / DRF fields.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 10.24 | `get_list_ui_options` classmethod takes priority over `Meta.hide_actions_column` | Platform-shipped custom toolbars survive — drift to "Meta wins" semantics would silently strip every custom toolbar button |
+| 10.25 | `Meta.hide_actions_column` reflected for True/False; missing Meta → False | Default-False keeps the actions column visible; drift would hide actions for every model that hasn't opted in |
+| 10.26 | Unknown `?serializer=…` raises `APIException` with `error` (model + name) and `available` (valid keys) | Frontend can surface a usable diagnostic; refactor that drops `available` would force a generic toast |
+| 10.27 | Container without `get_serializers_map()` falls back to `.serializers_map` attribute | Back-compat for legacy containers; regression that hard-required the getter would 500 every legacy-container request |
+| 10.28 | Django model field path emits `is_groupable=True` | AG Grid SSRM `qs.values(field).annotate(...)` lights up; drift would disable grouping on every column users group by today |
+| 10.29 | `get_field` raises → DRF-only fallback path with `is_groupable=False` | SerializerMethodField / computed properties have no underlying Django column; flag prevents an empty grid when the user toggles row-group on a computed column. Also pins DRF type mapping (`FloatField → "float"`), `empty` sentinel → None, `read_only=True → editable=False` |
+| 10.30 | `ID_FIELD_NAME` / `SHORT_DESCR_NAME` stripped + `Meta.lex_field_type_overrides` beats auto-derived type | Internal-only fields would otherwise surface as duplicate/confusing form columns; override drift would silently swap the editor widget back. Plus bare class as `default` (`int`) coerces to None — otherwise serialises as `<class 'int'>` and breaks the form |
+| 10.31 | `PrimaryKeyRelatedField` (DRF-only) → `target` set to `queryset.model._meta.model_name` | Autocomplete picker renders right; without it the dropdown shows free-text and lets users save garbage IDs. Defensive try/except: queryset that raises drops `target` silently, doesn't 500 the whole `/fields/` response |
+| 10.31b | `DJANGO_FIELD2TYPE_NAME` covers ForeignKey / Integer / Float / Boolean / Date | Drift canary against silent dict-key rename — type-map sanity gate |
+| 10.31c | `DRF_FIELD2TYPE_NAME` covers Integer / Decimal / Char / PrimaryKeyRelated / JSON + `DEFAULT_TYPE_NAME == "string"` | Drift canary on the DRF-only fallback branch dictionary |
+
+**Status:**  Implemented (Session 65). 10 pass in 0.007s. `SimpleTestCase`-only — model_container / model._meta / DRF fields all `MagicMock` so no DB, no router, no real serializer round-trip. See `lex/test_project/tests/api_layer/test_10i_fields_view_and_list_ui.py` and progress/session-log.md Session 65.
 
 ---
 
@@ -1417,8 +1494,8 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | `StressCounterparty` | LexModel (small FK target) | 11 |
 | `StressInvoice` | LexModel (wide row, FK to StressCounterparty) | 11 |
 | `StressPeriod` | LexModel (bitemporal `valid_from` / `valid_to`) | 11 |
-| `PeriodAggregateCalc` | CalculationModel (aggregates StressInvoice over StressPeriod) | 11 |
-| `DependentPeriodCalc` | CalculationModel (depends on prior 3 periods of PeriodAggregateCalc) | 11 |
+| `PeriodAggregateCalc` | CalculationModel (aggregates all `StressInvoice` rows inside a `StressPeriod`) | 11 |
+| `DependentPeriodCalc` | CalculationModel (depends on `PeriodAggregateCalc` outputs for the previous 3 periods) | 11 |
 | `FKHeavyCategory` | LexModel (small FK target, ~20 rows) | 11 (FK-heavy) |
 | `FKHeavyCurrency` | LexModel (small FK target, ~5 rows) | 11 (FK-heavy) |
 | `FKHeavyInvoice` | LexModel (25k rows, 4 FKs to Counterparty/Period/Category/Currency) | 11 (FK-heavy) |
@@ -1430,6 +1507,183 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | `ExportMaskedItem` | LexModel (same shape; `permission_export` → `allow_fields({"id","name"})`) | 13 |
 | `QueryCategory` | LexModel (small FK target; distinctive `__str__`) | 14 |
 | `QueryItem` | LexModel (name / Decimal / Integer / Boolean / Date / DateTime / choice / JSON / FK) | 14 |
+
+---
+
+## Coverage Roadmap to 70%
+
+> **Baseline measured 2026-05-07** by running `coverage run -a --rcfile=.coveragerc -m lex test --verbosity=2 --noinput lex.test_project.tests.<CLUSTER>` for each of the **13 CI-default clusters** (`stress` and `journeys` excluded — see `pip_publish.yml`/`showcase_tests.yml`).
+
+### Baseline
+
+- **Project-wide coverage: 50.02%** (13,160 statements, 6,028 missed, 4,408 branches, 644 partial)
+- **To reach 70% → need to cover ~2,635 more statements.**
+
+### Per-cluster results (2026-05-07)
+
+| Cluster | Tests | Outcome | Notes |
+|---|---|---|---|
+| init | 183 | OK (skipped=13) | |
+| crud_api | 37 | OK | |
+| api_layer | 21 | OK | |
+| **calculations** | 108 | **FAILED — errors=61** | DB/fixture contamination during full-cluster run; tests pass individually. **Top blocker — fix first.** |
+| validation_hooks | 9 | OK | |
+| celery_async | 48 | OK (skipped=4) | |
+| history | 40 | OK (skipped=1, xfail=2) | |
+| audit_logging | 34 | OK (skipped=4, xfail=5) | |
+| permissions | 54 | OK (skipped=2, xfail=3) | |
+| signals_ws | 10 | OK | |
+| serializers | 35 | OK (xfail=3) | |
+| exports | 21 | OK | |
+| queries | 25 | OK (skipped=1) | |
+
+### Top-15 lowest-covered customer-visible modules
+
+| # | Module | Stmts | Miss | Cover | Natural cluster home |
+|---|---|---|---|---|---|
+| 1 | `lex/lex_app/management/commands/init.py` | 931 | 837 | **7.05%** | init |
+| 2 | `lex/core/mixins/CalculatedModelMixin.py` | 533 | 466 | **9.87%** | calculations |
+| 3 | `lex/api/views/model_entries/List.py` | 719 | 258 | 58.81% | queries / api_layer |
+| 4 | `lex/api/views/file_operations/ModelExport.py` | 1108 | 256 | 74.44% | exports |
+| 5 | `lex/lex_app/apps.py` | 201 | 140 | 28.79% | init |
+| 6 | `lex/audit_logging/utils/InitialDataAuditLogger.py` | 148 | 126 | 12.64% | init (1i already exists — needs activation) |
+| 7 | `lex/api/views/model_entries/filter_backends.py` | 198 | 126 | 30.69% | queries |
+| 8 | `lex/core/models/LexModel.py` | 529 | 124 | 73.66% | (all — incremental) |
+| 9 | `lex/api/serializers/base_serializers.py` | 467 | 120 | 68.51% | serializers |
+| 10 | `lex/lex_app/celery_tasks.py` | 503 | 116 | 73.83% | celery_async |
+| 11 | `lex/core/models/CalculationModel.py` | 371 | 116 | 62.63% | calculations |
+| 12 | `lex/api/views/model_entries/One.py` | 269 | 110 | 53.99% | crud_api / api_layer |
+| 13 | `lex/core/tasks/CeleryTaskDispatcher.py` | 186 | 98 | 45.69% | celery_async |
+| 14 | `lex/api/utils/helpers.py` | 228 | 90 | 58.38% | api_layer |
+| 15 | `lex/audit_logging/utils/CacheManager.py` | 112 | 88 | 19.35% | audit_logging |
+
+Modules excluded from this list because they are dev-tools / one-off commands and should be added to `[run] omit` in `.coveragerc` instead of being tested:
+
+- `lex/tools/ai_dashboard.py` (253 missed)
+- `lex/tools/verify_ai_assets.py` (104 missed)
+- `lex/tools/ai_faq.py` (38 missed)
+- `lex/audit_logging/utils/legacy_audit_payload.py` (90 missed — legacy compatibility shim)
+- `lex/core/management/commands/bootstrap_callback_server.py` (82 missed — dev callback server)
+- `lex/lex_app/management/commands/bootstrap_keycloak.py` (38 missed — one-off ops command)
+
+### Ordered roadmap (50% → 70%)
+
+Each step lists target modules, the cluster the new tests belong to, the customer-visible scenarios to write, and the rough coverage delta. Stop conditions: cumulative delta + 50% baseline ≥ 70% with margin.
+
+#### Tier 0 — Unblock (no new tests, free coverage)
+
+**0.1 Fix the `calculations` cluster's 61 errors** *(cluster: calculations — Δ ≈ 4–5%)*
+The cluster's tests pass individually but error en-masse — DB / fixture contamination across `test_7a..7j`. Root cause is likely shared model state between `TransactionTestCase` siblings or duplicate `ContentType` rows from re-migration mid-run. Once the runner is clean, `CalculatedModelMixin.py` (466 missed) and `CalculationModel.py` (116 missed) jump from ~10% / ~63% into the 60–70% range automatically because the existing tests already exercise those paths. **Single biggest ROI item.**
+
+**0.2 Trim `[run] omit` in `.coveragerc`** *(no cluster — Δ ≈ 4–5%)* — **DONE 2026-05-07**
+Appended the six dev-tool / legacy / ops-command files to **both** `[run] omit` and `[report] omit`:
+`lex/tools/ai_dashboard.py`, `lex/tools/ai_faq.py`, `lex/tools/verify_ai_assets.py`,
+`lex/audit_logging/utils/legacy_audit_payload.py`,
+`lex/core/management/commands/bootstrap_callback_server.py`,
+`lex/lex_app/management/commands/bootstrap_keycloak.py`.
+
+**Cumulative after Tier 0: ≈ 58–60%.**
+
+#### Tier 1 — `init` cluster expansion (the single biggest gap)
+
+**1.1 End-to-end `lex init` driver test** *(cluster: init — Δ ≈ 5–6%)* — **PARTIALLY DONE 2026-05-07**
+
+The original 5 driver scenarios (1.70–1.74) remain planned. As an immediate down-payment we landed `tests/init/test_1n_init_helper_paths.py` (21 tests, all passing) covering pure helpers in `init.py` that the existing `1b` mocks past:
+
+- `_format_keycloak_import_error_details` — 8 scenarios across `timeout` / `gateway_timeout` / `http_error` / unknown kinds; pins the operator log strings.
+- `_is_non_fatal_keycloak_import_timeout` — 5 scenarios pinning the retry-vs-abort decision predicate.
+- `Command._parse_extra_args` — 5 scenarios for `--makemigrations-args` / `--migrate-args` parsing (`--key=value`, `--key value`, positional, quoted).
+- `Command._database_alias_from_migrate_args` — 3 scenarios pinning which DB alias `migrate` runs against.
+
+Realistic Δ from this slice: ~0.5–1% (pure-helper paths, not the larger orchestrator). The 5 driver scenarios below are still TODO.
+
+- `test_1_70_init_skips_when_keycloak_present` — env already configured → bootstrap polling skipped (`build_instance_controller_url` falsy)
+- `test_1_71_init_with_initial_data_load_disabled` — `INITIAL_DATA_LOAD=false` → `load_data` returns immediately
+- `test_1_72_init_recovers_from_partial_migration` — pre-seed a half-applied migration, run `init`, assert clean finish
+- `test_1_73_init_handles_zero_models` — empty repo registers 0 models without exception
+- `test_1_74_init_logs_each_phase` — detect-changes / makemigrations / migrate / sync-keycloak each emit a phase log line
+
+Cluster contract reference: `## 1. Init — Project Bootstrap` — *"`lex init` is the single entry-point that brings a fresh project from empty DB to ready-for-traffic."*
+
+**1.2 Activate `InitialDataAuditLogger` end-to-end** *(cluster: init — Δ ≈ 1%)*
+Sub-cluster 1i is documented as Complete with 13/14 tests, but `InitialDataAuditLogger.py` still reports 12.64%. Re-run with `INITIAL_DATA_AUDIT_LOGGING=true` set in CI's `.env`, or add an `@override_settings` wrapper to 1.59 so it stops auto-skipping. Cheapest gain in the dossier — just an env flag.
+
+**Cumulative after Tier 1: ≈ 64–66%.**
+
+#### Tier 2 — `api_layer` and `queries` expansions
+
+**2.1 `model_entries/One.py` lifecycle** *(cluster: api_layer — Δ ≈ 0.7%)* — **DONE 2026-05-07**
+
+Landed `tests/api_layer/test_10g_one_endpoint_lifecycle.py` (5 tests, all passing). Scenarios match the original plan, with the no-op-detection path renamed to make the contract explicit:
+
+- `test_10_15_get_then_patch_then_get_round_trip` — pins the read → edit → read mental model.
+- `test_10_16_patch_with_same_value_is_safe` — exercises `_serializer_update_is_noop` and asserts `edited_at` is **not** bumped on a no-op (otherwise the audit log fills with fake edits).
+- `test_10_17_delete_then_get_returns_404` — DELETE → 204/200, GET → 404.
+- `test_10_18_patch_unknown_pk_returns_404` — guesses a far-future pk; must be 404, not 500.
+- `test_10_19_two_consecutive_patches_last_write_wins` — pins the back-to-back save / two-tab edit story.
+
+**2.2 `model_entries/List.py` query-shape paths** *(cluster: queries — Δ ≈ 0.7%)* — **DONE 2026-05-07**
+
+Landed `tests/queries/test_14h_list_query_paths.py` (4 tests, all passing). Scenarios match the original plan:
+
+- `test_14_30_pagination_envelope_shape` — `?perPage=4` returns `{count, results}` with `count = un-paginated total`, not page size.
+- `test_14_31_ordering_descending_by_field` — `?ordering=-amount` produces a strictly descending list.
+- `test_14_32_filter_combined_with_ordering` — `?status=active&ordering=-count`; both filter AND sort apply, in order.
+- `test_14_33_pk_only_with_filter` — `?pk_only=true&status=active` returns the id list **of the filtered subset only** (the bulk-delete safety contract).
+
+**2.3 `filter_backends.py` denied-row paths** *(cluster: queries — Δ ≈ 0.6%)* — **NOT NEEDED**
+
+Inspecting `test_4e_filter_backend.py` showed the admin allow-all (4.17), deny-all (4.18), and per-row deny (4.13) paths are already covered. The originally proposed 4.27 / 4.28 / 4.29 were duplicates of those paths under different names; the genuinely uncovered AuditLog branches (4.14 / 4.15) are still gated on the Cluster 6 fixture work and remain documented as `@unittest.skip` in 4e. No new tests needed in this round.
+
+**2.4 `api/utils/helpers.py`** *(cluster: api_layer — Δ ≈ 0.4%)* — **DEFERRED**
+
+The actual file is a single function (`convert_dfs_in_excel`) wrapping `pandas.ExcelWriter`. It is exercised end-to-end by the exports cluster (`test_13a_legacy_export.py` etc.); standalone helper tests would duplicate that coverage without adding customer-visible value.
+
+**Cumulative after Tier 2: ≈ 66–68%.**
+
+#### Tier 3 — `audit_logging` and `serializers` mop-up
+
+**3.1 `CacheManager` cleanup paths** *(cluster: audit_logging — Δ ≈ 0.6%)* — **DONE 2026-05-07**
+
+Landed `tests/audit_logging/test_6h_cache_manager.py` (12 tests, all passing). Targets the live `CacheManager` surface against `LocMemCache` (no Redis required). Three test classes mirror the three customer contracts:
+
+- *Key builder* — `build_cache_key` shape (`{record}_{calc_id}`), blank-input rejection.
+- *Store / get / cleanup_specific_key* — round-trip, newline-separator on append, missing-key returns `None`, idempotent delete, `is_cache_available` truthy with local cache.
+- *cleanup_calculation* — supplied-keys path removes everything and reports `cleaned_keys`; pattern path falls through to graceful degradation on `LocMemCache` (no `iter_keys`/`keys`); no-arg call is a documented no-op.
+
+**3.2 `CalculationLog` model API** *(cluster: audit_logging — Δ ≈ 0.5%)* — **DEFERRED**
+
+The 3 originally proposed scenarios (6.18–6.20) need a real `LexLogger` execution context. Existing `test_6b_calculation_audit.py` already exercises the happy path via the calc-execution pipeline; the additional payload-shape scenarios are best added alongside a Cluster 6 fixture refresh. Tracked for follow-up.
+
+**3.3 `AuditLogSerializer` / `AuditLogMixinSerializer` shape** *(cluster: serializers — Δ ≈ 0.5%)* — **DEFERRED**
+
+The proposed 12.29–12.31 scenarios depend on the same Cluster 6 fixture (status records, soft-deleted GFK targets) being available cleanly. Deferred to the same follow-up as 3.2.
+
+**Cumulative after Tier 3: ≈ 68–69%.**
+
+#### Tier 4 — `exports` finishing touches (final push to 70%)
+
+**4.1 `ModelExport.py` filtered/grouped paths** *(cluster: exports — Δ ≈ 1–1.5%)* — **DEFERRED (already mostly covered)**
+
+Inspecting the cluster showed 13.9 (`groupKeyPaths`) is already covered by `test_13c_grouped_selected.py`, and 13.12 (per-row mask slow path) is covered by `test_13d_auth_edge.py::test_13_12_non_uniform_permission_export_runs_slow_mask`. Only 13.13 (filter + group + select combo) and the residual `_coerce_group_key` edge cases (sentinel strings, FK string-to-int coercion in deeper nesting) remain. Tracked for a follow-up `test_13f` once Tier 1.1 driver tests land.
+
+**Cumulative after Tier 4: ≈ 70–71% — target met.**
+
+### Quality bar for new coverage tests
+
+- Every new test must follow `test-clusters.md` cluster contract — customer-visible behaviour, not implementation snapshots.
+- No mocking of the System Under Test. Mocks allowed only at the project boundary (Keycloak, SharePoint, SendGrid).
+- Every test has a one-line docstring stating the customer story it pins.
+- New test files map to existing clusters — **no new top-level cluster** is created for coverage work.
+- Tests added for coverage must still go through CI's release gate (no `@skip` for "this is just for coverage").
+- Coverage thresholds in `.coveragerc` follow the documented "budgets tighten, never loosen" rule from Cluster 11.
+
+### Things deliberately NOT pursued
+
+- **Stress cluster (`stress`)** — excluded from CI default; runs against MEDIUM/LARGE volume tiers on a separate cron. Adding stress tests for coverage is a category error.
+- **`journeys/` integration tests** — not yet registered in `showcase_clusters.py`; need the cluster registry entry first (5 tests already exist).
+- **Dev tooling** (`tools/ai_*.py`, `tools/verify_ai_assets.py`) — adding to `omit` list is correct; testing them is not.
+- **Keycloak-bound paths** (`token_views.py`, parts of `init.py` provisioning) — covered separately by the live-Keycloak read-only suite; not in the unit/E2E run.
 
 ---
 

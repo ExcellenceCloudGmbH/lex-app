@@ -37,9 +37,8 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from rest_framework import status
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import (
     ALL_MODELS,
@@ -292,39 +291,29 @@ class TestCluster14e_SecondaryFilterBranches(E2ETestCase):
         )
 
     # -- 14.25 ---------------------------------------------------------
-    @unittest.skip("BUG-016 deferred: blank/notBlank filter ops are unreachable.")
-    def test_14_25_blank_and_not_blank_ops_do_not_work_bug016(self) -> None:
+    def test_14_25_blank_and_not_blank_ops(self) -> None:
         """
-        Scenario 14.25 — **BUG-016**: the AG Grid ``blank`` and
-        ``notBlank`` filter operations are silently unreachable
-        because the early-return guards at the top of the text /
-        number / date branches in ``_build_filter_q`` short-circuit
+        Scenario 14.25 — AG Grid ``blank`` / ``notBlank`` filter ops
+        (formerly tracked as BUG-016, now fixed).
+
+        Previously, the early-return guards at the top of the text /
+        number / date branches in ``_build_filter_q`` short-circuited
         on a missing ``filter`` value **before** the per-op dispatch
-        runs.
+        could run. Result: ``blank`` and ``notBlank`` items in the
+        grid's filter dropdown silently did nothing.
 
-        Concrete repros (all currently return every row instead of
-        filtering):
+        Fix (in ``lex/api/views/model_entries/List.py``): extend each
+        early-return guard to bypass for both ``blank`` *and*
+        ``notBlank`` — neither op carries a ``filter`` value because
+        their semantics ("is this column empty?" / "is this column
+        non-empty?") are value-less by design.
 
-          * ``text`` ``blank``    — line ~330: ``if value in (None, ""): return None``
-                                    fires before the ``blank`` branch
-                                    at line ~353 can execute.
-          * ``text`` ``notBlank`` — same early-return; unreachable.
-          * ``number`` ``notBlank`` — line ~363:
-                                    ``if value in (None, "") and operation_type != "blank": return None``
-                                    omits ``notBlank`` from the bypass
-                                    set.
-          * ``date`` ``notBlank`` — line ~395:
-                                    ``if operation_type != "blank" and not date_from_raw: return None``
-                                    same pattern.
-
-        The customer sees ``blank`` / ``notBlank`` items in the grid's
-        filter dropdown doing nothing. When the framework is fixed,
-        this test must pass naturally (remove the xfail).
+        This test exercises all four reachable cases the bug used to
+        hide: text/blank, text/notBlank, number/notBlank,
+        date/notBlank. ``date/blank`` was already covered by the old
+        "blank"-only bypass, so no regression risk there — but we
+        spot-check it too as a sanity assertion.
         """
-        # Give one row a non-blank name to distinguish
-        # "blank matched everything" from "blank correctly matched
-        # only the empty-name row".
-
         # Text blank — must return only the "" row.
         resp = self._post(filterModel={
             "name": {"filterType": "text", "type": "blank"},
@@ -344,8 +333,25 @@ class TestCluster14e_SecondaryFilterBranches(E2ETestCase):
             msg="text `notBlank` must exclude the empty-name row",
         )
 
-        # Date notBlank — after setting one row's created_on, only that
-        # row must survive.
+        # Number notBlank — ``amount`` is non-null on every row in this
+        # fixture, so all four rows must come back. (The pure-isnull
+        # filter is tested explicitly by date/notBlank below — for
+        # numbers the bug-fix was about *reachability*, not semantics.)
+        resp = self._post(filterModel={
+            "amount": {"filterType": "number", "type": "notBlank"},
+        })
+        self.assertEqual(
+            len(resp.data["rowData"]), 4,
+            msg=(
+                "number `notBlank` must reach the dispatch (it used "
+                "to be killed by the early-return guard); with all "
+                "four amounts non-null, every row must come back. "
+                f"Got {len(resp.data['rowData'])} rows."
+            ),
+        )
+
+        # Date notBlank — after setting one row's created_on, only
+        # that row must survive.
         self.beta.created_on = date(2026, 5, 5)
         self.beta.save(update_fields=["created_on"])
         resp = self._post(filterModel={
@@ -354,6 +360,16 @@ class TestCluster14e_SecondaryFilterBranches(E2ETestCase):
         self.assertEqual(
             {r["name"] for r in resp.data["rowData"]}, {"beta-y"},
             msg="date `notBlank` must exclude the isnull rows",
+        )
+
+        # Date blank — and the inverse must return the other three.
+        resp = self._post(filterModel={
+            "created_on": {"filterType": "date", "type": "blank"},
+        })
+        self.assertEqual(
+            {r["name"] for r in resp.data["rowData"]},
+            {"alpha-x", "gamma-z", ""},
+            msg="date `blank` must include the isnull rows only",
         )
 
 

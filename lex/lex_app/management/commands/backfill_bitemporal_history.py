@@ -9,7 +9,6 @@ from django.db import connection, transaction
 from django.db.models import Exists, OuterRef
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-
 from lex.core.services.StandardHistory import create_standard_history_record
 from lex.core.services.bitemporal_signals import (
     suppress_main_table_sync,

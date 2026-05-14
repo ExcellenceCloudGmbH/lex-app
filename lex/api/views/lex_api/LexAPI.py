@@ -1,7 +1,9 @@
-import os
-import requests
 import base64
 import mimetypes
+import os
+
+import requests
+
 
 def build_attachments_from_paths(paths):
     """

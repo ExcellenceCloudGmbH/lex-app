@@ -22,7 +22,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.db.models import Sum
-
 from lex.core.models.CalculationModel import CalculationModel
 
 from ._stress_test_case import StressTestCase

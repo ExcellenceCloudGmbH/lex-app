@@ -1,17 +1,14 @@
+import logging
+from datetime import datetime, date, time
+
+from django.apps import apps
 from django.db import models
 from django.db.models import Model, ForeignKey
 from django.db.models.fields import DateTimeField, DateField, TimeField
-from django.apps import apps
-from rest_framework import serializers, viewsets
-import logging
-
-from datetime import datetime, date, time
-from uuid import UUID
-from decimal import Decimal
-
 from lex.api.utils.helpers import can_read_with_default_permission_scope
 from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.core.models.LexModel import LexModel, UserContext
+from rest_framework import serializers, viewsets
 
 logger = logging.getLogger(__name__)
 

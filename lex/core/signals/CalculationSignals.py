@@ -2,7 +2,6 @@ import logging
 from typing import Optional
 
 from django.dispatch import Signal
-
 from lex.api.utils import operation_context
 from lex.core.calculated_updates.update_handler import CalculatedModelUpdateHandler
 from lex.core.models.CalculationModel import CalculationModel
@@ -70,9 +69,11 @@ def update_calculation_status(
     if not message_type:
         return
 
+    model_name = instance._meta.model_name
     payload = {
         "record": str(instance),
         "record_id": record_id,
+        "model_name": model_name,
     }
     if calculation_id:
         payload["calculation_id"] = calculation_id

@@ -28,7 +28,6 @@ from io import BytesIO
 from urllib.parse import urlencode
 
 import pandas as pd
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import (

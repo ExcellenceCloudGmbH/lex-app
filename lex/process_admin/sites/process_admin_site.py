@@ -1,42 +1,41 @@
+from api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_save
 from django.http import HttpResponse
 from django.urls import path, register_converter
-
-from api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
-from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
-from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
 from lex.api.utils import create_model_converter
-from lex.process_admin.models.ModelCollection import ModelCollection
-from lex.core.signals import do_post_save
+from lex.api.views.LexLoggerView.LexLoggerView import LexLoggerView
 from lex.api.views.calculations.CleanCalculations import CleanCalculations
+from lex.api.views.calculations.DownloadMarkdownPdf import DownloadMarkdownPdf
 from lex.api.views.calculations.InitCalculationLogs import InitCalculationLogs
 from lex.api.views.file_operations.FileDownload import FileDownloadView
 from lex.api.views.file_operations.ModelExport import ModelExportView
 from lex.api.views.global_search_for_models.Search import Search
+from lex.api.views.model_entries.CalculationLogTreeView import CalculationLogTreeView
+from lex.api.views.model_entries.History import HistoryModelEntry
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.Many import ManyModelEntries
 from lex.api.views.model_entries.One import OneModelEntry
-from lex.api.views.model_entries.History import HistoryModelEntry
 from lex.api.views.model_info.Fields import Fields
 from lex.api.views.model_info.Widgets import Widgets
-from lex.process_admin.views.model_relation_views import (
-    ModelStructureObtainView,
-    Overview,
-    ProcessStructure,
-)
 from lex.api.views.permissions.ModelPermissions import ModelPermissions
 from lex.api.views.process_flow.CreateOrUpdate import CreateOrUpdate
 from lex.api.views.project_info.ProjectInfo import ProjectInfo
 from lex.api.views.sharepoint.SharePointFileDownload import SharePointFileDownload
 from lex.api.views.sharepoint.SharePointPreview import SharePointPreview
 from lex.api.views.sharepoint.SharePointShareLink import SharePointShareLink
-from lex.utilities.decorators.singleton import LexSingleton
-from lex.api.views.LexLoggerView.LexLoggerView import LexLoggerView
-from lex.api.views.model_entries.CalculationLogTreeView import CalculationLogTreeView
-from lex.api.views.calculations.DownloadMarkdownPdf import DownloadMarkdownPdf
 from lex.authentication.views.permissions import UserPermissionsView
 from lex.authentication.views.token_views import StreamlitTokenView
+from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
+from lex.core.signals import do_post_save
+from lex.process_admin.models.ModelCollection import ModelCollection
+from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
+from lex.process_admin.views.model_relation_views import (
+    ModelStructureObtainView,
+    Overview,
+    ProcessStructure,
+)
+from lex.utilities.decorators.singleton import LexSingleton
 
 
 @LexSingleton

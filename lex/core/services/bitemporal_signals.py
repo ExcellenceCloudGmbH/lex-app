@@ -15,15 +15,14 @@ Level 2 (MetaHistory → MetaHistory):
     - ``on_meta_saved__chain_sys_to``             — strict chaining of sys_to
 """
 
-import os
 import logging
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-
 from lex.core.services.MetaHistory import create_meta_history_record
 from lex.core.services.StandardHistory import MAIN_TABLE_SYNC_NOT_NEEDED_ATTR
 

@@ -6,16 +6,14 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.http import QueryDict
 from django.test import TestCase
-from rest_framework import serializers
-
-from lex.core.models.LexModel import PermissionResult
 from lex.api.views.file_operations.ModelExport import (
     AG_GROUP_HIERARCHY_COLUMN,
     AG_GROUP_HIERARCHY_DEPTH_COLUMN,
     ModelExportView,
 )
 from lex.api.views.model_entries.List import ListModelEntries
-
+from lex.core.models.LexModel import PermissionResult
+from rest_framework import serializers
 
 User = get_user_model()
 

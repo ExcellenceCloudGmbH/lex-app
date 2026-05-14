@@ -3,7 +3,6 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import converters as django_converters
 from django.urls.converters import REGISTERED_CONVERTERS
-
 from lex.process_admin.settings import processAdminSite
 
 _real_register_converter = django_converters.register_converter

@@ -1,6 +1,7 @@
 # lex_app/rest_api/middleware.py
 
 import logging
+
 from lex.api.views.authentication.KeycloakManager import KeycloakManager
 
 # It's good practice to have a dedicated logger for your middleware

@@ -6,9 +6,10 @@ and graceful degradation when WebSocket operations fail.
 """
 
 import logging
-from typing import Optional
+
 from channels.layers import get_channel_layer
 from lex.utilities.channel_layer import sync_channel_group_send
+
 # from lex.logging.utils.data_models import WebSocketError
 
 

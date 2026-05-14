@@ -33,7 +33,6 @@ from pathlib import Path
 from unittest import TestCase, mock
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands.init import (
     KeycloakSyncManager,
 )
@@ -703,7 +702,8 @@ class TestCluster01e_SyncStandardClientRolePermissions(TestCase):
         self.mgr = _make_sync_manager()
 
     def test_1_43_extra_role_appended_to_scope_permissions(self):
-        """Scenario 1.43: extras are appended to scope permissions, not replaced."""
+        """Scenario 1.43: extras are appended to scope permissions, not replaced.
+        Only newly created policies should be propagated."""
         auth_config = {
             "policies": [
                 # The extra-role policy itself must exist in auth_config:
@@ -723,6 +723,7 @@ class TestCluster01e_SyncStandardClientRolePermissions(TestCase):
 
         self.mgr.sync_standard_client_role_permissions(
             auth_config, ["admin", "standard", "view-only", "hr"],
+            newly_created_policy_names={"Policy - hr"},
         )
 
         updated = next(
@@ -763,6 +764,115 @@ class TestCluster01e_SyncStandardClientRolePermissions(TestCase):
             auth_config, before,
             "With no extras, the auth_config must be untouched",
         )
+
+    def test_1_43c_existing_extra_role_not_overridden_on_subsequent_run(self):
+        """Scenario 1.43c: on a subsequent run (policy already exists),
+        manually adjusted permissions must NOT be overridden.
+
+        An admin may have removed ``Policy - hr`` from the ``delete``
+        permission after the initial propagation. A later ``lex init``
+        must preserve that manual adjustment.
+        """
+        auth_config = {
+            "policies": [
+                {"name": "Policy - hr", "type": "role", "config": {}},
+                # read — admin kept hr here
+                {
+                    "name": "Permission - myapp.A - read",
+                    "type": "scope",
+                    "config": {
+                        "resources": '["myapp.A"]',
+                        "scopes": '["read"]',
+                        "applyPolicies": '["Policy - admin", "Policy - standard", "Policy - hr"]',
+                    },
+                },
+                # delete — admin manually REMOVED hr from this permission
+                {
+                    "name": "Permission - myapp.A - delete",
+                    "type": "scope",
+                    "config": {
+                        "resources": '["myapp.A"]',
+                        "scopes": '["delete"]',
+                        "applyPolicies": '["Policy - admin", "Policy - standard"]',
+                    },
+                },
+            ],
+        }
+        import copy
+        before = copy.deepcopy(auth_config)
+
+        # Second run: "Policy - hr" already exists, so newly_created is empty
+        self.mgr.sync_standard_client_role_permissions(
+            auth_config, ["admin", "standard", "view-only", "hr"],
+            newly_created_policy_names=set(),
+        )
+
+        self.assertEqual(
+            auth_config, before,
+            "On a subsequent run with no newly created policies, "
+            "manual permission adjustments must be preserved",
+        )
+
+    def test_1_43d_new_role_propagated_existing_role_preserved(self):
+        """Scenario 1.43d: when two extra roles exist but only one is new,
+        only the new one is propagated to standard-bearing permissions.
+
+        Pre-existing ``Policy - hr`` (already manually customized) is not
+        touched, while brand-new ``Policy - finance`` is added.
+        """
+        auth_config = {
+            "policies": [
+                {"name": "Policy - hr", "type": "role", "config": {}},
+                {"name": "Policy - finance", "type": "role", "config": {}},
+                # read — admin has hr here already, but NOT finance
+                {
+                    "name": "Permission - myapp.A - read",
+                    "type": "scope",
+                    "config": {
+                        "resources": '["myapp.A"]',
+                        "scopes": '["read"]',
+                        "applyPolicies": '["Policy - admin", "Policy - standard", "Policy - hr"]',
+                    },
+                },
+                # delete — admin deliberately has NO extras here
+                {
+                    "name": "Permission - myapp.A - delete",
+                    "type": "scope",
+                    "config": {
+                        "resources": '["myapp.A"]',
+                        "scopes": '["delete"]',
+                        "applyPolicies": '["Policy - admin", "Policy - standard"]',
+                    },
+                },
+            ],
+        }
+
+        # Only "Policy - finance" is newly created
+        self.mgr.sync_standard_client_role_permissions(
+            auth_config, ["admin", "standard", "view-only", "hr", "finance"],
+            newly_created_policy_names={"Policy - finance"},
+        )
+
+        read_perm = next(
+            p for p in auth_config["policies"]
+            if p.get("name") == "Permission - myapp.A - read"
+        )
+        apply_read = json.loads(read_perm["config"]["applyPolicies"])
+        self.assertIn("Policy - finance", apply_read,
+                       "New policy 'finance' must be added to read")
+        self.assertIn("Policy - hr", apply_read,
+                       "Existing 'hr' must remain in read")
+
+        delete_perm = next(
+            p for p in auth_config["policies"]
+            if p.get("name") == "Permission - myapp.A - delete"
+        )
+        apply_delete = json.loads(delete_perm["config"]["applyPolicies"])
+        self.assertIn("Policy - finance", apply_delete,
+                       "New policy 'finance' must be added to delete (inherits standard)")
+        self.assertNotIn("Policy - hr", apply_delete,
+                          "Existing 'hr' must NOT be re-added to delete "
+                          "(admin deliberately removed it)")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -19,7 +19,6 @@ be created inside the parent's calculate().
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import PermissionResult
 
@@ -345,6 +344,40 @@ class NonAtomicParentCalc(CalculationModel):
 
 
 @_permissive
+class PersistenceProbeCalc(CalculationModel):
+    """Cluster 7e fixture — exposes a hook for inspecting persistence mid-calc.
+
+    Used by sub-cluster 7e (persistence internals) to observe what the
+    framework has committed to the DB while ``calculate()`` is still
+    running. Assign a callable to the *instance* attribute ``_probe``
+    before saving with ``is_calculated=IN_PROGRESS``; ``calculate()``
+    will invoke it (passing ``self``). Set ``should_fail=True`` to make
+    ``calculate()`` raise *after* the probe runs.
+    """
+
+    name = models.CharField(max_length=200)
+    should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        probe = getattr(self, "_probe", None)
+        if probe is not None:
+            probe(self)
+        if self.should_fail:
+            raise RuntimeError(
+                f"PersistenceProbeCalc({self.name!r}) failing on purpose"
+            )
+
+
+@_permissive
 class FailingCalc(CalculationModel):
     """Always raises in ``calculate()``."""
 
@@ -630,6 +663,7 @@ ALL_MODELS = [
     GrandchildCalc, MidCalc,
     NonAtomicParentCalc,
     FailingCalc,
+    PersistenceProbeCalc,
     # 3-level matrix grandparents (sub-cluster 7j)
     Triple_AAA_Calc, Triple_AAN_Calc, Triple_ANA_Calc, Triple_ANN_Calc,
     Triple_NAA_Calc, Triple_NAN_Calc, Triple_NNA_Calc, Triple_NNN_Calc,

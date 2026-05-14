@@ -64,7 +64,6 @@ from pathlib import Path
 from unittest import TestCase
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands import init as init_module
 from lex.lex_app.management.commands.init import (
     KEYCLOAK_DEV_REDIRECT_HOST,

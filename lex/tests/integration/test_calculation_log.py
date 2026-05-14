@@ -14,7 +14,6 @@ from unittest.mock import call, patch
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection, transaction
 from django.test import TransactionTestCase
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.audit_logging.utils.DataModels import ContextInfo, ContextResolutionError

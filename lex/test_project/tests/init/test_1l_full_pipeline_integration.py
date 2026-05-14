@@ -82,13 +82,11 @@ import json
 import os
 import time
 import unittest
-from copy import deepcopy
 from pathlib import Path
 from unittest import TestCase
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands import init as init_module
 from lex.lex_app.management.commands.init import (
     KEYCLOAK_ENV_VARS,

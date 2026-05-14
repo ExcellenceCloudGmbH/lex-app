@@ -23,10 +23,9 @@ Run::
     python manage.py test lex.tests.test_objects_to_recalculate_store
 """
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.core.calculated_updates.ObjectsToRecalculateStore import (
     ObjectsToRecalculateStore,
 )

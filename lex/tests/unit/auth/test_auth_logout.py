@@ -25,7 +25,7 @@ Run::
     python manage.py test lex.tests.test_auth_logout
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from urllib.parse import urlparse, parse_qs
 
 from django.test import SimpleTestCase, override_settings

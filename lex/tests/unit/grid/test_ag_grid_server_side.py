@@ -16,10 +16,8 @@ from django.contrib.auth import get_user_model
 from django.http import QueryDict
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework import serializers
-
 from lex.api.views.model_entries.List import ListModelEntries, apply_ordering, apply_query_param_filters
-
+from rest_framework import serializers
 
 User = get_user_model()
 

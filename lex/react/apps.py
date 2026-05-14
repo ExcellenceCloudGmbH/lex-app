@@ -1,5 +1,7 @@
-from django.apps import AppConfig
 from pathlib import Path
+
+from django.apps import AppConfig
+
 
 class ReactConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"

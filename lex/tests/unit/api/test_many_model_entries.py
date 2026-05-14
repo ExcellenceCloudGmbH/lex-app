@@ -19,7 +19,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import django
 from django.apps import apps
@@ -30,7 +30,6 @@ if not apps.ready:
     django.setup()
 
 from django.test import SimpleTestCase
-from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 
 from lex.api.views.model_entries.Many import ManyModelEntries

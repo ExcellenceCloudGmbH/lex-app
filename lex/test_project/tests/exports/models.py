@@ -22,7 +22,6 @@ Rule #3: no cross-cluster imports — stood up fresh here.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 EXPORT_STATUS_ACTIVE = "active"

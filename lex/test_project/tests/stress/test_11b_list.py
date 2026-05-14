@@ -13,8 +13,6 @@ Scenarios:
 
 from __future__ import annotations
 
-import unittest
-
 from django.db import connection
 
 from ._stress_test_case import StressTestCase

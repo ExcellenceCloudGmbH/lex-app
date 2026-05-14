@@ -1,7 +1,7 @@
 import copy
 from typing import Dict, Any, Set, Type, Union
-from django.db.models import Model
 
+from django.db.models import Model
 from lex.process_admin.models.ModelContainer import ModelContainer
 from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
 from lex.process_admin.utils import ModelStructureBuilder

@@ -13,13 +13,10 @@ from django.core.cache import cache
 from django.core.files import File
 from django.core.files.storage import default_storage
 from django.db import models
-
 from lex.api.utils import OperationContext
-from lex.audit_logging.utils.config import is_audit_logging_enabled
-from django.contrib.contenttypes.models import ContentType
 from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.audit_logging.utils.ModelContext import model_logging_context
-
+from lex.audit_logging.utils.config import is_audit_logging_enabled
 from lex.lex_app import settings
 
 

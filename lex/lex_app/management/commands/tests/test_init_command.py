@@ -2,12 +2,11 @@
 Tests for the init management command's argument parsing and migration forwarding.
 """
 import json
+from io import StringIO
 from unittest import TestCase
 from unittest.mock import patch, MagicMock, call
-from io import StringIO
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands.init import (
     Command,
     KeycloakSyncManager,
@@ -534,7 +533,7 @@ class KeycloakSyncManagerRolePolicyTest(TestCase):
         ]
 
         auth_config = {"policies": []}
-        role_names = manager.ensure_client_role_policies(auth_config)
+        role_names, newly_created = manager.ensure_client_role_policies(auth_config)
 
         self.assertEqual(role_names, ["admin", "standard", "view-only", "auditor"])
         self.assertCountEqual(

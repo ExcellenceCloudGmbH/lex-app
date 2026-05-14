@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import secrets
 import threading
 import webbrowser
 from http import HTTPStatus

@@ -26,7 +26,6 @@ Run::
 from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.utils.calculation_audit import (
     _same_model_instance,
     _resolve_context_data,

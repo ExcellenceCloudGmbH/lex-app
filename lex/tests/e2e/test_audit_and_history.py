@@ -9,15 +9,10 @@ Tests that verify:
 5. Delete operations create tombstone history entries.
 """
 
-import os
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from django.db import connection, models
-from django.test import TransactionTestCase
-from django.utils import timezone
-
+from django.db import models
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.models.CalculationModel import (

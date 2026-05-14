@@ -24,12 +24,11 @@ Run::
 """
 
 from django.test import SimpleTestCase
-from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
-
 from lex.api.views.pagination import (
     CustomPageNumberPagination,
     CustomLimitOffsetPagination,
 )
+from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination
 
 
 class TestCustomPageNumberPagination(SimpleTestCase):

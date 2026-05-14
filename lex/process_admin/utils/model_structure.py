@@ -26,7 +26,7 @@ class ModelStructure:
 
     @staticmethod
     def _is_model_list_defined(values):
-        return values not in (None, "", {})
+        return values not in (None, "", {}) and not isinstance(values, bool)
 
     @staticmethod
     def _normalize_model_list(values, key):

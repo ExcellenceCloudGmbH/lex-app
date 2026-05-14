@@ -28,11 +28,10 @@ How to run::
 
 import os
 import sys
-from datetime import date, datetime, timezone as dt_tz, timedelta
+from datetime import date, datetime, timezone as dt_tz
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import django
 from django.apps import apps
@@ -58,9 +57,6 @@ from lex.api.views.model_entries.List import (
     normalize_field_path,
     _coerce_value,
     _build_query_from_values,
-    _resolve_lookup,
-    apply_query_param_filters,
-    apply_ordering,
     RESERVED_QUERY_PARAMS,
     SAFE_LOOKUPS,
 )

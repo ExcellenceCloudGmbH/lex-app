@@ -22,10 +22,9 @@ Run::
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
 from lex.core.models.LexModel import LexModel, PermissionResult
 

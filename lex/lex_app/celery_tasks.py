@@ -20,27 +20,23 @@ import logging
 import os
 import sys
 import traceback
-from contextlib import nullcontext
 from copy import deepcopy
 from functools import wraps
 from typing import Dict, Tuple, Optional, Set, List, Any
 from uuid import uuid4
 
+from asgiref.sync import sync_to_async
 from celery import Task, shared_task
 from celery.result import allow_join_result
-
-from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
+from django.db import transaction
+from django.db.models import Model
+from lex.api.utils import operation_context
+from lex.audit_logging.utils.ModelContext import _model_context
 from lex.audit_logging.utils.calculation_audit import (
     ensure_terminal_calculation_audit,
 )
-from django.db import transaction
-from django.db.models import Model
-
-from lex.core.signals import update_calculation_status
-from lex.api.utils import operation_context
-from asgiref.sync import sync_to_async
-
 from lex.core.models.CalculationModel import CalculationModel
+from lex.core.signals import update_calculation_status
 
 logger = logging.getLogger(__name__)
 
@@ -697,7 +693,7 @@ def load_data(test, generic_app_models, audit_logging_enabled=None, initial_data
     """Load data asynchronously if conditions are met."""
     if not initial_data_load:
         return
-    from lex.lex_app.apps import should_load_data, _create_audit_logger_for_task
+    from lex.lex_app.apps import _create_audit_logger_for_task
 
     audit_logger = _create_audit_logger_for_task(audit_logging_enabled)
     finalization_error = None
@@ -761,7 +757,8 @@ def calc_and_save(models: List[Model], *args, **kwargs):
         try:
             logger.info(f"Processing model {model}")
             from lex.audit_logging.utils.ModelContext import model_logging_context
-            with model_logging_context(model):
+            from lex.core.models.CalculationModel import calculation_execution_context
+            with calculation_execution_context():
                 model.lex_func()()
             logger.info(f"Finished calculating model {model}")
             model.save()

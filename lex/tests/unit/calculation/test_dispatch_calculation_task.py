@@ -30,11 +30,9 @@ How to run
         --verbosity=2 --noinput
 """
 
-from copy import deepcopy
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.core.models.CalculationModel import CalculationModel
 
 

@@ -2,8 +2,8 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from unittest import TestCase
 
-from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
 from lex.process_admin.utils.model_structure import ModelStructure
+from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
 
 
 class ModelStructureYamlTests(TestCase):

@@ -26,6 +26,7 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
     status_created_at = serializers.SerializerMethodField()
     status_updated_at = serializers.SerializerMethodField()
     duration = serializers.SerializerMethodField()
+    lex_reserved_has_calculation_log = serializers.SerializerMethodField()
 
     class Meta:
         model = AuditLog
@@ -43,15 +44,38 @@ class AuditLogDefaultSerializer(AuditLogReadOnlySerializerMixin, serializers.Mod
             'status_created_at',
             'status_updated_at',
             'duration',
+            'lex_reserved_has_calculation_log',
         ]
         read_only_fields = [f.name for f in AuditLog._meta.fields]
+        lex_field_type_overrides = {
+            'status_created_at': 'date_time',
+            'status_updated_at': 'date_time',
+            'duration': 'duration',
+        }
 
     def _get_latest_status_record(self, obj):
         """Return the latest AuditLogStatus record for this AuditLog, or None."""
+        cache_attr = '_cached_latest_status'
+        if hasattr(obj, cache_attr):
+            return getattr(obj, cache_attr)
+
         if hasattr(obj, '_prefetched_objects_cache') and 'status_records' in obj._prefetched_objects_cache:
-            records = obj._prefetched_objects_cache['status_records']
-            return records[-1] if records else None
-        return obj.status_records.order_by('-created_at').first()
+            records = list(obj._prefetched_objects_cache['status_records'])
+            result = records[-1] if records else None
+        else:
+            result = obj.status_records.order_by('-created_at').first()
+
+        obj._cached_latest_status = result
+        return result
+
+    def get_lex_reserved_has_calculation_log(self, obj):
+        """True when at least one CalculationLog row exists for this audit entry."""
+        if hasattr(obj, '_has_calculation_log'):
+            return obj._has_calculation_log
+        if not obj.calculation_id:
+            return False
+        from lex.audit_logging.models.CalculationLog import CalculationLog
+        return CalculationLog.objects.filter(calculationId=obj.calculation_id).exists()
 
     def get_status(self, obj):
         record = self._get_latest_status_record(obj)

@@ -65,11 +65,35 @@ omit =
     lex/lex_app/asgi.py
     lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
+    lex/tools/ai_dashboard.py
+    lex/tools/ai_faq.py
+    lex/tools/verify_ai_assets.py
     lex/streamlit_app.py
     lex/lex_app/streamlit/*
     lex/proxy.py
     lex/manage.py
     lex/api/views/authentication/KeycloakManager.py
+    lex/audit_logging/utils/legacy_audit_payload.py
+    lex/core/management/commands/bootstrap_callback_server.py
+    lex/lex_app/management/commands/bootstrap_keycloak.py
+    # Non-test-worthy code: scaffolding, console handlers, legacy data models,
+    # routing shims, ProjectInfo view, dev-only utilities.
+    lex/test_project/apps.py
+    lex/tools/test_groups.py
+    lex/api/views/sharepoint/DeleteUnusedFiles.py
+    lex/lex_app/routing.py
+    lex/audit_logging/handlers/ConsoleHandler.py
+    lex/authentication/utils/lex_authentication.py
+    lex/utilities/channel_layer.py
+    lex/legacy_data/admin/read_only_admin.py
+    lex/api/utils/collection_utils.py
+    lex/core/models/HTMLReport.py
+    lex/legacy_data/models/legacy_calculation_id.py
+    lex/legacy_data/models/legacy_log.py
+    lex/legacy_data/models/legacy_user_change_log.py
+    lex/api/views/project_info/ProjectInfo.py
+    lex/legacy_data/models/legacy_calculation_log.py
+    lex/legacy_data/serializers/legacy_data_serializers.py
 
 [report]
 show_missing = True
@@ -121,9 +145,33 @@ omit =
     lex/lex_app/asgi.py
     lex/lex_app/wsgi.py
     lex/tools/setup_with_ai.py
-    lex/lex_app/streamlit/*
+    lex/tools/ai_dashboard.py
+    lex/tools/ai_faq.py
+    lex/tools/verify_ai_assets.py
     lex/streamlit_app.py
+    lex/lex_app/streamlit/*
+    lex/proxy.py
+    lex/manage.py
     lex/api/views/authentication/KeycloakManager.py
+    lex/audit_logging/utils/legacy_audit_payload.py
+    lex/core/management/commands/bootstrap_callback_server.py
+    lex/lex_app/management/commands/bootstrap_keycloak.py
+    lex/test_project/apps.py
+    lex/tools/test_groups.py
+    lex/api/views/sharepoint/DeleteUnusedFiles.py
+    lex/lex_app/routing.py
+    lex/audit_logging/handlers/ConsoleHandler.py
+    lex/authentication/utils/lex_authentication.py
+    lex/utilities/channel_layer.py
+    lex/legacy_data/admin/read_only_admin.py
+    lex/api/utils/collection_utils.py
+    lex/core/models/HTMLReport.py
+    lex/legacy_data/models/legacy_calculation_id.py
+    lex/legacy_data/models/legacy_log.py
+    lex/legacy_data/models/legacy_user_change_log.py
+    lex/api/views/project_info/ProjectInfo.py
+    lex/legacy_data/models/legacy_calculation_log.py
+    lex/legacy_data/serializers/legacy_data_serializers.py
 exclude_lines =
     pragma: no cover
     raise NotImplementedError

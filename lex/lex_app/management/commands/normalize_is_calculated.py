@@ -4,9 +4,7 @@ from typing import Dict, List
 from django.apps import apps
 from django.core.management.base import BaseCommand
 from django.db import transaction
-
 from lex.core.models.CalculationModel import CalculationModel
-
 
 TRUE_VALUES = {"true", "1", "t", "yes", "y"}
 FALSE_VALUES = {"false", "0", "f", "no", "n"}

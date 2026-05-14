@@ -1,11 +1,10 @@
 # core/management/commands/keycloak_backup.py
 import json
-import os
 from datetime import datetime
 from pathlib import Path
-from django.core.management.base import BaseCommand
-from django.conf import settings
 
+from django.conf import settings
+from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):

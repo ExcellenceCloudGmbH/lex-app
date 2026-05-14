@@ -1,5 +1,4 @@
 from lex.lex_app.apps import LexAppConfig
-from lex.utilities.config.generic_app_config import GenericAppConfig
 
 
 class ApiConfig(LexAppConfig):

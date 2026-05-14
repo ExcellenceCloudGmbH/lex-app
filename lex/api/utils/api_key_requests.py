@@ -6,7 +6,6 @@ from typing import FrozenSet, Optional
 from rest_framework_api_key.models import APIKey
 from rest_framework_api_key.permissions import KeyParser
 
-
 DEFAULT_API_KEY_SCOPES: FrozenSet[str] = frozenset(
     {"create", "read", "edit", "delete", "list", "export"}
 )

@@ -1,17 +1,14 @@
-import traceback
 import logging
 import time
+import traceback
 
 from django.db import transaction
 from django.utils import timezone
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
-
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload
 from lex.audit_logging.utils.content_types import safe_get_content_type as _safe_get_content_type
 from lex.core.exceptions import resolve_exception_traceback
-
 
 logger = logging.getLogger(__name__)
 

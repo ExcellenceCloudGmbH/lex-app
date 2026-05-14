@@ -8,7 +8,6 @@ cluster is about *who/what* the framework records, not field shapes.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
 
@@ -57,8 +56,40 @@ class AuditAtomicCalc(CalculationModel):
             raise RuntimeError(f"AuditAtomicCalc({self.name!r}) failing on purpose")
 
 
-ALL_MODELS = [AuditSimpleItem, AuditAtomicCalc]
+@_permissive
+class AuditNonAtomicCalc(CalculationModel):
+    """Non-atomic calc — ``is_atomic = False`` opts out of the
+    surrounding API ``transaction.atomic()`` block (see
+    ``should_use_atomic_model_operations`` in
+    ``lex.core.models.LexModel``).
+
+    Used by the API-driven calc audit tests in 6i to pin the contract
+    that audit rows are created the same way regardless of whether the
+    view wrapped the call in an atomic block.
+    """
+
+    name = models.CharField(max_length=200)
+    should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = False
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        if self.should_fail:
+            raise RuntimeError(
+                f"AuditNonAtomicCalc({self.name!r}) failing on purpose"
+            )
+
+
+ALL_MODELS = [AuditSimpleItem, AuditAtomicCalc, AuditNonAtomicCalc]
 
 AUDIT_SIMPLE = "auditsimpleitem"
 AUDIT_ATOMIC = "auditatomiccalc"
+AUDIT_NONATOMIC = "auditnonatomiccalc"
 

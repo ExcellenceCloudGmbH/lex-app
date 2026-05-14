@@ -1,0 +1,250 @@
+# ───────────────────────────────────────────────────────────────────
+#  Copilot Test-Bot — PR gate.
+#
+#  Runs on every PR authored by copilot-swe-agent[bot]. Does:
+#    1. Find the originating issue via "Fixes #N" in the PR body,
+#       read its mode label.
+#    2. Static PR-shape check via copilot_validate_pr_shape.py.
+#    3. Run the new test in isolation. Mode-B strips
+#       @expectedFailure on a temp copy and asserts FAILURE.
+#    4. Apply auto-merge (modes A/B) or needs-human-review (mode C).
+#
+#  Any failure → label PR copilot:invalid + comment + exit non-zero
+#  (the comment lists what failed; merge labels are not applied).
+# ───────────────────────────────────────────────────────────────────
+
+name: Copilot PR Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+concurrency:
+  # Coalesce rapid synchronize events on the same PR — the gate
+  # mutates labels, posts comments, and (mode A/B) calls --auto;
+  # racing runs would double-comment / double-label.
+  group: copilot-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
+    runs-on: ubuntu-latest
+
+    services:
+      # Required: the Django test runner needs a real Postgres for
+      # migrate + per-test transactions. Mirrors showcase_tests.yml so
+      # cluster fixtures behave identically here vs. the full suite.
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: lundadminlocal
+          POSTGRES_DB: db_lex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Match showcase_tests.yml so the gate runs against the same
+          # interpreter the project itself targets.
+          python-version: "3.12.0"
+
+      - name: Install lex-app
+        # `pip install -e .` puts the project's `lex` console-script on
+        # PATH — Mode-A/B/C invoke `lex test ...` (Django manage entry).
+        # Without this, `lex` is "command not found" on the GHA runner.
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --prefer-binary -r requirements.txt
+          pip install -e .
+
+      # ── 1. Discover mode from the linked issue ─────────────────
+      - name: Discover mode
+        id: mode
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          ISSUE_NUM=$(printf '%s' "$PR_BODY" | grep -oE 'Fixes #[0-9]+' | head -n1 | sed 's/Fixes #//')
+          if [[ -z "$ISSUE_NUM" ]]; then
+            echo "::error::PR body has no 'Fixes #N' link."
+            exit 1
+          fi
+          LABELS=$(gh issue view "$ISSUE_NUM" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          MODE=""
+          for L in $LABELS; do
+            case "$L" in
+              copilot:regression)    MODE="regression" ;;
+              copilot:bug-repro)     MODE="bug-repro" ;;
+              copilot:fix-and-test)  MODE="fix-and-test" ;;
+            esac
+          done
+          if [[ -z "$MODE" ]]; then
+            echo "::error::Linked issue #$ISSUE_NUM has no copilot:<mode> label."
+            exit 1
+          fi
+          echo "mode=${MODE}"           >> "$GITHUB_OUTPUT"
+          echo "issue=${ISSUE_NUM}"     >> "$GITHUB_OUTPUT"
+
+      # ── 2. PR-shape gate ───────────────────────────────────────
+      - name: Build files JSON + body file
+        id: files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Use the REST API (paginated) so we get per-file `status`
+          # (added|modified|removed|renamed). `gh pr view --json files`
+          # does not surface status, which the test-file locator needs
+          # to filter to additions-only — otherwise a `synchronize`
+          # event editing a pre-existing test file would be picked.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+            --jq '[.[] | {path: .filename, additions: .additions, deletions: .deletions, status: .status}]' \
+            > files.json
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body > body.txt
+
+      - name: Run shape validator
+        id: shape
+        run: |
+          python .github/scripts/copilot_validate_pr_shape.py \
+            --mode "${{ steps.mode.outputs.mode }}" \
+            --files-json files.json \
+            --body-file body.txt | tee shape.out
+
+      - name: On shape failure, label + comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          BODY="PR-shape check failed:\n\n$(cat shape.out)"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          gh pr edit    "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+          exit 1
+
+      # ── 3. Run the new test (mode A/C: must pass; mode B: must fail without decorator) ──
+      - name: Locate new test file
+        id: testfile
+        run: |
+          set -euo pipefail
+          # Filter to status=='added' — on a `synchronize` event the
+          # PR may also touch an existing test file that matches the
+          # naming regex; without this filter `head -n1` would pick the
+          # wrong one and Mode-A/B/C would run the wrong scenario.
+          NEW_TEST=$(jq -r '.[] | select(.status == "added") | .path | select(test("^lex/test_project/tests/[^/]+/test_[0-9]+[a-z]?_[A-Za-z0-9_]+\\.py$"))' files.json | head -n1)
+          if [[ -z "$NEW_TEST" ]]; then
+            echo "::error::could not locate the new test file (no added file matching test_<Nx>_<slug>.py under lex/test_project/tests/<cluster>/)."
+            exit 1
+          fi
+          echo "path=${NEW_TEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Mode A or C — run test, expect pass
+        if: steps.mode.outputs.mode != 'bug-repro'
+        env:
+          # Mirror showcase_tests.yml so the gate exercises the new
+          # test under the same Django settings as the full cluster
+          # suite — a bug-repro that only fires under different
+          # settings would otherwise slip through.
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
+        run: |
+          set -euo pipefail
+          # `lex` is the Django manage.py console-script installed by
+          # `pip install -e .` in the install step.
+          TEST_PATH="${{ steps.testfile.outputs.path }}"
+          MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
+          lex test "$MODULE" --noinput
+
+      - name: Mode B — strip @expectedFailure, expect FAIL
+        if: steps.mode.outputs.mode == 'bug-repro'
+        env:
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
+        run: |
+          set -euo pipefail
+          TEST_PATH="${{ steps.testfile.outputs.path }}"
+          # Strip the @(unittest.)?expectedFailure decorator IN PLACE.
+          # The CI checkout is throwaway; overwriting keeps the file at
+          # its real package path so the Django test runner discovers
+          # it as part of `lex/test_project/tests/<cluster>/`. A temp
+          # file outside the package would not be importable as
+          # `lex.test_project.tests.cluster_X.test_Nx_thing`.
+          python - "$TEST_PATH" <<'PY'
+          import re, sys, pathlib
+          p = pathlib.Path(sys.argv[1])
+          src = p.read_text()
+          out = re.sub(r"(?m)^\s*@(?:unittest\.)?expectedFailure\s*\n", "", src)
+          if out == src:
+              print("::error::no @expectedFailure decorator found to strip — Mode-B requires one on the new test")
+              sys.exit(2)
+          p.write_text(out)
+          PY
+          MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
+          # Run via the Django test runner (NOT pytest — the project's
+          # tests are unittest.TestCase under Django settings; pytest
+          # without pytest-django would either not collect or crash on
+          # django.setup(), which would look like 'correctly fails'
+          # without actually proving the bug reproduces).
+          set +e
+          lex test "$MODULE" --noinput 2>&1 | tee mode_b.out
+          EXIT=${PIPESTATUS[0]}
+          set -e
+          if [[ $EXIT -eq 0 ]]; then
+            echo "::error::Mode-B test passed without @expectedFailure — bug is not reproducible."
+            exit 1
+          fi
+          # Distinguish 'ran and asserted FAIL' from 'errored on
+          # import/setup'. Django's unittest runner prints lines
+          # starting with `FAIL:` (assertion) or `FAILED` (summary).
+          # Anything else is a non-test failure that we MUST not treat
+          # as a successful bug repro.
+          if grep -qE '^(FAIL|FAILED)' mode_b.out; then
+            echo "Mode-B test correctly fails without the decorator."
+          else
+            echo "::error::Mode-B test errored before assertion (likely import/setup failure) — not a real bug repro."
+            exit 1
+          fi
+
+      # ── 4. Apply merge labels ──────────────────────────────────
+      - name: Apply auto-merge (modes A/B)
+        if: steps.mode.outputs.mode != 'fix-and-test'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr edit  "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "auto-merge"
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto
+
+      - name: Route mode-C to human review
+        if: steps.mode.outputs.mode == 'fix-and-test'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "needs-human-review"
+          # The team-review request is best-effort — if the team isn't configured, log and continue.
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-reviewer "lex-maintainers" || \
+            echo "::warning::could not request review from lex-maintainers (team not found?)"

@@ -3,10 +3,10 @@ import traceback
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Type, List
+
 from django.db import models, transaction
 from django.db.models import Model
 from django.utils import timezone
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload, generic_instance_payload

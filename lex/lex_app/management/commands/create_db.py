@@ -1,8 +1,9 @@
 import os
-from django.core.management.base import BaseCommand, CommandError
-from django.conf import settings
 
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 from lex.runtime_config import format_db_connection_unicode_error
+
 
 class Command(BaseCommand):
     help = 'Creates the database defined in settings if it does not exist (PostgreSQL only)'

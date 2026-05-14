@@ -1,6 +1,5 @@
 # from: https://stackoverflow.com/a/52700398
 import logging
-from rest_framework import response, status
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +113,20 @@ class DestroyOneWithPayloadMixin:
             can_delete = False
             
         if not can_delete:
+            # BUG-008 fix: authz failures must surface as 401/403,
+            # not 400. See the matching fix in OneModelEntry.create.
+            is_anonymous = not bool(
+                getattr(getattr(request, "user", None), "is_authenticated", False)
+            )
+            deny_status = (
+                status.HTTP_401_UNAUTHORIZED
+                if is_anonymous
+                else status.HTTP_403_FORBIDDEN
+            )
             return response.Response({
                 "message": f"You are not authorized to delete this record in {instance.__class__.__name__}"
-            }, status=status.HTTP_400_BAD_REQUEST)
-            
+            }, status=deny_status)
+
         serializer = self.get_serializer(instance)
         super().destroy(*args, **kwargs)
         return response.Response(serializer.data, status=status.HTTP_200_OK)

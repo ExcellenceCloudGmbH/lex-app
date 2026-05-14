@@ -25,11 +25,10 @@ from __future__ import annotations
 
 import unittest
 
-from rest_framework import status
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import ALL_MODELS, AUDIT_SIMPLE, AuditSimpleItem
 
@@ -148,17 +147,17 @@ class TestCluster06a_APIAuditLog(E2ETestCase):
             "success",
         )
 
-    @unittest.skip(
-        "Scenario 6.4: 'every failed API write yields a failure AuditLog' "
-        "is the documented intent, but the current AuditLogMixin only "
-        "wraps perform_{create,update,destroy}. Requests that fail before "
-        "the mixin runs (404, 401, serializer ValidationError-as-500 per "
-        "BUG-005) produce no audit row. Needs a middleware-level audit "
-        "hook to cover reliably. Intent-driven — do NOT weaken the test "
-        "to match current behaviour."
-    )
-    def test_6_4_api_failure_audit_row(self) -> None:
-        """Scenario 6.4: Failed API op → AuditLog row with status=failure."""
+    # Scenario 6.4 — superseded by 6.45 in test_6d_payload_and_gfk.py.
+    #
+    # The original 6.4 ("every failed API write yields a failure
+    # AuditLog") was skipped because failures *before* the mixin runs
+    # (404, 401, raw ValidationError) bypass the audit writer. That
+    # gap is real but it's a framework limitation, not something to
+    # assert against here. The reachable failure contract — a
+    # mutation that fails *inside* perform_create / perform_update —
+    # is now pinned by 6.45 (pre_validation reject → failure audit
+    # row + traceback) and 6.51 (atomic calc failure via API → failure
+    # audit). Nothing else to do at this layer.
 
 
 if __name__ == "__main__":  # pragma: no cover

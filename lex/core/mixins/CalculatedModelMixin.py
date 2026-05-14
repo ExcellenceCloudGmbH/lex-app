@@ -126,19 +126,17 @@ Version History:
 import itertools
 import logging
 import os
-from collections.abc import Iterable as IterableABC, Mapping as MappingABC
 from abc import abstractmethod
+from collections.abc import Iterable as IterableABC, Mapping as MappingABC
 from copy import deepcopy
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
+from typing import List, Dict, Any, TYPE_CHECKING
 
-from django.db import transaction
-from django.db.models import Model, UniqueConstraint
+from django.db.models import UniqueConstraint
 from django.db.models.base import ModelBase
-
-from lex.lex_app import settings
 from lex.api.utils import operation_context
 from lex.core.exceptions import *
 from lex.core.models.LexModel import LexModel
+from lex.lex_app import settings
 
 if TYPE_CHECKING:
     pass  # CalculatedModelMixin is defined in this file
@@ -885,8 +883,8 @@ def calc_and_save_sync(models, *args):
                 # Push the child model onto the model_context stack so that
                 # LexLogger / CalculationLog can identify it as the *current*
                 # model while the trigger remains visible as the *parent*.
-                from lex.audit_logging.utils.ModelContext import model_logging_context
-                with model_logging_context(model):
+                from lex.core.models.CalculationModel import calculation_execution_context
+                with calculation_execution_context():
                     model.lex_func()(*args)
                 logger.debug(f"Calculation completed for model {i + 1}")
             except Exception as calc_error:

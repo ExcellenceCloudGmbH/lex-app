@@ -1,5 +1,6 @@
-from rest_framework import serializers
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from rest_framework import serializers
+
 
 class CalculationLogTreeSerializer(serializers.ModelSerializer):
     title = serializers.SerializerMethodField()
