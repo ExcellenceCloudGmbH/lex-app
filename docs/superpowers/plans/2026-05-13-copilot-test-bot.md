@@ -1722,7 +1722,7 @@ def test_zero_padded_rc_is_normalised() -> None:
 
 
 def test_non_rc_tag_rejected() -> None:
-    with pytest.raises(ValueError, match="not an rc tag"):
+    with pytest.raises(ValueError, match=r"(?i)rc"):
         compute_next_rc("v2.0.0")
 
 
@@ -1738,10 +1738,27 @@ def test_empty_string_rejected() -> None:
 
 def test_pre_release_other_than_rc_rejected() -> None:
     # The publish path is explicitly rc-only — anything else is a human concern.
-    with pytest.raises(ValueError, match="not an rc tag"):
+    with pytest.raises(ValueError, match=r"(?i)rc"):
         compute_next_rc("v2.0.0a1")
-    with pytest.raises(ValueError, match="not an rc tag"):
+    with pytest.raises(ValueError, match=r"(?i)rc"):
         compute_next_rc("v2.0.0b5")
+
+
+def test_uppercase_rc_rejected() -> None:
+    # Tag space discipline: only lowercase `rc` is allowed. Forbid
+    # silent normalisation — uppercase usually means a typo upstream
+    # (manual `git tag`), and silently accepting it would hide that.
+    with pytest.raises(ValueError):
+        compute_next_rc("v2.0.0RC1")
+
+
+def test_whitespace_input_rejected() -> None:
+    # Reject leading/trailing whitespace + newlines outright. A workflow
+    # capturing the previous tag from `gh release view` may include a
+    # stray newline; silently `.strip()`-ing it would mask that bug. The
+    # caller must hand us a clean tag.
+    with pytest.raises(ValueError):
+        compute_next_rc(" v2.0.0rc1\n")
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1798,7 +1815,7 @@ if __name__ == "__main__":
 - [ ] **Step 2: Run the tests to verify they pass**
 
 Run: `pytest .github/scripts/tests/test_copilot_compute_next_rc.py -v`
-Expected: 8 passed.
+Expected: 10 passed.
 
 - [ ] **Step 3: Write the publish workflow**
 
@@ -2101,7 +2118,7 @@ Run:
 ```bash
 pytest .github/scripts/tests/ -v
 ```
-Expected: all tests pass (8 + 12 + 8 = 28 tests).
+Expected: all tests pass (8 + 15 + 10 = 33 tests).
 
 Then sanity-check the three workflow YAMLs parse:
 ```bash
