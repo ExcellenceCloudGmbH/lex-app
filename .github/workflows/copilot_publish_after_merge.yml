@@ -37,6 +37,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'publish-on-merge') &&
       vars.COPILOT_AUTO_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout default branch

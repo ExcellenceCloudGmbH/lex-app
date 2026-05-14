@@ -35,6 +35,7 @@ jobs:
   gate:
     if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       # Required: the Django test runner needs a real Postgres for

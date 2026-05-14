@@ -831,6 +831,7 @@ permissions:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Only run on label events when the label is one of our three modes.
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -1451,6 +1452,7 @@ jobs:
   gate:
     if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       # Required: the Django test runner needs a real Postgres for
@@ -1861,6 +1863,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'publish-on-merge') &&
       vars.COPILOT_AUTO_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout default branch
