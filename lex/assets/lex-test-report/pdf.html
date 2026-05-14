@@ -292,6 +292,32 @@
     </div>
     {% endfor %}
 
+    {% if coverage and coverage.files %}
+    <div class="section" style="page-break-before:auto;">
+      <h2 style="font-size:18px;">Coverage breakdown</h2>
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Module</th>
+            <th style="width:80px;">Stmts</th>
+            <th style="width:80px;">Miss</th>
+            <th style="width:80px;">Cover</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for file in coverage.files %}
+          <tr>
+            <td style="font-size:11px;">{{ file.name }}</td>
+            <td>{{ file.stmts }}</td>
+            <td>{{ file.miss }}</td>
+            <td style="font-weight:700;color:{% if file.cover >= 80 %}#1b5e20{% elif file.cover >= 50 %}#b45309{% else %}#b91c1c{% endif %};">{{ "%.1f"|format(file.cover) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
     {% if config.traceability.duration or config.traceability.build_id or config.traceability.branch or config.traceability.run_url %}
     <div class="section">
       <h2 style="font-size:18px;">Traceability</h2>
