@@ -261,7 +261,7 @@ Steps:
 
 **Default off.** The `publish-on-merge` label is opt-in per issue. A repo variable `COPILOT_AUTO_PUBLISH_ENABLED` (default `"false"`) is the kill switch — flip it to disable the whole path without editing YAML.
 
-**Why draft, not direct publish:** the draft visibly exists in the GitHub UI for a few seconds before `pip_publish.yml` completes. A maintainer watching the Releases page can edit notes or delete the draft to abort. With direct publish, no abort window exists.
+**Why draft, not direct publish:** the draft surfaces in the GitHub Releases UI with the auto-generated notes — useful as an audit artifact for after-the-fact review. Note: `pip_publish.yml` triggers on `release: created`, which fires for draft releases too, so PyPI publish begins immediately and there is no reliable abort window between draft creation and upload. Per-run aborts must happen by flipping `COPILOT_AUTO_PUBLISH_ENABLED` to `"false"` before merging the PR; the draft itself is for visibility, not a manual gate.
 
 ## 10. Configuration prerequisites
 

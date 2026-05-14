@@ -1846,6 +1846,12 @@ permissions:
   contents: write
   pull-requests: read
 
+# Serialize runs so two PRs merged seconds apart don't both compute
+# the same nextRc and race on `gh release create`.
+concurrency:
+  group: copilot-publish
+  cancel-in-progress: false
+
 jobs:
   draft-release:
     if: >-
@@ -1897,15 +1903,23 @@ jobs:
           NEXT: ${{ steps.next.outputs.tag }}
         run: |
           set -euo pipefail
+          # GitHub PR search only honors date-only qualifiers
+          # (merged:>=YYYY-MM-DD); a full ISO-8601 timestamp like
+          # 2026-05-13T10:22:31Z silently matches nothing. Fetch with a
+          # date-only lower bound, then post-filter by the precise
+          # publishedAt timestamp via jq to drop PRs merged earlier on
+          # PREV_DATE before the previous release was published.
+          PREV_PUBLISHED=$(gh release view "$PREV" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)
+          PREV_DATE=${PREV_PUBLISHED%%T*}
           {
             echo "Release ${NEXT} — auto-cut by copilot_publish_after_merge.yml."
             echo
             echo "## PRs since ${PREV}"
             echo
             gh pr list --repo "$GITHUB_REPOSITORY" \
-              --state merged --search "merged:>$(gh release view "$PREV" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)" \
-              --json number,title,author \
-              --jq '.[] | "- #\(.number) \(.title) (\(.author.login))"'
+              --state merged --search "merged:>=${PREV_DATE}" --limit 100 \
+              --json number,title,author,mergedAt \
+              | jq --arg cut "$PREV_PUBLISHED" -r '.[] | select(.mergedAt > $cut) | "- #\(.number) \(.title) (\(.author.login))"'
           } > notes.md
 
       - name: Create draft release
