@@ -1440,10 +1440,35 @@ permissions:
   pull-requests: write
   issues: read
 
+concurrency:
+  # Coalesce rapid synchronize events on the same PR — the gate
+  # mutates labels, posts comments, and (mode A/B) calls --auto;
+  # racing runs would double-comment / double-label.
+  group: copilot-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   gate:
     if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
     runs-on: ubuntu-latest
+
+    services:
+      # Required: the Django test runner needs a real Postgres for
+      # migrate + per-test transactions. Mirrors showcase_tests.yml so
+      # cluster fixtures behave identically here vs. the full suite.
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: lundadminlocal
+          POSTGRES_DB: db_lex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
 
     steps:
       - name: Checkout PR head
@@ -1455,13 +1480,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # Match showcase_tests.yml so the gate runs against the same
+          # interpreter the project itself targets.
+          python-version: "3.12.0"
 
-      - name: Install runtime deps
+      - name: Install lex-app
+        # `pip install -e .` puts the project's `lex` console-script on
+        # PATH — Mode-A/B/C invoke `lex test ...` (Django manage entry).
+        # Without this, `lex` is "command not found" on the GHA runner.
         run: |
-          python -m pip install --upgrade pip
-          # Project's own deps — tests need them to import.
-          if [[ -f requirements.txt ]]; then pip install -r requirements.txt; fi
+          pip install --upgrade pip setuptools wheel
+          pip install --prefer-binary -r requirements.txt
+          pip install -e .
 
       # ── 1. Discover mode from the linked issue ─────────────────
       - name: Discover mode
@@ -1500,8 +1530,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json files \
-            --jq '[.files[] | {path: .path, additions: .additions, deletions: .deletions}]' \
+          # Use the REST API (paginated) so we get per-file `status`
+          # (added|modified|removed|renamed). `gh pr view --json files`
+          # does not surface status, which the test-file locator needs
+          # to filter to additions-only — otherwise a `synchronize`
+          # event editing a pre-existing test file would be picked.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+            --jq '[.[] | {path: .filename, additions: .additions, deletions: .deletions, status: .status}]' \
             > files.json
           gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body > body.txt
 
@@ -1529,43 +1564,85 @@ jobs:
         id: testfile
         run: |
           set -euo pipefail
-          NEW_TEST=$(jq -r '.[] | .path | select(test("^lex/test_project/tests/[^/]+/test_[0-9]+[a-z]?_[A-Za-z0-9_]+\\.py$"))' files.json | head -n1)
+          # Filter to status=='added' — on a `synchronize` event the
+          # PR may also touch an existing test file that matches the
+          # naming regex; without this filter `head -n1` would pick the
+          # wrong one and Mode-A/B/C would run the wrong scenario.
+          NEW_TEST=$(jq -r '.[] | select(.status == "added") | .path | select(test("^lex/test_project/tests/[^/]+/test_[0-9]+[a-z]?_[A-Za-z0-9_]+\\.py$"))' files.json | head -n1)
           if [[ -z "$NEW_TEST" ]]; then
-            echo "::error::could not locate the new test file."
+            echo "::error::could not locate the new test file (no added file matching test_<Nx>_<slug>.py under lex/test_project/tests/<cluster>/)."
             exit 1
           fi
           echo "path=${NEW_TEST}" >> "$GITHUB_OUTPUT"
 
       - name: Mode A or C — run test, expect pass
         if: steps.mode.outputs.mode != 'bug-repro'
+        env:
+          # Mirror showcase_tests.yml so the gate exercises the new
+          # test under the same Django settings as the full cluster
+          # suite — a bug-repro that only fires under different
+          # settings would otherwise slip through.
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
         run: |
           set -euo pipefail
-          # Django manage.py test path — same invocation as conventions.md.
-          source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate 2>/dev/null || true
+          # `lex` is the Django manage.py console-script installed by
+          # `pip install -e .` in the install step.
           TEST_PATH="${{ steps.testfile.outputs.path }}"
           MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
           lex test "$MODULE" --noinput
 
       - name: Mode B — strip @expectedFailure, expect FAIL
         if: steps.mode.outputs.mode == 'bug-repro'
+        env:
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
         run: |
           set -euo pipefail
-          source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate 2>/dev/null || true
           TEST_PATH="${{ steps.testfile.outputs.path }}"
-          STRIPPED=$(mktemp --suffix=.py)
-          python - "$TEST_PATH" "$STRIPPED" <<'PY'
+          # Strip the @(unittest.)?expectedFailure decorator IN PLACE.
+          # The CI checkout is throwaway; overwriting keeps the file at
+          # its real package path so the Django test runner discovers
+          # it as part of `lex/test_project/tests/<cluster>/`. A temp
+          # file outside the package would not be importable as
+          # `lex.test_project.tests.cluster_X.test_Nx_thing`.
+          python - "$TEST_PATH" <<'PY'
           import re, sys, pathlib
-          src = pathlib.Path(sys.argv[1]).read_text()
-          # Drop @unittest.expectedFailure / @expectedFailure decorator lines.
+          p = pathlib.Path(sys.argv[1])
+          src = p.read_text()
           out = re.sub(r"(?m)^\s*@(?:unittest\.)?expectedFailure\s*\n", "", src)
-          pathlib.Path(sys.argv[2]).write_text(out)
+          if out == src:
+              print("::error::no @expectedFailure decorator found to strip — Mode-B requires one on the new test")
+              sys.exit(2)
+          p.write_text(out)
           PY
-          # Run the stripped copy directly; assert non-zero exit.
-          if python -m pytest "$STRIPPED" -x; then
+          MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
+          # Run via the Django test runner (NOT pytest — the project's
+          # tests are unittest.TestCase under Django settings; pytest
+          # without pytest-django would either not collect or crash on
+          # django.setup(), which would look like 'correctly fails'
+          # without actually proving the bug reproduces).
+          set +e
+          lex test "$MODULE" --noinput 2>&1 | tee mode_b.out
+          EXIT=${PIPESTATUS[0]}
+          set -e
+          if [[ $EXIT -eq 0 ]]; then
             echo "::error::Mode-B test passed without @expectedFailure — bug is not reproducible."
             exit 1
           fi
-          echo "Mode-B test correctly fails without the decorator."
+          # Distinguish 'ran and asserted FAIL' from 'errored on
+          # import/setup'. Django's unittest runner prints lines
+          # starting with `FAIL:` (assertion) or `FAILED` (summary).
+          # Anything else is a non-test failure that we MUST not treat
+          # as a successful bug repro.
+          if grep -qE '^(FAIL|FAILED)' mode_b.out; then
+            echo "Mode-B test correctly fails without the decorator."
+          else
+            echo "::error::Mode-B test errored before assertion (likely import/setup failure) — not a real bug repro."
+            exit 1
+          fi
 
       # ── 4. Apply merge labels ──────────────────────────────────
       - name: Apply auto-merge (modes A/B)
