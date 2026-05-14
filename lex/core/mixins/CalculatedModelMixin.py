@@ -883,8 +883,8 @@ def calc_and_save_sync(models, *args):
                 # Push the child model onto the model_context stack so that
                 # LexLogger / CalculationLog can identify it as the *current*
                 # model while the trigger remains visible as the *parent*.
-                from lex.audit_logging.utils.ModelContext import model_logging_context
-                with model_logging_context(model):
+                from lex.core.models.CalculationModel import calculation_execution_context
+                with calculation_execution_context():
                     model.lex_func()(*args)
                 logger.debug(f"Calculation completed for model {i + 1}")
             except Exception as calc_error:

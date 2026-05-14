@@ -757,7 +757,8 @@ def calc_and_save(models: List[Model], *args, **kwargs):
         try:
             logger.info(f"Processing model {model}")
             from lex.audit_logging.utils.ModelContext import model_logging_context
-            with model_logging_context(model):
+            from lex.core.models.CalculationModel import calculation_execution_context
+            with calculation_execution_context():
                 model.lex_func()()
             logger.info(f"Finished calculating model {model}")
             model.save()
