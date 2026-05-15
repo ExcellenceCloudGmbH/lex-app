@@ -51,7 +51,7 @@ LEGACY_GEMINI_MCP_ENV_KEYS = frozenset({"GEMINI_API_KEY", "GEMINI_MODEL", "GIT_G
 
 # Minimum lex-mcp-local version that ships the unified lex_mcp.server entry
 # point and backward-mode support.
-MINIMUM_DUAL_MODE_VERSION = "0.2.3"
+MINIMUM_DUAL_MODE_VERSION = "1.0.0"
 
 
 class SetupWithAIError(RuntimeError):
@@ -529,7 +529,7 @@ def get_installed_lex_mcp_local_version(
 def _has_unified_mcp_entry_point(python_executable: Path) -> bool:
     """Return ``True`` if the unified ``lex_mcp.server`` module is importable.
 
-    ``lex-mcp-local >= 0.2.3`` ships the unified ``lex_mcp`` package with
+    ``lex-mcp-local >= 1.0.0`` ships the unified ``lex_mcp`` package with
     a ``server`` module.  Older releases only have ``lex_mcp_local.wrapper_mcp``.
     """
     script = (
@@ -553,7 +553,7 @@ def resolve_mcp_server_args(
 ) -> list[str]:
     """Return the ``args`` list for the mcp.json server definition.
 
-    * If ``lex_mcp.server`` is importable (>= 0.2.3), uses the unified
+    * If ``lex_mcp.server`` is importable (>= 1.0.0), uses the unified
       entry point: ``["-m", "lex_mcp.server", "--mode", <mode>]``.
     * Otherwise falls back to the legacy wrapper script path:
       ``["<path/to/wrapper_mcp.py>"]``.
@@ -1617,7 +1617,7 @@ def _update_mcp_server_to_unified_entry(
     return True
 
 
-def apply_ai_update_0_2_3(
+def apply_ai_update_1_0_0(
     project_root: Path,
     *,
     mcp_config_path: Path | None = None,
@@ -1626,7 +1626,7 @@ def apply_ai_update_0_2_3(
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
     runner: Callable[..., Any] = subprocess.run,
 ) -> SetupWithAIUpdateResult:
-    """Migrate to the unified ``lex_mcp.server`` entry point (0.2.3).
+    """Migrate to the unified ``lex_mcp.server`` entry point (1.0.0).
 
     * Upgrades ``lex-mcp-local`` to the latest published version.
     * Updates the mcp.json server entry to use
@@ -1693,11 +1693,61 @@ def apply_ai_update_0_2_3(
     )
 
     return SetupWithAIUpdateResult(
-        version="0.2.3",
+        version="1.0.0",
         env_file_path=env_file_path,
         mcp_config_path=copilot_mcp_path,
         package_upgraded=True,
         artifact_directories_copied=tuple(copied),
+        server_restarted=server_stopped,
+    )
+
+
+def apply_ai_update_1_0_1(
+    project_root: Path,
+    *,
+    mcp_config_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
+    runner: Callable[..., Any] = subprocess.run,
+) -> SetupWithAIUpdateResult:
+    """Update the ``lex-mcp-local`` package code to the latest version (1.0.1).
+
+    This is a code-only update:
+    * Upgrades ``lex-mcp-local`` to the latest published version.
+    * Stops the running MCP server so the new code is used on next launch.
+
+    No environment variables, mcp.json structure, or embedded directories
+    are changed.
+    """
+    env_file_path = (Path(project_root) / ".env").resolve()
+    copilot_mcp_path = (
+        resolve_github_copilot_mcp_config_path(env=env, home=home)
+        if mcp_config_path is None
+        else Path(mcp_config_path)
+    ).resolve()
+
+    python_executable = resolve_active_python_executable(project_root, env=env)
+
+    remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
+    if not remote_mcp_api_key:
+        raise SetupWithAIError(
+            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local."
+        )
+
+    install_lex_mcp_local(
+        python_executable, remote_mcp_api_key, runner=runner, upgrade=True,
+    )
+
+    server_stopped = _stop_lex_mcp_local_server(
+        copilot_mcp_path, server_name=server_name,
+    )
+
+    return SetupWithAIUpdateResult(
+        version="1.0.1",
+        env_file_path=env_file_path,
+        mcp_config_path=copilot_mcp_path,
+        package_upgraded=True,
         server_restarted=server_stopped,
     )
 
@@ -1708,7 +1758,8 @@ def apply_ai_update_0_2_3(
 _AI_UPDATE_STEPS: list[tuple[str, Callable[..., SetupWithAIUpdateResult]]] = [
     ("0.2.1", apply_ai_update_0_2_1),
     ("0.2.2", apply_ai_update_0_2_2),
-    ("0.2.3", apply_ai_update_0_2_3),
+    ("1.0.0", apply_ai_update_1_0_0),
+    ("1.0.1", apply_ai_update_1_0_1),
 ]
 
 

@@ -1119,13 +1119,15 @@ class AIUpdateTests(TestCase):
                     project_root, mcp_config_path=mcp_path,
                 )
 
-            self.assertEqual(len(results), 3)
+            self.assertEqual(len(results), 4)
             self.assertEqual(results[0].version, "0.2.1")
             self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
             self.assertIn("GEMINI_API_KEY", results[0].mcp_env_keys_removed)
             self.assertEqual(results[1].version, "0.2.2")
             self.assertTrue(results[1].package_upgraded)
-            self.assertEqual(results[2].version, "0.2.3")
+            self.assertEqual(results[2].version, "1.0.0")
+            self.assertEqual(results[3].version, "1.0.1")
+            self.assertTrue(results[3].package_upgraded)
 
     def test_ai_update_cli_command_reports_removed_keys(self):
         runner = CliRunner()
@@ -1472,12 +1474,14 @@ class AIUpdate022Tests(TestCase):
                     project_root, mcp_config_path=mcp_path,
                 )
 
-            self.assertEqual(len(results), 3)
+            self.assertEqual(len(results), 4)
             self.assertEqual(results[0].version, "0.2.1")
             self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
             self.assertEqual(results[1].version, "0.2.2")
             self.assertTrue(results[1].package_upgraded)
-            self.assertEqual(results[2].version, "0.2.3")
+            self.assertEqual(results[2].version, "1.0.0")
+            self.assertEqual(results[3].version, "1.0.1")
+            self.assertTrue(results[3].package_upgraded)
 
     def test_ai_update_cli_command_reports_0_2_2_actions(self):
         runner = CliRunner()

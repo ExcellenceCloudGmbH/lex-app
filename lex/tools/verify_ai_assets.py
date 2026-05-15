@@ -12,7 +12,7 @@ distribution:
 Mode selection inside the MCP server is determined by the CLI flag
 (``--mode``), a one-shot override file (``~/.lex-mcp/mode-override``), or
 the ``LEX_MCP_MODE`` environment variable / ``.env`` entry.  With the
-crash-and-reboot mechanism (lex-mcp-local ≥ 0.2.3), mode switches are
+crash-and-reboot mechanism (lex-mcp-local ≥ 1.0.0), mode switches are
 instant: the server self-terminates via ``os._exit(0)`` and the IDE
 auto-restarts the subprocess with the new mode's tool surface.
 
