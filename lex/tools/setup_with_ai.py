@@ -20,7 +20,25 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Mapping
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlparse
+
+from lex.tools._setup_ai_github import (
+    DeviceCode,
+    DeviceFlowError,
+    DeviceFlowUnavailable,
+    is_device_flow_available,
+    poll_device_flow,
+    start_device_flow,
+)
+from lex.tools._setup_ai_state import (
+    SetupWithAILastUsed,
+    load_last_used,
+    save_last_used,
+)
+from lex.tools._setup_ai_validation import (
+    validate_github_token,
+    validate_remote_mcp_key,
+)
 
 DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
@@ -1234,77 +1252,279 @@ def launch_setup_with_ai_form(
     env_file_path: Path,
     reporter: Callable[[str], None] | None = None,
     timeout_seconds: int = 900,
+    remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
 ) -> SetupWithAICredentials:
     state = secrets.token_urlsafe(16)
     result: dict[str, SetupWithAICredentials] = {}
     submitted = threading.Event()
     report = reporter or (lambda message: None)
 
+    last_used = load_last_used()
+
+    # Server-side cache for the in-progress GitHub Device Flow. The browser
+    # only ever sees an opaque session id, never the device_code itself.
+    device_sessions: dict[str, DeviceCode] = {}
+    device_lock = threading.Lock()
+
+    def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
+        encoded = json.dumps(payload).encode("utf-8")
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Content-Length", str(len(encoded)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.end_headers()
+        handler.wfile.write(encoded)
+
+    def _read_json_body(handler: BaseHTTPRequestHandler) -> dict:
+        content_length = int(handler.headers.get("Content-Length", "0") or "0")
+        if content_length <= 0:
+            return {}
+        raw = handler.rfile.read(content_length).decode("utf-8")
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _check_state(handler: BaseHTTPRequestHandler, payload: dict) -> bool:
+        if payload.get("state") != state:
+            _json_response(handler, HTTPStatus.FORBIDDEN, {"error": "state mismatch"})
+            return False
+        return True
+
     class SetupWithAIHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path not in {"", "/"}:
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            body = _build_setup_form_html(
-                state=state,
-                project_root=project_root,
-                env_file_path=env_file_path,
-            )
-            encoded = body.encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
-
-        def do_POST(self):
-            if self.path != "/submit":
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            content_length = int(self.headers.get("Content-Length", "0"))
-            payload = self.rfile.read(content_length).decode("utf-8")
-            form_data = parse_qs(payload, keep_blank_values=True)
-
-            if form_data.get("state", [""])[0] != state:
-                self.send_error(HTTPStatus.FORBIDDEN, "State mismatch")
-                return
-
-            github_token = form_data.get("github_token", [""])[0].strip()
-            remote_mcp_api_key = form_data.get("remote_mcp_api_key", [""])[0].strip()
-            mcp_mode = form_data.get("mcp_mode", ["forward"])[0].strip().lower()
-            if mcp_mode not in ("forward", "backward"):
-                mcp_mode = "forward"
-
-            if not github_token or not remote_mcp_api_key:
+        def _route_get(self) -> None:
+            parsed = urlparse(self.path)
+            path = parsed.path
+            if path in ("", "/"):
                 body = _build_setup_form_html(
                     state=state,
                     project_root=project_root,
                     env_file_path=env_file_path,
-                    error_message="Both fields are required.",
+                    remote_mcp_url=remote_mcp_url,
+                    last_used=last_used,
+                    device_flow_available=is_device_flow_available(),
                 )
                 encoded = body.encode("utf-8")
-                self.send_response(HTTPStatus.BAD_REQUEST)
+                self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
                 return
 
-            result["credentials"] = SetupWithAICredentials(
-                github_token=github_token,
-                remote_mcp_api_key=remote_mcp_api_key,
-                mcp_mode=mcp_mode,
-            )
-            body = _build_success_html(env_file_path=env_file_path)
-            encoded = body.encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
-            submitted.set()
+            if path == "/api/state":
+                _json_response(self, HTTPStatus.OK, {
+                    "state": state,
+                    "project_root": str(project_root),
+                    "env_file_path": str(env_file_path),
+                    "remote_mcp_url": remote_mcp_url,
+                    "github_token_url": GITHUB_TOKEN_URL,
+                    "device_flow_available": is_device_flow_available(),
+                    "last_used": {
+                        "mcp_mode": last_used.mcp_mode,
+                        "remote_mcp_url": last_used.remote_mcp_url,
+                        "prefer_pat": last_used.prefer_pat,
+                    },
+                })
+                return
+
+            if path == "/api/github/device/poll":
+                qs = parse_qs(parsed.query)
+                if qs.get("state", [""])[0] != state:
+                    _json_response(self, HTTPStatus.FORBIDDEN, {"error": "state mismatch"})
+                    return
+                session_id = qs.get("session", [""])[0]
+                with device_lock:
+                    code = device_sessions.get(session_id)
+                if code is None:
+                    _json_response(self, HTTPStatus.NOT_FOUND, {"error": "no such device session"})
+                    return
+                try:
+                    poll = poll_device_flow(code.device_code)
+                except DeviceFlowUnavailable as exc:
+                    _json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"status": "unavailable", "error": str(exc)})
+                    return
+                except DeviceFlowError as exc:
+                    _json_response(self, HTTPStatus.BAD_GATEWAY, {"status": "error", "error": str(exc)})
+                    return
+                response: dict = {"status": poll.status}
+                if poll.status == "authorized":
+                    # Hand the token back to the browser exactly once. The
+                    # SPA stores it in memory only and POSTs it back with
+                    # /api/submit. The handler clears the session immediately.
+                    response["access_token"] = poll.access_token
+                    response["scopes"] = list(poll.scopes)
+                    with device_lock:
+                        device_sessions.pop(session_id, None)
+                elif poll.status == "slow_down":
+                    response["interval"] = poll.interval
+                elif poll.error:
+                    response["error"] = poll.error
+                _json_response(self, HTTPStatus.OK, response)
+                return
+
+            self.send_error(HTTPStatus.NOT_FOUND)
+
+        def _route_post(self) -> None:
+            path = urlparse(self.path).path
+            if path == "/api/github/device/start":
+                payload = _read_json_body(self)
+                if not _check_state(self, payload):
+                    return
+                if not is_device_flow_available():
+                    _json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": "GitHub Device Flow is not configured. Use the personal access token option.",
+                    })
+                    return
+                try:
+                    code = start_device_flow()
+                except DeviceFlowUnavailable as exc:
+                    _json_response(self, HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
+                    return
+                except DeviceFlowError as exc:
+                    _json_response(self, HTTPStatus.BAD_GATEWAY, {"error": str(exc)})
+                    return
+                session_id = secrets.token_urlsafe(12)
+                with device_lock:
+                    device_sessions[session_id] = code
+                public = code.to_public_dict()
+                public["session"] = session_id
+                _json_response(self, HTTPStatus.OK, public)
+                return
+
+            if path == "/api/validate/github-token":
+                payload = _read_json_body(self)
+                if not _check_state(self, payload):
+                    return
+                token = str(payload.get("github_token", "") or "").strip()
+                validation = validate_github_token(token)
+                _json_response(self, HTTPStatus.OK, validation.to_dict())
+                return
+
+            if path == "/api/validate/mcp-key":
+                payload = _read_json_body(self)
+                if not _check_state(self, payload):
+                    return
+                api_key = str(payload.get("remote_mcp_api_key", "") or "").strip()
+                url = str(payload.get("remote_mcp_url", "") or remote_mcp_url).strip() or remote_mcp_url
+                validation = validate_remote_mcp_key(url, api_key)
+                _json_response(self, HTTPStatus.OK, validation.to_dict())
+                return
+
+            if path == "/submit" or path == "/api/submit":
+                # Accept both JSON (from the SPA) and form-encoded (legacy).
+                content_type = (self.headers.get("Content-Type") or "").lower()
+                if "application/json" in content_type:
+                    payload = _read_json_body(self)
+                    if not _check_state(self, payload):
+                        return
+                    github_token = str(payload.get("github_token", "") or "").strip()
+                    remote_mcp_api_key = str(payload.get("remote_mcp_api_key", "") or "").strip()
+                    mcp_mode = str(payload.get("mcp_mode", "forward") or "forward").strip().lower()
+                else:
+                    content_length = int(self.headers.get("Content-Length", "0") or "0")
+                    raw = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else ""
+                    form_data = parse_qs(raw, keep_blank_values=True)
+                    if form_data.get("state", [""])[0] != state:
+                        self.send_error(HTTPStatus.FORBIDDEN, "State mismatch")
+                        return
+                    github_token = form_data.get("github_token", [""])[0].strip()
+                    remote_mcp_api_key = form_data.get("remote_mcp_api_key", [""])[0].strip()
+                    mcp_mode = form_data.get("mcp_mode", ["forward"])[0].strip().lower()
+
+                if mcp_mode not in ("forward", "backward"):
+                    mcp_mode = "forward"
+
+                if not github_token or not remote_mcp_api_key:
+                    if "application/json" in content_type:
+                        _json_response(self, HTTPStatus.BAD_REQUEST, {
+                            "error": "Both GitHub token and Lex MCP Access Key are required.",
+                        })
+                    else:
+                        body = _build_setup_form_html(
+                            state=state,
+                            project_root=project_root,
+                            env_file_path=env_file_path,
+                            remote_mcp_url=remote_mcp_url,
+                            last_used=last_used,
+                            device_flow_available=is_device_flow_available(),
+                            error_message="Both fields are required.",
+                        )
+                        encoded = body.encode("utf-8")
+                        self.send_response(HTTPStatus.BAD_REQUEST)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Content-Length", str(len(encoded)))
+                        self.end_headers()
+                        self.wfile.write(encoded)
+                    return
+
+                result["credentials"] = SetupWithAICredentials(
+                    github_token=github_token,
+                    remote_mcp_api_key=remote_mcp_api_key,
+                    mcp_mode=mcp_mode,
+                )
+
+                # Persist non-secret choices for next run.
+                try:
+                    save_last_used(SetupWithAILastUsed(
+                        mcp_mode=mcp_mode,
+                        remote_mcp_url=remote_mcp_url,
+                        last_project_root=str(project_root),
+                        last_lex_mcp_local_version=last_used.last_lex_mcp_local_version,
+                        prefer_pat=bool(payload.get("prefer_pat", False))
+                            if "application/json" in content_type
+                            else last_used.prefer_pat,
+                    ))
+                except OSError:
+                    # Persistence failures must never break setup.
+                    pass
+
+                if "application/json" in content_type:
+                    _json_response(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "redirect": f"/done?state={quote(state)}",
+                    })
+                else:
+                    body = _build_success_html(
+                        env_file_path=env_file_path,
+                        project_root=project_root,
+                    )
+                    encoded = body.encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(encoded)))
+                    self.end_headers()
+                    self.wfile.write(encoded)
+                submitted.set()
+                return
+
+            self.send_error(HTTPStatus.NOT_FOUND)
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/done":
+                qs = parse_qs(parsed.query)
+                if qs.get("state", [""])[0] != state:
+                    self.send_error(HTTPStatus.FORBIDDEN, "State mismatch")
+                    return
+                body = _build_success_html(
+                    env_file_path=env_file_path,
+                    project_root=project_root,
+                )
+                encoded = body.encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+                return
+            self._route_get()
+
+        def do_POST(self):
+            self._route_post()
 
         def log_message(self, format: str, *args) -> None:
             return
@@ -1790,519 +2010,35 @@ def _build_setup_form_html(
     state: str,
     project_root: Path,
     env_file_path: Path,
+    remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
+    last_used: SetupWithAILastUsed | None = None,
+    device_flow_available: bool = False,
     error_message: str | None = None,
 ) -> str:
-    error_block = ""
-    if error_message:
-        error_block = (
-            f'<div class="error">{html.escape(error_message)}</div>'
-        )
+    from lex.tools._setup_ai_templates import render_setup_wizard
+
+    last_used = last_used or SetupWithAILastUsed()
+    return render_setup_wizard(
+        state=state,
+        project_root=project_root,
+        env_file_path=env_file_path,
+        remote_mcp_url=remote_mcp_url,
+        github_token_url=GITHUB_TOKEN_URL,
+        server_name=LEX_MCP_LOCAL_SERVER_NAME,
+        last_used_mcp_mode=last_used.mcp_mode,
+        last_used_prefer_pat=last_used.prefer_pat,
+        device_flow_available=device_flow_available,
+        initial_error=error_message or "",
+    )
 
 
+def _build_success_html(*, env_file_path: Path, project_root: Path) -> str:
+    from lex.tools._setup_ai_templates import render_success_page
 
-    return f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>LEX AI Setup</title>
-    <style>
-      :root {{
-        color-scheme: light;
-        --bg: #f0f4f8;
-        --card: #ffffff;
-        --text: #1a1a2e;
-        --muted: #5a6278;
-        --line: #d0d7e2;
-        --blue: #283067;
-        --blue-strong: #1b2050;
-        --teal: #24b6bb;
-        --error: #c0392b;
-      }}
-      * {{
-        box-sizing: border-box;
-      }}
-      body {{
-        margin: 0;
-        font-family: "Segoe UI", "Avenir Next", system-ui, sans-serif;
-        color: var(--text);
-        background: var(--bg);
-      }}
-      .shell {{
-        max-width: 68rem;
-        margin: 0 auto;
-        padding: 2rem 1.25rem 3rem;
-      }}
-      .hero {{
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 1rem;
-        padding: 1.75rem 1.5rem;
-        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
-        display: flex;
-        align-items: center;
-        gap: 1.5rem;
-      }}
-      .hero-logo {{
-        flex-shrink: 0;
-      }}
-      .hero-logo svg {{
-        height: 52px;
-        width: auto;
-      }}
-      .hero-text {{
-        flex: 1;
-        min-width: 0;
-      }}
-      .hero h1 {{
-        margin: 0 0 0.4rem;
-        font-size: clamp(1.5rem, 2.5vw, 2rem);
-        color: var(--blue);
-      }}
-      .hero p {{
-        margin: 0.3rem 0;
-        color: var(--muted);
-        line-height: 1.5;
-        font-size: 0.95rem;
-      }}
-      .hero code {{
-        background: var(--bg);
-        padding: 0.15em 0.4em;
-        border-radius: 4px;
-        font-size: 0.88em;
-        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
-      }}
-      .grid {{
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 1.25rem;
-        margin-top: 1.25rem;
-      }}
-      .grid-cols {{
-        display: grid;
-        grid-template-columns: 1.15fr 0.85fr;
-        gap: 1.25rem;
-      }}
-      .panel {{
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 1rem;
-        padding: 1.5rem;
-        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
-      }}
-      .eyebrow {{
-        margin: 0 0 0.6rem;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        color: var(--teal);
-      }}
-      h2 {{
-        margin: 0 0 0.75rem;
-        font-size: 1.25rem;
-        color: var(--blue);
-      }}
-      p, li {{
-        line-height: 1.55;
-      }}
-      ul {{
-        margin: 0.75rem 0 0;
-        padding-left: 1.2rem;
-      }}
-      li {{
-        padding: 0.1rem 0;
-        color: var(--muted);
-        font-size: 0.93rem;
-      }}
-      li::marker {{
-        color: var(--teal);
-      }}
-      .meta {{
-        display: grid;
-        gap: 0.4rem;
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--line);
-        color: var(--muted);
-        font-size: 0.92rem;
-      }}
-      .meta code {{
-        background: var(--bg);
-        padding: 0.1em 0.35em;
-        border-radius: 4px;
-        font-size: 0.88em;
-        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
-      }}
-      a.button, button {{
-        display: inline-block;
-        appearance: none;
-        border: 0;
-        border-radius: 8px;
-        background: var(--blue);
-        color: #fff;
-        text-decoration: none;
-        font: inherit;
-        font-size: 0.95rem;
-        font-weight: 600;
-        cursor: pointer;
-        padding: 0.75rem 1.25rem;
-        transition: background 120ms ease, box-shadow 120ms ease;
-      }}
-      a.button:hover, button:hover {{
-        background: var(--blue-strong);
-        box-shadow: 0 4px 14px rgba(40, 48, 103, 0.18);
-      }}
-      .mode-section {{
-        margin-top: 1.25rem;
-      }}
-      .mode-section .eyebrow {{
-        margin: 0 0 0.6rem;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        color: var(--teal);
-      }}
-      .mode-section h2 {{
-        margin: 0 0 0.5rem;
-        font-size: 1.25rem;
-        color: var(--blue);
-      }}
-      .mode-section p {{
-        margin: 0 0 1rem;
-        color: var(--muted);
-        font-size: 0.93rem;
-        line-height: 1.55;
-      }}
-      .mode-toggle {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1rem;
-      }}
-      .mode-card {{
-        position: relative;
-        background: var(--card);
-        border: 2px solid var(--line);
-        border-radius: 12px;
-        padding: 1.25rem 1.25rem 1rem;
-        cursor: pointer;
-        transition: border-color 150ms ease, box-shadow 150ms ease;
-      }}
-      .mode-card:hover {{
-        border-color: var(--teal);
-      }}
-      .mode-card.selected {{
-        border-color: var(--teal);
-        box-shadow: 0 0 0 3px rgba(36, 182, 187, 0.18);
-      }}
-      .mode-card input[type="radio"] {{
-        position: absolute;
-        opacity: 0;
-        pointer-events: none;
-      }}
-      .mode-card .mode-icon {{
-        width: 40px;
-        height: 40px;
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 0.75rem;
-      }}
-      .mode-card .mode-icon svg {{
-        width: 22px;
-        height: 22px;
-      }}
-      .mode-card.forward .mode-icon {{
-        background: rgba(36, 182, 187, 0.12);
-      }}
-      .mode-card.backward .mode-icon {{
-        background: rgba(40, 48, 103, 0.08);
-      }}
-      .mode-card .mode-title {{
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: var(--blue);
-        margin-bottom: 0.35rem;
-      }}
-      .mode-card .mode-desc {{
-        color: var(--muted);
-        font-size: 0.88rem;
-        line-height: 1.45;
-        margin: 0;
-      }}
-      .mode-card .mode-check {{
-        position: absolute;
-        top: 0.75rem;
-        right: 0.75rem;
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
-        border: 2px solid var(--line);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background 150ms ease, border-color 150ms ease;
-      }}
-      .mode-card.selected .mode-check {{
-        background: var(--teal);
-        border-color: var(--teal);
-      }}
-      .mode-card .mode-check svg {{
-        width: 12px;
-        height: 12px;
-        opacity: 0;
-        transition: opacity 150ms ease;
-      }}
-      .mode-card.selected .mode-check svg {{
-        opacity: 1;
-      }}
-      form {{
-        display: grid;
-        gap: 1rem;
-      }}
-      label {{
-        display: grid;
-        gap: 0.35rem;
-        font-weight: 600;
-        font-size: 0.95rem;
-        color: var(--blue);
-      }}
-      input {{
-        width: 100%;
-        padding: 0.75rem 0.85rem;
-        border-radius: 8px;
-        border: 1px solid var(--line);
-        font: inherit;
-        font-size: 0.95rem;
-        background: #fff;
-        transition: border-color 120ms ease, box-shadow 120ms ease;
-      }}
-      input:focus {{
-        outline: none;
-        border-color: var(--blue);
-        box-shadow: 0 0 0 3px rgba(40, 48, 103, 0.10);
-      }}
-      .hint {{
-        color: var(--muted);
-        font-size: 0.88rem;
-        margin: 0;
-      }}
-      .hint code {{
-        background: var(--bg);
-        padding: 0.1em 0.35em;
-        border-radius: 4px;
-        font-size: 0.88em;
-        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
-      }}
-      .error {{
-        border: 1px solid rgba(192, 57, 43, 0.3);
-        background: rgba(192, 57, 43, 0.06);
-        color: var(--error);
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
-        font-size: 0.93rem;
-      }}
-      @media (max-width: 860px) {{
-        .grid-cols {{
-          grid-template-columns: 1fr;
-        }}
-        .mode-toggle {{
-          grid-template-columns: 1fr;
-        }}
-        .hero {{
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 1rem;
-        }}
-      }}
-    </style>
-  </head>
-  <body>
-    <main class="shell">
-      <section class="hero">
-        <div class="hero-logo">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 329.02 78.41"><defs><style>.lx1{{fill:#24b6bb}}.lx2{{fill:#283067}}.lx3{{fill:#282f63}}</style></defs><g><path class="lx3" d="M269.21,58.25h-77.14c.57.57,1.22,1.06,1.97,1.47l32.26,17.6c2.68,1.46,5.99,1.46,8.66,0l32.28-17.6c.73-.41,1.4-.9,1.96-1.47h0Z"/><path class="lx3" d="M269.21,20.16h-77.14c.57-.57,1.22-1.06,1.97-1.47L226.32,1.09c2.68-1.46,5.99-1.46,8.66,0l32.28,17.6c.73.41,1.4.9,1.96,1.47h0Z"/></g><g><path class="lx1" d="M196.83,43.09c1.37,0,2.48-.54,3.35-1.6l1.78,1.81c-1.42,1.57-3.07,2.36-5,2.36s-3.5-.59-4.73-1.79c-1.25-1.2-1.86-2.7-1.86-4.52s.63-3.34,1.9-4.57c1.26-1.22,2.82-1.82,4.64-1.82,2.05,0,3.76.78,5.12,2.31l-1.72,1.94c-.87-1.08-1.96-1.62-3.28-1.62-1.04,0-1.93.34-2.68,1.01-.75.68-1.11,1.59-1.11,2.73s.34,2.06,1.06,2.75c.7.66,1.55,1.01,2.54,1.01h0Z"/><path class="lx1" d="M208.56,45.51v-12.3h2.78v9.86h5.31v2.45h-8.09Z"/><path class="lx1" d="M233.22,43.82c-1.26,1.22-2.8,1.82-4.64,1.82s-3.38-.61-4.64-1.82c-1.26-1.22-1.88-2.73-1.88-4.54s.63-3.32,1.88-4.54c1.26-1.22,2.8-1.82,4.64-1.82s3.38.61,4.64,1.82c1.26,1.22,1.88,2.73,1.88,4.54s-.63,3.32-1.88,4.54ZM232.27,39.3c0-1.1-.36-2.03-1.08-2.8-.72-.78-1.59-1.16-2.63-1.16s-1.91.39-2.63,1.16-1.08,1.7-1.08,2.8.36,2.03,1.08,2.8c.72.78,1.59,1.15,2.63,1.15s1.91-.39,2.63-1.15c.73-.78,1.08-1.7,1.08-2.8Z"/><path class="lx1" d="M245.15,42.33c.46.57,1.09.86,1.86.86s1.4-.29,1.86-.86c.46-.57.68-1.35.68-2.33v-6.8h2.78v6.89c0,1.79-.5,3.16-1.5,4.1-.99.96-2.27,1.43-3.82,1.43s-2.83-.49-3.84-1.45c-1.01-.96-1.5-2.33-1.5-4.1v-6.89h2.78v6.8c.02,1,.24,1.79.7,2.35h0Z"/><path class="lx1" d="M269.15,34.82c1.18,1.08,1.78,2.57,1.78,4.47s-.58,3.43-1.74,4.54c-1.16,1.11-2.92,1.67-5.29,1.67h-4.25v-12.3h4.41c2.22.02,3.93.54,5.11,1.62h0ZM267.12,42.13c.68-.64,1.02-1.55,1.02-2.77s-.34-2.14-1.02-2.78c-.68-.66-1.72-.98-3.14-.98h-1.55v7.48h1.76c1.28.02,2.25-.3,2.94-.95h0Z"/></g><g><path class="lx2" d="M8.92,33.22v2.43H2.76v2.51h5.53v2.33H2.76v2.53h6.34v2.41H0v-12.21h8.92Z"/><path class="lx2" d="M24.51,33.22h3.32l-3.85,5.88,4.17,6.32h-3.36l-2.63-4.02-2.61,4.02h-3.32l4.15-6.25-3.86-5.96h3.31l2.36,3.62,2.32-3.6Z"/><path class="lx2" d="M41.53,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.36,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="lx2" d="M63.68,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="lx2" d="M72.33,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="lx2" d="M88.36,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="lx2" d="M113.31,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="lx2" d="M132.14,33.22h2.76v12.21h-2.76l-5.88-7.66v7.66h-2.76v-12.21h2.58l6.07,7.86v-7.86Z"/><path class="lx2" d="M149.62,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.34,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="lx2" d="M171.77,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/></g></svg>
-        </div>
-        <div class="hero-text">
-          <h1>Connect GitHub Copilot to your LEX MCP setup</h1>
-          <p>This flow will store the required secrets in <code>{html.escape(str(env_file_path))}</code> and register <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code> in GitHub Copilot's <code>mcp.json</code>.</p>
-          <p>Project root: <code>{html.escape(str(project_root))}</code></p>
-        </div>
-      </section>
-
-      <section class="grid">
-        <article class="panel">
-          <p class="eyebrow">Workflow mode</p>
-          <h2>What would you like to do?</h2>
-          <div class="mode-toggle" id="modeToggle">
-            <label class="mode-card forward selected" data-mode="forward">
-              <input type="radio" name="mcp_mode_select" value="forward" checked>
-              <div class="mode-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-              </div>
-              <div class="mode-title">Create new project</div>
-              <p class="mode-desc">Start a new LEX App project with AI-assisted planning, implementation, and documentation.</p>
-              <div class="mode-check">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-            </label>
-            <label class="mode-card backward" data-mode="backward">
-              <input type="radio" name="mcp_mode_select" value="backward">
-              <div class="mode-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#283067" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-              </div>
-              <div class="mode-title">Document existing project</div>
-              <p class="mode-desc">Generate documentation and canonical context files for a project that already exists.</p>
-              <div class="mode-check">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-            </label>
-          </div>
-        </article>
-
-        <div class="grid-cols">
-        <article class="panel">
-          <p class="eyebrow">Documentation</p>
-          <h2>Create a GitHub Classic Personal Access Token</h2>
-          <p>Click the button below to open the GitHub token creation page. All required permission scopes are <strong>pre-selected</strong> for you.</p>
-          <p>All you need to do is:</p>
-          <ul>
-            <li>Give the token an expiration (or select <strong>No expiration</strong>).</li>
-            <li>Scroll down and click <strong>&ldquo;Generate token&rdquo;</strong>.</li>
-            <li>Copy the token and paste it into the form on the right.</li>
-          </ul>
-          <p><a class="button" href="{html.escape(GITHUB_TOKEN_URL)}" target="_blank" rel="noreferrer">Open GitHub token page</a></p>
-          <div class="meta">
-            <div>Use the Lex MCP Access Key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
-          </div>
-        </article>
-
-        <section class="panel">
-          <p class="eyebrow">Credentials</p>
-          <h2>Save tokens to this project</h2>
-          {error_block}
-          <form method="post" action="/submit">
-            <input type="hidden" name="state" value="{html.escape(state)}">
-            <input type="hidden" name="mcp_mode" id="mcpModeInput" value="forward">
-
-            <label>
-              GitHub token
-              <input type="password" name="github_token" autocomplete="off" required>
-            </label>
-            <p class="hint">Paste the fine-grained GitHub token you just created.</p>
-
-            <label>
-              Lex MCP Access Key
-              <input type="password" name="remote_mcp_api_key" autocomplete="off" required>
-            </label>
-            <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
-
-            <button type="submit">Save and finish setup</button>
-          </form>
-        </section>
-      </div>
-      </section>
-    </main>
-    <script>
-      (function() {{
-        var cards = document.querySelectorAll('.mode-card');
-        var hiddenInput = document.getElementById('mcpModeInput');
-        cards.forEach(function(card) {{
-          card.addEventListener('click', function() {{
-            cards.forEach(function(c) {{ c.classList.remove('selected'); }});
-            card.classList.add('selected');
-            var radio = card.querySelector('input[type="radio"]');
-            if (radio) radio.checked = true;
-            hiddenInput.value = card.getAttribute('data-mode');
-          }});
-        }});
-      }})();
-    </script>
-  </body>
-</html>
-"""
+    return render_success_page(
+        project_root=project_root,
+        env_file_path=env_file_path,
+        server_name=LEX_MCP_LOCAL_SERVER_NAME,
+    )
 
 
-def _build_success_html(*, env_file_path: Path) -> str:
-    return f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>LEX AI Setup In Progress</title>
-    <style>
-      body {{
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background: #f0f4f8;
-        color: #1a1a2e;
-        font-family: "Segoe UI", "Avenir Next", system-ui, sans-serif;
-      }}
-      .card {{
-        width: min(38rem, calc(100vw - 2rem));
-        background: #ffffff;
-        border: 1px solid #d0d7e2;
-        border-radius: 1rem;
-        padding: 2rem;
-        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
-        text-align: center;
-      }}
-      .card-logo {{
-        margin-bottom: 1.25rem;
-      }}
-      .card-logo svg {{
-        height: 44px;
-        width: auto;
-      }}
-      h1 {{
-        margin: 0 0 0.75rem;
-        color: #283067;
-        font-size: 1.5rem;
-      }}
-      p {{
-        line-height: 1.6;
-        color: #5a6278;
-        text-align: left;
-      }}
-      code {{
-        background: #f0f4f8;
-        padding: 0.1em 0.35em;
-        border-radius: 4px;
-        font-size: 0.88em;
-        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
-      }}
-      .check {{
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        background: rgba(36, 182, 187, 0.12);
-        margin-bottom: 0.75rem;
-      }}
-      .check svg {{
-        width: 24px;
-        height: 24px;
-      }}
-    </style>
-  </head>
-  <body>
-    <section class="card">
-      <div class="card-logo">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 329.02 78.41"><defs><style>.sx1{{fill:#24b6bb}}.sx2{{fill:#283067}}.sx3{{fill:#282f63}}</style></defs><g><path class="sx3" d="M269.21,58.25h-77.14c.57.57,1.22,1.06,1.97,1.47l32.26,17.6c2.68,1.46,5.99,1.46,8.66,0l32.28-17.6c.73-.41,1.4-.9,1.96-1.47h0Z"/><path class="sx3" d="M269.21,20.16h-77.14c.57-.57,1.22-1.06,1.97-1.47L226.32,1.09c2.68-1.46,5.99-1.46,8.66,0l32.28,17.6c.73.41,1.4.9,1.96,1.47h0Z"/></g><g><path class="sx1" d="M196.83,43.09c1.37,0,2.48-.54,3.35-1.6l1.78,1.81c-1.42,1.57-3.07,2.36-5,2.36s-3.5-.59-4.73-1.79c-1.25-1.2-1.86-2.7-1.86-4.52s.63-3.34,1.9-4.57c1.26-1.22,2.82-1.82,4.64-1.82,2.05,0,3.76.78,5.12,2.31l-1.72,1.94c-.87-1.08-1.96-1.62-3.28-1.62-1.04,0-1.93.34-2.68,1.01-.75.68-1.11,1.59-1.11,2.73s.34,2.06,1.06,2.75c.7.66,1.55,1.01,2.54,1.01h0Z"/><path class="sx1" d="M208.56,45.51v-12.3h2.78v9.86h5.31v2.45h-8.09Z"/><path class="sx1" d="M233.22,43.82c-1.26,1.22-2.8,1.82-4.64,1.82s-3.38-.61-4.64-1.82c-1.26-1.22-1.88-2.73-1.88-4.54s.63-3.32,1.88-4.54c1.26-1.22,2.8-1.82,4.64-1.82s3.38.61,4.64,1.82c1.26,1.22,1.88,2.73,1.88,4.54s-.63,3.32-1.88,4.54ZM232.27,39.3c0-1.1-.36-2.03-1.08-2.8-.72-.78-1.59-1.16-2.63-1.16s-1.91.39-2.63,1.16-1.08,1.7-1.08,2.8.36,2.03,1.08,2.8c.72.78,1.59,1.15,2.63,1.15s1.91-.39,2.63-1.15c.73-.78,1.08-1.7,1.08-2.8Z"/><path class="sx1" d="M245.15,42.33c.46.57,1.09.86,1.86.86s1.4-.29,1.86-.86c.46-.57.68-1.35.68-2.33v-6.8h2.78v6.89c0,1.79-.5,3.16-1.5,4.1-.99.96-2.27,1.43-3.82,1.43s-2.83-.49-3.84-1.45c-1.01-.96-1.5-2.33-1.5-4.1v-6.89h2.78v6.8c.02,1,.24,1.79.7,2.35h0Z"/><path class="sx1" d="M269.15,34.82c1.18,1.08,1.78,2.57,1.78,4.47s-.58,3.43-1.74,4.54c-1.16,1.11-2.92,1.67-5.29,1.67h-4.25v-12.3h4.41c2.22.02,3.93.54,5.11,1.62h0ZM267.12,42.13c.68-.64,1.02-1.55,1.02-2.77s-.34-2.14-1.02-2.78c-.68-.66-1.72-.98-3.14-.98h-1.55v7.48h1.76c1.28.02,2.25-.3,2.94-.95h0Z"/></g><g><path class="sx2" d="M8.92,33.22v2.43H2.76v2.51h5.53v2.33H2.76v2.53h6.34v2.41H0v-12.21h8.92Z"/><path class="sx2" d="M24.51,33.22h3.32l-3.85,5.88,4.17,6.32h-3.36l-2.63-4.02-2.61,4.02h-3.32l4.15-6.25-3.86-5.96h3.31l2.36,3.62,2.32-3.6Z"/><path class="sx2" d="M41.53,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.36,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="sx2" d="M63.68,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="sx2" d="M72.33,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="sx2" d="M88.36,45.42v-12.21h2.76v9.78h5.27v2.43h-8.03Z"/><path class="sx2" d="M113.31,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/><path class="sx2" d="M132.14,33.22h2.76v12.21h-2.76l-5.88-7.66v7.66h-2.76v-12.21h2.58l6.07,7.86v-7.86Z"/><path class="sx2" d="M149.62,43.02c1.36,0,2.46-.54,3.32-1.59l1.76,1.79c-1.41,1.56-3.05,2.35-4.97,2.35s-3.47-.59-4.7-1.78c-1.24-1.19-1.85-2.68-1.85-4.49s.63-3.32,1.88-4.54c1.25-1.21,2.8-1.81,4.61-1.81,2.03,0,3.73.77,5.08,2.3l-1.71,1.93c-.86-1.07-1.95-1.61-3.25-1.61-1.03,0-1.92.34-2.66,1.01-.73.67-1.1,1.57-1.1,2.71s.34,2.04,1.05,2.73c.68.65,1.53,1.01,2.53,1.01h0Z"/><path class="sx2" d="M171.77,33.22v2.43h-6.15v2.51h5.53v2.33h-5.53v2.53h6.34v2.41h-9.1v-12.21h8.92Z"/></g></svg>
-      </div>
-      <div class="check">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <h1>Credentials received</h1>
-      <p>Return to the terminal while LEX installs <code>lex-mcp-local</code> and finishes writing <code>{html.escape(str(env_file_path))}</code> plus the GitHub Copilot <code>mcp.json</code> entry for <code>{html.escape(LEX_MCP_LOCAL_SERVER_NAME)}</code>.</p>
-      <p>You can close this tab after the terminal prints the final setup success message.</p>
-    </section>
-  </body>
-</html>
-"""

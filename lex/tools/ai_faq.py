@@ -432,6 +432,42 @@ def _build_faq_html() -> str:
           </div>
         </details>
 
+        <!-- Q5 -->
+        <details class="faq">
+          <summary>
+            <span class="q-label">Q5</span>
+            <span class="q-title">Which AI models work best with LEX AI?</span>
+          </summary>
+          <div class="answer">
+            <p>We evaluated how well leading AI models perform when guided by our MCP workflow &mdash; a structured process that instructs AI to plan, build, and validate complete applications autonomously. Here are the current rankings:</p>
+
+            <ol>
+              <li><strong>Claude 4.7 (Sonnet)</strong> &mdash; Best overall. Production-ready code with perfect framework compliance and zero corrections needed.</li>
+              <li><strong>GPT 5.5</strong> &mdash; Close second. Most thorough testing infrastructure with strong planning-to-code alignment.</li>
+              <li><strong>Claude 4.6 (Opus)</strong> &mdash; Most detailed planner. Produced 50 requirements and implemented all with zero compliance corrections.</li>
+              <li><strong>GPT 5.3 Codex</strong> &mdash; Most elegant design. Simpler, more auditable architecture while maintaining full compliance.</li>
+              <li><strong>Claude Sonnet 4.6</strong> &mdash; Strong implementation with realistic agent-based simulation. Complete code and dashboards.</li>
+              <li><strong>GPT-4 Mini</strong> &mdash; Minimal but functional. Proves the MCP workflow can guide even smaller models.</li>
+              <li><strong>Gemini 3.1</strong> &mdash; Completed all steps including bonus documentation enrichment. Fully compliant.</li>
+              <li><strong>Gemini 3.1 Flash</strong> &mdash; Working code with good file organization. Documentation left partially incomplete.</li>
+              <li><strong>Grok (Fast)</strong> &mdash; Did not produce any project output. Only framework scaffolding was generated.</li>
+            </ol>
+
+            <h3>Key Takeaways</h3>
+            <ul>
+              <li><strong>The MCP workflow works.</strong> Every model that completed the process produced a structurally valid, framework-compliant application.</li>
+              <li><strong>Top models deliver production-ready output.</strong> Claude 4.7 and GPT 5.5 produced immediately deployable code with tests, documentation, and full requirement traceability.</li>
+              <li><strong>Planning depth pays off.</strong> Models that invested more in the planning phase produced higher-quality implementations.</li>
+              <li><strong>Testing is the differentiator.</strong> The gap between top performers and the rest comes down to automated test coverage.</li>
+            </ul>
+
+            <p>We recommend <strong>Claude 4.7 (Sonnet)</strong> or <strong>GPT 5.5</strong> as the primary models for production workflows.</p>
+
+            <p>This evaluation is updated regularly. Visit the live rankings page for the latest results:<br>
+            <a href="https://excellencecloudgmbh.github.io/lex-mcp-model-evals" target="_blank" rel="noopener noreferrer">excellencecloudgmbh.github.io/lex-mcp-model-evals</a></p>
+          </div>
+        </details>
+
       </section>
     </main>
 

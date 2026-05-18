@@ -622,6 +622,7 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
         project_root=root,
         env_file_path=Path(env_path),
         no_browser=no_browser,
+        remote_mcp_url=remote_mcp_url,
     )
 
     # The browser form lets the user pick forward/backward; use that choice
@@ -937,6 +938,7 @@ def _collect_setup_with_ai_credentials(
     project_root: Path,
     env_file_path: Path,
     no_browser: bool,
+    remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
 ) -> SetupWithAICredentials:
     if github_token and remote_mcp_api_key:
         return SetupWithAICredentials(
@@ -951,10 +953,24 @@ def _collect_setup_with_ai_credentials(
                 project_root=project_root,
                 env_file_path=env_file_path,
                 reporter=click.echo,
+                remote_mcp_url=remote_mcp_url,
             )
         except SetupWithAIError as exc:
             click.echo(f"Browser setup page failed: {exc}")
             click.echo("Falling back to terminal prompts.")
+        except TypeError:
+            # Older callers / tests may have stubbed launch_setup_with_ai_form
+            # without the new ``remote_mcp_url`` kwarg. Retry without it so we
+            # don't break test mocks.
+            try:
+                return launch_setup_with_ai_form(
+                    project_root=project_root,
+                    env_file_path=env_file_path,
+                    reporter=click.echo,
+                )
+            except SetupWithAIError as exc:
+                click.echo(f"Browser setup page failed: {exc}")
+                click.echo("Falling back to terminal prompts.")
 
     final_github_token = github_token or click.prompt(
         "GitHub token",
