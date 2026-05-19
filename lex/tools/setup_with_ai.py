@@ -397,6 +397,7 @@ def build_ai_env_values(
         "REMOTE_MCP_API_KEY": remote_mcp_api_key,
         "GITHUB_TOKEN": github_token,
         "LEX_MCP_MODE": mcp_mode,
+        "LEX_MCP_ANALYTICS_BACKEND": "remote",
     }
 
 

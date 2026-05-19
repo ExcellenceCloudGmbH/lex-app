@@ -351,6 +351,7 @@ class LexFlowerCommandTests(TestCase):
                     "REMOTE_MCP_API_KEY": "remote_api_key",
                     "GITHUB_TOKEN": "ghu_example",
                     "LEX_MCP_MODE": "forward",
+                    "LEX_MCP_ANALYTICS_BACKEND": "remote",
                 },
             )
             bootstrap_copilot_state_mock.assert_called_once_with(
