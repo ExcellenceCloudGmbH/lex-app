@@ -422,7 +422,11 @@ class SetupWithAIToolsTests(TestCase):
                 "Planning docs\n",
             )
 
-    def test_copy_lex_app_docs_directory_skips_when_docs_are_already_inside_project(self):
+    def test_copy_lex_app_docs_directory_refreshes_even_when_source_lives_inside_project(self):
+        # Editable installs put ``lex/docs`` inside the project checkout. The
+        # destination (``<project>/docs``) is still a different directory, so
+        # the copy must proceed so the AI agent always sees the canonical
+        # dev-shipped docs in its working directory.
         with TemporaryDirectory() as tmp_dir:
             temp_root = Path(tmp_dir)
             project_root = temp_root / "project"
@@ -437,8 +441,25 @@ class SetupWithAIToolsTests(TestCase):
                 lex_package_root,
             )
 
+            self.assertEqual(docs_directory, (project_root / "docs").resolve())
+            self.assertTrue((project_root / "docs" / "planning" / "README.md").is_file())
+
+    def test_copy_lex_app_docs_directory_skips_true_self_copy(self):
+        # If source and destination resolve to the same directory (the project
+        # root itself is the lex package root), there is nothing to copy.
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            (project_root / "docs" / "planning").mkdir(parents=True)
+            (project_root / "docs" / "planning" / "README.md").write_text(
+                "Planning docs\n", encoding="utf-8"
+            )
+
+            docs_directory = setup_with_ai_module.copy_lex_app_docs_directory(
+                project_root,
+                project_root,
+            )
+
             self.assertIsNone(docs_directory)
-            self.assertFalse((project_root / "docs").exists())
 
     def test_configure_ai_integration_copies_github_and_docs_directories_into_project_root(self):
         with TemporaryDirectory() as tmp_dir:

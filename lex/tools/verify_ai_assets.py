@@ -538,14 +538,15 @@ def verify_ai_assets(
             else None
         )
         # Don't restore into the lex package's own checkout (avoids self-copy).
-        if source is not None and project_root_resolved in source.parents:
+        destination = project_root_resolved / name
+        if source is not None and source.resolve() == destination.resolve():
             results.append(
                 DirectoryVerificationResult(
                     directory_name=name,
                     source_directory=source,
-                    destination_directory=project_root_resolved / name,
+                    destination_directory=destination,
                     skipped_reason=(
-                        f"Source directory '{name}' lives inside the project root; "
+                        f"Source directory '{name}' is the destination; "
                         "skipping self-copy."
                     ),
                 )

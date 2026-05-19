@@ -326,7 +326,11 @@ def copy_lex_app_docs_directory(
         return None
 
     project_root_resolved = Path(project_root).resolve()
-    if project_root_resolved in source_directory.parents:
+    destination = (project_root_resolved / source_directory.name).resolve()
+    if source_directory == destination:
+        # True self-copy (source IS the destination). Anything else — including
+        # an editable install where ``lex/docs`` lives under the project root —
+        # must still refresh ``<project_root>/docs`` from the package source.
         return None
 
     return _copy_directory_into_project_root(project_root, source_directory)
