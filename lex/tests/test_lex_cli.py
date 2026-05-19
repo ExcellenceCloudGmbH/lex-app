@@ -795,7 +795,7 @@ class SetupWithAIToolsTests(TestCase):
 
         os_kill_mock.assert_called_once_with(6543, 0)
         popen_mock.assert_not_called()
-        selfhow to revert a commit.assertTrue(runtime.already_running)
+        self.assertTrue(runtime.already_running)
         self.assertEqual(runtime.pid, 6543)
 
 

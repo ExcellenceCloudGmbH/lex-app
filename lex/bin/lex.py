@@ -2,9 +2,6 @@
 import asyncio
 import io
 import os
-import shutil
-import sys
-import time
 import platform
 import subprocess
 import sys
@@ -322,11 +319,12 @@ def pytest_cmd(ctx):
 
     \b
     Lex-only flags (intercepted, NOT forwarded to pytest):
-      --report           Generate a per-group PDF summary and HTML coverage
-                           bundle under the effective Lex report output dir.
-      --report-and-email Generate the PDF summary + HTML coverage bundle and
-                           then prepare/send report emails if email delivery is
-                           enabled in the effective Lex test config.
+      --report           Generate a per-group PDF summary at
+                           <output_dir>/lex-test-report-<ts>.pdf
+                           (output_dir comes from the effective Lex test config).
+      --report-and-email Generate the PDF summary and then prepare/send
+                           report emails if email delivery is enabled in the
+                           effective Lex test config.
       --send-emails      Skip the interactive confirmation prompt and send
                            report emails immediately. Only applies together
                            with --report-and-email. Intended for CI runs.
@@ -349,11 +347,11 @@ def pytest_cmd(ctx):
     ``$LEX_TEST_CONFIG_PAYLOAD`` JSON object. An in-process pytest plugin
     registers each group as a marker, validates that every used marker maps to
     a configured group (hard error otherwise), and aggregates
-    pass/fail/skip/error counts per group. `lex pytest --report` writes the
-    PDF report plus the HTML coverage bundle. `lex pytest --report-and-email`
-    additionally prepares one report email per resolved recipient delivery
-    using the configured sender and recipient data and asks for confirmation
-    before sending unless ``--send-emails`` is supplied.
+    pass/fail/skip/error counts per group. `lex pytest --report` writes only
+    the PDF report. `lex pytest --report-and-email` additionally prepares one
+    report email per resolved recipient delivery using the configured sender and
+    recipient data and asks for confirmation before sending unless
+    ``--send-emails`` is supplied.
     """
     # Run from project root so lex_test_config.yaml and the tests entrypoint
     # are auto-discovered regardless of where `lex pytest` was invoked.
@@ -389,7 +387,6 @@ def pytest_cmd(ctx):
     import pytest as _pytest
 
     coverage_runner = None
-    coverage_error = None
     collect_coverage = should_generate_report
     if collect_coverage:
         try:
@@ -397,7 +394,6 @@ def pytest_cmd(ctx):
         except Exception:
             Coverage = None
         if Coverage is not None:
-            report_output_dir = lex_test_config.report_dir
             coverage_runner = Coverage(
                 data_file=None,
                 source=[PROJECT_ROOT_DIR.as_posix()],
@@ -407,7 +403,6 @@ def pytest_cmd(ctx):
                     str(PROJECT_ROOT_DIR / "env" / "*"),
                     str(PROJECT_ROOT_DIR / "Tests" / "*"),
                     str(PROJECT_ROOT_DIR / "tests" / "*"),
-                    str(report_output_dir / "*"),
                     str(PROJECT_ROOT_DIR / "reports" / "*"),
                     str(PROJECT_ROOT_DIR / "htmlcov" / "*"),
                     str(PROJECT_ROOT_DIR / "static" / "*"),
@@ -424,8 +419,6 @@ def pytest_cmd(ctx):
                 ],
             )
             coverage_runner.start()
-        else:
-            coverage_error = "coverage.py is not available in this environment."
 
     # Bootstrap Django after starting report coverage so app/model import-time
     # code is included in the measured project coverage.
@@ -450,36 +443,14 @@ def pytest_cmd(ctx):
                             ignore_errors=True,
                         )
                     )
-                    file_coverage = _parse_coverage_text_report(stream.getvalue())
-                shutil.rmtree(lex_test_config.coverage_html_dir, ignore_errors=True)
-                coverage_runner.html_report(
-                    directory=str(lex_test_config.coverage_html_dir),
-                    ignore_errors=True,
-                )
-                coverage_index = lex_test_config.coverage_html_dir / "index.html"
-                if not coverage_index.exists():
-                    raise RuntimeError(
-                        f"Missing coverage HTML entrypoint at {coverage_index}."
-                    )
-            except Exception as exc:
-                coverage_error = f"Coverage summary/HTML generation failed: {exc}"
+            except Exception:
                 plugin.coverage_summary = None
             else:
                 plugin.coverage_summary = {
                     "label": "Framework-wide code coverage",
                     "display": f"{total:.1f}%",
                     "percentage": round(total, 1),
-                    "files": file_coverage,
                 }
-
-    if should_generate_report and plugin.coverage_summary is None:
-        message = (
-            "Coverage data is required for Lex test report PDF/HTML artifacts. "
-            "The report would otherwise show `n/a`."
-        )
-        if coverage_error:
-            message = f"{message} {coverage_error}"
-        raise click.ClickException(message)
 
     if should_generate_report:
         try:
@@ -492,9 +463,6 @@ def pytest_cmd(ctx):
             click.echo(f"Warning: failed to write PDF report: {exc}", err=True)
         else:
             click.echo(f"Lex test report: {pdf_path}")
-            click.echo(
-                f"Lex test coverage HTML: {lex_test_config.coverage_html_dir / 'index.html'}"
-            )
 
     if parsed.report_and_email:
         if not lex_test_config.email.get("from_email"):
@@ -528,35 +496,6 @@ def pytest_cmd(ctx):
                     click.echo(f"Sent {len(deliveries)} Lex test report email(s).")
 
     raise SystemExit(int(exit_code))
-
-
-def _parse_coverage_text_report(text: str) -> list[dict]:
-    """Parse ``coverage report`` text output into per-file dicts.
-
-    Each dict has keys: ``name``, ``stmts``, ``miss``, ``cover``.
-    The TOTAL row is excluded.
-    """
-    import re
-
-    files: list[dict] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("-") or line.upper().startswith("NAME") or line.upper().startswith("TOTAL"):
-            continue
-        parts = re.split(r"\s+", line)
-        if len(parts) < 4:
-            continue
-        name = parts[0]
-        try:
-            stmts = int(parts[1])
-            miss = int(parts[2])
-            cover_str = parts[3].rstrip("%")
-            cover = float(cover_str)
-        except (ValueError, IndexError):
-            continue
-        files.append({"name": name, "stmts": stmts, "miss": miss, "cover": cover})
-    files.sort(key=lambda f: f["cover"])
-    return files
 
 
 @lex.command(
@@ -683,7 +622,6 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
         project_root=root,
         env_file_path=Path(env_path),
         no_browser=no_browser,
-        remote_mcp_url=remote_mcp_url,
     )
 
     # The browser form lets the user pick forward/backward; use that choice
@@ -999,7 +937,6 @@ def _collect_setup_with_ai_credentials(
     project_root: Path,
     env_file_path: Path,
     no_browser: bool,
-    remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
 ) -> SetupWithAICredentials:
     if github_token and remote_mcp_api_key:
         return SetupWithAICredentials(
@@ -1014,24 +951,10 @@ def _collect_setup_with_ai_credentials(
                 project_root=project_root,
                 env_file_path=env_file_path,
                 reporter=click.echo,
-                remote_mcp_url=remote_mcp_url,
             )
         except SetupWithAIError as exc:
             click.echo(f"Browser setup page failed: {exc}")
             click.echo("Falling back to terminal prompts.")
-        except TypeError:
-            # Older callers / tests may have stubbed launch_setup_with_ai_form
-            # without the new ``remote_mcp_url`` kwarg. Retry without it so we
-            # don't break test mocks.
-            try:
-                return launch_setup_with_ai_form(
-                    project_root=project_root,
-                    env_file_path=env_file_path,
-                    reporter=click.echo,
-                )
-            except SetupWithAIError as exc:
-                click.echo(f"Browser setup page failed: {exc}")
-                click.echo("Falling back to terminal prompts.")
 
     final_github_token = github_token or click.prompt(
         "GitHub token",
