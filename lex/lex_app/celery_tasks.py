@@ -586,10 +586,19 @@ class EnhancedTaskMethodDescriptor:
         return getattr(self.task, name)
 
 
-def lex_shared_task(_func=None, **task_opts):
+def lex_shared_task(_func=None, *, lex_max_retries=None, **task_opts):
     """
     Decorator that makes a method Celery-capable, respecting
     :class:`WaitForTasks` and :class:`FireAndForget` contexts.
+
+    ``lex_max_retries`` is the per-task cap consumed by the worker-recovery
+    supervisor (see :mod:`lex.lex_app.celery_recovery`). When the supervisor
+    detects this task's worker died, it re-publishes the task up to
+    ``lex_max_retries`` times before injecting a ``MaxRequeueExceeded`` into the
+    result backend. If left as ``None``, the supervisor falls back to the
+    ``LEX_TASK_MAX_RETRIES`` env default. This is **not** Celery's built-in
+    ``max_retries`` (which governs ``self.retry()`` calls inside the task body);
+    the two are orthogonal.
     """
 
     def decorator(func):
@@ -630,6 +639,27 @@ def lex_shared_task(_func=None, **task_opts):
         options.update(task_opts)
 
         celery_task = shared_task(**options)(wrapper)
+
+        if lex_max_retries is not None:
+            # Stash on the underlying task so the recovery heartbeat can read
+            # it via ``getattr(task, "lex_max_retries", None)`` in task_prerun.
+            # ``shared_task`` returns a celery PromiseProxy in some setups;
+            # resolving it via ``_get_current_object`` ensures the attribute
+            # lands on the actual Task instance rather than the proxy slot.
+            try:
+                value = int(lex_max_retries)
+                if value < 0:
+                    raise ValueError("lex_max_retries must be >= 0")
+                target = getattr(celery_task, "_get_current_object", None)
+                target = target() if callable(target) else celery_task
+                target.lex_max_retries = value
+            except Exception:
+                logger.warning(
+                    "lex_shared_task: failed to apply lex_max_retries=%r to %s; "
+                    "supervisor will fall back to LEX_TASK_MAX_RETRIES",
+                    lex_max_retries, func.__name__, exc_info=True,
+                )
+
         return EnhancedTaskMethodDescriptor(celery_task)
 
     if _func is not None and callable(_func):

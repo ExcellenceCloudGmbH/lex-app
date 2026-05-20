@@ -28,6 +28,15 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 
 app.autodiscover_tasks(lambda: [n.name for n in apps.get_app_configs()])
 
+# Connect the worker-recovery signal handlers. Idempotent and gated by
+# LEX_TASK_RECOVERY_ENABLED, so this is safe on every Celery-loading process
+# (web, worker, beat, eager-test). See docs/celery-worker-recovery/plan.md.
+try:
+    from lex.lex_app import celery_recovery
+    celery_recovery.enable()
+except Exception:
+    logger.exception("Failed to enable lex celery recovery system; continuing without it")
+
 
 def _is_non_local_deployment_target() -> bool:
     """
