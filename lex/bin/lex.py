@@ -13,7 +13,7 @@ import click
 import uvicorn
 from lex.tools.ai_dashboard import launch_ai_dashboard
 from lex.tools.ai_faq import launch_ai_faq
-from lex.tools.project_root import find_project_root
+from lex.tools.project_root import find_project_root, resolve_llm_working_directory
 from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
@@ -608,7 +608,12 @@ def setup(project_root):
     help="Skip the local setup page and prompt in the terminal instead.",
 )
 def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url, mcp_mode, no_browser):
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The LLM agent's working directory IS the project root for setup-with-ai.
+    # Do not walk up to a git toplevel / marker file: the LLM often runs
+    # inside a subdirectory of a larger checkout, and walking up causes
+    # docs/ and .github/ to be written into an ancestor (or be skipped
+    # entirely when that ancestor is the lex package itself).
+    root = resolve_llm_working_directory(project_root)
     python_executable = resolve_active_python_executable(root)
 
     env_path, created = ensure_env_file(root.as_posix())
@@ -859,7 +864,10 @@ def ai_verify(project_root, mode, quiet, silent):
     the project root that is missing or whose contents have drifted. Existing
     user-only files are left untouched.
     """
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The directory passed via --project-root (or cwd) IS the LLM working
+    # directory. We verify assets in *that* directory literally; we do not
+    # walk up to a git toplevel / marker file (see resolve_llm_working_directory).
+    root = resolve_llm_working_directory(project_root)
     quiet = quiet or silent
     explicit_mode = None if mode == "auto" else mode.lower()
 

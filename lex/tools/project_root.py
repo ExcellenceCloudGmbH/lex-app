@@ -58,3 +58,21 @@ def find_project_root(start=None) -> str:
     #    will operate on the directory the user actually invoked the command
     #    from instead of escaping into ``~`` or ``/``.
     return str(base)
+
+
+def resolve_llm_working_directory(explicit_path: str | None = None) -> Path:
+    """Return the literal directory the LLM agent is working in.
+
+    For ``lex setup-with-ai`` and ``lex ai-verify`` the rule is simple and
+    intentional: the directory passed via ``--project-root`` (or the current
+    working directory when omitted) **is** the project root, exactly as the
+    LLM sees it. We must not walk up to a git toplevel or marker file the way
+    :func:`find_project_root` does, because the LLM commonly operates inside
+    a subdirectory of a larger checkout (or inside a freshly created folder
+    that has no markers yet). Walking up causes asset directories such as
+    ``docs/`` and ``.github/`` to be written into an ancestor — or to be
+    skipped entirely when that ancestor happens to be the ``lex`` package's
+    own checkout (self-copy guard).
+    """
+    base = explicit_path if explicit_path else os.getcwd()
+    return Path(base).expanduser().resolve()
