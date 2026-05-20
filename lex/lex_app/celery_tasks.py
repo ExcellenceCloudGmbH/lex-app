@@ -760,8 +760,8 @@ def calc_and_save(models: List[Model], *args, **kwargs):
             from lex.core.models.CalculationModel import calculation_execution_context
             with calculation_execution_context():
                 model.lex_func()()
-            logger.info(f"Finished calculating model {model}")
-            model.save()
+                logger.info(f"Finished calculating model {model}")
+                model.save()
             summary["processed_successfully"] += 1
 
         except IntegrityError as integrity_error:
@@ -779,7 +779,9 @@ def calc_and_save(models: List[Model], *args, **kwargs):
                         if hasattr(model, 'id'):
                             model.id = None
 
-                    model.save()
+                    from lex.core.models.CalculationModel import calculation_execution_context as _cec
+                    with _cec():
+                        model.save()
                     logger.info(f"Successfully resolved conflict and saved model {model}")
                     summary["conflicts_resolved"] += 1
                     summary["processed_successfully"] += 1

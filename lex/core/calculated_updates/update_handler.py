@@ -7,7 +7,7 @@ from lex.core.models.CalculationModel import calculation_execution_context
 def calc_and_save(entry):
     with calculation_execution_context():
         entry.calculate()
-    entry.save()
+        entry.save()
 
 
 class CalculatedModelUpdateHandler:

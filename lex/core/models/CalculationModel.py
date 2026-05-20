@@ -117,10 +117,12 @@ class CalculationModel(LexModel):
             # to the DB (or to the enclosing savepoint) *before* the
             # calculation runs.
             self._defer_calculate_hook = True
+            self._is_calculation_triggered_save = True
             try:
                 result = super().save(*args, **kwargs)
             finally:
                 self._defer_calculate_hook = False
+                self._is_calculation_triggered_save = False
 
             # Register that IN_PROGRESS has been written (on_commit for
             # nested atomics, or immediately for autocommit).

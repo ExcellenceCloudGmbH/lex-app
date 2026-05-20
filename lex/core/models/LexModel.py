@@ -770,18 +770,24 @@ class LexModel(LifecycleModel):
         """
         Return True when edited_by / edited_at updates should be suppressed.
 
-        Two distinct scenarios:
+        Three distinct scenarios:
         1. Bitemporal sync — ``skip_history_when_saving`` is *permanently* set
            (i.e. NOT via the transient ``_skip_history_for_current_save_only``
            flag).  ``_is_history_only_skip`` distinguishes the two.
         2. Child-record save inside a parent calculation — the ContextVar
            ``_in_calculation_execution`` is True while the parent's user code
            (``calculate()`` / ``update()``) is executing.
+        3. The CalculationModel itself being saved as part of a calculation
+           trigger (IN_PROGRESS transition) — the per-instance flag
+           ``_is_calculation_triggered_save`` is True.
         """
         if (
             getattr(self, 'skip_history_when_saving', False)
             and not getattr(self, '_is_history_only_skip', False)
         ):
+            return True
+
+        if getattr(self, '_is_calculation_triggered_save', False):
             return True
 
         from lex.core.models.CalculationModel import _in_calculation_execution
