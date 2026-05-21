@@ -54,6 +54,13 @@ class KeycloakPermissionsMiddleware:
         request.client_roles = []
 
         access_token = request.session.get("oidc_access_token")
+
+        # Fallback: extract token from Authorization header for Bearer token requests
+        if not access_token:
+            auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+            if auth_header.startswith("Bearer "):
+                access_token = auth_header[7:].strip()
+
         if access_token:
             kc_manager = KeycloakManager()
             try:
