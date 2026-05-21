@@ -52,32 +52,49 @@ Meanwhile, when we switched our E2E tests to use the **documented canonical patt
 
 ## Test Project Structure
 
-All tests are built around a **dedicated test project** at `lex/test_project/` that mirrors how real customers use the framework. This project contains purpose-built models for each test cluster.
+All tests are built around a **dedicated test project** at `lex/test_project/` that mirrors how real customers use the framework. Each cluster lives in its own folder under `tests/` and owns the models it needs — **`models.py` lives inside the cluster folder**, not in a central `models/` directory.
 
 ```
 lex/test_project/
 ├── lex_config.py              # Project configuration
 ├── app.py                     # Django AppConfig
 ├── __init__.py
-├── models/                    # Test models organized by purpose
-│   ├── crud_models.py         # SimpleItem, TrackedItem
-│   ├── calc_models.py         # AtomicCalc, NonAtomicCalc, FailingCalc
-│   ├── hierarchy_models.py    # ParentCalc → ChildCalc → GrandchildCalc
-│   ├── permission_models.py   # ProtectedItem, FieldLevelItem
-│   └── validation_models.py   # PreValidatedItem, PostValidatedItem
-└── tests/                     # Test modules, one per cluster
+└── tests/                     # One folder per cluster, named after the cluster slug
     ├── __init__.py
-    ├── test_01_init.py
-    ├── test_02_crud_api.py
-    ├── test_03_validation_hooks.py
-    ├── test_04_permissions.py
-    ├── test_05_history_and_bitemporal.py
-    ├── test_06_audit_logging.py
-    ├── test_07_calculation_state_machine.py
-    ├── test_08_celery_and_async.py
-    ├── test_09_signals_and_websocket.py
-    └── test_10_api_layer.py
+    ├── fixtures/              # Shared JSON seed fixtures
+    ├── init/                  # Cluster 1 — Project bootstrap
+    │   ├── models.py
+    │   └── test_1a_lex_setup.py, test_1b_..., ...
+    ├── crud_api/              # Cluster 2 — CRUD via REST API
+    │   ├── models.py          # SimpleItem, TrackedItem, ...
+    │   └── test_2a_create.py, test_2b_read.py, ...
+    ├── validation_hooks/      # Cluster 3 — Validation hooks
+    │   ├── models.py
+    │   └── test_3*.py
+    ├── permissions/           # Cluster 4 — Permissions
+    │   ├── models.py
+    │   └── test_4*.py
+    ├── history/               # Cluster 5 — History & bitemporal
+    │   ├── models.py
+    │   └── test_5*.py
+    ├── audit_logging/         # Cluster 6 — Audit logging
+    │   ├── models.py
+    │   └── test_6*.py
+    ├── calculations/          # Cluster 7 — Calculation state machine
+    │   ├── models.py
+    │   └── test_7a_atomic.py, test_7b_non_atomic.py, ...
+    ├── calculation_logging/   # Cluster 7 (logging surface)
+    ├── celery_async/          # Cluster 8 — Celery & async
+    ├── signals_ws/            # Cluster 9 — Signals & WebSocket
+    ├── api_layer/             # Cluster 10 — API layer
+    ├── serializers/           # Cluster 12 — Serializers
+    ├── queries/               # Cluster 14 — AG Grid queries
+    ├── exports/               # Exports surface
+    ├── journeys/              # End-to-end user journeys
+    └── stress/                # Stress / load harness
 ```
+
+**Naming convention:** test files inside a cluster folder follow `test_<Nx>_<slug>.py` where `Nx` is the cluster number + sub-cluster letter (e.g. `2a`, `7g`). The PR-gate workflow enforces this regex on Copilot-authored test files.
 
 ---
 

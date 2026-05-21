@@ -75,9 +75,9 @@
 | Scenario range | 2.40 – 2.55 |
 | Type | I + E |
 | Files covered | `mixins/ModelEntryProviderMixin.py`, `mixins/DestroyOneWithPayloadMixin.py`, `mixins/PermissionAwareSerializerMixin.py` |
-| Test file | `lex/test_project/tests/crud/test_model_entry_mixins.py` |
+| Test file | `lex/test_project/tests/crud_api/test_2f_model_entry_mixins.py` |
 | Test classes | `TestModelClassResolution` (URL kwarg → ContentType → model), `TestDestroyOneReturnsPayload` (DELETE returns the deleted instance), `TestPermissionAwareSerializerStripsFields` (per-user field masking) |
-| Fixtures | `ProtectedItem` (already exists in `permission_models.py`); add `OwnedItem` if not present |
+| Fixtures | `ProtectedItem` (already exists in `permissions/models.py`); add `OwnedItem` if not present |
 | Est. tests | ~14 |
 | Coverage gain | +0.7 % |
 | Prereqs | none |
@@ -89,7 +89,7 @@
 | Scenario range | 2.56 – 2.78 |
 | Type | E |
 | Files covered | `views/model_entries/One.py`, `Many.py`, **partial** `List.py` (rest is in 14f), `filter_backends.py`, `api/filters/GenericFilters.py` |
-| Test file | `lex/test_project/tests/crud/test_one_many_filters.py` |
+| Test file | `lex/test_project/tests/crud_api/test_2g_one_many_filters.py` |
 | Test classes | `TestOneEndpoint` (GET/PUT/PATCH/DELETE happy + 404), `TestManyEndpoint` (paginated GET, bulk POST), `TestListBasicShape` (defer AG-Grid specifics to 14f), `TestFilterBackendQueryParser`, `TestGenericFilterClasses` |
 | Fixtures | `SimpleItem`, `TrackedItem` |
 | Est. tests | ~22 |
@@ -103,7 +103,7 @@
 | Scenario range | 2.79 – 2.92 |
 | Type | E |
 | Files covered | `views/ModelStructureObtainView.py`, `views/model_info/Fields.py`, `views/lex_api/LexAPI.py`, `api/utils/helpers.py`, `api/utils/Context.py`, `api/utils/api_key_requests.py` |
-| Test file | `lex/test_project/tests/crud/test_structure_and_lex_api.py` |
+| Test file | `lex/test_project/tests/crud_api/test_2h_structure_and_lex_api.py` |
 | Test classes | `TestModelStructureObtain`, `TestFieldsEndpoint` (per-model field metadata), `TestLexApiDispatcher`, `TestApiUtilHelpers` (U), `TestRequestContextObject` (U), `TestApiKeyAuthenticatedRequest` |
 | Fixtures | API-key fixture (already in cluster 4) |
 | Est. tests | ~15 |
@@ -121,7 +121,7 @@
 | Scenario range | 4.35 – 4.46 |
 | Type | I |
 | Files covered | `api/middleware/keycloak_permissions.py`, `authentication/authentication_backends/BearerMiddlewareAuthentication.py` |
-| Test file | `lex/test_project/tests/permissions/test_keycloak_middleware.py` |
+| Test file | `lex/test_project/tests/permissions/test_4j_keycloak_middleware.py` |
 | Test classes | `TestKeycloakPermissionMiddleware` (request → UserContext attachment, scope evaluation, denial path), `TestBearerMiddlewareAuthentication` (valid token, expired, missing, malformed) |
 | Fixtures | mock Keycloak token decoder |
 | Est. tests | ~12 |
@@ -135,7 +135,7 @@
 | Scenario range | 4.47 – 4.55 |
 | Type | E |
 | Files covered | `views/permissions/ModelPermissions.py`, `views/permissions/UserPermission.py` |
-| Test file | `lex/test_project/tests/permissions/test_permission_views.py` |
+| Test file | `lex/test_project/tests/permissions/test_4k_permission_views.py` |
 | Test classes | `TestModelPermissionsEndpoint`, `TestUserPermissionEndpoint` |
 | Fixtures | superuser, regular user, group-membership fixture |
 | Est. tests | ~9 |
@@ -157,7 +157,7 @@
 | Scenario range | 5.30 – 5.48 |
 | Type | I |
 | Files covered | `core/services/Bitemporal.py`, `core/services/bitemporal_signals.py`, `core/services/StandardHistory.py`, `core/services/MetaHistory.py`, `process_admin/utils/bitemporal_sync.py` |
-| Test file | `lex/test_project/tests/history/test_bitemporal_services.py` |
+| Test file | `lex/test_project/tests/history/test_5e_bitemporal_services.py` |
 | Test classes | `TestBitemporalCore` (intervals, valid_from/to chaining), `TestBitemporalSignals` (pre_save → row close + new row), `TestStandardHistory` (non-bitemporal branch), `TestMetaHistory` (cross-model linking), `TestBitemporalSync` (legacy → bitemporal migration) |
 | Fixtures | `BitemporalItem`, `LegacyVersionedItem` |
 | Est. tests | ~20 |
@@ -171,7 +171,7 @@
 | Scenario range | 5.49 – 5.55 |
 | Type | E |
 | Files covered | `api/views/model_entries/History.py` |
-| Test file | `lex/test_project/tests/history/test_history_endpoint.py` |
+| Test file | `lex/test_project/tests/history/test_5f_history_endpoint.py` |
 | Test classes | `TestHistoryEndpointShape`, `TestHistoryFilters` (date range, user), `TestHistoryPermissionGating` |
 | Fixtures | reuse 5e fixtures + 4j users |
 | Est. tests | ~8 |
@@ -191,7 +191,7 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Scenario range | 6.30 – 6.42 |
 | Type | U + I |
 | Files covered | `models/AuditLog.py`, `models/AuditLogStatus.py`, `models/CalculationLog.py` |
-| Test file | `lex/test_project/tests/audit/test_audit_models.py` |
+| Test file | `lex/test_project/tests/audit_logging/test_6g_audit_models.py` |
 | Test classes | `TestAuditLogModelFields`, `TestAuditLogStatusTransitions`, `TestCalculationLogParentLinking` |
 | Fixtures | `AuditedItem`, `CalcWithLogging` |
 | Est. tests | ~14 |
@@ -205,7 +205,7 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Scenario range | 6.43 – 6.62 |
 | Type | I |
 | Files covered | `mixins/AuditLogMixin.py`, `mixins/BulkAuditLogMixin.py`, `utils/ModelContext.py`, `utils/ContextResolver.py`, `utils/DataModels.py`, `utils/calculation_audit.py`, `utils/InitialDataAuditLogger.py`, `utils/config.py`, `utils/content_types.py` |
-| Test file | `lex/test_project/tests/audit/test_audit_mixins_and_utils.py` |
+| Test file | `lex/test_project/tests/audit_logging/test_6h_audit_mixins_and_utils.py` |
 | Test classes | one per file (9 classes) — keeps the failure point unambiguous in CI |
 | Fixtures | reuse 6g + a `BulkOpItem` |
 | Est. tests | ~30 |
@@ -219,7 +219,7 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Scenario range | 6.63 – 6.78 |
 | Type | I |
 | Files covered | `serializers/AuditLogSerializer.py`, `serializers/AuditLogMixinSerializer.py`, `serializers/CalculationLogSerializer.py`, `handlers/LexLogger.py`, `handlers/WebSocketHandler.py` |
-| Test file | `lex/test_project/tests/audit/test_audit_serializers_and_handlers.py` |
+| Test file | `lex/test_project/tests/audit_logging/test_6i_audit_serializers_and_handlers.py` |
 | Test classes | `TestAuditLogSerializerShape`, `TestAuditLogMixinSerializerExtras`, `TestCalculationLogSerializerTree`, `TestLexLoggerBuilderAndPersist`, `TestWebSocketHandlerEmits` (mock channel layer) |
 | Fixtures | reuse 6g/6h |
 | Est. tests | ~16 |
@@ -259,7 +259,7 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Files covered | `core/calculated_updates/ObjectsToRecalculateStore.py`, `core/calculated_updates/update_handler.py` |
 | Test file | `lex/test_project/tests/calculations/test_7l_recalc_queue.py` |
 | Test classes | `TestObjectsToRecalculateStore` (push/pop/dedupe), `TestUpdateHandlerDispatch` (FK chains, depth limits, cycle protection) |
-| Fixtures | `ParentCalc → ChildCalc → GrandchildCalc` (already in `hierarchy_models.py`) |
+| Fixtures | `ParentCalc → ChildCalc → GrandchildCalc` (already in `calculations/models.py`) |
 | Est. tests | ~12 |
 | Coverage gain | +0.8 % |
 | Prereqs | none |
