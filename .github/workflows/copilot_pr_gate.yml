@@ -144,27 +144,45 @@ jobs:
           gh pr edit    "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
           exit 1
 
-      # ── 3. Run the new test (mode A/C: must pass; mode B: must fail without decorator) ──
-      - name: Locate new test file
+      # ── 3. Run the new tests (mode A: all must pass; mode B/C: single-file contract) ──
+      - name: Locate new test files
         id: testfile
         run: |
           set -euo pipefail
-          # Filter to status=='added' — on a `synchronize` event the
-          # PR may also touch an existing test file that matches the
-          # naming regex; without this filter `head -n1` would pick the
-          # wrong one and Mode-A/B/C would run the wrong scenario.
-          NEW_TEST=$(jq -r '.[] | select(.status == "added") | .path | select(test("^lex/test_project/tests/[^/]+/test_[0-9]+[a-z]?_[A-Za-z0-9_]+\\.py$"))' files.json | head -n1)
-          if [[ -z "$NEW_TEST" ]]; then
-            echo "::error::could not locate the new test file (no added file matching test_<Nx>_<slug>.py under lex/test_project/tests/<cluster>/)."
+          # Filter to status=='added' — on a `synchronize` event the PR
+          # may also touch an existing test file matching the naming regex;
+          # without this filter we'd run pre-existing tests as if they
+          # were the Copilot-authored ones.
+          # Regression mode may produce multiple new test files (one per
+          # cluster the feature touches — see the cluster-decomposition
+          # section of the assembled prompt). Bug-repro and fix-and-test
+          # must produce exactly one.
+          NEW_TESTS=$(jq -r '.[] | select(.status == "added") | .path | select(test("^lex/test_project/tests/[^/]+/test_[0-9]+[a-z]?_[A-Za-z0-9_]+\\.py$"))' files.json)
+          if [[ -z "$NEW_TESTS" ]]; then
+            echo "::error::could not locate any new test file (no added file matching test_<Nx>_<slug>.py under lex/test_project/tests/<cluster>/)."
             exit 1
           fi
-          echo "path=${NEW_TEST}" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$NEW_TESTS" | wc -l)
+          MODE="${{ steps.mode.outputs.mode }}"
+          if [[ "$MODE" != "regression" && "$COUNT" -gt 1 ]]; then
+            echo "::error::mode '$MODE' requires exactly one new test file (found $COUNT). Cross-cluster decomposition is a regression-mode concept; bug-repro and fix-and-test stay single-file."
+            echo "$NEW_TESTS" | sed 's/^/  - /'
+            exit 1
+          fi
+          # Persist as a newline-separated multiline GitHub output.
+          {
+            echo "paths<<EOF"
+            echo "$NEW_TESTS"
+            echo "EOF"
+            echo "first=$(echo "$NEW_TESTS" | head -n1)"
+            echo "count=$COUNT"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Mode A or C — run test, expect pass
+      - name: Mode A or C — run all new tests, expect pass
         if: steps.mode.outputs.mode != 'bug-repro'
         env:
           # Mirror showcase_tests.yml so the gate exercises the new
-          # test under the same Django settings as the full cluster
+          # tests under the same Django settings as the full cluster
           # suite — a bug-repro that only fires under different
           # settings would otherwise slip through.
           DJANGO_SETTINGS_MODULE: lex_app.settings
@@ -173,10 +191,18 @@ jobs:
         run: |
           set -euo pipefail
           # `lex` is the Django manage.py console-script installed by
-          # `pip install -e .` in the install step.
-          TEST_PATH="${{ steps.testfile.outputs.path }}"
-          MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
-          lex test "$MODULE" --noinput
+          # `pip install -e .` in the install step. Convert each path
+          # `lex/test_project/.../test_x.py` into a dotted module and
+          # hand them ALL to one `lex test` invocation so Django runs
+          # them in a single migrate cycle.
+          MODULES=""
+          while IFS= read -r TEST_PATH; do
+            [[ -z "$TEST_PATH" ]] && continue
+            MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
+            MODULES="$MODULES $MODULE"
+          done <<< "${{ steps.testfile.outputs.paths }}"
+          echo "Running modules:$MODULES"
+          lex test $MODULES --noinput
 
       - name: Mode B — strip @expectedFailure, expect FAIL
         if: steps.mode.outputs.mode == 'bug-repro'
@@ -186,7 +212,8 @@ jobs:
           CELERY_ACTIVE: "False"
         run: |
           set -euo pipefail
-          TEST_PATH="${{ steps.testfile.outputs.path }}"
+          # Single-file: locate step already errored out if >1 new test.
+          TEST_PATH="${{ steps.testfile.outputs.first }}"
           # Strip the @(unittest.)?expectedFailure decorator IN PLACE.
           # The CI checkout is throwaway; overwriting keeps the file at
           # its real package path so the Django test runner discovers

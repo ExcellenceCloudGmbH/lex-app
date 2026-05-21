@@ -168,3 +168,34 @@ def test_missing_test_writing_plan_file_raises(fake_test_plan: Path) -> None:
     (fake_test_plan / "test-writing-plan.md").unlink()
     with pytest.raises(FileNotFoundError, match="test-writing-plan.md"):
         assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+
+
+def test_assembled_prompt_teaches_multi_cluster_decomposition(fake_test_plan: Path) -> None:
+    """A feature's contract often spans clusters (e.g. an audit-log entry
+    produced as a side-effect belongs in audit_logging/, even if the
+    headline behaviour lives in another cluster). Pin that the prompt
+    teaches this — single-cluster placement is the easy default; the
+    prompt must explicitly call out the multi-cluster pattern with at
+    least one concrete cross-cluster example so Copilot doesn't default
+    to single-file."""
+    out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+    # Heading: the decomposition section is its own block, not buried.
+    assert "Cluster decomposition" in out
+    # Concept: primary vs secondary clusters.
+    assert "primary" in out.lower() and "secondary" in out.lower()
+    # Concrete cross-cluster example: audit log is the canonical case.
+    assert "audit_logging" in out
+
+
+def test_bug_repro_and_fix_and_test_constrained_to_single_file(fake_test_plan: Path) -> None:
+    """Multi-cluster decomposition is REGRESSION-only. Bug-repro and
+    fix-and-test stay single-file (a multi-file bug-repro dilutes the
+    @expectedFailure strip-and-fail contract; a multi-file fix-and-test
+    makes the 50-line source-diff cap meaningless). The prompt must
+    state this explicitly per mode."""
+    out_bug = assemble_prompt(_basic_issue(Mode.BUG_REPRO), test_plan_dir=fake_test_plan)
+    out_fix = assemble_prompt(_basic_issue(Mode.FIX_AND_TEST), test_plan_dir=fake_test_plan)
+    # Both prompts must constrain to single-file. Match the literal phrase
+    # used in the assembled prompt's mode-scope block.
+    assert "exactly **one**" in out_bug
+    assert "exactly **one**" in out_fix
