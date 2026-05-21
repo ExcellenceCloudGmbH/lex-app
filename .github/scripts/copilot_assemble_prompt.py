@@ -150,22 +150,49 @@ def assemble_prompt(issue: IssueInput, *, test_plan_dir: Path) -> str:
 
 ---
 
-## Cluster routing (apply in order, first match wins)
+## Cluster decomposition — one feature may need tests in multiple clusters
 
-1. Hint names an **existing cluster letter** (e.g. `7g`) → use it. If that letter is taken, advance to the next free letter per `test-writing-plan.md`.
-2. Hint names just a **cluster number** (e.g. `7`) → allocate the next free sub-cluster letter inside it.
-3. Hint is **`new`** → create a new cluster. Pick the next free cluster number, add a `test-clusters.md` entry, register in `.github/scripts/showcase_clusters.py`, update default selectors in `pip_publish.yml` + `showcase_tests.yml`.
-4. Hint is **`others`** or **blank** AND no existing cluster fits → place under `lex/test_project/tests/others/` (create if missing) with generic numbering.
+A feature's contract often spans clusters. The cluster hint names the **primary** cluster (the feature's headline behaviour). Your job is to identify **secondary** clusters whose contracts the feature also touches, and add a test file in each.
 
-State your placement decision in the PR description: *"Placed under cluster Nx because …"* (one sentence).
+**How to decide (regression mode):**
+
+1. **Primary cluster** — owns the feature's headline behaviour. The "selling point" test goes here. This is what the user hinted at (or what cluster routing below picks if no hint).
+2. **Secondary clusters** — for every observable contract the feature is responsible for that lives in a *different* cluster, add a separate test file in that cluster's folder. Typical cross-cluster contracts:
+   - Produces audit-log entries → test in `audit_logging/`.
+   - Drives calculation state transitions → test in `calculations/`.
+   - Must respect permission rules → test in `permissions/`.
+   - Emits WebSocket signals → test in `signals_ws/`.
+   - Goes through the REST/serializer surface → test in `api_layer/` or `serializers/`.
+   Read the **Behaviour** and **Reproducer** fields below carefully; each contractual guarantee the user lists is a candidate for its own cross-cluster test file.
+3. State the decomposition in the PR description, one line per file: *"Placed `tests/<slug>/test_<Nx>_<short>.py` under cluster N because …"*
+
+**Mode-specific scope:**
+
+- **regression** — multi-cluster decomposition encouraged when the feature has real cross-cluster contracts.
+- **bug-repro** — exactly **one** new test file (the `@expectedFailure` repro). Cross-cluster effects are validated by the repro itself, not by extra test files.
+- **fix-and-test** — exactly **one** new test file (the failing test the source change makes pass). The 50-line source-diff cap is meaningful only with a single test in scope.
+
+---
+
+## Cluster routing for each new test file (apply in order, first match wins)
+
+**Folder naming:** cluster folders under `lex/test_project/tests/` are named with the cluster's **descriptive slug**, not `cluster_N/`. Existing folders include `init/`, `crud_api/`, `validation_hooks/`, `permissions/`, `history/`, `audit_logging/`, `calculations/`, `calculation_logging/`, `celery_async/`, `signals_ws/`, `api_layer/`, `serializers/`, `queries/`, `exports/`, `journeys/`, `stress/`. Each cluster folder has its own `models.py` — **do not** create a central `models/` directory.
+
+For each test file you create (primary + each secondary):
+
+1. Hint names an **existing cluster letter** (e.g. `7g`) → use that cluster's folder. If the letter is taken, advance to the next free letter per `test-writing-plan.md`.
+2. Hint names just a **cluster number** (e.g. `7`) → use that cluster's folder; allocate the next free sub-cluster letter inside it.
+3. Secondary cluster (chosen by you, not in the hint) → allocate the next free sub-cluster letter inside that cluster.
+4. Hint is **`others`** or **blank** AND no existing cluster fits → place under `lex/test_project/tests/others/` (create if missing) with generic numbering. This is the normal fallback.
+5. Hint is **`new`** → create a new cluster (rare). Pick the next free cluster number, choose a descriptive slug for the folder name, add a `test-clusters.md` entry, register in `.github/scripts/showcase_clusters.py`, update default selectors in `pip_publish.yml` + `showcase_tests.yml`. Prefer `others/` over a new cluster unless the feature is a genuinely new surface area.
 
 ---
 
 ## Required deliverables in the PR
 
-- New test file under `lex/test_project/tests/<cluster>/test_<Nx>_<slug>.py`.
-- `lex/test_project/test-plan/test-clusters.md` updated (status / scenario range for the touched (sub-)cluster).
-- One new row appended to the bottom of `lex/test_project/test-plan/progress/session-log.md`.
+- One or more new test files under `lex/test_project/tests/<slug>/test_<Nx>_<short>.py` — one per cluster involved (regression mode may have several; bug-repro and fix-and-test have exactly one).
+- `lex/test_project/test-plan/test-clusters.md` updated (status / scenario range for **each** touched (sub-)cluster).
+- One new row appended to the bottom of `lex/test_project/test-plan/progress/session-log.md` summarising all touched clusters in this PR.
 - Mode B/C only: one new BUG-NNN row in `lex/test_project/test-plan/known-bugs.md`.
 - New-cluster placement only: register the new cluster in `.github/scripts/showcase_clusters.py` and update default selectors in `pip_publish.yml` + `showcase_tests.yml`.
 - Touch nothing outside the allowed file set, except the source fix in mode `fix-and-test`.
