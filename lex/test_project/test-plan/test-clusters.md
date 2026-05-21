@@ -383,6 +383,7 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 7.12 | `calculate()` does NOT call `self.save()` | Framework handles saves; model's calculate just does computation |
 | 7.13 | Error message stored | When calculation fails, `calculation_error_message` or `error_message` field populated |
 | 7.14 | Calculation via REST API (PATCH is_calculated=IN_PROGRESS) | API path commits IN_PROGRESS independently, then hooks run |
+| 7.166 | Calculation status API serialization contract | Detail endpoint serializes `is_calculated` as canonical constants and never as `"No"` |
 | 7.32 | Atomic parent, atomic child, both pass | Parent and child both settle at SUCCESS |
 | 7.33 | Atomic parent, atomic child, child fails | Child settles at ERROR and propagates ERROR to parent |
 | 7.34 | Atomic parent, atomic child, parent fails after child pass | Parent settles at ERROR; successful child is rolled back by the parent's atomic transaction |
