@@ -14,8 +14,9 @@ After every successful PyPI publish of `lex-app`, the pipeline automatically:
 2. Creates an issue in `lex-app-docs` with the diff and update instructions.
 3. Assigns the issue to **GitHub Copilot**, which reads the diff, updates docs, and opens a PR.
 4. If Copilot opens a PR with **no actual doc changes** (test-only releases, internal refactors, CI edits), a follow-up workflow in `lex-app-docs` auto-closes that empty PR with an explanatory comment — so the maintainer queue isn't littered with no-op PRs.
+5. For PRs with real changes, `copilot_docs_pr_gate.yml` in `lex-app-docs` validates frontmatter, runs `npm run check` + `npm test` + `npx quartz build`, and on green calls `gh pr merge --auto --squash`. Native GitHub auto-merge merges the PR as soon as required checks pass — **no human click required**.
 
-**No docs go live without human approval** — it's always a PR.
+**Auto-merge is the default for green Copilot docs PRs.** Failed gate runs route the PR to `needs-human-review` instead.
 
 ---
 
@@ -57,8 +58,22 @@ update_docs.yml
                                                                 │  files or 0 line delta:
                                                                 │     comment + close
                                                                 │
-                                                                └─ Otherwise: leave open
-                                                                   for human review
+                                                                └─ Otherwise: hand off to
+                                                                              ▼
+                                                        copilot_docs_pr_gate.yml
+                                                        (on: pull_request)
+                                                                │
+                                                                ├─ Verify Fixes #N → issue
+                                                                │  has documentation+automated
+                                                                ├─ Frontmatter sanity check
+                                                                ├─ npm run check
+                                                                ├─ npm test
+                                                                ├─ npx quartz build
+                                                                │
+                                                                ├─ Green → gh pr merge --auto
+                                                                │           → merged on green CI
+                                                                │
+                                                                └─ Failure → needs-human-review
 ```
 
 ### Why this pattern?
@@ -77,11 +92,13 @@ update_docs.yml
 | `.github/workflows/update_docs.yml` | `lex-app` | Fires `repository_dispatch` after successful publish |
 | `.github/workflows/auto-update-docs.yml` | `lex-app-docs` | Receives event, creates issue, assigns Copilot |
 | `.github/workflows/auto-close-empty-pr.yml` | `lex-app-docs` | Auto-closes empty Copilot PRs (no docs to apply) |
+| `.github/workflows/copilot_docs_pr_gate.yml` | `lex-app-docs` | Validates Copilot doc PRs and applies `gh pr merge --auto` |
 
 Reference copies of the `lex-app-docs` workflows are stored alongside this file:
 
 - [`docs/ci-cd/docs-receiver-workflow.yml`](docs-receiver-workflow.yml) → `lex-app-docs/.github/workflows/auto-update-docs.yml`
 - [`docs/ci-cd/docs-auto-close-empty-pr.yml`](docs-auto-close-empty-pr.yml) → `lex-app-docs/.github/workflows/auto-close-empty-pr.yml`
+- [`docs/ci-cd/docs-pr-gate.yml`](docs-pr-gate.yml) → `lex-app-docs/.github/workflows/copilot_docs_pr_gate.yml`
 
 ---
 
@@ -120,7 +137,7 @@ No secrets needed on `lex-app-docs` — Copilot uses its built-in access.
 2. Enable "Copilot coding agent"
 3. Optionally: go to **`lex-app-docs` → Settings → Copilot → Coding agent** to confirm it's enabled at the repo level
 
-### 4. Copy the receiver + auto-close workflows to `lex-app-docs`
+### 4. Copy the receiver + auto-close + gate workflows to `lex-app-docs`
 
 ```bash
 # From the lex-app repo root:
@@ -129,9 +146,21 @@ cp docs/ci-cd/docs-receiver-workflow.yml \
 
 cp docs/ci-cd/docs-auto-close-empty-pr.yml \
    /path/to/lex-app-docs/.github/workflows/auto-close-empty-pr.yml
+
+cp docs/ci-cd/docs-pr-gate.yml \
+   /path/to/lex-app-docs/.github/workflows/copilot_docs_pr_gate.yml
 ```
 
-Then commit and push to `lex-app-docs`. Both files must live on the default branch of `lex-app-docs` (the `pull_request` trigger fires from the file on the default branch, not the PR's source branch).
+Then commit and push to `lex-app-docs`. All three files must live on the default branch of `lex-app-docs` (the `pull_request` trigger fires from the file on the default branch, not the PR's source branch).
+
+### 5. Enable repo-level auto-merge on `lex-app-docs`
+
+The gate workflow calls `gh pr merge --auto`. GitHub rejects that call unless the repo has auto-merge enabled:
+
+1. Go to **`lex-app-docs` → Settings → General → Pull Requests**
+2. Tick **"Allow auto-merge"**
+
+If branch protection on the default branch requires status checks, list the gate's required checks there too — otherwise `--auto` will wait forever for a check that never becomes required.
 
 ---
 
@@ -175,6 +204,19 @@ If Copilot decides the code changes don't affect any existing docs, one of two t
 2. **Common case:** Copilot opens an empty PR anyway. `auto-close-empty-pr.yml` will detect the empty diff (0 files changed *or* 0 line delta) and close the PR with a comment explaining why. Look for runs of "Auto-Close Empty Docs PR" in the `lex-app-docs` Actions tab if you want to audit which PRs were auto-closed.
 
 Either way is normal for test-only releases, internal refactors, and CI-only changes.
+
+### Gate ran but the PR never merged
+`gh pr merge --auto` queues the merge — it only fires when *every required check* on the default-branch protection rule has passed. If the gate is green but the PR sits:
+
+- Confirm `Allow auto-merge` is still enabled in repo settings (someone may have toggled it off).
+- Confirm the required-checks list on the branch protection rule includes only checks that actually run on this PR. A stale required check (e.g. from upstream Quartz CI gated to `jackyzha0/quartz`) will never report and will block the merge forever.
+- The PR will display "Waiting for status checks to complete" — the missing/never-reporting check is named there.
+
+### Gate failed but the failure looks unrelated to docs
+Copilot occasionally pushes a commit that fails `npm run check` (prettier reformatting) or `npm test` (a flaky upstream Quartz test). Two options:
+
+1. Push a fixup commit to Copilot's branch — the gate re-runs on `synchronize` and will auto-merge if green.
+2. Manually merge after eyeballing the diff — the `needs-human-review` label is just a signal, it doesn't actually block merge.
 
 ### Auto-close fired on a PR that had real changes
 The auto-close workflow gates on `pull_request.user.login == 'copilot-swe-agent[bot]'` and on `gh pr view --json files`. If a non-empty PR was closed:

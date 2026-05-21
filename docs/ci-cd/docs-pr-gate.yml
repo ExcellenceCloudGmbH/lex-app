@@ -1,0 +1,168 @@
+# ──────────────────────────────────────────────────────────────────────
+#  THIS FILE GOES IN: lex-app-docs/.github/workflows/copilot_docs_pr_gate.yml
+#
+#  Copy this file to the lex-app-docs repository.
+#
+#  Copilot Docs PR Gate — validate and auto-merge Copilot doc updates.
+#
+#  Mirrors lex-app's `copilot_pr_gate.yml`. Runs whenever Copilot opens
+#  or updates a PR against this repo. Validates:
+#    1. PR author is `copilot-swe-agent[bot]` (skip otherwise — humans
+#       use the normal PR review flow).
+#    2. The PR links to an issue with the `documentation` + `automated`
+#       labels — i.e. it came from `auto-update-docs.yml`. This rules
+#       out unrelated Copilot work in the same repo.
+#    3. Modified `.md` files under `content/` still have valid Quartz
+#       frontmatter (--- block at the top with at least a `title:` key).
+#    4. `npm run check` passes (tsc --noEmit + prettier --check).
+#    5. `npm test` passes.
+#    6. `npx quartz build` succeeds on the PR's content.
+#
+#  On all-green: applies `auto-merge` label and calls
+#  `gh pr merge --auto --squash` — native GitHub auto-merge then takes
+#  over and merges as soon as required checks pass.
+#
+#  On any failure: applies `needs-human-review` label and posts a
+#  comment listing what failed; the PR is left open for a maintainer.
+#
+#  Prerequisite:
+#    Repo Settings → General → Pull Requests → "Allow auto-merge" must
+#    be enabled. Without it, `gh pr merge --auto` errors out.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Copilot Docs PR Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Serialise runs per PR so a fast follow-up push doesn't race the
+# previous run's label/merge calls.
+concurrency:
+  group: copilot-docs-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only act on Copilot-authored PRs. Humans go through the normal
+    # review flow with no auto-merge.
+    if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      # ── 1. Verify PR trail (Fixes #N → automated docs issue) ─────
+      - name: Verify PR links to an automated docs issue
+        id: trail
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # Extract first `Fixes #N` (or `Closes #N`, `Resolves #N`) from the body.
+          ISSUE=$(echo "$PR_BODY" | grep -ioE '(fixes|closes|resolves) #[0-9]+' | head -n1 | grep -oE '[0-9]+' || true)
+          if [[ -z "$ISSUE" ]]; then
+            echo "::error::PR body has no 'Fixes #N' line — cannot verify it came from the automated docs pipeline."
+            exit 1
+          fi
+          echo "Linked issue: #$ISSUE"
+          LABELS=$(gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' | tr '\n' ',' || true)
+          echo "Issue labels: $LABELS"
+          if [[ ",$LABELS," != *",documentation,"* ]] || [[ ",$LABELS," != *",automated,"* ]]; then
+            echo "::error::Linked issue #$ISSUE lacks 'documentation' + 'automated' labels — not an auto-update-docs issue."
+            exit 1
+          fi
+          echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
+
+      # ── 2. Frontmatter sanity check on modified content/*.md ─────
+      - name: Validate Quartz frontmatter on modified pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          MODIFIED=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json files --jq '.files[].path' \
+            | grep -E '^content/.*\.md$' || true)
+          if [[ -z "$MODIFIED" ]]; then
+            echo "No content/*.md files modified — frontmatter check skipped."
+            exit 0
+          fi
+          FAILED=0
+          while IFS= read -r FILE; do
+            [[ -z "$FILE" ]] && continue
+            # Frontmatter must be a `---` block at line 1 containing a `title:` key.
+            HEAD=$(head -n 20 "$FILE")
+            if ! echo "$HEAD" | head -n1 | grep -qE '^---\s*$'; then
+              echo "::error file=$FILE::missing opening '---' frontmatter delimiter on line 1"
+              FAILED=1
+              continue
+            fi
+            if ! echo "$HEAD" | grep -qE '^title:\s'; then
+              echo "::error file=$FILE::frontmatter has no 'title:' key in first 20 lines"
+              FAILED=1
+            fi
+          done <<< "$MODIFIED"
+          exit "$FAILED"
+
+      # ── 3. Node toolchain + deps ─────────────────────────────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache npm deps
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install deps
+        run: npm ci
+
+      # ── 4. tsc + prettier ────────────────────────────────────────
+      - name: Type & style check
+        run: npm run check
+
+      # ── 5. Unit tests ────────────────────────────────────────────
+      - name: Tests
+        run: npm test
+
+      # ── 6. Quartz build sanity ───────────────────────────────────
+      - name: Quartz build
+        run: npx quartz build
+
+      # ── 7. All green → auto-merge ────────────────────────────────
+      - name: Apply auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr edit  "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "auto-merge"
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto
+
+      # ── 8. On failure → route to human review ────────────────────
+      - name: Route to human review
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "needs-human-review"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Copilot Docs PR Gate failed — see $RUN_URL. Auto-merge not applied; this PR needs human review."
