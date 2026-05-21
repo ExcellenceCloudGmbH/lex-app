@@ -431,6 +431,31 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 ---
 
+### 7m. `is_calculated` status value integrity — regression gate for issue #60 ✅
+
+**Gap:** No test previously asserted that the `is_calculated` field only ever holds one of the five documented status constants (`IN_PROGRESS`, `SUCCESS`, `ERROR`, `NOT_CALCULATED`, `ABORTED`). A customer reported receiving the value `"No"` in the frontend, which is not a valid status. This sub-cluster is the regression gate for that bug report.
+
+**The invariant the framework guarantees (two layers):**
+1. **Model layer** — `CharField(editable=False, choices=STATUSES)` restricts the ORM's validation layer to the five constants.
+2. **REST layer** — `One._prepare_update_request` normalises `is_calculated` to `NOT_CALCULATED` on every plain PATCH (one that does **not** carry `calculate=true`), so an incoming payload that contains an invalid value like `"No"` is silently discarded before the record is saved.
+
+**Models needed:** `AtomicCalc` (reused).
+
+**Test scenarios:**
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 7.155 | New record default status | `is_calculated` defaults to `NOT_CALCULATED`; never `"No"` or any other out-of-set value |
+| 7.156 | Successful calculation status | After a successful `calculate()`, final state is `SUCCESS` (always in the valid set) |
+| 7.157 | Failed calculation status | After a raising `calculate()`, final state is `ERROR` (always in the valid set) |
+| 7.158 | GET API response includes valid status | `GET /api/<model>/<id>/` returns `is_calculated` as one of the five documented statuses |
+| 7.159 | PATCH without `calculate=true` returns valid status | Plain PATCH always normalises `is_calculated` back to `NOT_CALCULATED` in both response and DB |
+| 7.160 | PATCH with `is_calculated="No"` does not corrupt status | The REST layer discards the invalid value; response and DB record remain valid — direct regression gate for issue #60 |
+
+**Status:** ✅ Complete — covers `lex/test_project/tests/calculations/test_7m_valid_statuses.py`.
+
+---
+
 ## 8. Celery & Async
 
 **What it tests:** Task dispatch to Celery, sync fallback when Celery is unavailable, `FireAndForget` / `WaitForTasks` context managers, and nested calculation dispatch.

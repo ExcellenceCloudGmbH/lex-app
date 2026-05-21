@@ -267,14 +267,30 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 -->
 
 
-### Batch 7m — Calculation signals & active-state store
+### Batch 7m — `is_calculated` status value integrity (issue #60 regression gate) ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 7.155 – 7.165 |
+| Scenario range | 7.155 – 7.160 |
+| Type | I + E |
+| Files covered | `core/models/CalculationModel.py`, `api/views/model_entries/One.py` (REST-layer normalisation) |
+| Test file | `lex/test_project/tests/calculations/test_7m_valid_statuses.py` |
+| Test classes | `TestCluster07m_ValidStatuses` |
+| Fixtures | `AtomicCalc` (existing) |
+| Tests landed | **6 pass / 0 fail** |
+| Coverage gain | +0.2 % (estimated) |
+| Status | ✅ Complete — issue #60 regression gate. |
+
+> **Note:** The originally-planned 7m batch (calculation signals & active-state store) is shifted to **7n** (next free letter). Its `ActiveCalculationStateStore` surface was also covered by sub-cluster **9d** (Session 60); the `CalculationSignals.py` portion remains as 7n when scheduled.
+
+### Batch 7n — Calculation signals & active-state store *(next)*
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.161 – 7.171 |
 | Type | I |
 | Files covered | `core/signals/CalculationSignals.py`, `core/signals/ActiveCalculationStateStore.py` |
-| Test file | `lex/test_project/tests/calculations/test_7m_calc_signals.py` |
+| Test file | `lex/test_project/tests/calculations/test_7n_calc_signals.py` |
 | Test classes | `TestCalculationSignalsPrePost` (signal fires, payload shape), `TestActiveCalculationStateStore` (registration, cleanup on success + on failure) |
 | Fixtures | `AtomicCalc`, `FailingCalc` (existing) |
 | Est. tests | ~10 |
