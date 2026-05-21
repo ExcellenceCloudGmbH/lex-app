@@ -127,5 +127,3 @@ lex/test_project/
 - **[Expected Results](expected-results.md)** — KPIs, success criteria, and timeline
 - **[Progress & Organization](progress.md)** — How we measure progress, track quality, and stay organized
 - **[Cleanup & Coverage Completion Plan](cleanup-and-coverage-plan.md)** — May 2026 supervisor categorisation (EXCLUDE / DELETE / COMPLETE / LATER) with dependency triage and cluster mapping
-- **[Testing Methodology](../testing-methodology.md)** — Original methodology document (reference)
-- **[Testing Progress](../testing-progress.md)** — Historical progress tracking (reference)

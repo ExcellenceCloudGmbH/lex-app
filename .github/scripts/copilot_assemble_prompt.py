@@ -31,6 +31,12 @@ class IssueInput:
     files: list[str] = field(default_factory=list)
 
 
+# GitHub caps issue bodies at 65,536 bytes. Stay well under so a slow drift in
+# conventions.md or the Golden Rule paragraph doesn't suddenly tip us over at
+# `gh issue create` time. The big files (test-clusters.md, test-writing-plan.md)
+# are referenced by path, not inlined — Copilot reads them from the repo.
+_MAX_BODY_BYTES = 60_000
+
 _GOLDEN_RULE_ANCHOR = "## Golden Rule"
 
 _MODE_BLOCKS: dict[Mode, str] = {
@@ -69,9 +75,15 @@ def assemble_prompt(issue: IssueInput, *, test_plan_dir: Path) -> str:
         raise ValueError(f"reproducer is required for mode {issue.mode.value}")
 
     index_md = _read(test_plan_dir / "index.md")
-    clusters_md = _read(test_plan_dir / "test-clusters.md")
-    writing_md = _read(test_plan_dir / "test-writing-plan.md")
     conventions_md = _read(test_plan_dir / "progress" / "conventions.md")
+    # test-clusters.md and test-writing-plan.md are referenced by path, not
+    # inlined (they're too large for GitHub's 64KB issue body cap — clusters
+    # alone is ~160KB). We still _verify they exist_ so a typo or a moved file
+    # blows up here at prompt-assembly time, not later when Copilot follows a
+    # dead link from the issue body.
+    for required in ("test-clusters.md", "test-writing-plan.md"):
+        if not (test_plan_dir / required).exists():
+            raise FileNotFoundError(f"required test-plan file missing: {test_plan_dir / required}")
 
     # Pull the Golden Rule paragraph out of index.md so it's front-loaded.
     if _GOLDEN_RULE_ANCHOR in index_md:
@@ -85,7 +97,7 @@ def assemble_prompt(issue: IssueInput, *, test_plan_dir: Path) -> str:
     reproducer_block = issue.reproducer.strip() or "(none provided)"
     hint_block = issue.cluster_hint.strip() or "(blank — fall back to cluster routing rules)"
 
-    return f"""\
+    body = f"""\
 # Copilot task
 
 > Assembled from issue #{issue.number}. Read the Golden Rule first.
@@ -104,13 +116,13 @@ def assemble_prompt(issue: IssueInput, *, test_plan_dir: Path) -> str:
 
 ## Cluster catalogue
 
-{clusters_md.strip()}
+**Read `lex/test_project/test-plan/test-clusters.md` in this repo before picking a cluster.** That file owns every cluster's scope, scenarios, and status. The cluster routing rules below depend on it.
 
 ---
 
 ## Writing-plan rules (file naming, scenario IDs, sub-clusters)
 
-{writing_md.strip()}
+**Read `lex/test_project/test-plan/test-writing-plan.md` in this repo before creating the test file.** That file owns file naming, scenario IDs, and sub-cluster allocation rules.
 
 ---
 
@@ -160,6 +172,18 @@ State your placement decision in the PR description: *"Placed under cluster Nx b
 
 End the PR body with the exact line: `Fixes #{issue.number}` so the gate workflow can find this issue.
 """
+    # Belt to keep the bug fixed: if conventions.md or the Golden Rule grow
+    # large enough to threaten the 64KB cap, fail loud in CI rather than at
+    # `gh issue create` time (which surfaced as a cryptic
+    # "GraphQL: Body is too long" in the 2026-05-21 production run).
+    size = len(body.encode("utf-8"))
+    if size > _MAX_BODY_BYTES:
+        raise ValueError(
+            f"assembled prompt is {size} bytes — exceeds {_MAX_BODY_BYTES}-byte cap. "
+            "Trim conventions.md / the Golden Rule paragraph in index.md, or move "
+            "more content behind a 'read this file in the repo' pointer."
+        )
+    return body
 
 
 def _cli() -> None:

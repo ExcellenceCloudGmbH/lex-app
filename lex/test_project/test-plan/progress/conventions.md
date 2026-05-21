@@ -25,20 +25,16 @@ Don't start Cluster N+1 until Cluster N is  or . This keeps work focused and pro
 
 ### Rule: Test Intent, Never Overfit to Source Code
 
-> **The source code is an incomplete story.** It has bugs, shortcuts, and workarounds.
+> Canonical statement (philosophy + red flags) lives in **[test-clusters.md → Testing Philosophy](../test-clusters.md#testing-philosophy)**. Read it once before writing any test.
 >
-> Tests must assert what the framework is **trying to achieve** — derived from the docs, the public API, and what a customer would reasonably expect. Never write a test by reading the current implementation and asserting "what the code does today."
->
-> **If the code is buggy, the test fails. That is correct.** Mark the failing test `@unittest.expectedFailure`, add the bug to the [Known Bugs Tracker](#known-bugs-tracker), and move on. The test now guards against the bug being forgotten.
->
-> **Never** weaken a test to make it pass on broken code. That is how the old suite ended up with 2,000 green tests that missed real bugs. See [Golden Rule + red flags in test-clusters.md](../test-clusters.md#testing-philosophy).
+> Operational corollary for this file: when a test exposes a bug, mark it `@unittest.expectedFailure`, add the bug to the [Known Bugs Tracker](../known-bugs.md), and continue — see the next rule.
 
 ### Rule: Test First, Then Fix
 
 When a test exposes a framework bug:
 1. Write the test asserting the **correct** behavior (from docs / intent)
 2. Mark it `@unittest.expectedFailure` with a comment explaining the bug and linking the tracker entry
-3. Add the bug to [Known Bugs Tracker](#known-bugs-tracker)
+3. Add the bug to the [Known Bugs Tracker](../known-bugs.md)
 4. Move on — don't block the test suite on the fix
 5. When the bug is fixed, remove `@unittest.expectedFailure` — the test should now pass naturally
 
@@ -138,7 +134,7 @@ Before any release, these must hold:
 2. **Zero unexpected failures** — every failure is either a passing test or an `expectedFailure` with a tracked bug
 3. **CI pipeline green** — `lex test lex.test_project.tests --noinput` passes in CI
 4. **No overfitting** — no test uses `skip_hooks=True` + `calculate_hook()` (the pattern that works around bugs). No test mocks the class under test. No test was written by reading the implementation instead of the docs.
-5. **Every `expectedFailure` is tracked** — must have an entry in [Known Bugs Tracker](#known-bugs-tracker) with severity and cluster
+5. **Every `expectedFailure` is tracked** — must have an entry in the [Known Bugs Tracker](../known-bugs.md) with severity and cluster
 6. **Coverage threshold met** — `COVERAGE_FAIL_UNDER` not decreased
 
 ---

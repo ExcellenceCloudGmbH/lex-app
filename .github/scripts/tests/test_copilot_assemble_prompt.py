@@ -117,3 +117,54 @@ def test_blank_reproducer_rejected_for_fix_and_test(fake_test_plan: Path) -> Non
     )
     with pytest.raises(ValueError, match="reproducer is required"):
         assemble_prompt(issue, test_plan_dir=fake_test_plan)
+
+
+def test_assembled_prompt_does_not_inline_large_test_plan_files(fake_test_plan: Path) -> None:
+    """Regression: production failed 2026-05-21 with `GraphQL: Body is too long`
+    because the assembler inlined test-clusters.md (~160KB) directly into the
+    issue body. The fix is to reference those files by path; Copilot reads
+    them from the repo. Pin the new contract: their contents must NOT appear
+    in the output, but their paths MUST."""
+    # Pad both big files past 64KB so this test catches a regression even on a
+    # small repo. If the assembler ever re-inlines them, the size guard would
+    # fire first; this test pins the design intent independently.
+    (fake_test_plan / "test-clusters.md").write_text("CLUSTERS_SENTINEL\n" + ("x" * 70_000))
+    (fake_test_plan / "test-writing-plan.md").write_text("WRITING_PLAN_SENTINEL\n" + ("y" * 70_000))
+    out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+    assert "CLUSTERS_SENTINEL" not in out
+    assert "WRITING_PLAN_SENTINEL" not in out
+    assert "lex/test_project/test-plan/test-clusters.md" in out
+    assert "lex/test_project/test-plan/test-writing-plan.md" in out
+
+
+def test_assembled_prompt_fits_under_github_issue_body_cap(fake_test_plan: Path) -> None:
+    """GitHub's createIssue mutation caps issue body at 65,536 bytes. The
+    assembler enforces a 60,000-byte margin. Even with realistic-ish
+    conventions content, the body must fit."""
+    # Realistic-ish conventions.md size — currently ~5KB; pad to 20KB headroom.
+    (fake_test_plan / "progress" / "conventions.md").write_text("# Conventions\n\n" + ("c" * 20_000))
+    out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+    assert len(out.encode("utf-8")) <= 60_000
+
+
+def test_size_guard_raises_when_conventions_exceeds_cap(fake_test_plan: Path) -> None:
+    """If a future edit to conventions.md or the Golden Rule paragraph pushes
+    the body past the cap, fail loud in CI — not at `gh issue create` time."""
+    (fake_test_plan / "progress" / "conventions.md").write_text("# Conventions\n\n" + ("z" * 80_000))
+    with pytest.raises(ValueError, match="exceeds .* cap"):
+        assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+
+
+def test_missing_test_clusters_file_raises(fake_test_plan: Path) -> None:
+    """The pointer pattern doesn't read test-clusters.md, but its existence is
+    still a precondition — a missing file would leave Copilot with a dead
+    pointer. Verify the existence check fires."""
+    (fake_test_plan / "test-clusters.md").unlink()
+    with pytest.raises(FileNotFoundError, match="test-clusters.md"):
+        assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+
+
+def test_missing_test_writing_plan_file_raises(fake_test_plan: Path) -> None:
+    (fake_test_plan / "test-writing-plan.md").unlink()
+    with pytest.raises(FileNotFoundError, match="test-writing-plan.md"):
+        assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)

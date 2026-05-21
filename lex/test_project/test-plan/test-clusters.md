@@ -42,7 +42,7 @@ This ordering means: **if cluster N is broken, clusters N+1 through 10 are also 
 > 3. Ask: _"What would a customer reasonably expect from this feature?"_
 > 4. Write the test for **that** — even if the current code fails it
 >
-> **If a test fails because the code is buggy: good.** Mark it `@unittest.expectedFailure` with a reference in [progress.md — Known Bugs Tracker](progress.md#known-bugs-tracker). The failure is the test doing its job.
+> **If a test fails because the code is buggy: good.** Mark it `@unittest.expectedFailure` with a reference in the [Known Bugs Tracker](known-bugs.md). The failure is the test doing its job.
 >
 > **Never adjust a test to match broken behavior.** That is overfitting, and it is how we ended up with 2,000 green tests that missed real production bugs.
 
