@@ -53,7 +53,10 @@ jobs:
     timeout-minutes: 15
     # Only act on Copilot-authored PRs. Humans go through the normal
     # review flow with no auto-merge.
-    if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
+    # NOTE: Copilot coding agent's PR author login is literally `Copilot`
+    # (user.type == 'Bot'). The `copilot-swe-agent[bot]` form is just a
+    # display name in the GitHub UI. Accept both spellings.
+    if: github.event.pull_request.user.login == 'Copilot' || github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
 
     steps:
       - name: Checkout PR head

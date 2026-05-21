@@ -33,7 +33,11 @@ concurrency:
 
 jobs:
   gate:
-    if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
+    # NOTE: The Copilot coding agent's PR author login is literally `Copilot`
+    # (user.type == 'Bot', user.id 198982749). The `copilot-swe-agent[bot]`
+    # form is a *display* name in the GitHub UI — not the actual login.
+    # Accept both spellings to stay resilient to future renaming.
+    if: github.event.pull_request.user.login == 'Copilot' || github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

@@ -30,9 +30,11 @@ concurrency:
 
 jobs:
   draft-release:
+    # NOTE: Copilot coding agent's PR author login is `Copilot` (the
+    # `copilot-swe-agent[bot]` form is just a display name). Accept both.
     if: >-
       github.event.pull_request.merged == true &&
-      github.event.pull_request.user.login == 'copilot-swe-agent[bot]' &&
+      (github.event.pull_request.user.login == 'Copilot' || github.event.pull_request.user.login == 'copilot-swe-agent[bot]') &&
       contains(github.event.pull_request.labels.*.name, 'auto-merge') &&
       contains(github.event.pull_request.labels.*.name, 'publish-on-merge') &&
       vars.COPILOT_AUTO_PUBLISH_ENABLED == 'true'

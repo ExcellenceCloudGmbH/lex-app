@@ -39,10 +39,12 @@ jobs:
     runs-on: ubuntu-latest
 
     # Gate on author: only act on PRs authored by Copilot's coding
-    # agent. The login GitHub uses is `copilot-swe-agent[bot]`.
+    # agent. The actual login is literally `Copilot` (user.type ==
+    # 'Bot'); the `copilot-swe-agent[bot]` form is just a UI display
+    # name. Accept both spellings.
     # `pull_request.user.login` is the PR author (not the merger),
     # which is what we want here.
-    if: github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
+    if: github.event.pull_request.user.login == 'Copilot' || github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
 
     permissions:
       # `pull-requests: write` is the minimum to comment + close.
