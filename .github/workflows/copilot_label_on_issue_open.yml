@@ -36,7 +36,13 @@ jobs:
     steps:
       - name: Parse form fields + apply labels
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # MUST be a PAT (not GITHUB_TOKEN). GitHub deliberately drops
+          # workflow events triggered by GITHUB_TOKEN to prevent infinite
+          # loops. If we add the label with GITHUB_TOKEN, the resulting
+          # `issues: labeled` event will NOT fire copilot_test_bot.yml,
+          # and the whole pipeline silently no-ops. COPILOT_PAT is a
+          # human PAT, so its events do propagate.
+          GH_TOKEN: ${{ secrets.COPILOT_PAT }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
