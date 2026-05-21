@@ -24,6 +24,7 @@ from __future__ import annotations
 import uuid
 
 from django.db import models
+from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 
@@ -283,6 +284,39 @@ class EditScopedItem(LexModel):
         return True
 
 
+class CalculationStatusItem(CalculationModel):
+    """Calculated row used to pin the API's public status-string contract."""
+
+    name = models.CharField(max_length=200)
+    should_fail = models.BooleanField(default=False)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        if self.should_fail:
+            raise RuntimeError(f"CalculationStatusItem({self.name!r}) failing on purpose")
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12: calc status read open")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 12: calc status edit open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [
     RelatedItem,
     WideItem,
@@ -290,6 +324,7 @@ ALL_MODELS = [
     TagItem,
     TaggableItem,
     EditScopedItem,
+    CalculationStatusItem,
 ]
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
@@ -299,4 +334,4 @@ PROTECTED_WIDE = "protectedwideitem"
 TAG = "tagitem"
 TAGGABLE = "taggableitem"
 EDIT_SCOPED = "editscopeditem"
-
+CALC_STATUS = "calculationstatusitem"

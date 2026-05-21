@@ -1019,6 +1019,19 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 
 **Status:**  Complete — 3 pass / 0 fail. See progress.md Sessions 18 + 29.
 
+### 12g. Calculation status JSON contract
+
+**Gap:** issue #54 reported the frontend sometimes seeing `"No"` in the calculation-status column. This sub-cluster pins the API contract at the serializer boundary: calculated rows must expose the framework's canonical enum strings, never ad-hoc display labels.
+
+**Models:** `CalculationStatusItem` in `serializers/models.py` — a tiny `CalculationModel` fixture that can be observed in untouched / success / error / post-edit states through the real REST endpoints.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 12.36 | List rows expose only canonical calculation-status strings | Untouched / successful / failed rows serialize as `NOT_CALCULATED` / `SUCCESS` / `ERROR` — never `"No"` |
+| 12.37 | PATCH response resets to the canonical `NOT_CALCULATED` string | Editing a calculated row returns and persists `NOT_CALCULATED` (string, not a label / boolean) |
+
+**Status:**  Complete — 2 pass / 0 fail. See progress.md Session 66.
+
 ### 10e. Schema introspection — `create_field_info` + structure-tree pruning 
 
 **Gap:** `ModelStructureObtainView.py` (102 stmts, 21.54% baseline) and `model_info/Fields.py` (67 stmts, 22.35% baseline) drive every frontend form + nav menu. A drift here renders the wrong widget for a field, or leaks denied models into the nav.
