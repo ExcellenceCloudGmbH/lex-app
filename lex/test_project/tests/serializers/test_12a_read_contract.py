@@ -42,7 +42,7 @@ class TestCluster12a_ReadContract(E2ETestCase):
 
     e2e_models = ALL_MODELS
 
-    def _with_wide_api_serializers(self, serializers_map: dict[str, type]) -> None:
+    def _install_wide_api_serializers(self, serializers_map: dict[str, type]) -> None:
         """Temporarily install ``WideItem.api_serializers`` for one test."""
         had_api_serializers = hasattr(WideItem, "api_serializers")
         original_api_serializers = getattr(WideItem, "api_serializers", None)
@@ -93,7 +93,7 @@ class TestCluster12a_ReadContract(E2ETestCase):
                 model = WideItem
                 fields = model_fields + ["secret_input"]
 
-        self._with_wide_api_serializers({"detail": WideDetailSerializer})
+        self._install_wide_api_serializers({"detail": WideDetailSerializer})
 
         item = WideItem.objects.create(name="alpha", amount="10.0000")
 
