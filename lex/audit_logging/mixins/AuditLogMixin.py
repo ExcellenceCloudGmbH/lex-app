@@ -261,7 +261,12 @@ class AuditLogMixin:
             audit_log.object_id = instance.pk
             audit_log.payload = updated_payload
             audit_log.save()
-            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
+            # When a background calculation is pending (HTTP 202 path),
+            # leave the status as 'pending' — the terminal audit
+            # (ensure_terminal_calculation_audit) will set it to
+            # 'success' or 'failure' once the calculation completes.
+            if not getattr(instance, "_defer_calculate_hook", False):
+                AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return instance
         except Exception as e:
             error_msg = _resolve_audit_failure_traceback(e)

@@ -611,6 +611,10 @@ class OneModelEntry(
                         # update_calculation_status WebSocket.
                         from contextvars import copy_context
                         from lex.core.models.CalculationModel import _calculation_executor
+                        from lex.audit_logging.utils.ModelContext import (
+                            _model_context,
+                            ModelContext,
+                        )
                         from django.db import close_old_connections
 
                         ctx = copy_context()
@@ -620,6 +624,24 @@ class OneModelEntry(
                             # request's ``operation_context`` (with
                             # ``calculation_id``) is visible to both the
                             # hook and the terminal-audit finalizer.
+                            #
+                            # Install a FRESH model context for the
+                            # background thread.  ``copy_context()``
+                            # captures a reference to the same mutable
+                            # ``ModelContext`` object that the request
+                            # thread's ``model_logging_context`` will
+                            # pop upon returning the 202 response.  By
+                            # the time this thread starts, the shared
+                            # stack is empty → ContextResolver.resolve()
+                            # cannot determine ``current_record`` →
+                            # WebSocket log delivery and cache routing
+                            # break.  Setting a new ModelContext here
+                            # (inside ``ctx.run``) scopes it to this
+                            # execution without affecting the request
+                            # thread.
+                            _model_context.set(
+                                {"model_context": ModelContext([instance])}
+                            )
                             instance._defer_calculate_hook = False
                             try:
                                 instance.calculate_hook()
