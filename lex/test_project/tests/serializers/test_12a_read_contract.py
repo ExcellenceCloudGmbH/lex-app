@@ -96,7 +96,6 @@ class TestCluster12a_ReadContract(E2ETestCase):
         self._with_wide_api_serializers({"detail": WideDetailSerializer})
 
         item = WideItem.objects.create(name="alpha", amount="10.0000")
-        item._history_change_reason = "must stay internal"
 
         resp = self.client.get(
             self.url_detail(WIDE, item.pk),
