@@ -1447,6 +1447,20 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 ---
 
+### 8m. Sync-fallback threadpool contract (regression) — implemented
+
+**Gap:** The threadpool refactor moved async handoff to `OneModelEntry.update()` (HTTP-202 path), while sync fallback in `CalculationModel.calculate_hook` now runs inline. Without a dedicated regression test, a future re-introduction of nested threadpool submission would silently move user `calculate()` code to a second thread and re-open cross-thread behavior drift.
+
+**Models:** `CelerySyncCalc` (`E2ETestCase` real model + real save path).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.72 | `CELERY_ACTIVE=False` sync fallback runs `calculate()` on the caller thread | The thread id captured inside `calculate()` matches the thread id that invoked `save()`, and final state is `SUCCESS` |
+
+**Status:**  Implemented (Session 66). 1 pass in 0.4s. See `lex/test_project/tests/celery_async/test_8m_threadpool_sync_fallback.py` and progress/session-log.md Session 66.
+
+---
+
 ### 10i. `Fields` APIView dispatch + `create_list_ui_info` helper (coverage-driven — May 12) — implemented
 
 **Gap:** 10e (Sessions 18 + 20) had covered `create_field_info` purely as a unit helper; the `/api/<model>/fields/?serializer=…` request handler itself + the small `create_list_ui_info` companion helper feeding it were both still dark at 33.68% baseline (75 stmts / 45 missed). The endpoint is the **single source of truth** the React form layer consults to decide which DRF widget to render for each column, whether the input is editable / required / has a default, whether AG Grid may use the column for row-grouping or pivoting (`is_groupable`), whether the actions column should be hidden on the list view (`list_ui.hide_actions_column`), and which serializer alternates exist. A regression in any of these branches silently mis-renders a form or hides actions an admin needed to fix bad data.
