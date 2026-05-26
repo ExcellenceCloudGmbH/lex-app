@@ -24,6 +24,7 @@ import unittest
 
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 from rest_framework import status
+from rest_framework import serializers as drf_serializers
 
 from .models import (
     ALL_MODELS,
@@ -40,6 +41,20 @@ class TestCluster12a_ReadContract(E2ETestCase):
     """GET /api/<model>/<pk>/ — JSON shape contract."""
 
     e2e_models = ALL_MODELS
+
+    def _with_wide_api_serializers(self, serializers_map: dict[str, type]) -> None:
+        """Temporarily install ``WideItem.api_serializers`` for one test."""
+        had_api_serializers = hasattr(WideItem, "api_serializers")
+        original_api_serializers = getattr(WideItem, "api_serializers", None)
+
+        def _restore() -> None:
+            if had_api_serializers:
+                WideItem.api_serializers = original_api_serializers
+            elif hasattr(WideItem, "api_serializers"):
+                delattr(WideItem, "api_serializers")
+
+        self.addCleanup(_restore)
+        WideItem.api_serializers = serializers_map
 
     # -- 12.1 ----------------------------------------------------------
     def test_12_1_detail_contains_framework_managed_keys(self) -> None:
@@ -61,6 +76,57 @@ class TestCluster12a_ReadContract(E2ETestCase):
                 field_name, resp.data,
                 f"Model field {field_name!r} must be in detail response",
             )
+
+    # -- 12.1b ---------------------------------------------------------
+    def test_12_1b_detail_matches_model_fields_and_omits_write_only(self) -> None:
+        """Scenario 12.1b: GET detail exposes the model field surface, keeps
+        the primary key, omits write-only serializer inputs, and never leaks
+        underscore-prefixed internal attributes.
+        """
+
+        model_fields = [f.name for f in WideItem._meta.fields]
+
+        class WideDetailSerializer(drf_serializers.ModelSerializer):
+            secret_input = drf_serializers.CharField(write_only=True, required=False)
+
+            class Meta:
+                model = WideItem
+                fields = model_fields + ["secret_input"]
+
+        self._with_wide_api_serializers({"detail": WideDetailSerializer})
+
+        item = WideItem.objects.create(name="alpha", amount="10.0000")
+        item._history_change_reason = "must stay internal"
+
+        resp = self.client.get(
+            self.url_detail(WIDE, item.pk),
+            data={"serializer": "detail"},
+        )
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        expected_keys = set(model_fields) | FRAMEWORK_KEYS
+        actual_keys = set(resp.data.keys())
+        self.assertEqual(
+            actual_keys,
+            expected_keys,
+            "GET detail must expose exactly the model fields plus the "
+            "framework-managed keys — no write-only or internal extras.",
+        )
+        self.assertEqual(
+            resp.data["id"], item.pk,
+            "GET detail must include the primary key under `id`.",
+        )
+        self.assertNotIn(
+            "secret_input",
+            resp.data,
+            "Write-only serializer inputs must never appear in GET responses.",
+        )
+        leaked_internal_keys = sorted(k for k in resp.data if k.startswith("_"))
+        self.assertFalse(
+            leaked_internal_keys,
+            f"GET detail leaked underscore-prefixed internal keys: {leaked_internal_keys}",
+        )
 
     # -- 12.2 ----------------------------------------------------------
     def test_12_2_short_description_uses_model_str(self) -> None:
@@ -185,4 +251,3 @@ class TestCluster12a_ReadContract(E2ETestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-
