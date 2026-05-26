@@ -34,6 +34,7 @@ class TestCluster08m_ThreadpoolSyncFallback(E2ETestCase):
         calc.calculate = MethodType(track_calculate_thread, calc)
         calc.is_calculated = CalculationModel.IN_PROGRESS
         calc.save()
+        calc.refresh_from_db()
 
         self.assertEqual(
             calc.is_calculated,
