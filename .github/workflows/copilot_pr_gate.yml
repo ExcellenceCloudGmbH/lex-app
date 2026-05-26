@@ -73,6 +73,16 @@ jobs:
           # interpreter the project itself targets.
           python-version: "3.12.0"
 
+      - name: Install system dependencies
+        # pycairo + weasyprint dependencies build from source without
+        # these. Must mirror showcase_tests.yml or `pip install` of
+        # requirements.txt fails with "Package 'cairo' not found".
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcairo2-dev pkg-config \
+            libpango-1.0-0 libpangoft2-1.0-0
+
       - name: Install lex-app
         # `pip install -e .` puts the project's `lex` console-script on
         # PATH — Mode-A/B/C invoke `lex test ...` (Django manage entry).
