@@ -1,6 +1,5 @@
 name: Copilot Test Request
 description: Ask the Copilot test-bot to author (and optionally fix) a test for a behaviour or bug.
-title: ""
 labels: []
 body:
   - type: markdown
