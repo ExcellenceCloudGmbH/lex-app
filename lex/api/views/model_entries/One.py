@@ -564,6 +564,12 @@ class OneModelEntry(
                             calculationId,
                         )
                         CacheManager.store_message(cache_key, "")
+
+                        # ── Async calculation (HTTP 202) ────────────────────
+                        # Defer the calculation hook so that
+                        # UpdateModelMixin.update() saves any additional field
+                        # data WITHOUT triggering the heavy calculation inline.
+                        instance._defer_calculate_hook = True
                     prepared_request = self._prepare_update_request(
                         request,
                         reset_is_calculated=should_reset_is_calculated,
@@ -576,6 +582,37 @@ class OneModelEntry(
                             skip_history=should_skip_history_for_sharepoint_edit,
                             history_change_reason=sharepoint_history_change_reason,
                         )
+
+                    if self._calculate_requested:
+                        # Fire the calculation in the background and return
+                        # HTTP 202 immediately.  The frontend already listens
+                        # for calculation_success / calculation_error via the
+                        # update_calculation_status WebSocket.
+                        from contextvars import copy_context
+                        from lex.core.models.CalculationModel import _calculation_executor
+                        from django.db import close_old_connections
+
+                        ctx = copy_context()
+
+                        def _background_calculate():
+                            try:
+                                ctx.run(instance.calculate_hook)
+                            except Exception as exc:
+                                logger.error(
+                                    "Background calculation failed for %s: %s",
+                                    calculation_record, exc, exc_info=True,
+                                )
+                            finally:
+                                close_old_connections()
+
+                        _calculation_executor.submit(_background_calculate)
+
+                        # Return the IN_PROGRESS state immediately
+                        return Response(
+                            self.get_serializer(instance).data,
+                            status=status.HTTP_202_ACCEPTED,
+                        )
+
                     return response
 
                 except CalculationModelException as exc:

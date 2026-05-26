@@ -15,18 +15,28 @@ from django.core.asgi import get_asgi_application
 django_asgi_app = get_asgi_application()
 
 # Only import Channels + your routing AFTER Django is ready
-from asgiref.sync import async_to_sync
+from concurrent.futures import ThreadPoolExecutor
+
+from asgiref.sync import async_to_sync, SyncToAsync
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
 
+# Increase the thread-sensitive executor from 1 → 3 workers so that
+# long-running sync operations (e.g. calculations) don't starve other
+# thread_sensitive=True calls like database_sync_to_async (WS auth).
+SyncToAsync.single_thread_executor = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("ASGI_THREADS", "3"))
+)
+
 from lex.lex_app import routing
 from lex.lex_app.fast_health import health_asgi_app, is_fast_health_path
+from django.urls import re_path
 
 
 async def http_application(scope, receive, send):
-    path = scope.get("path", "")
-    if scope.get("type") == "http" and is_fast_health_path(path):
+    request_path = scope.get("path", "")
+    if scope.get("type") == "http" and is_fast_health_path(request_path):
         await health_asgi_app(scope, receive, send)
         return
     await django_asgi_app(scope, receive, send)
@@ -36,8 +46,14 @@ application = ProtocolTypeRouter(
     {
         "http": http_application,
         "websocket": AllowedHostsOriginValidator(
-            AuthMiddlewareStack(
-                URLRouter(routing.websocket_urlpatterns())
+            URLRouter(
+                routing.public_websocket_urlpatterns()
+                + [
+                    # All other WS routes require authentication
+                    re_path(r"", AuthMiddlewareStack(
+                        URLRouter(routing.authenticated_websocket_urlpatterns())
+                    )),
+                ]
             )
         ),
     }

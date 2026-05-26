@@ -1,12 +1,13 @@
 import logging
 import os
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from copy import deepcopy
 
 from django.db import models
-from django.db import transaction
+from django.db import transaction, close_old_connections
 from django.utils import timezone
 from django_lifecycle import (
     hook,
@@ -37,6 +38,16 @@ logger = logging.getLogger(__name__)
 # system-triggered, not a direct user edit.
 _in_calculation_execution: ContextVar[bool] = ContextVar(
     '_in_calculation_execution', default=False,
+)
+
+# Dedicated thread pool for calculations.  This keeps long-running
+# calculations OFF the ASGI single_thread_executor so they don't starve
+# other sync operations (API views, WS auth, DB queries).
+# Unbounded (default) so concurrent calculations on different records
+# never block each other — the GIL serializes CPU work regardless.
+_calculation_executor = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("LEX_CALCULATION_THREADS", "10")),
+    thread_name_prefix="lex-calc",
 )
 
 
@@ -454,6 +465,29 @@ class CalculationModel(LexModel):
         from lex.lex_app.celery_tasks import register_task_with_context
         return register_task_with_context(task_result)
 
+    def _run_in_calculation_executor(self):
+        """
+        Run execute_calculation_sync in a dedicated thread pool, preserving
+        the current contextvars (operation_context, _in_calculation_execution,
+        _model_context, etc.) and ensuring Django DB connections are properly
+        managed in the worker thread.
+
+        This frees the ASGI single_thread_executor so other sync operations
+        (API views, WS auth) are not blocked by long-running calculations.
+        """
+        ctx = copy_context()
+
+        def _run():
+            try:
+                return ctx.run(self.execute_calculation_sync)
+            finally:
+                close_old_connections()
+
+        future = _calculation_executor.submit(_run)
+        # Block until the calculation completes — preserves the existing
+        # synchronous contract (the caller waits for the result/exception).
+        return future.result()
+
     def execute_calculation_sync(self):
         """
         Execute calculation synchronously in the current thread.
@@ -666,7 +700,7 @@ class CalculationModel(LexModel):
             else:
                 # Execute synchronously as fallback
                 logger.info(f"Executing calculation for {self} synchronously (Celery not available)")
-                self.execute_calculation_sync()
+                self._run_in_calculation_executor()
 
         except Exception as e:
             # Nested hook invocations may already normalize failures into
