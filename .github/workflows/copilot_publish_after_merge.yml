@@ -3,9 +3,16 @@
 #
 #  Fires when a Copilot PR with both `auto-merge` and
 #  `publish-on-merge` labels gets merged. Bumps the rc suffix on
-#  the latest release tag and creates a DRAFT GitHub release; the
+#  the latest release tag and creates a GitHub release; the
 #  existing `pip_publish.yml` (release: created) takes over from
 #  there to publish to PyPI.
+#
+#  NOTE: the release is created NON-DRAFT on purpose. GitHub's
+#  `release` event family does not fire for draft creations — a
+#  draft sits silent until a maintainer manually flips it to
+#  published, which fires `published`/`released` (NOT `created`).
+#  Earlier versions of this file used `--draft` and the publish
+#  chain never ran. See pip_publish.yml's trigger comment.
 #
 #  Default off — gated by repo variable COPILOT_AUTO_PUBLISH_ENABLED.
 #  Set to "true" only after one full A-mode round-trip has been
@@ -109,14 +116,15 @@ jobs:
               | jq --arg cut "$PREV_PUBLISHED" -r '.[] | select(.mergedAt > $cut) | "- #\(.number) \(.title) (\(.author.login))"'
           } > notes.md
 
-      - name: Create draft release
+      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEXT: ${{ steps.next.outputs.tag }}
         run: |
+          # Created non-draft so `release.created` fires for pip_publish.yml.
+          # Draft creations do not emit any release event — see header note.
           gh release create "$NEXT" \
             --repo "$GITHUB_REPOSITORY" \
-            --draft \
             --title "$NEXT" \
             --notes-file notes.md
-          echo "Draft release $NEXT created — pip_publish.yml takes over."
+          echo "Release $NEXT created — pip_publish.yml takes over."

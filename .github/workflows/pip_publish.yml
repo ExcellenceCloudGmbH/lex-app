@@ -25,11 +25,14 @@
 #  → 2.0.0rc124). The version in pyproject.toml is dynamic — it reads
 #  from lex/_version.py which this workflow writes before building.
 #
-#  Trigger: `release: created`. This fires on draft saves AND direct
-#  publishes (no draft), so a maintainer can ship a release just by
-#  saving a draft — they don't have to flip it to "Published" first.
-#  We deliberately do NOT also listen on `published` (that would
-#  double-fire when a draft is later published manually).
+#  Trigger: `release: created`. Fires when a non-draft release is
+#  created directly. GitHub does NOT fire any `release` event for
+#  draft creations — a draft sits silent until a maintainer flips
+#  it to published, which then fires `published`/`released`. We
+#  deliberately listen only on `created` so a release ships to PyPI
+#  exactly once, at the moment it becomes a real (non-draft) release.
+#  Upstream callers (e.g. copilot_publish_after_merge.yml) therefore
+#  must NOT use `--draft` when creating releases programmatically.
 #
 #  Required secrets:
 #   - PYPI_API_TOKEN               (PyPI API token with upload permission)
@@ -49,14 +52,11 @@ name: Publish to PyPI
 
 on:
   release:
-    # Fire on draft save too, so a draft release publishes to PyPI without
-    # requiring the maintainer to manually flip the draft to "Published".
-    # `created` covers both flows:
-    #   (a) a draft is saved   → `created` fires (we want this — auto-publish)
-    #   (b) a release is published directly (no draft) → `created` fires
-    # `published` is intentionally NOT listed: if it were, flow (a)'s draft
-    # being manually published later would trigger a second run (publish
-    # twice). Listening only on `created` gives a single shot per release.
+    # `created` fires when a non-draft release is created (either
+    # directly, or by flipping a draft to published — both count as
+    # the moment the release becomes real). Drafts emit no release
+    # event at all, so this is a single-shot trigger per release.
+    # See header for the upstream contract this enforces.
     types: [created]
   workflow_dispatch:
     inputs:
