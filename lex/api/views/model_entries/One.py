@@ -75,6 +75,19 @@ class OneModelEntry(
             and isinstance(serializer.instance, CalculationModel)
         ):
             serializer.instance._skip_history_for_current_save_only = True
+            # ── Async-202 contract: defer the AFTER_UPDATE calculate_hook ──
+            # ``OneModelEntry.update`` submits ``calculate_hook`` to the
+            # background ``_calculation_executor`` and returns HTTP 202.
+            # For that split to work, the request-thread save must NOT
+            # fire the calc inline.  We set the deferral flag on
+            # ``serializer.instance`` (rather than on the view-local
+            # ``instance``) because DRF's ``UpdateModelMixin.update``
+            # calls ``self.get_object()`` independently, producing a
+            # *different* Python object for the same DB row — any flag
+            # set on the view-local copy never reaches the actual save.
+            # ``CalculationModel.calculate_hook`` checks this flag at
+            # entry and returns early without running ``calculate()``.
+            serializer.instance._defer_calculate_hook = True
         return super().perform_update(serializer)
 
     def _normalize_temporal_value_for_noop_check(self, value):
@@ -566,9 +579,17 @@ class OneModelEntry(
                         CacheManager.store_message(cache_key, "")
 
                         # ── Async calculation (HTTP 202) ────────────────────
-                        # Defer the calculation hook so that
-                        # UpdateModelMixin.update() saves any additional field
-                        # data WITHOUT triggering the heavy calculation inline.
+                        # The actual deferral that prevents the calc from
+                        # running on the request thread is applied in
+                        # ``perform_update`` on ``serializer.instance``
+                        # (the object DRF's UpdateModelMixin re-fetches
+                        # and saves).  Setting the flag here on the
+                        # view-local ``instance`` would have no effect —
+                        # it's a *different* Python object than the one
+                        # going through ``save()``.  Kept as a no-op
+                        # safety net in case any code path reads from
+                        # this in-memory object before the background
+                        # submit clears it (see below).
                         instance._defer_calculate_hook = True
                     prepared_request = self._prepare_update_request(
                         request,
@@ -594,9 +615,41 @@ class OneModelEntry(
 
                         ctx = copy_context()
 
+                        def _invoke_calculate_hook():
+                            # Runs inside ``ctx.run(...)`` below so the
+                            # request's ``operation_context`` (with
+                            # ``calculation_id``) is visible to both the
+                            # hook and the terminal-audit finalizer.
+                            instance._defer_calculate_hook = False
+                            try:
+                                instance.calculate_hook()
+                            except Exception:
+                                # The terminal failure audit is normally
+                                # flushed by ``LexModel.save``'s except
+                                # block (see
+                                # ``_finalize_pending_terminal_audit``).
+                                # In the async path we invoke
+                                # ``calculate_hook`` directly — outside
+                                # any ``save()`` — so we own that flush
+                                # here.  Without it, the pending audit
+                                # dict that ``calculate_hook`` set on
+                                # the instance never becomes a row and
+                                # the operator sees a 'success' audit
+                                # for a calc that actually failed.
+                                try:
+                                    instance._finalize_pending_terminal_audit()
+                                except Exception:
+                                    logger.exception(
+                                        "Failed to finalize terminal failure "
+                                        "audit for %s after background "
+                                        "calculation raised",
+                                        calculation_record,
+                                    )
+                                raise
+
                         def _background_calculate():
                             try:
-                                ctx.run(instance.calculate_hook)
+                                ctx.run(_invoke_calculate_hook)
                             except Exception as exc:
                                 logger.error(
                                     "Background calculation failed for %s: %s",

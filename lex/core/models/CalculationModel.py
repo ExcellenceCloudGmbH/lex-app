@@ -3,11 +3,11 @@ import os
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from contextvars import ContextVar, copy_context
+from contextvars import ContextVar
 from copy import deepcopy
 
 from django.db import models
-from django.db import transaction, close_old_connections
+from django.db import transaction
 from django.utils import timezone
 from django_lifecycle import (
     hook,
@@ -467,26 +467,45 @@ class CalculationModel(LexModel):
 
     def _run_in_calculation_executor(self):
         """
-        Run execute_calculation_sync in a dedicated thread pool, preserving
-        the current contextvars (operation_context, _in_calculation_execution,
-        _model_context, etc.) and ensuring Django DB connections are properly
-        managed in the worker thread.
+        Synchronous-fallback dispatcher for ``execute_calculation_sync``.
 
-        This frees the ASGI single_thread_executor so other sync operations
-        (API views, WS auth) are not blocked by long-running calculations.
+        Historically this method submitted the calculation to a dedicated
+        thread pool in order to free the ASGI single-thread executor.  That
+        introduced two regressions that the Cluster-7 behavioural tests
+        ([test-plan/test-clusters.md#7-calculation-state-machine](../../test_project/test-plan/test-clusters.md))
+        immediately surfaced:
+
+        1. **Cross-thread DB deadlock.**  ``LexModel.save()`` runs inside
+           ``transaction.atomic()`` and holds row locks on the caller's
+           connection.  The worker thread opens its **own** Django
+           connection (connections are thread-local) and any write against
+           the same row waits forever for the caller's lock — while the
+           caller is blocked on ``future.result()``.  Parent → child
+           hierarchies (test 7.5+) hang outright.
+        2. **`operation_context` ContextVar isolation.**  ``copy_context()``
+           gives the worker a *copy*; mutations made inside the worker
+           (e.g. ``OperationContext.__enter__`` setting ``calculation_id``)
+           **do not propagate back** to the caller.  The caller's
+           except-branch cleanup then calls ``ContextResolver.resolve()``
+           which raises ``Missing calculation_id in operation context``.
+
+        Both problems disappear when the sync fallback runs inline on the
+        caller's thread — which is also the only way to preserve the
+        documented "synchronous" contract.
+
+        The original goal of the thread pool — freeing the ASGI
+        single-thread executor during heavy calculations — is **already
+        achieved upstream** by ``One.update()``, which submits
+        ``calculate_hook`` to ``_calculation_executor`` and returns HTTP
+        202 immediately.  By the time ``calculate_hook`` reaches this
+        fallback it is already off the ASGI thread, so a second hop is
+        both unnecessary and harmful.
+
+        ``_calculation_executor`` is still exported at module scope for
+        ``One.py``'s fire-and-forget HTTP-202 path; only the nested
+        re-submit was removed.
         """
-        ctx = copy_context()
-
-        def _run():
-            try:
-                return ctx.run(self.execute_calculation_sync)
-            finally:
-                close_old_connections()
-
-        future = _calculation_executor.submit(_run)
-        # Block until the calculation completes — preserves the existing
-        # synchronous contract (the caller waits for the result/exception).
-        return future.result()
+        return self.execute_calculation_sync()
 
     def execute_calculation_sync(self):
         """
