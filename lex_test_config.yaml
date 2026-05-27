@@ -1,0 +1,40 @@
+# Lex test-group configuration — single source of truth for `python -m lex pytest`.
+# Loaded by lex/tools/test_groups.py at project_root.
+
+tests_entrypoint: lex/test_project/tests
+
+# Recipients are intentionally empty for now. The reporting/email surface is
+# implemented in test_groups.py but not yet turned on. When stakeholders are
+# decided, populate this list and per-group receivers below.
+receivers: []
+
+report:
+  output_dir: reports
+
+email:
+  from_email: "noreply@example.com"
+  from_name: "Lex Reports"
+  reply_to: "noreply@example.com"
+  subject_prefix: "Lex test report"
+
+# Group names match the cluster folder names under lex/test_project/tests/.
+# One test module → one marker via module-level `pytestmark = pytest.mark.<group>`.
+# Sub-cluster selection (e.g. 7k, 1o, 6n) uses `-k` against the existing
+# test_N_M_* method naming, not finer-grained markers.
+groups:
+  - { name: init,                description: "Cluster 1 — Project bootstrap, lex setup, lex Init, Keycloak sync, seed data." }
+  - { name: crud_api,            description: "Cluster 2 — CRUD via REST API (POST/GET/PATCH/DELETE)." }
+  - { name: validation_hooks,    description: "Cluster 3 — pre_validation / post_validation hooks." }
+  - { name: permissions,         description: "Cluster 4 — Field- and action-level access control." }
+  - { name: history,             description: "Cluster 5 — History rows, bitemporal chaining, MetaHistory." }
+  - { name: audit_logging,       description: "Cluster 6 — AuditLogMixin lifecycle, audit finalization." }
+  - { name: calculations,        description: "Cluster 7 — Calculation state machine, atomic/non-atomic, parent→child chains." }
+  - { name: calculation_logging, description: "Cluster 7 logging surface — calculation-log tree, builder API." }
+  - { name: celery_async,        description: "Cluster 8 — Celery dispatch, sync fallback, FireAndForget / WaitForTasks." }
+  - { name: signals_ws,          description: "Cluster 9 — Signals, WebSocket consumers, active-state store." }
+  - { name: api_layer,           description: "Cluster 10 — REST endpoints (history, bulk, files, SharePoint, schema)." }
+  - { name: stress,              description: "Cluster 11 — ~20k-row workload tests. Opt-in via -m stress." }
+  - { name: serializers,         description: "Cluster 12 — Serializer contract: JSON shape, type round-trip, reserved scopes." }
+  - { name: exports,             description: "Cluster 13 — Export endpoint, AG Grid flat/grouped, FK display names." }
+  - { name: queries,             description: "Cluster 14 — AG Grid query endpoint, filter/sort/group models." }
+  - { name: journeys,            description: "End-to-end multi-cluster user journeys." }
