@@ -494,6 +494,13 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 6. Bare `except:` is banned — always `except Exception:` (or a specific subclass).
 7. If a test exposes a real bug → `@unittest.expectedFailure` with a tracker entry, **don't weaken it.**
 
+---
+
+> **Runner note (May 2026):** this suite runs under `python -m lex pytest`.
+> New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
+> module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
+> for the runner commands.
+
 
 
 
