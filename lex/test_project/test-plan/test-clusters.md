@@ -1117,6 +1117,31 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 24 pass / 0 fail / 0.009s. Coverage: 27.03% → ~95%+ (whole file minus 1-2 unreachable defensive branches).
 
+### 9e — Threaded calculation-log WebSocket fan-out (regression — May 28)
+
+**Gap (May 28):** the async `calculate_requested` path now runs `calculate_hook()`
+on the dedicated calculation thread pool. `copy_context()` preserves
+`operation_context`, but `model_logging_context()` still mutates a shared
+`ModelContext` object in place. Once the request thread unwinds, the copied
+context sees an empty model stack unless the worker installs a fresh
+`ModelContext([instance])` before calling `CalculationLog.log()`.
+
+**Why it matters:** if that re-install step regresses, calculation state-change
+WebSockets still work, but the per-record live log tab goes blank — the exact
+"threadpool added, websocket logs stopped arriving" failure reported in issue
+#518.
+
+**Shape:** `SimpleTestCase` — no DB. Patches `AuditLog.objects.get`,
+`CalculationLog._persist_message`, cache storage, and the channel-layer send
+seam while driving `CalculationLog.log()` from a real `ThreadPoolExecutor`
+worker under `copy_context()`.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.29 | Background-thread calculation log still reaches the record WebSocket group | After the request-scoped `model_logging_context()` unwinds, the copied context alone has no current model; the worker re-installs a fresh `ModelContext([instance])`, `CalculationLog.log()` stores the cache entry, and `WebSocketHandler` emits `calculation_log_real_time` to `<model>_<pk>` |
+
+**Status:**  Complete — 1 pass / 0 fail.
+
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
 **Gap (April 25):** `CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
