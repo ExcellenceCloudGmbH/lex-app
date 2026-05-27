@@ -41,6 +41,10 @@ from .models import (
     NonAtomicParentNonAtomicChildMatrixCalc,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 
 class TestCluster07i_AtomicityMatrix(E2ETestCase):
     """Exhaustive parent/child atomicity and failure propagation matrix."""

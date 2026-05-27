@@ -46,6 +46,10 @@ from lex.core.services.bitemporal_signals import (
     suppress_meta_sys_to_chaining,
 )
 
+import pytest
+
+pytestmark = pytest.mark.signals_ws
+
 
 class TestCluster09_SuppressionGuards(SimpleTestCase):
     """Unit contract for the three bitemporal suppression guards."""

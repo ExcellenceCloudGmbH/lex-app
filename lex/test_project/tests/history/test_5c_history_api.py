@@ -20,6 +20,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, HIST_SIMPLE, HistSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 class TestCluster05c_HistoryAPI(E2ETestCase):
     """History endpoint contract."""

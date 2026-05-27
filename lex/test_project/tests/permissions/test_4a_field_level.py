@@ -36,6 +36,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, FIELD_LEVEL, FieldLevelItem
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 class TestCluster04a_FieldLevel_Superuser(AuthenticatedE2ETestCase):
     """Superuser sees every field."""

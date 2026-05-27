@@ -23,6 +23,10 @@ from __future__ import annotations
 import unittest
 from unittest import TestCase
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 class TestCluster01b_DefaultAuthzContract(TestCase):
     """Published defaults must not drift silently."""

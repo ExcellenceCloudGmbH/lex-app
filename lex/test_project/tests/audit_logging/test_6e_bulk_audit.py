@@ -27,6 +27,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, AUDIT_SIMPLE, AuditSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 class TestCluster06e_BulkAuditLog(E2ETestCase):
     """``BulkAuditLogMixin`` writes one audit row per affected record."""

@@ -58,6 +58,10 @@ from lex.api.views.model_info.Fields import (
     create_list_ui_info,
 )
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 # --------------------------------------------------------------------- #
 # Helpers — synthesise the few attributes `Fields.get` actually touches.

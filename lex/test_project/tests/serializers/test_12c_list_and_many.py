@@ -29,6 +29,10 @@ from .models import (
     WideItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.serializers
+
 # Framework-managed keys every serialized row carries (mirrors 12a).
 FRAMEWORK_KEYS = {"id", "id_field", "short_description", "lex_reserved_scopes"}
 

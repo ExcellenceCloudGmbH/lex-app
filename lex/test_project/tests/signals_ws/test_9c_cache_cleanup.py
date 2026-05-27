@@ -28,6 +28,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, SigAtomicCalc
 
+import pytest
+
+pytestmark = pytest.mark.signals_ws
+
 
 class TestCluster09c_CacheCleanup(E2ETestCase):
     """CacheManager.cleanup_calculation root-vs-child discipline."""

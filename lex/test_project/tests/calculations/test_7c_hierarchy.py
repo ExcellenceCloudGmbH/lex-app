@@ -24,6 +24,10 @@ from .models import (
     NonAtomicParentCalc, ParentCalc,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 
 class TestCluster07c_Hierarchy(E2ETestCase):
     """Parent/child calculation propagation."""

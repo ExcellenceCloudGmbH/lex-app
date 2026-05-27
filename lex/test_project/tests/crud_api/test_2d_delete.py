@@ -20,6 +20,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, SIMPLE, SimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.crud_api
+
 
 class TestCluster02d_Delete(E2ETestCase):
     """DELETE /api/<model>/<pk>/"""

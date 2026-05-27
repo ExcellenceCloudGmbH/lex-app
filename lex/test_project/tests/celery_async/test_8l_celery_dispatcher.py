@@ -37,6 +37,10 @@ from django.test import SimpleTestCase
 from lex.core.exceptions import CeleryDispatchError
 from lex.core.tasks.CeleryTaskDispatcher import CeleryTaskDispatcher
 
+import pytest
+
+pytestmark = pytest.mark.celery_async
+
 
 # ----------------------------------------------------------------------
 # Helpers

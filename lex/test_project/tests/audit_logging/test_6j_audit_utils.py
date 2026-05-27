@@ -52,6 +52,10 @@ from lex.audit_logging.utils.DataModels import (
     ContextResolutionError,
 )
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 # ---------------------------------------------------------------------------
 # AuditLoggingConfig parser

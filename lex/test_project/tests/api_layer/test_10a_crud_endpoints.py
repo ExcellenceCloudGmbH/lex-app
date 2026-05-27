@@ -25,6 +25,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, API_SIMPLE, ApiSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 class TestCluster10a_CRUDEndpoints(E2ETestCase):
     """One/List endpoint smoke tests at the HTTP layer."""

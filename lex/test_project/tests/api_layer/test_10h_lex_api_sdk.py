@@ -36,6 +36,10 @@ from django.test import SimpleTestCase
 
 from lex.api.views.lex_api import LexAPI
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 # ----------------------------------------------------------------------
 # 10.17  build_attachments_from_paths

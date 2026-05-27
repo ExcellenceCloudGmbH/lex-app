@@ -42,6 +42,10 @@ from rest_framework.test import APIRequestFactory
 
 from .models import ALL_MODELS, ProtectedWideItem, RelatedItem, WideItem
 
+import pytest
+
+pytestmark = pytest.mark.serializers
+
 
 class TestCluster12d_AuditLogPayloadFiltering(E2ETestCase):
     """Serialize an AuditLog row as a non-admin — assert payload is filtered.

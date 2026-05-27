@@ -58,6 +58,10 @@ from rest_framework.test import APIRequestFactory
 
 from .models import FieldLevelItem, ProtectedItem
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 # --------------------------------------------------------------------
 # 4.19 — camelCase → snake_case translation

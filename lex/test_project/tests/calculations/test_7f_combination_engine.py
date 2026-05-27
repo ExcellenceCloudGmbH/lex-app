@@ -51,6 +51,10 @@ from lex.core.mixins.CalculatedModelMixin import (
     _normalize_field_values,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 
 # --------------------------------------------------------------------
 # Lightweight fakes

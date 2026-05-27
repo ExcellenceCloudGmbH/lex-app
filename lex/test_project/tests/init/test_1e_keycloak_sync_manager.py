@@ -37,6 +37,10 @@ from lex.lex_app.management.commands.init import (
     KeycloakSyncManager,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 # ---------------------------------------------------------------------
 # Fixture: a KeycloakSyncManager whose kc_manager is a MagicMock.

@@ -32,6 +32,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, AUDIT_SIMPLE, AuditSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 class TestCluster06a_APIAuditLog(E2ETestCase):
     """API path writes AuditLog rows — live under the Pass B2 fixture."""

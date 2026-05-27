@@ -38,6 +38,10 @@ from .models import (
     QueryItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.queries
+
 
 def _ag(**overrides) -> dict:
     req = {

@@ -54,6 +54,10 @@ from unittest import TestCase, mock
 from django.test import Client
 from django.urls import reverse, NoReverseMatch
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 # ---------------------------------------------------------------------
 # 1.125–1.130 — settings.py constants

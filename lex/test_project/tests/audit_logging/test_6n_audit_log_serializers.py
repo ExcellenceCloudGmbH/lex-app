@@ -46,6 +46,10 @@ from lex.audit_logging.serializers.AuditLogSerializer import (
     AuditLogReferenceSerializer,
 )
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 # ----------------------------------------------------------------------
 # 6.141  Read-only scopes mixin

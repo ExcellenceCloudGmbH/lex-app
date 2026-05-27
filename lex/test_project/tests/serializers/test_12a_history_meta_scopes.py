@@ -31,6 +31,10 @@ from .models import (
     ProtectedWideItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.serializers
+
 
 class TestCluster12a_HistoryMetaScopes(E2ETestCase):
     """History-snapshot & MetaHistory / edit-scope shape."""

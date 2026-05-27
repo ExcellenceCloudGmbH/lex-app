@@ -53,6 +53,10 @@ from .models import (
 )
 from .test_13a_legacy_export import _assert_msg
 
+import pytest
+
+pytestmark = pytest.mark.exports
+
 
 def _read_xlsx_stream(resp) -> pd.DataFrame:
     """Read an xlsx produced by the **streaming** export paths.

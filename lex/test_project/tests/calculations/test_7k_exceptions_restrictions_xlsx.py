@@ -68,6 +68,10 @@ from lex.core.mixins.ModelModificationRestriction import (
     ModelModificationRestriction,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 
 # ---------------------------------------------------------------------
 # 7.122–7.124 — small helpers

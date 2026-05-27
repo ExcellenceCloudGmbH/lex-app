@@ -19,6 +19,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, SIMPLE, SimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.crud_api
+
 
 class TestCluster02b_Read(E2ETestCase):
     """GET detail + list endpoints."""

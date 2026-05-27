@@ -30,6 +30,10 @@ from lex.audit_logging.mixins.AuditLogMixin import (
 )
 from lex.audit_logging.utils.content_types import safe_get_content_type
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 def _make_pg_operational_error(pgcode):
     """Construct an OperationalError with a populated ``pgcode``."""

@@ -36,6 +36,10 @@ from django.core.cache import caches
 from django.test import SimpleTestCase
 from lex.audit_logging.utils.CacheManager import CacheManager
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 class TestCluster06h_CacheManagerKeyBuilder(SimpleTestCase):
     """``build_cache_key`` shape contract."""

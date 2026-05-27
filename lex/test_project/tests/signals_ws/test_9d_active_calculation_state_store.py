@@ -40,6 +40,10 @@ from lex.core.signals.ActiveCalculationStateStore import (
     ActiveCalculationStateStore,
 )
 
+import pytest
+
+pytestmark = pytest.mark.signals_ws
+
 
 class FakeCalcModel9d(CalculationModel):
     """Unmanaged ``CalculationModel`` subclass for resolver tests."""

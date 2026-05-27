@@ -19,6 +19,10 @@ from rest_framework import status
 from ._stress_test_case import StressTestCase
 from .models import ALL_MODELS, INVOICE, StressInvoice
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 
 class TestCluster11e_BulkAPI(StressTestCase):
     """11.10 / 11.11 — supported bulk delete + ORM update baseline."""

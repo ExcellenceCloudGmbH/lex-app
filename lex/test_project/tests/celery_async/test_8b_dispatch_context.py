@@ -18,6 +18,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, CeleryCalc, CelerySyncCalc
 
+import pytest
+
+pytestmark = pytest.mark.celery_async
+
 
 class TestCluster08b_DispatchContext(E2ETestCase):
     """8.5 / 8.6 — dispatch context and worker-recursion behavior."""

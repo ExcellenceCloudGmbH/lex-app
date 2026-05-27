@@ -60,6 +60,10 @@ from .models import (
     FK_HEAVY_MODELS, StressCounterparty, StressPeriod,
 )
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 # Row counts per volume tier. The point of this cluster is FK fan-out
 # at volume; 25k is the target. SMALL scales to 2.5k so local /
 # PR runs stay under a minute without losing the N+1 signal.

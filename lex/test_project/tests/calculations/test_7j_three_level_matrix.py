@@ -57,6 +57,10 @@ from .models import (
     TRIPLE_CLASSES,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 # ---------------------------------------------------------------------
 # Per-(p_atomic, c_atomic) → (parent_cls, child_cls) lookup so the
 # test runner can fetch the persisted "middle" and "leaf" rows after

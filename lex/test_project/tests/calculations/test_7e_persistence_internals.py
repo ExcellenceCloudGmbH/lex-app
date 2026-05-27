@@ -58,6 +58,10 @@ from .models import (
     PersistenceProbeCalc,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  Helper-level safety-net tests (no DB needed — pure logic).

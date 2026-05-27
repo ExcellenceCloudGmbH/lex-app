@@ -40,6 +40,10 @@ from .models import (
     QueryItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.queries
+
 
 class TestCluster14a_QueryParamFilters(E2ETestCase):
     """``GET /api/model_entries/queryitem/list?...`` — query-param filtering."""

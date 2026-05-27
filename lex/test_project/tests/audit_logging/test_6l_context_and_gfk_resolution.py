@@ -58,6 +58,10 @@ from lex.audit_logging.utils.content_types import safe_get_generic_related_objec
 from lex.audit_logging.utils.ContextResolver import ContextResolver
 from lex.audit_logging.utils.DataModels import ContextInfo, ContextResolutionError
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic Django-like model instance (no DB, no app registration)

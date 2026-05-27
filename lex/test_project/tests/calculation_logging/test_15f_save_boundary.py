@@ -27,6 +27,10 @@ from .models import (
     LogMiddleSavedCalc,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculation_logging
+
 
 class TestCluster15f_HierarchyAcrossSave(_CalcLogTestCase):
     """parent_log chains correctly even when an inner CalculationModel

@@ -68,6 +68,10 @@ from .models import (
     AuditNonAtomicCalc,
 )
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 class _CalcAuditViaAPIMixin:
     """Shared assertions for the four (atomic × success/failure) cases.

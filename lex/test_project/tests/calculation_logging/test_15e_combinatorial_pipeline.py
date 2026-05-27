@@ -10,6 +10,10 @@ from __future__ import annotations
 from . import _CalcLogTestCase
 from .models import LogConditionalChild, LogLoudChild
 
+import pytest
+
+pytestmark = pytest.mark.calculation_logging
+
 
 class TestCluster15e_CombinatorialPipeline(_CalcLogTestCase):
     """Combinatorial expansion + per-instance row keying."""

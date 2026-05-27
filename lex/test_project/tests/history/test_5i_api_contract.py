@@ -37,6 +37,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, HIST_SIMPLE, HistSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 def _meta_history_wired_for_hist_simple() -> bool:
     """Probe whether ``HistSimpleItem`` has a *real* L2 manager attached.

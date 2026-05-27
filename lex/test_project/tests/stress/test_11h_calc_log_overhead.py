@@ -47,6 +47,10 @@ from lex.audit_logging.models.CalculationLog import CalculationLog
 from ._stress_test_case import StressTestCase
 from .models import ALL_MODELS
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 
 class TestCluster11h_CalculationLogOverhead(StressTestCase):
     """11.22 — CalculationLog.log per-call cost, live pipeline vs no-op."""

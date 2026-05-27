@@ -40,6 +40,10 @@ from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
     _unwrap_historical_instance,
 )
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 def _build_view(instance, *, user_authenticated=True, serializer_data=None):
     """Build a minimal mixin instance with the DRF view contract.

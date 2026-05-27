@@ -40,6 +40,10 @@ from rest_framework import serializers as drf_serializers
 
 from .models import WideItem
 
+import pytest
+
+pytestmark = pytest.mark.serializers
+
 FRAMEWORK_INTERNALS = {ID_FIELD_NAME, SHORT_DESCR_NAME, LEX_SCOPES_NAME, "id"}
 
 

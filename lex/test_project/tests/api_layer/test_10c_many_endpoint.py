@@ -21,6 +21,10 @@ from rest_framework import status
 
 from ..crud_api.models import ALL_MODELS, SIMPLE, SimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 class TestCluster10c_ManyEndpoint(E2ETestCase):
     """Scenario 10.7 — ``many/`` DELETE selected rows."""

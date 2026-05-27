@@ -28,6 +28,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HistSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 def _meta_model_for(model_class):
     """Resolve ``MetaHistorical<Model>``. The ``meta_history`` manager

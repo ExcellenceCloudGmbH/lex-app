@@ -38,6 +38,10 @@ from lex.lex_app.management.commands.init import (
     set_state,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 # ---------------------------------------------------------------------
 # Fixture — a KeycloakSyncManager with every external boundary stubbed.

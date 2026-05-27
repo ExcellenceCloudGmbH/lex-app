@@ -1,3 +1,7 @@
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 # """
 # Cluster 7l: ``ObjectsToRecalculateStore`` + ``CalculatedModelUpdateHandler``.
 #
