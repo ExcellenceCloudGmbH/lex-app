@@ -446,7 +446,16 @@ def pytest_cmd(ctx):
 
     setup_test_environment()
     _db_runner = DiscoverRunner(verbosity=1, interactive=False, keepdb=False)
-    _old_db_config = _db_runner.setup_databases()
+    # Limit test-DB creation to the `default` alias. Django's own
+    # ``manage.py test`` path inspects every collected ``TestCase`` for
+    # its ``databases`` attribute (defaults to ``{"default"}``) and
+    # passes that set in here, so unused aliases like ``GCP`` / ``K8S``
+    # / ``DOCKER-COMPOSE`` are skipped. We bypass that discovery (pytest
+    # owns collection now), so without ``aliases=`` Django would try to
+    # CREATE test_<name> on every alias and fail on the ones whose host
+    # env vars aren't set in CI (e.g. ``GCP`` resolves to host
+    # ``envvar_not_existing`` → DNS error).
+    _old_db_config = _db_runner.setup_databases(aliases={"default"})
 
     started_at = time.perf_counter()
     try:
