@@ -2,8 +2,12 @@
 #  Copilot Test-Bot — PR gate.
 #
 #  Runs on every PR authored by copilot-swe-agent[bot]. Does:
-#    1. Find the originating issue via "Fixes #N" in the PR body,
-#       read its mode label.
+#    1. Find the originating (source) issue via the resolver in
+#       .github/scripts/copilot_discover_mode.py — checks the PR's
+#       closingIssuesReferences (Development sidebar), then close-
+#       keyword refs in the body, then bare #N; dereferences task
+#       issues to the source issue via "Assembled from issue #M".
+#       Reads the source issue's copilot:<mode> label.
 #    2. Static PR-shape check via copilot_validate_pr_shape.py.
 #    3. Run the new test in isolation. Mode-B strips
 #       @expectedFailure on a temp copy and asserts FAILURE.
@@ -96,33 +100,41 @@ jobs:
           pip install -e .
 
       # ── 1. Discover mode from the linked issue ─────────────────
+      # Copilot's coding agent does NOT reliably emit "Fixes #N" in the
+      # PR body — it links the issue via GitHub's Development sidebar,
+      # which is invisible to text grep but surfaces via the GraphQL
+      # `closingIssuesReferences` field. The Python resolver walks every
+      # available signal (closing-issue refs → close-keyword regex →
+      # bare #N) and dereferences task issues to the source issue that
+      # carries the copilot:<mode> label. See
+      # .github/scripts/copilot_discover_mode.py for the full chain.
       - name: Discover mode
         id: mode
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-          ISSUE_NUM=$(printf '%s' "$PR_BODY" | grep -oE 'Fixes #[0-9]+' | head -n1 | sed 's/Fixes #//')
-          if [[ -z "$ISSUE_NUM" ]]; then
-            echo "::error::PR body has no 'Fixes #N' link."
-            exit 1
-          fi
-          LABELS=$(gh issue view "$ISSUE_NUM" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
-          MODE=""
-          for L in $LABELS; do
-            case "$L" in
-              copilot:regression)    MODE="regression" ;;
-              copilot:bug-repro)     MODE="bug-repro" ;;
-              copilot:fix-and-test)  MODE="fix-and-test" ;;
-            esac
-          done
-          if [[ -z "$MODE" ]]; then
-            echo "::error::Linked issue #$ISSUE_NUM has no copilot:<mode> label."
-            exit 1
-          fi
-          echo "mode=${MODE}"           >> "$GITHUB_OUTPUT"
-          echo "issue=${ISSUE_NUM}"     >> "$GITHUB_OUTPUT"
+          python .github/scripts/copilot_discover_mode.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "${{ github.event.pull_request.number }}" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: On mode-discovery failure, label + comment
+        if: failure() && steps.mode.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Mode discovery is the very first gate step that can fail
+          # against a real Copilot artefact — give the human a concrete
+          # explanation rather than a silent red ❌. The resolver's own
+          # error message already explains *why* it couldn't find the
+          # source issue (no closingIssuesReferences, no #N in body, or
+          # candidates lacked copilot:<mode> labels).
+          BODY=$'Copilot PR Gate could not determine the source issue / mode for this PR.\n\nThe resolver checks (in order): GitHub Development-sidebar links (closingIssuesReferences), `Fixes/Closes/Resolves #N` in the PR body, and bare `#N` references. None of the candidates carried a `copilot:<mode>` label, or none could be dereferenced to one.\n\n**Fix:** make sure the source issue (the user-filed one with the `copilot:regression` / `copilot:bug-repro` / `copilot:fix-and-test` label) is linked from this PR — either via the Development sidebar or by adding `Fixes #<issue>` to the PR body.'
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          gh pr edit    "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+          exit 1
 
       # ── 2. PR-shape gate ───────────────────────────────────────
       - name: Build files JSON + body file
@@ -151,7 +163,13 @@ jobs:
             --body-file body.txt | tee shape.out
 
       - name: On shape failure, label + comment
-        if: failure()
+        # Scope to the shape step only. Previously this used a bare
+        # `if: failure()`, which fires on ANY prior step failure — so
+        # when "Discover mode" exploded (no shape.out yet), this handler
+        # would still run and add `cat: shape.out: No such file` to the
+        # log on top of the real error. Now mode-discovery has its own
+        # dedicated handler above; this one stays scoped to shape.
+        if: failure() && steps.shape.outcome == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
