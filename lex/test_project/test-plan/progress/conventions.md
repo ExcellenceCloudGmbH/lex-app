@@ -38,6 +38,10 @@ When a test exposes a framework bug:
 4. Move on — don't block the test suite on the fix
 5. When the bug is fixed, remove `@unittest.expectedFailure` — the test should now pass naturally
 
+`@pytest.mark.xfail(strict=True)` is an acceptable equivalent for tests
+authored after the pytest cutover, but existing `@unittest.expectedFailure`
+markers are not bulk-converted.
+
 ---
 
 ## User Experience: Making Tests Readable
@@ -78,6 +82,11 @@ def test_02_01_create_sets_timestamps(self):
     self.assertEqual(item.created_by, "Initial Data Upload")
 ```
 
+Tests live in a `tests/<cluster_slug>/` folder. The folder's name is the
+pytest group. At the top of each test module,
+`pytestmark = pytest.mark.<cluster_slug>` declares the group once and
+applies it to every test in the file.
+
 ### Assertion Messages
 
 Every assertion has a human-readable failure message:
@@ -103,24 +112,33 @@ class TestCluster02_CRUDLifecycle(E2ETestCase):
     e2e_models = [SimpleItem, TrackedItem]
 ```
 
+Classes inherit from `E2ETestCase` as before; no per-class `@pytest.mark`
+decoration is needed because the module-level `pytestmark` already applies
+to every test in the file.
+
 ---
 
 ## How to Run Tests
 
-### Run all clusters
+### Run all clusters (excluding stress)
 ```bash
 source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
-lex test lex.test_project.tests --noinput
+python -m lex pytest -m "not stress"
 ```
 
 ### Run a single cluster
 ```bash
-lex test lex.test_project.tests.test_02_crud_lifecycle --noinput
+python -m lex pytest -m crud_api
+```
+
+### Run a single scenario by ID
+```bash
+python -m lex pytest -k "2_1"
 ```
 
 ### Run with coverage
 ```bash
-coverage run --source=lex manage.py test lex.test_project.tests --noinput
+coverage run -m lex pytest -m "not stress"
 coverage report
 ```
 
