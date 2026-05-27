@@ -429,6 +429,25 @@ def pytest_cmd(ctx):
     # code is included in the measured project coverage.
     _bootstrap_django()
 
+    # Stand up Django's test database the same way `manage.py test` /
+    # DiscoverRunner.run_tests() does:
+    #   1. setup_test_environment() — installs the test client, RequestFactory
+    #      patches, deprecation-warning filter etc.
+    #   2. DiscoverRunner.setup_databases() — creates the ``test_<dbname>``
+    #      database (or `test_<NAME>` from the settings TEST overrides), runs
+    #      migrations, and re-points ``connection.settings_dict["NAME"]``
+    #      so any TestCase / TransactionTestCase / SimpleTestCase subclass
+    #      that touches the ORM hits the test DB, not the production one.
+    # Without this, every unittest.TestCase-derived test errors at setUp with
+    # `database "<prod name>" does not exist` because Django's runner machinery
+    # never ran.
+    from django.test.runner import DiscoverRunner
+    from django.test.utils import setup_test_environment, teardown_test_environment
+
+    setup_test_environment()
+    _db_runner = DiscoverRunner(verbosity=1, interactive=False, keepdb=False)
+    _old_db_config = _db_runner.setup_databases()
+
     started_at = time.perf_counter()
     try:
         exit_code = _pytest.main(forwarded, plugins=[plugin])
@@ -436,6 +455,10 @@ def pytest_cmd(ctx):
         # Raised from pytest_collection_modifyitems on marker/group mismatch.
         raise click.ClickException(str(exc)) from exc
     finally:
+        try:
+            _db_runner.teardown_databases(_old_db_config)
+        finally:
+            teardown_test_environment()
         plugin.run_duration = f"{time.perf_counter() - started_at:.1f} s"
         if coverage_runner is not None:
             try:
