@@ -43,6 +43,10 @@ from lex.lex_app.management.commands.init import (
     wait_for_keycloak_setup_v2,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 def _http_response(status_code=200, json_body=None, raise_for_status=False, text=""):
     """Build a ``requests``-shaped response stand-in."""

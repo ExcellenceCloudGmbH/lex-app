@@ -33,6 +33,10 @@ from .models import (
     WideItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.serializers
+
 FRAMEWORK_KEYS = {"id", "id_field", "short_description", "lex_reserved_scopes"}
 
 

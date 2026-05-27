@@ -46,6 +46,10 @@ import types
 import unittest
 from unittest import TestCase
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 # ---------------------------------------------------------------------
 # 1.110–1.118 — process_admin lazy __getattr__
 # ---------------------------------------------------------------------

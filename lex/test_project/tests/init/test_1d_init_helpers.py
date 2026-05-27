@@ -45,6 +45,10 @@ from lex.lex_app.management.commands.init import (
     update_env_file,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 # ---------------------------------------------------------------------
 # Helpers

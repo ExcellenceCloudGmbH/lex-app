@@ -29,6 +29,10 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.core.models.LexModel import PermissionResult
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 class _FakeUserContext:
     """Stand-in for ``UserContext`` — the permission methods only call

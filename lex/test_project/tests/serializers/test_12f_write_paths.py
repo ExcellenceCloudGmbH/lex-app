@@ -41,6 +41,10 @@ from .models import (
     TaggableItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.serializers
+
 
 class TestCluster12f_WritePaths(E2ETestCase):
     """``/api/<model>/create/`` + ``/api/<model>/<pk>/`` for M2M + FK."""

@@ -20,6 +20,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, SIMPLE, SimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.crud_api
+
 
 class TestCluster02e_BulkOperations(E2ETestCase):
     """DELETE-only bulk write contract for the ``many/`` endpoint."""

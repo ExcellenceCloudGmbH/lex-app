@@ -44,6 +44,10 @@ from .models import (
 )
 from .test_13a_legacy_export import _assert_msg, _read_xlsx_response
 
+import pytest
+
+pytestmark = pytest.mark.exports
+
 
 def _ag_flat_payload(columns: list[dict]) -> dict:
     """Minimal AG payload for a flat (non-grouped) export."""

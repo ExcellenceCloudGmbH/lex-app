@@ -41,6 +41,10 @@ from lex.api.filters.GenericFilters import (
 )
 from lex.utilities.storage.custom_storage import CustomDefaultStorage
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 def _make_request(get_params=None, query_params=None):
     """Build a request stub flexible enough for every backend."""

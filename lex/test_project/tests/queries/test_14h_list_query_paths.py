@@ -37,6 +37,10 @@ from .models import (
     QueryItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.queries
+
 
 class TestCluster14h_ListQueryPaths(E2ETestCase):
     """List endpoint multi-feature combinations."""

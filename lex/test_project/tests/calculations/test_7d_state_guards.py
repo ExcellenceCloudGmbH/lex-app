@@ -22,6 +22,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, FailingCalc
 
+import pytest
+
+pytestmark = pytest.mark.calculations
+
 
 class TestCluster07d_StateGuards(E2ETestCase):
     """Idempotency and re-entrancy guards."""

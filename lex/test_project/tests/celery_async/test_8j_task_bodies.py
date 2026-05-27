@@ -53,6 +53,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, CelerySyncCalc
 
+import pytest
+
+pytestmark = pytest.mark.celery_async
+
 
 # ════════════════════════════════════════════════════════════════════════
 # 8.31 – 8.35: load_data

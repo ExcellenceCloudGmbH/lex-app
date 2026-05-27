@@ -61,6 +61,10 @@ from lex.core.mixins.ModelModificationRestriction import (
     AdminReportsModificationRestriction,
 )
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 # =====================================================================
 # AuditLog — declarative contracts

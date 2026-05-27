@@ -26,6 +26,10 @@ from django.contrib.auth.models import AnonymousUser, User
 from django.test import RequestFactory, TestCase
 from lex.core.models.LexModel import UserContext
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 class TestCluster04d_UserContext(TestCase):
     """UserContext.from_request / from_request_base contract."""

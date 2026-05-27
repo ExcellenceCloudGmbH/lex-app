@@ -20,6 +20,10 @@ from .models import (
     ALL_MODELS, StressCounterparty, StressInvoice, StressPeriod,
 )
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 
 class TestCluster11a_SeedBaseline(StressTestCase):
     """11.1 / 11.2 — insertion paths at volume."""

@@ -45,6 +45,10 @@ from lex.lex_app.management.commands.init import (
     _redirect_uris_indicate_development,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 # ---------------------------------------------------------------------
 # Fixtures (same shape as 1e / 1g): bypass __init__ + stub kc_manager.
 # ---------------------------------------------------------------------

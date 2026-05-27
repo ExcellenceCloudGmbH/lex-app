@@ -24,6 +24,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, PROTECTED, ProtectedItem
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 class TestCluster04b_ActionLevel(E2ETestCase):
     """Action-level permission contract — non-admin caller."""

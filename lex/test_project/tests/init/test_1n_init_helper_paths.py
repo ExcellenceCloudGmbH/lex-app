@@ -38,6 +38,10 @@ from lex.lex_app.management.commands.init import (
     _is_non_fatal_keycloak_import_timeout,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 class TestCluster01n_KeycloakErrorFormatter(SimpleTestCase):
     """``_format_keycloak_import_error_details`` shapes operator logs."""

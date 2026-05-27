@@ -29,6 +29,10 @@ from django.test import SimpleTestCase
 
 from lex.audit_logging.mixins.BulkAuditLogMixin import BulkAuditLogMixin
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 def _target(pk):
     """Cheap target stand-in. `_attach_related_instance_id` only needs `pk`."""

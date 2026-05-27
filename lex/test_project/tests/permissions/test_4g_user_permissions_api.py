@@ -53,6 +53,10 @@ from lex.api.middleware.keycloak_permissions import (
 from lex.api.utils import helpers as api_helpers
 from lex.core.models.LexModel import LexModel
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 def _with_default_permission_read(model_cls):
     """Temporarily swap a model's ``permission_read`` back to the

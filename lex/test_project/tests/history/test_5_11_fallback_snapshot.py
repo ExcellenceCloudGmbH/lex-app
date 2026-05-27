@@ -46,6 +46,10 @@ import unittest
 from django.test import SimpleTestCase
 from lex.api.views.model_entries.History import HistoryModelEntry
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 class _FakeField:
     """Minimal stand-in for ``Field`` — ``_get_snapshot`` only reads

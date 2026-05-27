@@ -67,6 +67,10 @@ from lex.api.views.model_entries.filter_backends import (
     UserReadRestrictionFilterBackend,
 )
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 # ---------------------------------------------------------------------------
 # Shared test helpers

@@ -19,6 +19,10 @@ from lex.core.models.CalculationModel import CalculationModel
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 from lex.core.signals.CalculationSignals import update_calculation_status
 
+import pytest
+
+pytestmark = pytest.mark.signals_ws
+
 
 class DummySignalCalc(CalculationModel):
     """Unmanaged calculation model sufficient for signal-level tests."""

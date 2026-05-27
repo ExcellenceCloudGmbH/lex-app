@@ -34,6 +34,10 @@ from django.test import SimpleTestCase
 
 from lex.api.views.file_operations.FileDownload import FileDownloadView
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 # ---------------------------------------------------------------------------
 # Helpers

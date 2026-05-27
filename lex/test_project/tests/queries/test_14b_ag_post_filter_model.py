@@ -41,6 +41,10 @@ from .models import (
     QueryItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.queries
+
 
 def _base_ag_request(**overrides) -> dict:
     """Minimal AG Grid request body — override any subset of keys."""

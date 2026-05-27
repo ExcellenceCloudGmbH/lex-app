@@ -27,6 +27,10 @@ import unittest
 from pathlib import Path
 from unittest import TestCase
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 # Seed file is at tests/fixtures/test_seed.json — two levels up from
 # this file (we live in tests/init/initial_data/).
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"

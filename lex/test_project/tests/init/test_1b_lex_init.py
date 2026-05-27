@@ -26,6 +26,10 @@ from io import StringIO
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 class TestCluster01b_LexInit(TestCase):
     """Handler-level tests for ``lex Init``."""

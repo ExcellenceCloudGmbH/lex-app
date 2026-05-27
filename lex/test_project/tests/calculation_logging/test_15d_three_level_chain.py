@@ -8,6 +8,10 @@ from __future__ import annotations
 from . import _CalcLogTestCase
 from .models import LogGrandchildCalc, LogMiddleCombinatoric
 
+import pytest
+
+pytestmark = pytest.mark.calculation_logging
+
 
 class TestCluster15d_ThreeLevelChain(_CalcLogTestCase):
     """parent_log chains correctly across multiple hops."""

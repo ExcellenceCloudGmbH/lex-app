@@ -53,6 +53,10 @@ from click.testing import CliRunner
 from generate_pycharm_configs import generate_pycharm_configs
 from lex.bin.lex import _SKIP_BOOTSTRAP_COMMANDS, lex
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------

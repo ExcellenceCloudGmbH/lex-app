@@ -13,6 +13,10 @@ from lex.audit_logging.models.CalculationLog import CalculationLog
 from . import _CalcLogTestCase
 from .models import LogLoudChild, LogRootCalc, LogSilentChild
 
+import pytest
+
+pytestmark = pytest.mark.calculation_logging
+
 
 class TestCluster15c_SilentAndMixed(_CalcLogTestCase):
     """Silent children produce no rows; mixed siblings produce exactly

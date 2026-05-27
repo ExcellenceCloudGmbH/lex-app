@@ -51,6 +51,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HistSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 def _l2_wired() -> bool:
     """L2 (MetaHistorical) is wired on the *historical* model — probe at

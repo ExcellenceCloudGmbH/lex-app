@@ -33,6 +33,10 @@ from .models import (
 )
 from .test_13a_legacy_export import _assert_msg, _read_xlsx_response
 
+import pytest
+
+pytestmark = pytest.mark.exports
+
 
 class TestCluster13d_AuthAndFieldMask(E2ETestCase):
     """Auth gate (13.11) + non-uniform per-row export mask (13.12)."""

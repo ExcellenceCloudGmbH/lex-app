@@ -22,6 +22,10 @@ import io
 from ._stress_test_case import StressTestCase
 from .models import ALL_MODELS, INVOICE, StressInvoice
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 
 class TestCluster11c_Export(StressTestCase):
     """11.5 / 11.6 — bulk export."""

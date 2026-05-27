@@ -93,6 +93,10 @@ from lex.lex_app.management.commands.init import (
     KeycloakSyncManager,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 def _resolve_integration_env_file() -> Path | None:
     """Resolve the ``.env`` to source for Keycloak integration tests.

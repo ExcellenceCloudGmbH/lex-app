@@ -19,6 +19,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, API_SIMPLE, ApiSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 class TestCluster10b_HistoryEndpoint(E2ETestCase):
     """History endpoint smoke."""

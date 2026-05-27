@@ -23,6 +23,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HookOrderItem
 
+import pytest
+
+pytestmark = pytest.mark.validation_hooks
+
 
 class TestCluster03c_HookOrdering(E2ETestCase):
     """Standard lifecycle hook ordering."""

@@ -40,6 +40,10 @@ from .models import (
     ExportMaskedItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.exports
+
 
 def _read_xlsx_response(resp) -> pd.DataFrame:
     """Collect ``FileResponse`` streaming bytes → DataFrame.

@@ -29,6 +29,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, EMPLOYEE, Employee
 
+import pytest
+
+pytestmark = pytest.mark.journeys
+
 
 class TestJourneyC_EmployeeVisibility_Superuser(AuthenticatedE2ETestCase):
     """Superuser sees every field on list + detail."""

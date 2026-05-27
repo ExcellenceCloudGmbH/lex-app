@@ -29,6 +29,10 @@ from .models import (
     WideItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.serializers
+
 
 class TestCluster12b_TypeRoundTrip(E2ETestCase):
     """One field per type — POST → GET round-trip fidelity."""

@@ -46,6 +46,10 @@ from lex.lex_app.management.commands.init import (
     KeycloakSyncManager,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 def _make_sync_manager(client_uuid: str = "test-client-uuid"):
     """Match the 1e fixture — bypass ``__init__``, stub kc_manager."""

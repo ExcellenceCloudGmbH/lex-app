@@ -43,6 +43,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, EXPORT_DENIED, ExportDeniedItem
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 def _read_xlsx_response(resp) -> pd.DataFrame:
     """Collect a ``FileResponse`` into a DataFrame.

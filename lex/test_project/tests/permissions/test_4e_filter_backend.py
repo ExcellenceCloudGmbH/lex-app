@@ -38,6 +38,10 @@ from .models import (
     FilterBackendItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.permissions
+
 
 def _seed_mixed_rows() -> None:
     """Create four rows: two public, two secret."""

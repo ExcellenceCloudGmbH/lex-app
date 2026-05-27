@@ -33,6 +33,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, INVOICE, Invoice
 
+import pytest
+
+pytestmark = pytest.mark.journeys
+
 
 class TestJourneyA_InvoiceLifecycle_Admin(AuthenticatedE2ETestCase):
     """Admin walks an invoice through create → update → delete."""

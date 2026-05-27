@@ -11,6 +11,10 @@ from lex.audit_logging.models.CalculationLog import CalculationLog
 from . import _CalcLogTestCase
 from .models import LogLoudChild, LogRootCalc
 
+import pytest
+
+pytestmark = pytest.mark.calculation_logging
+
 
 class TestCluster15b_LoudChildren(_CalcLogTestCase):
     """Loud children produce a CalculationLog row each, all chaining

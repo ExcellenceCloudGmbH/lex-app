@@ -43,6 +43,10 @@ from .models import (
     SchemaItem,
 )
 
+import pytest
+
+pytestmark = pytest.mark.api_layer
+
 
 class TestCluster10e_CreateFieldInfo(TestCase):
     """10.11 / 10.12 / 10.13 — ``create_field_info`` per-field contract."""

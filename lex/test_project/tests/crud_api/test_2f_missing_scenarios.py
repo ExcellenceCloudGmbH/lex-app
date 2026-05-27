@@ -22,6 +22,10 @@ from rest_framework import status
 
 from .models import ALL_MODELS, SIMPLE, SimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.crud_api
+
 
 class TestCluster02f_MissingScenarios(E2ETestCase):
     """The final non-bulk scenarios required for Cluster 2 to reach 🟢."""

@@ -25,6 +25,10 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 class TestCluster01a_LexSetup(TestCase):
     """``lex setup`` — pure scaffolding, no Django required."""

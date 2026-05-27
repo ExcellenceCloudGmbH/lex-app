@@ -29,6 +29,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, JourneyPortfolio, JourneyPosition
 
+import pytest
+
+pytestmark = pytest.mark.journeys
+
 
 class TestJourneyB_PortfolioCalculation(E2ETestCase):
     """Parent/child calculation, happy path + failure + recovery."""

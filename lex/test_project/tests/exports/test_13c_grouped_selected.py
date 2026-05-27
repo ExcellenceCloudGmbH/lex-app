@@ -35,6 +35,10 @@ from .models import (
 )
 from .test_13a_legacy_export import _assert_msg, _read_xlsx_response
 
+import pytest
+
+pytestmark = pytest.mark.exports
+
 
 def _grouped_payload(group_key_paths):
     """Return an AG payload with a single ``rowGroupCols=[category]``

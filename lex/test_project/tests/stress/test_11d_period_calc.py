@@ -30,6 +30,10 @@ from .models import (
     StressInvoice, StressPeriod,
 )
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 
 class TestCluster11d_PeriodCalculations(StressTestCase):
     """11.7 / 11.8 / 11.9 — period aggregation and dependency chain."""

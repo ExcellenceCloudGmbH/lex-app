@@ -14,6 +14,10 @@ from lex.audit_logging.utils.ModelContext import model_logging_context
 from . import _CalcLogTestCase
 from .models import LogRootCalc
 
+import pytest
+
+pytestmark = pytest.mark.calculation_logging
+
 
 class TestCluster15a_BuilderAPI(_CalcLogTestCase):
     """LexLogger builder methods produce the right CalculationLog content."""

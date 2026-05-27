@@ -21,6 +21,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HistSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 class TestCluster05a_BasicHistory(E2ETestCase):
     """Basic history trail contract."""

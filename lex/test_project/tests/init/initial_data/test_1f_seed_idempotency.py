@@ -37,6 +37,10 @@ from lex.lex_app.tests.ProcessAdminTestCase import ProcessAdminTestCase
 from lex.test_project.tests.crud_api.models import SimpleItem
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
 

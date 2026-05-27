@@ -55,6 +55,10 @@ from django.test import SimpleTestCase
 from lex.audit_logging.handlers.LexLogger import LexLogger, LexLogLevel
 from lex.audit_logging.handlers.WebSocketHandler import WebSocketHandler
 
+import pytest
+
+pytestmark = pytest.mark.audit_logging
+
 
 # ---------------------------------------------------------------------------
 # 1) LexLogLevel constants — pinned so the public log-level surface stays stable
