@@ -5,12 +5,12 @@ Run the Platform Health showcase suite and emit a JSON manifest.
 For every cluster declared in ``showcase_clusters.CLUSTERS`` this
 script:
 
-  1. runs the test label ``lex.test_project.tests.<key>`` through the
-     Django test runner, under ``coverage run -a`` so coverage
+  1. runs the cluster path ``lex/test_project/tests/<key>`` through
+     ``python -m lex pytest``, under ``coverage run -a`` so coverage
      accumulates across clusters;
-  2. parses Django's trailing summary from stderr to extract
-     ``passed``, ``failed``, ``errors``, ``skipped`` and ``xfailed``
-     counts;
+  2. parses pytest's trailing summary line from stdout to extract
+     ``passed``, ``failed``, ``errors``, ``skipped``, ``xfailed`` and
+     ``xpassed`` counts;
   3. runs ``coverage report --include <cluster globs>`` to compute a
      cluster-scoped coverage percentage (if any globs are configured).
 
@@ -50,170 +50,144 @@ DJANGO_ENV = {
 
 
 # ── Output parsing ──────────────────────────────────────────────────
-_SUMMARY_RE = re.compile(r"Ran\s+(\d+)\s+tests?\s+in\s+([\d.]+)s", re.MULTILINE)
-_DETAIL_RE = re.compile(
-    r"(?:FAILED|OK)\s*(?:\((?P<kv>[^)]*)\))?", re.MULTILINE
+# Pytest summary line examples (order of categories varies by version):
+#   ===== 42 passed in 7.12s =====
+#   ===== 3 failed, 39 passed, 2 skipped in 8.45s =====
+#   ===== 1 xfailed, 41 passed in 7.20s =====
+#   ===== 1 error in 0.45s =====
+# Categories can be: passed, failed, errors, skipped, xfailed, xpassed,
+# deselected, warnings. We extract counts order-agnostically.
+_PYTEST_SUMMARY_RE = re.compile(
+    r"^=+ "
+    r"(?:(?P<failed>\d+) failed,? ?)?"
+    r"(?:(?P<passed>\d+) passed,? ?)?"
+    r"(?:(?P<skipped>\d+) skipped,? ?)?"
+    r"(?:(?P<xfailed>\d+) xfailed,? ?)?"
+    r"(?:(?P<xpassed>\d+) xpassed,? ?)?"
+    r"(?:(?P<errors>\d+) errors?,? ?)?"
+    r"(?:(?P<deselected>\d+) deselected,? ?)?"
+    r"(?:(?P<warnings>\d+) warnings?,? ?)?"
+    r"in (?P<duration>[\d.]+)s =+",
+    re.MULTILINE,
 )
 
 # ── Per-test parsing for the customer report ───────────────────────
-# Django's ``--verbosity=2`` runner prints a status word at the end
-# of each test line:
-#   ``test_x (mod.Class.test_x) ... ok``
-#   ``test_x (mod.Class.test_x) ... FAIL``
-#   ``test_x (mod.Class.test_x) ... ERROR``
-#   ``test_x (mod.Class.test_x) ... skipped 'reason'``
-#   ``test_x (mod.Class.test_x) ... expected failure``
-# Sometimes a docstring gets sandwiched between the header and the
-# status, so the status may show up on a later line. We anchor on
-# the dotted path inside the parens because that's stable.
-_TEST_HEADER_RE = re.compile(
-    r"^(?P<method>\S+)\s+\((?P<dotted>[\w.]+)\)\s*(?P<rest>.*)$",
+# Pytest -v test-result lines look like:
+#   path/to/file.py::Class::method PASSED [ 12%]
+#   path/to/file.py::Class::method FAILED [ 13%]
+#   path/to/file.py::Class::method SKIPPED (reason) [ 14%]
+#   path/to/file.py::Class::method XFAIL [ 15%]
+#   path/to/file.py::Class::method XPASS [ 16%]
+#   path/to/file.py::Class::method ERROR [ 17%]
+# Parametrised tests carry "[paramset]" after the method name; we keep
+# the whole nodeid in the `dotted` field for traceability.
+_PYTEST_RESULT_RE = re.compile(
+    r"^(?P<nodeid>(?:[\w\-./]+\.py)::[\w:\[\]\-.]+?)\s+"
+    r"(?P<status>PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)"
+    r"(?:\s+\([^)]*\))?"     # SKIPPED (reason) etc.
+    r"(?:\s+\[\s*\d+%\])?"   # optional [ N%] progress marker
+    r"\s*$",
     re.MULTILINE,
 )
-# A FAIL/ERROR block at the end of the run carries the traceback we
-# want to surface to humans.
-_FAIL_BLOCK_RE = re.compile(
-    r"^(?P<kind>FAIL|ERROR):\s+(?P<method>\S+)\s+\((?P<dotted>[\w.]+)\)\s*"
-    r"\n-+\n(?P<body>.*?)(?=\n=+\n|\Z)",
-    re.MULTILINE | re.DOTALL,
+
+# Pytest's short test summary info block (one line per non-passing test):
+#   FAILED nodeid - exception type: message
+#   ERROR  nodeid - exception type: message
+# This is the cleanest source for short error messages.
+_PYTEST_SHORT_SUMMARY_LINE_RE = re.compile(
+    r"^(?P<status>FAILED|ERROR)\s+(?P<nodeid>(?:[\w\-./]+\.py)::[\w:\[\]\-.]+?)"
+    r"(?:\s+-\s+(?P<message>.+?))?\s*$",
+    re.MULTILINE,
 )
 
 
-def _classify_status(rest: str) -> str | None:
-    """Map the trailing ``... ok``/``FAIL``/``ERROR``/``skipped`` token
-    to one of: ``passed``, ``failed``, ``errored``, ``skipped``,
-    ``xfailed``, ``xpassed``. Returns ``None`` if no terminal token is
-    present (e.g. the status is on the next line because of a docstring)."""
-    s = rest.strip().lower()
-    if not s:
-        return None
-    # Strip leading ``...`` separator if any.
-    if s.startswith("..."):
-        s = s[3:].strip()
-    if s.startswith("ok"):
-        return "passed"
-    if s.startswith("fail"):
-        return "failed"
-    if s.startswith("error"):
-        return "errored"
-    if s.startswith("skipped"):
-        return "skipped"
-    if s.startswith("expected failure"):
-        return "xfailed"
-    if s.startswith("unexpected success"):
-        return "xpassed"
-    return None
+_PYTEST_STATUS_TO_OUTCOME = {
+    "PASSED":  "passed",
+    "FAILED":  "failed",
+    "ERROR":   "errored",
+    "SKIPPED": "skipped",
+    "XFAIL":   "xfailed",
+    "XPASS":   "xpassed",
+}
 
 
-def _parse_per_test(stderr: str) -> list[dict[str, Any]]:
-    """Extract one entry per test method from a verbose Django run.
+def _parse_per_test(output: str) -> list[dict[str, Any]]:
+    """Extract one entry per test method from a verbose pytest run.
 
     Output entries::
 
-        {"name": "test_8_45_real_redis_round_trip",
-         "dotted": "lex...test_8k_redis_broker_integration.TestCluster08k.test_8_45_...",
+        {"name":    "test_8_45_real_redis_round_trip",
+         "dotted":  "lex/test_project/tests/.../test_8k.py::TestCluster08k::test_8_45",
          "outcome": "failed",
          "message": "AssertionError: ..."}
     """
-    # Index FAIL/ERROR blocks by dotted path so we can pin a short
-    # message onto each failed test.
-    fail_messages: dict[str, str] = {}
-    for m in _FAIL_BLOCK_RE.finditer(stderr):
-        body = m.group("body").strip()
-        # Last non-empty line of the traceback is usually the
-        # exception type + message — exactly what we want to show.
-        last_line = ""
-        for line in reversed(body.splitlines()):
-            line = line.rstrip()
-            if line.strip():
-                last_line = line.strip()
-                break
-        fail_messages[m.group("dotted")] = last_line[:400]
+    # First pass: index short-summary lines so we can attach messages.
+    messages: dict[str, str] = {}
+    for m in _PYTEST_SHORT_SUMMARY_LINE_RE.finditer(output):
+        msg = (m.group("message") or "").strip()
+        if msg:
+            messages[m.group("nodeid")] = msg[:400]
 
+    # Second pass: walk the -v result lines. De-dupe on nodeid in case
+    # pytest re-emits a test (e.g. rerun, parametrised reruns).
     tests: list[dict[str, Any]] = []
     seen: set[str] = set()
-    lines = stderr.splitlines()
-    for i, line in enumerate(lines):
-        m = _TEST_HEADER_RE.match(line)
-        if not m:
+    for m in _PYTEST_RESULT_RE.finditer(output):
+        nodeid = m.group("nodeid")
+        if nodeid in seen:
             continue
-        dotted = m.group("dotted")
-        if dotted in seen:
-            continue
-        rest = m.group("rest")
-        outcome = _classify_status(rest)
-        # If the status didn't fit on this line, peek at the next
-        # non-empty line — it's where the runner put it after the
-        # docstring.
-        if outcome is None:
-            for nxt in lines[i + 1: i + 6]:
-                outcome = _classify_status(nxt)
-                if outcome is not None:
-                    break
-        if outcome is None:
-            continue
-        seen.add(dotted)
-        method = dotted.rsplit(".", 1)[-1]
+        seen.add(nodeid)
+        outcome = _PYTEST_STATUS_TO_OUTCOME[m.group("status")]
+        # nodeid is path::Class::method or path::function (no class).
+        method = nodeid.split("::")[-1]
         tests.append({
             "name": method,
-            "dotted": dotted,
+            "dotted": nodeid,
             "outcome": outcome,
-            "message": fail_messages.get(dotted, ""),
+            "message": messages.get(nodeid, ""),
         })
     return tests
 
 
-def _parse_summary(stderr: str) -> dict[str, int | float | str]:
+def _parse_summary(output: str) -> dict[str, int | float | str]:
     """
-    Parse Django's test-runner trailing summary::
+    Parse pytest's trailing summary line into the manifest shape.
 
-        Ran 23 tests in 4.512s
-
-        OK
-        OK (skipped=2)
-        FAILED (failures=1, errors=0, skipped=2, expected failures=1)
+    Pytest's category order varies between releases; the regex is
+    order-agnostic for the seven categories pytest emits. We find the
+    *last* match in the output (pytest prints the summary line as the
+    very last line of the run; finditer + last guards against partial
+    matches earlier in the buffer).
     """
     ran = 0
     wall_s = 0.0
-    kv: dict[str, int] = {}
-    ok = False
+    counts = {"passed": 0, "failed": 0, "errors": 0,
+              "skipped": 0, "xfailed": 0, "xpassed": 0}
 
-    m = _SUMMARY_RE.search(stderr)
-    if m:
-        ran = int(m.group(1))
-        wall_s = float(m.group(2))
+    last_match = None
+    for m in _PYTEST_SUMMARY_RE.finditer(output):
+        last_match = m
+    if last_match is not None:
+        g = last_match.groupdict()
+        for key in counts:
+            v = g.get(key)
+            if v is not None:
+                counts[key] = int(v)
+        wall_s = float(g["duration"])
+        ran = sum(counts.values())
 
-    # The detail line — OK or FAILED followed by an optional (k=v, …)
-    m = _DETAIL_RE.search(stderr)
-    if m:
-        ok = stderr.rfind("\nOK") > stderr.rfind("\nFAILED")
-        if m.group("kv"):
-            for part in m.group("kv").split(","):
-                part = part.strip()
-                if "=" in part:
-                    k, v = part.split("=", 1)
-                    try:
-                        kv[k.strip()] = int(v.strip())
-                    except ValueError:
-                        pass
-
-    failures = kv.get("failures", 0)
-    errors = kv.get("errors", 0)
-    skipped = kv.get("skipped", 0)
-    xfailed = kv.get("expected failures", 0)
-    # "ran" includes skipped and expectedFailure in Django's count;
-    # passed = ran - (failures + errors + skipped + xfailed).
-    passed = max(0, ran - failures - errors - skipped - xfailed)
+    outcome = "success" if counts["failed"] == 0 and counts["errors"] == 0 else "failure"
 
     return {
         "ran": ran,
-        "passed": passed,
-        "failed": failures,
-        "errors": errors,
-        "skipped": skipped,
-        "xfailed": xfailed,
+        "passed": counts["passed"],
+        "failed": counts["failed"],
+        "errors": counts["errors"],
+        "skipped": counts["skipped"],
+        "xfailed": counts["xfailed"],
+        "xpassed": counts["xpassed"],
         "wall_s": wall_s,
-        "outcome": "success" if (ok and failures == 0 and errors == 0) else "failure",
+        "outcome": outcome,
     }
 
 
@@ -248,6 +222,13 @@ def _per_cluster_coverage_from_contexts(
       (``""``);
     * lines executed during a test carry a context like
       ``lex.test_project.tests.<key>.<module>.<TestClass>.<method>|run``.
+
+    (The dotted form survives the pytest cutover because every cluster
+    folder under ``lex/test_project/tests/`` is a real Python package
+    — ``__init__.py`` files all the way up to the repo root — so
+    pytest imports each test module under the same fully-qualified
+    name Django did, and coverage's ``test_function`` context tag is
+    derived from that import name.)
 
     So we define:
 
@@ -344,47 +325,66 @@ def _run_cluster(
 
         test_suffix="test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline"
 
-    produces::
+    produces the pytest nodeid::
 
-        lex.test_project.tests.init.test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline
+        lex/test_project/tests/init/test_1b_lex_init.py::TestCluster01b_LexInit::test_1_6b_init_runs_full_pipeline
 
     When omitted, the full cluster folder is run as before.
+
+    Note: ``keepdb`` is kept on the signature for backward compatibility
+    with callers; pytest has no equivalent flag for unittest.TestCase
+    tests, and Django TestCase's per-test transaction rollback already
+    avoids DB recreation per test, so the speed characteristic is
+    preserved without it.
     """
-    base_label = f"lex.test_project.tests.{cluster.key}"
-    label = f"{base_label}.{test_suffix}" if test_suffix else base_label
+    base_path = f"lex/test_project/tests/{cluster.key}"
+    if test_suffix:
+        # test_suffix arrives as a dotted Django label tail, e.g.
+        # "test_1b_lex_init.TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline".
+        # Translate to a pytest nodeid:
+        #   "<module>.py::<Class>::<method>"
+        parts = test_suffix.split(".")
+        module = parts[0]
+        rest = "::".join(parts[1:])
+        target = f"{base_path}/{module}.py::{rest}" if rest else f"{base_path}/{module}.py"
+    else:
+        target = base_path
     env = {**os.environ, **DJANGO_ENV}
 
     cmd = [
         "coverage", "run", "-a",
         "--rcfile=.coveragerc",
-        "-m", "lex", "test",
-        label,
-        "--verbosity=2", "--noinput",
+        "-m", "lex", "pytest",
+        target,
+        "-v",
     ]
-    if keepdb:
-        cmd.append("--keepdb")
+    # keepdb intentionally ignored — see docstring.
+    _ = keepdb
 
     subset_note = "  [single test]" if test_suffix else ""
-    print(f"\n──── {cluster.key}{subset_note} ────  (running: {label})",
+    print(f"\n──── {cluster.key}{subset_note} ────  (running: {target})",
           flush=True)
     t0 = time.time()
 
+    # Pytest writes most output (per-test -v lines, summary, FAILURES,
+    # short test summary info) to stdout. Merge stderr into stdout via
+    # `stderr=subprocess.STDOUT` so a single stream carries everything.
     if quiet:
         # Capture so we can parse the summary, but log a "still alive"
         # heartbeat every 15 s so the operator knows the process is
         # making progress on slow clusters (e.g. stress).
         proc = subprocess.Popen(
             cmd, cwd=REPO_ROOT, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         last_heartbeat = time.time()
-        stderr_chunks: list[str] = []
+        stdout_chunks: list[str] = []
         while proc.poll() is None:
             try:
-                if proc.stderr is not None:
-                    err = proc.stderr.read1(4096)
-                    if err:
-                        stderr_chunks.append(err)
+                if proc.stdout is not None:
+                    chunk = proc.stdout.read1(4096)
+                    if chunk:
+                        stdout_chunks.append(chunk)
             except Exception:
                 pass
             now = time.time()
@@ -393,33 +393,34 @@ def _run_cluster(
                 print(f"  … {cluster.key} still running ({elapsed}s)", flush=True)
                 last_heartbeat = now
             time.sleep(0.25)
-        tail_out, tail_err = proc.communicate()
-        stderr = "".join(stderr_chunks) + (tail_err or "")
+        tail_out, _tail_err = proc.communicate()
+        combined_output = "".join(stdout_chunks) + (tail_out or "")
     else:
-        # Stream stderr live; still capture it so we can parse.
+        # Stream live; merge stderr into stdout so a single iterator
+        # yields the full pytest output in order.
         proc = subprocess.Popen(
             cmd, cwd=REPO_ROOT, env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
-        stderr_chunks = []
-        assert proc.stderr is not None
-        for line in proc.stderr:
+        stdout_chunks = []
+        assert proc.stdout is not None
+        for line in proc.stdout:
             sys.stderr.write(line)
             sys.stderr.flush()
-            stderr_chunks.append(line)
+            stdout_chunks.append(line)
         proc.wait()
-        stderr = "".join(stderr_chunks)
+        combined_output = "".join(stdout_chunks)
 
     wall_s = time.time() - t0
-    parsed = _parse_summary(stderr)
-    # Prefer the wall-clock measurement over Django's internal one —
+    parsed = _parse_summary(combined_output)
+    # Prefer the wall-clock measurement over pytest's internal one —
     # includes DB setup cost the stakeholder also pays.
     parsed["wall_s"] = round(wall_s, 2)
 
     # Capture every individual test the runner emitted, so the
     # customer report can list which scenarios actually broke (and
     # the short error message), not just "this cluster is red".
-    parsed["tests"] = _parse_per_test(stderr)
+    parsed["tests"] = _parse_per_test(combined_output)
 
     # Per-cluster coverage is computed in one pass after all clusters
     # finish (see _per_cluster_coverage_from_contexts). Leave the key
@@ -449,8 +450,12 @@ def main(argv: list[str]) -> int:
                    help="Comma-separated cluster selector. Each entry is "
                         "either ``<cluster_key>`` (run every test in the "
                         "cluster) or ``<cluster_key>:<test_suffix>`` (run "
-                        "a single test — the suffix is appended to "
-                        "``lex.test_project.tests.<cluster_key>.``). "
+                        "a single test — the suffix is the dotted "
+                        "``<module>.<TestClass>.<method>`` tail under the "
+                        "cluster folder, translated internally to the "
+                        "pytest nodeid "
+                        "``lex/test_project/tests/<cluster_key>/<module>.py"
+                        "::<TestClass>::<method>``). "
                         "Example: ``init:test_1b_lex_init.TestCluster01b_"
                         "LexInit.test_1_6b_init_runs_full_pipeline,"
                         "crud_api:test_2a_create.TestCluster02a_Create."

@@ -42,9 +42,11 @@ jobs:
     timeout-minutes: 20
 
     services:
-      # Required: the Django test runner needs a real Postgres for
-      # migrate + per-test transactions. Mirrors showcase_tests.yml so
-      # cluster fixtures behave identically here vs. the full suite.
+      # Required: Django TestCase needs a real Postgres for migrate +
+      # per-test transactions (pytest collects the unittest.TestCase
+      # subclasses; the DB requirement is the same). Mirrors
+      # showcase_tests.yml so cluster fixtures behave identically here
+      # vs. the full suite.
       postgres:
         image: postgres:latest
         env:
@@ -85,7 +87,8 @@ jobs:
 
       - name: Install lex-app
         # `pip install -e .` puts the project's `lex` console-script on
-        # PATH — Mode-A/B/C invoke `lex test ...` (Django manage entry).
+        # PATH — Mode-A/B/C invoke `lex pytest ...` (pytest via the lex CLI
+        # wrapper, which calls django.setup() before collection).
         # Without this, `lex` is "command not found" on the GHA runner.
         run: |
           pip install --upgrade pip setuptools wheel
@@ -204,19 +207,17 @@ jobs:
           CELERY_ACTIVE: "False"
         run: |
           set -euo pipefail
-          # `lex` is the Django manage.py console-script installed by
-          # `pip install -e .` in the install step. Convert each path
-          # `lex/test_project/.../test_x.py` into a dotted module and
-          # hand them ALL to one `lex test` invocation so Django runs
-          # them in a single migrate cycle.
-          MODULES=""
+          # `lex pytest` is the Lex CLI wrapper around pytest.main. The CLI
+          # calls django.setup() in lex/bin/lex.py before pytest collection,
+          # so Django ORM imports inside tests work without pytest-django.
+          # Feed file paths (not dotted module names) to pytest.
+          PATHS=""
           while IFS= read -r TEST_PATH; do
             [[ -z "$TEST_PATH" ]] && continue
-            MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
-            MODULES="$MODULES $MODULE"
+            PATHS="$PATHS $TEST_PATH"
           done <<< "${{ steps.testfile.outputs.paths }}"
-          echo "Running modules:$MODULES"
-          lex test $MODULES --noinput
+          echo "Running paths:$PATHS"
+          python -m lex pytest $PATHS
 
       - name: Mode B — strip @expectedFailure, expect FAIL
         if: steps.mode.outputs.mode == 'bug-repro'
@@ -230,10 +231,8 @@ jobs:
           TEST_PATH="${{ steps.testfile.outputs.first }}"
           # Strip the @(unittest.)?expectedFailure decorator IN PLACE.
           # The CI checkout is throwaway; overwriting keeps the file at
-          # its real package path so the Django test runner discovers
-          # it as part of `lex/test_project/tests/<cluster>/`. A temp
-          # file outside the package would not be importable as
-          # `lex.test_project.tests.cluster_X.test_Nx_thing`.
+          # its real package path so the test runner discovers it as part
+          # of lex/test_project/tests/<cluster>/.
           python - "$TEST_PATH" <<'PY'
           import re, sys, pathlib
           p = pathlib.Path(sys.argv[1])
@@ -244,29 +243,29 @@ jobs:
               sys.exit(2)
           p.write_text(out)
           PY
-          MODULE=$(echo "${TEST_PATH%.py}" | tr '/' '.')
-          # Run via the Django test runner (NOT pytest — the project's
-          # tests are unittest.TestCase under Django settings; pytest
-          # without pytest-django would either not collect or crash on
-          # django.setup(), which would look like 'correctly fails'
-          # without actually proving the bug reproduces).
+          # Run via `lex pytest`. The lex CLI calls django.setup() before
+          # pytest collection, so Django ORM is available.
           set +e
-          lex test "$MODULE" --noinput 2>&1 | tee mode_b.out
+          python -m lex pytest "$TEST_PATH" -v 2>&1 | tee mode_b.out
           EXIT=${PIPESTATUS[0]}
           set -e
           if [[ $EXIT -eq 0 ]]; then
             echo "::error::Mode-B test passed without @expectedFailure — bug is not reproducible."
             exit 1
           fi
-          # Distinguish 'ran and asserted FAIL' from 'errored on
-          # import/setup'. Django's unittest runner prints lines
-          # starting with `FAIL:` (assertion) or `FAILED` (summary).
-          # Anything else is a non-test failure that we MUST not treat
-          # as a successful bug repro.
-          if grep -qE '^(FAIL|FAILED)' mode_b.out; then
+          # Distinguish "ran and asserted FAIL" from "errored on
+          # import/setup". Pytest prints lines starting with `FAILED`,
+          # `ERROR`, or a `==== FAILURES ====` separator for genuine test
+          # failures. A collection or import error prints `ERRORS` (note
+          # the plural separator) and exits non-zero too — we treat those
+          # as non-reproductions because the test body never asserted.
+          if grep -qE '^(FAILED |=+ FAILURES =+)' mode_b.out; then
             echo "Mode-B test correctly fails without the decorator."
-          else
+          elif grep -qE '^(=+ ERRORS =+|ERROR )' mode_b.out; then
             echo "::error::Mode-B test errored before assertion (likely import/setup failure) — not a real bug repro."
+            exit 1
+          else
+            echo "::error::Mode-B exit code non-zero but no recognised pytest FAILED/ERROR output — not a real bug repro."
             exit 1
           fi
 
