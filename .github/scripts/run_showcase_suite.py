@@ -66,7 +66,13 @@ DJANGO_ENV = {
 # This replaces an earlier hard-coded-order regex that silently reported
 # ``0 errors`` whenever pytest emitted ``warning`` before ``errors``.
 _PYTEST_SUMMARY_LINE_RE = re.compile(
-    r"^=+\s+(?P<body>.+?)\s+in\s+(?P<duration>[\d.]+)s\s+=+\s*$",
+    # Body, then ``in <duration>s`` — pytest also appends an optional
+    # ``(H:MM:SS)`` HMS form when the wall time exceeds ~60s, so we have
+    # to allow that suffix or long runs collapse to ``summary_found=False``
+    # and the cluster reports ``0 passed`` despite N tests actually passing.
+    r"^=+\s+(?P<body>.+?)\s+in\s+(?P<duration>[\d.]+)s"
+    r"(?:\s+\([^)]+\))?"     # optional " (0:01:39)" HMS suffix on long runs
+    r"\s+=+\s*$",
     re.MULTILINE,
 )
 _PYTEST_CATEGORY_TOKEN_RE = re.compile(
@@ -88,6 +94,12 @@ _PYTEST_CATEGORY_TO_BUCKET = {
     "deselected": None,
     "warning":    None,
     "warnings":   None,
+    # pytest-subtests prints "N subtests passed" — they are nested under
+    # the parent test methods already counted in "passed", so we must NOT
+    # double-count them. Listed here so the token isn't treated as an
+    # unknown category in the future.
+    "subtest":    None,
+    "subtests":   None,
 }
 
 # ── Per-test parsing for the customer report ───────────────────────
