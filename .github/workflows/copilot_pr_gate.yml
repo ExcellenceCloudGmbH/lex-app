@@ -291,7 +291,15 @@ jobs:
       - name: Apply auto-merge (modes A/B)
         if: steps.mode.outputs.mode != 'fix-and-test'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # COPILOT_PAT, not GITHUB_TOKEN. The `gh pr merge --auto` call
+          # invokes the `enablePullRequestAutoMerge` GraphQL mutation,
+          # which the default workflow token cannot call in repos with
+          # branch protection requiring review — fails with
+          # "Resource not accessible by integration". The classic PAT
+          # acts as a real user and has the required permission. Same
+          # constraint that drives PAT usage in copilot_coverage_check.yml
+          # and copilot_test_bot.yml.
+          GH_TOKEN: ${{ secrets.COPILOT_PAT }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           gh pr edit  "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "auto-merge"
