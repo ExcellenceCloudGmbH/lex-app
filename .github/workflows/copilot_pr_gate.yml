@@ -42,9 +42,11 @@ jobs:
     timeout-minutes: 20
 
     services:
-      # Required: the Django test runner needs a real Postgres for
-      # migrate + per-test transactions. Mirrors showcase_tests.yml so
-      # cluster fixtures behave identically here vs. the full suite.
+      # Required: Django TestCase needs a real Postgres for migrate +
+      # per-test transactions (pytest collects the unittest.TestCase
+      # subclasses; the DB requirement is the same). Mirrors
+      # showcase_tests.yml so cluster fixtures behave identically here
+      # vs. the full suite.
       postgres:
         image: postgres:latest
         env:

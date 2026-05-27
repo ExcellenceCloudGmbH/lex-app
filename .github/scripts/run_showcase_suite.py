@@ -5,12 +5,12 @@ Run the Platform Health showcase suite and emit a JSON manifest.
 For every cluster declared in ``showcase_clusters.CLUSTERS`` this
 script:
 
-  1. runs the test label ``lex.test_project.tests.<key>`` through the
-     Django test runner, under ``coverage run -a`` so coverage
+  1. runs the cluster path ``lex/test_project/tests/<key>`` through
+     ``python -m lex pytest``, under ``coverage run -a`` so coverage
      accumulates across clusters;
-  2. parses Django's trailing summary from stderr to extract
-     ``passed``, ``failed``, ``errors``, ``skipped`` and ``xfailed``
-     counts;
+  2. parses pytest's trailing summary line from stdout to extract
+     ``passed``, ``failed``, ``errors``, ``skipped``, ``xfailed`` and
+     ``xpassed`` counts;
   3. runs ``coverage report --include <cluster globs>`` to compute a
      cluster-scoped coverage percentage (if any globs are configured).
 
@@ -222,6 +222,13 @@ def _per_cluster_coverage_from_contexts(
       (``""``);
     * lines executed during a test carry a context like
       ``lex.test_project.tests.<key>.<module>.<TestClass>.<method>|run``.
+
+    (The dotted form survives the pytest cutover because every cluster
+    folder under ``lex/test_project/tests/`` is a real Python package
+    — ``__init__.py`` files all the way up to the repo root — so
+    pytest imports each test module under the same fully-qualified
+    name Django did, and coverage's ``test_function`` context tag is
+    derived from that import name.)
 
     So we define:
 
@@ -443,8 +450,12 @@ def main(argv: list[str]) -> int:
                    help="Comma-separated cluster selector. Each entry is "
                         "either ``<cluster_key>`` (run every test in the "
                         "cluster) or ``<cluster_key>:<test_suffix>`` (run "
-                        "a single test — the suffix is appended to "
-                        "``lex.test_project.tests.<cluster_key>.``). "
+                        "a single test — the suffix is the dotted "
+                        "``<module>.<TestClass>.<method>`` tail under the "
+                        "cluster folder, translated internally to the "
+                        "pytest nodeid "
+                        "``lex/test_project/tests/<cluster_key>/<module>.py"
+                        "::<TestClass>::<method>``). "
                         "Example: ``init:test_1b_lex_init.TestCluster01b_"
                         "LexInit.test_1_6b_init_runs_full_pipeline,"
                         "crud_api:test_2a_create.TestCluster02a_Create."

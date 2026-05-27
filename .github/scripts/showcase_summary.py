@@ -47,8 +47,8 @@ SHOWCASES: dict[str, Showcase] = {
             "registers the project with Keycloak for access management."
         ),
         technical_id=(
-            "lex.test_project.tests.init.test_1b_lex_init."
-            "TestCluster01b_LexInit.test_1_6b_init_runs_full_pipeline"
+            "lex/test_project/tests/init/test_1b_lex_init.py"
+            "::TestCluster01b_LexInit::test_1_6b_init_runs_full_pipeline"
         ),
         pass_blurb=(
             "A customer can press **Init** and end up with a fully "
@@ -67,8 +67,8 @@ SHOWCASES: dict[str, Showcase] = {
             "and readable on subsequent requests."
         ),
         technical_id=(
-            "lex.test_project.tests.crud_api.test_2a_create."
-            "TestCluster02a_Create.test_2_1_post_creates_record"
+            "lex/test_project/tests/crud_api/test_2a_create.py"
+            "::TestCluster02a_Create::test_2_1_post_creates_record"
         ),
         pass_blurb=(
             "The core \"create a record\" capability works end-to-end "
