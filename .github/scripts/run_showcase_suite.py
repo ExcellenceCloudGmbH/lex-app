@@ -187,11 +187,13 @@ def _parse_summary(output: str) -> dict[str, int | float | str]:
               "skipped": 0, "xfailed": 0, "xpassed": 0}
     wall_s = 0.0
     ran = 0
+    summary_found = False
 
     last_match = None
     for m in _PYTEST_SUMMARY_LINE_RE.finditer(output):
         last_match = m
     if last_match is not None:
+        summary_found = True
         wall_s = float(last_match.group("duration"))
         body = last_match.group("body")
         for tok in _PYTEST_CATEGORY_TOKEN_RE.finditer(body):
@@ -214,6 +216,7 @@ def _parse_summary(output: str) -> dict[str, int | float | str]:
         "xpassed": counts["xpassed"],
         "wall_s": wall_s,
         "outcome": outcome,
+        "summary_found": summary_found,
     }
 
 
@@ -438,10 +441,42 @@ def _run_cluster(
         combined_output = "".join(stdout_chunks)
 
     wall_s = time.time() - t0
+    returncode = proc.returncode if proc.returncode is not None else -1
     parsed = _parse_summary(combined_output)
     # Prefer the wall-clock measurement over pytest's internal one —
     # includes DB setup cost the stakeholder also pays.
     parsed["wall_s"] = round(wall_s, 2)
+
+    # Catch the silent-success failure mode: pytest never printed a
+    # summary line (e.g. it aborted before collection because
+    # ``setup_databases()`` raised, or Django bootstrap blew up) and
+    # the subprocess exit code is non-zero. Without this, the cluster
+    # row would report "0 passed, 0 failed, 0 errors" with
+    # outcome="success" — and the platform-health report would
+    # confidently say "✓ all green — N/N clusters passing" while in
+    # reality zero tests ran. Surface it as a hard error instead.
+    if not parsed.pop("summary_found", False) and returncode != 0:
+        parsed["errors"] = max(parsed["errors"], 1)
+        parsed["ran"] = sum(
+            parsed[k] for k in
+            ("passed", "failed", "errors", "skipped", "xfailed", "xpassed")
+        )
+        parsed["outcome"] = "failure"
+        parsed["setup_error"] = (
+            f"pytest emitted no summary line and exited with code "
+            f"{returncode}. Likely cause: Django/DB bootstrap failed "
+            f"before tests could run. Check the cluster log."
+        )
+    # If pytest DID emit a summary but the process still exited non-zero
+    # (e.g. internal pytest error after the report), make sure that
+    # surfaces too rather than reporting success based on counts alone.
+    elif returncode != 0 and parsed["outcome"] == "success":
+        parsed["errors"] = max(parsed["errors"], 1)
+        parsed["outcome"] = "failure"
+        parsed["setup_error"] = (
+            f"pytest exited with code {returncode} despite a clean "
+            f"summary line; treating cluster as failed."
+        )
 
     # Capture every individual test the runner emitted, so the
     # customer report can list which scenarios actually broke (and
