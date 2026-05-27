@@ -50,26 +50,45 @@ DJANGO_ENV = {
 
 
 # ── Output parsing ──────────────────────────────────────────────────
-# Pytest summary line examples (order of categories varies by version):
+# Pytest summary line examples (category order varies by version and by
+# what categories are non-zero):
 #   ===== 42 passed in 7.12s =====
 #   ===== 3 failed, 39 passed, 2 skipped in 8.45s =====
 #   ===== 1 xfailed, 41 passed in 7.20s =====
 #   ===== 1 error in 0.45s =====
-# Categories can be: passed, failed, errors, skipped, xfailed, xpassed,
-# deselected, warnings. We extract counts order-agnostically.
-_PYTEST_SUMMARY_RE = re.compile(
-    r"^=+ "
-    r"(?:(?P<failed>\d+) failed,? ?)?"
-    r"(?:(?P<passed>\d+) passed,? ?)?"
-    r"(?:(?P<skipped>\d+) skipped,? ?)?"
-    r"(?:(?P<xfailed>\d+) xfailed,? ?)?"
-    r"(?:(?P<xpassed>\d+) xpassed,? ?)?"
-    r"(?:(?P<errors>\d+) errors?,? ?)?"
-    r"(?:(?P<deselected>\d+) deselected,? ?)?"
-    r"(?:(?P<warnings>\d+) warnings?,? ?)?"
-    r"in (?P<duration>[\d.]+)s =+",
+#   ===== 1 warning, 37 errors in 8.44s =====   (collection failures)
+#
+# We parse this in two steps to be genuinely order-agnostic:
+#   1. ``_PYTEST_SUMMARY_LINE_RE`` matches the whole line and captures
+#      the comma-separated category clause and the wall-clock duration.
+#   2. ``_PYTEST_CATEGORY_TOKEN_RE`` is applied to the clause to pull
+#      out every ``<N> <word>`` pair regardless of order.
+# This replaces an earlier hard-coded-order regex that silently reported
+# ``0 errors`` whenever pytest emitted ``warning`` before ``errors``.
+_PYTEST_SUMMARY_LINE_RE = re.compile(
+    r"^=+\s+(?P<body>.+?)\s+in\s+(?P<duration>[\d.]+)s\s+=+\s*$",
     re.MULTILINE,
 )
+_PYTEST_CATEGORY_TOKEN_RE = re.compile(
+    r"(?P<count>\d+)\s+(?P<word>[a-zA-Z]+)"
+)
+# Map every pytest category word to its manifest bucket. Singulars and
+# plurals collapse to the same bucket so "1 error" and "37 errors" both
+# count.
+_PYTEST_CATEGORY_TO_BUCKET = {
+    "passed":     "passed",
+    "failed":     "failed",
+    "error":      "errors",
+    "errors":     "errors",
+    "skipped":    "skipped",
+    "xfailed":    "xfailed",
+    "xpassed":    "xpassed",
+    # Recognised-but-ignored buckets (kept so unknown-word warnings stay
+    # signal, not noise):
+    "deselected": None,
+    "warning":    None,
+    "warnings":   None,
+}
 
 # ── Per-test parsing for the customer report ───────────────────────
 # Pytest -v test-result lines look like:
@@ -153,27 +172,34 @@ def _parse_summary(output: str) -> dict[str, int | float | str]:
     """
     Parse pytest's trailing summary line into the manifest shape.
 
-    Pytest's category order varies between releases; the regex is
-    order-agnostic for the seven categories pytest emits. We find the
-    *last* match in the output (pytest prints the summary line as the
-    very last line of the run; finditer + last guards against partial
-    matches earlier in the buffer).
+    Two-step parse so category order doesn't matter:
+
+    * find the *last* line of the form ``==== <body> in <N>s ====`` —
+      pytest always prints the summary as the final boxed line, so the
+      last match is the authoritative one;
+    * tokenise ``<body>`` into every ``<N> <word>`` pair and fold each
+      into its bucket via ``_PYTEST_CATEGORY_TO_BUCKET``.
+
+    "1 warning, 37 errors in 8.44s" now correctly reports 37 errors;
+    the old hard-coded-order regex reported 0.
     """
-    ran = 0
-    wall_s = 0.0
     counts = {"passed": 0, "failed": 0, "errors": 0,
               "skipped": 0, "xfailed": 0, "xpassed": 0}
+    wall_s = 0.0
+    ran = 0
 
     last_match = None
-    for m in _PYTEST_SUMMARY_RE.finditer(output):
+    for m in _PYTEST_SUMMARY_LINE_RE.finditer(output):
         last_match = m
     if last_match is not None:
-        g = last_match.groupdict()
-        for key in counts:
-            v = g.get(key)
-            if v is not None:
-                counts[key] = int(v)
-        wall_s = float(g["duration"])
+        wall_s = float(last_match.group("duration"))
+        body = last_match.group("body")
+        for tok in _PYTEST_CATEGORY_TOKEN_RE.finditer(body):
+            word = tok.group("word").lower()
+            count = int(tok.group("count"))
+            bucket = _PYTEST_CATEGORY_TO_BUCKET.get(word)
+            if bucket is not None:
+                counts[bucket] += count
         ran = sum(counts.values())
 
     outcome = "success" if counts["failed"] == 0 and counts["errors"] == 0 else "failure"
