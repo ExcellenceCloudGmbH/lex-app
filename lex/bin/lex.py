@@ -457,6 +457,39 @@ def pytest_cmd(ctx):
     # ``envvar_not_existing`` → DNS error).
     _old_db_config = _db_runner.setup_databases(aliases={"default"})
 
+    # Make ``register_converter`` idempotent for the duration of the pytest
+    # run. ``lex/process_admin/sites/process_admin_site.py:_get_urls`` calls
+    # ``register_converter(create_model_converter(...), "model")`` every time
+    # ``processAdminSite.urls`` is accessed, and Django's ``register_converter``
+    # raises ``ValueError: Converter 'model' is already registered.`` on the
+    # second call. With ``lex test`` only one cluster ran per invocation so
+    # the issue rarely surfaced, and ``E2ETestCase._rebuild_urls`` already
+    # installs a local idempotent patch around its own reload of
+    # ``lex_app.urls``. Pytest now runs every cluster in one process; a
+    # plain ``TestCase`` (e.g. ``TestCluster01p_UrlConfResolves``) calling
+    # ``reverse()`` after an E2E test reloaded ``lex_app.urls`` hits the
+    # unpatched register and aborts collection. Installing the patch at the
+    # runner level — once, around ``pytest.main()`` — covers every test
+    # class (E2E and plain alike) without modifying framework code, and
+    # matches the existing pattern in ``_e2e_test_case.py`` /
+    # ``test_user_model_registration.py`` / ``test_api_user_journey.py`` /
+    # ``test_bitemporal.py``.
+    from django.urls import converters as _django_converters
+    from django.urls.converters import REGISTERED_CONVERTERS as _REGISTERED_CONVERTERS
+    from unittest.mock import patch as _patch
+
+    _real_register_converter = _django_converters.register_converter
+
+    def _idempotent_register_converter(converter, type_name):
+        _REGISTERED_CONVERTERS.pop(type_name, None)
+        return _real_register_converter(converter, type_name)
+
+    _converter_patch = _patch(
+        "lex.process_admin.sites.process_admin_site.register_converter",
+        new=_idempotent_register_converter,
+    )
+    _converter_patch.start()
+
     started_at = time.perf_counter()
     try:
         exit_code = _pytest.main(forwarded, plugins=[plugin])
@@ -464,6 +497,10 @@ def pytest_cmd(ctx):
         # Raised from pytest_collection_modifyitems on marker/group mismatch.
         raise click.ClickException(str(exc)) from exc
     finally:
+        try:
+            _converter_patch.stop()
+        except Exception:
+            pass
         try:
             _db_runner.teardown_databases(_old_db_config)
         finally:
