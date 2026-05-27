@@ -94,6 +94,10 @@ lex/test_project/
     └── stress/                # Stress / load harness
 ```
 
+Each cluster folder name is also its pytest group. The marker is declared
+once per test module via `pytestmark = pytest.mark.<group>`; the canonical
+group list lives in `lex_test_config.yaml` at the repo root.
+
 **Naming convention:** test files inside a cluster folder follow `test_<Nx>_<slug>.py` where `Nx` is the cluster number + sub-cluster letter (e.g. `2a`, `7g`). The PR-gate workflow enforces this regex on Copilot-authored test files.
 
 ---
