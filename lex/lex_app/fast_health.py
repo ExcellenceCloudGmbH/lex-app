@@ -15,6 +15,32 @@ def is_fast_health_path(path: str) -> bool:
     return path in FAST_HEALTH_PATHS
 
 
+def match_health_request_path(path: str) -> bool:
+    """Return True if ``path`` is a recognised health-check endpoint.
+
+    Like :func:`is_fast_health_path` but tolerates an optional query
+    string. Probes from Kubernetes, GCP uptime checks, and external
+    monitoring services often append a query suffix (``?source=k8s``,
+    ``?check=ready``) to differentiate themselves in access logs; the
+    strict matcher rejects those even though the underlying path is a
+    valid health endpoint. This variant strips the query before
+    comparing against ``FAST_HEALTH_PATHS``.
+
+    Examples:
+        >>> match_health_request_path("/health")
+        True
+        >>> match_health_request_path("/health?source=k8s")
+        True
+        >>> match_health_request_path("/api/health/?check=ready")
+        True
+        >>> match_health_request_path("/users")
+        False
+    """
+    if "?" in path:
+        path = path.split("?", 1)[0]
+    return path in FAST_HEALTH_PATHS
+
+
 async def _drain_http_body(
     receive: Callable[[], Awaitable[Dict[str, Any]]],
 ) -> None:
