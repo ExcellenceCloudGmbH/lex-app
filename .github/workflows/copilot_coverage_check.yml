@@ -243,13 +243,25 @@ jobs:
           cat > issue-body.md <<EOF
           # Coverage task — auto-opened by copilot_coverage_check.yml
 
+          ## ⚠️ Required base branch
+
+          Open your PR with this **exact** base:
+
+          \`\`\`
+          ${PR_HEAD_REF}
+          \`\`\`
+
+          Do **NOT** target \`lex-app-v2\`. The test must merge into the parent PR's head branch (\`${PR_HEAD_REF}\`) so it ships in the same diff as the source change. Targeting \`lex-app-v2\` directly will leave the parent PR blocked forever and may break \`lex-app-v2\` CI by shipping a test for code that doesn't exist on that branch yet.
+
+          ---
+
+          ## Task
+
           PR #${PR_NUMBER} modifies ${COUNT} source file(s) under \`lex/lex_app/\*\*\` without test coverage in the same diff:
 
           ${UNTESTED}
 
           Write regression tests for the behaviour these files now express. Follow the test-plan rules in \`lex/test_project/test-plan/\`.
-
-          **Open your PR against base \`${PR_HEAD_REF}\` — not \`lex-app-v2\`.** Targeting the parent PR's head branch ensures the test ships *with* the change instead of racing against it, and avoids recursive triggering of this workflow.
 
           End your PR body with \`Fixes #<this issue number>\`.
 
