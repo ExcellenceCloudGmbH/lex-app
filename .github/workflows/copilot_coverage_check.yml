@@ -270,11 +270,22 @@ jobs:
           *Coverage-task automation spec:* \`docs/superpowers/specs/2026-05-26-copilot-test-automation-pipeline-design.md\` §7
           EOF
 
+          # Assign Copilot so the agent actually picks the task up. Without
+          # this the issue is created but sits unassigned forever — the parent
+          # PR stays blocked on the red `coverage / required` check and a human
+          # has to chase it, defeating §7.1 ("one uniform workflow … so I don't
+          # have to manually chase contributors"). The spec's flow diagram and
+          # state machine both assume assignment ("creates issue → assigns
+          # Copilot → Copilot opens PR"). Mirrors copilot_test_bot.yml's
+          # `gh issue create … --assignee copilot-swe-agent`, and works here
+          # because this step already runs under COPILOT_PAT (a human PAT —
+          # GITHUB_TOKEN-created assignments don't reliably trigger the agent).
           ISSUE_URL=$(gh issue create \
             --repo "$GITHUB_REPOSITORY" \
             --title "[copilot-task] Coverage tests for PR #${PR_NUMBER}" \
             --body-file issue-body.md \
-            --label coverage-task)
+            --label coverage-task \
+            --assignee copilot-swe-agent)
           echo "Opened coverage-task issue: $ISSUE_URL"
 
           # Tag the parent PR. `needs-tests` is human-facing; the red
