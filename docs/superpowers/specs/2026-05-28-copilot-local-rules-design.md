@@ -1,95 +1,131 @@
-# Copilot local-rules — testing-first MVP
+# Local agent rules — no-trigger testing parity
 
-**Date:** 2026-05-28
-**Status:** MVP — testing scope only. Future domain rules deferred.
+**Date:** 2026-05-28 (revised 2026-05-29)
+**Status:** Implemented — testing scope. Other domains deferred.
 
 ## Problem
 
-The Copilot Coding Agent (cloud) writes tests that follow the lex-app conventions (cluster naming, base-class selection, coverage pairing) because the coverage workflow injects an explicit prompt into the agent's issue. Local IDE Copilot (Chat, inline) has no such prompt — so its test suggestions drift away from project conventions and frequently fail review.
+The Copilot Coding Agent (cloud) writes tests that follow the lex-app conventions (cluster naming,
+base-class selection, coverage pairing) because the coverage workflow injects an explicit prompt
+into the agent's issue. Local agents — IDE Copilot (Chat, inline) and Claude Code — have no such
+prompt, so their suggestions drift from project conventions and fail review.
 
-We want **local Copilot to produce work matching the cloud agent's quality**, with the test-plan followed strictly (no improvisation on cluster naming, letter allocation, or scenario IDs).
+We want **local agents to produce work matching the cloud agent's quality**, with the test-plan
+followed strictly. Two hard requirements shaped the design:
 
-## Decisions
+1. **No trigger words / no explicit invocation.** The agent must already "know" the rules. When a
+   dev edits framework source, paired tests must be written automatically — not behind a
+   `/command` the dev has to remember.
+2. **Local mirrors cloud.** The behaviour of writing and running tests must follow the cloud
+   coverage-gate paradigm: source change → paired test in the same change, cluster-allocated, with
+   the plan kept in sync.
 
-### Decision 1: Approach is **A + B** (instructions + prompt). C deferred.
+## What changed from the first MVP
 
-Three options were considered:
+The original MVP (PR #530) shipped an instructions file **plus** a `/write-cluster-test` slash
+command. The slash command is a **trigger** — incompatible with requirement 1. It has been removed.
+Its workflow logic was folded into:
 
-- **A. Instructions file only.** Path-scoped instructions activate when a test file is open or the user asks Copilot about tests. Tells Copilot the rules and points at the test-plan. Cheap, but relies on Copilot remembering to read the live test-plan state.
-- **B. Prompt that scripts the workflow.** `/write-cluster-test` slash command walks Copilot through the test-plan lookup and forces a confirmation step before scaffolding. Explicit and reliable, but only runs when the dev invokes it.
-- **C. CLI / MCP tool returning canonical state.** `lex test-plan next-slot --topic <topic>` returns `{cluster, letter, scenario_range, path}` deterministically. Eliminates parse drift but requires building infrastructure.
+- a **Claude Code skill** that auto-activates on description match (no `/` needed), and
+- the **instructions file**, whose `applyTo` was widened to framework source so the rules load the
+  moment a dev edits `lex/` code (not just when a test file is open).
 
-**Chosen: A + B.** Instructions cover style/convention so any Copilot interaction in a test context inherits the rules. The prompt covers the workflow-heavy path (cluster allocation) where determinism matters most. **C is deferred** — building a CLI is a separate multi-hour task and the MVP needs to ship now.
-
-### Decision 2: Scope is **testing only**
-
-Other domain instructions (calculation models, audit logging, migrations, frontend) are valuable but separate work. One PR per domain keeps reviews bounded. Testing is the highest-leverage domain because:
-
-- Every framework change needs paired tests (coverage gate).
-- Test conventions are the most cited reason for review pushback.
-- The cloud agent already writes tests in the target style — we have a working reference.
-
-### Decision 3: Files shipped in this PR
-
-1. **`.github/instructions/testing.instructions.md`** — scoped path-based instructions. `applyTo` covers `lex/tests/`, `lex/test_project/tests/`, and any `test_*.py` / `frontend/src/__test__/` files.
-2. **`.github/prompts/write-cluster-test.prompt.md`** — explicit slash command for the test-plan workflow. Forces test-plan read → cluster identification → letter/scenario allocation → confirmation → scaffold → test-plan update.
-3. **This spec doc** — captures decisions for future refinement.
-
-### Decision 4: What's deferred (refinement later)
-
-- **Other domain scoped instructions** — calculation-models, audit-logging, migrations, frontend. Worth doing; not blocking testing parity.
-- **CLI / MCP tool** for canonical test-plan state. Build only if devs report repeat parse errors on the markdown tables.
-- **Auto-retargeting workflow** for coverage-task PRs that target the wrong base branch. Tracked separately as defense-in-depth for the prompt-hardening fix in PR #528.
-- **`.github/copilot-instructions.md` changes** — left untouched. It's currently focused on MCP/kickstart guidance for downstream Lex app builders; adding domain rules there would dilute its purpose.
-
-## How the two files interact
+## Architecture — layered, no-trigger
 
 ```
-Dev opens a test file in IDE
-        ↓
-testing.instructions.md auto-loads (applyTo glob match)
-        ↓
-Copilot Chat / inline suggestions have full LEX testing rules in context
-        ↓
-Dev asks "write a test for fast_health.py"
-        ↓
-   ┌────────────────────────┬─────────────────────────┐
-   │                                                  │
-Free-form chat                            Dev invokes /write-cluster-test
-(general test, no cluster ↓               ↓ (cluster allocation matters)
-allocation needed)            write-cluster-test.prompt.md runs
-   ↓                                       ↓
-Instructions guide the           Step-by-step lookup → confirm → scaffold
-output (style, pairing,                    ↓
-docstring, base-class)           Output: scaffolded file + test-plan row
+┌─ AGENTS.md (root) ──────────────────────────────────────────────┐
+│  Cross-tool foundation. Read by Claude Code, Copilot coding      │
+│  agent, Cursor, Codex. 3 prime directives + pointers. Lean.      │
+└──────────────────────────────────────────────────────────────────┘
+        │ points to
+        ▼
+┌─ .github/instructions/testing.instructions.md ───────────────────┐
+│  Path-scoped (applyTo). Auto-injected by Copilot Chat + cloud     │
+│  agent when an open/changed file matches the glob. The glob now   │
+│  covers framework SOURCE (lex/lex_app, lex/core, lex/api, …) AND  │
+│  all test files — so editing source pulls the testing rules in    │
+│  with no trigger. Full prose rules + the §6 plan-update / bug     │
+│  workflow.                                                        │
+└──────────────────────────────────────────────────────────────────┘
+        │ executable companion for Claude Code
+        ▼
+┌─ .claude/skills/lex-testing/SKILL.md ────────────────────────────┐
+│  Auto-activates on description match (Claude Code / SKILL-aware   │
+│  tools). 8-step workflow: read plan → identify cluster → allocate │
+│  letter/scenario → type → confirm → scaffold → update plan →      │
+│  run & report. Replaces the deleted slash-command prompt.         │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+`.github/copilot-instructions.md` is **left untouched** — it stays focused on MCP/kickstart
+guidance for downstream Lex-app builders. Adding domain rules there would dilute its purpose, and
+the path-scoped instructions file covers the testing case without it.
+
+### Per-tool coverage
+
+| Tool | Reads AGENTS.md | Reads `*.instructions.md` (applyTo) | Reads SKILL.md |
+| --- | --- | --- | --- |
+| Copilot coding agent (cloud) | yes | yes | no |
+| Copilot Chat (VS Code / VS) | weak | yes (on glob match) | no |
+| Copilot inline suggestions | no | no | no |
+| Claude Code | yes | n/a | yes (auto-activate) |
+| Cursor / Codex | yes | partial | no |
+
+The CI coverage gate (`copilot_coverage_check.yml`) is the **enforcement backstop** for every tool —
+including Copilot inline, which reads none of these files. If a local agent misses a paired test,
+the gate opens a `coverage-task` issue and the cloud agent fills it. Local rules reduce how often
+that happens; the gate guarantees it can never ship unpaired.
+
+## The "keep the plan honest" behaviour (the minor adjustment)
+
+The instructions already pointed at the test-plan for naming. This revision makes the **doc-update
+and bug-recording** behaviour explicit, because the instructions for it already exist in the plan:
+
+- **`test-writing-plan.md`** — every completed batch carries a Status / Tests-landed row (see 1o,
+  1p, 7k). The agent appends/updates this row in the same change.
+- **`known-bugs.md`** (lines 9-12) — documents the bug workflow: surface a real bug → assert the
+  correct behaviour → `@unittest.expectedFailure` → add a `BUG-NNN` row. Never weaken the test.
+- **`test-writing-plan.md` Rule 7** — reinforces: a test exposing a real bug gets
+  `@unittest.expectedFailure` + a tracker entry, not a softened assertion.
+
+These are now referenced from `testing.instructions.md` §6 and the skill's Step 7 so a local agent
+performs them automatically.
+
+## Files in this PR
+
+1. **`AGENTS.md`** (new) — root cross-tool foundation.
+2. **`.github/instructions/testing.instructions.md`** (revised) — `applyTo` widened to framework
+   source; §6 plan-update/bug-recording added; runner updated to `python -m lex pytest`.
+3. **`.claude/skills/lex-testing/SKILL.md`** (new) — auto-activating cluster-test workflow.
+4. **`.github/prompts/write-cluster-test.prompt.md`** (deleted) — trigger-based, replaced by 2 + 3.
+5. **This spec** (revised).
 
 ## Success criteria
 
-- IDE Copilot produces tests that pass the coverage gate's pairing check on first try.
-- Cluster-aligned tests (when devs use `/write-cluster-test`) get the right letter, the right scenario range, and update the test-plan in the same PR.
-- No new "should have read the test-plan" review comments on Copilot-assisted test PRs.
+- Editing framework source surfaces the testing rules with no trigger; the agent writes the paired
+  test in the same change.
+- Cluster-aligned tests get the right letter, scenario range, and update `test-writing-plan.md` in
+  the same PR.
+- Discovered bugs land in `known-bugs.md` with an `@expectedFailure` test, never a softened one.
+- No new "should have read the test-plan" review comments on local-agent test PRs.
 
-## Risks and mitigations
+## Deferred (future work, in priority order)
 
-| Risk | Mitigation |
-| --- | --- |
-| Copilot mis-parses the test-plan markdown tables and picks a wrong letter. | The prompt forces an explicit confirmation step (Step 5) before scaffolding. Dev sees the proposed allocation and can correct it. |
-| Devs forget to invoke `/write-cluster-test` and write free-form. | Acceptable for non-cluster-aligned tests under `lex/tests/unit/`. Cluster work is the minority. If this becomes a problem, escalate to a CI check that validates batch numbering on PR open. |
-| `applyTo` glob misses some test file naming conventions. | Globs are broad on purpose: `lex/tests/**`, `lex/test_project/tests/**`, `**/test_*.py`, `**/tests/**/*.py`, `frontend/src/__test__/**`. Expand if a gap is reported. |
-| Test-plan format changes break the prompt's lookup steps. | The prompt cites the canonical files; if the format changes, update the prompt. Coupling is acceptable for a project-specific tool. |
-
-## Future work (in priority order)
-
-1. **Domain instruction files** — `calculation-models.instructions.md`, `audit-logging.instructions.md`, `migrations.instructions.md`, `frontend.instructions.md`. Each follows the same pattern as testing.
-2. **Auto-retargeting workflow** for coverage-task PRs (see follow-up note in PR #528's discussion).
-3. **CLI / MCP tool** for test-plan state lookup — only if step 1 of the prompt (markdown table parse) proves unreliable in practice.
-4. **Org-level Copilot instructions** — if other repos in the org need shared rules, lift the cross-cutting ones to the org settings UI.
+1. **Other domain instruction files** — `calculation-models`, `audit-logging`, `migrations`,
+   `frontend`. Same path-scoped pattern as testing.
+2. **Auto-retargeting workflow** for coverage-task PRs that target the wrong base (defense-in-depth
+   on PR #528's prompt hardening).
+3. **CLI / MCP tool** returning canonical test-plan state (`next-slot --topic`) — build only if
+   markdown-table parsing proves unreliable in practice.
+4. **Org-level Copilot instructions** — lift cross-cutting rules to org settings if other repos
+   need them.
 
 ## References
 
+- [`AGENTS.md`](../../../AGENTS.md) — cross-tool foundation.
+- [`.github/instructions/testing.instructions.md`](../../../.github/instructions/testing.instructions.md) — path-scoped testing rules.
+- [`.claude/skills/lex-testing/SKILL.md`](../../../.claude/skills/lex-testing/SKILL.md) — Claude Code skill.
 - [`.github/copilot-instructions.md`](../../../.github/copilot-instructions.md) — global Copilot file (untouched).
-- [`.github/instructions/lex-docs.instructions.md`](../../../.github/instructions/lex-docs.instructions.md) — existing scoped instructions (template followed for new file).
+- [`lex/test_project/test-plan/`](../../../lex/test_project/test-plan/) — authoritative cluster + bug-tracker source.
 - [`docs/superpowers/specs/2026-05-26-copilot-test-automation-pipeline-design.md`](2026-05-26-copilot-test-automation-pipeline-design.md) — coverage-task pipeline spec.
-- PR #528 — coverage-task issue-body hardening (related but separate work).
-- `lex/test_project/test-plan/` — authoritative source for cluster allocation rules.
+- PR #528 — coverage-task issue-body hardening (related, separate work).
