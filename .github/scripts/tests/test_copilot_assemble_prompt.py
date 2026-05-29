@@ -187,6 +187,33 @@ def test_assembled_prompt_teaches_multi_cluster_decomposition(fake_test_plan: Pa
     assert "audit_logging" in out
 
 
+def test_assembled_prompt_includes_research_first_block(fake_test_plan: Path) -> None:
+    """The PyCharm live test exposed that a Copilot agent will code from first
+    instinct (reinventing cross-process state instead of reusing the existing
+    cache-backed store) when the prompt only says 'don't mirror the code'. The
+    prompt must also tell the agent what to do FIRST: read docs for intent and
+    check for an existing mechanism before inventing one."""
+    out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+    assert "Research before you write code" in out
+    # Reads docs for intent.
+    assert "docs/features/" in out
+    # The concrete anti-pattern from the live failure: reinventing existing state.
+    assert "ActiveCalculationStateStore" in out
+    # Research must come before the mode block (front-loaded, like the Golden Rule).
+    assert out.index("Research before you write code") < out.index("## Mode: regression")
+
+
+def test_assembled_prompt_lists_full_done_doc_set(fake_test_plan: Path) -> None:
+    """Definition-of-Done parity with the local AGENTS.md rules: the deliverables
+    must name the universal session-log row, the dashboard status bump, AND the
+    test-writing-plan batch row — so the cloud and local paths update the same
+    docs and don't drift."""
+    out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+    assert "progress/session-log.md" in out
+    assert "progress/dashboard.md" in out
+    assert "test-writing-plan.md" in out
+
+
 def test_bug_repro_and_fix_and_test_constrained_to_single_file(fake_test_plan: Path) -> None:
     """Multi-cluster decomposition is REGRESSION-only. Bug-repro and
     fix-and-test stay single-file (a multi-file bug-repro dilutes the

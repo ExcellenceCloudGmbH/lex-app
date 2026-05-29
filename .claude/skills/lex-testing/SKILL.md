@@ -158,15 +158,23 @@ the gate would otherwise open a `coverage-task` issue and assign Copilot. Pre-em
 ## Step 7 — Definition of Done: bring the plan into sync (mandatory)
 
 **The task is NOT done until the test-plan on disk matches the tests you wrote.** Writing the test
-is only half the job — do all of this in the **same change**, not as optional follow-up:
+is only half the job. This mirrors the **cloud Copilot agent's required deliverables**
+(`.github/scripts/copilot_assemble_prompt.py`) so both paths stay consistent — do all of this in the
+**same change**, not as optional follow-up:
 
-1. **Append/update the batch row** in the right cluster section of `test-writing-plan.md`, matching
-   the most recent batch's table shape (scenario range, type U/I/E, files covered, test file path,
-   test classes, fixtures, status). After you run the suite (Step 8), record the **real** results
-   (`Tests landed: N pass / 0 fail`, measured coverage gain) and flip *Status* to ✅ Complete.
-   Don't leave `pending` placeholders in a finished change.
+1. **Append a row to `progress/session-log.md`** — the universal per-PR record (its header: "the
+   Copilot test-bot writes here as part of every PR"). Append-only, bottom row, never re-order.
 
-2. **If a test exposes a real framework bug, record it — don't weaken the test.** Per the
+2. **Update the cluster status / scenario range** in `test-clusters.md` for each touched
+   (sub-)cluster, and bump the matching row in `progress/dashboard.md`.
+
+3. **If the work maps to a planned batch, append/update the batch row** in `test-writing-plan.md`,
+   matching the most recent batch's table shape (scenario range, type U/I/E, files covered, test
+   file path, test classes, fixtures, status). After you run the suite (Step 8), record the **real**
+   results (`N pass / 0 fail`, measured coverage gain) in the rows above and flip *Status* to
+   ✅ Complete. Don't leave `pending` placeholders in a finished change.
+
+4. **If a test exposes a real framework bug, record it — don't weaken the test.** Per the
    `known-bugs.md` workflow: assert the *correct* behaviour, mark the test
    `@unittest.expectedFailure` (or `@pytest.mark.xfail(strict=True)` for post-cutover tests), and
    add a `BUG-NNN` row (description, severity, cluster, test, status). The marker is dropped when

@@ -261,7 +261,23 @@ jobs:
 
           ${UNTESTED}
 
-          Write regression tests for the behaviour these files now express. Follow the test-plan rules in \`lex/test_project/test-plan/\`.
+          Write regression tests for the behaviour these files now express.
+
+          ### Research first (do not skip)
+
+          Derive what to test from **intent**, not from the code you see. Before writing:
+          - Read the docs that describe these files' intent — \`docs/features/\`, \`docs/reference/\`, \`docs/tutorial/\` — and assert what the framework is *trying to achieve* + what a customer would expect. **This is the Golden Rule** (full statement: \`lex/test_project/test-plan/test-clusters.md\` → Testing Philosophy). A test that mirrors a buggy implementation locks the bug in.
+          - Check for an existing mechanism before assuming new behaviour; skim the existing cluster tests for the area to match patterns.
+
+          ### Where the tests go (strict)
+
+          Cluster tree only: \`lex/test_project/tests/<cluster_slug>/test_<Nx>_<short>.py\`. Allocate the next free sub-cluster letter and continue scenario IDs per \`lex/test_project/test-plan/test-writing-plan.md\` — do not invent clusters or drop tests in the legacy \`lex/tests/unit/\` tree.
+
+          ### Definition of Done (same as every test PR)
+
+          - Append a row to \`lex/test_project/test-plan/progress/session-log.md\` (universal per-PR record).
+          - Update the touched cluster's status / scenario range in \`lex/test_project/test-plan/test-clusters.md\` and bump \`progress/dashboard.md\`.
+          - If a test surfaces a real framework bug, assert the correct behaviour, mark \`@unittest.expectedFailure\` / \`@pytest.mark.xfail(strict=True)\`, and add a \`BUG-NNN\` row to \`known-bugs.md\` — never weaken the assertion.
 
           End your PR body with \`Fixes #<this issue number>\`.
 
