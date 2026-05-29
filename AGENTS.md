@@ -1,40 +1,85 @@
 # AGENTS.md — lex-app
 
-Cross-tool guidance for AI coding agents (Claude Code, Copilot coding agent, Cursor, Codex)
+Cross-tool guidance for AI coding agents (Claude Code, Copilot coding/agent mode, Cursor, Codex)
 working in this repository. These are defaults, not overrides: explicit user instructions and
-`CLAUDE.md` win where they conflict.
+`CLAUDE.md` win where they conflict. **Read this file fully before starting any task** — it is the
+contract for how work is done here.
 
 `lex-app` is a Django framework shipped as a pip package. The frontend lives in a separate repo
 (`process-admin-general-client`); the docs live in `lex-app-docs`.
 
-## Three things to know before you touch anything
+## Prime directive 1 — Research before you write code
 
-1. **The docs are authoritative.** Read the relevant files under [`docs/`](docs/) before
-   implementing a feature. If your training data disagrees with the docs, the docs win. Start
-   from [`docs/index.md`](docs/index.md) when unsure which file applies.
+**Do not start implementing from your first instinct.** Framework code here has bugs, workarounds,
+and non-obvious lifecycle rules; guessing produces plausible-looking code that is wrong in
+production. Before writing feature code or tests:
 
-2. **Changing framework source means writing tests — automatically.** When you add or modify code
-   under `lex/` (the framework: `lex/lex_app/`, `lex/core/`, `lex/api/`, `lex/audit_logging/`,
-   `lex/process_admin/`, …), you write the paired tests in the **same change**, following the
-   cluster-based test-plan. This is not optional and you do not need to be asked — the CI coverage
-   gate (`copilot_coverage_check.yml`) blocks any source change that arrives without a paired test,
-   so local work mirrors what the cloud agent does. The full rules live in
-   [`.github/instructions/testing.instructions.md`](.github/instructions/testing.instructions.md)
-   and the authoritative plan is [`lex/test_project/test-plan/`](lex/test_project/test-plan/).
+1. **Read the docs that describe the intent**, not just the code: [`docs/`](docs/) — especially
+   [`docs/features/`](docs/features/), [`docs/reference/`](docs/reference/),
+   [`docs/tutorial/`](docs/tutorial/). The docs describe what the framework is *trying to achieve*;
+   the source is an incomplete story. Start at [`docs/index.md`](docs/index.md) if unsure.
+2. **Read the public API docstrings** of the classes/functions you'll touch, and skim the existing
+   tests for that area (under `lex/test_project/tests/<topic>/`) to see the established patterns.
+3. **Check for existing mechanisms before inventing new ones.** Example: cross-process state
+   already has a cache-backed home (`ActiveCalculationStateStore`); don't add a process-local dict
+   that silently fails across Celery workers. Search the codebase for the capability first.
+4. **If the request is ambiguous or has more than one defensible design, STOP and ask the
+   developer** targeted questions before coding — surface the trade-offs and let them choose. A
+   wrong assumption baked into a feature + its tests is far more expensive than one question.
+   (Claude Code: use the `superpowers:brainstorming` skill for this.)
 
-3. **Tests keep the plan honest.** After writing tests you update the batch row in
-   [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md), and if a test
-   surfaces broken framework behaviour you record it in
-   [`known-bugs.md`](lex/test_project/test-plan/known-bugs.md) (assert the *correct* behaviour,
-   mark `@unittest.expectedFailure`, add a `BUG-NNN` row) rather than weakening the test.
+When your prior knowledge conflicts with the docs, **the docs win.**
+
+## Prime directive 2 — Changing framework source means writing cluster tests, automatically
+
+When you add or modify code under `lex/` (`lex/lex_app/`, `lex/core/`, `lex/api/`,
+`lex/audit_logging/`, `lex/process_admin/`, …), you write the paired tests in the **same change**,
+following the **cluster test-plan** — without being asked. The CI coverage gate
+(`copilot_coverage_check.yml`) blocks any source change that arrives without a paired test, so local
+work must mirror what the cloud agent does.
+
+**Tests are derived from intent (docs), never by mirroring the implementation you just wrote.**
+Writing a test that asserts whatever the code happens to do locks in bugs — this is the single most
+common failure here (see the Golden Rule in
+[`lex/test_project/test-plan/test-clusters.md`](lex/test_project/test-plan/test-clusters.md)).
+
+Where the tests go and how they're named is **strict** — do not improvise:
+
+- **Location:** `lex/test_project/tests/<cluster_slug>/` (the cluster system). **Not**
+  `lex/tests/unit/` — that is the legacy audit tree; do not add new feature tests there.
+- **Allocation:** map the change to a cluster, take the **next free letter** for that cluster, and
+  continue scenario IDs from the cluster's current max. The authoritative source is
+  [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md) — **read it to allocate;
+  never guess the letter.**
+- **Names:** file `test_<NN><letter>_<short>.py`, class `TestCluster<NN><letter>_<Description>`,
+  module-level `pytestmark = pytest.mark.<cluster_slug>`, methods `test_<NN>_<NN>_<behaviour>` with a
+  `Scenario X.Y: … / Given / When / Then` docstring, and an `Intent` header on the file.
+
+Full rules: [`.github/instructions/testing.instructions.md`](.github/instructions/testing.instructions.md).
+Claude Code: the [`lex-testing` skill](.claude/skills/lex-testing/SKILL.md) automates the allocation.
+
+## Prime directive 3 — A task is not done until the test-plan is consistent
+
+After the feature + tests, you bring the plan into sync **in the same change** — this is part of
+finishing, not optional cleanup:
+
+1. **Append/update the batch row** in
+   [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md) for the cluster: scenario
+   range, type (U/I/E), files covered, test file path, test classes, fixtures, status.
+2. **If a test surfaced broken framework behaviour**, record it in
+   [`known-bugs.md`](lex/test_project/test-plan/known-bugs.md) (assert the *correct* behaviour, mark
+   `@unittest.expectedFailure` / `@pytest.mark.xfail(strict=True)`, add a `BUG-NNN` row) — **never
+   weaken the test to make it pass.**
+3. **Run the tests** (`python -m lex pytest <path>`) and record real results in the batch row.
+
+If the plan and the tests on disk disagree, the task is not finished.
 
 ## What you'll be asked to do here
 
-- **Develop a feature in lex-app** → read docs, implement, write paired cluster tests, run them,
-  update the plan. See directive 2 above.
-- **Develop in a downstream Lex project** (not this framework repo) → follow the project's own
-  conventions and [`docs/`](docs/); the cluster test-plan rules are framework-internal and do
-  **not** apply to downstream app code.
+- **Develop a feature/bugfix in lex-app** → directives 1→2→3, in that order.
+- **Develop in a downstream Lex project** (not this framework repo) → follow that project's own
+  conventions and [`docs/`](docs/); the cluster test-plan rules are framework-internal and do **not**
+  apply to downstream app code.
 - **Run the tests** → `python -m lex pytest <path>` (or `lex test <labels>`). Never `manage.py test`.
 - **Answer a question** → the answer is usually in [`docs/`](docs/) or `lex-app-docs`. Read before
   asserting; don't guess at framework APIs.
@@ -43,8 +88,9 @@ working in this repository. These are defaults, not overrides: explicit user ins
 
 | Topic | Where |
 | --- | --- |
-| Testing rules (always read before writing a test) | [`.github/instructions/testing.instructions.md`](.github/instructions/testing.instructions.md) |
-| Authoritative test-plan (clusters, allocation, bug tracker) | [`lex/test_project/test-plan/`](lex/test_project/test-plan/) |
+| Testing rules (read before writing any test) | [`.github/instructions/testing.instructions.md`](.github/instructions/testing.instructions.md) |
+| Authoritative test-plan (clusters, allocation, Golden Rule, bug tracker) | [`lex/test_project/test-plan/`](lex/test_project/test-plan/) |
+| Test conventions (naming, run commands, quality gates) | [`lex/test_project/test-plan/progress/conventions.md`](lex/test_project/test-plan/progress/conventions.md) |
 | Framework conventions & feature docs | [`docs/`](docs/) |
 | Session history & CI/CD architecture | [`CLAUDE.md`](CLAUDE.md), [`docs/ci-cd/`](docs/ci-cd/) |
 | Claude Code skill for cluster tests | [`.claude/skills/lex-testing/SKILL.md`](.claude/skills/lex-testing/SKILL.md) |
