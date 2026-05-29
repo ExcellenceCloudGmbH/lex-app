@@ -13,17 +13,28 @@ When these rules conflict with prior knowledge, **these rules win**. They reflec
 
 ---
 
+## 0. Before you write code or tests — research first (the Golden Rule)
+
+**Do not write code or tests from your first instinct, and never derive a test by mirroring the implementation.** The source code is an incomplete story — it has bugs and workarounds; a test that asserts "whatever the code does" locks those bugs in. This is the single most common failure mode here. Before writing anything:
+
+1. **Read the docs that describe intent** — [`docs/features/`](../../docs/features/), [`docs/reference/`](../../docs/reference/), [`docs/tutorial/`](../../docs/tutorial/). They say what the framework is *trying to achieve*. Derive the test from that, then *"What would a customer reasonably expect?"* (full statement: the Golden Rule in [`test-clusters.md`](../../lex/test_project/test-plan/test-clusters.md#testing-philosophy)).
+2. **Read the public API docstrings** of what you'll touch, and skim the existing cluster tests for that topic to match established patterns.
+3. **Check for an existing mechanism before inventing one.** E.g. cross-process state already lives in the cache-backed `ActiveCalculationStateStore` — don't add a process-local dict that fails silently across Celery workers. Search first.
+4. **If the request is ambiguous or has more than one defensible design, STOP and ask the developer** before coding — surface the trade-offs. A wrong assumption baked into a feature + its tests costs far more than one question. (Claude Code: use the `superpowers:brainstorming` skill.)
+
+If a test fails because the code is genuinely buggy, that is the test doing its job → §6.
+
 ## 1. Where tests live
+
+**Feature/bugfix work on framework source goes into the cluster system** — this is the active, plan-tracked, release-gating suite:
 
 | Layer | Path | Use for |
 | --- | --- | --- |
-| Framework unit | `lex/tests/unit/<topic>/test_*.py` | Pure logic, single-class behaviour, no DB if possible. Topic subdirs: `api/`, `audit/`, `auth/`, `calculation/`, `cli/`, `core/`, `crud/`, `grid/`, `infra/`, `serialization/`, `temporal/`. |
-| Framework integration | `lex/tests/integration/test_*.py` | Multi-component flows, bitemporal chains, audit recovery. |
-| Framework E2E | `lex/tests/e2e/test_*.py` | Full user journeys through REST `APIClient`. |
-| Project-cluster tests | `lex/test_project/tests/<topic>/test_<cluster>.py` | Cluster-based test plan (see §5). |
+| **Cluster tests (default for feature work)** | `lex/test_project/tests/<cluster_slug>/test_<NN><letter>_<short>.py` | Any test paired with a framework source change. Plan-tracked (see §5, §6). |
 | Frontend | `frontend/src/__test__/*.test.{ts,tsx}` | Vitest, jsdom env. |
+| Legacy framework audit | `lex/tests/unit/<topic>/`, `lex/tests/integration/`, `lex/tests/e2e/` | **Pre-existing** suite. **Do not add new feature tests here** — it bypasses the cluster plan and the coverage-task tracking. Only touch when extending an existing file in it. |
 
-**Do not invent new top-level directories.** If unsure where a new test belongs, place it under `lex/tests/unit/<existing-topic>/` and ask the reviewer.
+**Do not invent new top-level directories**, and **do not** drop a feature test into `lex/tests/unit/` to avoid cluster allocation — that is exactly the escape hatch that breaks plan consistency.
 
 ## 2. Test runner
 
@@ -52,25 +63,31 @@ When you write a test for new code, ensure **at least one** of those is true. Th
 
 **This is the local mirror of the cloud paradigm:** the cloud coverage gate opens a `coverage-task` issue and assigns Copilot to write the missing test against the parent PR's head branch. Locally, you pre-empt that by writing the paired test in the same change — so the gate stays green and no follow-up task is needed.
 
-## 5. Cluster test-plan — naming & allocation
+## 5. Cluster test-plan — strict naming & allocation
 
-Project-cluster tests under `lex/test_project/tests/` follow the plan in [`lex/test_project/test-plan/`](../../lex/test_project/test-plan/). The allocation rules are strict — **follow them, don't improvise**:
+Cluster tests follow the plan in [`lex/test_project/test-plan/`](../../lex/test_project/test-plan/) and the conventions in [`progress/conventions.md`](../../lex/test_project/test-plan/progress/conventions.md). These rules are **strict — follow them exactly, don't improvise**:
 
-- **Test files:** `test_<module_stem>.py` (default) or `test_<cluster><letter>_<short_description>.py` (when extending the cluster plan).
-- **Test classes:** `Test<Topic>` for ad-hoc tests; `TestCluster<NN><letter>_<Description>` when contributing to the cluster plan (e.g. `TestCluster01p_SettingsConstants`).
-- **Test methods:** `test_<behaviour_under_test>` — verb-led, describes the assertion, not the setup.
-- **Cluster numbers are never renumbered.** Extend a cluster with the next free **letter**; scenario IDs continue from the cluster's current max. The authoritative source is [`test-writing-plan.md`](../../lex/test_project/test-plan/test-writing-plan.md) — read it before allocating, never guess the next letter.
-- **One batch = one sub-cluster = one PR.**
+1. **Identify the cluster.** Map the source area to a cluster via [`test-clusters.md`](../../lex/test_project/test-plan/test-clusters.md) (e.g. calculation flow → cluster 7, audit → 6, CRUD/serializers → 2/12, exports → 13, AG-Grid → 14).
+2. **Allocate from `test-writing-plan.md` — never guess.** Cluster numbers are **never renumbered**. Take the **next free letter** for that cluster (read the plan to find the highest in use), and **continue scenario IDs from the cluster's current max**. If the source file is already slotted in an in-flight batch, defer to it — don't duplicate.
+3. **File:** `lex/test_project/tests/<cluster_slug>/test_<NN><letter>_<short>.py` (e.g. `test_7m_cancellation.py`).
+4. **Module header:** an `Intent` docstring section (what the framework is *trying to achieve* + why a regression matters + the scenario range), plus module-level `pytestmark = pytest.mark.<cluster_slug>`. See [`test_7k_exceptions_restrictions_xlsx.py`](../../lex/test_project/tests/calculations/test_7k_exceptions_restrictions_xlsx.py) as the gold standard.
+5. **Class:** `TestCluster<NN><letter>_<Description>` (e.g. `TestCluster07m_Cancellation`). For E-type, inherit `E2ETestCase` and declare `e2e_models`.
+6. **Methods:** `test_<NN>_<NN>_<behaviour>` with a docstring `Scenario X.Y: <one-line> / Given: … / When: … / Then: …`. Every assertion carries a human-readable failure message.
+7. **One batch = one sub-cluster = one PR.**
 
 Claude Code users: the [`lex-testing` skill](../../.claude/skills/lex-testing/SKILL.md) walks this allocation automatically.
 
-## 6. After writing tests — keep the plan honest (mandatory)
+## 6. Definition of Done — the task is not finished until the plan is consistent
 
-Writing the test is only half the job. Tests are the project's living record, so you update the plan in the **same change**:
+Writing the test is only half the job. **A feature/test task is NOT done until the test-plan on disk matches the tests you wrote.** Do all of this in the **same change**:
 
-1. **Append/update the batch row** in [`test-writing-plan.md`](../../lex/test_project/test-plan/test-writing-plan.md), under the right cluster, matching the table shape of the most recent batch. Fill scenario range, type (U/I/E), files covered, test file path, test classes, fixtures. Set *Tests landed* and *Coverage gain* to `pending — measured after run` until you have real numbers, then update them and flip *Status* to ✅ Complete.
+1. **Append/update the batch row** in [`test-writing-plan.md`](../../lex/test_project/test-plan/test-writing-plan.md), under the right cluster, matching the table shape of the most recent batch. Fill scenario range, type (U/I/E), files covered, test file path, test classes, fixtures, status.
 
-2. **If a test surfaces broken framework behaviour, record the bug — don't weaken the test.** Per the workflow in [`known-bugs.md`](../../lex/test_project/test-plan/known-bugs.md): write the test asserting the *correct* behaviour (from docs/intent), mark it `@unittest.expectedFailure`, and add a `BUG-NNN` row (description, severity, cluster, test, status). When the framework is later fixed, the marker is dropped and the test passes naturally — a permanent regression gate. **Never** soften an assertion to make a real bug "pass".
+2. **Run the tests** (`python -m lex pytest <path>`) and record the **real** results in the batch row (`Tests landed: N pass / 0 fail`, measured coverage gain) — flip *Status* to ✅ Complete. Don't leave `pending` placeholders in a finished change.
+
+3. **If a test surfaces broken framework behaviour, record the bug — don't weaken the test.** Per the workflow in [`known-bugs.md`](../../lex/test_project/test-plan/known-bugs.md): write the test asserting the *correct* behaviour (from docs/intent), mark it `@unittest.expectedFailure` (or `@pytest.mark.xfail(strict=True)`), and add a `BUG-NNN` row (description, severity, cluster, test, status). When the framework is later fixed, the marker is dropped and the test passes naturally — a permanent regression gate. **Never** soften an assertion to make a real bug "pass".
+
+If the plan and the tests on disk disagree, you are not done.
 
 ## 7. What NOT to do
 

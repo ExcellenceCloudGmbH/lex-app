@@ -3,6 +3,26 @@
 **Date:** 2026-05-28 (revised 2026-05-29)
 **Status:** Implemented — testing scope. Other domains deferred.
 
+> **2026-05-29 hardening pass (from a live PyCharm test).** A real run — prompt *"in CalculationModel.py
+> we need a way to cancel the Calculation"*, Copilot agent mode (Opus 4.7) — exposed three gaps that
+> this revision closes:
+> 1. **The agent skipped docs research** and coded from first instinct (it added a process-global
+>    `_CancellationRegistry` dict that can't share state web→Celery-worker — the cache-backed
+>    `ActiveCalculationStateStore` already exists for exactly this). → Added an explicit
+>    **research-first / Golden-Rule** step as Prime directive 1 (AGENTS.md), §0 (instructions), and
+>    Step 0 (skill), including *stop-and-ask-the-dev when ambiguous* via `superpowers:brainstorming`.
+> 2. **The test landed in legacy `lex/tests/unit/`** and the test-plan was never updated. → Demoted
+>    the legacy tree to "do not add new feature tests here", made the cluster tree the primary/default
+>    home, and made **plan-consistency the Definition of Done** (Prime directive 3 / §6 / Step 7).
+> 3. **Strict cluster naming was not followed.** → Reinforced the strict allocation steps and added a
+>    full scaffold template (Intent header, `pytestmark`, `TestCluster<NN><letter>_`, Given/When/Then).
+>
+> **PyCharm finding (load-bearing):** JetBrains Copilot (March 2026+ plugin) autodetects `AGENTS.md`
+> and `CLAUDE.md`, but does **not** honour `.github/instructions/*.instructions.md` `applyTo` globs —
+> that mechanism is VS Code-only. So in the user's IDE **`AGENTS.md` is the load-bearing file**; the
+> path-scoped instructions file only auto-loads for the cloud agent and VS Code Copilot Chat. This is
+> why the three prime directives were pushed up into AGENTS.md rather than left in the instructions file.
+
 ## Problem
 
 The Copilot Coding Agent (cloud) writes tests that follow the lex-app conventions (cluster naming,
