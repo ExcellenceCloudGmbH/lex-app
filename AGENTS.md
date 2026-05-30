@@ -61,16 +61,25 @@ Claude Code: the [`lex-testing` skill](.claude/skills/lex-testing/SKILL.md) auto
 ## Prime directive 3 — A task is not done until the test-plan is consistent
 
 After the feature + tests, you bring the plan into sync **in the same change** — this is part of
-finishing, not optional cleanup:
+finishing, not optional cleanup. This is the **same checklist the cloud Copilot agent satisfies on
+every PR** (`.github/scripts/copilot_assemble_prompt.py` → "Required deliverables"); local work
+matches it so the two paths don't drift:
 
-1. **Append/update the batch row** in
-   [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md) for the cluster: scenario
-   range, type (U/I/E), files covered, test file path, test classes, fixtures, status.
-2. **If a test surfaced broken framework behaviour**, record it in
+1. **Append a row to [`session-log.md`](lex/test_project/test-plan/progress/session-log.md)** — the
+   universal per-PR record ("the Copilot test-bot writes here as part of every PR"). Append-only,
+   bottom row, never re-order.
+2. **Update the cluster status / scenario range** in
+   [`test-clusters.md`](lex/test_project/test-plan/test-clusters.md) for each touched (sub-)cluster,
+   and bump [`dashboard.md`](lex/test_project/test-plan/progress/dashboard.md).
+3. **If the work maps to a planned batch**, append/update the batch row in
+   [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md): scenario range, type
+   (U/I/E), files covered, test file path, test classes, fixtures, status.
+4. **Run the tests** (`python -m lex pytest <path>`) and record real results (`N pass / 0 fail`,
+   coverage gain) in the rows above.
+5. **If a test surfaced broken framework behaviour**, record it in
    [`known-bugs.md`](lex/test_project/test-plan/known-bugs.md) (assert the *correct* behaviour, mark
    `@unittest.expectedFailure` / `@pytest.mark.xfail(strict=True)`, add a `BUG-NNN` row) — **never
    weaken the test to make it pass.**
-3. **Run the tests** (`python -m lex pytest <path>`) and record real results in the batch row.
 
 If the plan and the tests on disk disagree, the task is not finished.
 

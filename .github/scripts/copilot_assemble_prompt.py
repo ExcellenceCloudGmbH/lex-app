@@ -108,6 +108,17 @@ def assemble_prompt(issue: IssueInput, *, test_plan_dir: Path) -> str:
 
 ---
 
+## Research before you write code
+
+The Golden Rule above tells you *not* to mirror the implementation. This tells you what to do instead — **gather intent before writing anything**:
+
+1. **Read the docs that describe intent**, not just the code: `docs/features/`, `docs/reference/`, `docs/tutorial/`. Derive the behaviour you assert from what the framework is *trying to achieve* + what a customer would reasonably expect.
+2. **Read the public API docstrings** of the classes/functions involved, and skim the existing cluster tests for that area to match established patterns.
+3. **Check for an existing mechanism before inventing one.** Cross-process state, for example, already has a cache-backed home (`ActiveCalculationStateStore`) — don't add a process-local dict that silently fails across Celery workers. Search the repo for the capability first.
+4. **If the behaviour is genuinely ambiguous** (the docs don't settle it and there's more than one defensible contract), state your assumption explicitly in the PR description and pick the option a customer would expect — don't silently guess.
+
+---
+
 ## Test-plan conventions
 
 {conventions_md.strip()}
@@ -193,6 +204,8 @@ For each test file you create (primary + each secondary):
 - One or more new test files under `lex/test_project/tests/<slug>/test_<Nx>_<short>.py` — one per cluster involved (regression mode may have several; bug-repro and fix-and-test have exactly one).
 - `lex/test_project/test-plan/test-clusters.md` updated (status / scenario range for **each** touched (sub-)cluster).
 - One new row appended to the bottom of `lex/test_project/test-plan/progress/session-log.md` summarising all touched clusters in this PR.
+- Bump the matching per-cluster status row in `lex/test_project/test-plan/progress/dashboard.md`.
+- If your work corresponds to a planned batch in `lex/test_project/test-plan/test-writing-plan.md`, append/update that batch row (scenario range, files covered, test classes, fixtures, status) so the allocation tracker stays consistent.
 - Mode B/C only: one new BUG-NNN row in `lex/test_project/test-plan/known-bugs.md`.
 - New-cluster placement only: register the new cluster in `.github/scripts/showcase_clusters.py` and update default selectors in `pip_publish.yml` + `showcase_tests.yml`.
 - Touch nothing outside the allowed file set, except the source fix in mode `fix-and-test`.

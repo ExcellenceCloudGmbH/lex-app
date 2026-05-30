@@ -79,13 +79,17 @@ Claude Code users: the [`lex-testing` skill](../../.claude/skills/lex-testing/SK
 
 ## 6. Definition of Done — the task is not finished until the plan is consistent
 
-Writing the test is only half the job. **A feature/test task is NOT done until the test-plan on disk matches the tests you wrote.** Do all of this in the **same change**:
+Writing the test is only half the job. **A feature/test task is NOT done until the test-plan on disk matches the tests you wrote.** This is the **same checklist the cloud Copilot agent satisfies on every PR** (see `.github/scripts/copilot_assemble_prompt.py` → "Required deliverables") — local work must match it so the two paths stay consistent. Do all of this in the **same change**:
 
-1. **Append/update the batch row** in [`test-writing-plan.md`](../../lex/test_project/test-plan/test-writing-plan.md), under the right cluster, matching the table shape of the most recent batch. Fill scenario range, type (U/I/E), files covered, test file path, test classes, fixtures, status.
+1. **Append a row to [`session-log.md`](../../lex/test_project/test-plan/progress/session-log.md)** — this is the *universal* per-PR record (its header: "the Copilot test-bot writes here as part of every PR"). Append-only: new row at the bottom, never re-order. Columns: date, session, what was done, clusters affected, tests added, tests passing.
 
-2. **Run the tests** (`python -m lex pytest <path>`) and record the **real** results in the batch row (`Tests landed: N pass / 0 fail`, measured coverage gain) — flip *Status* to ✅ Complete. Don't leave `pending` placeholders in a finished change.
+2. **Update the cluster's status / scenario range** in [`test-clusters.md`](../../lex/test_project/test-plan/test-clusters.md) for **each** (sub-)cluster you touched, and bump the matching row in [`dashboard.md`](../../lex/test_project/test-plan/progress/dashboard.md) (the high-churn per-cluster status view).
 
-3. **If a test surfaces broken framework behaviour, record the bug — don't weaken the test.** Per the workflow in [`known-bugs.md`](../../lex/test_project/test-plan/known-bugs.md): write the test asserting the *correct* behaviour (from docs/intent), mark it `@unittest.expectedFailure` (or `@pytest.mark.xfail(strict=True)`), and add a `BUG-NNN` row (description, severity, cluster, test, status). When the framework is later fixed, the marker is dropped and the test passes naturally — a permanent regression gate. **Never** soften an assertion to make a real bug "pass".
+3. **If your work maps to a planned batch, append/update the batch row** in [`test-writing-plan.md`](../../lex/test_project/test-plan/test-writing-plan.md), under the right cluster, matching the table shape of the most recent batch (scenario range, type U/I/E, files covered, test file path, test classes, fixtures, status). Ad-hoc work that isn't a planned COMPLETE-bucket batch still needs steps 1–2; this step is for batches the plan already forecasts.
+
+4. **Run the tests** (`python -m lex pytest <path>`) and record the **real** results (`N pass / 0 fail`, measured coverage gain) in the rows above — flip *Status* to ✅ Complete. Don't leave `pending` placeholders in a finished change.
+
+5. **If a test surfaces broken framework behaviour, record the bug — don't weaken the test.** Per the workflow in [`known-bugs.md`](../../lex/test_project/test-plan/known-bugs.md): write the test asserting the *correct* behaviour (from docs/intent), mark it `@unittest.expectedFailure` (or `@pytest.mark.xfail(strict=True)`), and add a `BUG-NNN` row (description, severity, cluster, test, status). When the framework is later fixed, the marker is dropped and the test passes naturally — a permanent regression gate. **Never** soften an assertion to make a real bug "pass".
 
 If the plan and the tests on disk disagree, you are not done.
 
