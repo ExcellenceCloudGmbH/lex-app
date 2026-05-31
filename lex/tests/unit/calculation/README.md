@@ -31,7 +31,7 @@
 ## How to Run
 
 ```bash
-source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
+source /path/to/your-project/.venv/bin/activate  # the host project where lex-app is installed editable
 lex test lex.tests.unit.calculation          # all tests
 lex test lex.tests.unit.calculation.test_calculation_model_state_machine  # 33 tests
 ```

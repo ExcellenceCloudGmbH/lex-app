@@ -19,7 +19,7 @@ class RuntimeConfigTests(TestCase):
 
     def test_derive_repo_name_from_posix_path(self):
         self.assertEqual(
-            derive_repo_name("/Users/melihsunbul/LUND_IT/lex-app"),
+            derive_repo_name("/Users/dev/projects/lex-app"),
             "lex-app",
         )
 

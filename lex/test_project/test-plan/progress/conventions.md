@@ -122,7 +122,7 @@ to every test in the file.
 
 ### Run all clusters (excluding stress)
 ```bash
-source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
+source /path/to/your-project/.venv/bin/activate  # the host project where lex-app is installed editable
 python -m lex pytest -m "not stress"
 ```
 

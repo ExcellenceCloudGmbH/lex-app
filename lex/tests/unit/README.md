@@ -24,7 +24,7 @@ Every test mocks external dependencies and runs in < 40 s total.
 ## How to Run
 
 ```bash
-source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
+source /path/to/your-project/.venv/bin/activate  # the host project where lex-app is installed editable
 
 # All unit tests
 lex test lex.tests.unit

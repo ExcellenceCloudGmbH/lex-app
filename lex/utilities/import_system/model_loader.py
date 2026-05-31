@@ -27,7 +27,7 @@ class ModelAwareLoader(importlib.abc.Loader):
         module.__file__ = self.filepath
         module.__name__ = self.fullname
 
-        # Extract repo_name from fullname (e.g., "ArmiraCashflowDB" from "ArmiraCashflowDB.Upload.Upload")
+        # Extract repo_name from fullname (e.g., "MyApp" from "MyApp.Upload.Upload")
         repo_name = self.fullname.split('.')[0]
 
         # Read source code
