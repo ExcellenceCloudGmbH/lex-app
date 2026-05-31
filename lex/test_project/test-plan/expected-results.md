@@ -66,13 +66,7 @@ Each test cluster has concrete pass/fail criteria:
 
 ## Known Bugs That New Tests Expose
 
-These are real framework bugs that the new tests detect. They are documented as **expected failures** (`@unittest.expectedFailure`) so the test suite stays green while the bugs are tracked for resolution.
-
-| Bug | What Happens | Test That Catches It | Severity |
-|-----|-------------|---------------------|----------|
-| `save()` atomic rollback erases IN_PROGRESS history | When a calculation fails, the IN_PROGRESS state and its history row are rolled back — no evidence the calculation was attempted | `test_02_calculation_state_machine.py` | High |
-| Startup reset bypasses history signals | `queryset.update()` used to reset stuck IN_PROGRESS → ABORTED, but `.update()` doesn't trigger `simple_history` signals — no history row for the ABORTED transition | `test_02_calculation_state_machine.py` | Medium |
-| `reconcile_changes_since()` returns None | Function sets `synced_count` but falls through without returning it | `test_03_history_and_bitemporal.py` | Low |
+The new suite has surfaced 20+ real framework bugs, each pinned by a test marked `@unittest.expectedFailure` (or `xfail`) so the suite stays green while the bug is tracked for resolution. The live tracker — with severity, owning cluster, test, and status — is **[`known-bugs.md`](known-bugs.md)**, the single source of truth enforced by the PR-shape gate.
 
 ---
 

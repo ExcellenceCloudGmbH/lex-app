@@ -11,9 +11,6 @@
 > entry below with a one-line description, severity, the cluster + test it lives in, and status.
 > When the framework is fixed, drop the marker — the test should now pass naturally.
 ---
-## Known Bugs Tracker
-
-Bugs discovered by the new test suite. Each has a corresponding test marked `@unittest.expectedFailure`.
 
 | # | Bug | Severity | Cluster | Test | Status |
 |---|-----|----------|---------|------|--------|
