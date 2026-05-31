@@ -115,7 +115,7 @@ The Golden Rule above tells you *not* to mirror the implementation. This tells y
 1. **Read the docs that describe intent**, not just the code: `docs/features/`, `docs/reference/`, `docs/tutorial/`. Derive the behaviour you assert from what the framework is *trying to achieve* + what a customer would reasonably expect.
 2. **Read the public API docstrings** of the classes/functions involved, and skim the existing cluster tests for that area to match established patterns.
 3. **Check for an existing mechanism before inventing one.** Before adding a new store, cache, registry, or helper, search the repo for one that already does the job — a second, parallel home for state that already has one is a common source of subtle divergence bugs. Reuse the established mechanism rather than reinventing it.
-4. **If the behaviour is genuinely ambiguous** (the docs don't settle it and there's more than one defensible contract), state your assumption explicitly in the PR description and pick the option a customer would expect — don't silently guess.
+4. **Restate what the request means before designing — especially its scope.** Put the behaviour in your own words and pin down its *scope and propagation*: words like "every / all / always / each" hide a boundary — does the change apply at the **entry point only**, or **recursively** to everything it triggers downstream? If that boundary (or any other contract) is genuinely ambiguous and the docs don't settle it, **state the interpretation you chose and your reasoning explicitly in the PR description**, pick the option a customer would expect, and make the alternative you rejected visible so a reviewer can correct it in one comment — don't silently guess.
 
 ---
 

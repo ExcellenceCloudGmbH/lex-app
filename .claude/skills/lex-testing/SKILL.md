@@ -41,10 +41,16 @@ Do this yourself, automatically — do not wait to be asked:
    registry, or helper, search the codebase for one that already does the job — a second, parallel
    home for state that already has one is a common source of subtle divergence bugs. Reuse the
    established mechanism rather than reinventing it.
-4. **If the request is ambiguous or has more than one defensible design, STOP and ask the
-   developer** before coding — surface the trade-offs and let them choose. Use the
-   `superpowers:brainstorming` skill. A wrong assumption baked into a feature + its tests costs far
-   more than one question.
+4. **Restate the request before designing, then ask with a recommendation — never a blank
+   question.** First put the request in your own words and pin down its *scope and propagation*:
+   words like "every / all / always / each" hide a boundary — does the change apply at the **entry
+   point only**, or **recursively** to everything it triggers downstream? State the interpretation
+   you'll build to. If more than one design is genuinely defensible, **STOP and ask the developer**
+   (use the `superpowers:brainstorming` skill) — but **lead every question with the option you
+   recommend and *why*, plus the trade-off of the alternative**, so they confirm or correct rather
+   than doing the design work themselves. A bare "X or Y?" pushes the thinking back on them; "I'd do
+   X because Z — the cost is W — confirm?" does not. A wrong assumption baked into a feature + its
+   tests costs far more than one question.
 
 Only once you understand the intent do you proceed to allocation. If a test then fails because the
 code is genuinely buggy, that is the test doing its job — record it (Step 7), don't weaken it.

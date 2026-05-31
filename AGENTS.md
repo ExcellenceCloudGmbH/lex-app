@@ -24,9 +24,15 @@ production. Before writing feature code or tests:
    registry, or helper, search the codebase for one that already does the job — a second, parallel
    home for state that already has one is a common source of subtle divergence bugs. Reuse the
    established mechanism rather than reinventing it.
-4. **If the request is ambiguous or has more than one defensible design, STOP and ask the
-   developer** targeted questions before coding — surface the trade-offs and let them choose. A
-   wrong assumption baked into a feature + its tests is far more expensive than one question.
+4. **Restate the request before designing, then ask with a recommendation — never a blank
+   question.** Put the request in your own words and pin down its *scope and propagation* first:
+   words like "every / all / always / each" hide a boundary — does the change apply at the **entry
+   point only**, or **recursively** to everything it triggers downstream? State the interpretation
+   you'll build to. If more than one design is genuinely defensible, **STOP and ask the developer** —
+   but **lead every question with the option you recommend and *why*, plus the trade-off of the
+   alternative**, so they confirm or correct rather than doing the design work themselves. A bare "X
+   or Y?" pushes the thinking back on them; "I'd do X because Z — the cost is W — confirm?" does not.
+   A wrong assumption baked into a feature + its tests is far more expensive than one question.
    (Claude Code: use the `superpowers:brainstorming` skill for this.)
 
 When your prior knowledge conflicts with the docs, **the docs win.**
