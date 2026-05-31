@@ -5,6 +5,15 @@
 > **What this is:** the chronological narrative of every test-plan work session — what was done, what changed, what surfaced.
 >
 > **Append-only.** Add new rows at the bottom; never re-order, never re-number. The Copilot test-bot writes here as part of every PR (see [`docs/ci-cd/copilot-test-bot.md`](../../../../docs/ci-cd/copilot-test-bot.md)).
+>
+> **Row format** — one row per session, six columns:
+> `| Date | Session | What Was Done | Clusters Affected | Tests Added | Tests Passing |`
+> - **Date** — ISO `YYYY-MM-DD`.
+> - **Session** — the next integer after the last row (monotonic, never reused).
+> - **What Was Done** — prose; lead with the batch/sub-cluster touched, name new fixtures/models, note any `BUG-NNN` surfaced.
+> - **Clusters Affected** — comma-separated cluster numbers/letters (e.g. `7, 9d`).
+> - **Tests Added** — count of new test methods (note xfail/skip in parentheses when relevant).
+> - **Tests Passing** — the measured suite tally after this session (e.g. `231 pass + 4 skip + 19 xfail of 254`).
 
 ---
 
