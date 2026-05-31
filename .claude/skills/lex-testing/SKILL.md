@@ -57,9 +57,31 @@ Read these before doing anything else; if any is missing, **stop and tell the us
 3. [`lex/test_project/test-plan/test-writing-plan.md`](../../../lex/test_project/test-plan/test-writing-plan.md) — current batch state, in-flight clusters, allocation rules.
 4. [`lex/test_project/test-plan/known-bugs.md`](../../../lex/test_project/test-plan/known-bugs.md) — bug-recording workflow.
 
-## Step 2 — Identify the cluster
+## Step 2 — Enumerate behaviour surfaces, then map each to its cluster
 
-Map the source module to a cluster using `test-clusters.md`. Common mappings:
+**First, list every externally-observable behaviour the change creates or changes** — don't reason
+about "the feature" as one thing. Each of these is a distinct surface needing its own scenario:
+
+- every new public entry point a caller can invoke (instance method, classmethod, REST endpoint,
+  management command — anything a customer or the framework dispatches),
+- every state transition or status change the change can produce,
+- every persisted or emitted side-effect (a written audit/history row, a signal or broadcast, a row
+  landing in a different terminal state),
+- every error/edge path (not-found, no-op, permission-denied, already-finished, failure-during-X).
+
+**A surface is only "covered" when a test drives it the way a real caller reaches it — end-to-end
+through the public entry point, not by exercising the private helper or in-memory data structure
+underneath it.** Testing the easy internal layer while leaving the public entry points and their
+integration paths unexercised is the single most common way a change *looks* tested but isn't. If
+your scenarios only touch the data structure and the no-op/error returns, you have not tested the
+feature — go back and add the happy-path and integration surfaces.
+
+**Then map each surface to its owning cluster — often more than one.** A single change frequently
+spans clusters: one that adds a state transition *and* a new REST endpoint *and* a new persisted
+side-effect has surfaces in three domains. Map by **what the surface is**, not where the source line
+lives — a REST surface belongs to the API-layer cluster even if the code sits on a model; a
+persisted side-effect belongs to the cluster owning that record type. Surfaces in different clusters
+become separate batches (Step 3 onward, run per cluster). Use `test-clusters.md`; common mappings:
 
 | Source area | Cluster |
 | --- | --- |
@@ -73,7 +95,9 @@ Map the source module to a cluster using `test-clusters.md`. Common mappings:
 | Model export / import | 13 |
 | List views, AG Grid | 14 |
 
-If the mapping is ambiguous, ask the user which cluster. Don't pick one blindly.
+If you can't confidently place a surface, **stop and ask the user** — don't pick one blindly. And if
+a surface genuinely cannot be exercised in the test environment, surface that explicitly — gate it
+with a documented reason (or ask), **never** silently omit it and still call the change tested.
 
 ## Step 3 — Allocate the next free letter and scenario range
 

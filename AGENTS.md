@@ -47,10 +47,21 @@ Where the tests go and how they're named is **strict** — do not improvise:
 
 - **Location:** `lex/test_project/tests/<cluster_slug>/` (the cluster system). **Not**
   `lex/tests/unit/` — that is the legacy audit tree; do not add new feature tests there.
-- **Allocation:** map the change to a cluster, take the **next free letter** for that cluster, and
-  continue scenario IDs from the cluster's current max. The authoritative source is
+- **Surfaces:** first enumerate *every externally-observable behaviour* the change creates — each
+  new public entry point (method, classmethod, REST endpoint, management command), state transition,
+  persisted/emitted side-effect, and error/edge path. A surface is only *covered* when a test drives
+  it **end-to-end through the public entry point**, not via the helper or in-memory data structure
+  underneath. Exercising only the easy internal layer (and the no-op/error returns) is the single
+  most common way a change *looks* tested but isn't.
+- **Allocation:** map **each surface** to its owning cluster by *what the surface is*, not where the
+  source line lives (a REST surface belongs to the API cluster even if the code sits on a model) —
+  often more than one cluster, and surfaces in different clusters become separate batches. Take the
+  **next free letter** for each cluster and continue scenario IDs from its current max. The
+  authoritative source is
   [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md) — **read it to allocate;
-  never guess the letter.**
+  never guess the letter.** If you can't confidently place a surface, or it genuinely can't be
+  exercised in the test environment, **stop and ask** — never silently omit it and still call the
+  change tested.
 - **Names:** file `test_<NN><letter>_<short>.py`, class `TestCluster<NN><letter>_<Description>`,
   module-level `pytestmark = pytest.mark.<cluster_slug>`, methods `test_<NN>_<NN>_<behaviour>` with a
   `Scenario X.Y: … / Given / When / Then` docstring, and an `Intent` header on the file.
