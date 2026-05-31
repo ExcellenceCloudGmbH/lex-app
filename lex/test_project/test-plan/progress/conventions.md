@@ -144,9 +144,26 @@ coverage report
 
 ---
 
+## Definition of Done (per cluster)
+
+A cluster is ** Complete** when:
+
+1. ✅ Every scenario from [test-clusters.md](../test-clusters.md) has a corresponding test method
+2. ✅ All tests either **pass** or are marked `@unittest.expectedFailure` (or `@pytest.mark.xfail(strict=True)`) with a tracked bug reference
+3. ✅ Tests use the canonical customer code path (no `skip_hooks`, no `calculate_hook()` in E2E tests)
+4. ✅ Tests run in CI without flakiness (3 consecutive green runs)
+5. ✅ No mocks on the class under test or the ORM
+
+A cluster is ** In progress** when some but not all of the above are true. The
+[dashboard](dashboard.md) tracks which state each cluster is in; this section owns what the states
+*mean*.
+
+---
+
 ## Quality Gates
 
-Before any release, these must hold:
+The Definition of Done above is per-cluster. These are the **release-wide** gates — before any
+release, all must hold:
 
 1. **All clusters  or ** — no cluster in  or  state
 2. **Zero unexpected failures** — every failure is either a passing test or an `expectedFailure` with a tracked bug
