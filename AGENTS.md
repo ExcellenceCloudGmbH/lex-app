@@ -20,9 +20,10 @@ production. Before writing feature code or tests:
    the source is an incomplete story. Start at [`docs/index.md`](docs/index.md) if unsure.
 2. **Read the public API docstrings** of the classes/functions you'll touch, and skim the existing
    tests for that area (under `lex/test_project/tests/<topic>/`) to see the established patterns.
-3. **Check for existing mechanisms before inventing new ones.** Example: cross-process state
-   already has a cache-backed home (`ActiveCalculationStateStore`); don't add a process-local dict
-   that silently fails across Celery workers. Search the codebase for the capability first.
+3. **Check for existing mechanisms before inventing new ones.** Before adding a new store, cache,
+   registry, or helper, search the codebase for one that already does the job — a second, parallel
+   home for state that already has one is a common source of subtle divergence bugs. Reuse the
+   established mechanism rather than reinventing it.
 4. **If the request is ambiguous or has more than one defensible design, STOP and ask the
    developer** targeted questions before coding — surface the trade-offs and let them choose. A
    wrong assumption baked into a feature + its tests is far more expensive than one question.

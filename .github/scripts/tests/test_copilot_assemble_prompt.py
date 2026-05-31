@@ -189,16 +189,18 @@ def test_assembled_prompt_teaches_multi_cluster_decomposition(fake_test_plan: Pa
 
 def test_assembled_prompt_includes_research_first_block(fake_test_plan: Path) -> None:
     """The PyCharm live test exposed that a Copilot agent will code from first
-    instinct (reinventing cross-process state instead of reusing the existing
-    cache-backed store) when the prompt only says 'don't mirror the code'. The
-    prompt must also tell the agent what to do FIRST: read docs for intent and
-    check for an existing mechanism before inventing one."""
+    instinct (reinventing state that already has a home) when the prompt only
+    says 'don't mirror the code'. The prompt must also tell the agent what to do
+    FIRST: read docs for intent and check for an existing mechanism before
+    inventing one. The guidance is kept domain-neutral on purpose — no named
+    subsystem class (an earlier version cited a concrete class that was both
+    factually wrong and leaked the held-out evaluation domain)."""
     out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
     assert "Research before you write code" in out
     # Reads docs for intent.
     assert "docs/features/" in out
-    # The concrete anti-pattern from the live failure: reinventing existing state.
-    assert "ActiveCalculationStateStore" in out
+    # The anti-pattern from the live failure: reinventing a mechanism that exists.
+    assert "existing mechanism before inventing one" in out
     # Research must come before the mode block (front-loaded, like the Golden Rule).
     assert out.index("Research before you write code") < out.index("## Mode: regression")
 
