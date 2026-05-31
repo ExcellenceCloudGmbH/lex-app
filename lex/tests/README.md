@@ -20,7 +20,7 @@ lex/tests/
 ## How to Run
 
 ```bash
-source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
+source /path/to/your-project/.venv/bin/activate  # the host project where lex-app is installed editable
 
 # Everything
 lex test lex.tests --noinput

@@ -112,7 +112,7 @@ class ModelCollection:
 
         # Build a nested "Models" fallback structure from filesystem paths
         # instead of dumping everything flat.  For a model with
-        #   __module__ == "ArmiraCashflowDB.Upload.UploadCashflow.UploadCashflow"
+        #   __module__ == "MyApp.Upload.UploadCashflow.UploadCashflow"
         # the container id "uploadcashflow" will be placed under
         #   Models → Upload → uploadcashflow: None
         if auto_include_missing_models:
@@ -129,7 +129,7 @@ class ModelCollection:
                     continue
                 parts = module.split(".")
                 # Try to find the repo segment and derive the subfolder path
-                # e.g. ["ArmiraCashflowDB", "Upload", "UploadCashflow", "UploadCashflow"]
+                # e.g. ["MyApp", "Upload", "UploadCashflow", "UploadCashflow"]
                 #        repo_index=0        → path parts = ["Upload", "UploadCashflow"]
                 #        we drop the last part (filename == class name) → ["Upload"]
                 repo_name_local = parts[0] if parts else ""

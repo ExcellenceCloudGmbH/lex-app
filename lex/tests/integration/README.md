@@ -144,7 +144,7 @@ Used by all `test_bitemporal.py` classes that subclass
 
 ```bash
 # Activate venv
-source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
+source /path/to/your-project/.venv/bin/activate  # the host project where lex-app is installed editable
 
 # All integration tests (60 tests)
 lex test lex.tests.integration
