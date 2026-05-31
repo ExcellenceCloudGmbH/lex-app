@@ -44,6 +44,50 @@ markers are not bulk-converted.
 
 ---
 
+## Enumerate Behaviour Surfaces Before Allocating Clusters
+
+> **Canonical source.** This is the one authoritative statement of the surface rule.
+> Every agent front-end — the cloud Copilot prompt (which inlines this file), the IDE
+> instructions, `AGENTS.md`, and the `lex-testing` skill — derives the rule from here.
+> Change it here and nowhere else, so the cloud and local paths can never drift.
+
+Before picking any cluster, list *every externally-observable behaviour* the change
+introduces or alters — **don't reason about "the feature" as one thing.** Each of these is
+a distinct **surface** that needs its own scenario:
+
+- every public entry point a caller can invoke — instance method, classmethod, REST
+  endpoint, management command, anything a customer or the framework dispatches;
+- **every distinct execution path the same operation can take.** One logical operation may
+  run by more than one route depending on configuration, runtime mode, or how the work is
+  dispatched — and those routes can have entirely different machinery, failure modes, and
+  ways of being stopped. Each route is its own surface: a test that drives one route tells
+  you *nothing* about the others. Enumerate every route the operation can take and cover
+  each independently — do not assume the behaviour of one generalises to the rest;
+- every state transition or status change the change can produce;
+- every persisted or emitted side-effect — a written audit/history row, a signal or
+  broadcast, a record that lands in a different terminal state;
+- every error/edge path — not-found, no-op, permission-denied, already-finished,
+  failure-during-X.
+
+**A surface is only "covered" when a test drives it the way a real caller reaches it —
+end-to-end through the public entry point, not by exercising the private helper or
+in-memory data structure underneath it.** Testing the easy internal layer while leaving the
+public entry points and their integration paths unexercised is the single most common way a
+change *looks* tested but isn't. If your scenarios only touch the data structure and the
+no-op/error returns, you have not tested the feature — go back and add the happy-path and
+integration surfaces.
+
+**Map each surface to its owning cluster — often more than one.** A single change
+frequently spans clusters. Map each surface by *what the surface is*, not where the source
+line lives: a REST surface belongs to the API-layer cluster even if the code sits on a
+model; a persisted side-effect belongs to the cluster that owns that record type. Surfaces
+in different clusters become separate batches. If you can't confidently place a surface, or
+a surface genuinely cannot be exercised in the test environment, **say so explicitly** —
+gate it with a documented reason or stop and ask the developer — **never** silently omit it
+and still call the change tested.
+
+---
+
 ## User Experience: Making Tests Readable
 
 Tests are documentation. A new developer reading a test should understand:

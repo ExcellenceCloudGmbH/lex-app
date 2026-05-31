@@ -161,21 +161,18 @@ The Golden Rule above tells you *not* to mirror the implementation. This tells y
 
 ---
 
-## Cluster decomposition — one feature may need tests in multiple clusters
+## Surfaces and clusters — one feature may need tests in multiple clusters
 
-A feature's contract often spans clusters. The cluster hint names the **primary** cluster (the feature's headline behaviour). Your job is to identify **secondary** clusters whose contracts the feature also touches, and add a test file in each.
+**The authoritative rule is in the *Test-plan conventions* above — "Enumerate Behaviour Surfaces Before Allocating Clusters." Apply it; it is the single source this prompt and every local agent share.** This section only says how it maps onto a Copilot PR:
 
-**How to decide (regression mode):**
-
-1. **Primary cluster** — owns the feature's headline behaviour. The "selling point" test goes here. This is what the user hinted at (or what cluster routing below picks if no hint).
-2. **Secondary clusters** — for every observable contract the feature is responsible for that lives in a *different* cluster, add a separate test file in that cluster's folder. Typical cross-cluster contracts:
+1. **Enumerate the surfaces first.** Per the conventions rule, list every externally-observable behaviour the change introduces — each public entry point, **each distinct execution path the same operation can take** (one operation may run by more than one route — cover each route, don't assume one generalises to the others), each state transition, each persisted/emitted side-effect, each error/edge path. A surface counts as covered only when a test drives it end-to-end through the public entry point.
+2. **Map each surface to its owning cluster.** The cluster hint names the **primary** cluster (the headline surface). Every surface that lives in a *different* cluster is a **secondary** cluster that gets its own test file. Map by *what the surface is*, not where the source line lives:
    - Produces audit-log entries → test in `audit_logging/`.
    - Drives calculation state transitions → test in `calculations/`.
    - Must respect permission rules → test in `permissions/`.
    - Emits WebSocket signals → test in `signals_ws/`.
    - Goes through the REST/serializer surface → test in `api_layer/` or `serializers/`.
-   Read the **Behaviour** and **Reproducer** fields below carefully; each contractual guarantee the user lists is a candidate for its own cross-cluster test file.
-3. State the decomposition in the PR description, one line per file: *"Placed `tests/<slug>/test_<Nx>_<short>.py` under cluster N because …"*
+3. State the decomposition in the PR description, one line per file: *"Placed `tests/<slug>/test_<Nx>_<short>.py` under cluster N because …"*. If a surface genuinely cannot be exercised here, say so explicitly in the PR body — never silently drop it.
 
 **Mode-specific scope:**
 

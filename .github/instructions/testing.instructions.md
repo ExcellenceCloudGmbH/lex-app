@@ -67,8 +67,9 @@ When you write a test for new code, ensure **at least one** of those is true. Th
 
 Cluster tests follow the plan in [`lex/test_project/test-plan/`](../../lex/test_project/test-plan/) and the conventions in [`progress/conventions.md`](../../lex/test_project/test-plan/progress/conventions.md). These rules are **strict — follow them exactly, don't improvise**:
 
-1. **First, enumerate the behaviour surfaces your change creates or changes.** Before picking any cluster, list *every externally-observable behaviour* the change introduces — don't reason about "the feature" as one thing. Each of these is a distinct surface that needs its own scenario:
+1. **First, enumerate the behaviour surfaces your change creates or changes.** Before picking any cluster, list *every externally-observable behaviour* the change introduces — don't reason about "the feature" as one thing. (The authoritative statement of this rule lives in [`progress/conventions.md` → "Enumerate Behaviour Surfaces Before Allocating Clusters"](../../lex/test_project/test-plan/progress/conventions.md) — the one source the cloud and local agents share; this section mirrors it.) Each of these is a distinct surface that needs its own scenario:
    - every new public entry point a caller can invoke (instance method, classmethod, REST endpoint, management command, anything a customer or the framework dispatches),
+   - **every distinct execution path the same operation can take** — one logical operation may run by more than one route depending on configuration, runtime mode, or how the work is dispatched, and those routes can have entirely different machinery and ways of being stopped. Each route is its own surface; a test that drives one route tells you nothing about the others. Cover each route independently — don't assume one generalises to the rest,
    - every state transition or status change the change can produce,
    - every persisted or emitted side-effect (a written audit/history row, a signal or broadcast, a row that lands in a different terminal state),
    - every error/edge path (not-found, no-op, permission-denied, already-finished, failure-during-X).
