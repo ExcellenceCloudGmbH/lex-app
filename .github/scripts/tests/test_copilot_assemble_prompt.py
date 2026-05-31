@@ -179,12 +179,27 @@ def test_assembled_prompt_teaches_multi_cluster_decomposition(fake_test_plan: Pa
     least one concrete cross-cluster example so Copilot doesn't default
     to single-file."""
     out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
-    # Heading: the decomposition section is its own block, not buried.
-    assert "Cluster decomposition" in out
+    # Heading: the surfaces-and-clusters section is its own block, not buried.
+    assert "Surfaces and clusters" in out
     # Concept: primary vs secondary clusters.
     assert "primary" in out.lower() and "secondary" in out.lower()
     # Concrete cross-cluster example: audit log is the canonical case.
     assert "audit_logging" in out
+
+
+def test_assembled_prompt_teaches_execution_path_surfaces(fake_test_plan: Path) -> None:
+    """The held-out cancellation eval exposed that an agent enumerates the
+    *entry-point* surfaces (method / endpoint / command) but misses that one
+    operation can run by more than one execution route — each route being its
+    own surface with its own machinery. The prompt must teach this dimension,
+    and it must do so **domain-neutrally**: it names the abstract category
+    (execution path / route, varying by configuration/runtime-mode/dispatch),
+    never a concrete subsystem, so the agent derives the specific routes itself
+    instead of being handed the answer for the eval feature."""
+    out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+    assert "execution path" in out.lower()
+    # The principle: covering one route says nothing about the others.
+    assert "one generalises to the others" in out or "don't assume one generalises" in out
 
 
 def test_assembled_prompt_includes_research_first_block(fake_test_plan: Path) -> None:

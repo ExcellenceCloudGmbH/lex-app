@@ -61,10 +61,18 @@ Read these before doing anything else; if any is missing, **stop and tell the us
 ## Step 2 — Enumerate behaviour surfaces, then map each to its cluster
 
 **First, list every externally-observable behaviour the change creates or changes** — don't reason
-about "the feature" as one thing. Each of these is a distinct surface needing its own scenario:
+about "the feature" as one thing. (The authoritative statement is
+[`conventions.md` → "Enumerate Behaviour Surfaces Before Allocating Clusters"](../../../lex/test_project/test-plan/progress/conventions.md)
+— the single source the cloud and local agents share; this step mirrors it.) Each of these is a
+distinct surface needing its own scenario:
 
 - every new public entry point a caller can invoke (instance method, classmethod, REST endpoint,
   management command — anything a customer or the framework dispatches),
+- **every distinct execution path the same operation can take** — one logical operation may run by
+  more than one route depending on configuration, runtime mode, or how the work is dispatched, and
+  those routes can have entirely different machinery and ways of being stopped. Each route is its
+  own surface; a test driving one route tells you nothing about the others. Cover each route
+  independently — don't assume one generalises to the rest,
 - every state transition or status change the change can produce,
 - every persisted or emitted side-effect (a written audit/history row, a signal or broadcast, a row
   landing in a different terminal state),

@@ -49,11 +49,17 @@ Where the tests go and how they're named is **strict** — do not improvise:
 - **Location:** `lex/test_project/tests/<cluster_slug>/` (the cluster system). **Not**
   `lex/tests/unit/` — that is the legacy audit tree; do not add new feature tests there.
 - **Surfaces:** first enumerate *every externally-observable behaviour* the change creates — each
-  new public entry point (method, classmethod, REST endpoint, management command), state transition,
-  persisted/emitted side-effect, and error/edge path. A surface is only *covered* when a test drives
-  it **end-to-end through the public entry point**, not via the helper or in-memory data structure
-  underneath. Exercising only the easy internal layer (and the no-op/error returns) is the single
-  most common way a change *looks* tested but isn't.
+  new public entry point (method, classmethod, REST endpoint, management command), **each distinct
+  execution path the same operation can take** (one operation may run by more than one route
+  depending on configuration, runtime mode, or how the work is dispatched — those routes can have
+  entirely different machinery and ways of being stopped, so each is its own surface and covering one
+  tells you nothing about the others), state transition, persisted/emitted side-effect, and
+  error/edge path. A surface is only *covered* when a test drives it **end-to-end through the public
+  entry point**, not via the helper or in-memory data structure underneath. Exercising only the easy
+  internal layer (and the no-op/error returns) is the single most common way a change *looks* tested
+  but isn't. The authoritative statement of this rule lives in
+  [`conventions.md` → "Enumerate Behaviour Surfaces Before Allocating Clusters"](lex/test_project/test-plan/progress/conventions.md)
+  — the one source the cloud and local agents share.
 - **Allocation:** map **each surface** to its owning cluster by *what the surface is*, not where the
   source line lives (a REST surface belongs to the API cluster even if the code sits on a model) —
   often more than one cluster, and surfaces in different clusters become separate batches. Take the
