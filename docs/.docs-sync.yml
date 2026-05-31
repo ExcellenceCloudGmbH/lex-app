@@ -1,0 +1,37 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Docs mirror manifest — the single declaration of which paths under
+#  docs/ are mirrored DOWN from lex-app-docs/content/ (canonical).
+#
+#  Model A (mirror-down): these paths are READ-ONLY in this repo. Edit
+#  them in lex-app-docs; the sync job (sync_docs_from_lex_app_docs.yml)
+#  overwrites them here and docs_mirror_guard.yml rejects local edits.
+#
+#  Everything under docs/ NOT listed here is internal-only and owned by
+#  this repo (ci-cd/, superpowers/, planning/, implementation/, …).
+#
+#  See: docs/superpowers/specs/2026-05-31-docs-mirror-sync-design.md
+# ──────────────────────────────────────────────────────────────────────
+
+source_repo: ExcellenceCloudGmbH/lex-app-docs
+source_ref: main
+# Upstream root that maps onto docs/ here (content/<path> -> docs/<path>).
+source_root: content
+
+# Paths (relative to docs/ here and to source_root upstream) owned by the
+# mirror. Directories are mirrored recursively with deletion; files are
+# copied. Allowlist only — add a path here when a new published section
+# appears upstream.
+managed_paths:
+  - features
+  - interface
+  - reference
+  - tutorial
+  - migration
+  - videos
+  - workshop
+  - images
+  - "getting started.md"
+  - "installation.md"
+  - "project structure.md"
+  - "running your app.md"
+  - "index.md"

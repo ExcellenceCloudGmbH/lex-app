@@ -18,6 +18,12 @@ After every successful PyPI publish of `lex-app`, the pipeline automatically:
 
 **Auto-merge is the default for green Copilot docs PRs.** Failed gate runs route the PR to `needs-human-review` instead.
 
+> **This is the *outbound* leg** (lex-app → lex-app-docs: author docs upstream). The complementary
+> *inbound* leg ([`docs-sync-mirror.md`](docs-sync-mirror.md)) mirrors the published `content/`
+> subset back *down* into this repo's `docs/` so the local copy stays fresh for the test-plan's
+> Golden Rule and feature-implementation context. Together they form one loop:
+> `release → Copilot authors+merges docs PR upstream → mirror-down PR brings content/ back here`.
+
 ---
 
 ## Architecture
@@ -93,6 +99,8 @@ update_docs.yml
 | `.github/workflows/auto-update-docs.yml` | `lex-app-docs` | Receives event, creates issue, assigns Copilot |
 | `.github/workflows/auto-close-empty-pr.yml` | `lex-app-docs` | Auto-closes empty Copilot PRs (no docs to apply) |
 | `.github/workflows/copilot_docs_pr_gate.yml` | `lex-app-docs` | Validates Copilot doc PRs and applies `gh pr merge --auto` |
+| `.github/workflows/sync_docs_from_lex_app_docs.yml` | `lex-app` | **Inbound** — mirrors published `content/` down into `docs/`; see [`docs-sync-mirror.md`](docs-sync-mirror.md) |
+| `.github/workflows/docs_mirror_guard.yml` | `lex-app` | **Inbound** — rejects local edits to mirror-owned `docs/` paths |
 
 Reference copies of the `lex-app-docs` workflows are stored alongside this file:
 
