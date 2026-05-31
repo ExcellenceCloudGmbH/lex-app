@@ -1,0 +1,56 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Guard: reject local edits to MIRRORED (read-only) docs.
+#
+#  Model A makes the published doc subset (declared in docs/.docs-sync.yml)
+#  a read-only mirror of lex-app-docs. Editing those files here is futile —
+#  the next mirror sync overwrites them. This check fails such PRs early
+#  with a message pointing the author upstream.
+#
+#  The sync bot's own PRs (head branch docs-sync/*) are exempt.
+#
+#  See: docs/superpowers/specs/2026-05-31-docs-mirror-sync-design.md
+# ──────────────────────────────────────────────────────────────────────
+
+name: Docs Mirror Guard
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Reject edits to mirror-owned docs
+    runs-on: ubuntu-latest
+    # The mirror sync legitimately writes these paths.
+    if: ${{ !startsWith(github.head_ref, 'docs-sync/') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Collect changed files
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" > /tmp/changed.txt
+          echo "Changed files:"
+          cat /tmp/changed.txt
+
+      - name: Check no mirror-owned docs were edited
+        run: |
+          python .github/scripts/docs_mirror.py check-readonly < /tmp/changed.txt

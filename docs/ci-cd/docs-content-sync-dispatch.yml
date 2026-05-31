@@ -1,0 +1,50 @@
+# ──────────────────────────────────────────────────────────────────────
+#  REFERENCE COPY — this workflow lives in lex-app-docs, not lex-app.
+#
+#  Install at: lex-app-docs/.github/workflows/notify-lex-app-docs-sync.yml
+#
+#  Purpose: when published docs change on lex-app-docs' default branch,
+#  fire a repository_dispatch at lex-app so its mirror-down job
+#  (sync_docs_from_lex_app_docs.yml) runs immediately instead of waiting
+#  for the daily cron. OPTIONAL — the lex-app side works on cron alone;
+#  this just makes the mirror near-instant.
+#
+#  Auth: needs a token that can fire repository_dispatch on lex-app
+#  (contents:write). Use the same lex-docs-bot GitHub App (installed on
+#  both repos) or a scoped PAT stored as a secret on lex-app-docs.
+#
+#  See (in lex-app): docs/superpowers/specs/2026-05-31-docs-mirror-sync-design.md
+# ──────────────────────────────────────────────────────────────────────
+
+name: Notify lex-app to sync docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "content/**"
+  workflow_dispatch:
+
+jobs:
+  notify:
+    name: Dispatch docs-content-updated to lex-app
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token (write lex-app)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DOCS_APP_ID }}
+          private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}
+          repositories: "lex-app"
+          owner: ExcellenceCloudGmbH
+
+      - name: Fire repository_dispatch to lex-app
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/ExcellenceCloudGmbH/lex-app/dispatches \
+            -f event_type="docs-content-updated" \
+            -f "client_payload[source_repo]=ExcellenceCloudGmbH/lex-app-docs" \
+            -f "client_payload[ref]=${GITHUB_SHA}"
+          echo "Dispatched 'docs-content-updated' to lex-app (sha ${GITHUB_SHA})."

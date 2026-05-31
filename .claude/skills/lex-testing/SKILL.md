@@ -32,6 +32,9 @@ Do this yourself, automatically — do not wait to be asked:
    [`docs/reference/`](../../../docs/reference/), [`docs/tutorial/`](../../../docs/tutorial/). They say what the
    framework is *trying to achieve*. Derive the behaviour you'll implement and test from that intent
    + *"What would a customer reasonably expect?"* — not from what the code currently happens to do.
+   These published-doc paths are a **read-only mirror** of `lex-app-docs` (kept fresh by the docs
+   mirror sync — see [`docs/ci-cd/docs-sync-mirror.md`](../../../docs/ci-cd/docs-sync-mirror.md)), so
+   trust them as current intent, but don't hand-edit them here — fix docs upstream in `lex-app-docs`.
 2. **Read the public API docstrings** of the classes/functions you'll touch, and skim the existing
    cluster tests for that topic to match established patterns.
 3. **Check for an existing mechanism before inventing one.** E.g. cross-process state already lives
