@@ -67,13 +67,21 @@ When you write a test for new code, ensure **at least one** of those is true. Th
 
 Cluster tests follow the plan in [`lex/test_project/test-plan/`](../../lex/test_project/test-plan/) and the conventions in [`progress/conventions.md`](../../lex/test_project/test-plan/progress/conventions.md). These rules are **strict — follow them exactly, don't improvise**:
 
-1. **Identify the cluster.** Map the source area to a cluster via [`test-clusters.md`](../../lex/test_project/test-plan/test-clusters.md) (e.g. calculation flow → cluster 7, audit → 6, CRUD/serializers → 2/12, exports → 13, AG-Grid → 14).
-2. **Allocate from `test-writing-plan.md` — never guess.** Cluster numbers are **never renumbered**. Take the **next free letter** for that cluster (read the plan to find the highest in use), and **continue scenario IDs from the cluster's current max**. If the source file is already slotted in an in-flight batch, defer to it — don't duplicate.
-3. **File:** `lex/test_project/tests/<cluster_slug>/test_<NN><letter>_<short>.py` (e.g. `test_7m_cancellation.py`).
-4. **Module header:** an `Intent` docstring section (what the framework is *trying to achieve* + why a regression matters + the scenario range), plus module-level `pytestmark = pytest.mark.<cluster_slug>`. See [`test_7k_exceptions_restrictions_xlsx.py`](../../lex/test_project/tests/calculations/test_7k_exceptions_restrictions_xlsx.py) as the gold standard.
-5. **Class:** `TestCluster<NN><letter>_<Description>` (e.g. `TestCluster07m_Cancellation`). For E-type, inherit `E2ETestCase` and declare `e2e_models`.
-6. **Methods:** `test_<NN>_<NN>_<behaviour>` with a docstring `Scenario X.Y: <one-line> / Given: … / When: … / Then: …`. Every assertion carries a human-readable failure message.
-7. **One batch = one sub-cluster = one PR.**
+1. **First, enumerate the behaviour surfaces your change creates or changes.** Before picking any cluster, list *every externally-observable behaviour* the change introduces — don't reason about "the feature" as one thing. Each of these is a distinct surface that needs its own scenario:
+   - every new public entry point a caller can invoke (instance method, classmethod, REST endpoint, management command, anything a customer or the framework dispatches),
+   - every state transition or status change the change can produce,
+   - every persisted or emitted side-effect (a written audit/history row, a signal or broadcast, a row that lands in a different terminal state),
+   - every error/edge path (not-found, no-op, permission-denied, already-finished, failure-during-X).
+
+   **A surface is only "covered" when a test drives it the way a real caller reaches it — end-to-end through the public entry point, not by exercising the private helper or in-memory data structure underneath it.** Testing the easy internal layer while leaving the public entry points and their integration paths unexercised is the single most common way a change *looks* tested but isn't. If your scenarios only touch the data structure and the no-op/error returns, you have not tested the feature — go back and add the happy-path and integration surfaces.
+
+2. **Map each surface to its owning cluster — this is often more than one cluster.** A single change frequently spans clusters: a behaviour that adds, say, a state transition *and* a new REST endpoint *and* a new persisted side-effect has surfaces in three different domains. Map each surface to its cluster via [`test-clusters.md`](../../lex/test_project/test-plan/test-clusters.md) by **what the surface is**, not where the source line lives — a REST surface belongs to the API-layer cluster even if the code lives on a model; a persisted side-effect belongs to the cluster that owns that record type. Put each surface in the cluster that owns its domain; do **not** bundle an out-of-domain surface into whichever cluster is most convenient. Surfaces in different clusters become separate batches/PRs (see step 8). If you can't confidently place a surface, that's a §0.4 *stop-and-ask*. And if a surface genuinely cannot be exercised in the test environment, that is a decision to surface explicitly — gate it with a documented reason (or ask), **never** silently omit it and still call the change tested.
+3. **Allocate from `test-writing-plan.md` — never guess.** Cluster numbers are **never renumbered**. Take the **next free letter** for that cluster (read the plan to find the highest in use), and **continue scenario IDs from the cluster's current max**. If the source file is already slotted in an in-flight batch, defer to it — don't duplicate.
+4. **File:** `lex/test_project/tests/<cluster_slug>/test_<NN><letter>_<short>.py` (e.g. `test_7m_cancellation.py`).
+5. **Module header:** an `Intent` docstring section (what the framework is *trying to achieve* + why a regression matters + the scenario range), plus module-level `pytestmark = pytest.mark.<cluster_slug>`. See [`test_7k_exceptions_restrictions_xlsx.py`](../../lex/test_project/tests/calculations/test_7k_exceptions_restrictions_xlsx.py) as the gold standard.
+6. **Class:** `TestCluster<NN><letter>_<Description>` (e.g. `TestCluster07m_Cancellation`). For E-type, inherit `E2ETestCase` and declare `e2e_models`.
+7. **Methods:** `test_<NN>_<NN>_<behaviour>` with a docstring `Scenario X.Y: <one-line> / Given: … / When: … / Then: …`. Every assertion carries a human-readable failure message.
+8. **One batch = one sub-cluster = one PR.** When a change's surfaces span multiple clusters (step 2), each cluster gets its own batch — don't collapse cross-domain surfaces into a single batch to save a PR.
 
 Claude Code users: the [`lex-testing` skill](../../.claude/skills/lex-testing/SKILL.md) walks this allocation automatically.
 
