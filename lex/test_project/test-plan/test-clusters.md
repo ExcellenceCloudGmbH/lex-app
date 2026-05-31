@@ -1447,6 +1447,30 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 ---
 
+### 8m. Undecorated `CalculationModel` dispatched via generic `calc_and_save` (behaviour change — June 1) — implemented
+
+**Intent change.** Previously `CalculationModel.should_use_celery()` returned `False` whenever `lex_func()` did not expose `.delay` — i.e. whenever the user had **not** decorated their `calculate()` / `update()` with `@lex_shared_task`. The same "Calculate" UI action therefore behaved completely differently depending on a decorator the user might not even know about: decorated calcs returned HTTP 202 immediately and ran on a worker; undecorated calcs ran inline on the request thread, hanging the UI for the duration. Per docs/features/calculations + the explicit user directive ("every Calculation starts as task — it doesn't matter if it's annotated or not"), the framework now dispatches **every root calculation** to a worker when `CELERY_ACTIVE=true` and the broker is reachable. Undecorated methods take a new path: `dispatch_calculation_task()` wraps the instance in the generic `calc_and_save` Celery task (already present in `lex/lex_app/celery_tasks.py`) which calls `model.lex_func()()` inside the worker. Decorated methods keep the existing fast path.
+
+**Scope (interpretation of "every / first calculation"):** root entry-point only. Nested calculations triggered from inside a worker (`is_celery_worker_process()` branch in `calculate_hook`) still execute synchronously inside that worker — re-dispatching to a child task would deadlock the worker pool. This matches the user's "the first calculation will start as a task" phrasing.
+
+**Surfaces this batch covers:**
+- `CalculationModel.should_use_celery()` — no longer requires `.delay` on `lex_func()` (test 8.2 inverted in `test_8a_sync_fallback.py`).
+- `CalculationModel.dispatch_calculation_task()` — undecorated branch routes through `calc_and_save.delay([self], …)` (Scenario 8.49).
+- `CalculationModel.dispatch_calculation_task()` — decorated fast path preserved, generic task NOT used (Scenario 8.50, regression pin).
+
+**Models:** `CelerySyncCalc` (undecorated, from existing `tests/celery_async/models.py`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.49 | Undecorated `calculate` + populated `operation_context` → `dispatch_calculation_task` invokes `calc_and_save.delay([self], context=…, model_context=…)` | The generic task receives the instance, the calculation_id propagates, and the returned AsyncResult is the one from the generic task — the framework no longer refuses to dispatch undecorated calcs |
+| 8.50 | Decorated `lex_func()` (has `.delay`) → user task's `.delay` called directly; generic `calc_and_save` is NOT touched | Fast path for decorated methods preserved; regression that always routed through `calc_and_save` would double-wrap every decorated calc and add an unnecessary deserialisation hop |
+
+Plus Scenario 8.2 in `test_8a_sync_fallback.py` was inverted: `should_use_celery()` returns True for undecorated calcs when `CELERY_ACTIVE=true` and broker reachable (was False).
+
+**Status:**  Implemented (Session 66). 2 pass in 1.21s + 4 pass in 2.45s (8a re-run). `SimpleTestCase`-style: broker/Celery mocked at the import boundary inside `dispatch_calculation_task`. See `lex/test_project/tests/celery_async/test_8m_undecorated_dispatch.py` and `test_8a_sync_fallback.py`.
+
+---
+
 ### 10i. `Fields` APIView dispatch + `create_list_ui_info` helper (coverage-driven — May 12) — implemented
 
 **Gap:** 10e (Sessions 18 + 20) had covered `create_field_info` purely as a unit helper; the `/api/<model>/fields/?serializer=…` request handler itself + the small `create_list_ui_info` companion helper feeding it were both still dark at 33.68% baseline (75 stmts / 45 missed). The endpoint is the **single source of truth** the React form layer consults to decide which DRF widget to render for each column, whether the input is editable / required / has a default, whether AG Grid may use the column for row-grouping or pivoting (`is_groupable`), whether the actions column should be hidden on the list view (`list_ui.hide_actions_column`), and which serializer alternates exist. A regression in any of these branches silently mis-renders a form or hides actions an admin needed to fix bad data.

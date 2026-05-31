@@ -419,12 +419,19 @@ class CalculationModel(LexModel):
         """
         Determine if calculation should use Celery based on configuration and availability.
 
+        The framework dispatches every root calculation to Celery whenever
+        ``CELERY_ACTIVE=true`` and the broker is reachable, regardless of
+        whether the user's ``calculate()`` / ``update()`` method is wrapped
+        with ``@lex_shared_task``. Undecorated methods are dispatched
+        through the generic ``calc_and_save`` task — see
+        :meth:`dispatch_calculation_task`.
+
         Returns:
             bool: True if Celery should be used, False for synchronous execution
         """
 
-        # Check if Celery is enabled in setting
-        if not os.getenv("CELERY_ACTIVE", "").lower() == 'true' or not hasattr(self.lex_func(), 'delay'):
+        # Check if Celery is enabled in settings
+        if not os.getenv("CELERY_ACTIVE", "").lower() == 'true':
             return False
 
         # Check if Celery is available by trying to import and test connection
@@ -439,7 +446,14 @@ class CalculationModel(LexModel):
 
     def dispatch_calculation_task(self):
         """
-        Dispatch calculation to Celery worker using the calc_and_save task.
+        Dispatch calculation to a Celery worker.
+
+        If the user's calculate/update method is decorated with
+        ``@lex_shared_task`` (i.e. ``lex_func()`` exposes ``.delay``) the
+        task is dispatched directly. Otherwise the calculation is wrapped
+        in the generic ``calc_and_save`` task, so any
+        :class:`CalculationModel` can run on a worker without requiring
+        the user to decorate their method.
 
         Returns:
             AsyncResult: Celery task result object
@@ -458,8 +472,20 @@ class CalculationModel(LexModel):
         from lex.audit_logging.utils.ModelContext import _model_context
         model_context = deepcopy(_model_context.get()['model_context'])
 
-        # Dispatch the task
-        task_result = func.delay(context=new_context, model_context=model_context)
+        if hasattr(func, 'delay'):
+            # Method itself is a @lex_shared_task — dispatch it directly.
+            task_result = func.delay(context=new_context, model_context=model_context)
+        else:
+            # Undecorated method — use the generic calc_and_save task,
+            # which calls ``model.lex_func()()`` inside the worker. This
+            # is the path that makes every calculation Celery-eligible
+            # regardless of user decoration.
+            from lex.lex_app.celery_tasks import calc_and_save
+            task_result = calc_and_save.delay(
+                [self],
+                context=new_context,
+                model_context=model_context,
+            )
 
         # Register with WaitForTasks context if one exists
         from lex.lex_app.celery_tasks import register_task_with_context
