@@ -231,7 +231,7 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ## Cluster 7 — Calculation State Machine (existing 7a–7j, plus new 7k)
 
-> **Renumbering note (May 12):** the plan's original 7i/7j/7k labels collided with already-shipped sub-clusters (7i = 2-level atomicity matrix Session 42; 7j = 3-level matrix Session 45). The supervisor's "exceptions / restrictions / XLSX" batch landed under **7k**; the queue + signals batches shift to **7l / 7m**.
+> **Renumbering note (May 12):** the plan's original 7i/7j/7k labels collided with already-shipped sub-clusters (7i = 2-level atomicity matrix Session 42; 7j = 3-level matrix Session 45). The supervisor's "exceptions / restrictions / XLSX" batch landed under **7k**; the queue + signals batches shift to **7l / 7m**. The cancellation-API batch claims **7n** (May 29).
 
 ### Batch 7k — Exceptions, restrictions & XLSX field ✅
 
@@ -280,6 +280,20 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Est. tests | ~10 |
 | Coverage gain | +0.6 % |
 | Prereqs | none |
+
+### Batch 7n — Manual cancellation API on `CalculationModel` ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.166 – 7.172 |
+| Type | I |
+| Files covered | `lex/core/models/CalculationModel.py` (new `cancel()` + `is_cancellation_requested()` methods — the docs in `docs/reference/CalculationModel Internals.md`, `docs/features/processing/calculations.md`, `docs/lex_topics/04-calculationmodel-lifecycle.md` document the `IN_PROGRESS → ABORTED` "manually cancelled" transition and the `ABORTED → IN_PROGRESS` retry path, but until this batch the framework had no public API to reach `ABORTED` — only the startup-reset path wrote it) |
+| Test file | `lex/test_project/tests/calculations/test_7n_cancellation.py` |
+| Test classes | `TestCluster07n_Cancellation` (IN_PROGRESS → ABORTED transition, no-op on every non-IN_PROGRESS state, store pruning + `calculation_aborted` broadcast, reason stored on `calculation_error_message`, ABORTED → IN_PROGRESS retry) |
+| Fixtures | `AtomicCalc`, `FailingCalc` (existing). `e2e_unpatch = ["mark_in_progress"]` so the real `ActiveCalculationStateStore` is observed in scenario 7.170. |
+| Tests landed | **7 pass / 0 fail in 6.13s** |
+| Coverage gain | +0.2 % (estimated; measured on next coverage run) |
+| Status | ✅ Complete (Session — May 29). |
 
 > `LexModel.py`, `CalculationModel.py`, `CalculatedModelMixin.py` keep their forecasted homes (4i existing + 7h Tier-A clusters in the coverage plan). Do not duplicate.
 

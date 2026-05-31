@@ -342,6 +342,118 @@ class CalculationModel(LexModel):
         return calc_obj, exception_details, stack_trace
 
 
+    def cancel(self, reason: str = "") -> bool:
+        """Manually cancel an IN_PROGRESS calculation.
+
+        Transitions ``is_calculated`` from ``IN_PROGRESS`` to ``ABORTED``,
+        persists the change (without re-triggering ``calculate_hook``),
+        removes the record from ``ActiveCalculationStateStore``, and
+        broadcasts ``calculation_aborted`` to WebSocket subscribers.
+
+        This is a cooperative cancel: it marks the **record** as cancelled
+        and frees the frontend spinner. It does **not** interrupt code that
+        is currently executing inside ``calculate()``. A long-running
+        ``calculate()`` that wants to honour a cancel must poll
+        :meth:`is_cancellation_requested` at safe points and raise.
+
+        Parameters
+        ----------
+        reason:
+            Optional human-readable reason. When the model carries a
+            ``calculation_error_message`` or ``error_message`` field, the
+            reason is stored there prefixed with ``"Cancelled: "``.
+
+        Returns
+        -------
+        bool
+            ``True`` if the record was ``IN_PROGRESS`` and is now
+            ``ABORTED``; ``False`` if the record was already in a terminal
+            state (``SUCCESS`` / ``ERROR`` / ``ABORTED`` / ``NOT_CALCULATED``),
+            in which case ``cancel()`` is a no-op.
+
+        Notes
+        -----
+        Per the documented state machine, an ``ABORTED`` record can be
+        retried by saving it again with ``is_calculated=IN_PROGRESS``.
+        """
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+        from lex.core.signals.CalculationSignals import update_calculation_status
+
+        if getattr(self, "is_calculated", None) != self.IN_PROGRESS:
+            return False
+
+        self.is_calculated = self.ABORTED
+        if reason:
+            cancellation_message = f"Cancelled: {reason}"
+            if hasattr(self, "calculation_error_message"):
+                self.calculation_error_message = cancellation_message
+            elif hasattr(self, "error_message"):
+                self.error_message = cancellation_message
+
+        try:
+            self.save(skip_hooks=True)
+        except Exception:
+            logger.error(
+                "Failed to persist ABORTED state for %s during cancel()",
+                self,
+                exc_info=True,
+            )
+            raise
+
+        self._register_terminal_state_persistence(self)
+
+        # Defensive direct clear in addition to the clear that
+        # update_calculation_status will perform — guarantees the store
+        # entry is gone even if the broadcast path errors out.
+        if self.pk is not None:
+            record_id = f"{self._meta.model_name}_{self.pk}"
+            ActiveCalculationStateStore.clear(record_id)
+
+        try:
+            update_calculation_status(self)
+        except Exception:
+            logger.warning(
+                "Failed to broadcast calculation_aborted for %s",
+                self,
+                exc_info=True,
+            )
+
+        return True
+
+    def is_cancellation_requested(self) -> bool:
+        """Return ``True`` if this record has been cancelled while
+        ``calculate()`` is still running.
+
+        Long-running ``calculate()`` implementations can poll this at safe
+        points and raise to honour a cancellation:
+
+        .. code-block:: python
+
+            def calculate(self):
+                for chunk in chunks:
+                    if self.is_cancellation_requested():
+                        raise RuntimeError("Calculation cancelled by user")
+                    process(chunk)
+
+        The check hits the DB (``only("is_calculated")``) — call it at
+        coarse boundaries, not in a tight inner loop.
+        """
+        if self.pk is None:
+            return False
+        try:
+            current = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .only("is_calculated")
+                .values_list("is_calculated", flat=True)
+                .first()
+            )
+        except Exception:
+            return False
+        return current == self.ABORTED
+
     def update(self):
         """
         Placeholder for update logic. Subclasses should override this method
