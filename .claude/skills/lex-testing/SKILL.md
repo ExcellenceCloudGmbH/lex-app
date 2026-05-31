@@ -37,9 +37,10 @@ Do this yourself, automatically — do not wait to be asked:
    trust them as current intent, but don't hand-edit them here — fix docs upstream in `lex-app-docs`.
 2. **Read the public API docstrings** of the classes/functions you'll touch, and skim the existing
    cluster tests for that topic to match established patterns.
-3. **Check for an existing mechanism before inventing one.** E.g. cross-process state already lives
-   in the cache-backed `ActiveCalculationStateStore` — don't add a process-local dict that fails
-   silently across Celery workers. Search the codebase for the capability first.
+3. **Check for an existing mechanism before inventing one.** Before adding a new store, cache,
+   registry, or helper, search the codebase for one that already does the job — a second, parallel
+   home for state that already has one is a common source of subtle divergence bugs. Reuse the
+   established mechanism rather than reinventing it.
 4. **If the request is ambiguous or has more than one defensible design, STOP and ask the
    developer** before coding — surface the trade-offs and let them choose. Use the
    `superpowers:brainstorming` skill. A wrong assumption baked into a feature + its tests costs far
