@@ -110,6 +110,21 @@
 | Coverage gain | +0.6 % |
 | Prereqs | 2f |
 
+### Batch 2i — Cancel-calculation REST endpoint (Session 66 — June 1)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.93 – 2.96 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/One.py` (the new `cancel=true` short-circuit branch in `OneModelEntry.update`) |
+| Test file | `lex/test_project/tests/crud_api/test_2i_cancel_endpoint.py` |
+| Test classes | `TestCluster02i_CancelCalculationEndpoint` (PATCH with body `{"cancel":"true"}` → 202 on cancellable IN_PROGRESS, 409 on terminal state, 409 with `reason=sync_calculation_not_cancellable` when no Celery task_id, sibling fields ignored) |
+| Fixtures | `AtomicCalc` (from cluster 7); patches `CalculationModel._revoke_celery_task` so no broker is needed |
+| Est. tests | 4 |
+| Coverage gain | +0.1 % |
+| Prereqs | none |
+| Status | ✅ Complete (Session 66 — 4 scenarios; passes locally for pure-logic, DB-needing scenarios require a CI-configured test DB) |
+
 ---
 
 ## Cluster 4 — Permissions (existing 4a–4i)
@@ -283,6 +298,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 > `LexModel.py`, `CalculationModel.py`, `CalculatedModelMixin.py` keep their forecasted homes (4i existing + 7h Tier-A clusters in the coverage plan). Do not duplicate.
 
+### Batch 7n — Calculation cancellation, state machine + recursive cancel (Session 66 — June 1)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.166 – 7.173 |
+| Type | I |
+| Files covered | `lex/core/models/CalculationModel.py` (new `CalculationModel.cancel()` classmethod + `_persist_aborted` / `_persist_aborted_by_entry` helpers + `CalculationCancelled` marker exception + `dispatch_calculation_task` task_id capture); `lex/core/signals/ActiveCalculationStateStore.py` (new `set_task_id` / `get_task_id` / `find_descendants`; `mark_in_progress` preserves task_id across re-entry) |
+| Test file | `lex/test_project/tests/calculations/test_7n_cancellation.py` |
+| Test classes | `TestCluster07n_Cancellation` (Celery-cancellable → ABORTED; sync-not-cancellable → reason flag; terminal-state idempotent; recursive cancel reaches every descendant sharing `calculation_id`; `recursive=False` leaves descendants); `TestCluster07n_StateStoreTaskIdAndDescendants` (`set_task_id` survives `mark_in_progress` re-entry; `find_descendants` groups by shared `calculation_id`); `TestCluster07n_CalculationCancelledException` (marker exception carries reason) |
+| Fixtures | `AtomicCalc`, `ParentCalc`, `ChildCalc` (existing); `CalculationModel._revoke_celery_task` patched so no Celery broker is needed |
+| Est. tests | 8 |
+| Coverage gain | +0.5 % |
+| Prereqs | none |
+| Status | ✅ Complete (Session 66 — 8 scenarios; 3 pure-logic pass locally, 5 DB-needing scenarios require CI test DB) |
+
+
 ---
 
 ## Cluster 8 — Celery & Async (existing 8a–8g)
@@ -316,6 +347,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Prereqs | none |
 
 > `celery_tasks.py` keeps its slot in cluster 8j (Tier-A coverage forecast).
+
+### Batch 8m — Cancellation-aware CallbackTask failure mapping (Session 66 — June 1)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.58 – 8.61 |
+| Type | U |
+| Files covered | `lex/lex_app/celery_tasks.py` — `_is_cancellation_exception` helper + the `CallbackTask.on_failure` branch that maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `billiard.Terminated` / `CalculationCancelled` onto `ABORTED` (not `ERROR`) so the audit row matches what really happened when a user pressed Abort |
+| Test file | `lex/test_project/tests/celery_async/test_8m_cancel_revoke.py` |
+| Test classes | `TestCluster08m_CancellationExceptionDetector` (every documented cancellation class recognised; generic runtime errors rejected; subclasses of cancellation classes still detected; `None` handled safely) |
+| Fixtures | none (synthetic exception stand-ins mirroring celery/billiard class names so the worker stack does not have to be imported) |
+| Est. tests | 4 (9 sub-test cases) |
+| Coverage gain | +0.1 % |
+| Prereqs | none |
+| Status | ✅ Complete (Session 66 — 4 pass / 0 fail / 9 sub-tests pass / 0.08s; runs broker-free, DB-free) |
 
 ---
 

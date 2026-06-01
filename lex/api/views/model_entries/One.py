@@ -412,6 +412,25 @@ class OneModelEntry(
         with OperationContext(request, calculationId):
             instance = self.get_object()
             with model_logging_context(instance):
+                # ── Cancel button short-circuit ────────────────────────
+                # PATCH .../{pk}/?cancel=true (or body {"cancel":"true"})
+                # asks the framework to revoke the in-progress Celery
+                # calculation for this row. Mirrors the existing
+                # ``calculate=true`` trigger pattern so no new URL route
+                # is needed. The handler runs *before* any other update
+                # logic — cancel does not touch any other field.
+                if (
+                    isinstance(instance, CalculationModel)
+                    and str(request.data.get("cancel", "")).lower() == "true"
+                ):
+                    report = CalculationModel.cancel(instance, recursive=True)
+                    http_status = (
+                        status.HTTP_202_ACCEPTED
+                        if report.get("cancelled")
+                        else status.HTTP_409_CONFLICT
+                    )
+                    return Response(report, status=http_status)
+
                 self._calculate_requested = (
                         isinstance(instance, CalculationModel)
                         and str(request.data.get("calculate", "")).lower() == "true"
