@@ -217,3 +217,60 @@ def test_missing_fixes_link_fails_bug_repro() -> None:
 def test_unknown_mode_raises() -> None:
     with pytest.raises(ValueError):
         validate_pr_shape(mode="banana", files=[], pr_body="")
+
+
+# ----- linked-issue (coverage-task / sidebar-link) ----------------
+
+def test_linked_issue_satisfies_fixes_link_without_body_text() -> None:
+    """A gate-verified closing-issue link replaces the literal `Fixes #N`.
+
+    Copilot's coding agent routinely links the originating issue via the
+    Development sidebar instead of writing `Fixes #N` in the body. The
+    gate resolves that link (copilot_discover_mode.py) and passes the
+    issue number as linked_issue — the body text is then not required.
+    """
+    files = _files(
+        ("lex/test_project/tests/signals_ws/test_9e_thing.py", 80),
+        ("lex/test_project/test-plan/test-clusters.md", 3),
+        ("lex/test_project/test-plan/progress/session-log.md", 1),
+    )
+    pr_body = "Adds coverage for the consumer/signal sync. No Fixes line here."
+    result = validate_pr_shape(
+        mode="regression", files=files, pr_body=pr_body, linked_issue=556
+    )
+    assert result.ok, result.errors
+
+
+def test_missing_fixes_link_still_fails_when_no_linked_issue() -> None:
+    """Without a resolved link, the body must still carry `Fixes #N`."""
+    files = _files(
+        ("lex/test_project/tests/signals_ws/test_9e_thing.py", 80),
+        ("lex/test_project/test-plan/test-clusters.md", 3),
+        ("lex/test_project/test-plan/progress/session-log.md", 1),
+    )
+    result = validate_pr_shape(
+        mode="regression", files=files, pr_body="No link.", linked_issue=None
+    )
+    assert not result.ok
+    assert any("Fixes #" in e for e in result.errors)
+
+
+def test_coverage_task_regression_pr_passes_shape() -> None:
+    """A Feature-4 coverage-task PR is shaped exactly like a regression PR.
+
+    It maps to mode=regression (test-only, multi-file allowed) and links
+    its coverage-task issue via the sidebar — so with linked_issue set it
+    must pass shape validation end-to-end.
+    """
+    files = _files(
+        ("lex/test_project/tests/signals_ws/test_9e_consumer_signal_sync.py", 251),
+        ("lex/test_project/test-plan/test-clusters.md", 16),
+        ("lex/test_project/test-plan/progress/session-log.md", 1),
+        ("lex/test_project/test-plan/progress/dashboard.md", 3),
+        ("lex/test_project/test-plan/test-writing-plan.md", 15),
+    )
+    pr_body = "Adds cluster 9e coverage for the PR #555 source files."
+    result = validate_pr_shape(
+        mode="regression", files=files, pr_body=pr_body, linked_issue=556
+    )
+    assert result.ok, result.errors
