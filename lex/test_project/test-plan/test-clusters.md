@@ -429,6 +429,15 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 **Status:** ✅ Complete — covers `lex/test_project/tests/calculations/test_7e_persistence_internals.py`.
 
+### 7n — Startup reset cancellation guard (coverage-task PR #549)
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 7.166 | Startup reset (`CALLED_FROM_START_COMMAND=1`) rewrites lingering IN_PROGRESS rows to CANCELLED | Per-row `save(skip_hooks=True)` executes, `_history_change_reason` is stamped, and terminal audit is emitted with `audit_status="cancelled"` + `"Calculation cancelled during startup reset"` |
+| 7.167 | Startup reset gate disabled (`CALLED_FROM_START_COMMAND` missing) | `_handle_calculation_model_reset` is a no-op (no query / no rewrite / no audit side effects) |
+
+**Status:** ✅ Complete — covers `lex/test_project/tests/calculations/test_7n_startup_reset_cancelled.py`.
+
 ---
 
 ## 8. Celery & Async
@@ -499,6 +508,14 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 9.4 | Root process cleans up cache | `CacheManager.cleanup_calculation` called for root |
 | 9.5 | Child process skips cache cleanup | Cleanup NOT called for child process |
 | 9.6 | `update_calculation_status` called with error details on failure | Exception details and stack trace included |
+
+### 9e — Cancelled signal regression (coverage-task PR #549)
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.29 | `update_calculation_status` receives CANCELLED state | Active-state store entry is cleared and WebSocket payload broadcasts `type="calculation_cancelled"` |
+
+**Status:** ✅ Complete — covers `lex/test_project/tests/signals_ws/test_9e_cancelled_signal.py`.
 
 ---
 

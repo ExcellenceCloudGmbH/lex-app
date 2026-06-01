@@ -281,6 +281,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Coverage gain | +0.6 % |
 | Prereqs | none |
 
+### Batch 7n — Startup-cancellation reset + cancelled signal regression ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.166 – 7.167 |
+| Type | U |
+| Files covered | `process_admin/utils/model_registration.py` |
+| Test file | `lex/test_project/tests/calculations/test_7n_startup_reset_cancelled.py` |
+| Test classes | `TestCluster07n_StartupResetCancelled` |
+| Fixtures | inline stubs (`SimpleNamespace` + mocks) |
+| Tests landed | 2 pass / 0 fail |
+| Coverage gain | targeted regression coverage for startup cancelled-reset branch |
+| Prereqs | none |
+| Status | ✅ Complete (Session 67 — Jun 1). |
+
 > `LexModel.py`, `CalculationModel.py`, `CalculatedModelMixin.py` keep their forecasted homes (4i existing + 7h Tier-A clusters in the coverage plan). Do not duplicate.
 
 ---
@@ -337,6 +352,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Note | Supervisor's list had a typo — `ex/api/consumers/CalculationsConsumer.py` → corrected to `lex/…`. |
 
 `CalculationLogConsumer.py` is **parked** until §6 decision #3 confirms it's still wired anywhere.
+
+### Batch 9e — Cancelled signal broadcast regression ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.29 – 9.29 |
+| Type | U |
+| Files covered | `core/signals/CalculationSignals.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9e_cancelled_signal.py` |
+| Test classes | `TestCluster09e_CancelledSignal` |
+| Fixtures | unmanaged `DummySignalCalc` |
+| Tests landed | 1 pass / 0 fail |
+| Coverage gain | targeted regression coverage for CANCELLED signal branch |
+| Prereqs | none |
+| Status | ✅ Complete (Session 67 — Jun 1). |
 
 ---
 
@@ -500,7 +530,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 
