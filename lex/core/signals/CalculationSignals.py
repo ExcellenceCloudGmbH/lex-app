@@ -44,7 +44,7 @@ def update_calculation_status(
     calculation_id = _resolve_calculation_id(instance, record_id)
     message_type = ""
 
-    cancelled_state = getattr(CalculationModel, "CANCELLED", CalculationModel.ABORTED)
+    cancelled_status = getattr(CalculationModel, "CANCELLED", CalculationModel.ABORTED)
 
     if instance.is_calculated == CalculationModel.IN_PROGRESS:
         message_type = "calculation_in_progress"
@@ -64,7 +64,7 @@ def update_calculation_status(
         message_type = "calculation_error"
         ActiveCalculationStateStore.clear(record_id)
 
-    elif instance.is_calculated == cancelled_state:
+    elif instance.is_calculated == cancelled_status:
         message_type = "calculation_cancelled"
         ActiveCalculationStateStore.clear(record_id)
 

@@ -60,6 +60,8 @@ class TestCluster09e_CancelledSignal(TestCase):
             record_pk=instance.pk,
         )
 
+        # Compatibility bridge: this branch still keeps ABORTED as the model
+        # constant, so we inject CANCELLED to assert the forward contract.
         with patch.object(CalculationModel, "CANCELLED", "CANCELLED", create=True), patch(
             "lex.core.signals.CalculationSignals.sync_channel_group_send"
         ) as send_spy:

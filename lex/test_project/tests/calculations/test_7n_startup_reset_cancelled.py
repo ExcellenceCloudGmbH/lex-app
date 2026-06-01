@@ -45,6 +45,8 @@ class TestCluster07n_StartupResetCancelled(TestCase):
         with patch.dict(
             "os.environ", {"CALLED_FROM_START_COMMAND": "1"}, clear=False
         ), patch.object(
+            # Compatibility bridge: this branch still keeps ABORTED as the model
+            # constant, so we inject CANCELLED to assert the forward contract.
             CalculationModel, "CANCELLED", "CANCELLED", create=True
         ), patch(
             "lex.audit_logging.utils.calculation_audit.ensure_terminal_calculation_audit"

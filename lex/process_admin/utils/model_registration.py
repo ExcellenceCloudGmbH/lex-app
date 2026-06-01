@@ -404,11 +404,11 @@ class ModelRegistration:
             stuck = list(
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
             )
-            cancelled_state = getattr(
+            cancelled_status = getattr(
                 CalculationModel, "CANCELLED", CalculationModel.ABORTED
             )
             for instance in stuck:
-                instance.is_calculated = cancelled_state
+                instance.is_calculated = cancelled_status
                 instance._history_change_reason = (
                     "Startup reset: calculation was still IN_PROGRESS"
                 )
