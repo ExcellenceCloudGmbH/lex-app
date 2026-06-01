@@ -1,0 +1,10 @@
+first_name,last_name,email,team,role
+Anna,Schmidt,anna.schmidt@apex-consulting.com,Design,employee
+Max,Weber,max.weber@apex-consulting.com,Design,employee
+Thomas,Müller,thomas.mueller@apex-consulting.com,Design,manager
+Julia,Fischer,julia.fischer@apex-consulting.com,Engineering,employee
+Lukas,Wagner,lukas.wagner@apex-consulting.com,Engineering,employee
+Sarah,Becker,sarah.becker@apex-consulting.com,Engineering,manager
+Nina,Braun,nina.braun@apex-consulting.com,Marketing,employee
+Lisa,Hoffmann,lisa.hoffmann@apex-consulting.com,Marketing,manager
+Michael,Richter,michael.richter@apex-consulting.com,Engineering,cfo
