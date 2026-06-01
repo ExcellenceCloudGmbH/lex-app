@@ -50,7 +50,7 @@
 | 8i. `WaitForTasks` / `FireAndForget` scope contracts (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — 8.22–8.30 (priority/nesting/filters/no-op/propagation) |
 | 8j. Celery task bodies — `load_data` / `calc_and_save` / `activate_history_version` (coverage-driven — April 24) | 14 | 14 | 14 | 0 | 0 |  Complete — task bodies at `celery_tasks.py` 696–957; broker-free |
 | 8k. Redis broker integration examples (opt-in — May 4) | 2 | 2 | 2 | 0 | 0 |  Complete — 8.45/8.46 env-gated (`LEX_RUN_REDIS_CELERY_TESTS=true`); wired into `celery_redis_broker_example.yml` |
-| 8m. Cancellation-aware `CallbackTask` failure mapping (Session 66 — June 1) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 8.58–8.61; `_is_cancellation_exception` maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `Terminated` / `CalculationCancelled` → `ABORTED` |
+| 8m. Cancellation-aware `CallbackTask` failure mapping (Session 66 — June 1; extended Session 67) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 8.58–8.61 + 8.72; `_is_cancellation_exception` maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `Terminated` / `CalculationCancelled` → `ABORTED`; 8.72 pins `_update_model_status` audit-status mapping (ABORTED → `failure`, not `success`) |
 | 9. Signals & WebSocket | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 9.7–9.10. Bitemporal signal branches (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — suppression primitives in `bitemporal_signals.py` |
 | 9d. `ActiveCalculationStateStore` full surface (coverage-driven — May 12) | 24 | 24 | 24 | 0 | 0 |  Complete — scenarios 9.11–9.28; coverage 27.03% → ~95% |

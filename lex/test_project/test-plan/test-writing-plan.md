@@ -352,16 +352,16 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 8.58 – 8.61 |
+| Scenario range | 8.58 – 8.61, 8.72 |
 | Type | U |
-| Files covered | `lex/lex_app/celery_tasks.py` — `_is_cancellation_exception` helper + the `CallbackTask.on_failure` branch that maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `billiard.Terminated` / `CalculationCancelled` onto `ABORTED` (not `ERROR`) so the audit row matches what really happened when a user pressed Abort |
+| Files covered | `lex/lex_app/celery_tasks.py` — `_is_cancellation_exception` helper + the `CallbackTask.on_failure` branch that maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `billiard.Terminated` / `CalculationCancelled` onto `ABORTED` (not `ERROR`); **Session 67** also pins `CallbackTask._update_model_status`'s audit-status mapping (8.72) so the terminal-audit row records `failure` for both ERROR and ABORTED, never `success` for a non-SUCCESS terminal state |
 | Test file | `lex/test_project/tests/celery_async/test_8m_cancel_revoke.py` |
-| Test classes | `TestCluster08m_CancellationExceptionDetector` (every documented cancellation class recognised; generic runtime errors rejected; subclasses of cancellation classes still detected; `None` handled safely) |
-| Fixtures | none (synthetic exception stand-ins mirroring celery/billiard class names so the worker stack does not have to be imported) |
-| Est. tests | 4 (9 sub-test cases) |
-| Coverage gain | +0.1 % |
+| Test classes | `TestCluster08m_CancellationExceptionDetector` (every documented cancellation class recognised; generic runtime errors rejected; subclasses of cancellation classes still detected; `None` handled safely); `TestCluster08m_AuditStatusForTerminalStates` (8.72 — SUCCESS → `success`, ERROR / ABORTED → `failure`) |
+| Fixtures | none (synthetic exception stand-ins mirroring celery/billiard class names so the worker stack does not have to be imported; 8.72 mocks `ensure_terminal_calculation_audit` to observe the `audit_status` argument) |
+| Est. tests | 5 (12 sub-test cases) |
+| Coverage gain | +0.15 % |
 | Prereqs | none |
-| Status | ✅ Complete (Session 66 — 4 pass / 0 fail / 9 sub-tests pass / 0.08s; runs broker-free, DB-free) |
+| Status | ✅ Complete (Session 66 — 4 scenarios; Session 67 extended +1 — 5 pass / 0 fail / 12 sub-tests pass / 0.11s; runs broker-free, DB-free) |
 
 ---
 

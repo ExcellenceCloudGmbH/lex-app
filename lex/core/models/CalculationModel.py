@@ -772,7 +772,18 @@ class CalculationModel(LexModel):
                 fallback=fallback_stack_trace,
             )
             error_details = f"{exception_details}\n\n{stack_trace}"
-            self.is_calculated = self.ERROR
+            # If the exception bubbling up is a cancellation signal
+            # (cooperative CalculationCancelled, or a worker-side
+            # Terminated/SoftTimeLimit/Revoked/WorkerLost propagated
+            # synchronously into this thread), the terminal state must
+            # be ABORTED, not ERROR. ERROR would lie to the user — they
+            # pressed cancel and the audit would say "the calc crashed".
+            from lex.lex_app.celery_tasks import _is_cancellation_exception
+
+            if _is_cancellation_exception(e):
+                self.is_calculated = self.ABORTED
+            else:
+                self.is_calculated = self.ERROR
 
             if hasattr(self, 'calculation_error_message'):
                 self.calculation_error_message = error_details
@@ -827,7 +838,7 @@ class CalculationModel(LexModel):
                     status_update_error,
                     exc_info=True,
                 )
-            if self.is_calculated != self.ERROR:
+            if self.is_calculated == self.SUCCESS:
                 try:
                     from lex.audit_logging.utils.calculation_audit import (
                         ensure_terminal_calculation_audit,
@@ -837,6 +848,25 @@ class CalculationModel(LexModel):
                         self,
                         audit_status="success",
                         error_message=exception_details,
+                        stack_trace=stack_trace,
+                    )
+                except Exception as audit_error:
+                    logger.error(
+                        "Failed to finalize terminal audit log for %s: %s",
+                        self,
+                        audit_error,
+                        exc_info=True,
+                    )
+            elif self.is_calculated == self.ABORTED:
+                try:
+                    from lex.audit_logging.utils.calculation_audit import (
+                        ensure_terminal_calculation_audit,
+                    )
+
+                    ensure_terminal_calculation_audit(
+                        self,
+                        audit_status="failure",
+                        error_message=exception_details or "Calculation cancelled by user",
                         stack_trace=stack_trace,
                     )
                 except Exception as audit_error:
@@ -964,8 +994,23 @@ class CalculationModel(LexModel):
 
             # Handle any errors in task dispatch or synchronous execution
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
+            # Cancellation must collapse onto ABORTED rather than ERROR —
+            # whether it surfaced from a Celery worker that was revoked
+            # (TaskRevokedError / WorkerLostError / SoftTimeLimitExceeded /
+            # Terminated) or from a cooperative in-process raise
+            # (CalculationCancelled). Without this branch, the
+            # except-block below would persist ERROR and overwrite the
+            # ABORTED state cancel() already wrote, leaving the audit row
+            # in the wrong terminal state.
+            from lex.lex_app.celery_tasks import _is_cancellation_exception
+
+            is_cancellation = _is_cancellation_exception(e)
             status_was_error = self.is_calculated == self.ERROR
-            self.is_calculated = self.ERROR
+            status_was_aborted = self.is_calculated == self.ABORTED
+            target_terminal_state = (
+                self.ABORTED if is_cancellation else self.ERROR
+            )
+            self.is_calculated = target_terminal_state
 
             # Store error message if the model has an error_message field
             stack_trace = traceback.format_exc()
@@ -1012,20 +1057,20 @@ class CalculationModel(LexModel):
                 or stack_trace
             )
 
-            # Persist ERROR state and notify websocket clients.
-            # Always save self to ERROR — even when execute_calculation_sync
-            # already did — to cover cases where the error originated in
+            # Persist terminal state (ERROR or ABORTED) and notify websocket
+            # clients. Always save self even when execute_calculation_sync
+            # already did — to cover cases where the failure originated in
             # calculate_hook itself (e.g. dispatch failure) or where the
             # parent's own calculate() raised directly.
-            error_state_already_persisted = self._has_persisted_terminal_state(
+            terminal_state_already_persisted = self._has_persisted_terminal_state(
                 self,
-                self.ERROR,
+                target_terminal_state,
             )
             try:
-                if not error_state_already_persisted:
+                if not terminal_state_already_persisted:
                     self.save(skip_hooks=True)
                     self._register_terminal_state_persistence(self)
-                if not status_was_error:
+                if not (status_was_error or status_was_aborted):
                     update_calculation_status(
                         self,
                         exception_details=preferred_exception_detail,
@@ -1033,7 +1078,7 @@ class CalculationModel(LexModel):
                     )
             except Exception as status_update_error:
                 logger.error(
-                    f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
+                    f"Failed to persist/notify {target_terminal_state} state for {self}: {status_update_error}",
                     exc_info=True,
                 )
             self._pending_terminal_audit = {
@@ -1042,7 +1087,11 @@ class CalculationModel(LexModel):
                 "stack_trace": preferred_stack_trace,
             }
             calc_obj_to_persist = calc_obj[:-1] if calc_obj and calc_obj[-1] is self else calc_obj
-            self.persist_error_state(calc_obj_to_persist)
+            # On cancellation, descendants were already revoked + flipped to
+            # ABORTED by ``cancel()``'s recursive walk; we must not now
+            # persist ERROR on top of them via the generic error path.
+            if not is_cancellation:
+                self.persist_error_state(calc_obj_to_persist)
             raise CalculationModelException(
                 calc_obj=calc_obj,
                 exception_details=full_exception_chain,
