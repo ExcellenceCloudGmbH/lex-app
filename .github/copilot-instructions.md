@@ -38,3 +38,22 @@ kickstart_workflow OR kickstart_run  →  [work]  →  finalize_workflow
 ```
 
 See the tool descriptions for step details. Steps (0–12) are optional guidance — the kickstart → finalize pattern is mandatory.
+
+## Finishing work — offer a pull request
+
+When you believe a feature or bugfix is **complete and verified** — the code is written, its tests
+have been run, and they pass — **ask the developer whether to open a pull request.** Do not open one
+without being asked, and do not offer while the work is partial or any test is failing (keep going or
+report the blocker instead).
+
+If the developer says yes:
+
+1. Create a **new branch** with a meaningful, descriptive name (`feat/…`, `fix/…`). Never push
+   directly to the default `lex-app-v2` branch — the repository ruleset blocks direct pushes, so all
+   work must land via a branch + PR.
+2. Push the branch (`git push -u`) and open the PR with `gh pr create`: a concise title (< 70 chars)
+   and a body covering **what changed and why** plus a short test-plan / verification checklist.
+3. Return the PR URL.
+
+If the developer says no, leave the commits in place and continue. (Full agent workflow:
+[`AGENTS.md`](../AGENTS.md) → Prime directive 4.)

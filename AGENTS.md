@@ -107,9 +107,34 @@ matches it so the two paths don't drift:
 
 If the plan and the tests on disk disagree, the task is not finished.
 
+## Prime directive 4 — When everything is complete and verified, offer a pull request
+
+Once the feature/bugfix, its cluster tests, **and** the test-plan are all consistent (directives 2–3)
+and the tests actually pass, **ask the developer whether to open a pull request** before touching any
+branch. Do **not** open a PR unsolicited.
+
+- **Only offer when the work is genuinely finished** — never mid-task, and never while tests are
+  failing or the change is partial. If it isn't done, keep going or report the blocker instead.
+- This is the **local agent's** completion step. It is unrelated to the cloud GitHub Copilot coding
+  agent that produces docs PRs in `lex-app-docs`.
+
+If the developer says **yes**:
+
+1. Create a **new branch** with a **meaningful, descriptive name** (`feat/…`, `fix/…`, e.g.
+   `feat/instant-cancel-calculations`, `fix/coverage-gate-all-apps`). **Never push to the default
+   `lex-app-v2` branch directly** — the repository ruleset blocks direct pushes, so every change lands
+   via a branch + PR.
+2. Move the completed commits onto that branch and push it with `git push -u`.
+3. Open the PR with `gh pr create`: a concise title (< 70 chars) and a body covering **what changed
+   and why**, plus a short test-plan / verification checklist (the same evidence directives 2–3
+   already produced).
+4. Return the PR URL.
+
+If the developer says **no**, leave the commits as they are and continue.
+
 ## What you'll be asked to do here
 
-- **Develop a feature/bugfix in lex-app** → directives 1→2→3, in that order.
+- **Develop a feature/bugfix in lex-app** → directives 1→2→3→4, in that order.
 - **Develop in a downstream Lex project** (not this framework repo) → follow that project's own
   conventions and [`docs/`](docs/); the cluster test-plan rules are framework-internal and do **not**
   apply to downstream app code.
