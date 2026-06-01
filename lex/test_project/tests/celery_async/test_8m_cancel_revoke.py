@@ -15,7 +15,7 @@ A regression here would silently flip every aborted calc to ``ERROR``,
 which would page the on-call team every time someone clicks the abort
 button — exactly the wrong incident signal.
 
-Cluster 8m — scenarios 8.58–8.61. Type: U (SimpleTestCase — exercises
+Cluster 8m — scenarios 8.58–8.61, 8.72. Type: U (SimpleTestCase — exercises
 ``_is_cancellation_exception`` against a synthetic exception hierarchy
 mirroring celery/billiard's class names without importing the real
 worker stack).
@@ -145,4 +145,77 @@ class TestCluster08m_CancellationExceptionDetector(SimpleTestCase):
                the ERROR persistence branch which is the safer default.
         """
         self.assertFalse(_is_cancellation_exception(None))
+
+
+class TestCluster08m_AuditStatusForTerminalStates(SimpleTestCase):
+    """8.72 — ``CallbackTask._update_model_status`` audit-status mapping.
+
+    Only ``SUCCESS`` is a "success" audit. ``ERROR`` *and* ``ABORTED``
+    are both non-success terminal states and must record an audit row
+    with ``audit_status="failure"`` — otherwise the audit trail would
+    claim that a cancelled calculation completed successfully, which
+    is the most misleading possible record for a customer reviewing
+    "what happened to my calculation".
+    """
+
+    def test_08_72_aborted_status_records_failure_audit_not_success(self):
+        """
+        Scenario 8.72: ABORTED → audit_status='failure'; SUCCESS →
+        audit_status='success'; ERROR → audit_status='failure'.
+
+        Given: a stub model_instance and patched
+               ``ensure_terminal_calculation_audit``.
+        When:  ``CallbackTask._update_model_status`` is invoked for each
+               of SUCCESS, ERROR, ABORTED.
+        Then:  the audit helper is called with the right audit_status for
+               each — SUCCESS only is "success", everything else "failure".
+        """
+        from unittest.mock import MagicMock, patch
+
+        from lex.core.models.CalculationModel import CalculationModel
+        from lex.lex_app.celery_tasks import CallbackTask
+
+        cb = CallbackTask()
+        cases = [
+            (CalculationModel.SUCCESS, "success"),
+            (CalculationModel.ERROR, "failure"),
+            (CalculationModel.ABORTED, "failure"),
+        ]
+        for status, expected_audit_status in cases:
+            with self.subTest(status=status):
+                instance = MagicMock(spec=CalculationModel)
+                instance.pk = 1
+                instance.__class__ = CalculationModel
+
+                with patch.object(
+                    cb, "_persist_status_fields", return_value=True
+                ), patch(
+                    "lex.lex_app.celery_tasks.update_calculation_status"
+                ), patch(
+                    "lex.lex_app.celery_tasks.ensure_terminal_calculation_audit"
+                ) as audit_mock, patch(
+                    "lex.lex_app.celery_tasks.transaction.atomic"
+                ):
+                    cb._update_model_status(
+                        instance,
+                        status,
+                        error_message="x" if status != CalculationModel.SUCCESS else None,
+                        stack_trace=None,
+                        task_id="t1",
+                    )
+
+                audit_mock.assert_called_once()
+                kwargs = audit_mock.call_args.kwargs
+                self.assertEqual(
+                    kwargs.get("audit_status"),
+                    expected_audit_status,
+                    msg=(
+                        f"status={status} must produce "
+                        f"audit_status={expected_audit_status!r}, "
+                        f"got {kwargs.get('audit_status')!r} — "
+                        "mislabelled cancellations are the bug this guards"
+                    ),
+                )
+
+
 

@@ -22,7 +22,7 @@ A regression that lost any of these would leave a customer staring at
 a "spinner" they cannot stop — the worst possible UX for a long
 calculation that ran the wrong inputs.
 
-Cluster 7n — scenarios 7.166–7.172. Type: I (TestCase — exercises the
+Cluster 7n — scenarios 7.166–7.175. Type: I (TestCase — exercises the
 ``CalculationModel.cancel()`` public classmethod against real DB rows
 and the in-memory active-state store; mocks only ``celery.current_app``
 because the test environment has no broker).
@@ -43,8 +43,9 @@ from django.test import TestCase
 
 from lex.core.models.CalculationModel import CalculationCancelled, CalculationModel
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+from lex.tests.e2e._e2e_test_case import E2ETestCase
 
-from .models import AtomicCalc, ChildCalc, ParentCalc
+from .models import ALL_MODELS, AtomicCalc, ChildCalc, ParentCalc
 
 pytestmark = pytest.mark.calculations
 
@@ -53,10 +54,17 @@ def _record_id(instance) -> str:
     return f"{instance._meta.model_name}_{instance.pk}"
 
 
-class TestCluster07n_Cancellation(TestCase):
+class TestCluster07n_Cancellation(E2ETestCase):
     """Cluster 7n: cancel() public API + recursive descendant cancel."""
 
+    e2e_models = ALL_MODELS
+    # We need the real ActiveCalculationStateStore.mark_in_progress to set
+    # up IN_PROGRESS state in the store before calling cancel(). E2ETestCase
+    # patches it out by default to keep happy-path tests deterministic.
+    e2e_unpatch = {"mark_in_progress"}
+
     def setUp(self):
+        super().setUp()
         ActiveCalculationStateStore.clear_all()
         # Patch celery's revoke so tests run without a broker. We capture
         # the calls to assert "did revoke fire?" at the assertion stage.
@@ -68,6 +76,7 @@ class TestCluster07n_Cancellation(TestCase):
     def tearDown(self):
         self._revoke_patch.stop()
         ActiveCalculationStateStore.clear_all()
+        super().tearDown()
 
     # ------------------------------------------------------------------
     # 7.166 — happy path: in-progress Celery calc revokes + persists ABORTED
@@ -375,4 +384,110 @@ class TestCluster07n_CalculationCancelledException(TestCase):
             self.assertIsInstance(exc, CalculationCancelled)
             self.assertEqual(exc.reason, "user clicked abort")
             self.assertIn("user clicked abort", str(exc))
+
+
+class TestCluster07n_InProcessCancellationLandsAborted(E2ETestCase):
+    """7.174 / 7.175 — in-process exception paths must persist ABORTED.
+
+    Cancellation can reach the calculation through three distinct
+    execution paths, each with its own machinery — covering one tells
+    you nothing about the others:
+
+    1. The cancel REST endpoint pre-emptively writes ABORTED via
+       ``_persist_aborted`` — covered by 7.166.
+    2. The Celery worker observes the revoke and
+       ``CallbackTask.on_failure`` maps the exception onto ABORTED —
+       covered by cluster 8m.
+    3. **The in-process exception path** — ``execute_calculation_sync``'s
+       except branch, and the outer ``calculate_hook`` except branch —
+       sees a cancellation exception bubble up (e.g. a nested sync calc
+       raised ``CalculationCancelled`` cooperatively, or a Celery worker
+       propagated ``Terminated`` synchronously into the dispatching
+       thread). **These** scenarios cover path 3. A regression here
+       would silently flip ``is_calculated`` to ``ERROR`` on top of the
+       cancellation — which is the original bug that triggered the user
+       report this scenario was added for.
+    """
+
+    e2e_models = ALL_MODELS
+
+    def test_07_174_execute_calculation_sync_persists_aborted_on_cancellation(self):
+        """
+        Scenario 7.174: ``execute_calculation_sync`` recognises a
+        cancellation exception and writes ABORTED instead of ERROR.
+
+        Given: an IN_PROGRESS AtomicCalc whose user ``calculate()``
+               raises ``CalculationCancelled`` (the cooperative marker
+               that worker-side cancel signals also collapse onto).
+        When:  ``execute_calculation_sync`` runs the calc.
+        Then:  the row persists ``is_calculated=ABORTED``, NOT ERROR.
+        """
+        calc = AtomicCalc.objects.create(name="in-proc-cancel-sync")
+        calc.is_calculated = CalculationModel.IN_PROGRESS
+        calc.save(skip_hooks=True)
+
+        def _raise_cancel(self):
+            raise CalculationCancelled("worker received SIGTERM")
+
+        with patch.object(AtomicCalc, "calculate", _raise_cancel):
+            with self.assertRaises(CalculationCancelled):
+                calc.execute_calculation_sync()
+
+        calc.refresh_from_db()
+        self.assertEqual(
+            calc.is_calculated,
+            CalculationModel.ABORTED,
+            msg=(
+                "in-process cancellation must land in ABORTED — finding "
+                "ERROR here is the original bug: the user pressed cancel "
+                "but the audit shows a crash"
+            ),
+        )
+
+    def test_07_175_calculate_hook_persists_aborted_and_skips_error_chain(self):
+        """
+        Scenario 7.175: ``calculate_hook``'s top-level except recognises
+        the cancellation and (a) writes ABORTED on self, and (b) does
+        NOT call ``persist_error_state`` on the calc_obj chain —
+        descendants were already revoked + flipped to ABORTED by the
+        recursive cancel walk, and overwriting them with ERROR here
+        would corrupt the terminal state of the whole tree.
+
+        Given: an IN_PROGRESS AtomicCalc whose ``calculate()`` raises
+               ``CalculationCancelled``.
+        When:  ``calculate_hook`` runs (the wrapper that sits between
+               ``save()`` and ``execute_calculation_sync``).
+        Then:  the row persists ABORTED, and ``persist_error_state``
+               is NEVER called.
+        """
+        from lex.core.models.CalculationModel import CalculationModelException
+
+        calc = AtomicCalc.objects.create(name="in-proc-cancel-hook")
+        calc.is_calculated = CalculationModel.IN_PROGRESS
+        calc.save(skip_hooks=True)
+
+        def _raise_cancel(self):
+            raise CalculationCancelled("revoked mid-flight")
+
+        with patch.object(AtomicCalc, "calculate", _raise_cancel), patch.object(
+            CalculationModel, "persist_error_state"
+        ) as persist_error_mock:
+            with self.assertRaises(CalculationModelException):
+                calc.calculate_hook()
+
+        persist_error_mock.assert_not_called()
+        calc.refresh_from_db()
+        self.assertEqual(
+            calc.is_calculated,
+            CalculationModel.ABORTED,
+            msg=(
+                "calculate_hook must persist ABORTED on cancellation — "
+                "and must NOT cascade ERROR onto already-aborted "
+                "descendants via persist_error_state"
+            ),
+        )
+
+
+
+
 

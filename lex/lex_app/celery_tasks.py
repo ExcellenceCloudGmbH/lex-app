@@ -234,9 +234,17 @@ class CallbackTask(Task):
             )
         finally:
             try:
+                # ABORTED is a non-success terminal state — audit it as a
+                # failure so the row shows "did not complete", not
+                # "completed OK". Only SUCCESS counts as success.
+                audit_status = (
+                    "success"
+                    if status == CalculationModel.SUCCESS
+                    else "failure"
+                )
                 ensure_terminal_calculation_audit(
                     model_instance,
-                    audit_status="failure" if status == CalculationModel.ERROR else "success",
+                    audit_status=audit_status,
                     error_message=error_message,
                     stack_trace=stack_trace,
                     context_data=context_data,
