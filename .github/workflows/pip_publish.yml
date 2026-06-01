@@ -29,28 +29,30 @@
 #  release flow. It fires ONLY when a release is published as a full
 #  (non-draft, non-pre-release) release.
 #
-#  The VALIDATE half lives in stage_release_candidate.yml, which runs
-#  the same gate WITHOUT publishing and, on green, points a DRAFT
-#  release for the version at the validated commit. The intended
-#  operator flow:
-#    1. Dispatch stage_release_candidate.yml with version vX.Y.ZrcN.
-#       It runs the gate against the dispatched commit and publishes
-#       NOTHING. On green it ensures a DRAFT for that version exists
-#       and re-points its target_commitish at that exact commit.
-#       If it fails, fix code and re-dispatch — because a DRAFT does
-#       not mint a git tag, the version name is never "spent" and the
-#       draft simply re-targets the latest green commit. No tag is
-#       ever stale, and the "duplicate tag" wall never appears.
-#    2. When green, open the draft in the Releases UI and click
-#       "Publish release" as a FULL (non-pre-release) release. GitHub
-#       mints the tag at the draft's target — the validated commit —
-#       and fires `released` → this workflow publishes that exact
-#       commit to PyPI under that version name.
+#  The VALIDATE half lives in validate_and_release.yml. It runs this
+#  same gate FIRST against a dispatched commit and, ONLY on green, cuts
+#  the real release at that exact commit — so a failing gate never
+#  mints a tag and the version name is never "spent". The intended
+#  operator flow is a single dispatch:
+#    1. Dispatch validate_and_release.yml with version vX.Y.ZrcN.
+#       It gates the dispatched commit and publishes NOTHING. On green
+#       it creates a full release at that commit, which fires
+#       `released` → this workflow ships it. If it fails, fix code and
+#       re-dispatch the same version — no tag was created.
+#
+#  Single gate (no redundant re-run): the release that
+#  validate_and_release.yml cuts carries a `lex:gate-passed` marker in
+#  its body. The gate-release job below SKIPS itself when it sees that
+#  marker — the commit was already validated, so re-running the same
+#  suite adds no signal and a flaky second run could mint a tag it then
+#  refuses to publish. The `publish` job runs when the gate PASSED or
+#  was SKIPPED-because-validated. Every OTHER path is still fully gated
+#  here: a release cut manually in the UI, or by
+#  copilot_publish_after_merge.yml, has no marker, so this gate runs.
 #
 #  Why `released` and not `created`: `created` fires for pre-releases
 #  too, so it could not separate validate from publish. `released`
-#  never fires for pre-releases or drafts, so staging a candidate as a
-#  draft can never accidentally publish. Programmatic callers
+#  never fires for pre-releases or drafts. Programmatic callers
 #  (e.g. copilot_publish_after_merge.yml) that want to publish in one
 #  shot create a NON-draft, NON-pre-release release, which fires
 #  `released` directly — still a single publish.
@@ -74,10 +76,10 @@ name: Publish to PyPI
 on:
   release:
     # `released` fires only for FULL (non-pre-release, non-draft)
-    # releases — either created directly, or promoted from a
-    # pre-release by unchecking "pre-release" (same tag). Pre-releases
-    # fire `prereleased` instead and are handled by validate_release.yml
-    # (gate only, no publish). See header for the two-phase contract.
+    # releases — either created directly, or by validate_and_release.yml
+    # once its gate is green. Pre-releases fire `prereleased` and drafts
+    # fire nothing, so neither can trip this publish. See header for how
+    # the gate below is skipped for already-validated releases.
     types: [released]
   workflow_dispatch:
     inputs:
@@ -118,8 +120,18 @@ jobs:
   #   * exits non-zero iff any cluster failed.
   #
   # The `publish` step below will not run unless this gate is green.
+  #
+  # SKIP CONDITION: validate_and_release.yml already runs this exact gate
+  # before it cuts the release, and stamps a `lex:gate-passed` marker into
+  # the release notes. When we see that marker we skip the gate here —
+  # re-running the same suite on the same commit adds no signal and a flaky
+  # second run could mint a tag it then refuses to publish. Every other
+  # path (manual release cut in the UI, copilot_publish_after_merge.yml)
+  # has NO marker, so it is gated here exactly as before. Manual
+  # workflow_dispatch has no release body, so the gate runs too.
   gate-release:
     name: "Release Gate: Tests + Customer Email"
+    if: ${{ !contains(github.event.release.body || '', 'lex:gate-passed') }}
     uses: ./.github/workflows/showcase_tests.yml
     secrets: inherit
     with:
@@ -134,8 +146,13 @@ jobs:
   # ── Step 2: Build and publish (only if the gate passes) ──────────
   publish:
     name: "Build & Publish"
-    needs: [gate-release]   # ← hard dependency — skipped if gate fails
-                            #   (no PyPI push when tests fail)
+    needs: [gate-release]
+    # Publish when the gate PASSED, or when it was SKIPPED because the
+    # release was already validated by validate_and_release.yml (marker
+    # present). A gate that actually ran and FAILED (or was cancelled)
+    # leaves result != success/skipped → publish is skipped, so a red
+    # build still never reaches PyPI.
+    if: ${{ always() && (needs.gate-release.result == 'success' || needs.gate-release.result == 'skipped') }}
     runs-on: ubuntu-latest
 
     permissions:

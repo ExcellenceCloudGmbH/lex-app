@@ -8,17 +8,16 @@
 #  there to publish to PyPI.
 #
 #  NOTE: the release is created NON-DRAFT and NON-pre-release on
-#  purpose. A full release published without a prior draft fires
-#  `release: released`, which is exactly what pip_publish.yml now
-#  listens on — so this auto-cut path publishes in one shot (it does
-#  not use the manual draft-staging validation flow; the gate
-#  inside pip_publish.yml still blocks a red build).
+#  purpose. A full release fires `release: released`, which is exactly
+#  what pip_publish.yml listens on — so this auto-cut path publishes in
+#  one shot. It does NOT use the manual validate_and_release.yml flow,
+#  and its notes carry NO `lex:gate-passed` marker, so pip_publish.yml's
+#  gate DOES run for this path and still blocks a red build.
 #  Drafts and pre-releases would NOT fire `released`: a draft sits
-#  silent until published (the manual stage_release_candidate.yml flow
-#  re-targets such a draft and the operator publishes it by hand), and
-#  a pre-release fires `prereleased`, which nothing now listens on.
-#  Earlier versions of this file used `--draft` and the publish
-#  chain never ran. See pip_publish.yml's trigger comment.
+#  silent until published, and a pre-release fires `prereleased`, which
+#  nothing now listens on. Earlier versions of this file used `--draft`
+#  and the publish chain never ran. See pip_publish.yml's trigger
+#  comment.
 #
 #  Default off — gated by repo variable COPILOT_AUTO_PUBLISH_ENABLED.
 #  Set to "true" only after one full A-mode round-trip has been
