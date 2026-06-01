@@ -1,0 +1,111 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Validate & Release — one dispatch that gates a commit and, ONLY if the
+#  gate is green, cuts the real release for it. Auto-publish on green.
+#
+#  The problem this solves:
+#    A git tag is a pointer to one commit. The old pain was cutting the
+#    tag/release UP FRONT and then having the gate fail: the tag is now
+#    "spent" on a red commit, and fixing code means deleting + recreating
+#    the tag (the "duplicate tag name" wall). The root cause was always
+#    minting the tag before the commit was proven good.
+#
+#  The fix — mint the tag only AFTER the gate is green:
+#    This workflow runs the full release gate FIRST against the dispatched
+#    commit (github.sha) and publishes nothing. The GitHub release — and
+#    therefore the git tag — is created ONLY on a green gate, pointed at
+#    that exact validated commit (`--target <sha>`). So:
+#      * a failing gate never creates a tag — the version name is never
+#        spent, just re-dispatch after fixing code, and
+#      * the tag, when it is finally born, points at a proven-good commit.
+#
+#  Auto-publish (single gate, no redundant re-gate):
+#    Creating a full (non-draft, non-pre-release) release fires
+#    `release: released`, which pip_publish.yml consumes to ship to PyPI.
+#    To avoid running the SAME gate twice (and risking a flaky second run
+#    minting a tag it then refuses to publish), the release notes carry a
+#    `lex:gate-passed` marker. pip_publish.yml SKIPS its own gate when it
+#    sees that marker — this commit was already validated here. Every other
+#    publish path (a manual release cut in the UI, or
+#    copilot_publish_after_merge.yml) has no marker and is gated by
+#    pip_publish.yml as before.
+#
+#  Net operator flow: dispatch this with a version → if green it ships on
+#  its own; if red, fix and re-dispatch the same version. No manual publish
+#  click, no stale tag, no duplicate-tag wall.
+#
+#  Required secrets: inherited by showcase_tests.yml — see that file.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Validate & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to release on green (e.g. v2.0.0rc185)"
+        required: true
+        type: string
+      clusters:
+        description: >-
+          Cluster selector fed to the gate (same syntax as
+          run_showcase_suite.py --only). Defaults to all 13 clusters.
+        required: false
+        type: string
+        default: >-
+          init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries
+
+jobs:
+  # ── Validate the dispatched commit against the same gate pip_publish
+  #    uses. No publish happens here — this only decides go / no-go. ───
+  gate:
+    name: "Release Gate: Tests + Customer Email"
+    uses: ./.github/workflows/showcase_tests.yml
+    secrets: inherit
+    with:
+      clusters: ${{ inputs.clusters || 'init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries' }}
+      # This IS the authoritative release gate now (pip_publish skips its
+      # own gate for the release we cut below), so the stakeholder email
+      # is the release-day status update.
+      run_kind: release
+
+  # ── On green, cut the real release at the validated commit. This fires
+  #    `release: released` → pip_publish.yml ships it (skipping its gate
+  #    thanks to the lex:gate-passed marker). Skipped if the gate failed.
+  release-on-green:
+    name: "Cut release at validated commit"
+    needs: gate
+    if: needs.gate.outputs.overall_ok == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the release + tag at the validated commit
+    steps:
+      - name: Checkout (for tag target)
+        uses: actions/checkout@v4
+
+      - name: "Create validated release (fires release: released)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The lex:gate-passed marker tells pip_publish.yml this commit
+          # was already validated here, so it skips its (redundant) gate
+          # and publishes directly. Keep the marker text in sync with the
+          # `contains(...)` check in pip_publish.yml.
+          cat > notes.md <<EOF
+          Release ${VERSION} — release gate passed at \`${SHA}\` via Validate & Release.
+
+          The PyPI publish gate is intentionally skipped for this release
+          because the same gate already ran (and passed) here; re-running it
+          risks a flaky second run minting a tag it then refuses to publish.
+          See pip_publish.yml.
+
+          <!-- lex:gate-passed sha=${SHA} -->
+          EOF
+          gh release create "${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "${SHA}" \
+            --title "${VERSION}" \
+            --notes-file notes.md
+          echo "Created release ${VERSION} at ${SHA}; release:released will publish it."
