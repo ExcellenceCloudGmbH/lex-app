@@ -481,6 +481,32 @@ CLUSTERS: tuple[Cluster, ...] = (
         ),
         test_descriptions=QUERIES_TESTS,
     ),
+    Cluster(
+        # CI self-test cluster — NOT a product feature. It is registered
+        # here only so the runner will execute it when explicitly selected
+        # (`run_showcase_suite.py --only ...,gate_selftest`); it is left
+        # OUT of every default cluster selector, so normal releases never
+        # run it (exactly like `stress`). Its single test always fails on
+        # purpose, to drive the Prerelease Gate's red → auto-cleanup path.
+        key="gate_selftest",
+        label="CI self-test (intentionally fails)",
+        short_description=(
+            "Internal release-pipeline self-test — not a product feature."
+        ),
+        what_it_proves=(
+            "Nothing about the product. It exists purely to exercise the "
+            "prerelease gate's failure path on demand."
+        ),
+        what_it_means_if_broken=(
+            "This cluster is designed to fail whenever it runs. If it shows "
+            "up red in a real release gate, it was included by mistake — it "
+            "is not a product regression."
+        ),
+        why_it_matters=(
+            "Lets us verify the prerelease gate deletes a failed "
+            "prerelease and its tag without breaking a genuine test."
+        ),
+    ),
 )
 
 
