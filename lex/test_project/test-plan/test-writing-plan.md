@@ -281,6 +281,20 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Coverage gain | +0.6 % |
 | Prereqs | none |
 
+### Batch 7n — User-triggered calculation cancellation (sync route) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.166 – 7.176 |
+| Type | U + I (E2E via `save()` path) |
+| Files covered | `lex/core/exceptions.py` (`CalculationCancelled` add), `lex/core/signals/ActiveCalculationStateStore.py` (cancel surface + race-resistant `mark_in_progress`), `lex/core/models/CalculationModel.py` (`check_cancelled` / `request_cancel`, `execute_calculation_sync` cancel branch + SUCCESS state-guard, audit-status routing) |
+| Test file | `lex/test_project/tests/calculations/test_7n_cancellation.py` |
+| Test classes | `TestCluster07n_CalculationCancelledException`, `TestCluster07n_StateStoreCancelSurface`, `TestCluster07n_CancellationLifecycle` |
+| Fixtures | `PollingCancelCalc`, `NonPollingCancelCalc` (new) |
+| Tests landed | **14 pass / 0 fail in 6.6s** |
+| Coverage gain | est. +0.6 % (measured on next coverage run) |
+| Status | ✅ Complete (Session 66 — June 1). Celery hard-cancel deferred (needs task id persisted in cache store + `revoke(terminate=True)`). REST surface lives in batch **10m**. |
+
 > `LexModel.py`, `CalculationModel.py`, `CalculatedModelMixin.py` keep their forecasted homes (4i existing + 7h Tier-A clusters in the coverage plan). Do not duplicate.
 
 ---
@@ -369,6 +383,20 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Est. tests | ~14 |
 | Coverage gain | +0.8 % |
 | Prereqs | none |
+
+### Batch 10m — Cancel-calculation REST endpoint ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.61 – 10.67 |
+| Type | E |
+| Files covered | `lex/api/views/calculations/CancelCalculation.py` (new), `lex/process_admin/sites/process_admin_site.py` (URL registration) |
+| Test file | `lex/test_project/tests/api_layer/test_10m_cancel_calculation_endpoint.py` |
+| Test classes | `TestCluster10m_CancelCalculationEndpoint` |
+| Fixtures | `CancelEndpointCalc` (CalculationModel), `CancelEndpointPlain` (non-CalculationModel, for the 400 surface) |
+| Tests landed | **7 pass / 0 fail in 4.4s** |
+| Coverage gain | est. +0.3 % |
+| Status | ✅ Complete (Session 66 — June 1). Pairs with **7n** (the cancellation mechanism itself); 10m owns the HTTP-level contract. |
 
 > `ModelExport.py` (cluster 13f), `List.py` AG-Grid path (14f), `base_serializers.py` (12g) keep their forecasted homes.
 

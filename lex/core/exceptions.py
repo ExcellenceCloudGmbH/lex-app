@@ -114,6 +114,28 @@ class ValidationError(Exception):
         super().__init__(message)
 
 
+class CalculationCancelled(Exception):
+    """
+    Raised by ``CalculationModel.check_cancelled()`` to cooperatively abort
+    a running synchronous calculation.
+
+    A customer's ``calculate()`` body can call ``self.check_cancelled()`` at
+    safe interruption points (between loop iterations, between DB writes).
+    When a user has clicked "Cancel" on the record, that call raises this
+    exception and the framework settles the row in ``ABORTED`` state instead
+    of ``ERROR`` — no error message, no traceback, just a clean cancellation
+    that broadcasts ``calculation_aborted`` to the UI.
+
+    Cooperative-only: a ``calculate()`` that never polls ``check_cancelled``
+    cannot be hard-stopped on the sync route. The framework still settles
+    the row as ``ABORTED`` (state-guard at SUCCESS write) so the UI reflects
+    the user's intent, but the running calculation is allowed to finish.
+    """
+
+    def __init__(self, message: str = "Calculation cancelled by user"):
+        super().__init__(message)
+
+
 
 
 class CalculatedModelError(Exception):

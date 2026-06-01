@@ -20,6 +20,7 @@ from lex.api.utils import operation_context, OperationContext
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ContextResolver import ContextResolver
 from lex.core.exceptions import (
+    CalculationCancelled,
     ensure_list,
     find_exception_artifacts,
     resolve_exception_detail,
@@ -360,6 +361,78 @@ class CalculationModel(LexModel):
             f"{self.__class__.__name__} must override the 'update' or 'calculate' method."
         )
 
+    # ------------------------------------------------------------------
+    # Cooperative cancellation
+    # ------------------------------------------------------------------
+    #
+    # The framework exposes two surfaces for cancelling a running sync
+    # calculation:
+    #
+    # * :meth:`check_cancelled` — called from inside a customer's
+    #   ``calculate()`` body at safe interruption points.  Raises
+    #   :class:`~lex.core.exceptions.CalculationCancelled` (settled as
+    #   ABORTED, not ERROR) when a cancel has been requested.
+    # * :meth:`request_cancel` — called by external code (REST view,
+    #   management command, framework) to flag the calculation for
+    #   cancellation.  Returns ``True`` if there was an active
+    #   calculation to cancel.
+    #
+    # Cooperative-only on the sync route: a ``calculate()`` that never
+    # polls cannot be hard-stopped (Python provides no safe way to kill
+    # a thread).  The state-guard at the SUCCESS write in
+    # :meth:`execute_calculation_sync` still flips the terminal state to
+    # ``ABORTED`` so the UI reflects the user's intent even when the
+    # body ran to completion — but the thread itself is allowed to
+    # finish.  Customers writing long-running calculations should sprinkle
+    # ``self.check_cancelled()`` between loop iterations / DB writes for
+    # snappy cancellation.
+
+    def check_cancelled(self) -> None:
+        """Raise :class:`CalculationCancelled` if a cancel was requested.
+
+        Call this from inside ``calculate()`` at safe interruption points
+        (e.g. between loop iterations) to make a long-running calculation
+        responsive to user-initiated cancellation.
+
+        Safe to call from anywhere; a no-op when no cancel is pending or
+        when the instance has no pk (not yet saved).
+        """
+        if getattr(self, "pk", None) is None:
+            return
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+        record_id = f"{self._meta.model_name}_{self.pk}"
+        if ActiveCalculationStateStore.is_cancel_requested(record_id):
+            raise CalculationCancelled()
+
+    @classmethod
+    def request_cancel(cls, instance_or_pk, *, requested_by=None) -> bool:
+        """Flag a running calculation on this model for cancellation.
+
+        Accepts either a model instance or a primary key.  Returns
+        ``True`` if the record was registered as an active calculation
+        (and the cancel flag was therefore set); ``False`` if there is
+        nothing to cancel — already finished, never started, or already
+        in a terminal state.
+
+        The actual transition to ``ABORTED`` happens inside the running
+        calculation (when it next polls :meth:`check_cancelled`, or at
+        the SUCCESS state-guard if it never polls).  This method only
+        sets the flag; it never modifies the DB row directly.
+        """
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+        pk = getattr(instance_or_pk, "pk", instance_or_pk)
+        if pk is None:
+            return False
+        record_id = f"{cls._meta.model_name}_{pk}"
+        return ActiveCalculationStateStore.request_cancel(
+            record_id,
+            requested_by=requested_by,
+        )
+
 
 
 
@@ -512,21 +585,46 @@ class CalculationModel(LexModel):
         Execute calculation synchronously in the current thread.
         """
         from lex.core.signals.CalculationSignals import update_calculation_status
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
 
+        record_id = f"{self._meta.model_name}_{self.pk}"
         self._clear_terminal_state_persistence(self)
         func = self.lex_func()
         exception_details = None
         stack_trace = None
+        cancelled = False
         try:
             if hasattr(self, "is_atomic") and not self.is_atomic:
                 with calculation_execution_context():
                     func()
-                self.is_calculated = self.SUCCESS
             else:
                 with transaction.atomic():
                     with calculation_execution_context():
                         func()
-                    self.is_calculated = self.SUCCESS
+
+            # ── State-guard: cooperative cancel that fired between the
+            # last ``check_cancelled()`` poll and ``calculate()``
+            # returning, or a calculate() that never polls at all.
+            # The user clicked cancel; honour their intent by settling
+            # the row as ABORTED rather than SUCCESS — even though the
+            # computation itself ran to completion.  The thread cannot
+            # be hard-stopped on the sync route, but the persisted
+            # outcome and the UI broadcast both reflect the cancel.
+            if ActiveCalculationStateStore.is_cancel_requested(record_id):
+                cancelled = True
+                self.is_calculated = self.ABORTED
+            else:
+                self.is_calculated = self.SUCCESS
+
+        except CalculationCancelled as e:
+            # Cooperative cancel observed at a ``check_cancelled()``
+            # poll inside ``calculate()`` — settle ABORTED, do NOT
+            # treat as ERROR (no error message, no traceback).
+            cancelled = True
+            self.is_calculated = self.ABORTED
+            exception_details = str(e) or "Calculation cancelled by user"
 
         except Exception as e:
             # Store error details
@@ -598,9 +696,17 @@ class CalculationModel(LexModel):
                         ensure_terminal_calculation_audit,
                     )
 
+                    # Aborted calculations get a dedicated audit status so
+                    # operators can distinguish "user cancelled" from
+                    # "completed cleanly".  Errors are handled by the
+                    # outer except path; here we only see SUCCESS or
+                    # ABORTED.
+                    audit_status = (
+                        "aborted" if self.is_calculated == self.ABORTED else "success"
+                    )
                     ensure_terminal_calculation_audit(
                         self,
-                        audit_status="success",
+                        audit_status=audit_status,
                         error_message=exception_details,
                         stack_trace=stack_trace,
                     )

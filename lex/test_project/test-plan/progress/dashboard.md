@@ -42,6 +42,7 @@
 | 7. Calculation State Machine | 94 | 94 | 93 | 1 | 0 |  Complete (BUG-009 tracked; 7i 2-level matrix 7.32–7.47; 7j 3-level matrix 7.48–7.111) |
 | 7g. `CalculatedModel.create()` pipeline (coverage-driven — April 21) | 6 | 6 | 6 | 0 | 0 |  Complete — drove `CalculatedModelMixin` 33.74% → 64.75% (`CombinatorialCalc` fixture added April 23) |
 | 7h. `_dispatch_model_processing` Celery branch (coverage-driven — April 23) | 1 | 1 | 1 | 0 | 0 |  Complete — async branch 7g never reached; broker-free |
+| 7n. Cooperative cancellation of running sync calculations (June 1) | 14 | 14 | 14 | 0 | 0 |  Complete — scenarios 7.166–7.176; sync route only, Celery hard-cancel deferred |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |
@@ -55,12 +56,13 @@
 | 10e. Schema introspection (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete (BUG-015 documented in-test — CharField w/o default reports `required=False`) |
 | 10f. Global search (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — 10.15–10.16b |
 | 10h. `LexAPI` outbound-client SDK (coverage-driven — May 12) | 7 | 7 | 7 | 0 | 0 |  Complete — scenarios 10.17–10.23; `requests` patched |
+| 10m. Cancel-calculation REST endpoint (June 1) | 7 | 7 | 7 | 0 | 0 |  Complete — scenarios 10.61–10.67; pairs with 7n |
 | 11. Stress & Performance | 20 | 20 | 15 | 2 | 0 |  Complete (3 skipped — 11.12/11.15/11.19 at SMALL; BUG-011 tracked) |
 | 12. Serializer Contract | 32 | 32 | 29 | 3 | 0 |  Complete — 12a–12e (BUG-012/013 type round-trip xfail; BUG-017 cache xfail) |
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **555** | **555** | **534** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **576** | **576** | **555** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet

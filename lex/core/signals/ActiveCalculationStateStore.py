@@ -51,18 +51,35 @@ class ActiveCalculationStateStore:
         model_label: Optional[str] = None,
         record_pk: Optional[Any] = None,
     ) -> None:
-        """Register a record as having an active calculation."""
+        """Register a record as having an active calculation.
+
+        If an entry already exists (e.g. the framework re-registers the
+        same record from a deeper layer of the dispatch path), an
+        already-set ``cancel_requested`` flag is **preserved** — a
+        cancellation that landed during the brief window before the
+        registration completed must not be silently dropped.
+        """
         if not record_id:
             return
 
         with cls._lock:
-            cls._state_map[record_id] = {
+            existing = cls._state_map.get(record_id, {})
+            entry = {
                 "record_id": record_id,
                 "record": record or record_id,
                 "calculation_id": calculation_id or "",
                 "model_label": model_label or "",
                 "record_pk": str(record_pk) if record_pk is not None else "",
             }
+            # Preserve cancel-request state across re-registrations so a
+            # cancel that raced the dispatch is honoured rather than
+            # erased by the next ``mark_in_progress`` call.
+            if existing.get("cancel_requested") == "true":
+                entry["cancel_requested"] = "true"
+                requested_by = existing.get("cancel_requested_by")
+                if isinstance(requested_by, str) and requested_by:
+                    entry["cancel_requested_by"] = requested_by
+            cls._state_map[record_id] = entry
 
     @classmethod
     def clear(cls, record_id: str) -> None:
@@ -86,6 +103,80 @@ class ActiveCalculationStateStore:
         calculation_id = entry.get("calculation_id")
         if isinstance(calculation_id, str) and calculation_id:
             return calculation_id
+        return None
+
+    # ------------------------------------------------------------------
+    # Cancellation
+    # ------------------------------------------------------------------
+    #
+    # ``request_cancel`` is the **only** mutator that flips the
+    # ``cancel_requested`` flag on a tracked entry.  Cooperative
+    # cancellation works like this:
+    #
+    # 1. A request handler (``CancelCalculation`` REST view, or any
+    #    framework code) calls :meth:`request_cancel` with the
+    #    ``record_id`` of an active calculation.
+    # 2. The flag is set on the in-memory entry.  No DB write — the
+    #    record's terminal state is owned by the calculation itself.
+    # 3. The running ``calculate()`` body polls
+    #    :meth:`CalculationModel.check_cancelled` at safe interruption
+    #    points; it raises :class:`CalculationCancelled` once the flag
+    #    is observed.
+    # 4. ``execute_calculation_sync`` catches that exception and settles
+    #    the row in ``ABORTED`` (instead of ``ERROR``).  ``clear`` is
+    #    called as part of the terminal-state transition, which also
+    #    drops the ``cancel_requested`` flag — a follow-up retry starts
+    #    from a clean slate.
+    #
+    # If ``calculate()`` never polls, the state-guard at the SUCCESS
+    # write in ``execute_calculation_sync`` still flips the terminal
+    # state to ``ABORTED`` so the UI reflects the user's intent.  The
+    # running thread is allowed to finish (Python cannot safely kill
+    # threads), but its result is discarded.
+
+    @classmethod
+    def request_cancel(
+        cls,
+        record_id: str,
+        *,
+        requested_by: Optional[str] = None,
+    ) -> bool:
+        """Flag an active calculation for cooperative cancellation.
+
+        Returns ``True`` if the record was registered as active (and the
+        flag was therefore set), ``False`` if no active entry exists —
+        the caller can treat ``False`` as "nothing to cancel".
+        """
+        if not record_id:
+            return False
+        with cls._lock:
+            entry = cls._state_map.get(record_id)
+            if entry is None:
+                return False
+            entry["cancel_requested"] = "true"
+            if requested_by:
+                entry["cancel_requested_by"] = str(requested_by)
+            return True
+
+    @classmethod
+    def is_cancel_requested(cls, record_id: str) -> bool:
+        """Return ``True`` if cancellation was requested for ``record_id``."""
+        if not record_id:
+            return False
+        with cls._lock:
+            entry = cls._state_map.get(record_id, {})
+        return entry.get("cancel_requested") == "true"
+
+    @classmethod
+    def get_cancel_requested_by(cls, record_id: str) -> Optional[str]:
+        """Return the actor that requested the cancel (or ``None``)."""
+        if not record_id:
+            return None
+        with cls._lock:
+            entry = cls._state_map.get(record_id, {})
+        requested_by = entry.get("cancel_requested_by")
+        if isinstance(requested_by, str) and requested_by:
+            return requested_by
         return None
 
     @classmethod

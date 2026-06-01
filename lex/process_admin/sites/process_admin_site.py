@@ -6,6 +6,7 @@ from django.urls import path, register_converter
 from lex.api.utils import create_model_converter
 from lex.api.views.LexLoggerView.LexLoggerView import LexLoggerView
 from lex.api.views.calculations.CleanCalculations import CleanCalculations
+from lex.api.views.calculations.CancelCalculation import CancelCalculation
 from lex.api.views.calculations.DownloadMarkdownPdf import DownloadMarkdownPdf
 from lex.api.views.calculations.InitCalculationLogs import InitCalculationLogs
 from lex.api.views.file_operations.FileDownload import FileDownloadView
@@ -252,6 +253,11 @@ class ProcessAdminSite:
                 "api/clean-calculations",
                 CleanCalculations.as_view(),
                 name="clean-calculations",
+            ),
+            path(
+                "api/cancel-calculation/<str:model_name>/<str:pk>",
+                CancelCalculation.as_view(),
+                name="cancel-calculation",
             ),
             path("api/logs", LexLoggerView.as_view(), name="log"),
             path(

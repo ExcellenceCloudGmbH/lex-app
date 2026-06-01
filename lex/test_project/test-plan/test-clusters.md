@@ -431,6 +431,41 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 ---
 
+### 7n. Cooperative cancellation of a running synchronous calculation ✅
+
+**Gap:** The state-machine diagram has always listed `ABORTED` as a first-class terminal state, but there was no customer-facing way to *reach* it — only the startup-reset path (orphaned `IN_PROGRESS` rows from a crashed server) ever produced `ABORTED`. Customers running long calculations had no way to press a Cancel button.
+
+**Sync route only** — Celery hard-cancel via `revoke(terminate=True)` is a separate follow-up (needs the task id stored in `ActiveCalculationStateStore`). On the sync route Python cannot safely kill a running thread, so cancellation is **cooperative**: a customer's `calculate()` body polls `self.check_cancelled()` at safe interruption points, and the framework adds a **state-guard** at the SUCCESS write so even non-polling bodies settle as `ABORTED` (not `SUCCESS`) when cancel was requested mid-flight — the persisted outcome and UI broadcast both honour the user's intent.
+
+**Scenario numbering:** 7.166 – 7.176. (7.143 – 7.165 reserved for the rolled-back 7l recalc-queue spec and the planned 7m signals batch.)
+
+**Models needed:**
+- `PollingCancelCalc` (new) — `calculate()` iterates and polls `self.check_cancelled()` each iteration so tests can assert short-circuit.
+- `NonPollingCancelCalc` (new) — `calculate()` runs to completion without polling; drives the state-guard branch.
+
+**Test scenarios:**
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 7.166 | `CalculationCancelled` default message | Carries a non-empty cancel-mentioning message; not a subclass of `RuntimeError` (framework branches on the type) |
+| 7.166b | `CalculationCancelled` is a dedicated subclass | `isinstance` discriminates user-cancel from real failures |
+| 7.167 | `ActiveCalculationStateStore.request_cancel` returns False when no active entry | Caller treats False as "nothing to cancel"; no silent entry creation |
+| 7.167b | `request_cancel` flags an active entry, `requested_by` round-trips | `is_cancel_requested` True; `get_cancel_requested_by` returns the actor string |
+| 7.167c | Terminal `clear()` drops the cancel flag | A retry of the same record starts from a clean slate |
+| 7.168 | `check_cancelled` is silent on the happy path | A polling `calculate()` with no cancel pending reaches SUCCESS and runs all iterations |
+| 7.169 | Polling calculate observes cancel and short-circuits | Pre-flagged cancel: `check_cancelled` raises → row settles `ABORTED` (not ERROR); loop iterations < target |
+| 7.170 | ABORTED terminal state emits `calculation_aborted` broadcast | The existing `update_calculation_status` group message — what clears every UI spinner |
+| 7.171 | State-guard flips SUCCESS → ABORTED on non-polling calc | The body that never polls still settles ABORTED; its work product survives (Python can't kill threads) but the terminal state and broadcast reflect the cancel |
+| 7.172 | State-guard is dormant when no cancel is pending | Non-polling calc with no cancel still reaches SUCCESS — the guard does not spuriously abort |
+| 7.173 | `Model.request_cancel(instance, requested_by=…)` is the public surface | Single classmethod entry point; flag observable via the store |
+| 7.174 | `Model.request_cancel` on an idle record is a benign no-op | Returns False; persisted `is_calculated` untouched (double-click on Cancel after calc finished must not raise) |
+| 7.175 | `check_cancelled` on an unsaved instance is a no-op | No `pk` → returns silently; never raises just because the instance hasn't been saved |
+| 7.176 | ABORTED transitions write `audit_status="aborted"` | Compliance log distinguishes user cancellation from `success` (clean) and `failure` (error) |
+
+**Status:** ✅ Complete — `lex/test_project/tests/calculations/test_7n_cancellation.py`, 14 pass / 0 fail in 6.6s.
+
+---
+
 ## 8. Celery & Async
 
 **What it tests:** Task dispatch to Celery, sync fallback when Celery is unavailable, `FireAndForget` / `WaitForTasks` context managers, and nested calculation dispatch.
