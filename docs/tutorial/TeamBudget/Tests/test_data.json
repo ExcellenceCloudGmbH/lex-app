@@ -1,0 +1,5 @@
+[
+  {"subprocess": "Tests/01_create_teams.json"},
+  {"subprocess": "Tests/02_create_employees.json"},
+  {"subprocess": "Tests/03_create_expenses.json"}
+]

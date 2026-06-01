@@ -1,0 +1,35 @@
+# ──────────────────────────────────────────────
+# model_structure.yaml — Frontend Navigation
+# ──────────────────────────────────────────────
+# This file controls how models appear in the
+# frontend sidebar and which models are excluded
+# from history tracking.
+
+model_structure:
+  Teams & People:
+    team: null
+    employee: null
+  Expenses:
+    expense: null
+  Reports:
+    budgetsummary: null
+  Data Import:
+    teamupload: null
+    employeeupload: null
+    expenseupload: null
+
+model_styling:
+  Teams & People:
+    name: "👥 Teams & People"
+  Expenses:
+    name: "💶 Expenses"
+  Reports:
+    name: "📊 Reports"
+  Data Import:
+    name: "📥 Data Import"
+
+untracked_models:
+  budgetsummary: null
+  teamupload: null
+  employeeupload: null
+  expenseupload: null

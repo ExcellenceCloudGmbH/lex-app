@@ -1,0 +1,170 @@
+[
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_anna",
+      "description": "Flight to Munich",
+      "amount": 450.00,
+      "category": "travel",
+      "date": "datetime:2026-01-15",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_max",
+      "description": "Adobe Creative Suite License",
+      "amount": 720.00,
+      "category": "software",
+      "date": "datetime:2026-01-20",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_anna",
+      "description": "Team lunch with client",
+      "amount": 85.00,
+      "category": "meals",
+      "date": "datetime:2026-01-22",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_anna",
+      "description": "Figma Annual License",
+      "amount": 180.00,
+      "category": "software",
+      "date": "datetime:2026-02-01",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_max",
+      "description": "Train to Berlin",
+      "amount": 120.00,
+      "category": "travel",
+      "date": "datetime:2026-02-10",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_julia",
+      "description": "AWS Monthly Hosting",
+      "amount": 3200.00,
+      "category": "software",
+      "date": "datetime:2026-01-05",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_lukas",
+      "description": "Mechanical Keyboard",
+      "amount": 250.00,
+      "category": "equipment",
+      "date": "datetime:2026-01-18",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_sarah",
+      "description": "Conference Registration",
+      "amount": 890.00,
+      "category": "travel",
+      "date": "datetime:2026-02-15",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_julia",
+      "description": "GitHub Enterprise License",
+      "amount": 1500.00,
+      "category": "software",
+      "date": "datetime:2026-01-10",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_sarah",
+      "description": "Team offsite dinner",
+      "amount": 210.00,
+      "category": "meals",
+      "date": "datetime:2026-02-20",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_nina",
+      "description": "Google Ads Q1 Campaign",
+      "amount": 4500.00,
+      "category": "other",
+      "date": "datetime:2026-01-08",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_nina",
+      "description": "Marketing brochures printing",
+      "amount": 380.00,
+      "category": "office",
+      "date": "datetime:2026-01-25",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_lisa",
+      "description": "Trade show booth rental",
+      "amount": 2800.00,
+      "category": "other",
+      "date": "datetime:2026-02-12",
+      "quarter": "Q1 2026"
+    }
+  },
+  {
+    "class": "Expense",
+    "action": "create",
+    "parameters": {
+      "employee": "tag:emp_nina",
+      "description": "Company swag merchandise",
+      "amount": 650.00,
+      "category": "other",
+      "date": "datetime:2026-02-18",
+      "quarter": "Q1 2026"
+    }
+  }
+]
