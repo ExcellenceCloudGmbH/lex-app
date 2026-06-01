@@ -1,12 +1,19 @@
 """Resolve the source issue + mode for a Copilot-authored PR.
 
-The PR-gate workflow needs two things from a Copilot PR:
+The PR-gate workflow needs three things from a Copilot PR:
 
 * the **mode** (``regression`` / ``bug-repro`` / ``fix-and-test``), so it
   knows which checks to apply;
 * the **source issue number** (the user-filed issue that carries the
-  ``copilot:<mode>`` label), so it can post comments back to the right
-  place when things go wrong.
+  ``copilot:<mode>`` label, or the auto-opened ``coverage-task`` issue),
+  so it can post comments back to the right place when things go wrong;
+* the **kind** of task (``test-bot`` vs ``coverage-task``), so the gate
+  knows whether the PR was opened in response to a maintainer's
+  test-request (test-bot path) or the Feature-4 coverage gate. A
+  coverage-task PR needs extra handling — its base branch must be the
+  parent feature branch, not ``lex-app-v2`` — and its originating issue
+  carries the ``coverage-task`` label instead of a ``copilot:<mode>`` one,
+  so it is mapped to ``regression`` (test-only, multi-file, auto-merge).
 
 The previous inline-bash resolver only matched ``Fixes #N`` in the PR
 body. Copilot's coding agent doesn't reliably emit that line — it links
@@ -25,7 +32,10 @@ Resolver chain (first match wins):
 
 For each candidate we then walk:
 
-* if it has a ``copilot:<mode>`` label → it's the source issue, done;
+* if it has a ``copilot:<mode>`` label → it's the source issue, done
+  (kind ``test-bot``);
+* else if it has the ``coverage-task`` label → it's a Feature-4 coverage
+  task, done (mode ``regression``, kind ``coverage-task``);
 * else if its body says ``Assembled from issue #M`` → fetch #M and try
   the label check on that.
 
@@ -39,8 +49,8 @@ Usage::
         --repo owner/name --pr 520 \\
         > $GITHUB_OUTPUT
 
-prints two ``key=value`` lines on success, exits non-zero with a
-human-readable explanation on failure.
+prints three ``key=value`` lines (``mode``, ``issue``, ``kind``) on
+success, exits non-zero with a human-readable explanation on failure.
 """
 
 from __future__ import annotations
@@ -54,6 +64,11 @@ from typing import Optional
 
 
 _MODE_LABEL_RE = re.compile(r"^copilot:(regression|bug-repro|fix-and-test)$")
+# Feature-4 coverage-task issues carry this label instead of a
+# copilot:<mode> one. They are treated as regression PRs (test-only,
+# multi-file allowed, auto-merge) but flagged with kind="coverage-task"
+# so the gate can retarget the PR's base onto the parent feature branch.
+_COVERAGE_TASK_LABEL = "coverage-task"
 _CLOSE_KEYWORD_RE = re.compile(
     r"(?i)(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+#(\d+)"
 )
@@ -90,13 +105,29 @@ def _issue_view(repo: str, number: int) -> Optional[dict]:
     return json.loads(raw)
 
 
-def _mode_from_labels(labels: list[dict]) -> Optional[str]:
-    """Return ``regression`` / ``bug-repro`` / ``fix-and-test`` or ``None``."""
+def _mode_and_kind_from_labels(
+    labels: list[dict],
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolve an issue's labels to ``(mode, kind)``.
+
+    * a ``copilot:<mode>`` label → ``(<mode>, "test-bot")``;
+    * the ``coverage-task`` label → ``("regression", "coverage-task")``
+      (the coverage gate's PRs are test-only/multi-file/auto-merge, i.e.
+      the regression contract);
+    * neither → ``(None, None)``.
+
+    A ``copilot:<mode>`` label wins over ``coverage-task`` on the off
+    chance both are present, so an explicitly-moded issue is never
+    silently downgraded to regression.
+    """
     for label in labels:
         m = _MODE_LABEL_RE.match(label.get("name", ""))
         if m:
-            return m.group(1)
-    return None
+            return m.group(1), "test-bot"
+    for label in labels:
+        if label.get("name", "") == _COVERAGE_TASK_LABEL:
+            return "regression", "coverage-task"
+    return None, None
 
 
 def _closing_issue_references(repo: str, pr: int) -> list[int]:
@@ -134,12 +165,14 @@ def _candidates_from_pr_body(body: str) -> list[int]:
     return seen
 
 
-def resolve(repo: str, pr: int) -> tuple[str, int]:
-    """Return ``(mode, source_issue_number)``.
+def resolve(repo: str, pr: int) -> tuple[str, int, str]:
+    """Return ``(mode, source_issue_number, kind)``.
 
-    Walks the resolver chain documented in the module docstring. Raises
-    ``RuntimeError`` with a human-readable message if no candidate yields
-    a ``copilot:<mode>`` label, even after dereferencing task issues.
+    ``kind`` is ``"test-bot"`` for maintainer test-request issues and
+    ``"coverage-task"`` for Feature-4 coverage tasks. Walks the resolver
+    chain documented in the module docstring. Raises ``RuntimeError`` with
+    a human-readable message if no candidate yields a ``copilot:<mode>``
+    or ``coverage-task`` label, even after dereferencing task issues.
     """
     # Step 1 — gather candidates from every available signal.
     candidates: list[int] = list(_closing_issue_references(repo, pr))
@@ -172,12 +205,12 @@ def resolve(repo: str, pr: int) -> tuple[str, int]:
             if issue is None:
                 break
 
-            mode = _mode_from_labels(issue.get("labels") or [])
+            mode, kind = _mode_and_kind_from_labels(issue.get("labels") or [])
             if mode:
-                return mode, cand
+                return mode, cand, kind
 
-            # No mode label. If the body declares it was assembled from a
-            # parent, hop to that and retry.
+            # No mode / coverage-task label. If the body declares it was
+            # assembled from a parent, hop to that and retry.
             m = _ASSEMBLED_FROM_RE.search(issue.get("body") or "")
             if not m:
                 break
@@ -188,8 +221,9 @@ def resolve(repo: str, pr: int) -> tuple[str, int]:
 
     raise RuntimeError(
         f"None of the candidate issues ({candidates}) carry a copilot:<mode> "
-        "label, and none dereference to a source issue that does. The PR is "
-        "either not Copilot-triggered or the source issue lost its label."
+        "or coverage-task label, and none dereference to a source issue that "
+        "does. The PR is either not Copilot-triggered or the source issue lost "
+        "its label."
     )
 
 
@@ -200,7 +234,7 @@ def _cli() -> int:
     args = p.parse_args()
 
     try:
-        mode, issue = resolve(args.repo, args.pr)
+        mode, issue, kind = resolve(args.repo, args.pr)
     except RuntimeError as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1
@@ -208,6 +242,7 @@ def _cli() -> int:
     # GitHub Actions step output format.
     print(f"mode={mode}")
     print(f"issue={issue}")
+    print(f"kind={kind}")
     return 0
 
 

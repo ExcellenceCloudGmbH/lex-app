@@ -7,11 +7,20 @@
 #       closingIssuesReferences (Development sidebar), then close-
 #       keyword refs in the body, then bare #N; dereferences task
 #       issues to the source issue via "Assembled from issue #M".
-#       Reads the source issue's copilot:<mode> label.
-#    2. Static PR-shape check via copilot_validate_pr_shape.py.
+#       Reads the source issue's copilot:<mode> label, OR the
+#       coverage-task label (Feature 4) which maps to mode=regression
+#       with kind=coverage-task.
+#    1b. Coverage-task PRs only: retarget the PR's base from lex-app-v2
+#       onto the parent feature branch (Copilot ignores the base-branch
+#       instruction in the issue body), so the test ships in the parent
+#       PR's diff and its `coverage / required` check re-runs green.
+#    2. Static PR-shape check via copilot_validate_pr_shape.py. The
+#       resolved issue is passed as --linked-issue so a sidebar-only
+#       link satisfies the "Fixes #N" requirement.
 #    3. Run the new test in isolation. Mode-B strips
 #       @expectedFailure on a temp copy and asserts FAILURE.
-#    4. Apply auto-merge (modes A/B) or needs-human-review (mode C).
+#    4. Apply auto-merge (modes A/B + coverage-task) or
+#       needs-human-review (mode C).
 #
 #  Any failure → label PR copilot:invalid + comment + exit non-zero
 #  (the comment lists what failed; merge labels are not applied).
@@ -136,6 +145,43 @@ jobs:
           gh pr edit    "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
           exit 1
 
+      # ── 1b. Retarget coverage-task PRs onto the parent branch ──
+      # Feature-4 coverage tasks must merge into the *parent feature
+      # branch*, not lex-app-v2, so the new test ships in the same diff
+      # as the source change and the parent PR's `coverage / required`
+      # check re-runs green (see the coverage-check spec §7.2). Copilot's
+      # coding agent bases its PR on the repo default branch regardless of
+      # the explicit instruction in the coverage-task issue body, so we
+      # correct the base here deterministically rather than relying on the
+      # agent. The parent PR head SHA is the merge-base of both branches
+      # (both branched off lex-app-v2), so GitHub's three-dot PR diff stays
+      # test-only after the retarget — no source is reverted. No-op when
+      # the PR already targets the parent branch (Copilot complied) or when
+      # this isn't a coverage-task PR.
+      - name: Retarget coverage-task PR onto parent branch
+        if: steps.mode.outputs.kind == 'coverage-task' && github.event.pull_request.base.ref == 'lex-app-v2'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COVERAGE_ISSUE: ${{ steps.mode.outputs.issue }}
+        run: |
+          set -euo pipefail
+          # The coverage-task issue body carries `*Parent PR:* #N`. Resolve
+          # that PR's head branch and make it this PR's base.
+          ISSUE_BODY=$(gh issue view "$COVERAGE_ISSUE" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          PARENT_PR=$(printf '%s' "$ISSUE_BODY" | grep -oE 'Parent PR:\*? +#[0-9]+' | grep -oE '[0-9]+' | head -n1)
+          if [[ -z "${PARENT_PR:-}" ]]; then
+            echo "::error::could not find 'Parent PR: #N' in coverage-task issue #${COVERAGE_ISSUE} body — cannot retarget."
+            exit 1
+          fi
+          PARENT_BRANCH=$(gh pr view "$PARENT_PR" --repo "$GITHUB_REPOSITORY" --json headRefName --jq .headRefName)
+          if [[ -z "${PARENT_BRANCH:-}" || "$PARENT_BRANCH" == "lex-app-v2" ]]; then
+            echo "::error::parent PR #${PARENT_PR} head branch resolved to '${PARENT_BRANCH:-<empty>}' — refusing to retarget."
+            exit 1
+          fi
+          echo "Retargeting PR #${PR_NUMBER} base lex-app-v2 → ${PARENT_BRANCH} (parent PR #${PARENT_PR})."
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --base "$PARENT_BRANCH"
+
       # ── 2. PR-shape gate ───────────────────────────────────────
       - name: Build files JSON + body file
         id: files
@@ -160,7 +206,8 @@ jobs:
           python .github/scripts/copilot_validate_pr_shape.py \
             --mode "${{ steps.mode.outputs.mode }}" \
             --files-json files.json \
-            --body-file body.txt | tee shape.out
+            --body-file body.txt \
+            --linked-issue "${{ steps.mode.outputs.issue }}" | tee shape.out
 
       - name: On shape failure, label + comment
         # Scope to the shape step only. Previously this used a bare

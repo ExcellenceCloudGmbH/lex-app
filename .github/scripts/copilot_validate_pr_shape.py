@@ -57,7 +57,25 @@ def _is_allowed_for_test_only(path: str) -> bool:
     return any(path == p or path.startswith(p) for p in ALLOWED_TEST_ONLY_PREFIXES)
 
 
-def validate_pr_shape(*, mode: str, files: list[PRFile], pr_body: str) -> ValidationResult:
+def validate_pr_shape(
+    *,
+    mode: str,
+    files: list[PRFile],
+    pr_body: str,
+    linked_issue: int | None = None,
+) -> ValidationResult:
+    """Validate a Copilot PR's file set, naming, and body markers.
+
+    ``linked_issue`` — when the caller (the PR gate) has already resolved
+    the originating issue via the PR's verified closing-issue link
+    (GitHub's Development sidebar / ``closingIssuesReferences``), the
+    literal ``Fixes #N`` line in the body is redundant and not required.
+    Copilot's coding agent routinely links the issue via the sidebar
+    *instead of* writing ``Fixes #N`` (see ``copilot_discover_mode.py``),
+    so requiring the text would reject otherwise-valid PRs. When
+    ``linked_issue`` is ``None`` (e.g. local/manual validation with no
+    resolved link) the body must still carry ``Fixes #N``.
+    """
     if mode not in VALID_MODES:
         raise ValueError(f"unknown mode {mode!r}; valid: {VALID_MODES}")
 
@@ -141,8 +159,10 @@ def validate_pr_shape(*, mode: str, files: list[PRFile], pr_body: str) -> Valida
                         f"source file `{f.path}` not listed under `{SOURCE_CHANGES_HEADING}`"
                     )
 
-    # 7. PR body links the originating issue.
-    if not FIXES_LINK_RE.search(pr_body or ""):
+    # 7. PR body links the originating issue. A verified closing-issue
+    #    link (passed as linked_issue by the gate) satisfies this without
+    #    the literal text — Copilot links via the Development sidebar.
+    if linked_issue is None and not FIXES_LINK_RE.search(pr_body or ""):
         errors.append("PR body must contain `Fixes #N` (the originating issue)")
 
     return ValidationResult(ok=not errors, errors=errors)
@@ -154,6 +174,12 @@ def _cli() -> int:
     parser.add_argument("--files-json", required=True, type=Path,
                         help='JSON: [{"path":..., "additions":N, "deletions":N}, ...]')
     parser.add_argument("--body-file", required=True, type=Path)
+    parser.add_argument(
+        "--linked-issue", type=int, default=None,
+        help="Originating issue number, if the gate already verified the "
+             "PR's closing-issue link. When set, the body's `Fixes #N` line "
+             "is not required.",
+    )
     args = parser.parse_args()
 
     raw = json.loads(args.files_json.read_text())
@@ -162,7 +188,9 @@ def _cli() -> int:
         for r in raw
     ]
     body = args.body_file.read_text()
-    result = validate_pr_shape(mode=args.mode, files=files, pr_body=body)
+    result = validate_pr_shape(
+        mode=args.mode, files=files, pr_body=body, linked_issue=args.linked_issue
+    )
     if result.ok:
         print("OK")
         return 0
