@@ -21,7 +21,15 @@ name: Frontend Build
 
 on:
   release:
-    types: [published]
+    # `released`, NOT `published`: this build commits + pushes a fresh
+    # frontend bundle, so it must run only for REAL releases — never for
+    # the pre-release validation phase (see validate_release.yml). The
+    # `published` activity fires for pre-releases too, which would build
+    # and push a bundle during validation and then NOT re-fire when the
+    # pre-release is promoted to a full release. `released` fires only
+    # for full releases and for promotion (un-checking "pre-release"),
+    # which is exactly when a shipped bundle should be produced.
+    types: [released]
   workflow_dispatch:
     inputs:
       frontend_branch:

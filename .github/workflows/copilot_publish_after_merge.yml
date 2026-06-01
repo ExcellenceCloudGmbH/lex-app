@@ -4,13 +4,18 @@
 #  Fires when a Copilot PR with both `auto-merge` and
 #  `publish-on-merge` labels gets merged. Bumps the rc suffix on
 #  the latest release tag and creates a GitHub release; the
-#  existing `pip_publish.yml` (release: created) takes over from
+#  existing `pip_publish.yml` (release: released) takes over from
 #  there to publish to PyPI.
 #
-#  NOTE: the release is created NON-DRAFT on purpose. GitHub's
-#  `release` event family does not fire for draft creations — a
-#  draft sits silent until a maintainer manually flips it to
-#  published, which fires `published`/`released` (NOT `created`).
+#  NOTE: the release is created NON-DRAFT and NON-pre-release on
+#  purpose. A full release published without a prior draft fires
+#  `release: released`, which is exactly what pip_publish.yml now
+#  listens on — so this auto-cut path publishes in one shot (it does
+#  not use the manual two-phase pre-release validation flow; the gate
+#  inside pip_publish.yml still blocks a red build).
+#  Drafts and pre-releases would NOT fire `released`: a draft sits
+#  silent until promoted, and a pre-release fires `prereleased`
+#  (handled by validate_release.yml, which publishes nothing).
 #  Earlier versions of this file used `--draft` and the publish
 #  chain never ran. See pip_publish.yml's trigger comment.
 #
