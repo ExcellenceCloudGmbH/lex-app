@@ -53,12 +53,42 @@ on:
 
 jobs:
   # ── Run the authoritative release gate against the prerelease commit. ──
+  # ── Pick the cluster selector. Normally the standard 13 clusters; if
+  #    you put [gate-selftest] in the prerelease title or notes, the
+  #    always-failing `gate_selftest` cluster is appended so you can prove
+  #    the RED → cleanup path on purpose (see cleanup-on-red below). ──────
+  select-clusters:
+    name: "Pick cluster selector"
+    runs-on: ubuntu-latest
+    outputs:
+      clusters: ${{ steps.pick.outputs.clusters }}
+    steps:
+      - id: pick
+        env:
+          NAME: ${{ github.event.release.name }}
+          BODY: ${{ github.event.release.body }}
+        run: |
+          set -euo pipefail
+          BASE="init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries"
+          # Opt-in self-test: a prerelease whose title OR notes contain the
+          # literal [gate-selftest] appends the gate_selftest cluster, which
+          # always fails — turning the gate red so cleanup-on-red deletes the
+          # prerelease + tag. Normal prereleases run only the standard 13.
+          if printf '%s\n%s' "$NAME" "$BODY" | grep -qF '[gate-selftest]'; then
+            echo "clusters=${BASE},gate_selftest" >> "$GITHUB_OUTPUT"
+            echo "[gate-selftest] marker found — appending the always-failing gate_selftest cluster."
+          else
+            echo "clusters=${BASE}" >> "$GITHUB_OUTPUT"
+            echo "No [gate-selftest] marker — running the standard 13 clusters."
+          fi
+
   gate:
     name: "Release Gate: Tests + Customer Email"
+    needs: select-clusters
     uses: ./.github/workflows/showcase_tests.yml
     secrets: inherit
     with:
-      clusters: init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries
+      clusters: ${{ needs.select-clusters.outputs.clusters }}
       # The prerelease gate is the release-day status update, same as the
       # pip_publish gate, so the stakeholder email is sent as a release run.
       run_kind: release
