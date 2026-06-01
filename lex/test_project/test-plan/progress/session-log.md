@@ -79,3 +79,4 @@ Record each work session here so progress is traceable.
 ---
 
 > **Back to:** [Progress & Organization](../progress.md) | [Test Plan Index](../index.md)
+| 2026-06-01 | 74 | Added fast-health query-tolerant path matcher regression coverage for PR #525 by introducing Cluster 1r (`test_1r_fast_health_query_matching.py`) with strict-vs-tolerant boundary assertions for `match_health_request_path` and `is_fast_health_path`. Updated cluster map, writing plan, and dashboard to include scenarios 1.151–1.153. | 1 | 3 | 3 |

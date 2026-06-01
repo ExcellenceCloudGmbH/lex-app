@@ -127,6 +127,14 @@ If either command is broken, a new customer cannot start using the framework at 
 | 1.21 | `lex_config.py` parses | `INITIAL_DATA` path and `PROJECT_GROUPS` read correctly |
 | 1.22 | Missing seed file | Skipped gracefully with a log message, `Init` still succeeds |
 
+### 1r. Fast-health query-tolerant path matching
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.151 | Query-bearing `/health` probe path | `match_health_request_path("/health?source=k8s")` returns `True` |
+| 1.152 | Query-bearing non-health path | `match_health_request_path("/users?source=k8s")` returns `False` |
+| 1.153 | Strict-vs-tolerant matcher boundary | `is_fast_health_path("/health?source=k8s")` remains `False` while `match_health_request_path(...)` is `True` |
+
 ---
 
 ## 2. CRUD via REST API

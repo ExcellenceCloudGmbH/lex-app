@@ -64,6 +64,20 @@
 | Coverage gain | +0.3 % |
 | Prereqs | 1p |
 
+### Batch 1r — `fast_health.py` query-tolerant path matching ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.151 – 1.153 |
+| Type | U |
+| Files covered | `lex/lex_app/fast_health.py` |
+| Test file | `lex/test_project/tests/init/test_1r_fast_health_query_matching.py` |
+| Test classes | module-level pytest functions (`test_1_151_*` – `test_1_153_*`) |
+| Fixtures | none |
+| Tests landed | **3 pass / 0 fail** |
+| Coverage gain | +0.1 % (estimated) |
+| Status | ✅ Complete (Session 74 — Jun 1) |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)
@@ -500,7 +514,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 
