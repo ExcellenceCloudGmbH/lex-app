@@ -18,22 +18,39 @@
 #        spent, just re-dispatch after fixing code, and
 #      * the tag, when it is finally born, points at a proven-good commit.
 #
-#  Auto-publish (single gate, no redundant re-gate):
-#    Creating a full (non-draft, non-pre-release) release fires
-#    `release: released`, which pip_publish.yml consumes to ship to PyPI.
-#    To avoid running the SAME gate twice (and risking a flaky second run
-#    minting a tag it then refuses to publish), the release notes carry a
-#    `lex:gate-passed` marker. pip_publish.yml SKIPS its own gate when it
-#    sees that marker — this commit was already validated here. Every other
-#    publish path (a manual release cut in the UI, or
-#    copilot_publish_after_merge.yml) has no marker and is gated by
-#    pip_publish.yml as before.
+#  Auto-publish + full release chain (single gate, no redundant re-gate):
+#    On green this cuts a full (non-draft, non-pre-release) release at the
+#    validated commit, which fires `release: released`. That one event
+#    drives the WHOLE normal-release chain automatically:
+#      * pip_publish.yml      → builds + uploads to PyPI
+#      * frontend_build.yml   → builds + commits the frontend bundle
+#      * custom-image.yml     → builds the Docker image + deploys to env
+#                               (it triggers on pip_publish's success).
+#    IMPORTANT: the release is created with a PAT (secrets.PAT), NOT the
+#    default GITHUB_TOKEN — releases cut by GITHUB_TOKEN do not fire
+#    `released` (GitHub's recursion guard), which would leave the entire
+#    chain dormant. To avoid running the SAME gate twice (and risking a
+#    flaky second run minting a tag it then refuses to publish), the
+#    release notes carry a `lex:gate-passed` marker. pip_publish.yml SKIPS
+#    its own gate when it sees that marker. Every other publish path (a
+#    manual release cut in the UI, or copilot_publish_after_merge.yml) has
+#    no marker and is gated by pip_publish.yml as before.
 #
-#  Net operator flow: dispatch this with a version → if green it ships on
-#  its own; if red, fix and re-dispatch the same version. No manual publish
-#  click, no stale tag, no duplicate-tag wall.
+#  Placeholder for the next rc:
+#    After a release ships, this stages a DRAFT release for the next rc
+#    (vX.Y.ZrcN → vX.Y.Zrc(N+1) via copilot_compute_next_rc.py) as a
+#    visible "next up" slot. A draft mints no git tag, so it is safe to
+#    leave around and edit; the next Validate & Release run for that
+#    version deletes the placeholder and cuts the real, gated release in
+#    its place. Non-rc versions get no placeholder.
 #
-#  Required secrets: inherited by showcase_tests.yml — see that file.
+#  Net operator flow: dispatch this with a version → if green it ships AND
+#  builds/deploys on its own, and the next rc's draft is waiting; if red,
+#  fix and re-dispatch the same version. No manual publish click, no manual
+#  build/deploy, no stale tag, no duplicate-tag wall.
+#
+#  Required secrets: secrets.PAT (release creation that fires `released`),
+#  plus everything inherited by showcase_tests.yml — see that file.
 # ──────────────────────────────────────────────────────────────────────
 
 name: Validate & Release
@@ -79,16 +96,40 @@ jobs:
     permissions:
       contents: write   # create the release + tag at the validated commit
     steps:
-      - name: Checkout (for tag target)
+      - name: Checkout (for tag target + scripts)
         uses: actions/checkout@v4
 
       - name: "Create validated release (fires release: released)"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT, NOT GITHUB_TOKEN, ON PURPOSE: a release created with the
+          # default GITHUB_TOKEN does NOT fire `release: released` (GitHub's
+          # recursion guard), so pip_publish.yml, frontend_build.yml and the
+          # Docker build+deploy (custom-image.yml, via pip_publish's
+          # workflow_run) would never run. A user PAT fires the event and the
+          # whole normal-release chain proceeds automatically.
+          GH_TOKEN: ${{ secrets.PAT }}
           VERSION: ${{ inputs.version }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # A placeholder DRAFT for this version may exist from the prior
+          # release run (see "Stage placeholder draft" below). A draft mints
+          # no git tag, but `gh release create` still collides on the name,
+          # so remove it first. The /releases/tags/{tag} endpoint hides
+          # drafts, so look it up by id from the full list.
+          DRAFT_ID=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq "[.[] | select(.tag_name==\"$VERSION\" and .draft==true)][0].id // empty")
+          if [ -n "$DRAFT_ID" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$DRAFT_ID"
+            echo "Removed placeholder draft $VERSION (#$DRAFT_ID) before cutting the real release."
+          fi
+          # Never silently re-ship a version that already published.
+          PUB_ID=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq "[.[] | select(.tag_name==\"$VERSION\" and .draft==false)][0].id // empty")
+          if [ -n "$PUB_ID" ]; then
+            echo "::error::$VERSION is already published — pick a new version."
+            exit 1
+          fi
           # The lex:gate-passed marker tells pip_publish.yml this commit
           # was already validated here, so it skips its (redundant) gate
           # and publishes directly. Keep the marker text in sync with the
@@ -108,4 +149,41 @@ jobs:
             --target "${SHA}" \
             --title "${VERSION}" \
             --notes-file notes.md
-          echo "Created release ${VERSION} at ${SHA}; release:released will publish it."
+          echo "Released ${VERSION} at ${SHA}; publish + build/deploy will follow."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stage placeholder draft for the next rc
+        env:
+          # GITHUB_TOKEN is fine here: a DRAFT fires no release event, so
+          # there is nothing to trigger and no recursion-guard to dodge.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # Bump vX.Y.ZrcN -> vX.Y.Zrc(N+1). A non-rc version has no "next
+          # rc", so skip the placeholder rather than fail an already-shipped
+          # release.
+          if ! NEXT=$(python .github/scripts/copilot_compute_next_rc.py --current "$VERSION" 2>/dev/null); then
+            echo "$VERSION is not an rc tag — no placeholder draft created."
+            exit 0
+          fi
+          # Don't clobber an existing release/draft for NEXT.
+          EXISTS=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq "[.[] | select(.tag_name==\"$NEXT\")] | length")
+          if [ "$EXISTS" != "0" ]; then
+            echo "A release/draft for $NEXT already exists — leaving it untouched."
+            exit 0
+          fi
+          # A DRAFT mints no git tag, so this slot is a safe, editable
+          # placeholder. The next Validate & Release run for $NEXT deletes
+          # this draft and cuts the real, gated release in its place.
+          gh release create "$NEXT" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "$NEXT" \
+            --notes "Placeholder draft for the next release candidate, staged automatically after ${VERSION} shipped. This DRAFT mints no git tag; dispatch Validate & Release with version ${NEXT} to replace it with the real, gated release."
+          echo "Staged placeholder draft $NEXT for the next release."
