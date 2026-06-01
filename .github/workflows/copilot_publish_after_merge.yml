@@ -11,11 +11,12 @@
 #  purpose. A full release published without a prior draft fires
 #  `release: released`, which is exactly what pip_publish.yml now
 #  listens on — so this auto-cut path publishes in one shot (it does
-#  not use the manual two-phase pre-release validation flow; the gate
+#  not use the manual draft-staging validation flow; the gate
 #  inside pip_publish.yml still blocks a red build).
 #  Drafts and pre-releases would NOT fire `released`: a draft sits
-#  silent until promoted, and a pre-release fires `prereleased`
-#  (handled by validate_release.yml, which publishes nothing).
+#  silent until published (the manual stage_release_candidate.yml flow
+#  re-targets such a draft and the operator publishes it by hand), and
+#  a pre-release fires `prereleased`, which nothing now listens on.
 #  Earlier versions of this file used `--draft` and the publish
 #  chain never ran. See pip_publish.yml's trigger comment.
 #

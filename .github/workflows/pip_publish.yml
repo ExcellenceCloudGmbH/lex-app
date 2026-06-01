@@ -25,27 +25,32 @@
 #  → 2.0.0rc124). The version in pyproject.toml is dynamic — it reads
 #  from lex/_version.py which this workflow writes before building.
 #
-#  Trigger: `release: released`. This is the PUBLISH half of a
-#  two-phase release. It fires ONLY when a release is published as a
-#  full (non-pre-release) release — which happens either by creating
-#  a full release directly, or by editing an existing PRE-RELEASE to
-#  uncheck "pre-release" (promotion). Crucially, promotion keeps the
-#  SAME tag, so a version validated as a pre-release ships to PyPI
-#  under that exact same version name.
+#  Trigger: `release: released`. This is the PUBLISH half of the
+#  release flow. It fires ONLY when a release is published as a full
+#  (non-draft, non-pre-release) release.
 #
-#  The VALIDATE half lives in validate_release.yml, which fires on
-#  `release: prereleased` and runs the same gate WITHOUT publishing.
-#  The intended operator flow:
-#    1. Cut vX.Y.ZrcN as a PRE-RELEASE  → validate_release.yml runs
-#       the gate, publishes nothing. If it fails, re-push and re-cut;
-#       the tag is never "spent" on a publish.
-#    2. When green, edit the release and UNCHECK "pre-release"      →
-#       `released` fires on the same tag → this workflow publishes.
+#  The VALIDATE half lives in stage_release_candidate.yml, which runs
+#  the same gate WITHOUT publishing and, on green, points a DRAFT
+#  release for the version at the validated commit. The intended
+#  operator flow:
+#    1. Dispatch stage_release_candidate.yml with version vX.Y.ZrcN.
+#       It runs the gate against the dispatched commit and publishes
+#       NOTHING. On green it ensures a DRAFT for that version exists
+#       and re-points its target_commitish at that exact commit.
+#       If it fails, fix code and re-dispatch — because a DRAFT does
+#       not mint a git tag, the version name is never "spent" and the
+#       draft simply re-targets the latest green commit. No tag is
+#       ever stale, and the "duplicate tag" wall never appears.
+#    2. When green, open the draft in the Releases UI and click
+#       "Publish release" as a FULL (non-pre-release) release. GitHub
+#       mints the tag at the draft's target — the validated commit —
+#       and fires `released` → this workflow publishes that exact
+#       commit to PyPI under that version name.
 #
 #  Why `released` and not `created`: `created` fires for pre-releases
 #  too, so it could not separate validate from publish. `released`
-#  never fires for pre-releases or drafts, so a pre-release validation
-#  pass can never accidentally publish. Programmatic callers
+#  never fires for pre-releases or drafts, so staging a candidate as a
+#  draft can never accidentally publish. Programmatic callers
 #  (e.g. copilot_publish_after_merge.yml) that want to publish in one
 #  shot create a NON-draft, NON-pre-release release, which fires
 #  `released` directly — still a single publish.
