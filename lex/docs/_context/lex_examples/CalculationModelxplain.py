@@ -35,12 +35,14 @@ class CalculationModel(LexModel):
     SUCCESS = "SUCCESS"
     NOT_CALCULATED = "NOT_CALCULATED"
     ABORTED = "ABORTED"
+    CANCELLED = "CANCELLED"
     STATUSES = [
         (IN_PROGRESS, "IN_PROGRESS"),
         (ERROR, "ERROR"),
         (SUCCESS, "SUCCESS"),
         (NOT_CALCULATED, "NOT_CALCULATED"),
         (ABORTED, "ABORTED"),
+        (CANCELLED, "CANCELLED"),
     ]
 
     is_calculated = models.CharField(

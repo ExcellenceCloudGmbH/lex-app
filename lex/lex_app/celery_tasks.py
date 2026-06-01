@@ -155,7 +155,7 @@ class CallbackTask(Task):
 
         Distinguishes a *cancellation* (user-triggered revoke / soft
         time-limit / lost worker) from a generic error and persists
-        ``ABORTED`` instead of ``ERROR`` for the former. This is what
+        ``CANCELLED`` instead of ``ERROR`` for the former. This is what
         makes the abort button's effect visible in the audit row even
         when the worker process is the one that observes the SIGTERM.
         """
@@ -163,7 +163,7 @@ class CallbackTask(Task):
             if self.name == "initial_data_upload":
                 return
             target_status = (
-                CalculationModel.ABORTED
+                CalculationModel.CANCELLED
                 if _is_cancellation_exception(exc)
                 else CalculationModel.ERROR
             )
@@ -234,14 +234,26 @@ class CallbackTask(Task):
             )
         finally:
             try:
-                # ABORTED is a non-success terminal state — audit it as a
-                # failure so the row shows "did not complete", not
-                # "completed OK". Only SUCCESS counts as success.
-                audit_status = (
-                    "success"
-                    if status == CalculationModel.SUCCESS
-                    else "failure"
-                )
+                # Map the terminal calculation state onto the AuditLogStatus
+                # ``status`` string. We use three distinct values so the
+                # compliance trail can tell apart "completed OK", "did not
+                # complete because an operator stopped it", and "did not
+                # complete because something broke":
+                #   SUCCESS   -> "success"
+                #   CANCELLED -> "cancelled"   (user-initiated cancel)
+                #   ERROR / anything else -> "failure"
+                # The startup-reset path already uses ``"aborted"`` for the
+                # crashed-worker recovery case (see
+                # ``process_admin.utils.model_registration``), so all four
+                # non-pending terminal states are now distinguishable in
+                # AuditLogStatus.status without ever lying that a non-success
+                # outcome "completed OK".
+                if status == CalculationModel.SUCCESS:
+                    audit_status = "success"
+                elif status == CalculationModel.CANCELLED:
+                    audit_status = "cancelled"
+                else:
+                    audit_status = "failure"
                 ensure_terminal_calculation_audit(
                     model_instance,
                     audit_status=audit_status,

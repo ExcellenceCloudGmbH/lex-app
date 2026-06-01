@@ -67,13 +67,28 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
         }))
 
     async def calculation_aborted(self, event):
+        # Startup-reset path: a stuck IN_PROGRESS row was flipped to ABORTED
+        # by ``model_registration._handle_calculation_model_reset`` on boot.
+        payload = event['payload']
+        record_id = payload.get('record_id')
+        if record_id:
+            await sync_to_async(ActiveCalculationStateStore.clear)(record_id)
+        await self.send(text_data=json.dumps({
+            'type': 'calculation_aborted',
+            'payload': payload
+        }))
+
+    async def calculation_cancelled(self, event):
+        # User-initiated cancel path: ``CalculationModel.cancel()`` or a
+        # cooperative ``CalculationCancelled`` exception bubbled out of
+        # ``calculate()``.
         payload = event['payload']
         # Keep ASGI-process state store in sync (event may originate from a Celery worker)
         record_id = payload.get('record_id')
         if record_id:
             await sync_to_async(ActiveCalculationStateStore.clear)(record_id)
         await self.send(text_data=json.dumps({
-            'type': 'calculation_aborted',
+            'type': 'calculation_cancelled',
             'payload': payload
         }))
 

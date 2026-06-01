@@ -6,13 +6,13 @@ A long-running ``CalculationModel`` calculation must be cancellable
 instantly from the UI when it is running on a Celery worker. The user
 clicks **Abort**; the framework's contract (see
 ``docs/features/processing/calculations.md`` — the state machine
-already advertises ``IN_PROGRESS → ABORTED``) is:
+already advertises ``IN_PROGRESS → CANCELLED``) is:
 
 * the running Celery task is revoked with SIGTERM (instant kill),
-* the row transitions ``IN_PROGRESS → ABORTED`` and persists,
+* the row transitions ``IN_PROGRESS → CANCELLED`` and persists,
 * every descendant calculation that was dispatched from inside the
   cancelled parent (sharing its ``calculation_id``) is revoked and
-  marked ``ABORTED`` too — "abort" stops the whole tree, not just the
+  marked ``CANCELLED`` too — "abort" stops the whole tree, not just the
   entry point the button was attached to,
 * a synchronously-running calculation (no ``task_id`` registered) is
   not cancellable in this design and surfaces a clear no-op response
@@ -27,7 +27,7 @@ Cluster 7n — scenarios 7.166–7.175. Type: I (TestCase — exercises the
 and the in-memory active-state store; mocks only ``celery.current_app``
 because the test environment has no broker).
 Covers: ``lex/core/models/CalculationModel.py`` (``cancel``,
-``_persist_aborted``, ``_persist_aborted_by_entry``,
+``_persist_cancelled``, ``_persist_cancelled_by_entry``,
 ``dispatch_calculation_task`` task_id capture, ``CalculationCancelled``),
 ``lex/core/signals/ActiveCalculationStateStore.py`` (``set_task_id``,
 ``get_task_id``, ``find_descendants``).
@@ -79,16 +79,16 @@ class TestCluster07n_Cancellation(E2ETestCase):
         super().tearDown()
 
     # ------------------------------------------------------------------
-    # 7.166 — happy path: in-progress Celery calc revokes + persists ABORTED
+    # 7.166 — happy path: in-progress Celery calc revokes + persists CANCELLED
     # ------------------------------------------------------------------
-    def test_07_166_cancel_in_progress_celery_calc_revokes_and_persists_aborted(self):
+    def test_07_166_cancel_in_progress_celery_calc_revokes_and_persists_cancelled(self):
         """
         Scenario 7.166: cancel() on an IN_PROGRESS Celery-dispatched calc.
         Given: an AtomicCalc row saved IN_PROGRESS with a Celery task_id
                registered in the active-state store.
         When:  CalculationModel.cancel(instance) is called.
         Then:  app.control.revoke(task_id, terminate=True, SIGTERM) fires,
-               row persists is_calculated=ABORTED, the report says
+               row persists is_calculated=CANCELLED, the report says
                cancelled=True with the task_id listed.
         """
         calc = AtomicCalc.objects.create(name="cancel-target")
@@ -109,14 +109,14 @@ class TestCluster07n_Cancellation(E2ETestCase):
             report["cancelled"],
             msg=f"cancel() should report cancelled=True, got {report!r}",
         )
-        self.assertEqual(report["status"], CalculationModel.ABORTED)
+        self.assertEqual(report["status"], CalculationModel.CANCELLED)
         self.assertEqual(report["revoked_tasks"], ["task-123"])
         self.revoke_mock.assert_called_once_with("task-123")
         calc.refresh_from_db()
         self.assertEqual(
             calc.is_calculated,
-            CalculationModel.ABORTED,
-            msg="is_calculated must persist ABORTED after cancel",
+            CalculationModel.CANCELLED,
+            msg="is_calculated must persist CANCELLED after cancel",
         )
 
     # ------------------------------------------------------------------
@@ -161,8 +161,8 @@ class TestCluster07n_Cancellation(E2ETestCase):
     # ------------------------------------------------------------------
     def test_07_168_cancel_on_terminal_state_is_noop(self):
         """
-        Scenario 7.168: cancel() on a row already in SUCCESS / ERROR / ABORTED.
-        Given: a row at SUCCESS (could equally be ERROR or ABORTED).
+        Scenario 7.168: cancel() on a row already in SUCCESS / ERROR / CANCELLED.
+        Given: a row at SUCCESS (could equally be ERROR or CANCELLED).
         When:  cancel() is called.
         Then:  cancelled=False, status reflects the existing terminal
                state, no revoke fired — operation is idempotent.
@@ -191,7 +191,7 @@ class TestCluster07n_Cancellation(E2ETestCase):
                registered against the parent's calculation_id).
         When:  cancel(parent) is called.
         Then:  parent's task is revoked, BOTH children's tasks are
-               revoked, all three rows persist ABORTED, and
+               revoked, all three rows persist CANCELLED, and
                descendants_cancelled == 2.
         """
         parent = ParentCalc.objects.create(name="recursive-parent")
@@ -231,13 +231,13 @@ class TestCluster07n_Cancellation(E2ETestCase):
             sorted(report["revoked_tasks"]),
             ["task-child-a", "task-child-b", "task-parent"],
         )
-        # Every row, parent + both children, persisted ABORTED.
+        # Every row, parent + both children, persisted CANCELLED.
         for inst in (parent, child_a, child_b):
             inst.refresh_from_db()
             self.assertEqual(
                 inst.is_calculated,
-                CalculationModel.ABORTED,
-                msg=f"{inst.name} must be ABORTED after recursive cancel",
+                CalculationModel.CANCELLED,
+                msg=f"{inst.name} must be CANCELLED after recursive cancel",
             )
 
     # ------------------------------------------------------------------
@@ -248,7 +248,7 @@ class TestCluster07n_Cancellation(E2ETestCase):
         Scenario 7.170: cancel(recursive=False) targets only the entry point.
         Given: same parent + 2 children fixture as 7.169.
         When:  cancel(parent, recursive=False) is called.
-        Then:  parent persists ABORTED; the two children stay IN_PROGRESS
+        Then:  parent persists CANCELLED; the two children stay IN_PROGRESS
                and their Celery tasks are NOT revoked.
         """
         parent = ParentCalc.objects.create(name="lone-parent")
@@ -276,7 +276,7 @@ class TestCluster07n_Cancellation(E2ETestCase):
         self.revoke_mock.assert_called_once_with("task-p")
         parent.refresh_from_db()
         child.refresh_from_db()
-        self.assertEqual(parent.is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(parent.is_calculated, CalculationModel.CANCELLED)
         self.assertEqual(
             child.is_calculated,
             CalculationModel.IN_PROGRESS,
@@ -387,16 +387,16 @@ class TestCluster07n_CalculationCancelledException(TestCase):
 
 
 class TestCluster07n_InProcessCancellationLandsAborted(E2ETestCase):
-    """7.174 / 7.175 — in-process exception paths must persist ABORTED.
+    """7.174 / 7.175 — in-process exception paths must persist CANCELLED.
 
     Cancellation can reach the calculation through three distinct
     execution paths, each with its own machinery — covering one tells
     you nothing about the others:
 
-    1. The cancel REST endpoint pre-emptively writes ABORTED via
-       ``_persist_aborted`` — covered by 7.166.
+    1. The cancel REST endpoint pre-emptively writes CANCELLED via
+       ``_persist_cancelled`` — covered by 7.166.
     2. The Celery worker observes the revoke and
-       ``CallbackTask.on_failure`` maps the exception onto ABORTED —
+       ``CallbackTask.on_failure`` maps the exception onto CANCELLED —
        covered by cluster 8u.
     3. **The in-process exception path** — ``execute_calculation_sync``'s
        except branch, and the outer ``calculate_hook`` except branch —
@@ -411,16 +411,16 @@ class TestCluster07n_InProcessCancellationLandsAborted(E2ETestCase):
 
     e2e_models = ALL_MODELS
 
-    def test_07_174_execute_calculation_sync_persists_aborted_on_cancellation(self):
+    def test_07_174_execute_calculation_sync_persists_cancelled_on_cancellation(self):
         """
         Scenario 7.174: ``execute_calculation_sync`` recognises a
-        cancellation exception and writes ABORTED instead of ERROR.
+        cancellation exception and writes CANCELLED instead of ERROR.
 
         Given: an IN_PROGRESS AtomicCalc whose user ``calculate()``
                raises ``CalculationCancelled`` (the cooperative marker
                that worker-side cancel signals also collapse onto).
         When:  ``execute_calculation_sync`` runs the calc.
-        Then:  the row persists ``is_calculated=ABORTED``, NOT ERROR.
+        Then:  the row persists ``is_calculated=CANCELLED``, NOT ERROR.
         """
         calc = AtomicCalc.objects.create(name="in-proc-cancel-sync")
         calc.is_calculated = CalculationModel.IN_PROGRESS
@@ -436,20 +436,20 @@ class TestCluster07n_InProcessCancellationLandsAborted(E2ETestCase):
         calc.refresh_from_db()
         self.assertEqual(
             calc.is_calculated,
-            CalculationModel.ABORTED,
+            CalculationModel.CANCELLED,
             msg=(
-                "in-process cancellation must land in ABORTED — finding "
+                "in-process cancellation must land in CANCELLED — finding "
                 "ERROR here is the original bug: the user pressed cancel "
                 "but the audit shows a crash"
             ),
         )
 
-    def test_07_175_calculate_hook_persists_aborted_and_skips_error_chain(self):
+    def test_07_175_calculate_hook_persists_cancelled_and_skips_error_chain(self):
         """
         Scenario 7.175: ``calculate_hook``'s top-level except recognises
-        the cancellation and (a) writes ABORTED on self, and (b) does
+        the cancellation and (a) writes CANCELLED on self, and (b) does
         NOT call ``persist_error_state`` on the calc_obj chain —
-        descendants were already revoked + flipped to ABORTED by the
+        descendants were already revoked + flipped to CANCELLED by the
         recursive cancel walk, and overwriting them with ERROR here
         would corrupt the terminal state of the whole tree.
 
@@ -457,7 +457,7 @@ class TestCluster07n_InProcessCancellationLandsAborted(E2ETestCase):
                ``CalculationCancelled``.
         When:  ``calculate_hook`` runs (the wrapper that sits between
                ``save()`` and ``execute_calculation_sync``).
-        Then:  the row persists ABORTED, and ``persist_error_state``
+        Then:  the row persists CANCELLED, and ``persist_error_state``
                is NEVER called.
         """
         from lex.core.models.CalculationModel import CalculationModelException
@@ -479,10 +479,10 @@ class TestCluster07n_InProcessCancellationLandsAborted(E2ETestCase):
         calc.refresh_from_db()
         self.assertEqual(
             calc.is_calculated,
-            CalculationModel.ABORTED,
+            CalculationModel.CANCELLED,
             msg=(
-                "calculate_hook must persist ABORTED on cancellation — "
-                "and must NOT cascade ERROR onto already-aborted "
+                "calculate_hook must persist CANCELLED on cancellation — "
+                "and must NOT cascade ERROR onto already-cancelled "
                 "descendants via persist_error_state"
             ),
         )
