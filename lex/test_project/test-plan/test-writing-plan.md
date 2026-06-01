@@ -384,6 +384,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 `CalculationLogConsumer.py` is **parked** until §6 decision #3 confirms it's still wired anywhere.
 
+### Batch 9e — Status-consumer reconciliation + ABORTED signal sync (Session 69 — June 1)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.29 – 9.33 |
+| Type | U |
+| Files covered | `lex/api/consumers/UpdateCalculationStatusConsumer.py`, `lex/core/signals/CalculationSignals.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9e_consumer_signal_sync.py` |
+| Test classes | `TestCluster09e_StatusConsumer`, `TestCluster09e_CalculationSignals` |
+| Fixtures | none (in-memory `ActiveCalculationStateStore`; async consumer methods exercised directly with `AsyncMock`) |
+| Est. tests | 5 |
+| Coverage gain | +0.2 % |
+| Prereqs | none |
+| Status | ✅ Complete (Session 69 — 5 pass / 0 fail / 0.013s via unittest runner with `PYTHONPATH=lex`, `DJANGO_SETTINGS_MODULE=lex_app.settings`) |
+
 ---
 
 ## Cluster 10 — API Layer (existing 10a–10f)
@@ -546,7 +561,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 

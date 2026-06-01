@@ -1135,6 +1135,22 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 24 pass / 0 fail / 0.009s. Coverage: 27.03% → ~95%+ (whole file minus 1-2 unreachable defensive branches).
 
+### 9e — `UpdateCalculationStatusConsumer` reconciliation + terminal sync (coverage task — June 1)
+
+**Gap (June 1):** PR #555 updated the WebSocket status consumer and signal broadcaster to keep ASGI-process state aligned with cancellation (`ABORTED`) and reconnect snapshots, but cluster coverage had no direct regression gate on those surfaces. Without this batch, a reconnect could lose the active snapshot payload, or terminal events could leave stale in-memory entries (ghost spinners) even when the DB row is terminal.
+
+**Design contract (from calculation docs + state-machine reference):** calculations can transition `IN_PROGRESS → SUCCESS|ERROR|ABORTED`; reconnecting clients must receive current in-progress rows, and terminal transitions must clear active-state tracking.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.29 | `UpdateCalculationStatusConsumer.connect()` sends reconciliation snapshot | joins `update_calculation_status` group, accepts socket, emits `type=calculation_reconciliation` with `payload.active_calculations == ActiveCalculationStateStore.snapshot()` |
+| 9.30 | `calculation_in_progress` consumer event updates store and forwards payload | `ActiveCalculationStateStore.mark_in_progress(...)` path exercised via real store write; websocket payload type remains `calculation_in_progress` |
+| 9.31 | `calculation_success` / `calculation_error` / `calculation_aborted` events clear store | each terminal consumer handler clears `record_id` entry and forwards its expected websocket type |
+| 9.32 | `update_calculation_status` maps ABORTED correctly | signal emits `calculation_aborted` and clears the active-state entry |
+| 9.33 | `update_calculation_status` resolves `calculation_id` from store fallback | with empty operation-context `calculation_id`, payload uses `ActiveCalculationStateStore` value (priority chain preserved) |
+
+**Scenario range:** 9.29 – 9.33. **Test file:** `lex/test_project/tests/signals_ws/test_9e_consumer_signal_sync.py`. **Type:** U. **Status:** ✅ Complete (Session 69 — 5 pass / 0 fail / 0.013s).
+
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
 **Gap (April 25):** `CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:

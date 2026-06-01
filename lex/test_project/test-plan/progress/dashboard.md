@@ -52,9 +52,10 @@
 | 8k. Redis broker integration examples (opt-in — May 4) | 2 | 2 | 2 | 0 | 0 |  Complete — 8.45/8.46 env-gated (`LEX_RUN_REDIS_CELERY_TESTS=true`); wired into `celery_redis_broker_example.yml` |
 | 8m. Undecorated `CalculationModel` dispatched via generic `calc_and_save` (behaviour change — June 1) | 2 | 2 | 2 | 0 | 0 |  Complete — scenarios 8.49/8.50; every root calc now uses Celery when `CELERY_ACTIVE=true`, regardless of `@lex_shared_task` |
 | 8u. Cancellation-aware `CallbackTask` failure mapping (Session 67 — June 1; extended Session 68) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 8.73–8.77; `_is_cancellation_exception` maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `Terminated` / `CalculationCancelled` → `ABORTED`; 8.77 pins `_update_model_status` audit-status mapping (ABORTED → `failure`, not `success`) |
-| 9. Signals & WebSocket | 6 | 6 | 6 | 0 | 0 |  Complete |
+| 9. Signals & WebSocket | 11 | 11 | 11 | 0 | 0 | ✅ Complete (includes 9e reconnect + ABORTED sync coverage, Session 69) |
 | 9.7–9.10. Bitemporal signal branches (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — suppression primitives in `bitemporal_signals.py` |
 | 9d. `ActiveCalculationStateStore` full surface (coverage-driven — May 12) | 24 | 24 | 24 | 0 | 0 |  Complete — scenarios 9.11–9.28; coverage 27.03% → ~95% |
+| 9e. Status-consumer reconciliation + ABORTED signal sync (Session 69 — June 1) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 9.29–9.33 in `test_9e_consumer_signal_sync.py` |
 | 10. API Layer | 9 | 9 | 8 | 0 | 0 |  Complete (10.9 dup skipped; 10.8 retired — BUG-009 at 7.14) |
 | 10e. Schema introspection (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete (BUG-015 documented in-test — CharField w/o default reports `required=False`) |
 | 10f. Global search (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — 10.15–10.16b |
@@ -64,7 +65,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **571** | **571** | **550** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **576** | **576** | **555** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet
