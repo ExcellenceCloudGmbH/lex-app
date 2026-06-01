@@ -905,7 +905,7 @@ class CalculationModel(LexModel):
 
                     ensure_terminal_calculation_audit(
                         self,
-                        audit_status="failure",
+                        audit_status="cancelled",
                         error_message=exception_details or "Calculation cancelled by user",
                         stack_trace=stack_trace,
                     )
@@ -1122,7 +1122,11 @@ class CalculationModel(LexModel):
                     exc_info=True,
                 )
             self._pending_terminal_audit = {
-                "audit_status": "failure",
+                # Distinguish user-cancellation from a genuine crash in the
+                # deferred audit row, mirroring the in-process branch above
+                # and the worker-side ``CallbackTask._update_model_status``
+                # mapping in ``lex_app.celery_tasks``.
+                "audit_status": "cancelled" if is_cancellation else "failure",
                 "error_message": preferred_exception_detail,
                 "stack_trace": preferred_stack_trace,
             }

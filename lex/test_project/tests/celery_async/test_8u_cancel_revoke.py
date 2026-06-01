@@ -150,25 +150,34 @@ class TestCluster08u_CancellationExceptionDetector(SimpleTestCase):
 class TestCluster08u_AuditStatusForTerminalStates(SimpleTestCase):
     """8.77 — ``CallbackTask._update_model_status`` audit-status mapping.
 
-    Only ``SUCCESS`` is a "success" audit. ``ERROR`` *and* ``CANCELLED``
-    are both non-success terminal states and must record an audit row
-    with ``audit_status="failure"`` — otherwise the audit trail would
-    claim that a cancelled calculation completed successfully, which
-    is the most misleading possible record for a customer reviewing
-    "what happened to my calculation".
+    The terminal calc state maps onto a distinct ``AuditLogStatus.status``
+    string per outcome so the compliance trail can tell *what* happened:
+
+    * ``SUCCESS``   → ``"success"``   — completed OK.
+    * ``CANCELLED`` → ``"cancelled"`` — an operator pressed Abort.
+    * ``ERROR`` / anything else → ``"failure"`` — something broke.
+
+    (The fourth value ``"aborted"`` is already produced by the startup
+    reset path in ``process_admin.utils.model_registration`` for the
+    crashed-worker recovery case, so all four non-pending audit-status
+    values are now distinct.) Without this mapping a cancelled
+    calculation would record ``"failure"`` and be indistinguishable
+    from a real crash in the audit trail — the most misleading
+    possible record for a customer reviewing "what happened to my
+    calculation".
     """
 
-    def test_08_77_cancelled_status_records_failure_audit_not_success(self):
+    def test_08_77_terminal_state_maps_to_distinct_audit_status(self):
         """
-        Scenario 8.77: CANCELLED → audit_status='failure'; SUCCESS →
-        audit_status='success'; ERROR → audit_status='failure'.
+        Scenario 8.77: SUCCESS → 'success'; CANCELLED → 'cancelled';
+        ERROR → 'failure'.
 
         Given: a stub model_instance and patched
                ``ensure_terminal_calculation_audit``.
         When:  ``CallbackTask._update_model_status`` is invoked for each
                of SUCCESS, ERROR, CANCELLED.
-        Then:  the audit helper is called with the right audit_status for
-               each — SUCCESS only is "success", everything else "failure".
+        Then:  the audit helper is called with the audit_status string
+               that uniquely identifies the outcome.
         """
         from unittest.mock import MagicMock, patch
 
@@ -179,7 +188,7 @@ class TestCluster08u_AuditStatusForTerminalStates(SimpleTestCase):
         cases = [
             (CalculationModel.SUCCESS, "success"),
             (CalculationModel.ERROR, "failure"),
-            (CalculationModel.CANCELLED, "failure"),
+            (CalculationModel.CANCELLED, "cancelled"),
         ]
         for status, expected_audit_status in cases:
             with self.subTest(status=status):
