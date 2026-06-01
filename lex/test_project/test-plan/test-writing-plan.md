@@ -304,9 +304,9 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | --- | --- |
 | Scenario range | 7.166 – 7.173 |
 | Type | I |
-| Files covered | `lex/core/models/CalculationModel.py` (new `CalculationModel.cancel()` classmethod + `_persist_aborted` / `_persist_aborted_by_entry` helpers + `CalculationCancelled` marker exception + `dispatch_calculation_task` task_id capture); `lex/core/signals/ActiveCalculationStateStore.py` (new `set_task_id` / `get_task_id` / `find_descendants`; `mark_in_progress` preserves task_id across re-entry) |
+| Files covered | `lex/core/models/CalculationModel.py` (new `CalculationModel.cancel()` classmethod + `_persist_cancelled` / `_persist_cancelled_by_entry` helpers + `CalculationCancelled` marker exception + `dispatch_calculation_task` task_id capture); `lex/core/signals/ActiveCalculationStateStore.py` (new `set_task_id` / `get_task_id` / `find_descendants`; `mark_in_progress` preserves task_id across re-entry) |
 | Test file | `lex/test_project/tests/calculations/test_7n_cancellation.py` |
-| Test classes | `TestCluster07n_Cancellation` (Celery-cancellable → ABORTED; sync-not-cancellable → reason flag; terminal-state idempotent; recursive cancel reaches every descendant sharing `calculation_id`; `recursive=False` leaves descendants); `TestCluster07n_StateStoreTaskIdAndDescendants` (`set_task_id` survives `mark_in_progress` re-entry; `find_descendants` groups by shared `calculation_id`); `TestCluster07n_CalculationCancelledException` (marker exception carries reason) |
+| Test classes | `TestCluster07n_Cancellation` (Celery-cancellable → CANCELLED; sync-not-cancellable → reason flag; terminal-state idempotent; recursive cancel reaches every descendant sharing `calculation_id`; `recursive=False` leaves descendants); `TestCluster07n_StateStoreTaskIdAndDescendants` (`set_task_id` survives `mark_in_progress` re-entry; `find_descendants` groups by shared `calculation_id`); `TestCluster07n_CalculationCancelledException` (marker exception carries reason) |
 | Fixtures | `AtomicCalc`, `ParentCalc`, `ChildCalc` (existing); `CalculationModel._revoke_celery_task` patched so no Celery broker is needed |
 | Est. tests | 8 |
 | Coverage gain | +0.5 % |
@@ -354,9 +354,9 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | --- | --- |
 | Scenario range | 8.73 – 8.77 |
 | Type | U |
-| Files covered | `lex/lex_app/celery_tasks.py` — `_is_cancellation_exception` helper + the `CallbackTask.on_failure` branch that maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `billiard.Terminated` / `CalculationCancelled` onto `ABORTED` (not `ERROR`); **Session 68** also pins `CallbackTask._update_model_status`'s audit-status mapping (8.77) so the terminal-audit row records `failure` for both ERROR and ABORTED, never `success` for a non-SUCCESS terminal state |
+| Files covered | `lex/lex_app/celery_tasks.py` — `_is_cancellation_exception` helper + the `CallbackTask.on_failure` branch that maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `billiard.Terminated` / `CalculationCancelled` onto `CANCELLED` (not `ERROR`); **Session 68** also pins `CallbackTask._update_model_status`'s audit-status mapping (8.77) so the terminal-audit row records `failure` for both ERROR and CANCELLED, never `success` for a non-SUCCESS terminal state |
 | Test file | `lex/test_project/tests/celery_async/test_8u_cancel_revoke.py` |
-| Test classes | `TestCluster08u_CancellationExceptionDetector` (every documented cancellation class recognised; generic runtime errors rejected; subclasses of cancellation classes still detected; `None` handled safely); `TestCluster08u_AuditStatusForTerminalStates` (8.77 — SUCCESS → `success`, ERROR / ABORTED → `failure`) |
+| Test classes | `TestCluster08u_CancellationExceptionDetector` (every documented cancellation class recognised; generic runtime errors rejected; subclasses of cancellation classes still detected; `None` handled safely); `TestCluster08u_AuditStatusForTerminalStates` (8.77 — SUCCESS → `success`, ERROR / CANCELLED → `failure`) |
 | Fixtures | none (synthetic exception stand-ins mirroring celery/billiard class names so the worker stack does not have to be imported; 8.77 mocks `ensure_terminal_calculation_audit` to observe the `audit_status` argument) |
 | Est. tests | 5 (12 sub-test cases) |
 | Coverage gain | +0.15 % |

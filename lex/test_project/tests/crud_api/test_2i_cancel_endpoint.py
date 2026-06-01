@@ -9,7 +9,7 @@ trigger pattern) and expects:
 * **202 Accepted** when the row was IN_PROGRESS and Celery-cancellable
   — with a report body listing the revoked task IDs.
 * **409 Conflict** when the row is not in a cancellable state — either
-  because it already terminated (SUCCESS / ERROR / ABORTED) or because
+  because it already terminated (SUCCESS / ERROR / CANCELLED) or because
   no Celery task is registered (sync-dispatched calc; nothing to
   revoke). The body still carries the report so the UI can show a
   precise reason.
@@ -76,7 +76,7 @@ class TestCluster02i_CancelCalculationEndpoint(E2ETestCase):
         Given: an AtomicCalc at IN_PROGRESS with a registered task_id.
         When:  PATCH ../<pk>/?... with body {"cancel": "true"}.
         Then:  HTTP 202; body reports cancelled=True with the revoked
-               task_id; row in DB persists is_calculated=ABORTED.
+               task_id; row in DB persists is_calculated=CANCELLED.
         """
         calc = AtomicCalc.objects.create(name="cancel-via-rest")
         calc.is_calculated = CalculationModel.IN_PROGRESS
@@ -102,11 +102,11 @@ class TestCluster02i_CancelCalculationEndpoint(E2ETestCase):
             msg=f"expected 202 on successful cancel, got {response.status_code}: {response.data!r}",
         )
         self.assertTrue(response.data.get("cancelled"))
-        self.assertEqual(response.data.get("status"), CalculationModel.ABORTED)
+        self.assertEqual(response.data.get("status"), CalculationModel.CANCELLED)
         self.assertEqual(response.data.get("revoked_tasks"), ["task-rest-1"])
         self.revoke_mock.assert_called_once_with("task-rest-1")
         calc.refresh_from_db()
-        self.assertEqual(calc.is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(calc.is_calculated, CalculationModel.CANCELLED)
 
     # ------------------------------------------------------------------
     # 2.94 — PATCH cancel=true on terminal state → 409
@@ -185,7 +185,7 @@ class TestCluster02i_CancelCalculationEndpoint(E2ETestCase):
         Scenario 2.96: cancel is control-plane only — no field writes.
         Given: a row at IN_PROGRESS with name='original' and task_id.
         When:  PATCH {"cancel": "true", "name": "should-not-stick"}.
-        Then:  HTTP 202, row persists ABORTED, ``name`` is still
+        Then:  HTTP 202, row persists CANCELLED, ``name`` is still
                'original' — the cancel short-circuit returns before any
                serializer.save() runs.
         """
@@ -214,5 +214,5 @@ class TestCluster02i_CancelCalculationEndpoint(E2ETestCase):
             "original",
             msg="cancel PATCH must not write sibling fields from the body",
         )
-        self.assertEqual(calc.is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(calc.is_calculated, CalculationModel.CANCELLED)
 

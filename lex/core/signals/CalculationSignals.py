@@ -26,13 +26,13 @@ def update_calculation_status(
     * ``calculate_hook``        – when the calculation starts (IN_PROGRESS)
     * ``execute_calculation_sync`` – when the calculation finishes (SUCCESS / ERROR)
     * ``One.py`` exception path – on dispatch failure (ERROR)
-    * Startup reset             – when leftover IN_PROGRESS rows are set to ABORTED
+    * Startup reset             – when leftover IN_PROGRESS rows are set to CANCELLED
 
     Design rules
     ------------
     1. IN_PROGRESS  → register in ActiveCalculationStateStore, broadcast.
     2. SUCCESS/ERROR → clear from ActiveCalculationStateStore, broadcast.
-    3. ABORTED      → clear from ActiveCalculationStateStore, broadcast.
+    3. CANCELLED      → clear from ActiveCalculationStateStore, broadcast.
     4. **Never** suppress a broadcast — the frontend idempotently handles
        duplicates and needs every signal to stay in sync (especially across
        multiple browser tabs / users).
@@ -62,8 +62,8 @@ def update_calculation_status(
         message_type = "calculation_error"
         ActiveCalculationStateStore.clear(record_id)
 
-    elif instance.is_calculated == CalculationModel.ABORTED:
-        message_type = "calculation_aborted"
+    elif instance.is_calculated == CalculationModel.CANCELLED:
+        message_type = "calculation_cancelled"
         ActiveCalculationStateStore.clear(record_id)
 
     if not message_type:

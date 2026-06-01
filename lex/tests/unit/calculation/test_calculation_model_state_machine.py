@@ -113,9 +113,9 @@ class TestCalculationModelStatuses(SimpleTestCase):
         """``NOT_CALCULATED`` == ``'NOT_CALCULATED'``."""
         self.assertEqual(CalculationModel.NOT_CALCULATED, "NOT_CALCULATED")
 
-    def test_aborted_constant(self):
-        """``ABORTED`` == ``'ABORTED'``."""
-        self.assertEqual(CalculationModel.ABORTED, "ABORTED")
+    def test_cancelled_constant(self):
+        """``CANCELLED`` == ``'CANCELLED'``."""
+        self.assertEqual(CalculationModel.CANCELLED, "CANCELLED")
 
     def test_statuses_tuple_has_five_entries(self):
         """``STATUSES`` must contain exactly five (value, label) pairs."""

@@ -333,7 +333,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
         )
 
     @unittest.skip("ActiveCalculationStateStore state mismatch — tests need update")
-    def test_startup_abort_reset_persists_aborted_history_row(self):
+    def test_startup_abort_reset_persists_cancelled_history_row(self):
         self.obj.is_calculated = CalculationModel.IN_PROGRESS
         self.obj.save(skip_hooks=True)
 
@@ -347,7 +347,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             ModelRegistration._handle_calculation_model_reset(CalculationHistoryTestModel)
 
         self.obj.refresh_from_db()
-        self.assertEqual(self.obj.is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(self.obj.is_calculated, CalculationModel.CANCELLED)
 
         new_rows = list(
             self.HistoryModel.objects.filter(id=self.obj.pk)
@@ -355,7 +355,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             .order_by("history_id")
         )
         self.assertEqual(len(new_rows), 1)
-        self.assertEqual(new_rows[0].is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.CANCELLED)
 
     @unittest.skip("ActiveCalculationStateStore state mismatch — tests need update")
     def test_startup_abort_reset_uses_active_state_store_when_db_is_not_in_progress(self):
@@ -380,7 +380,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             ModelRegistration._handle_calculation_model_reset(CalculationHistoryTestModel)
 
         self.obj.refresh_from_db()
-        self.assertEqual(self.obj.is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(self.obj.is_calculated, CalculationModel.CANCELLED)
 
         new_rows = list(
             self.HistoryModel.objects.filter(id=self.obj.pk)
@@ -388,7 +388,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             .order_by("history_id")
         )
         self.assertEqual(len(new_rows), 1)
-        self.assertEqual(new_rows[0].is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.CANCELLED)
 
 
 class NestedCalculationHistoryTransitionsTest(TransactionTestCase):

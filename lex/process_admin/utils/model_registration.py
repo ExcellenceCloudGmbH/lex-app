@@ -20,7 +20,7 @@ class ModelRegistration:
     - HTML Report models
     - Process models
     - Standard models with bitemporal history tracking
-    - CalculationModel instances with aborted calculation handling
+    - CalculationModel instances with cancelled calculation handling
     """
 
     @classmethod
@@ -386,7 +386,7 @@ class ModelRegistration:
         Reset CalculationModel instances left in IN_PROGRESS state on startup.
 
         Uses per-instance ``.save(skip_hooks=True)`` so that
-        django-simple-history records an ABORTED history row for each
+        django-simple-history records an CANCELLED history row for each
         affected record, and creates the corresponding AuditLog /
         AuditLogStatus entries for a complete audit trail.
         """
@@ -396,7 +396,7 @@ class ModelRegistration:
             return
 
         @sync_to_async
-        def reset_instances_with_aborted_calculations():
+        def reset_instances_with_cancelled_calculations():
             from lex.audit_logging.utils.calculation_audit import (
                 ensure_terminal_calculation_audit,
             )
@@ -405,7 +405,7 @@ class ModelRegistration:
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
             )
             for instance in stuck:
-                instance.is_calculated = CalculationModel.ABORTED
+                instance.is_calculated = CalculationModel.CANCELLED
                 instance._history_change_reason = (
                     "Startup reset: calculation was still IN_PROGRESS"
                 )
@@ -414,12 +414,12 @@ class ModelRegistration:
                 try:
                     ensure_terminal_calculation_audit(
                         instance,
-                        audit_status="aborted",
-                        error_message="Calculation aborted during startup reset",
+                        audit_status="cancelled",
+                        error_message="Calculation cancelled during startup reset",
                     )
                 except Exception:
                     logger.warning(
-                        "Failed to create audit log for startup-aborted %s (pk=%s)",
+                        "Failed to create audit log for startup-cancelled %s (pk=%s)",
                         model.__name__,
                         instance.pk,
                         exc_info=True,
@@ -427,7 +427,7 @@ class ModelRegistration:
 
         nest_asyncio.apply()
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(reset_instances_with_aborted_calculations())
+        loop.run_until_complete(reset_instances_with_cancelled_calculations())
 
     @classmethod
     def register_model_structure(

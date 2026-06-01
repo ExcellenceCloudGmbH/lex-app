@@ -6,12 +6,12 @@ When the abort button revokes a Celery task, the worker process raises
 one of a small set of cancellation exceptions (``TaskRevokedError``,
 ``SoftTimeLimitExceeded``, ``WorkerLostError``, ``billiard.Terminated``,
 or the framework's own ``CalculationCancelled`` marker). The
-``CallbackTask.on_failure`` hook must persist ``is_calculated=ABORTED``
+``CallbackTask.on_failure`` hook must persist ``is_calculated=CANCELLED``
 for those — not ``ERROR`` — so the user-facing state matches what
 actually happened (the customer pressed cancel; the calculation did
 not fail with a bug).
 
-A regression here would silently flip every aborted calc to ``ERROR``,
+A regression here would silently flip every cancelled calc to ``ERROR``,
 which would page the on-call team every time someone clicks the abort
 button — exactly the wrong incident signal.
 
@@ -150,7 +150,7 @@ class TestCluster08u_CancellationExceptionDetector(SimpleTestCase):
 class TestCluster08u_AuditStatusForTerminalStates(SimpleTestCase):
     """8.77 — ``CallbackTask._update_model_status`` audit-status mapping.
 
-    Only ``SUCCESS`` is a "success" audit. ``ERROR`` *and* ``ABORTED``
+    Only ``SUCCESS`` is a "success" audit. ``ERROR`` *and* ``CANCELLED``
     are both non-success terminal states and must record an audit row
     with ``audit_status="failure"`` — otherwise the audit trail would
     claim that a cancelled calculation completed successfully, which
@@ -158,15 +158,15 @@ class TestCluster08u_AuditStatusForTerminalStates(SimpleTestCase):
     "what happened to my calculation".
     """
 
-    def test_08_77_aborted_status_records_failure_audit_not_success(self):
+    def test_08_77_cancelled_status_records_failure_audit_not_success(self):
         """
-        Scenario 8.77: ABORTED → audit_status='failure'; SUCCESS →
+        Scenario 8.77: CANCELLED → audit_status='failure'; SUCCESS →
         audit_status='success'; ERROR → audit_status='failure'.
 
         Given: a stub model_instance and patched
                ``ensure_terminal_calculation_audit``.
         When:  ``CallbackTask._update_model_status`` is invoked for each
-               of SUCCESS, ERROR, ABORTED.
+               of SUCCESS, ERROR, CANCELLED.
         Then:  the audit helper is called with the right audit_status for
                each — SUCCESS only is "success", everything else "failure".
         """
@@ -179,7 +179,7 @@ class TestCluster08u_AuditStatusForTerminalStates(SimpleTestCase):
         cases = [
             (CalculationModel.SUCCESS, "success"),
             (CalculationModel.ERROR, "failure"),
-            (CalculationModel.ABORTED, "failure"),
+            (CalculationModel.CANCELLED, "failure"),
         ]
         for status, expected_audit_status in cases:
             with self.subTest(status=status):

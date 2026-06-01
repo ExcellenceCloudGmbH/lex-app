@@ -155,7 +155,7 @@ class CallbackTask(Task):
 
         Distinguishes a *cancellation* (user-triggered revoke / soft
         time-limit / lost worker) from a generic error and persists
-        ``ABORTED`` instead of ``ERROR`` for the former. This is what
+        ``CANCELLED`` instead of ``ERROR`` for the former. This is what
         makes the abort button's effect visible in the audit row even
         when the worker process is the one that observes the SIGTERM.
         """
@@ -163,7 +163,7 @@ class CallbackTask(Task):
             if self.name == "initial_data_upload":
                 return
             target_status = (
-                CalculationModel.ABORTED
+                CalculationModel.CANCELLED
                 if _is_cancellation_exception(exc)
                 else CalculationModel.ERROR
             )
@@ -234,7 +234,7 @@ class CallbackTask(Task):
             )
         finally:
             try:
-                # ABORTED is a non-success terminal state — audit it as a
+                # CANCELLED is a non-success terminal state — audit it as a
                 # failure so the row shows "did not complete", not
                 # "completed OK". Only SUCCESS counts as success.
                 audit_status = (
