@@ -191,6 +191,12 @@ If either command is broken, a new customer cannot start using the framework at 
 | 2.24 | DELETE to `many/` leaves unselected records | Rows not named by repeated `ids` query params remain untouched |
 | 2.25 | DELETE to `many/` with unknown ids | Stale/unknown ids are ignored safely; only existing selected rows are reported/deleted |
 
+### 2i. Cancel-calculation REST endpoint ✅
+
+**Gap:** The user-facing abort button on a long-running `CalculationModel` row needs an HTTP surface to call. We extended the existing detail `PATCH` endpoint with a `{"cancel":"true"}` short-circuit (mirroring the established `calculate=true` trigger pattern, so no new URL route is required) that routes to `CalculationModel.cancel(instance, recursive=True)` and returns the report dict the cancel classmethod produces. 2i pins the four customer-visible behaviours: `202 Accepted` with the report when the row was cancellable; `409 Conflict` with `reason=not_in_progress` when the row already terminated; `409 Conflict` with `reason=sync_calculation_not_cancellable` when the row is IN_PROGRESS but was dispatched synchronously (no Celery task to revoke); and crucially, the short-circuit must return **before** any `serializer.save()`, so a request body `{"cancel":"true","name":"X"}` cannot silently apply the sibling `name` field while cancelling. A regression that let sibling fields ride along would convert "abort" into "abort and corrupt the row at the same time" — the worst possible compound bug.
+
+**Scenario range:** 2.93 – 2.96. **Test file:** `lex/test_project/tests/crud_api/test_2i_cancel_endpoint.py`. **Type:** E. **Status:** ✅ Complete (Session 66 — June 1).
+
 ---
 
 ## 3. Validation Hooks
@@ -429,6 +435,12 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 **Status:** ✅ Complete — covers `lex/test_project/tests/calculations/test_7e_persistence_internals.py`.
 
+### 7n. Calculation cancellation — state machine + recursive cancel ✅
+
+**Gap:** The published state machine in `docs/features/processing/calculations.md` advertised `IN_PROGRESS → ABORTED`, but the only wiring in the framework was the **startup** sweep in `process_admin/utils/model_registration.py` (any IN_PROGRESS row found at boot is reset). There was no live cancel path — no public method, no REST handler, no Celery revoke — so the user-facing abort button had nothing to call. 7n closes that gap end-to-end on the state-machine side: `CalculationModel.cancel(instance, *, recursive=True, reason="")` revokes the Celery task by id (instant kill via `SIGTERM`), persists `ABORTED` (and the cancellation reason into `calculation_error_message`/`error_message`), and — by default — recurses to every active descendant sharing the parent's `calculation_id`. Sync-dispatched calcs have no `task_id` to revoke; the method returns `cancellable=False, reason="sync_calculation_not_cancellable"` so the API layer can surface a precise 409 instead of silently pretending the cancel worked. Companion store contracts (`ActiveCalculationStateStore.set_task_id` / `get_task_id` / `find_descendants`) and the `CalculationCancelled` marker exception are pinned here too — they're the load-bearing seam between the REST short-circuit (cluster 2i) and the Celery callback (cluster 8u).
+
+**Scenario range:** 7.166 – 7.175. **Test file:** `lex/test_project/tests/calculations/test_7n_cancellation.py`. **Type:** I. **Status:** ✅ Complete (Session 66 — June 1; extended Session 67 with 7.174 / 7.175 covering the in-process exception paths — `execute_calculation_sync` and the outer `calculate_hook` except branches — so a `CalculationCancelled` (or any worker-side `Terminated` / `SoftTimeLimitExceeded` / `WorkerLostError` / `TaskRevokedError` propagated synchronously) lands in `ABORTED`, not `ERROR`; the hook path additionally skips `persist_error_state` on cancellation so descendants already revoked by the recursive walk are not overwritten with ERROR).
+
 ---
 
 ## 8. Celery & Async
@@ -476,6 +488,12 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 8.15 | ``lex_shared_task`` wrapper pops reserved kwargs and enters ``CeleryCalculationContext`` when truthy ``context`` is supplied | Body sees only the user kwargs; returns ``(inner_result, args)`` — the shape ``CallbackTask._extract_model_instances`` depends on |
 
 **Status:**  Complete — 9 pass / 0 fail / 0 xfail.
+
+### 8u. Cancellation-aware `CallbackTask` failure mapping ✅
+
+**Gap:** When a user presses Abort on a long-running calculation, the framework's new `CalculationModel.cancel()` calls `app.control.revoke(task_id, terminate=True, signal="SIGTERM")` — the worker process then raises one of `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `billiard.Terminated` (plus the framework's own `CalculationCancelled` marker when cooperative cancel is in play). Before 8u, `CallbackTask.on_failure` treated every exception identically and persisted `is_calculated=ERROR`. That would flip every cancelled calculation to ERROR — the wrong incident signal (the audit row would say "calculation failed" when it actually succeeded at being cancelled), and would page the on-call team every time someone clicks Abort. 8u pins `_is_cancellation_exception` as the class-name-matching detector (walks the MRO so subclasses are also recognised, no hard imports of celery/billiard internals) and the `on_failure` branch that consumes it to write `ABORTED` instead.
+
+**Scenario range:** 8.73 – 8.77. **Test file:** `lex/test_project/tests/celery_async/test_8u_cancel_revoke.py`. **Type:** U. **Status:** ✅ Complete (Session 67 — June 1; extended Session 68 with 8.77 covering the audit-status mapping so ABORTED is recorded as `failure`, not `success`; 5 pass / 12 sub-tests / 0.11s broker-free).
 
 ---
 

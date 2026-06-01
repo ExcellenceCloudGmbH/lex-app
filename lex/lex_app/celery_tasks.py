@@ -52,6 +52,33 @@ def _celery_is_active() -> bool:
     return os.getenv("CELERY_ACTIVE", "False").lower() == "true"
 
 
+# Names of celery/billiard exceptions that signal a cancellation rather
+# than a real error. Matched by class name to avoid hard-importing celery
+# internals (the worker process import surface differs between celery 4/5
+# and across billiard versions). The cancel REST endpoint also raises
+# :class:`CalculationCancelled` cooperatively where possible — included
+# for completeness.
+_CANCELLATION_EXC_NAMES = frozenset(
+    {
+        "TaskRevokedError",
+        "SoftTimeLimitExceeded",
+        "WorkerLostError",
+        "Terminated",
+        "CalculationCancelled",
+    }
+)
+
+
+def _is_cancellation_exception(exc: BaseException) -> bool:
+    """Return True if ``exc`` is one of the cancellation signals."""
+    if exc is None:
+        return False
+    for klass in type(exc).__mro__:
+        if klass.__name__ in _CANCELLATION_EXC_NAMES:
+            return True
+    return False
+
+
 class CeleryCalculationContext:
     """
     Context manager to set calculation_id for Celery tasks.
@@ -124,16 +151,28 @@ class CallbackTask(Task):
             )
 
     def on_failure(self, exc: Exception, task_id: str, args: Tuple, kwargs: Dict, einfo: Any) -> None:
-        """Handle task failure."""
+        """Handle task failure.
+
+        Distinguishes a *cancellation* (user-triggered revoke / soft
+        time-limit / lost worker) from a generic error and persists
+        ``ABORTED`` instead of ``ERROR`` for the former. This is what
+        makes the abort button's effect visible in the audit row even
+        when the worker process is the one that observes the SIGTERM.
+        """
         try:
             if self.name == "initial_data_upload":
                 return
+            target_status = (
+                CalculationModel.ABORTED
+                if _is_cancellation_exception(exc)
+                else CalculationModel.ERROR
+            )
             model_instances = self._extract_model_instances(args)
             for model_instance in model_instances:
                 if isinstance(model_instance, CalculationModel):
                     self._update_model_status(
                         model_instance,
-                        CalculationModel.ERROR,
+                        target_status,
                         error_message=str(exc),
                         stack_trace=str(einfo) if einfo else None,
                         task_id=task_id,
@@ -195,9 +234,17 @@ class CallbackTask(Task):
             )
         finally:
             try:
+                # ABORTED is a non-success terminal state — audit it as a
+                # failure so the row shows "did not complete", not
+                # "completed OK". Only SUCCESS counts as success.
+                audit_status = (
+                    "success"
+                    if status == CalculationModel.SUCCESS
+                    else "failure"
+                )
                 ensure_terminal_calculation_audit(
                     model_instance,
-                    audit_status="failure" if status == CalculationModel.ERROR else "success",
+                    audit_status=audit_status,
                     error_message=error_message,
                     stack_trace=stack_trace,
                     context_data=context_data,

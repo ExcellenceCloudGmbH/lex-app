@@ -51,18 +51,73 @@ class ActiveCalculationStateStore:
         model_label: Optional[str] = None,
         record_pk: Optional[Any] = None,
     ) -> None:
-        """Register a record as having an active calculation."""
+        """Register a record as having an active calculation.
+
+        Preserves any previously-stored ``task_id`` for the same
+        ``record_id`` so a re-entrant ``calculate_hook`` invocation does
+        not lose the Celery task handle needed for cancellation.
+        """
         if not record_id:
             return
 
         with cls._lock:
+            existing = cls._state_map.get(record_id, {}) if isinstance(
+                cls._state_map.get(record_id), dict
+            ) else {}
             cls._state_map[record_id] = {
                 "record_id": record_id,
                 "record": record or record_id,
                 "calculation_id": calculation_id or "",
                 "model_label": model_label or "",
                 "record_pk": str(record_pk) if record_pk is not None else "",
+                "task_id": existing.get("task_id", ""),
             }
+
+    # ------------------------------------------------------------------
+    # Cancellation support
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def set_task_id(cls, record_id: str, task_id: Optional[str]) -> None:
+        """Attach a Celery ``task_id`` to a tracked record.
+
+        Called by :meth:`CalculationModel.dispatch_calculation_task` right
+        after Celery returns the ``AsyncResult``. The task ID is the only
+        handle the cancellation endpoint has to revoke the work — without
+        it, Celery-only cancel cannot terminate the worker.
+        """
+        if not record_id or not task_id:
+            return
+        with cls._lock:
+            entry = cls._state_map.get(record_id)
+            if isinstance(entry, dict):
+                entry["task_id"] = str(task_id)
+
+    @classmethod
+    def get_task_id(cls, record_id: str) -> Optional[str]:
+        with cls._lock:
+            entry = cls._state_map.get(record_id, {})
+        task_id = entry.get("task_id") if isinstance(entry, dict) else None
+        return task_id or None
+
+    @classmethod
+    def find_descendants(cls, calculation_id: str) -> List[Dict[str, str]]:
+        """Return every active entry whose ``calculation_id`` matches.
+
+        Children dispatched from inside a parent's ``calculate()`` share
+        the parent's ``calculation_id`` (set in
+        ``calculate_hook``); this gives us the recursive-cancel set
+        without walking a parent→child tree explicitly.
+        """
+        if not calculation_id:
+            return []
+        with cls._lock:
+            return [
+                dict(entry)
+                for entry in cls._state_map.values()
+                if isinstance(entry, dict)
+                and entry.get("calculation_id") == calculation_id
+            ]
 
     @classmethod
     def clear(cls, record_id: str) -> None:

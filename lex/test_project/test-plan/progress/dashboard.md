@@ -20,6 +20,7 @@
 | 1p. Settings / URLs / health view / config singletons (coverage-driven — May 12) | 22 | 22 | 22 | 0 | 0 |  Complete — scenarios 1.125–1.146 |
 | 7k. Core exceptions + `ModelModificationRestriction` ABC + XLSXField spotter (coverage-driven — May 12) | 21 | 21 | 21 | 0 | 0 |  Complete — scenarios 7.122–7.142 |
 | 2. CRUD via REST API | 23 | 23 | 23 | 0 | 0 |  Complete (Many bulk-write reconciled to DELETE-only; BUG-004 removed per product decision; BUG-005 fixed; 2.1 = CRUD showcase) |
+| 2i. Cancel-calculation REST endpoint (Session 67 — June 1) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored) |
 | 3. Validation Hooks | 8 | 9 | 9 | 0 | 0 |  Complete |
 | 4. Permissions | 14 | 14 | 12 | 2 | 0 |  Complete (BUG-008/010 tracked; 4.40 export full-deny; 4.41 read full-deny at detail endpoint) |
 | 4e. Read-restriction filter backend (planned — April 21) | 7 | 7 | 5 | 0 | 0 |  Complete (2 skipped — 4.14/4.15 AuditLog DB-filter path deferred; 4.41 pins detail-GET read-deny) |
@@ -42,6 +43,7 @@
 | 7. Calculation State Machine | 94 | 94 | 93 | 1 | 0 |  Complete (BUG-009 tracked; 7i 2-level matrix 7.32–7.47; 7j 3-level matrix 7.48–7.111) |
 | 7g. `CalculatedModel.create()` pipeline (coverage-driven — April 21) | 6 | 6 | 6 | 0 | 0 |  Complete — drove `CalculatedModelMixin` 33.74% → 64.75% (`CombinatorialCalc` fixture added April 23) |
 | 7h. `_dispatch_model_processing` Celery branch (coverage-driven — April 23) | 1 | 1 | 1 | 0 | 0 |  Complete — async branch 7g never reached; broker-free |
+| 7n. Calculation cancellation — state machine + recursive cancel (Session 67 — June 1) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.166–7.173; pins `CalculationModel.cancel()` happy path + sync-not-cancellable + recursive descendant revoke (mocks `_revoke_celery_task`) |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |
@@ -49,6 +51,7 @@
 | 8j. Celery task bodies — `load_data` / `calc_and_save` / `activate_history_version` (coverage-driven — April 24) | 14 | 14 | 14 | 0 | 0 |  Complete — task bodies at `celery_tasks.py` 696–957; broker-free |
 | 8k. Redis broker integration examples (opt-in — May 4) | 2 | 2 | 2 | 0 | 0 |  Complete — 8.45/8.46 env-gated (`LEX_RUN_REDIS_CELERY_TESTS=true`); wired into `celery_redis_broker_example.yml` |
 | 8m. Undecorated `CalculationModel` dispatched via generic `calc_and_save` (behaviour change — June 1) | 2 | 2 | 2 | 0 | 0 |  Complete — scenarios 8.49/8.50; every root calc now uses Celery when `CELERY_ACTIVE=true`, regardless of `@lex_shared_task` |
+| 8u. Cancellation-aware `CallbackTask` failure mapping (Session 67 — June 1; extended Session 68) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 8.73–8.77; `_is_cancellation_exception` maps `TaskRevokedError` / `SoftTimeLimitExceeded` / `WorkerLostError` / `Terminated` / `CalculationCancelled` → `ABORTED`; 8.77 pins `_update_model_status` audit-status mapping (ABORTED → `failure`, not `success`) |
 | 9. Signals & WebSocket | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 9.7–9.10. Bitemporal signal branches (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — suppression primitives in `bitemporal_signals.py` |
 | 9d. `ActiveCalculationStateStore` full surface (coverage-driven — May 12) | 24 | 24 | 24 | 0 | 0 |  Complete — scenarios 9.11–9.28; coverage 27.03% → ~95% |
@@ -61,7 +64,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **555** | **555** | **534** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **571** | **571** | **550** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet
