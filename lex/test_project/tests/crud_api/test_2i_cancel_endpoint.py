@@ -53,6 +53,15 @@ class TestCluster02i_CancelCalculationEndpoint(E2ETestCase):
     """Cluster 2i: PATCH ``cancel=true`` cancel-endpoint contract."""
 
     e2e_models = ALL_MODELS
+    # ``E2ETestCase`` patches ``mark_in_progress`` to a no-op by default
+    # (keeps unrelated happy-path tests deterministic). We need the real
+    # implementation here so the state-store entry actually lands and
+    # ``set_task_id`` can attach the Celery task handle the cancel
+    # endpoint reads. Without this, 2.93 / 2.96 fall through to
+    # ``sync_calculation_not_cancellable`` because ``cancel()`` sees no
+    # registered task_id and returns HTTP 409. (Same fix as cluster 7n
+    # in Session 68.)
+    e2e_unpatch = {"mark_in_progress"}
 
     def setUp(self):
         super().setUp()
