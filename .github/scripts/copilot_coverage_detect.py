@@ -18,14 +18,17 @@ Outputs JSON on stdout::
 
     {
       "status": "pass" | "miss",
-      "untested": ["lex/lex_app/foo.py", ...],
-      "matched": {"lex/lex_app/bar.py": "lex/test_project/tests/.../test_x.py"},
+      "untested": ["lex/core/foo.py", ...],
+      "matched": {"lex/api/bar.py": "lex/test_project/tests/.../test_x.py"},
       "skipped_allowlist": [...]
     }
 
 Inputs are paths to two files holding the PR's changed-file lists, one
-per line, produced by ``gh pr diff`` upstream. We split into source-list
-(``added``/``modified`` under ``lex/lex_app/``) and test-list (any path
+per line, produced by ``gh pr diff`` upstream. We split into a source-list
+(``added``/``modified`` ``.py`` files inside any framework package under
+``lex/`` — ``lex/lex_app/``, ``lex/core/``, ``lex/api/``,
+``lex/audit_logging/``, ``lex/process_admin/``, … — excluding the test
+trees, docs, and other non-source packages) and a test-list (any path
 matching ``lex/test_project/tests/**/test_*.py``).
 
 Pure-Python, no third-party deps — runs on a stock GitHub runner.
@@ -41,11 +44,30 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-# Mirrors §7.3 of the spec — files where coverage is not meaningful.
-_SOURCE_PREFIX = "lex/lex_app/"
+# Framework source lives in app/packages directly under ``lex/`` —
+# ``lex/lex_app/``, ``lex/core/``, ``lex/api/``, ``lex/audit_logging/``,
+# ``lex/process_admin/`` and any future app. Rather than enumerate apps
+# (a new app would silently escape the coverage gate until someone
+# remembered to add it), we treat *every* package under ``lex/`` as
+# source and subtract the trees where coverage is not meaningful.
+_SOURCE_ROOT = "lex/"
+
+# Packages under ``lex/`` that are NOT testable framework source: the
+# test trees themselves, docs, frontend, static assets, vendored data.
+_EXCLUDED_PACKAGES = frozenset(
+    {
+        "test_project",  # the cluster test tree itself
+        "tests",         # legacy audit test tree
+        "docs",
+        "react",
+        "assets",
+        "legacy_data",
+        "bin",
+    }
+)
+
 _TEST_TREE = "lex/test_project/tests/"
 _ALLOWLIST_NAMES = ("__init__.py", "apps.py")
-_ALLOWLIST_PREFIXES_UNDER_SOURCE = ("migrations/",)
 _ALLOWLIST_NAME_STARTSWITH = ("settings",)  # settings.py, settings_dev.py, settings_local.py
 
 
@@ -69,13 +91,28 @@ class DetectionResult:
         )
 
 
+def _package_of(path: str) -> str | None:
+    """``lex/core/foo/bar.py`` → ``core``.
+
+    Returns ``None`` for paths outside ``lex/`` and for loose top-level
+    files directly under ``lex/`` (e.g. ``lex/runtime_config.py``) — those
+    are one-off scripts, not app code, and are deliberately out of scope.
+    """
+    if not path.startswith(_SOURCE_ROOT):
+        return None
+    rel = path[len(_SOURCE_ROOT):]
+    if "/" not in rel:
+        return None  # loose file directly under lex/, not a package member
+    return rel.split("/", 1)[0]
+
+
 def _is_allowlisted(path: str) -> bool:
-    if not path.startswith(_SOURCE_PREFIX):
+    pkg = _package_of(path)
+    if pkg is None or pkg in _EXCLUDED_PACKAGES:
         return False
-    rel = path[len(_SOURCE_PREFIX):]
-    if any(rel.startswith(p) for p in _ALLOWLIST_PREFIXES_UNDER_SOURCE):
+    if "/migrations/" in path:
         return True
-    name = rel.rsplit("/", 1)[-1]
+    name = path.rsplit("/", 1)[-1]
     if name in _ALLOWLIST_NAMES:
         return True
     if name.endswith(".py") and any(name.startswith(p) for p in _ALLOWLIST_NAME_STARTSWITH):
@@ -84,11 +121,12 @@ def _is_allowlisted(path: str) -> bool:
 
 
 def _is_source_file(path: str) -> bool:
-    if not path.startswith(_SOURCE_PREFIX):
-        return False
     if not path.endswith(".py"):
         return False
-    # Don't treat test files committed inside the app tree as source.
+    pkg = _package_of(path)
+    if pkg is None or pkg in _EXCLUDED_PACKAGES:
+        return False
+    # Don't treat test files committed inside an app tree as source.
     name = path.rsplit("/", 1)[-1]
     if name.startswith("test_"):
         return False

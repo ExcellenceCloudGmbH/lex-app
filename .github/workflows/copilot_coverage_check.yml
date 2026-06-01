@@ -2,7 +2,10 @@
 #  Copilot PR Coverage Check (Feature 4).
 #
 #  Implements the supervisor's task #4: every PR that lands code under
-#  lex/lex_app/** must also ship tests for that code. If the heuristic
+#  a framework app (lex/lex_app/**, lex/core/**, lex/api/**,
+#  lex/audit_logging/**, lex/process_admin/**, … — every package under
+#  lex/ except the test trees, docs, and other non-source dirs) must
+#  also ship tests for that code. If the heuristic
 #  can't pair source changes with test changes in the same diff, the
 #  workflow opens a coverage-task issue for Copilot, labels the PR
 #  `needs-tests`, and posts a failing `coverage / required` check that
@@ -128,14 +131,20 @@ jobs:
         id: triage
         run: |
           set -euo pipefail
-          # If the diff contains nothing under lex/lex_app/** the
-          # detector will return pass anyway, but short-circuiting
-          # here saves a Python startup and makes intent visible.
-          if ! grep -q '^lex/lex_app/' changed.txt; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::No source changes under lex/lex_app/** — coverage check is a no-op."
-          else
+          # If the diff touches no framework source the detector will
+          # return pass anyway, but short-circuiting here saves a Python
+          # startup and makes intent visible. Mirror the detector's
+          # scope: any file inside a package under lex/ (a second path
+          # segment exists, so loose lex/*.py scripts are excluded) that
+          # is NOT one of the non-source packages. This is an exclude
+          # list on purpose — an include list would let a NEW app slip
+          # the gate until someone updated this grep.
+          if grep -E '^lex/[^/]+/' changed.txt \
+               | grep -qvE '^lex/(test_project|tests|docs|react|assets|legacy_data|bin)/'; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No framework source changes under lex/<app>/** — coverage check is a no-op."
           fi
 
       - name: Run Phase 1 detection
@@ -181,7 +190,7 @@ jobs:
             -F status='completed' \
             -F conclusion='success' \
             -F output[title]='Coverage check passed' \
-            -F output[summary]='Every changed source file under lex/lex_app/** has a matching test in this PR.'
+            -F output[summary]='Every changed source file under lex/<app>/** has a matching test in this PR.'
 
       - name: Short-circuit pass when skip guards / triage matched
         # When the workflow skips for legitimate reasons (no source
@@ -192,7 +201,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REASON: ${{ steps.escape.outputs.skip == 'true' && 'opted out via [skip-coverage-check]' || 'no source changes under lex/lex_app/**' }}
+          REASON: ${{ steps.escape.outputs.skip == 'true' && 'opted out via [skip-coverage-check]' || 'no framework source changes under lex/<app>/**' }}
         run: |
           set -euo pipefail
           gh api repos/"$GITHUB_REPOSITORY"/check-runs \
@@ -257,7 +266,7 @@ jobs:
 
           ## Task
 
-          PR #${PR_NUMBER} modifies ${COUNT} source file(s) under \`lex/lex_app/\*\*\` without test coverage in the same diff:
+          PR #${PR_NUMBER} modifies ${COUNT} framework source file(s) under \`lex/<app>/\*\*\` without test coverage in the same diff:
 
           ${UNTESTED}
 
