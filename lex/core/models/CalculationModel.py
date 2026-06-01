@@ -106,12 +106,26 @@ class CalculationModel(LexModel):
     ERROR = "ERROR"
     SUCCESS = "SUCCESS"
     NOT_CALCULATED = "NOT_CALCULATED"
+    # Two distinct "non-success" terminal states:
+    #   ABORTED   — server-side recovery: a row was found stuck in IN_PROGRESS
+    #               at startup (worker crashed / process killed mid-run) and is
+    #               flipped here by ``process_admin.utils.model_registration``.
+    #               No human cancelled it; the framework gave up on its behalf.
+    #   CANCELLED — explicit user-initiated cancel via ``CalculationModel.cancel()``
+    #               (or the cooperative ``CalculationCancelled`` exception raised
+    #               from inside ``calculate()``). A person/operator deliberately
+    #               stopped a running calculation.
+    # Both are non-success and both audit as ``failure``, but they answer
+    # different "what happened?" questions in the compliance trail, so the
+    # state machine keeps them separate.
+    ABORTED = "ABORTED"
     CANCELLED = "CANCELLED"
     STATUSES = [
         (IN_PROGRESS, "IN_PROGRESS"),
         (ERROR, "ERROR"),
         (SUCCESS, "SUCCESS"),
         (NOT_CALCULATED, "NOT_CALCULATED"),
+        (ABORTED, "ABORTED"),
         (CANCELLED, "CANCELLED"),
     ]
 

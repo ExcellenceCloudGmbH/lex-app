@@ -5,7 +5,7 @@ broadcasts calculation state transitions and keeps
 
 Why this matters
 ----------------
-Every IN_PROGRESS / SUCCESS / ERROR / CANCELLED transition on a
+Every IN_PROGRESS / SUCCESS / ERROR / ABORTED transition on a
 ``CalculationModel`` instance flows through this function. The frontend
 relies on the broadcast to update its spinners across tabs, and the
 ``ActiveCalculationStateStore`` is the authoritative source for
@@ -239,19 +239,19 @@ class CalculationStatusSignalTests(SimpleTestCase):
         update_calculation_status(NotACalculationModel())
         self.assertEqual(self._broadcasts, [])
 
-    def test_cancelled_clears_store_and_broadcasts(self):
-        """CANCELLED → clears the entry and sends ``calculation_cancelled``."""
+    def test_aborted_clears_store_and_broadcasts(self):
+        """ABORTED → clears the entry and sends ``calculation_aborted``."""
         self._set_context("calc-abort")
         instance = self._build_instance(10)
         record_id = f"{instance._meta.model_name}_{instance.id}"
 
         update_calculation_status(instance)  # IN_PROGRESS
 
-        instance.is_calculated = CalculationModel.CANCELLED
+        instance.is_calculated = CalculationModel.ABORTED
         update_calculation_status(instance)
 
         self.assertEqual(len(self._broadcasts), 2)
-        self.assertEqual(self._broadcasts[-1][1]["type"], "calculation_cancelled")
+        self.assertEqual(self._broadcasts[-1][1]["type"], "calculation_aborted")
         self.assertEqual(ActiveCalculationStateStore.get_entry(record_id), {})
 
     def test_unknown_status_no_broadcast(self):

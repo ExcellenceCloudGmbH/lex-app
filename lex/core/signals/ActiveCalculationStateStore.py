@@ -27,10 +27,10 @@ class ActiveCalculationStateStore:
     * **Write-through**: ``mark_in_progress`` / ``clear`` are the *only* mutators.
     * **No DB queries during snapshot**: The store is the single source of
       truth.  Entries are added when a calculation starts and removed when
-      it finishes (SUCCESS / ERROR / CANCELLED).
+      it finishes (SUCCESS / ERROR / ABORTED / CANCELLED).
     * **Thread-safe**: All access is serialised via a ``threading.Lock``.
     * **Transient**: The store is empty on server start.  Stale DB rows
-      in IN_PROGRESS are reset to CANCELLED by ``model_registration`` during
+      in IN_PROGRESS are reset to ABORTED by ``model_registration`` during
       startup.
     """
 
@@ -165,7 +165,7 @@ class ActiveCalculationStateStore:
 
         Each entry is cross-checked against the DB so that records whose
         ``is_calculated`` field has already moved to a terminal state
-        (SUCCESS / ERROR / CANCELLED) are pruned from the store and excluded
+        (SUCCESS / ERROR / ABORTED / CANCELLED) are pruned from the store and excluded
         from the payload.
         """
         from lex.core.models.CalculationModel import CalculationModel

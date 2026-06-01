@@ -182,7 +182,7 @@ class TestCluster09d_Mutators(_StoreTestBase):
     def test_9_17_mark_in_progress_overwrites_existing_entry(self) -> None:
         """Re-marking the same id replaces the prior entry in place.
 
-        Customer scenario: a calculation re-fires after an CANCELLED
+        Customer scenario: a calculation re-fires after an ABORTED
         startup-reset; the new ``calculation_id`` must take over so
         the WebSocket payload reflects the live run, not the dead one.
         """
@@ -446,7 +446,7 @@ class TestCluster09d_SnapshotAndPrune(_StoreTestBase):
 
         This is the WebSocket-reconciliation contract: clients must not
         be told a calculation is running when the DB row already says
-        SUCCESS / ERROR / CANCELLED.
+        SUCCESS / ERROR / ABORTED.
         """
         live = _mock_calc_model(CalculationModel.IN_PROGRESS)
         stale = _mock_calc_model(CalculationModel.SUCCESS)

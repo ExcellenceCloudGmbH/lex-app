@@ -162,7 +162,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
         self.obj.refresh_from_db()
         self.assertEqual(self.obj.is_calculated, CalculationModel.NOT_CALCULATED)
 
-    def test_startup_abort_reset_persists_cancelled_history_row(self):
+    def test_startup_abort_reset_persists_aborted_history_row(self):
         self.obj.is_calculated = CalculationModel.IN_PROGRESS
         self.obj.save(skip_hooks=True)
 
@@ -176,7 +176,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             ModelRegistration._handle_calculation_model_reset(CalculationHistoryTestModel)
 
         self.obj.refresh_from_db()
-        self.assertEqual(self.obj.is_calculated, CalculationModel.CANCELLED)
+        self.assertEqual(self.obj.is_calculated, CalculationModel.ABORTED)
 
         new_rows = list(
             self.HistoryModel.objects.filter(id=self.obj.pk)
@@ -184,7 +184,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             .order_by("history_id")
         )
         self.assertEqual(len(new_rows), 1)
-        self.assertEqual(new_rows[0].is_calculated, CalculationModel.CANCELLED)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.ABORTED)
 
     @unittest.skip(
         "Needs pairing: current _handle_calculation_model_reset only "
@@ -216,7 +216,7 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             ModelRegistration._handle_calculation_model_reset(CalculationHistoryTestModel)
 
         self.obj.refresh_from_db()
-        self.assertEqual(self.obj.is_calculated, CalculationModel.CANCELLED)
+        self.assertEqual(self.obj.is_calculated, CalculationModel.ABORTED)
 
         new_rows = list(
             self.HistoryModel.objects.filter(id=self.obj.pk)
@@ -224,4 +224,4 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             .order_by("history_id")
         )
         self.assertEqual(len(new_rows), 1)
-        self.assertEqual(new_rows[0].is_calculated, CalculationModel.CANCELLED)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.ABORTED)
