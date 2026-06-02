@@ -801,14 +801,13 @@ def load_data(test, generic_app_models, audit_logging_enabled=None, initial_data
 @lex_shared_task
 def calc_and_save(models: List[Model], *args, **kwargs):
     """
-    Calculates and saves a list of models with robust error handling and
-    conflict resolution.
+    Calculates and saves a list of models.
+    Aborts the entire batch immediately if any error occurs.
     """
     from django.db import IntegrityError
     summary = {
         "total_models": len(models),
         "processed_successfully": 0,
-        "conflicts_resolved": 0,
         "errors": 0
     }
 
@@ -824,45 +823,16 @@ def calc_and_save(models: List[Model], *args, **kwargs):
             summary["processed_successfully"] += 1
 
         except IntegrityError as integrity_error:
-            msg = str(integrity_error).lower()
-            if "foreign key" in msg or "violates foreign key constraint" in msg:
-                logger.error(
-                    "Foreign-key integrity violation for %s; aborting batch",
-                    model,
-                    exc_info=True,
-                )
-                summary["errors"] += 1
-                raise
-            try:
-                logger.warning(f"Integrity error for {model}, attempting conflict resolution.")
-
-                if hasattr(model, 'delete_models_with_same_defining_fields'):
-                    existing_model = model.delete_models_with_same_defining_fields()
-
-                    if existing_model != model and existing_model.pk:
-                        model.pk = existing_model.pk
-                        logger.info(f"Using existing model PK {existing_model.pk} for conflict resolution")
-                    else:
-                        model.pk = None
-                        if hasattr(model, 'id'):
-                            model.id = None
-
-                    from lex.core.models.CalculationModel import calculation_execution_context as _cec
-                    with _cec():
-                        model.save()
-                    logger.info(f"Successfully resolved conflict and saved model {model}")
-                    summary["conflicts_resolved"] += 1
-                    summary["processed_successfully"] += 1
-                else:
-                    raise integrity_error
-
-            except Exception as resolution_error:
-                logger.error(f"Conflict resolution FAILED for model {model}: {resolution_error}")
-                summary["errors"] += 1
-                raise resolution_error
+            logger.error(
+                "Integrity error for %s; aborting batch",
+                model,
+                exc_info=True,
+            )
+            summary["errors"] += 1
+            raise
 
         except Exception as e:
-            logger.error(f"Unexpected error processing model {model}: {e}")
+            logger.error(f"Error processing model {model}: {e}")
             summary["errors"] += 1
             raise e
 

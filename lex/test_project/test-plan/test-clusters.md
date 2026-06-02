@@ -399,6 +399,7 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 7.13 | Error message stored | When calculation fails, `calculation_error_message` or `error_message` field populated |
 | 7.14 | Calculation via REST API (PATCH is_calculated=IN_PROGRESS) | API path commits IN_PROGRESS independently, then hooks run |
 | 7.176 | ForeignKey integrity violation inside `CalculatedModelMixin.create()` aborts immediately | Unhandled FK integrity failures are propagated and later models in the batch are not processed |
+| 7.177 | Any calculation error inside `CalculatedModelMixin.create()` aborts immediately | Any error during calculate() or save() stops the batch; later models are not processed |
 | 7.32 | Atomic parent, atomic child, both pass | Parent and child both settle at SUCCESS |
 | 7.33 | Atomic parent, atomic child, child fails | Child settles at ERROR and propagates ERROR to parent |
 | 7.34 | Atomic parent, atomic child, parent fails after child pass | Parent settles at ERROR; successful child is rolled back by the parent's atomic transaction |
@@ -451,11 +452,11 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 **Scenario range:** 7.166 – 7.175. **Test file:** `lex/test_project/tests/calculations/test_7n_cancellation.py`. **Type:** I. **Status:** ✅ Complete (Session 66 — June 1; extended Session 67 with 7.174 / 7.175 covering the in-process exception paths — `execute_calculation_sync` and the outer `calculate_hook` except branches — so a `CalculationCancelled` (or any worker-side `Terminated` / `SoftTimeLimitExceeded` / `WorkerLostError` / `TaskRevokedError` propagated synchronously) lands in `CANCELLED`, not `ERROR`; the hook path additionally skips `persist_error_state` on cancellation so descendants already revoked by the recursive walk are not overwritten with ERROR).
 
-### 7o. ForeignKey integrity violations abort calculated batches ✅
+### 7o. Any error aborts calculated batches ✅
 
-**Gap:** `CalculatedModelMixin.create()`'s synchronous pipeline (`calc_and_save_sync`) intentionally tolerates partial failures for regular per-row calculation errors, but a database-level ForeignKey integrity failure is a data-integrity contract breach, not a recoverable row-level warning. This scenario pins the expected customer behaviour: once a FK violation occurs inside `calculate()`, the computation aborts immediately and must not process later models in the same batch.
+**Gap:** `CalculatedModelMixin.create()`'s synchronous pipeline (`calc_and_save_sync`) was tolerating partial failures and continuing to process later models in the batch. Any error during calculation or saving is a non-recoverable condition that must abort the entire batch immediately — whether it's an IntegrityError, a RuntimeError, or any other exception. This ensures data consistency and prevents silent partial processing.
 
-**Scenario range:** 7.176 – 7.176. **Test file:** `lex/test_project/tests/calculations/test_7o_fk_violation_abort.py`. **Type:** I. **Status:** ✅ Complete (Session 72 — June 2).
+**Scenario range:** 7.176 – 7.177. **Test file:** `lex/test_project/tests/calculations/test_7o_fk_violation_abort.py`. **Type:** I. **Status:** ✅ Complete (Session 72 — June 2).
 
 ---
 

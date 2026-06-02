@@ -818,3 +818,60 @@ class FKViolationAbortCalc(CalculatedModelMixin):
 
 
 ALL_MODELS.extend([FKAbortTarget, FKAbortWrite, FKViolationAbortCalc])
+
+
+# ---------------------------------------------------------------------------
+# Cluster 7o extended: General error abort fixtures
+# ---------------------------------------------------------------------------
+
+
+class GeneralErrorAbortMarker(LexModel):
+    """Tracks which steps executed during a batch to detect silent continuation."""
+
+    marker = models.CharField(max_length=32)
+
+    class Meta:
+        app_label = "lex_app"
+
+
+class GeneralErrorAbortCalc(CalculatedModelMixin):
+    """CalculatedModelMixin fixture that raises a generic error mid-batch."""
+
+    step = models.CharField(max_length=32)
+    name = models.CharField(max_length=64, blank=True, default="")
+
+    defining_fields = ["step"]
+    parallelizable_fields = []
+    _steps = ["first", "explode", "last"]
+
+    class Meta:
+        app_label = "lex_app"
+
+    def get_selected_key_list(self, key):
+        if key == "step":
+            return list(type(self)._steps)
+        return []
+
+    def calculate(self, *args, **kwargs):
+        if self.step == "explode":
+            raise RuntimeError("Intentional calculation failure")
+        GeneralErrorAbortMarker.objects.create(marker=self.step)
+        self.name = self.step
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 7: error abort")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 7: error abort")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+ALL_MODELS.extend([GeneralErrorAbortMarker, GeneralErrorAbortCalc])
