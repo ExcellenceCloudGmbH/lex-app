@@ -50,19 +50,19 @@
 | Coverage gain | +0.6 % (estimated; measured on next coverage run) |
 | Status |  Complete (Session 54 — May 12). Note: `lex/lex_app/apps.py` AppConfig.ready surface deferred to **1q** — it requires real bootstrap fixtures. |
 
-### Batch 1q — `lex Init` end-to-end on fresh DB *(next)*
+### Batch 1q — Migration file completeness release gate ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.143 – 1.150 |
-| Type | I |
-| Files covered | `lex/lex_app/management/commands/init.py` (gap fill on top of 1g/1h/1n) |
-| Test file | `lex/test_project/tests/init/test_1q_init_command_full_flow.py` |
-| Test classes | `TestInitCommandFreshDb`, `TestInitCommandIdempotent`, `TestInitCommandKeycloakSync` (mocked at HTTP boundary) |
-| Fixtures | mock Keycloak admin client; minimal `INITIAL_DATA` JSON |
-| Est. tests | ~10 |
-| Coverage gain | +0.3 % |
-| Prereqs | 1p |
+| Scenario range | 1.147 – 1.147 |
+| Type | U |
+| Files covered | `lex/lex_app/migrations/*.py`, `lex/authentication/migrations/*.py`, `lex/audit_logging/migrations/*.py`, `lex/legacy_data/migrations/*.py` |
+| Test file | `lex/test_project/tests/init/test_1q_migration_files_complete.py` |
+| Test classes | `TestCluster01q_MigrationFilesComplete` |
+| Fixtures | none |
+| Tests landed | **1 pass / 0 fail in 2.42s** |
+| Coverage gain | n/a (release-gate drift test) |
+| Status | ✅ Complete (Session 70 — June 2) |
 
 ---
 
@@ -546,7 +546,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 

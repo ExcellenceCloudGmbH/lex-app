@@ -127,6 +127,15 @@ If either command is broken, a new customer cannot start using the framework at 
 | 1.21 | `lex_config.py` parses | `INITIAL_DATA` path and `PROJECT_GROUPS` read correctly |
 | 1.22 | Missing seed file | Skipped gracefully with a log message, `Init` still succeeds |
 
+### 1q. Migration file completeness gate ✅
+
+**Gap:** A framework release must never rely on customer machines to generate
+missing migration files during `lex Init`; that creates downstream duplicate
+migration conflicts when the missing files are later committed in a follow-up
+release.
+
+**Scenario range:** 1.147 – 1.147. **Test file:** `lex/test_project/tests/init/test_1q_migration_files_complete.py`. **Type:** U. **Status:** ✅ Complete (Session 70 — June 2).
+
 ---
 
 ## 2. CRUD via REST API
