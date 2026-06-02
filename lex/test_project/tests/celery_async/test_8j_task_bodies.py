@@ -15,7 +15,7 @@ customer-visible work units — remained dark:
   happy path → ``finalize_batch(failure_error=None)``.
 * ``calc_and_save`` — the batch-processing loop every
   ``CalculatedModelMixin.create()`` dispatch routes to: happy path,
-  ``IntegrityError`` + conflict resolution, generic exception.
+  any error aborts the entire batch immediately.
 * ``activate_history_version`` — the Celery Beat-driven bitemporal
   activation task: the three failure-return branches
   (``failed_model_lookup`` / ``skipped_missing_record`` /
@@ -342,13 +342,10 @@ class TestCluster08j_CalcAndSave(E2ETestCase):
     ``calc_and_save`` — the batch-processing loop.
 
     Every row a ``CalculatedModelMixin.create(...)`` dispatches ends up
-    here.  Per-model: ``lex_func()`` → ``save()``.  On
-    ``IntegrityError`` (duplicate defining-field row) the task calls
-    ``delete_models_with_same_defining_fields`` to detect the existing
-    row and either re-uses its pk or resets the current instance's pk
-    to NULL before retrying ``save()``.  On any other exception the
-    task re-raises so the outer ``on_failure`` callback can flip the
-    row to ``ERROR`` + log the audit row.
+    here.  Per-model: ``lex_func()`` → ``save()``.  Any exception
+    aborts the entire batch immediately and re-raises so the outer
+    ``on_failure`` callback can flip the row to ``ERROR`` + log the
+    audit row.
     """
 
     e2e_models = ALL_MODELS
@@ -372,62 +369,39 @@ class TestCluster08j_CalcAndSave(E2ETestCase):
             result["processed_successfully"], 2,
             "Every clean model must be counted as processed",
         )
-        self.assertEqual(result["conflicts_resolved"], 0)
         self.assertEqual(result["errors"], 0)
         self.assertIsNotNone(a.pk, "save() must have persisted row A")
         self.assertIsNotNone(b.pk, "save() must have persisted row B")
 
     # -- 8.38 ---------------------------------------------------------------
-    def test_8_38_integrity_error_triggers_conflict_resolution(self) -> None:
+    def test_8_38_integrity_error_aborts_batch(self) -> None:
         """
-        Scenario 8.38: ``save()`` raises IntegrityError → conflict resolver
-        reassigns pk from ``delete_models_with_same_defining_fields``' result.
+        Scenario 8.38: ``save()`` raises IntegrityError → batch aborts
+        immediately.
 
-        Simulated path: first ``save()`` raises, the task asks the model
-        for its defining-field twin, the twin reports an existing pk,
-        the task rewires the current instance's pk to that existing row
-        and ``save()``s again — which succeeds because the row now
-        UPDATEs instead of INSERTs.  ``conflicts_resolved`` AND
-        ``processed_successfully`` both bump.
+        Any exception during save is treated as non-recoverable and the
+        batch stops processing.  The error is re-raised so the outer
+        CallbackTask.on_failure stamps ``is_calculated=ERROR``.
         """
         model = CelerySyncCalc(name="calc-conflict")
-        # Give the instance a `delete_models_with_same_defining_fields`
-        # mock that returns a distinct instance carrying the pk of the
-        # pre-existing row.
-        existing = CelerySyncCalc.objects.create(name="calc-conflict-preexisting")
 
         integrity = IntegrityError("duplicate defining_fields")
         real_save = CelerySyncCalc.save
-        call_count = {"n": 0}
 
-        def flaky_save(self, *args, **kwargs):
-            call_count["n"] += 1
-            if self is model and call_count["n"] == 1:
+        def failing_save(self, *args, **kwargs):
+            if self is model:
                 raise integrity
             return real_save(self, *args, **kwargs)
 
-        model.delete_models_with_same_defining_fields = MagicMock(
-            return_value=existing
-        )
-
-        with patch.object(CelerySyncCalc, "save", flaky_save):
-            result, _args = calc_and_save([model])
-
-        self.assertEqual(
-            model.pk, existing.pk,
-            "Conflict resolver must reassign pk to the pre-existing row so "
-            "the retried save UPDATEs instead of re-INSERTing",
-        )
-        self.assertEqual(result["conflicts_resolved"], 1)
-        self.assertEqual(result["processed_successfully"], 1)
-        self.assertEqual(result["errors"], 0)
-        model.delete_models_with_same_defining_fields.assert_called_once()
+        with patch.object(CelerySyncCalc, "save", failing_save):
+            with self.assertRaises(IntegrityError):
+                calc_and_save([model])
 
     # -- 8.39 ---------------------------------------------------------------
     def test_8_39_generic_exception_bumps_errors_and_reraises(self) -> None:
         """
-        Scenario 8.39: ``lex_func()`` raises non-IntegrityError → error
-        counted and re-raised to on_failure.
+        Scenario 8.39: ``lex_func()`` raises → error counted and re-raised
+        to on_failure.
 
         The outer ``CallbackTask.on_failure`` depends on the original
         exception to stamp ``is_calculated=ERROR`` and close the audit
