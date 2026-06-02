@@ -302,16 +302,30 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 7.166 – 7.173 |
+| Scenario range | 7.166 – 7.175 |
 | Type | I |
-| Files covered | `lex/core/models/CalculationModel.py` (new `CalculationModel.cancel()` classmethod + `_persist_cancelled` / `_persist_cancelled_by_entry` helpers + `CalculationCancelled` marker exception + `dispatch_calculation_task` task_id capture); `lex/core/signals/ActiveCalculationStateStore.py` (new `set_task_id` / `get_task_id` / `find_descendants`; `mark_in_progress` preserves task_id across re-entry) |
+| Files covered | `lex/core/models/CalculationModel.py` (new `CalculationModel.cancel()` classmethod + `_persist_cancelled` / `_persist_cancelled_by_entry` helpers + `CalculationCancelled` marker exception + `dispatch_calculation_task` task_id capture; Sessions 68–70 extended the in-process cancellation branches + audit mapping around the same state machine); `lex/core/signals/ActiveCalculationStateStore.py` (new `set_task_id` / `get_task_id` / `find_descendants`; `mark_in_progress` preserves task_id across re-entry) |
 | Test file | `lex/test_project/tests/calculations/test_7n_cancellation.py` |
-| Test classes | `TestCluster07n_Cancellation` (Celery-cancellable → CANCELLED; sync-not-cancellable → reason flag; terminal-state idempotent; recursive cancel reaches every descendant sharing `calculation_id`; `recursive=False` leaves descendants); `TestCluster07n_StateStoreTaskIdAndDescendants` (`set_task_id` survives `mark_in_progress` re-entry; `find_descendants` groups by shared `calculation_id`); `TestCluster07n_CalculationCancelledException` (marker exception carries reason) |
+| Test classes | `TestCluster07n_Cancellation` (Celery-cancellable → CANCELLED; sync-not-cancellable → reason flag; terminal-state idempotent; recursive cancel reaches every descendant sharing `calculation_id`; `recursive=False` leaves descendants); `TestCluster07n_StateStoreTaskIdAndDescendants` (`set_task_id` survives `mark_in_progress` re-entry; `find_descendants` groups by shared `calculation_id`); `TestCluster07n_CalculationCancelledException` (marker exception carries reason); `TestCluster07n_InProcessCancellationLandsAborted` / later `...Cancelled` extension (the in-process exception paths persist the cancellation state and skip the error cascade) |
 | Fixtures | `AtomicCalc`, `ParentCalc`, `ChildCalc` (existing); `CalculationModel._revoke_celery_task` patched so no Celery broker is needed |
-| Est. tests | 8 |
+| Est. tests | 10 |
 | Coverage gain | +0.5 % |
 | Prereqs | none |
-| Status | ✅ Complete (Session 67 — 8 scenarios; 3 pure-logic pass locally, 5 DB-needing scenarios require CI test DB) |
+| Status | ✅ Complete (Sessions 67–70 — 10 scenarios; DB-dependent classes migrated onto `E2ETestCase`, 7n now passes locally end-to-end) |
+
+### Batch 7o — Operator visibility + stuck-calculation recovery (Session 72 — June 2)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.176 – 7.184 |
+| Type | U |
+| Files covered | `lex/core/models/CalculationModel.py` — `list_in_progress()`, `find_stuck()`, `cancel_stuck()`, `_public_entry()` and the public stuck-recovery summary shape; `lex/core/signals/ActiveCalculationStateStore.py` — `mark_in_progress()` start-time stamping, `list_active()` ordering/filtering/legacy-entry handling |
+| Test file | `lex/test_project/tests/calculations/test_7o_stuck_recovery.py` |
+| Test classes | `TestCluster07o_StateStoreAges` (first registration stamps monotonic + ISO start metadata; re-entry preserves start time + task_id; `list_active()` sorts oldest-first, filters inclusively, rejects negative thresholds, and gives legacy entries age `0.0`); `TestCluster07o_OperatorRecovery` (`list_in_progress()` public projection + `cancellable` flag; `find_stuck()` delegates thresholding to the store; `cancel_stuck()` unresolved-entry error path; **7.184 strict xfail / BUG-023** — intended bulk recovery should reuse `cancel()` and collapse descendants, but the current public projection strips `record_pk` before resolution) |
+| Fixtures | none (raw store-entry dicts + patched `cancel()` / resolver; no DB, no broker) |
+| Tests landed | **8 pass / 1 xfail in 0.22s** |
+| Coverage gain | +0.4 % (estimated) |
+| Status | ✅ Complete (Session 72 — pure-logic cluster-7 coverage for operator visibility + stuck recovery; BUG-023 recorded for the `cancel_stuck()` public-path resolver break) |
 
 
 ---
@@ -546,7 +560,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 
