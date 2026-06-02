@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from django.db import models
 from lex.core.models.CalculationModel import CalculationModel
-from lex.core.models.LexModel import PermissionResult
+from lex.core.models.LexModel import LexModel, PermissionResult
 
 
 def _permissive(cls):
