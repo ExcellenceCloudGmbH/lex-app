@@ -90,25 +90,20 @@ class TestCluster07g_CreatePipeline(E2ETestCase):
     def test_7_27_partial_failure_processes_rest_and_skips_failed(self) -> None:
         """
         Scenario 7.27: ``calculate()`` raises for one region. The sync
-        dispatcher catches the error per-model, accumulates it, and
-        keeps going — the successful rows still persist; failed rows
-        are NOT saved (``calc_and_save_sync`` calls calculate *before*
-        save).
+        dispatcher fails fast on the first error — ``calc_and_save_sync``
+        raises ``CalculatedModelError`` and aborts the remaining models.
 
-        Exercises the ``CalculatedModelError`` catch + ``errors``
-        accumulator at lines ~924-958 of ``calc_and_save_sync``, plus
-        the "processed_count > 0" warning branch at 948-958.
+        Exercises the ``CalculatedModelError`` raise path inside
+        ``calc_and_save_sync`` when ``calculate()`` fails.
         """
-        CombinatorialCalc.fail_for_region = "US"
-        # No exception expected — partial failure logs a warning only.
-        CombinatorialCalc.create()
+        from lex.core.exceptions import CalculatedModelError
 
-        rows = list(CombinatorialCalc.objects.all().order_by("region", "category"))
-        self.assertEqual(
-            {(r.region, r.category) for r in rows},
-            {("EU", "A"), ("EU", "B")},
-            "US rows fail in calculate(); save() is never reached",
-        )
+        CombinatorialCalc.fail_for_region = "US"
+
+        with self.assertRaises(CalculatedModelError) as ctx:
+            CombinatorialCalc.create()
+
+        self.assertIn("CombinatorialCalc failing on purpose", str(ctx.exception))
 
     # -- 7.28 ----------------------------------------------------------
     def test_7_28_create_is_idempotent_on_rerun(self) -> None:
