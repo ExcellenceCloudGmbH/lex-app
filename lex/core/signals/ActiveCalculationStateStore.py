@@ -1,5 +1,7 @@
 import logging
 import threading
+import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,14 @@ class ActiveCalculationStateStore:
         Preserves any previously-stored ``task_id`` for the same
         ``record_id`` so a re-entrant ``calculate_hook`` invocation does
         not lose the Celery task handle needed for cancellation.
+
+        On first registration, stamps ``started_at_monotonic`` (a
+        ``time.monotonic()`` reading used for safe age math — wall-clock
+        time can jump backwards) and ``started_at_iso`` (a UTC ISO-8601
+        string for display in the operator UI / API report). A re-entrant
+        registration of the same ``record_id`` keeps the original start
+        timestamps so the visible "running time" reflects when the
+        calculation actually began, not when its hook was last touched.
         """
         if not record_id:
             return
@@ -64,6 +74,11 @@ class ActiveCalculationStateStore:
             existing = cls._state_map.get(record_id, {}) if isinstance(
                 cls._state_map.get(record_id), dict
             ) else {}
+            now_monotonic = existing.get("started_at_monotonic")
+            now_iso = existing.get("started_at_iso")
+            if not isinstance(now_monotonic, float):
+                now_monotonic = time.monotonic()
+                now_iso = datetime.now(timezone.utc).isoformat()
             cls._state_map[record_id] = {
                 "record_id": record_id,
                 "record": record or record_id,
@@ -71,6 +86,8 @@ class ActiveCalculationStateStore:
                 "model_label": model_label or "",
                 "record_pk": str(record_pk) if record_pk is not None else "",
                 "task_id": existing.get("task_id", ""),
+                "started_at_monotonic": now_monotonic,
+                "started_at_iso": now_iso or datetime.now(timezone.utc).isoformat(),
             }
 
     # ------------------------------------------------------------------
@@ -118,6 +135,58 @@ class ActiveCalculationStateStore:
                 if isinstance(entry, dict)
                 and entry.get("calculation_id") == calculation_id
             ]
+
+    @classmethod
+    def list_active(
+        cls,
+        *,
+        older_than_seconds: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return every active entry, optionally filtered by age.
+
+        Each returned dict carries the stored fields plus a freshly
+        computed ``age_seconds`` (non-negative float) so callers do not
+        need to know about the monotonic clock. Entries are sorted
+        oldest-first — the natural order for an operator looking for
+        stuck work.
+
+        ``older_than_seconds``:
+            * ``None`` (default) — return every entry.
+            * ``>= 0`` — return only entries whose ``age_seconds`` is
+              **greater than or equal to** the threshold. ``0`` therefore
+              still returns everything; ``60`` returns calculations that
+              have been running at least a minute.
+            * Negative values raise ``ValueError`` — a negative threshold
+              is almost always a bug at the call site (e.g. an
+              uninitialised setting) and silently returning the whole
+              store would mask it.
+        """
+        if older_than_seconds is not None and older_than_seconds < 0:
+            raise ValueError(
+                f"older_than_seconds must be >= 0, got {older_than_seconds!r}"
+            )
+
+        now = time.monotonic()
+        with cls._lock:
+            entries = [
+                dict(e) for e in cls._state_map.values() if isinstance(e, dict)
+            ]
+
+        enriched: List[Dict[str, Any]] = []
+        for entry in entries:
+            started = entry.get("started_at_monotonic")
+            if isinstance(started, (int, float)):
+                age = max(0.0, float(now - started))
+            else:
+                # Legacy entry written before started_at tracking was added —
+                # treat as age=0 rather than crashing the operator endpoint.
+                age = 0.0
+            entry["age_seconds"] = age
+            if older_than_seconds is None or age >= older_than_seconds:
+                enriched.append(entry)
+
+        enriched.sort(key=lambda e: e.get("age_seconds", 0.0), reverse=True)
+        return enriched
 
     @classmethod
     def clear(cls, record_id: str) -> None:
@@ -324,4 +393,3 @@ class ActiveCalculationStateStore:
             ):
                 return model_class
         return None
-

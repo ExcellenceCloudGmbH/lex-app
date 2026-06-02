@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
+from typing import Optional
 
 from django.db import models
 from django.db import transaction
@@ -499,6 +500,229 @@ class CalculationModel(LexModel):
             "revoked_tasks": revoked,
             "descendants_cancelled": descendants_cancelled,
         }
+
+    # ------------------------------------------------------------------
+    # Operator visibility & stuck-calculation recovery
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def list_in_progress(cls) -> list:
+        """Return a structured report of every active calculation.
+
+        Public surface for the operator dashboard / CLI / REST endpoint.
+        Each item exposes only the fields a human or external tool needs;
+        internal bookkeeping (the monotonic clock reading, the raw entry
+        shape) stays hidden.
+
+        The returned list is sorted oldest-first — that is the order an
+        operator wants when triaging a backlog.
+
+        Each item::
+
+            {
+                "record_id":      str,        # "<model_name>_<pk>"
+                "record":         str,        # human-readable __str__
+                "model_label":    str,        # "<app_label>.<model_name>"
+                "calculation_id": str,        # "" if none
+                "task_id":        str | None, # None for sync / unknown
+                "started_at":     str,        # UTC ISO-8601
+                "age_seconds":    float,
+                "cancellable":    bool,       # True iff a Celery task_id is known
+            }
+        """
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+
+        return [
+            cls._public_entry(entry)
+            for entry in ActiveCalculationStateStore.list_active()
+        ]
+
+    @classmethod
+    def find_stuck(cls, older_than_seconds: float) -> list:
+        """Return active calculations older than ``older_than_seconds``.
+
+        Same shape as :meth:`list_in_progress`. ``older_than_seconds``
+        must be ``>= 0``; negative values raise ``ValueError`` (delegated
+        to the underlying store, which has the same contract).
+
+        Threshold semantics are inclusive: passing ``0`` returns every
+        active calculation; ``300`` returns calculations that have been
+        running at least five minutes.
+        """
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+
+        return [
+            cls._public_entry(entry)
+            for entry in ActiveCalculationStateStore.list_active(
+                older_than_seconds=older_than_seconds,
+            )
+        ]
+
+    @classmethod
+    def cancel_stuck(
+        cls,
+        older_than_seconds: float,
+        *,
+        reason: str = "Calculation exceeded stuck-calculation threshold",
+    ) -> dict:
+        """Cancel every calculation older than ``older_than_seconds``.
+
+        Reuses the per-record :meth:`cancel` machinery (Celery revoke +
+        ``CANCELLED`` persistence + audit) for each candidate, so the
+        terminal state, audit row, and websocket broadcast are identical
+        to a single user-initiated cancel — operators do not need a
+        parallel code path that has to be kept in sync.
+
+        Calculations dispatched synchronously (no ``task_id``) cannot be
+        revoked in this design (mirroring :meth:`cancel`); they are
+        reported back as ``skipped`` rather than cancelled, so the caller
+        can decide what to do (e.g. surface them to a human, restart the
+        worker process).
+
+        Returns::
+
+            {
+                "threshold_seconds":     float,
+                "candidates":            int,    # how many were stuck
+                "cancelled":             int,    # successfully cancelled
+                "skipped_not_cancellable": int,  # sync calcs / no task_id
+                "errors":                int,    # exceptions during cancel
+                "results": [
+                    {"record_id": str, "outcome": "cancelled" | "skipped" | "error",
+                     "status": str, "detail": str | None},
+                    ...
+                ],
+            }
+
+        ``recursive=True`` is implied by reusing :meth:`cancel`: any
+        descendant sharing the parent's ``calculation_id`` is revoked
+        with the parent. Each parent therefore appears only once in
+        ``results``; descendants do not get a second top-level row.
+        """
+        from django.apps import apps
+
+        stuck = cls.find_stuck(older_than_seconds)
+        results = []
+        cancelled = 0
+        skipped = 0
+        errors = 0
+
+        # Cancelling a parent revokes its descendants too (the recursive
+        # walk in cancel()). Skip any record_id we have already collapsed
+        # under a parent's calculation_id so we do not call cancel() twice
+        # on the same row in the same sweep.
+        already_handled: set = set()
+
+        for entry in stuck:
+            record_id = entry["record_id"]
+            if record_id in already_handled:
+                continue
+
+            instance = cls._resolve_instance_for_entry(entry, apps)
+            if instance is None:
+                results.append(
+                    {
+                        "record_id": record_id,
+                        "outcome": "error",
+                        "status": None,
+                        "detail": "could_not_resolve_instance",
+                    }
+                )
+                errors += 1
+                already_handled.add(record_id)
+                continue
+
+            try:
+                report = cls.cancel(instance, recursive=True, reason=reason)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.exception(
+                    "cancel_stuck: cancel() raised for %s", record_id
+                )
+                results.append(
+                    {
+                        "record_id": record_id,
+                        "outcome": "error",
+                        "status": getattr(instance, "is_calculated", None),
+                        "detail": str(exc),
+                    }
+                )
+                errors += 1
+                already_handled.add(record_id)
+                continue
+
+            outcome = "cancelled" if report.get("cancelled") else "skipped"
+            if outcome == "cancelled":
+                cancelled += 1
+            else:
+                skipped += 1
+
+            results.append(
+                {
+                    "record_id": record_id,
+                    "outcome": outcome,
+                    "status": report.get("status"),
+                    "detail": report.get("reason"),
+                }
+            )
+
+            already_handled.add(record_id)
+            # Mark every descendant the cancel walk just collapsed so we
+            # don't try to cancel them as standalone targets in this sweep.
+            calc_id = entry.get("calculation_id") or ""
+            if calc_id:
+                for other in stuck:
+                    if other.get("calculation_id") == calc_id:
+                        already_handled.add(other["record_id"])
+
+        return {
+            "threshold_seconds": float(older_than_seconds),
+            "candidates": len(stuck),
+            "cancelled": cancelled,
+            "skipped_not_cancellable": skipped,
+            "errors": errors,
+            "results": results,
+        }
+
+    @staticmethod
+    def _public_entry(entry: dict) -> dict:
+        """Project a raw store entry into the public report shape."""
+        task_id = entry.get("task_id") or None
+        return {
+            "record_id": entry.get("record_id", ""),
+            "record": entry.get("record", entry.get("record_id", "")),
+            "model_label": entry.get("model_label", ""),
+            "calculation_id": entry.get("calculation_id", ""),
+            "task_id": task_id,
+            "started_at": entry.get("started_at_iso", ""),
+            "age_seconds": float(entry.get("age_seconds", 0.0)),
+            "cancellable": bool(task_id),
+        }
+
+    @classmethod
+    def _resolve_instance_for_entry(cls, entry: dict, apps) -> "Optional[CalculationModel]":
+        """Resolve a store entry back to its model instance.
+
+        Mirrors :meth:`_persist_cancelled_by_entry`'s lookup but returns
+        the live row instead of writing to it, so :meth:`cancel_stuck`
+        can dispatch to the existing :meth:`cancel` machinery.
+        """
+        model_label = entry.get("model_label") or ""
+        record_pk = entry.get("record_pk") or ""
+        if not model_label or "." not in model_label or not record_pk:
+            return None
+        app_label, model_name = model_label.split(".", 1)
+        try:
+            model_class = apps.get_model(app_label, model_name)
+        except Exception:
+            return None
+        try:
+            return model_class._default_manager.filter(pk=record_pk).first()
+        except Exception:
+            return None
 
     @staticmethod
     def _revoke_celery_task(task_id: str) -> None:
