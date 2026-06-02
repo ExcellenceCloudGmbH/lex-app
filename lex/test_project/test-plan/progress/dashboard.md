@@ -41,10 +41,11 @@
 | 6g. Audit-log immutability (Session 51 — May 5) | 3 | 3 | 3 | 0 | 0 |  Complete — create/delete/edit all denied (incl. `AuditLogStatus`) |
 | 6j. Audit-utils singletons & data-model contracts (coverage-driven — May 12) | 16 | 16 | 16 | 0 | 0 |  Complete — scenarios 6.80–6.95 |
 | 6n. `AuditLogSerializer` + `AuditLogMixinSerializer` surface (coverage-driven — May 12) | 15 | 15 | 15 | 0 | 0 |  Complete — scenarios 6.141–6.155 |
-| 7. Calculation State Machine | 94 | 94 | 93 | 1 | 0 |  Complete (BUG-009 tracked; 7i 2-level matrix 7.32–7.47; 7j 3-level matrix 7.48–7.111) |
+| 7. Calculation State Machine | 105 | 105 | 103 | 2 | 0 |  Complete (BUG-009 + BUG-023 tracked; 7i 2-level matrix 7.32–7.47; 7j 3-level matrix 7.48–7.111) |
 | 7g. `CalculatedModel.create()` pipeline (coverage-driven — April 21) | 6 | 6 | 6 | 0 | 0 |  Complete — drove `CalculatedModelMixin` 33.74% → 64.75% (`CombinatorialCalc` fixture added April 23) |
 | 7h. `_dispatch_model_processing` Celery branch (coverage-driven — April 23) | 1 | 1 | 1 | 0 | 0 |  Complete — async branch 7g never reached; broker-free |
-| 7n. Calculation cancellation — state machine + recursive cancel (Session 67 — June 1) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.166–7.173; pins `CalculationModel.cancel()` happy path + sync-not-cancellable + recursive descendant revoke (mocks `_revoke_celery_task`) |
+| 7n. Calculation cancellation — state machine + recursive cancel (Sessions 67–70) | 10 | 10 | 10 | 0 | 0 | ✅ Complete — scenarios 7.166–7.175; includes the in-process cancellation paths so `CalculationCancelled` lands in `CANCELLED`, not `ERROR` |
+| 7o. Operator visibility + stuck-calculation recovery (Session 72 — June 2) | 9 | 9 | 8 | 1 | 0 | ✅ Complete — scenarios 7.176–7.184; pins age tracking / oldest-first triage / public report shape; 7.184 is strict xfail **BUG-023** on `cancel_stuck()` losing `record_pk` before resolution |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |
@@ -65,7 +66,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **571** | **571** | **550** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **582** | **582** | **560** | **4** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet
