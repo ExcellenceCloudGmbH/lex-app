@@ -930,7 +930,7 @@ def calc_and_save_sync(models, *args):
                         total_models=model_count,
                     ) from save_error
                 logger.warning(f"Save failed for model {i + 1}, attempting duplicate handling: {save_error}")
-                
+
                 try:
                     # Handle duplicate models with same defining fields
                     resolved_model = model.delete_models_with_same_defining_fields()

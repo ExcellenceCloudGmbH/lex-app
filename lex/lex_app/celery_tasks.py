@@ -73,8 +73,6 @@ def _is_cancellation_exception(exc: BaseException) -> bool:
     """Return True if ``exc`` is one of the cancellation signals."""
     if exc is None:
         return False
-
-
     for klass in type(exc).__mro__:
         if klass.__name__ in _CANCELLATION_EXC_NAMES:
             return True
