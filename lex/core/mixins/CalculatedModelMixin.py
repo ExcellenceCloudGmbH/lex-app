@@ -866,8 +866,6 @@ def calc_and_save_sync(models, *args):
     model_count = len(models)
     logger.info(f"Starting synchronous processing of {model_count} models")
     
-    processed_count = 0
-    
     for i, model in enumerate(models):
         try:
             if model is None:
@@ -896,7 +894,6 @@ def calc_and_save_sync(models, *args):
 
                     # Save the model
                     model.save()
-                processed_count += 1
                 logger.debug(f"Successfully saved model {i + 1}")
                 
             except CalculatedModelError:
@@ -920,7 +917,7 @@ def calc_and_save_sync(models, *args):
                 total_models=model_count,
             ) from unexpected_error
     
-    logger.info(f"Synchronous processing completed successfully: {processed_count}/{model_count} models processed")
+    logger.info(f"Synchronous processing completed successfully: {model_count} models processed")
 
 
 class CalculatedModelMixinMeta(ModelBase):
