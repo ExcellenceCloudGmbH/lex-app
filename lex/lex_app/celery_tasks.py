@@ -804,7 +804,6 @@ def calc_and_save(models: List[Model], *args, **kwargs):
     Calculates and saves a list of models.
     Aborts the entire batch immediately if any error occurs.
     """
-    from django.db import IntegrityError
     summary = {
         "total_models": len(models),
         "processed_successfully": 0,
@@ -822,19 +821,14 @@ def calc_and_save(models: List[Model], *args, **kwargs):
                 model.save()
             summary["processed_successfully"] += 1
 
-        except IntegrityError as integrity_error:
+        except Exception as e:
             logger.error(
-                "Integrity error for %s; aborting batch",
+                "Error processing model %s; aborting batch",
                 model,
                 exc_info=True,
             )
             summary["errors"] += 1
             raise
-
-        except Exception as e:
-            logger.error(f"Error processing model {model}: {e}")
-            summary["errors"] += 1
-            raise e
 
     logger.info(f"Task finished. Summary: {summary}")
     return summary

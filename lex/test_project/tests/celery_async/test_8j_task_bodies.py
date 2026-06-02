@@ -342,10 +342,10 @@ class TestCluster08j_CalcAndSave(E2ETestCase):
     ``calc_and_save`` — the batch-processing loop.
 
     Every row a ``CalculatedModelMixin.create(...)`` dispatches ends up
-    here.  Per-model: ``lex_func()`` → ``save()``.  Any error
-    (IntegrityError or otherwise) aborts the entire batch immediately
-    and re-raises so the outer ``on_failure`` callback can flip the
-    row to ``ERROR`` + log the audit row.
+    here.  Per-model: ``lex_func()`` → ``save()``.  Any exception
+    aborts the entire batch immediately and re-raises so the outer
+    ``on_failure`` callback can flip the row to ``ERROR`` + log the
+    audit row.
     """
 
     e2e_models = ALL_MODELS
@@ -379,9 +379,9 @@ class TestCluster08j_CalcAndSave(E2ETestCase):
         Scenario 8.38: ``save()`` raises IntegrityError → batch aborts
         immediately.
 
-        Any IntegrityError during save is now treated as non-recoverable
-        and the batch stops processing.  The error is re-raised so the
-        outer CallbackTask.on_failure stamps ``is_calculated=ERROR``.
+        Any exception during save is treated as non-recoverable and the
+        batch stops processing.  The error is re-raised so the outer
+        CallbackTask.on_failure stamps ``is_calculated=ERROR``.
         """
         model = CelerySyncCalc(name="calc-conflict")
 
@@ -400,8 +400,8 @@ class TestCluster08j_CalcAndSave(E2ETestCase):
     # -- 8.39 ---------------------------------------------------------------
     def test_8_39_generic_exception_bumps_errors_and_reraises(self) -> None:
         """
-        Scenario 8.39: ``lex_func()`` raises non-IntegrityError → error
-        counted and re-raised to on_failure.
+        Scenario 8.39: ``lex_func()`` raises → error counted and re-raised
+        to on_failure.
 
         The outer ``CallbackTask.on_failure`` depends on the original
         exception to stamp ``is_calculated=ERROR`` and close the audit
