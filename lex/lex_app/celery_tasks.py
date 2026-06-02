@@ -821,7 +821,7 @@ def calc_and_save(models: List[Model], *args, **kwargs):
                 model.save()
             summary["processed_successfully"] += 1
 
-        except Exception as e:
+        except Exception:
             logger.error(
                 "Error processing model %s; aborting batch",
                 model,
