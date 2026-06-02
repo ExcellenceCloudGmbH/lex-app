@@ -1,20 +1,18 @@
 import json
 import os
-from pathlib import Path
 import sqlite3
 import subprocess
+import sys
+import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest import TestCase
 from unittest.mock import Mock
 from unittest.mock import patch
-import sys
-
-from click.testing import CliRunner
 
 import lex.tools.setup_with_ai as setup_with_ai_module
-
+from click.testing import CliRunner
 from generate_pycharm_configs import (
     CELERY_WORKER_COUNT_PROMPT,
     _build_celery_workers_parameters,
@@ -31,8 +29,6 @@ from lex.tools.setup_with_ai import (
     SetupWithAICredentials,
     SetupWithAIArtifacts,
     SetupWithAIMCPProbeResult,
-    SetupWithAIServerRuntime,
-    SetupWithAIUpdateResult,
     apply_ai_update,
     apply_ai_update_0_2_1,
     apply_ai_update_0_2_2,
@@ -311,6 +307,7 @@ class LexFlowerCommandTests(TestCase):
                     "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
                     "REMOTE_MCP_API_KEY": "remote_api_key",
                     "GITHUB_TOKEN": "ghu_example",
+                    "LEX_MCP_ANALYTICS_BACKEND": "remote",
                 },
             )
             bootstrap_copilot_state_mock.assert_called_once_with(
@@ -798,7 +795,7 @@ class SetupWithAIToolsTests(TestCase):
 
         os_kill_mock.assert_called_once_with(6543, 0)
         popen_mock.assert_not_called()
-        selfhow to revert a commit.assertTrue(runtime.already_running)
+        self.assertTrue(runtime.already_running)
         self.assertEqual(runtime.pid, 6543)
 
 

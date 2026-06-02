@@ -1,6 +1,6 @@
-from django.test import TestCase
 from django.conf import settings
 from django.db import connection
+from django.test import TestCase
 
 
 class create_db(TestCase):

@@ -24,11 +24,14 @@ from __future__ import annotations
 
 import unittest
 
+from lex.tests.e2e._authenticated_e2e_test_case import AuthenticatedE2ETestCase
 from rest_framework import status
 
-from lex.tests.e2e._authenticated_e2e_test_case import AuthenticatedE2ETestCase
-
 from .models import ALL_MODELS, EMPLOYEE, Employee
+
+import pytest
+
+pytestmark = pytest.mark.journeys
 
 
 class TestJourneyC_EmployeeVisibility_Superuser(AuthenticatedE2ETestCase):

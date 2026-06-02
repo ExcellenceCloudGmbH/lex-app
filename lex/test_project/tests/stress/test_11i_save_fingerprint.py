@@ -44,6 +44,10 @@ from .models import (
     ALL_MODELS, StressCounterparty, StressInvoice, StressPeriod,
 )
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 
 class TestCluster11i_SaveSqlFingerprint(StressTestCase):
     """Pin down which SQL statements ``LexModel.save()`` actually runs."""

@@ -1,10 +1,3 @@
-from rest_framework import serializers as drf_serializers
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework_api_key.permissions import HasAPIKey
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import APIException
-from rest_framework.fields import empty
 from django.db.models import (
     ForeignKey,
     IntegerField,
@@ -17,10 +10,16 @@ from django.db.models import (
     AutoField,
     JSONField
 )
-from lex.core.fields import  PDFField, XLSXField
-from lex.api.views.permissions.UserPermission import UserPermission
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
-
+from lex.api.views.permissions.UserPermission import UserPermission
+from lex.core.fields import PDFField, XLSXField
+from rest_framework import serializers as drf_serializers
+from rest_framework.exceptions import APIException
+from rest_framework.fields import empty
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_api_key.permissions import HasAPIKey
 
 DEFAULT_TYPE_NAME = "string"
 
@@ -128,6 +127,10 @@ class Fields(APIView):
         # hide internal-only fields
         excluded = {ID_FIELD_NAME, SHORT_DESCR_NAME}
 
+        # Check for explicit type overrides on the serializer Meta
+        meta = getattr(serializer, 'Meta', None)
+        field_type_overrides = getattr(meta, 'lex_field_type_overrides', {}) or {}
+
         for fname, drf_field in serializer.fields.items():
             if fname in excluded:
                 continue
@@ -164,7 +167,7 @@ class Fields(APIView):
                 info = {
                     "name": fname,
                     "readable_name": getattr(drf_field, "label", fname).title(),
-                    "type": ftype,
+                    "type": field_type_overrides.get(fname, ftype),
                     "editable": not getattr(drf_field, "read_only", False),
                     "required": getattr(drf_field, "required", False),
                     "default_value": default_value,

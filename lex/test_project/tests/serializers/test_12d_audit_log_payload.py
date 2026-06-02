@@ -33,15 +33,18 @@ from __future__ import annotations
 import unittest
 
 from django.contrib.contenttypes.models import ContentType
-from rest_framework.test import APIRequestFactory
-
 from lex.api.serializers.base_serializers import model2serializer
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.core.models.LexModel import PermissionResult
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework.test import APIRequestFactory
 
 from .models import ALL_MODELS, ProtectedWideItem, RelatedItem, WideItem
+
+import pytest
+
+pytestmark = pytest.mark.serializers
 
 
 class TestCluster12d_AuditLogPayloadFiltering(E2ETestCase):

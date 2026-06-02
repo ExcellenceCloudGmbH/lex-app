@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-
 TABLE_SNAPSHOT_FILE = ".lex_tables_before.json"
 PRE_FREEZE_MANIFEST_FILE = ".lex_legacy_freeze_manifest.pre_migrate.json"
 FREEZE_MANIFEST_FILE = ".lex_legacy_freeze_manifest.json"

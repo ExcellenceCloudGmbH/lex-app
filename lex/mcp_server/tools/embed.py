@@ -31,16 +31,14 @@ import logging
 import os
 import re
 import string
-import textwrap
 import urllib.parse
 from typing import Any, Dict, List, Optional
 
+from lex.mcp_server.config import mcp_setting
+from lex.mcp_server.registry import container_is_writable, get_container
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.resources import FunctionResource
 from mcp.types import TextContent, ToolAnnotations
-
-from lex.mcp_server.config import mcp_setting
-from lex.mcp_server.registry import container_is_writable, get_container
 
 logger = logging.getLogger(__name__)
 

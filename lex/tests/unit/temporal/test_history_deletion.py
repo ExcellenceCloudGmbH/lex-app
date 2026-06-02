@@ -9,13 +9,14 @@ Verifies:
       and a corresponding meta-history entry
 """
 
-from unittest.mock import patch
-from django.test import TransactionTestCase
-from django.db import models, connection
-from datetime import timedelta
 import datetime
-from django.utils import timezone
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.db import models, connection
+from django.test import TransactionTestCase
 from lex.core.models.LexModel import LexModel
+
 
 class HistoryDeleteTestModel(LexModel):
     name = models.CharField(max_length=100)

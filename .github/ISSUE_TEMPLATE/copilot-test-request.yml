@@ -1,0 +1,72 @@
+name: Copilot Test Request
+description: Ask the Copilot test-bot to author (and optionally fix) a test for a behaviour or bug.
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Filing this issue triggers `copilot_test_bot.yml`.
+        See [`docs/ci-cd/copilot-test-bot.md`](../../docs/ci-cd/copilot-test-bot.md) for the full mechanism.
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode (REQUIRED — drives the workflow's behaviour)
+      description: |
+        - **regression** — codify a behaviour that already works. PR auto-merges on green CI.
+        - **bug-repro** — write an `@expectedFailure` test that reproduces a known bug; appends a row to `known-bugs.md`. PR auto-merges on green CI.
+        - **fix-and-test** — write a failing test, then make the smallest source change to pass it. **Human review required, no auto-merge.**
+      options:
+        - regression
+        - bug-repro
+        - fix-and-test
+    validations:
+      required: true
+
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Behaviour description
+      description: What is the framework supposed to do? Describe the contract — not the current code.
+      placeholder: |
+        e.g. "When a CalculatedModel.create() call hits an IntegrityError on save, the framework
+        should call delete_models_with_same_defining_fields, rewire the pk, and retry the save.
+        The conflicts_resolved counter should bump by one per resolved conflict."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer / steps
+      description: REQUIRED for bug-repro and fix-and-test. Optional for regression.
+      placeholder: |
+        1. Set up X
+        2. Call Y
+        3. Observe Z (bug) — should be W
+    validations:
+      required: false
+
+  - type: input
+    id: cluster_hint
+    attributes:
+      label: Cluster hint (optional)
+      description: |
+        - existing letter (`7g`, `12e`) → use that sub-cluster
+        - cluster number only (`7`) → next free letter inside it
+        - `new` → create a new cluster
+        - `others` or blank → place under `others/` if no existing cluster fits
+
+  - type: input
+    id: files
+    attributes:
+      label: Files involved (optional)
+      description: Source files Copilot should look at for context. Comma-separated paths.
+
+  - type: checkboxes
+    id: publish
+    attributes:
+      label: Publish on merge
+      description: If checked AND the bot's PR auto-merges AND the repo variable `COPILOT_AUTO_PUBLISH_ENABLED` is `"true"`, cuts a draft rc release.
+      options:
+        - label: Cut a draft `rc` release after merge

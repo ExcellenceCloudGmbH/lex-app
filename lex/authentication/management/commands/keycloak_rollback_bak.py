@@ -1,5 +1,5 @@
-from django.core.management.base import BaseCommand
 from django.apps import apps
+from django.core.management.base import BaseCommand
 from keycloak import KeycloakOpenIDConnection, KeycloakUMA, KeycloakAdmin
 from keycloak.exceptions import KeycloakDeleteError, KeycloakGetError
 from lex.lex_app import settings

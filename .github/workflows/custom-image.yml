@@ -37,7 +37,13 @@ jobs:
             TAG=$(git describe --tags --abbrev=0 HEAD)
           fi
           echo "TAG=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Resolved tag: ${TAG}"
+          # PyPI versions have no leading 'v'. The Dockerfile does
+          # `pip install lex-app==${IMAGE_VERSION}`, so the build-arg must
+          # be the stripped version (v2.0.0rc124 -> 2.0.0rc124); passing the
+          # raw tag makes pip reject "lex-app==v2.0.0rc124". Image TAGS below
+          # keep the 'v' — only the pip install version is stripped.
+          echo "VERSION=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: ${TAG} (pip version: ${TAG#v})"
 
       - id: "gcloud-auth"
         name: "Authenticate to Google Cloud"
@@ -108,5 +114,5 @@ jobs:
           context: .
           file: ./build/Dockerfile
           build-args: |
-            IMAGE_VERSION=${{ steps.resolve-tag.outputs.TAG }}
+            IMAGE_VERSION=${{ steps.resolve-tag.outputs.VERSION }}
             PYTHON_BASE_IMAGE=${{ steps.python-base.outputs.PYTHON_BASE_IMAGE }}

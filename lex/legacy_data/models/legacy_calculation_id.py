@@ -1,5 +1,4 @@
 from django.db import models
-from django_lifecycle import BEFORE_UPDATE, hook
 
 
 class LegacyCalculationId(models.Model):

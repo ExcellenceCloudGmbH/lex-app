@@ -12,7 +12,7 @@ distribution:
 Mode selection inside the MCP server is determined by the CLI flag
 (``--mode``), a one-shot override file (``~/.lex-mcp/mode-override``), or
 the ``LEX_MCP_MODE`` environment variable / ``.env`` entry.  With the
-crash-and-reboot mechanism (lex-mcp-local ≥ 0.2.3), mode switches are
+crash-and-reboot mechanism (lex-mcp-local ≥ 1.0.0), mode switches are
 instant: the server self-terminates via ``os._exit(0)`` and the IDE
 auto-restarts the subprocess with the new mode's tool surface.
 
@@ -58,7 +58,6 @@ from lex.tools.setup_with_ai import (
     resolve_active_python_executable,
     resolve_lex_app_package_root,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mode model
@@ -539,14 +538,15 @@ def verify_ai_assets(
             else None
         )
         # Don't restore into the lex package's own checkout (avoids self-copy).
-        if source is not None and project_root_resolved in source.parents:
+        destination = project_root_resolved / name
+        if source is not None and source.resolve() == destination.resolve():
             results.append(
                 DirectoryVerificationResult(
                     directory_name=name,
                     source_directory=source,
-                    destination_directory=project_root_resolved / name,
+                    destination_directory=destination,
                     skipped_reason=(
-                        f"Source directory '{name}' lives inside the project root; "
+                        f"Source directory '{name}' is the destination; "
                         "skipping self-copy."
                     ),
                 )

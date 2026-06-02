@@ -27,10 +27,9 @@ How to run::
 
 import os
 import sys
-from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock, call, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import django
 from django.apps import apps

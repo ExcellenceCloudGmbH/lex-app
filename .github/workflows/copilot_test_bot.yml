@@ -1,0 +1,171 @@
+# ───────────────────────────────────────────────────────────────────
+#  Copilot Test-Bot — entry point.
+#
+#  Trigger: a `copilot:<mode>` label is added to an issue, OR an
+#  operator runs the workflow manually with an issue number + mode.
+#
+#  Behaviour: validate the issue, assemble a prompt from the
+#  test-plan docs at runtime, file a Copilot-task issue, assign it
+#  to copilot-swe-agent[bot]. Ends after the assignment — Copilot
+#  takes over from there. The PR-gate workflow handles its PR.
+# ───────────────────────────────────────────────────────────────────
+
+name: Copilot Test-Bot
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Existing issue number to (re-)dispatch"
+        required: false
+        type: string
+      mode:
+        description: "Mode (only used if issue_number is blank)"
+        required: false
+        type: choice
+        options: [regression, bug-repro, fix-and-test]
+      publish:
+        description: "Set publish-on-merge label"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only run on label events when the label is one of our three modes.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'copilot:regression' ||
+      github.event.label.name == 'copilot:bug-repro' ||
+      github.event.label.name == 'copilot:fix-and-test'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Resolve issue number + mode
+        id: ctx
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "issues" ]]; then
+            ISSUE_NUMBER="${{ github.event.issue.number }}"
+            LABEL="${{ github.event.label.name }}"
+            MODE="${LABEL#copilot:}"
+          else
+            ISSUE_NUMBER="${{ inputs.issue_number }}"
+            MODE="${{ inputs.mode }}"
+            if [[ -z "$ISSUE_NUMBER" || -z "$MODE" ]]; then
+              echo "::error::workflow_dispatch requires both issue_number and mode."
+              exit 1
+            fi
+          fi
+          echo "issue_number=${ISSUE_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}"                 >> "$GITHUB_OUTPUT"
+
+      - name: Validate issue + extract fields
+        id: extract
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          MODE: ${{ steps.ctx.outputs.mode }}
+        run: |
+          set -euo pipefail
+          ISSUE_JSON=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json title,body,labels)
+          TITLE=$(echo "$ISSUE_JSON" | jq -r .title)
+          BODY=$(echo  "$ISSUE_JSON" | jq -r .body)
+
+          # Reject if more than one mode label is present.
+          MODE_LABELS=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name | select(startswith("copilot:") and . != "copilot:invalid")] | length')
+          if [[ "$MODE_LABELS" -gt 1 ]]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "Multiple mode labels found ($MODE_LABELS). Apply exactly one of copilot:regression / copilot:bug-repro / copilot:fix-and-test."
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+            exit 1
+          fi
+
+          # Pull form fields out of the issue body. The issue template emits
+          # `### Heading\n\n<value>` blocks; we extract by heading.
+          extract_section() {
+            python3 - "$1" <<'PY'
+          import re, sys, os
+          body = os.environ["BODY"]
+          heading = sys.argv[1]
+          pat = re.compile(rf"^### {re.escape(heading)}\s*\n+(.*?)(?=^### |\Z)", re.MULTILINE | re.DOTALL)
+          m = pat.search(body)
+          print((m.group(1).strip() if m else "").strip())
+          PY
+          }
+          export BODY
+          BEHAVIOUR=$(extract_section "Behaviour description")
+          REPRODUCER=$(extract_section "Reproducer / steps")
+          CLUSTER_HINT=$(extract_section "Cluster hint (optional)")
+          FILES_RAW=$(extract_section "Files involved (optional)")
+
+          if [[ -z "$BEHAVIOUR" ]]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "Behaviour description is empty. Edit the issue and re-add the mode label to retry."
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+            exit 1
+          fi
+
+          if [[ "$MODE" != "regression" && -z "$REPRODUCER" ]]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "Reproducer is required for mode '$MODE'. Edit the issue and re-add the mode label to retry."
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+            exit 1
+          fi
+
+          # Build files JSON array from CSV-or-newlines input.
+          FILES_JSON=$(printf '%s\n' "$FILES_RAW" | python3 -c '
+          import json, sys
+          raw = sys.stdin.read().strip()
+          parts = [p.strip() for chunk in raw.splitlines() for p in chunk.split(",")]
+          print(json.dumps([p for p in parts if p]))')
+
+          jq -n \
+            --argjson number "$ISSUE_NUMBER" \
+            --arg title "$TITLE" \
+            --arg mode "$MODE" \
+            --arg behaviour "$BEHAVIOUR" \
+            --arg reproducer "$REPRODUCER" \
+            --arg cluster_hint "$CLUSTER_HINT" \
+            --argjson files "$FILES_JSON" \
+            '{number: $number, title: $title, mode: $mode, behaviour: $behaviour, reproducer: $reproducer, cluster_hint: $cluster_hint, files: $files}' \
+            > issue.json
+
+      - name: Assemble prompt
+        run: |
+          python3 .github/scripts/copilot_assemble_prompt.py \
+            --issue-json issue.json \
+            --test-plan-dir lex/test_project/test-plan \
+            --out prompt.md
+
+      - name: Create Copilot-task issue + assign Copilot
+        env:
+          GH_TOKEN: ${{ secrets.COPILOT_PAT }}
+          PARENT_ISSUE: ${{ steps.ctx.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          TITLE_JSON=$(jq -r .title issue.json)
+          TASK_URL=$(gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "[copilot-task] $TITLE_JSON" \
+            --body-file prompt.md \
+            --assignee copilot-swe-agent)
+          gh issue comment "$PARENT_ISSUE" --repo "$GITHUB_REPOSITORY" \
+            --body "Copilot task dispatched: $TASK_URL"

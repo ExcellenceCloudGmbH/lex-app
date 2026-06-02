@@ -37,9 +37,8 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from rest_framework import status
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import (
     ALL_MODELS,
@@ -50,6 +49,10 @@ from .models import (
     QueryCategory,
     QueryItem,
 )
+
+import pytest
+
+pytestmark = pytest.mark.queries
 
 
 def _base_ag_request(**overrides) -> dict:

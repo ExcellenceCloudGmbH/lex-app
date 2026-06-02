@@ -39,8 +39,10 @@ from __future__ import annotations
 import datetime as _dt
 import unittest
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
 
+import pandas as pd
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import (
@@ -49,11 +51,11 @@ from .models import (
     ExportCategory,
     FastExportItem,
 )
-from io import BytesIO
-
-import pandas as pd
-
 from .test_13a_legacy_export import _assert_msg
+
+import pytest
+
+pytestmark = pytest.mark.exports
 
 
 def _read_xlsx_stream(resp) -> pd.DataFrame:

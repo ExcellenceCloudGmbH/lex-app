@@ -17,11 +17,10 @@ from __future__ import annotations
 
 import unittest
 
-from rest_framework import status
-from rest_framework.test import APIClient
-
 from lex.core.models.LexModel import PermissionResult
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from .models import (
     ALL_MODELS,
@@ -33,6 +32,10 @@ from .models import (
     ExportMaskedItem,
 )
 from .test_13a_legacy_export import _assert_msg, _read_xlsx_response
+
+import pytest
+
+pytestmark = pytest.mark.exports
 
 
 class TestCluster13d_AuthAndFieldMask(E2ETestCase):

@@ -29,14 +29,16 @@ from __future__ import annotations
 
 import unittest
 
-from rest_framework import status
-
 from lex.core.models.LexModel import PermissionResult, UserContext
-
 from lex.tests.e2e._authenticated_e2e_test_case import AuthenticatedE2ETestCase
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import ALL_MODELS, FIELD_LEVEL, FieldLevelItem
+
+import pytest
+
+pytestmark = pytest.mark.permissions
 
 
 class TestCluster04a_FieldLevel_Superuser(AuthenticatedE2ETestCase):

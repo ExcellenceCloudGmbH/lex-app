@@ -14,11 +14,14 @@ import unittest
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
-
 from lex.api.utils import operation_context
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 from lex.core.signals.CalculationSignals import update_calculation_status
+
+import pytest
+
+pytestmark = pytest.mark.signals_ws
 
 
 class DummySignalCalc(CalculationModel):

@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
 from django.utils import timezone
-
 from lex.core.services.bitemporal_signals import _schedule_future_activation
 
 

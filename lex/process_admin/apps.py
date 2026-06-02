@@ -1,4 +1,3 @@
-from lex.utilities.config.generic_app_config import GenericAppConfig
 from lex.lex_app.apps import LexAppConfig
 
 

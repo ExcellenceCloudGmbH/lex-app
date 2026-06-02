@@ -1,9 +1,9 @@
-import os
-import sys
-import types
 import importlib
 import importlib.abc
 import importlib.machinery
+import os
+import sys
+import types
 
 
 class ModuleAliasingFinder(importlib.abc.MetaPathFinder):
@@ -19,7 +19,7 @@ class ModuleAliasingFinder(importlib.abc.MetaPathFinder):
         """
         Args:
             project_root: Base path of the project
-            repo_name: Name of the repository/project (e.g., 'ArmiraCashflowDB')
+            repo_name: Name of the repository/project (e.g., 'MyApp')
         """
         self.project_root = project_root
         self.repo_name = repo_name

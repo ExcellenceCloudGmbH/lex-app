@@ -3,11 +3,16 @@ Cluster 8a: Sync fallback when Celery is inactive or unavailable.
 
 Intent (from docs/features/calculations/ + Celery integration docs):
 
-    When ``CELERY_ACTIVE`` is not set to ``"true"``, or when
-    ``calculate()`` has no ``.delay`` attribute (no task decorator),
-    ``should_use_celery()`` must return False and the framework must
-    execute the calculation synchronously. This is the default
-    zero-config experience.
+    When ``CELERY_ACTIVE`` is not set to ``"true"`` (or the broker is
+    unreachable), ``should_use_celery()`` must return False and the
+    framework must execute the calculation synchronously — this is the
+    default zero-config experience.
+
+    When ``CELERY_ACTIVE="true"`` and the broker is reachable, every
+    root calculation must dispatch to a worker **regardless of whether
+    the user's ``calculate()`` is decorated with ``@lex_shared_task``**.
+    Undecorated methods are wrapped in the generic ``calc_and_save``
+    task — see :meth:`CalculationModel.dispatch_calculation_task`.
 
 Scenario numbering matches
 docs/test-plan/test-clusters.md#8-celery--async.
@@ -20,10 +25,13 @@ import unittest
 from unittest.mock import patch
 
 from lex.core.models.CalculationModel import CalculationModel
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, CelerySyncCalc
+
+import pytest
+
+pytestmark = pytest.mark.celery_async
 
 
 class TestCluster08a_SyncFallback(E2ETestCase):
@@ -46,24 +54,35 @@ class TestCluster08a_SyncFallback(E2ETestCase):
             )
 
     # -- 8.2 -----------------------------------------------------------
-    def test_8_2_should_use_celery_false_without_delay_attr(self) -> None:
+    def test_8_2_should_use_celery_true_even_without_delay_attr(self) -> None:
         """
-        Scenario 8.2: No ``.delay`` attribute on calculate → False.
+        Scenario 8.2: Undecorated calculate + CELERY_ACTIVE=true + reachable
+        broker ⇒ ``should_use_celery()`` returns True.
 
-        Even if CELERY_ACTIVE were 'true', an undecorated calculate
-        method cannot be dispatched — the framework must fall back.
+        The framework no longer requires the user to decorate ``calculate()``
+        with ``@lex_shared_task`` — undecorated calculations are dispatched
+        via the generic ``calc_and_save`` task (see Scenario 8.5).
         """
         with patch.dict(os.environ, {"CELERY_ACTIVE": "true"}, clear=False):
             calc = CelerySyncCalc(name="s8-2")
-            # lex_func() returns the plain calculate method — no .delay.
+
+            # Precondition: lex_func() returns the plain calculate method
+            # with no .delay — this is what used to disable Celery.
             self.assertFalse(
                 hasattr(calc.lex_func(), "delay"),
                 "Plain calculate has no .delay — precondition of 8.2",
             )
-            self.assertFalse(
-                calc.should_use_celery(),
-                "should_use_celery must be False when .delay is missing",
-            )
+
+            # Force the broker-reachable branch without hitting a real broker.
+            with patch(
+                "celery.current_app.control.inspect",
+                return_value=object(),
+            ):
+                self.assertTrue(
+                    calc.should_use_celery(),
+                    "should_use_celery must be True for undecorated calculate "
+                    "when CELERY_ACTIVE=true and broker is reachable",
+                )
 
     # -- 8.3 -----------------------------------------------------------
     def test_8_3_sync_execution_success(self) -> None:

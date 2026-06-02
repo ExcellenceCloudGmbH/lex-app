@@ -42,11 +42,13 @@ from __future__ import annotations
 
 import datetime as _dt
 import unittest
-from types import SimpleNamespace
 
 from django.test import SimpleTestCase
-
 from lex.api.views.model_entries.History import HistoryModelEntry
+
+import pytest
+
+pytestmark = pytest.mark.history
 
 
 class _FakeField:

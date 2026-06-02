@@ -9,10 +9,11 @@ If no valid record exists (record deleted or not yet active), the main
 table row is removed.
 """
 
+import logging
+
 from django.db import models
 from django.db import transaction
 from django.utils import timezone
-import logging
 
 logger = logging.getLogger(__name__)
 

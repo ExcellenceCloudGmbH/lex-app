@@ -12,7 +12,6 @@ from unittest.mock import patch
 from django.db import connection
 from django.test import TransactionTestCase
 from django_lifecycle import AFTER_SAVE, hook
-
 from lex.core.models.LexModel import LexModel
 
 

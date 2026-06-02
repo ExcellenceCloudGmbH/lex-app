@@ -14,7 +14,7 @@ It normalises incoming datetime strings to UTC, handling:
 import os
 import sys
 import unittest
-from datetime import datetime, timezone as dt_tz, timedelta
+from datetime import timezone as dt_tz
 from pathlib import Path
 
 import django

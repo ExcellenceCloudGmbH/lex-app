@@ -18,10 +18,8 @@ factory – all without requiring a running Keycloak or database.
 """
 
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from django.test import SimpleTestCase
-
 from lex.core.models.LexModel import UserContext
 
 

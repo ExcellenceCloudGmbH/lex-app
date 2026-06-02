@@ -1,0 +1,95 @@
+# ───────────────────────────────────────────────────────────────────
+#  Copilot Test-Bot — label-on-open bridge.
+#
+#  The issue form (`.github/ISSUE_TEMPLATE/copilot-test-request.yml`)
+#  has a required Mode dropdown, but GitHub issue forms can't apply
+#  a dynamic label based on a dropdown value. Without this bridge the
+#  user has to manually label every issue before `copilot_test_bot.yml`
+#  fires — confusing UX.
+#
+#  This workflow runs on `issues: opened`, reads the form's Mode and
+#  Publish-on-merge fields out of the body, and applies the matching
+#  `copilot:<mode>` (and optional `publish-on-merge`) labels. That
+#  `labeled` event then triggers `copilot_test_bot.yml` as designed.
+# ───────────────────────────────────────────────────────────────────
+
+name: Copilot Label On Issue Open
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only act on issues filed via our form. We gate on the body
+    # containing the form's `### Mode` heading rather than a title
+    # prefix — users routinely edit the title (or drop the prefix),
+    # but the form body structure is stable. Non-form issues won't
+    # have that heading, so this won't fire on unrelated traffic.
+    if: contains(github.event.issue.body, '### Mode')
+
+    steps:
+      - name: Parse form fields + apply labels
+        env:
+          # MUST be a PAT (not GITHUB_TOKEN). GitHub deliberately drops
+          # workflow events triggered by GITHUB_TOKEN to prevent infinite
+          # loops. If we add the label with GITHUB_TOKEN, the resulting
+          # `issues: labeled` event will NOT fire copilot_test_bot.yml,
+          # and the whole pipeline silently no-ops. COPILOT_PAT is a
+          # human PAT, so its events do propagate.
+          GH_TOKEN: ${{ secrets.COPILOT_PAT }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          set -euo pipefail
+
+          # GitHub issue forms emit each field as:
+          #   ### <field label>
+          #
+          #   <value>
+          #
+          # The dropdown value is the first non-blank line after the heading.
+          # Checkboxes are emitted as `- [x] <option label>` (or `- [ ]`).
+          PARSED=$(python3 - <<'PY'
+          import os, re, sys
+          body = os.environ["ISSUE_BODY"] or ""
+
+          # Mode: dropdown — first non-blank line after the `### Mode ...` heading.
+          m = re.search(r"^###\s+Mode\b[^\n]*\n+([^\n]+)", body, re.MULTILINE)
+          if not m:
+              sys.exit("could not find '### Mode' heading in issue body — issue was likely not filed via the copilot-test form")
+          mode = m.group(1).strip()
+          if mode not in ("regression", "bug-repro", "fix-and-test"):
+              sys.exit(f"unexpected Mode value: {mode!r} (expected regression / bug-repro / fix-and-test)")
+
+          # Publish-on-merge: checkbox — look for `- [x]` (case-insensitive) under
+          # the `### Publish on merge` heading. Anything else (`- [ ]` or absent)
+          # means unchecked.
+          publish = False
+          pm = re.search(r"^###\s+Publish on merge\b[^\n]*\n+(- \[[ xX]\][^\n]*)", body, re.MULTILINE)
+          if pm and re.match(r"- \[[xX]\]", pm.group(1)):
+              publish = True
+
+          print(f"mode={mode}")
+          print(f"publish={'true' if publish else 'false'}")
+          PY
+          )
+          # Surface the parsed values to GHA log + extract for use below.
+          echo "$PARSED"
+          MODE=$(echo "$PARSED" | grep '^mode=' | cut -d= -f2)
+          PUBLISH=$(echo "$PARSED" | grep '^publish=' | cut -d= -f2)
+
+          # Apply the mode label. The `labeled` event will trigger
+          # copilot_test_bot.yml as designed.
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --add-label "copilot:$MODE"
+
+          if [[ "$PUBLISH" == "true" ]]; then
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --add-label "publish-on-merge"
+          fi

@@ -1,0 +1,142 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Mirror published docs DOWN from lex-app-docs (canonical) into docs/.
+#
+#  Model A: lex-app-docs/content/ is the source of truth for the published
+#  doc subset. This job pulls the managed paths (declared in
+#  docs/.docs-sync.yml) down into this repo's docs/ so the local copy is
+#  always fresh — it is what the test-plan reads for intent (Golden Rule)
+#  and what we keep on hand as feature-implementation context.
+#
+#  Complementary to update_docs.yml (which authors docs UPSTREAM via
+#  Copilot). Full loop:
+#    release → update_docs.yml → Copilot authors+merges PR in lex-app-docs
+#      → (this job, via cron or inbound dispatch) mirrors content/ down
+#      → opens a PR against lex-app-v2.
+#
+#  Pull-based primary trigger => zero changes needed in lex-app-docs to
+#  start working. The optional repository_dispatch gives instant sync once
+#  lex-app-docs installs docs/ci-cd/docs-content-sync-dispatch.yml.
+#
+#  Auth: reuses the lex-docs-bot GitHub App (DOCS_APP_ID /
+#  DOCS_APP_PRIVATE_KEY) which already has contents:read on lex-app-docs.
+#
+#  See: docs/superpowers/specs/2026-05-31-docs-mirror-sync-design.md
+# ──────────────────────────────────────────────────────────────────────
+
+name: Sync Docs from lex-app-docs
+
+on:
+  schedule:
+    # Daily backstop at 06:00 UTC.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [docs-content-updated]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: docs-mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror content/ down and open PR
+    runs-on: ubuntu-latest
+    steps:
+      # ── 1. Checkout this repo (lex-app) ────────────────────────
+      - name: Checkout lex-app
+        uses: actions/checkout@v4
+        with:
+          ref: lex-app-v2
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      # ── 2. Token to READ lex-app-docs ──────────────────────────
+      - name: Generate GitHub App token (read lex-app-docs)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DOCS_APP_ID }}
+          private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}
+          repositories: "lex-app-docs"
+          owner: ExcellenceCloudGmbH
+
+      # ── 3. Checkout lex-app-docs (canonical) into a sibling dir ─
+      - name: Checkout lex-app-docs
+        uses: actions/checkout@v4
+        with:
+          repository: ExcellenceCloudGmbH/lex-app-docs
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          path: _lex_app_docs
+
+      - name: Capture upstream content SHA
+        id: upstream
+        working-directory: _lex_app_docs
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # ── 4. Mirror managed paths down ───────────────────────────
+      - name: Mirror managed paths
+        run: |
+          python .github/scripts/docs_mirror.py sync \
+            --source "${GITHUB_WORKSPACE}/_lex_app_docs/content"
+
+      # Remove the upstream checkout so it can't leak into the diff/PR.
+      - name: Clean upstream checkout
+        run: rm -rf _lex_app_docs
+
+      # ── 5. Open a PR if the mirror produced changes ────────────
+      - name: Detect changes
+        id: diff
+        run: |
+          if [[ -n "$(git status --porcelain docs/)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No docs changes to mirror."
+          fi
+
+      - name: Create branch and PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+        run: |
+          set -euo pipefail
+          BRANCH="docs-sync/${UPSTREAM_SHA}"
+          git config user.name "lex-docs-sync[bot]"
+          git config user.email "lex-docs-sync@users.noreply.github.com"
+
+          # Fresh branch each run (ruleset forbids pushing to existing PR branches).
+          git checkout -b "${BRANCH}"
+          git add docs/
+          git commit -m "docs: mirror published docs from lex-app-docs@${UPSTREAM_SHA}"
+          git push --force-with-lease origin "${BRANCH}"
+
+          # Reuse an open PR for this branch if one already exists.
+          if gh pr view "${BRANCH}" --json number >/dev/null 2>&1; then
+            echo "PR already open for ${BRANCH}."
+          else
+            {
+              printf 'Automated mirror-down of the published docs subset from '
+              printf '`ExcellenceCloudGmbH/lex-app-docs` `content/` @ `%s`.\n\n' "${UPSTREAM_SHA}"
+              printf 'Only paths declared in `docs/.docs-sync.yml` are touched. These docs are '
+              printf '**read-only here** — edit them upstream in lex-app-docs; this job brings them back down.\n\n'
+              printf 'See `docs/ci-cd/docs-sync-mirror.md`.\n'
+            } > /tmp/pr_body.md
+            gh pr create \
+              --base lex-app-v2 \
+              --head "${BRANCH}" \
+              --title "docs: mirror from lex-app-docs@${UPSTREAM_SHA}" \
+              --body-file /tmp/pr_body.md
+          fi

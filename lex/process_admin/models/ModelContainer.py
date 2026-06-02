@@ -1,10 +1,11 @@
-from typing import Set, Dict, Any, Optional, Type, Union
+import logging
+from typing import Set, Dict, Any, Optional, Type
+
 from django.db.models import Model
+from lex.api.serializers import get_serializer_map_for_model
 from lex.core.mixins.ModelModificationRestriction import (
     ModelModificationRestriction,
 )
-from lex.api.serializers import get_serializer_map_for_model
-import logging
 
 logger = logging.getLogger(__name__)
 

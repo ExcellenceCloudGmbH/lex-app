@@ -25,6 +25,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HistSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 class TestCluster05h_SuppressionToolkit(E2ETestCase):
     """The four documented knobs beyond ``skip_history_when_saving``."""

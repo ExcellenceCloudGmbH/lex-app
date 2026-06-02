@@ -1,21 +1,20 @@
 # lex/bin/lex.py
+import asyncio
 import io
 import os
-import sys
-import time
 import platform
 import subprocess
+import sys
 import threading
-import asyncio
+import time
 from pathlib import Path
+import shutil
 
 import click
 import uvicorn
-
-from lex.tools.project_root import find_project_root
-from lex.tools.ai_faq import launch_ai_faq
 from lex.tools.ai_dashboard import launch_ai_dashboard
-from lex.tools.verify_ai_assets import verify_ai_assets
+from lex.tools.ai_faq import launch_ai_faq
+from lex.tools.project_root import find_project_root, resolve_llm_working_directory
 from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
@@ -29,6 +28,7 @@ from lex.tools.setup_with_ai import (
     probe_lex_mcp_local_server_for_pycharm,
     resolve_active_python_executable,
 )
+from lex.tools.verify_ai_assets import verify_ai_assets
 
 # Defer Django imports and setup until needed (NOT at import time)
 _DJANGO_READY = False
@@ -320,12 +320,11 @@ def pytest_cmd(ctx):
 
     \b
     Lex-only flags (intercepted, NOT forwarded to pytest):
-      --report           Generate a per-group PDF summary at
-                           <output_dir>/lex-test-report-<ts>.pdf
-                           (output_dir comes from the effective Lex test config).
-      --report-and-email Generate the PDF summary and then prepare/send
-                           report emails if email delivery is enabled in the
-                           effective Lex test config.
+      --report           Generate a per-group PDF summary and HTML coverage
+                           bundle under the effective Lex report output dir.
+      --report-and-email Generate the PDF summary + HTML coverage bundle and
+                           then prepare/send report emails if email delivery is
+                           enabled in the effective Lex test config.
       --send-emails      Skip the interactive confirmation prompt and send
                            report emails immediately. Only applies together
                            with --report-and-email. Intended for CI runs.
@@ -348,11 +347,11 @@ def pytest_cmd(ctx):
     ``$LEX_TEST_CONFIG_PAYLOAD`` JSON object. An in-process pytest plugin
     registers each group as a marker, validates that every used marker maps to
     a configured group (hard error otherwise), and aggregates
-    pass/fail/skip/error counts per group. `lex pytest --report` writes only
-    the PDF report. `lex pytest --report-and-email` additionally prepares one
-    report email per resolved recipient delivery using the configured sender and
-    recipient data and asks for confirmation before sending unless
-    ``--send-emails`` is supplied.
+    pass/fail/skip/error counts per group. `lex pytest --report` writes the
+    PDF report plus the HTML coverage bundle. `lex pytest --report-and-email`
+    additionally prepares one report email per resolved recipient delivery
+    using the configured sender and recipient data and asks for confirmation
+    before sending unless ``--send-emails`` is supplied.
     """
     # Run from project root so lex_test_config.yaml and the tests entrypoint
     # are auto-discovered regardless of where `lex pytest` was invoked.
@@ -388,6 +387,7 @@ def pytest_cmd(ctx):
     import pytest as _pytest
 
     coverage_runner = None
+    coverage_error = None
     collect_coverage = should_generate_report
     if collect_coverage:
         try:
@@ -395,6 +395,7 @@ def pytest_cmd(ctx):
         except Exception:
             Coverage = None
         if Coverage is not None:
+            report_output_dir = lex_test_config.report_dir
             coverage_runner = Coverage(
                 data_file=None,
                 source=[PROJECT_ROOT_DIR.as_posix()],
@@ -404,6 +405,7 @@ def pytest_cmd(ctx):
                     str(PROJECT_ROOT_DIR / "env" / "*"),
                     str(PROJECT_ROOT_DIR / "Tests" / "*"),
                     str(PROJECT_ROOT_DIR / "tests" / "*"),
+                    str(report_output_dir / "*"),
                     str(PROJECT_ROOT_DIR / "reports" / "*"),
                     str(PROJECT_ROOT_DIR / "htmlcov" / "*"),
                     str(PROJECT_ROOT_DIR / "static" / "*"),
@@ -420,10 +422,73 @@ def pytest_cmd(ctx):
                 ],
             )
             coverage_runner.start()
+        else:
+            coverage_error = "coverage.py is not available in this environment."
 
     # Bootstrap Django after starting report coverage so app/model import-time
     # code is included in the measured project coverage.
     _bootstrap_django()
+
+    # Stand up Django's test database the same way `manage.py test` /
+    # DiscoverRunner.run_tests() does:
+    #   1. setup_test_environment() — installs the test client, RequestFactory
+    #      patches, deprecation-warning filter etc.
+    #   2. DiscoverRunner.setup_databases() — creates the ``test_<dbname>``
+    #      database (or `test_<NAME>` from the settings TEST overrides), runs
+    #      migrations, and re-points ``connection.settings_dict["NAME"]``
+    #      so any TestCase / TransactionTestCase / SimpleTestCase subclass
+    #      that touches the ORM hits the test DB, not the production one.
+    # Without this, every unittest.TestCase-derived test errors at setUp with
+    # `database "<prod name>" does not exist` because Django's runner machinery
+    # never ran.
+    from django.test.runner import DiscoverRunner
+    from django.test.utils import setup_test_environment, teardown_test_environment
+
+    setup_test_environment()
+    _db_runner = DiscoverRunner(verbosity=1, interactive=False, keepdb=False)
+    # Limit test-DB creation to the `default` alias. Django's own
+    # ``manage.py test`` path inspects every collected ``TestCase`` for
+    # its ``databases`` attribute (defaults to ``{"default"}``) and
+    # passes that set in here, so unused aliases like ``GCP`` / ``K8S``
+    # / ``DOCKER-COMPOSE`` are skipped. We bypass that discovery (pytest
+    # owns collection now), so without ``aliases=`` Django would try to
+    # CREATE test_<name> on every alias and fail on the ones whose host
+    # env vars aren't set in CI (e.g. ``GCP`` resolves to host
+    # ``envvar_not_existing`` → DNS error).
+    _old_db_config = _db_runner.setup_databases(aliases={"default"})
+
+    # Make ``register_converter`` idempotent for the duration of the pytest
+    # run. ``lex/process_admin/sites/process_admin_site.py:_get_urls`` calls
+    # ``register_converter(create_model_converter(...), "model")`` every time
+    # ``processAdminSite.urls`` is accessed, and Django's ``register_converter``
+    # raises ``ValueError: Converter 'model' is already registered.`` on the
+    # second call. With ``lex test`` only one cluster ran per invocation so
+    # the issue rarely surfaced, and ``E2ETestCase._rebuild_urls`` already
+    # installs a local idempotent patch around its own reload of
+    # ``lex_app.urls``. Pytest now runs every cluster in one process; a
+    # plain ``TestCase`` (e.g. ``TestCluster01p_UrlConfResolves``) calling
+    # ``reverse()`` after an E2E test reloaded ``lex_app.urls`` hits the
+    # unpatched register and aborts collection. Installing the patch at the
+    # runner level — once, around ``pytest.main()`` — covers every test
+    # class (E2E and plain alike) without modifying framework code, and
+    # matches the existing pattern in ``_e2e_test_case.py`` /
+    # ``test_user_model_registration.py`` / ``test_api_user_journey.py`` /
+    # ``test_bitemporal.py``.
+    from django.urls import converters as _django_converters
+    from django.urls.converters import REGISTERED_CONVERTERS as _REGISTERED_CONVERTERS
+    from unittest.mock import patch as _patch
+
+    _real_register_converter = _django_converters.register_converter
+
+    def _idempotent_register_converter(converter, type_name):
+        _REGISTERED_CONVERTERS.pop(type_name, None)
+        return _real_register_converter(converter, type_name)
+
+    _converter_patch = _patch(
+        "lex.process_admin.sites.process_admin_site.register_converter",
+        new=_idempotent_register_converter,
+    )
+    _converter_patch.start()
 
     started_at = time.perf_counter()
     try:
@@ -432,6 +497,14 @@ def pytest_cmd(ctx):
         # Raised from pytest_collection_modifyitems on marker/group mismatch.
         raise click.ClickException(str(exc)) from exc
     finally:
+        try:
+            _converter_patch.stop()
+        except Exception:
+            pass
+        try:
+            _db_runner.teardown_databases(_old_db_config)
+        finally:
+            teardown_test_environment()
         plugin.run_duration = f"{time.perf_counter() - started_at:.1f} s"
         if coverage_runner is not None:
             try:
@@ -444,14 +517,37 @@ def pytest_cmd(ctx):
                             ignore_errors=True,
                         )
                     )
-            except Exception:
+                    file_coverage = _parse_coverage_text_report(stream.getvalue())
+                shutil.rmtree(lex_test_config.coverage_html_dir, ignore_errors=True)
+                coverage_runner.html_report(
+                    directory=str(lex_test_config.coverage_html_dir),
+                    ignore_errors=True,
+                )
+                coverage_index = lex_test_config.coverage_html_dir / "index.html"
+                if not coverage_index.exists():
+                    raise RuntimeError(
+                        f"Missing coverage HTML entrypoint at {coverage_index}."
+                    )
+            except Exception as exc:
+                coverage_error = f"Coverage summary/HTML generation failed: {exc}"
                 plugin.coverage_summary = None
             else:
                 plugin.coverage_summary = {
                     "label": "Framework-wide code coverage",
                     "display": f"{total:.1f}%",
                     "percentage": round(total, 1),
+                    "files": file_coverage,
                 }
+
+    if should_generate_report and plugin.coverage_summary is None:
+        message = (
+            "Coverage data is required for Lex test report PDF/HTML artifacts. "
+            "The report would otherwise show `n/a`."
+        )
+        if coverage_error:
+            message = f"{message} {coverage_error}"
+        raise click.ClickException(message)
+
 
     if should_generate_report:
         try:
@@ -464,6 +560,9 @@ def pytest_cmd(ctx):
             click.echo(f"Warning: failed to write PDF report: {exc}", err=True)
         else:
             click.echo(f"Lex test report: {pdf_path}")
+            click.echo(
+                f"Lex test coverage HTML: {lex_test_config.coverage_html_dir / 'index.html'}"
+            )
 
     if parsed.report_and_email:
         if not lex_test_config.email.get("from_email"):
@@ -497,6 +596,34 @@ def pytest_cmd(ctx):
                     click.echo(f"Sent {len(deliveries)} Lex test report email(s).")
 
     raise SystemExit(int(exit_code))
+
+def _parse_coverage_text_report(text: str) -> list[dict]:
+    """Parse ``coverage report`` text output into per-file dicts.
+
+    Each dict has keys: ``name``, ``stmts``, ``miss``, ``cover``.
+    The TOTAL row is excluded.
+    """
+    import re
+
+    files: list[dict] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("-") or line.upper().startswith("NAME") or line.upper().startswith("TOTAL"):
+            continue
+        parts = re.split(r"\s+", line)
+        if len(parts) < 4:
+            continue
+        name = parts[0]
+        try:
+            stmts = int(parts[1])
+            miss = int(parts[2])
+            cover_str = parts[3].rstrip("%")
+            cover = float(cover_str)
+        except (ValueError, IndexError):
+            continue
+        files.append({"name": name, "stmts": stmts, "miss": miss, "cover": cover})
+    files.sort(key=lambda f: f["cover"])
+    return files
 
 
 @lex.command(
@@ -609,7 +736,12 @@ def setup(project_root):
     help="Skip the local setup page and prompt in the terminal instead.",
 )
 def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url, mcp_mode, no_browser):
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The LLM agent's working directory IS the project root for setup-with-ai.
+    # Do not walk up to a git toplevel / marker file: the LLM often runs
+    # inside a subdirectory of a larger checkout, and walking up causes
+    # docs/ and .github/ to be written into an ancestor (or be skipped
+    # entirely when that ancestor is the lex package itself).
+    root = resolve_llm_working_directory(project_root)
     python_executable = resolve_active_python_executable(root)
 
     env_path, created = ensure_env_file(root.as_posix())
@@ -860,7 +992,10 @@ def ai_verify(project_root, mode, quiet, silent):
     the project root that is missing or whose contents have drifted. Existing
     user-only files are left untouched.
     """
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The directory passed via --project-root (or cwd) IS the LLM working
+    # directory. We verify assets in *that* directory literally; we do not
+    # walk up to a git toplevel / marker file (see resolve_llm_working_directory).
+    root = resolve_llm_working_directory(project_root)
     quiet = quiet or silent
     explicit_mode = None if mode == "auto" else mode.lower()
 

@@ -1,8 +1,8 @@
 from __future__ import absolute_import
 
+import re
 import sys
 import warnings
-import re
 from pathlib import Path
 
 from django.core.cache import CacheKeyWarning
@@ -23,7 +23,6 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
-from datetime import timedelta
 
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
@@ -416,8 +415,15 @@ CELERY_TASK_SEND_SENT_EVENT = True
 CELERY_RESULT_EXPIRES = 3600  # 1 hour
 
 # Use django-celery-beat's DatabaseScheduler so `celery beat` reads
-# PeriodicTask / ClockedSchedule rows from the DB by default.
-CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+# PeriodicTask / ClockedSchedule rows from the DB by default. Overridable
+# via the ``CELERY_BEAT_SCHEDULER`` env var — useful for local chaos
+# testing where the default ``celery.beat:PersistentScheduler`` (a small
+# on-disk file) is more reliable than DatabaseScheduler on misconfigured
+# Postgres timezones or stalled-sync edge cases.
+CELERY_BEAT_SCHEDULER = os.getenv(
+    "CELERY_BEAT_SCHEDULER",
+    "django_celery_beat.schedulers:DatabaseScheduler",
+)
 
 # Flower monitoring configuration
 FLOWER_ADDRESS = os.getenv("FLOWER_ADDRESS", "127.0.0.1")
@@ -446,6 +452,49 @@ except Exception as e:
 
 # Make celery_active available as a module-level variable for backward compatibility
 celery_active = CELERY_ACTIVE
+
+# ---------------------------------------------------------------------------
+# Celery worker-recovery knobs (see docs/celery-worker-recovery/plan.md)
+#
+# These drive the heartbeat + supervisor system that detects dead workers and
+# requeues their in-flight task back to the broker, bounded by a max-retries
+# budget. When the budget is exceeded the supervisor writes a FAILURE to the
+# result backend so the parent's AsyncResult.get() raises.
+#
+# Master switch: LEX_TASK_RECOVERY_ENABLED=false disables every signal handler,
+# the heartbeat thread, and the beat-driven supervisor sweep. Use it for local
+# dev and CI where no real Redis-backed Celery is running.
+# ---------------------------------------------------------------------------
+LEX_TASK_RECOVERY_ENABLED = (
+    os.getenv("LEX_TASK_RECOVERY_ENABLED", "true").lower() == "true"
+)
+LEX_TASK_HEARTBEAT_INTERVAL = int(os.getenv("LEX_TASK_HEARTBEAT_INTERVAL", "5"))
+LEX_TASK_HB_TTL_MULTIPLIER = int(os.getenv("LEX_TASK_HB_TTL_MULTIPLIER", "3"))
+LEX_TASK_SUPERVISOR_SCAN_INTERVAL = int(
+    os.getenv("LEX_TASK_SUPERVISOR_SCAN_INTERVAL", "10")
+)
+LEX_TASK_MAX_RETRIES = int(os.getenv("LEX_TASK_MAX_RETRIES", "4"))
+
+if LEX_TASK_RECOVERY_ENABLED:
+    # django-celery-beat's DatabaseScheduler ingests CELERY_BEAT_SCHEDULE at
+    # startup via update_from_dict, so this entry lands as a PeriodicTask row
+    # without manual provisioning.
+    #
+    # ``expires`` is critical: beat keeps enqueuing this sweep regardless of
+    # whether a worker is consuming. Without an expiry, a few minutes of worker
+    # downtime piles up hundreds of identical sweep messages in the broker
+    # queue, and when the worker returns it chews through the whole backlog
+    # even though each older sweep is logically obsoleted by the next one.
+    # We expire each message after one full interval so the queue depth for
+    # this task can never exceed ~1 message at a time.
+    CELERY_BEAT_SCHEDULE = {
+        **(globals().get("CELERY_BEAT_SCHEDULE") or {}),
+        "lex-celery-recovery-sweep": {
+            "task": "lex.lex_app.celery_recovery.tasks.sweep_dead_workers",
+            "schedule": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
+            "options": {"expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL)},
+        },
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators

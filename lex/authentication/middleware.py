@@ -1,6 +1,5 @@
-from oauth2_authcodeflow.middleware import LoginRequiredMiddleware
-
 from lex.api.utils.api_key_requests import is_api_key_request
+from oauth2_authcodeflow.middleware import LoginRequiredMiddleware
 
 
 class ApiKeyAwareLoginRequiredMiddleware(LoginRequiredMiddleware):

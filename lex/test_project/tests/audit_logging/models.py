@@ -8,7 +8,6 @@ cluster is about *who/what* the framework records, not field shapes.
 from __future__ import annotations
 
 from django.db import models
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
 

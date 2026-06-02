@@ -38,6 +38,10 @@ from lex.lex_app.management.commands.init import (
     set_state,
 )
 
+import pytest
+
+pytestmark = pytest.mark.init
+
 
 # ---------------------------------------------------------------------
 # Fixture — a KeycloakSyncManager with every external boundary stubbed.
@@ -70,12 +74,15 @@ def _make_sync_manager_with_defaults(client_uuid: str = "cli-uuid") -> KeycloakS
     # auth_config so downstream lookups find them.
     def _fake_ensure(auth_config):
         existing = {p.get("name") for p in auth_config.get("policies", [])}
+        newly_created = set()
         for role in ("admin", "standard", "view-only"):
-            if f"Policy - {role}" not in existing:
+            policy_name = f"Policy - {role}"
+            if policy_name not in existing:
                 auth_config["policies"].append(
-                    {"name": f"Policy - {role}", "type": "role", "config": {}},
+                    {"name": policy_name, "type": "role", "config": {}},
                 )
-        return ["admin", "standard", "view-only"]
+                newly_created.add(policy_name)
+        return ["admin", "standard", "view-only"], newly_created
 
     mgr.ensure_client_role_policies = _fake_ensure  # type: ignore[method-assign]
 

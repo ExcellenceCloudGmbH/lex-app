@@ -42,7 +42,6 @@ from unittest.mock import patch
 
 from django.db import connection, models
 from django.test import TransactionTestCase
-
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.exceptions import ValidationError

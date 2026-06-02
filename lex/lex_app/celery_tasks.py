@@ -20,27 +20,23 @@ import logging
 import os
 import sys
 import traceback
-from contextlib import nullcontext
 from copy import deepcopy
 from functools import wraps
 from typing import Dict, Tuple, Optional, Set, List, Any
 from uuid import uuid4
 
+from asgiref.sync import sync_to_async
 from celery import Task, shared_task
 from celery.result import allow_join_result
-
-from lex.audit_logging.utils.ModelContext import _model_context, model_logging_context
+from django.db import transaction
+from django.db.models import Model
+from lex.api.utils import operation_context
+from lex.audit_logging.utils.ModelContext import _model_context
 from lex.audit_logging.utils.calculation_audit import (
     ensure_terminal_calculation_audit,
 )
-from django.db import transaction
-from django.db.models import Model
-
-from lex.core.signals import update_calculation_status
-from lex.api.utils import operation_context
-from asgiref.sync import sync_to_async
-
 from lex.core.models.CalculationModel import CalculationModel
+from lex.core.signals import update_calculation_status
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +50,33 @@ elif __name__ == "lex_app.celery_tasks":
 def _celery_is_active() -> bool:
     """Return True when Celery dispatch is enabled via environment."""
     return os.getenv("CELERY_ACTIVE", "False").lower() == "true"
+
+
+# Names of celery/billiard exceptions that signal a cancellation rather
+# than a real error. Matched by class name to avoid hard-importing celery
+# internals (the worker process import surface differs between celery 4/5
+# and across billiard versions). The cancel REST endpoint also raises
+# :class:`CalculationCancelled` cooperatively where possible — included
+# for completeness.
+_CANCELLATION_EXC_NAMES = frozenset(
+    {
+        "TaskRevokedError",
+        "SoftTimeLimitExceeded",
+        "WorkerLostError",
+        "Terminated",
+        "CalculationCancelled",
+    }
+)
+
+
+def _is_cancellation_exception(exc: BaseException) -> bool:
+    """Return True if ``exc`` is one of the cancellation signals."""
+    if exc is None:
+        return False
+    for klass in type(exc).__mro__:
+        if klass.__name__ in _CANCELLATION_EXC_NAMES:
+            return True
+    return False
 
 
 class CeleryCalculationContext:
@@ -128,16 +151,28 @@ class CallbackTask(Task):
             )
 
     def on_failure(self, exc: Exception, task_id: str, args: Tuple, kwargs: Dict, einfo: Any) -> None:
-        """Handle task failure."""
+        """Handle task failure.
+
+        Distinguishes a *cancellation* (user-triggered revoke / soft
+        time-limit / lost worker) from a generic error and persists
+        ``CANCELLED`` instead of ``ERROR`` for the former. This is what
+        makes the abort button's effect visible in the audit row even
+        when the worker process is the one that observes the SIGTERM.
+        """
         try:
             if self.name == "initial_data_upload":
                 return
+            target_status = (
+                CalculationModel.CANCELLED
+                if _is_cancellation_exception(exc)
+                else CalculationModel.ERROR
+            )
             model_instances = self._extract_model_instances(args)
             for model_instance in model_instances:
                 if isinstance(model_instance, CalculationModel):
                     self._update_model_status(
                         model_instance,
-                        CalculationModel.ERROR,
+                        target_status,
                         error_message=str(exc),
                         stack_trace=str(einfo) if einfo else None,
                         task_id=task_id,
@@ -199,9 +234,29 @@ class CallbackTask(Task):
             )
         finally:
             try:
+                # Map the terminal calculation state onto the AuditLogStatus
+                # ``status`` string. We use three distinct values so the
+                # compliance trail can tell apart "completed OK", "did not
+                # complete because an operator stopped it", and "did not
+                # complete because something broke":
+                #   SUCCESS   -> "success"
+                #   CANCELLED -> "cancelled"   (user-initiated cancel)
+                #   ERROR / anything else -> "failure"
+                # The startup-reset path already uses ``"aborted"`` for the
+                # crashed-worker recovery case (see
+                # ``process_admin.utils.model_registration``), so all four
+                # non-pending terminal states are now distinguishable in
+                # AuditLogStatus.status without ever lying that a non-success
+                # outcome "completed OK".
+                if status == CalculationModel.SUCCESS:
+                    audit_status = "success"
+                elif status == CalculationModel.CANCELLED:
+                    audit_status = "cancelled"
+                else:
+                    audit_status = "failure"
                 ensure_terminal_calculation_audit(
                     model_instance,
-                    audit_status="failure" if status == CalculationModel.ERROR else "success",
+                    audit_status=audit_status,
                     error_message=error_message,
                     stack_trace=stack_trace,
                     context_data=context_data,
@@ -697,7 +752,7 @@ def load_data(test, generic_app_models, audit_logging_enabled=None, initial_data
     """Load data asynchronously if conditions are met."""
     if not initial_data_load:
         return
-    from lex.lex_app.apps import should_load_data, _create_audit_logger_for_task
+    from lex.lex_app.apps import _create_audit_logger_for_task
 
     audit_logger = _create_audit_logger_for_task(audit_logging_enabled)
     finalization_error = None
@@ -761,10 +816,11 @@ def calc_and_save(models: List[Model], *args, **kwargs):
         try:
             logger.info(f"Processing model {model}")
             from lex.audit_logging.utils.ModelContext import model_logging_context
-            with model_logging_context(model):
+            from lex.core.models.CalculationModel import calculation_execution_context
+            with calculation_execution_context():
                 model.lex_func()()
-            logger.info(f"Finished calculating model {model}")
-            model.save()
+                logger.info(f"Finished calculating model {model}")
+                model.save()
             summary["processed_successfully"] += 1
 
         except IntegrityError as integrity_error:
@@ -782,7 +838,9 @@ def calc_and_save(models: List[Model], *args, **kwargs):
                         if hasattr(model, 'id'):
                             model.id = None
 
-                    model.save()
+                    from lex.core.models.CalculationModel import calculation_execution_context as _cec
+                    with _cec():
+                        model.save()
                     logger.info(f"Successfully resolved conflict and saved model {model}")
                     summary["conflicts_resolved"] += 1
                     summary["processed_successfully"] += 1

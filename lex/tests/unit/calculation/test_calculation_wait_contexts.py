@@ -11,7 +11,6 @@ from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.lex_app.celery_tasks import WaitForTasks, register_task_with_context
 

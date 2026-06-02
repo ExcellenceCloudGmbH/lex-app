@@ -25,6 +25,38 @@
 #  → 2.0.0rc124). The version in pyproject.toml is dynamic — it reads
 #  from lex/_version.py which this workflow writes before building.
 #
+#  Trigger: `release: released`. This is the PUBLISH half of the
+#  release flow. It fires ONLY when a release is published as a full
+#  (non-draft, non-pre-release) release.
+#
+#  The VALIDATE half lives in validate_and_release.yml. It runs this
+#  same gate FIRST against a dispatched commit and, ONLY on green, cuts
+#  the real release at that exact commit — so a failing gate never
+#  mints a tag and the version name is never "spent". The intended
+#  operator flow is a single dispatch:
+#    1. Dispatch validate_and_release.yml with version vX.Y.ZrcN.
+#       It gates the dispatched commit and publishes NOTHING. On green
+#       it creates a full release at that commit, which fires
+#       `released` → this workflow ships it. If it fails, fix code and
+#       re-dispatch the same version — no tag was created.
+#
+#  Single gate (no redundant re-run): the release that
+#  validate_and_release.yml cuts carries a `lex:gate-passed` marker in
+#  its body. The gate-release job below SKIPS itself when it sees that
+#  marker — the commit was already validated, so re-running the same
+#  suite adds no signal and a flaky second run could mint a tag it then
+#  refuses to publish. The `publish` job runs when the gate PASSED or
+#  was SKIPPED-because-validated. Every OTHER path is still fully gated
+#  here: a release cut manually in the UI, or by
+#  copilot_publish_after_merge.yml, has no marker, so this gate runs.
+#
+#  Why `released` and not `created`: `created` fires for pre-releases
+#  too, so it could not separate validate from publish. `released`
+#  never fires for pre-releases or drafts. Programmatic callers
+#  (e.g. copilot_publish_after_merge.yml) that want to publish in one
+#  shot create a NON-draft, NON-pre-release release, which fires
+#  `released` directly — still a single publish.
+#
 #  Required secrets:
 #   - PYPI_API_TOKEN               (PyPI API token with upload permission)
 #   - SENDGRID_API_KEY             (used by the showcase workflow)
@@ -43,7 +75,12 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [published]
+    # `released` fires only for FULL (non-pre-release, non-draft)
+    # releases — either created directly, or by validate_and_release.yml
+    # once its gate is green. Pre-releases fire `prereleased` and drafts
+    # fire nothing, so neither can trip this publish. See header for how
+    # the gate below is skipped for already-validated releases.
+    types: [released]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -83,8 +120,18 @@ jobs:
   #   * exits non-zero iff any cluster failed.
   #
   # The `publish` step below will not run unless this gate is green.
+  #
+  # SKIP CONDITION: validate_and_release.yml already runs this exact gate
+  # before it cuts the release, and stamps a `lex:gate-passed` marker into
+  # the release notes. When we see that marker we skip the gate here —
+  # re-running the same suite on the same commit adds no signal and a flaky
+  # second run could mint a tag it then refuses to publish. Every other
+  # path (manual release cut in the UI, copilot_publish_after_merge.yml)
+  # has NO marker, so it is gated here exactly as before. Manual
+  # workflow_dispatch has no release body, so the gate runs too.
   gate-release:
     name: "Release Gate: Tests + Customer Email"
+    if: ${{ !contains(github.event.release.body || '', 'lex:gate-passed') }}
     uses: ./.github/workflows/showcase_tests.yml
     secrets: inherit
     with:
@@ -99,8 +146,13 @@ jobs:
   # ── Step 2: Build and publish (only if the gate passes) ──────────
   publish:
     name: "Build & Publish"
-    needs: [gate-release]   # ← hard dependency — skipped if gate fails
-                            #   (no PyPI push when tests fail)
+    needs: [gate-release]
+    # Publish when the gate PASSED, or when it was SKIPPED because the
+    # release was already validated by validate_and_release.yml (marker
+    # present). A gate that actually ran and FAILED (or was cancelled)
+    # leaves result != success/skipped → publish is skipped, so a red
+    # build still never reaches PyPI.
+    if: ${{ always() && (needs.gate-release.result == 'success' || needs.gate-release.result == 'skipped') }}
     runs-on: ubuntu-latest
 
     permissions:
@@ -124,8 +176,16 @@ jobs:
           if [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            # Strip leading 'v' from tag: v2.0.0rc124 → 2.0.0rc124
-            VERSION="${GITHUB_REF_NAME#v}"
+            # Read the tag straight from the release payload. On a
+            # `released` event the tag is real, but the payload value is
+            # authoritative regardless (and works for promoted pre-releases).
+            # Strip leading 'v': v2.0.0rc124 → 2.0.0rc124.
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+          fi
+          if [[ -z "${VERSION}" ]]; then
+            echo "::error::Could not determine version (no inputs.version and release.tag_name was empty)."
+            exit 1
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Publishing version: ${VERSION}"

@@ -23,6 +23,10 @@ from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HistSimpleItem
 
+import pytest
+
+pytestmark = pytest.mark.history
+
 
 class TestCluster05g_ValidToChaining(E2ETestCase):
     """``valid_to`` of row N must equal ``valid_from`` of row N+1."""

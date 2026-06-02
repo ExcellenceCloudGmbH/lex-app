@@ -64,7 +64,6 @@ from pathlib import Path
 from unittest import TestCase
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands import init as init_module
 from lex.lex_app.management.commands.init import (
     KEYCLOAK_DEV_REDIRECT_HOST,
@@ -73,6 +72,10 @@ from lex.lex_app.management.commands.init import (
     _deployment_environment_is_set,
     _redirect_uris_indicate_development,
 )
+
+import pytest
+
+pytestmark = pytest.mark.init
 
 
 def _resolve_integration_env_file() -> Path | None:

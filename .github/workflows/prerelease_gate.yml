@@ -1,0 +1,157 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Prerelease Gate — validate a release candidate WITHOUT any PAT.
+#
+#  The operator flow this implements:
+#    1. You cut a *prerelease* in the GitHub UI (tag vX.Y.ZrcN, "Set as a
+#       pre-release" ticked). Creating it mints the tag immediately and
+#       fires `release: prereleased`, which starts this workflow.
+#    2. This runs the SAME release gate pip_publish.yml uses
+#       (showcase_tests.yml). No publish happens here — it only decides
+#       go / no-go for that exact prerelease commit.
+#       * RED  → the `cleanup-on-red` job DELETES the prerelease and its
+#                tag with the default GITHUB_TOKEN (no PAT, no org scope —
+#                deleting a ref in this repo only needs `contents: write`).
+#                The version name is reclaimed: fix the code and re-cut the
+#                same prerelease.
+#       * GREEN → the `mark-validated` job stamps a `lex:gate-passed`
+#                marker into the prerelease body, then leaves it for you.
+#    3. You eyeball the green prerelease and flip it to a full release in
+#       the UI (untick "pre-release" / "Set as the latest release").
+#
+#  Why no PAT (this is the whole point):
+#    Flipping a prerelease to a full release fires `release: released`.
+#    That single event drives the existing publish chain on its own:
+#      * pip_publish.yml      → builds + uploads to PyPI
+#      * frontend_build.yml   → builds + commits the frontend bundle
+#      * custom-image.yml     → builds the Docker image + deploys to env
+#                               (triggers on pip_publish's success).
+#    The recursion guard that suppresses `released` only applies to events
+#    raised by GITHUB_TOKEN. The promotion here is done by YOU in the UI —
+#    a human actor, not GITHUB_TOKEN — so `released` fires normally and the
+#    chain proceeds. Nothing in this flow needs a PAT.
+#
+#  Single gate (no redundant re-run): pip_publish.yml SKIPS its own gate
+#  when the release body carries `lex:gate-passed`. The `mark-validated`
+#  job below stamps exactly that marker on green, so when you promote, the
+#  publish runs directly instead of re-running the full suite. (If the
+#  marker is ever absent — e.g. you promote something this workflow did not
+#  green-stamp — pip_publish gates it as normal. Defense in depth.)
+#
+#  Required secrets: only those inherited by showcase_tests.yml (SendGrid,
+#  recipients, optional Keycloak). No PAT.
+# ──────────────────────────────────────────────────────────────────────
+
+name: Prerelease Gate
+
+on:
+  release:
+    # `prereleased` fires ONLY when a pre-release is created. A full
+    # release fires `released`/`published` (not `prereleased`), so promoting
+    # a prerelease to a full release does NOT re-trigger this gate — it goes
+    # straight to the publish chain instead.
+    types: [prereleased]
+
+jobs:
+  # ── Run the authoritative release gate against the prerelease commit. ──
+  # ── Pick the cluster selector. Normally the standard 13 clusters; if
+  #    you put [gate-selftest] in the prerelease title or notes, the
+  #    always-failing `gate_selftest` cluster is appended so you can prove
+  #    the RED → cleanup path on purpose (see cleanup-on-red below). ──────
+  select-clusters:
+    name: "Pick cluster selector"
+    runs-on: ubuntu-latest
+    outputs:
+      clusters: ${{ steps.pick.outputs.clusters }}
+    steps:
+      - id: pick
+        env:
+          NAME: ${{ github.event.release.name }}
+          BODY: ${{ github.event.release.body }}
+        run: |
+          set -euo pipefail
+          BASE="init,crud_api,api_layer,calculations,validation_hooks,celery_async,history,audit_logging,permissions,signals_ws,serializers,exports,queries"
+          # Opt-in self-test: a prerelease whose title OR notes contain the
+          # literal [gate-selftest] appends the gate_selftest cluster, which
+          # always fails — turning the gate red so cleanup-on-red deletes the
+          # prerelease + tag. Normal prereleases run only the standard 13.
+          if printf '%s\n%s' "$NAME" "$BODY" | grep -qF '[gate-selftest]'; then
+            echo "clusters=${BASE},gate_selftest" >> "$GITHUB_OUTPUT"
+            echo "[gate-selftest] marker found — appending the always-failing gate_selftest cluster."
+          else
+            echo "clusters=${BASE}" >> "$GITHUB_OUTPUT"
+            echo "No [gate-selftest] marker — running the standard 13 clusters."
+          fi
+
+  gate:
+    name: "Release Gate: Tests + Customer Email"
+    needs: select-clusters
+    uses: ./.github/workflows/showcase_tests.yml
+    secrets: inherit
+    with:
+      clusters: ${{ needs.select-clusters.outputs.clusters }}
+      # The prerelease gate is the release-day status update, same as the
+      # pip_publish gate, so the stakeholder email is sent as a release run.
+      run_kind: release
+
+  # ── GREEN: stamp the marker so the eventual promotion skips the
+  #    (redundant) pip_publish gate and publishes directly. ──────────────
+  mark-validated:
+    name: "Stamp gate-passed marker (green)"
+    needs: gate
+    if: ${{ needs.gate.outputs.overall_ok == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # edit the prerelease body
+    steps:
+      - name: Append lex:gate-passed marker to the prerelease body
+        env:
+          # GITHUB_TOKEN is fine: editing a release body fires only
+          # `release: edited` (which this workflow does not listen for),
+          # so there is no event to trigger and no recursion guard to dodge.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          SHA: ${{ github.event.release.target_commitish }}
+        run: |
+          set -euo pipefail
+          BODY=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+          if printf '%s' "$BODY" | grep -q 'lex:gate-passed'; then
+            echo "Marker already present on $TAG — nothing to do."
+            exit 0
+          fi
+          # Keep the marker text in sync with the `contains(...)` check in
+          # pip_publish.yml's gate-release job.
+          {
+            printf '%s\n\n' "$BODY"
+            printf 'Prerelease gate passed for `%s` via Prerelease Gate.\n\n' "$TAG"
+            printf 'Promote this prerelease to a full release (untick "pre-release"\n'
+            printf 'in the UI) to ship it. The PyPI publish gate is skipped because\n'
+            printf 'the same gate already ran and passed here; see pip_publish.yml.\n\n'
+            printf '<!-- lex:gate-passed tag=%s commit=%s -->\n' "$TAG" "$SHA"
+          } > notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          echo "Stamped lex:gate-passed on $TAG — promote it to ship."
+
+  # ── RED: delete the prerelease AND its tag so the version is reclaimed.
+  #    Uses only GITHUB_TOKEN + contents:write — no PAT, no org scope. ────
+  cleanup-on-red:
+    name: "Delete failed prerelease + tag (red)"
+    needs: gate
+    if: ${{ always() && needs.gate.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # delete the release and the tag ref
+    steps:
+      - name: Delete the failed prerelease and its tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          # --cleanup-tag removes the git tag along with the release. The
+          # explicit ref delete is a belt-and-suspenders fallback in case
+          # the release is gone but the tag somehow outlived it.
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" 2>/dev/null \
+            && echo "Removed lingering tag ref $TAG." \
+            || echo "Tag $TAG already gone (cleaned up with the release)."
+          echo "Deleted failed prerelease $TAG; the version name is free to re-cut."

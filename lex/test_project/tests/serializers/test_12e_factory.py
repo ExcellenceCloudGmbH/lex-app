@@ -27,8 +27,6 @@ from unittest.mock import patch
 
 from django.db import models
 from django.test import SimpleTestCase
-from rest_framework import serializers as drf_serializers
-
 from lex.api.serializers.base_serializers import (
     ID_FIELD_NAME,
     LEX_SCOPES_NAME,
@@ -38,9 +36,13 @@ from lex.api.serializers.base_serializers import (
     model2serializer,
     resolve_requested_serializer_name,
 )
+from rest_framework import serializers as drf_serializers
 
 from .models import WideItem
 
+import pytest
+
+pytestmark = pytest.mark.serializers
 
 FRAMEWORK_INTERNALS = {ID_FIELD_NAME, SHORT_DESCR_NAME, LEX_SCOPES_NAME, "id"}
 

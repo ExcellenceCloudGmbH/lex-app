@@ -12,22 +12,35 @@ record. ``OneModelEntry.update`` (see ``lex/api/views/model_entries/One.py``)
     3. wraps the body in ``transaction.atomic()`` *only* when
        ``should_use_atomic_model_operations(model_class)`` is true (i.e.
        the model does NOT set ``is_atomic = False``),
-    4. calls ``UpdateModelMixin.update`` which routes through
-       ``AuditLogMixin.perform_update`` (writes the request-level audit)
-       and ultimately fires ``calculate_hook`` (writes the terminal
-       calculation audit via ``ensure_terminal_calculation_audit``).
+    4. submits ``calculate_hook`` to the dedicated calculation thread
+       pool (``_calculation_executor``) and immediately returns
+       **HTTP 202 Accepted** with ``is_calculated = IN_PROGRESS``.  The
+       background thread fires ``calculate_hook`` which writes the
+       request-level audit (``AuditLogMixin.perform_update``) and the
+       terminal calculation audit (``ensure_terminal_calculation_audit``).
+       Final state is broadcast to the frontend via WebSocket.
 
 Customer-visible contract this file pins down:
 
-    * **Success path** (atomic *and* non-atomic) → at least one
-      ``AuditLog`` row tied to the calc record, with a final
+    * **Success path** (atomic *and* non-atomic) → 2xx response (in
+      practice 202) and, *after the background calc completes*, at
+      least one ``AuditLog`` row tied to the calc record with a final
       ``AuditLogStatus.status = 'success'``.
-    * **Failure path** (atomic *and* non-atomic) → at least one
-      ``AuditLog`` row tied to the calc record, with a final
-      ``AuditLogStatus.status = 'failure'`` and a non-empty traceback
-      attached. Even when the API view returns HTTP 500, the operator
-      must still be able to open the audit timeline and see *why* the
-      calculation failed.
+    * **Failure path** (atomic *and* non-atomic) → 2xx response (the
+      failure happens off the request thread, so the request itself
+      still succeeds) and, *after the background calc completes*, at
+      least one ``AuditLog`` row tied to the calc record with a final
+      ``AuditLogStatus.status = 'failure'`` and a non-empty traceback.
+      Even though the HTTP response is 202, the operator must still be
+      able to open the audit timeline and see *why* the calculation
+      failed.
+
+Why we wait for the model to settle before asserting on audit rows:
+the HTTP-202 contract decouples request completion from calculation
+completion.  Real frontends pair the 202 with the
+``update_calculation_status`` WebSocket subscription; tests don't have
+that luxury, so we poll ``is_calculated`` until it leaves IN_PROGRESS
+(mirroring what the WebSocket would tell the frontend).
 
 Why we do not assert "audit survives outer atomic rollback" here:
 the framework only writes audit rows through the REST/CRUD layer
@@ -39,10 +52,12 @@ hand-drive the terminal-audit writer from inside their own
 
 from __future__ import annotations
 
+import time
 import unittest
 
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
+from lex.core.models.CalculationModel import CalculationModel
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import (
@@ -52,6 +67,10 @@ from .models import (
     AuditAtomicCalc,
     AuditNonAtomicCalc,
 )
+
+import pytest
+
+pytestmark = pytest.mark.audit_logging
 
 
 class _CalcAuditViaAPIMixin:
@@ -110,16 +129,71 @@ class _CalcAuditViaAPIMixin:
             data={"calculate": "true"}, format="json",
         )
 
+    # The background ``_calculation_executor`` runs the actual
+    # calculation off the request thread, so we mirror what the
+    # frontend does: wait for the model to leave IN_PROGRESS before
+    # we assert on the audit trail.  ``E2ETestCase`` is a
+    # ``TransactionTestCase``, so writes from the worker connection
+    # are visible to the test connection after ``refresh_from_db``.
+    _SETTLE_TIMEOUT_S = 10.0
+    _SETTLE_POLL_S = 0.05
+
+    def _wait_for_calculation_to_settle(self, calc) -> str:
+        """Block until the background calc reaches a terminal state
+        (anything other than ``IN_PROGRESS``) and return that state.
+
+        Polls instead of locking on the executor handle because
+        ``One.update`` deliberately fires the calc as fire-and-forget
+        (the customer-visible signal is the WebSocket, not a future).
+        Mirroring that means the test only knows what the customer
+        knows."""
+        deadline = time.monotonic() + self._SETTLE_TIMEOUT_S
+        while time.monotonic() < deadline:
+            calc.refresh_from_db()
+            if calc.is_calculated != CalculationModel.IN_PROGRESS:
+                return calc.is_calculated
+            time.sleep(self._SETTLE_POLL_S)
+        self.fail(
+            f"Background calculation on {self.url_name!r} pk={calc.pk} "
+            f"did not leave IN_PROGRESS within "
+            f"{self._SETTLE_TIMEOUT_S:.1f}s; last is_calculated="
+            f"{calc.is_calculated!r}. Either the executor is wedged or "
+            f"the calc itself is hanging.",
+        )
+
+    def _assert_2xx(self, resp) -> None:
+        """Any 2xx is a successful trigger.
+
+        Post-Melih's ASGI-thread fix (commit bde8dde), ``One.update``
+        returns ``202 Accepted`` for ``?calculate=true`` because the
+        calc runs in the background.  Older callers may have expected
+        200/201; the audit contract is independent of which 2xx the
+        framework uses."""
+        self.assertGreaterEqual(
+            resp.status_code, 200,
+            f"Expected a 2xx; got {resp.status_code} "
+            f"body={getattr(resp, 'data', None)!r}",
+        )
+        self.assertLess(
+            resp.status_code, 300,
+            f"Expected a 2xx; got {resp.status_code} "
+            f"body={getattr(resp, 'data', None)!r}",
+        )
+
     def _run_success_scenario(self) -> None:
         AuditLog.objects.all().delete()
         calc = self.model_cls.objects.create(name="ok", should_fail=False)
 
         resp = self._trigger_calc_via_api(calc)
-        self.assertIn(
-            resp.status_code, (200, 201),
-            f"A successful calc trigger must return 2xx; got "
-            f"{resp.status_code} body={getattr(resp, 'data', None)!r}",
+        self._assert_2xx(resp)
+        terminal = self._wait_for_calculation_to_settle(calc)
+        self.assertEqual(
+            terminal, CalculationModel.SUCCESS,
+            f"A clean calc must settle to SUCCESS; got {terminal!r}.",
         )
+        # The terminal audit row lands after the IN_PROGRESS → SUCCESS
+        # save, so wait for it before asserting on its shape.
+        self._wait_for_audit_status(calc, "success")
         self._assert_success_audit_present(calc)
 
     # -- failure ------------------------------------------------------
@@ -127,11 +201,11 @@ class _CalcAuditViaAPIMixin:
         """At least one AuditLog row for the calc resource, finalized
         to ``failure``, with a traceback the operator can read.
 
-        The HTTP response is 500 (``APIException`` from
-        ``OneModelEntry.update``'s ``CalculationModelException`` /
-        generic ``Exception`` branches), but the audit row is the
-        permanent record — that is the whole point of the
-        audit-log subsystem."""
+        With the async-202 dispatch, the HTTP response itself is 2xx
+        (the failure happens off the request thread).  The audit row
+        is the permanent record — that is the whole point of the
+        audit-log subsystem, and the only diagnostic the operator
+        has after the WebSocket completion event."""
         rows = AuditLog.objects.filter(
             resource=self.url_name, object_id=calc.pk,
         )
@@ -165,21 +239,66 @@ class _CalcAuditViaAPIMixin:
             f"the failure after the fact; got {tracebacks!r}.",
         )
 
+    def _wait_for_audit_status(self, calc, expected_status: str) -> None:
+        """Block until at least one ``AuditLogStatus`` row tied to the
+        calc record carries ``expected_status``.
+
+        The framework writes the terminal-state DB save *before* the
+        terminal audit row (``CalculationModel.calculate_hook`` saves
+        ``is_calculated`` then sets ``_pending_terminal_audit`` then
+        raises — the audit only lands when our background handler
+        calls ``_finalize_pending_terminal_audit``).  So
+        ``_wait_for_calculation_to_settle`` returning ERROR/SUCCESS
+        does **not** guarantee the audit row is present yet; checking
+        immediately would be a flake.  Polling for the customer-visible
+        audit status removes that race without overfitting to the
+        internal ordering — the contract is "audit eventually shows
+        the right status", and we're asserting exactly that."""
+        deadline = time.monotonic() + self._SETTLE_TIMEOUT_S
+        while time.monotonic() < deadline:
+            rows = AuditLog.objects.filter(
+                resource=self.url_name, object_id=calc.pk,
+            )
+            statuses = set(
+                AuditLogStatus.objects.filter(audit_log__in=rows).values_list(
+                    "status", flat=True,
+                )
+            )
+            if expected_status in statuses:
+                return
+            time.sleep(self._SETTLE_POLL_S)
+        self.fail(
+            f"Expected an AuditLogStatus.status={expected_status!r} on "
+            f"{self.url_name!r} pk={calc.pk} within "
+            f"{self._SETTLE_TIMEOUT_S:.1f}s, but none appeared. Last "
+            f"observed statuses: "
+            f"{sorted(statuses) if statuses else '∅'}.",
+        )
+
     def _run_failure_scenario(self) -> None:
         AuditLog.objects.all().delete()
         calc = self.model_cls.objects.create(name="boom", should_fail=True)
 
         resp = self._trigger_calc_via_api(calc)
-        # The view wraps CalculationModelException / generic Exception
-        # in APIException → DRF emits 500. Some failure shapes (e.g.
-        # ValidationError reflowed) come back as 400. Anything in the
-        # 4xx/5xx band is a "failed call" from the customer's
-        # perspective; what we care about is the audit row.
-        self.assertGreaterEqual(
-            resp.status_code, 400,
-            f"A calc that raised in calculate() must surface as a "
-            f"4xx/5xx response; got {resp.status_code}.",
+        # The HTTP response is decoupled from the calc outcome: the
+        # background executor runs ``calculate_hook`` *after* the
+        # request returns, so the request itself succeeds with 202
+        # even when ``calculate()`` will raise.  The customer's
+        # diagnostic signal is the audit row, not the HTTP status.
+        self._assert_2xx(resp)
+        terminal = self._wait_for_calculation_to_settle(calc)
+        self.assertEqual(
+            terminal, CalculationModel.ERROR,
+            f"A calc that raises in ``calculate()`` must settle to "
+            f"ERROR; got {terminal!r}.",
         )
+        # The failure audit row is written *after* ``is_calculated``
+        # commits to ERROR (calculate_hook saves ERROR, sets
+        # _pending_terminal_audit, raises, and only then does our
+        # background handler call _finalize_pending_terminal_audit).
+        # Wait for the audit row before asserting on it, otherwise the
+        # test races the background thread and flakes.
+        self._wait_for_audit_status(calc, "failure")
         self._assert_failure_audit_present(calc)
 
 

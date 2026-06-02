@@ -7,14 +7,11 @@ for use in calculation logging operations.
 """
 
 import logging
-from typing import Optional
 
 from audit_logging.mixins.AuditLogMixin import _safe_get_content_type
-from django.contrib.contenttypes.models import ContentType
-
 from lex.api.utils import operation_context
-from lex.audit_logging.utils.ModelContext import _model_context
 from lex.audit_logging.utils.DataModels import ContextInfo, ContextResolutionError
+from lex.audit_logging.utils.ModelContext import _model_context
 
 logger = logging.getLogger(__name__)
 

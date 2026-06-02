@@ -1,0 +1,359 @@
+# ───────────────────────────────────────────────────────────────────
+#  Copilot PR Coverage Check (Feature 4).
+#
+#  Implements the supervisor's task #4: every PR that lands code under
+#  a framework app (lex/lex_app/**, lex/core/**, lex/api/**,
+#  lex/audit_logging/**, lex/process_admin/**, … — every package under
+#  lex/ except the test trees, docs, and other non-source dirs) must
+#  also ship tests for that code. If the heuristic
+#  can't pair source changes with test changes in the same diff, the
+#  workflow opens a coverage-task issue for Copilot, labels the PR
+#  `needs-tests`, and posts a failing `coverage / required` check that
+#  blocks merge via branch protection.
+#
+#  Spec: docs/superpowers/specs/2026-05-26-copilot-test-automation-pipeline-design.md
+#  (Feature 4 / §7).
+#
+#  Two-phase design:
+#    Phase 1 (synchronous, ~10s): heuristic file-pairing via
+#      .github/scripts/copilot_coverage_detect.py — pure-Python, no API
+#      calls. Either every changed source file has a matching test
+#      touched in the same diff, or we have a list of misses.
+#    Phase 2 (asynchronous, minutes): on a miss, open a coverage-task
+#      issue assigned to Copilot, apply `needs-tests`, post red check.
+#      Copilot's PR (gated by copilot_pr_gate.yml) targets the parent
+#      PR's HEAD branch — when it merges, `synchronize` fires, this
+#      workflow re-runs, Phase 1 now passes, we drop the label and
+#      flip the check green.
+#
+#  Recursion safety — three independent guards (§7.5):
+#    1. Author exclusion: Copilot PRs never trigger this workflow.
+#    2. Label exclusion: coverage-task PRs carry that label, skipped.
+#    3. Branch targeting: `branches: [lex-app-v2]` filter means
+#       coverage-task PRs (which target the parent feature branch,
+#       not lex-app-v2) don't fire this workflow at all.
+#  Any single guard is sufficient — three is intentional belt-and-braces.
+#
+#  Required secrets / vars:
+#   - COPILOT_PAT: PAT with `issues:write` + `pull-requests:write`.
+#       GITHUB_TOKEN cannot create issues that trigger downstream
+#       workflow events (issue label → copilot_test_bot.yml), so the
+#       coverage-task issue must be created with a PAT.
+# ───────────────────────────────────────────────────────────────────
+
+name: Copilot PR Coverage Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Default branch only. Coverage-task PRs (which target a feature
+    # branch, not lex-app-v2) never fire this — that's guard #3.
+    branches: [lex-app-v2]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: write
+
+concurrency:
+  # Coalesce rapid `synchronize` events on the same PR. Mutations
+  # below (label changes, check posts, issue creation) must not race.
+  group: copilot-coverage-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  coverage-check:
+    # Guards #1 (author) and #2 (coverage-task label) — see header.
+    # Also skips test-bot output PRs (copilot:* labels) so the bot's
+    # own deliverables don't get re-checked by this workflow.
+    if: >-
+      github.event.pull_request.user.login != 'Copilot' &&
+      github.event.pull_request.user.login != 'copilot-swe-agent[bot]' &&
+      !contains(github.event.pull_request.labels.*.name, 'coverage-task') &&
+      !contains(github.event.pull_request.labels.*.name, 'copilot:regression') &&
+      !contains(github.event.pull_request.labels.*.name, 'copilot:bug-repro') &&
+      !contains(github.event.pull_request.labels.*.name, 'copilot:fix-and-test')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Skip-guard #4 (escape hatch). We honour [skip-coverage-check]
+      # in either title or body — reviewers are expected to verify
+      # the skip is justified. We post a neutral check note so the
+      # skip is visible on the PR's checks tab, not silent.
+      - name: Honour [skip-coverage-check] escape hatch
+        id: escape
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [[ "$PR_TITLE" == *"[skip-coverage-check]"* ]] || [[ "$PR_BODY" == *"[skip-coverage-check]"* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::PR opted out of coverage check via [skip-coverage-check]."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute changed files
+        if: steps.escape.outputs.skip != 'true'
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # --find-renames=90% excludes near-pure renames (90% similarity);
+          # they have no behavioural change so they don't deserve a test.
+          # We list only Added/Modified files (status filter A/M); Deletes
+          # are intentionally excluded — you can't write a test for code
+          # that no longer exists, and any removed behaviour should have
+          # been validated in a prior PR.
+          git diff --name-only --diff-filter=AM \
+            --find-renames=90% "$BASE_SHA" "$HEAD_SHA" > changed.txt
+          echo "Changed files:"
+          cat changed.txt
+          echo "count=$(wc -l < changed.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip-guard #5 — docs / allowlist / rename-only PRs
+        if: steps.escape.outputs.skip != 'true'
+        id: triage
+        run: |
+          set -euo pipefail
+          # If the diff touches no framework source the detector will
+          # return pass anyway, but short-circuiting here saves a Python
+          # startup and makes intent visible. Mirror the detector's
+          # scope: any file inside a package under lex/ (a second path
+          # segment exists, so loose lex/*.py scripts are excluded) that
+          # is NOT one of the non-source packages. This is an exclude
+          # list on purpose — an include list would let a NEW app slip
+          # the gate until someone updated this grep.
+          if grep -E '^lex/[^/]+/' changed.txt \
+               | grep -qvE '^lex/(test_project|tests|docs|react|assets|legacy_data|bin)/'; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No framework source changes under lex/<app>/** — coverage check is a no-op."
+          fi
+
+      - name: Run Phase 1 detection
+        if: steps.escape.outputs.skip != 'true' && steps.triage.outputs.skip != 'true'
+        id: detect
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/copilot_coverage_detect.py \
+            --changed-files changed.txt \
+            --repo-root . > detection.json
+          echo "--- detection.json ---"
+          cat detection.json
+          STATUS=$(python3 -c "import json; print(json.load(open('detection.json'))['status'])")
+          echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+
+      - name: Phase 1 PASS — drop needs-tests + post green check
+        # We always reach this on a pass, including the re-run case
+        # (Copilot's coverage-task PR merged into the parent feature
+        # branch and the parent PR's `synchronize` fired). On the
+        # re-run path the parent PR carries `needs-tests`; remove it.
+        if: >-
+          steps.escape.outputs.skip != 'true' &&
+          steps.triage.outputs.skip != 'true' &&
+          steps.detect.outputs.status == 'pass'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Best-effort label removal — succeeds whether or not the
+          # label is present. The `|| true` swallows the gh exit code
+          # when the label isn't there.
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --remove-label needs-tests || true
+          # Post a green check via the Checks API. The name must match
+          # the required-check name configured in branch protection
+          # (§7.7 open question 1 — default: `coverage / required`).
+          gh api repos/"$GITHUB_REPOSITORY"/check-runs \
+            -X POST \
+            -F name='coverage / required' \
+            -F head_sha="$HEAD_SHA" \
+            -F status='completed' \
+            -F conclusion='success' \
+            -F output[title]='Coverage check passed' \
+            -F output[summary]='Every changed source file under lex/<app>/** has a matching test in this PR.'
+
+      - name: Short-circuit pass when skip guards / triage matched
+        # When the workflow skips for legitimate reasons (no source
+        # changes, [skip-coverage-check]), still post a green check
+        # so branch protection on `coverage / required` doesn't block
+        # the PR forever waiting for a status that never arrives.
+        if: steps.escape.outputs.skip == 'true' || steps.triage.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REASON: ${{ steps.escape.outputs.skip == 'true' && 'opted out via [skip-coverage-check]' || 'no framework source changes under lex/<app>/**' }}
+        run: |
+          set -euo pipefail
+          gh api repos/"$GITHUB_REPOSITORY"/check-runs \
+            -X POST \
+            -F name='coverage / required' \
+            -F head_sha="$HEAD_SHA" \
+            -F status='completed' \
+            -F conclusion='success' \
+            -F output[title]='Coverage check skipped' \
+            -F output[summary]="Skipped: ${REASON}."
+
+      - name: Phase 2 MISS — open coverage-task + block PR
+        if: >-
+          steps.escape.outputs.skip != 'true' &&
+          steps.triage.outputs.skip != 'true' &&
+          steps.detect.outputs.status == 'miss'
+        env:
+          # PAT is required: an issue created with GITHUB_TOKEN does
+          # not propagate `issues: labeled` events to downstream
+          # workflows (copilot_label_on_issue_open.yml / test bot
+          # chain). Same constraint that drove ff9693a in this repo.
+          GH_TOKEN: ${{ secrets.COPILOT_PAT }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Build the file bullet list from detection.json. >5 untested
+          # files → grouped into one issue (§7.6 row 3 — avoids spam).
+          UNTESTED=$(python3 -c "
+          import json
+          data = json.load(open('detection.json'))
+          for f in data['untested']:
+              print(f'- {f}')
+          ")
+          COUNT=$(python3 -c "
+          import json
+          print(len(json.load(open('detection.json'))['untested']))
+          ")
+
+          # The body follows the [copilot-task] convention so the test
+          # bot's downstream handlers recognise its shape. The critical
+          # directive is the targeting line: Copilot must base its PR
+          # on PR_HEAD_REF, not lex-app-v2 — otherwise its PR would
+          # trigger this workflow recursively (guard #3 still catches
+          # it, but the intent is clearer when stated explicitly).
+          cat > issue-body.md <<EOF
+          # Coverage task — auto-opened by copilot_coverage_check.yml
+
+          ## ⚠️ Required base branch
+
+          Open your PR with this **exact** base:
+
+          \`\`\`
+          ${PR_HEAD_REF}
+          \`\`\`
+
+          Do **NOT** target \`lex-app-v2\`. The test must merge into the parent PR's head branch (\`${PR_HEAD_REF}\`) so it ships in the same diff as the source change. Targeting \`lex-app-v2\` directly will leave the parent PR blocked forever and may break \`lex-app-v2\` CI by shipping a test for code that doesn't exist on that branch yet.
+
+          ---
+
+          ## Task
+
+          PR #${PR_NUMBER} modifies ${COUNT} framework source file(s) under \`lex/<app>/\*\*\` without test coverage in the same diff:
+
+          ${UNTESTED}
+
+          Write regression tests for the behaviour these files now express.
+
+          ### Research first (do not skip)
+
+          Derive what to test from **intent**, not from the code you see. Before writing:
+          - Read the docs that describe these files' intent — \`docs/features/\`, \`docs/reference/\`, \`docs/tutorial/\` — and assert what the framework is *trying to achieve* + what a customer would expect. **This is the Golden Rule** (full statement: \`lex/test_project/test-plan/test-clusters.md\` → Testing Philosophy). A test that mirrors a buggy implementation locks the bug in.
+          - Check for an existing mechanism before assuming new behaviour; skim the existing cluster tests for the area to match patterns.
+
+          ### Where the tests go (strict)
+
+          Cluster tree only: \`lex/test_project/tests/<cluster_slug>/test_<Nx>_<short>.py\`. Allocate the next free sub-cluster letter and continue scenario IDs per \`lex/test_project/test-plan/test-writing-plan.md\` — do not invent clusters or drop tests in the legacy \`lex/tests/unit/\` tree.
+
+          ### Definition of Done (same as every test PR)
+
+          - Append a row to \`lex/test_project/test-plan/progress/session-log.md\` (universal per-PR record).
+          - Update the touched cluster's status / scenario range in \`lex/test_project/test-plan/test-clusters.md\` and bump \`progress/dashboard.md\`.
+          - If a test surfaces a real framework bug, assert the correct behaviour, mark \`@unittest.expectedFailure\` / \`@pytest.mark.xfail(strict=True)\`, and add a \`BUG-NNN\` row to \`known-bugs.md\` — never weaken the assertion.
+
+          End your PR body with \`Fixes #<this issue number>\`.
+
+          ---
+          *Parent PR:* #${PR_NUMBER}
+          *Coverage-task automation spec:* \`docs/superpowers/specs/2026-05-26-copilot-test-automation-pipeline-design.md\` §7
+          EOF
+
+          # Assign Copilot so the agent actually picks the task up. Without
+          # this the issue is created but sits unassigned forever — the parent
+          # PR stays blocked on the red `coverage / required` check and a human
+          # has to chase it, defeating §7.1 ("one uniform workflow … so I don't
+          # have to manually chase contributors"). The spec's flow diagram and
+          # state machine both assume assignment ("creates issue → assigns
+          # Copilot → Copilot opens PR"). Mirrors copilot_test_bot.yml's
+          # `gh issue create … --assignee copilot-swe-agent`, and works here
+          # because this step already runs under COPILOT_PAT (a human PAT —
+          # GITHUB_TOKEN-created assignments don't reliably trigger the agent).
+          ISSUE_URL=$(gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "[copilot-task] Coverage tests for PR #${PR_NUMBER}" \
+            --body-file issue-body.md \
+            --label coverage-task \
+            --assignee copilot-swe-agent)
+          echo "Opened coverage-task issue: $ISSUE_URL"
+
+          # Tag the parent PR. `needs-tests` is human-facing; the red
+          # check below is what actually blocks merge via branch
+          # protection — the label is informational.
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --add-label needs-tests
+
+          # Post a comment on the parent PR linking to the new issue
+          # so the author isn't left guessing what to do next.
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "Coverage check found ${COUNT} source file(s) without tests in this diff. I've opened ${ISSUE_URL} to ask Copilot to write them. Once Copilot's PR merges into \`${PR_HEAD_REF}\`, this check will re-run and unblock the merge. To override (refactor only / generated code), add \`[skip-coverage-check]\` to the PR title or body."
+
+      - name: Phase 2 MISS — post failing required check
+        # Separate step so a failure in the issue-creation step still
+        # leaves the PR clearly blocked (the check below runs on
+        # `failure()` continuation, see `if:`). Without this, a PAT
+        # outage would silently let a coverage-miss PR slip through.
+        if: >-
+          always() &&
+          steps.escape.outputs.skip != 'true' &&
+          steps.triage.outputs.skip != 'true' &&
+          steps.detect.outputs.status == 'miss'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          SUMMARY=$(python3 -c "
+          import json
+          d = json.load(open('detection.json'))
+          lines = ['Missing test coverage for:']
+          for f in d['untested']:
+              lines.append(f'- {f}')
+          lines.append('')
+          lines.append('A coverage-task issue has been opened for Copilot to address.')
+          print('\n'.join(lines))
+          ")
+          gh api repos/"$GITHUB_REPOSITORY"/check-runs \
+            -X POST \
+            -F name='coverage / required' \
+            -F head_sha="$HEAD_SHA" \
+            -F status='completed' \
+            -F conclusion='failure' \
+            -F output[title]='Coverage check failed' \
+            -F output[summary]="$SUMMARY"

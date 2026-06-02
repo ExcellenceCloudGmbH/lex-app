@@ -32,12 +32,15 @@ import unittest
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
-
 from lex.lex_app.management.commands.init import (
     Command,
     _format_keycloak_import_error_details,
     _is_non_fatal_keycloak_import_timeout,
 )
+
+import pytest
+
+pytestmark = pytest.mark.init
 
 
 class TestCluster01n_KeycloakErrorFormatter(SimpleTestCase):

@@ -43,7 +43,6 @@ from __future__ import annotations
 import unittest
 
 from django.core.exceptions import ObjectDoesNotExist
-
 from lex.core.models.CalculationModel import CalculationModel
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
@@ -58,6 +57,9 @@ from .models import (
     TRIPLE_CLASSES,
 )
 
+import pytest
+
+pytestmark = pytest.mark.calculations
 
 # ---------------------------------------------------------------------
 # Per-(p_atomic, c_atomic) → (parent_cls, child_cls) lookup so the

@@ -3,7 +3,6 @@ from unittest.mock import Mock, patch
 
 from django.db import models
 from django.test import SimpleTestCase, TestCase
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.audit_logging.utils.ModelContext import ModelContext

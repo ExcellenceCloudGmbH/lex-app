@@ -6,14 +6,13 @@ a specific system-time snapshot using the ``?as_of`` query parameter.
 """
 
 from django.db.models import Prefetch
+from lex.api.utils.temporal import parse_as_of_datetime
+from lex.api.views.permissions.UserPermission import UserPermission
 from rest_framework import status
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
-
-from lex.api.utils.temporal import parse_as_of_datetime
-from lex.api.views.permissions.UserPermission import UserPermission
 
 
 class HistoryModelEntry(ListAPIView):

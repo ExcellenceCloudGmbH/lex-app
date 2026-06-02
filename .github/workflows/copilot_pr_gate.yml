@@ -1,0 +1,364 @@
+# ───────────────────────────────────────────────────────────────────
+#  Copilot Test-Bot — PR gate.
+#
+#  Runs on every PR authored by copilot-swe-agent[bot]. Does:
+#    1. Find the originating (source) issue via the resolver in
+#       .github/scripts/copilot_discover_mode.py — checks the PR's
+#       closingIssuesReferences (Development sidebar), then close-
+#       keyword refs in the body, then bare #N; dereferences task
+#       issues to the source issue via "Assembled from issue #M".
+#       Reads the source issue's copilot:<mode> label, OR the
+#       coverage-task label (Feature 4) which maps to mode=regression
+#       with kind=coverage-task.
+#    1b. Coverage-task PRs only: retarget the PR's base from lex-app-v2
+#       onto the parent feature branch (Copilot ignores the base-branch
+#       instruction in the issue body), so the test ships in the parent
+#       PR's diff and its `coverage / required` check re-runs green.
+#    2. Static PR-shape check via copilot_validate_pr_shape.py. The
+#       resolved issue is passed as --linked-issue so a sidebar-only
+#       link satisfies the "Fixes #N" requirement.
+#    3. Run the new test in isolation. Mode-B strips
+#       @expectedFailure on a temp copy and asserts FAILURE.
+#    4. Apply auto-merge (modes A/B + coverage-task) or
+#       needs-human-review (mode C).
+#
+#  Any failure → label PR copilot:invalid + comment + exit non-zero
+#  (the comment lists what failed; merge labels are not applied).
+# ───────────────────────────────────────────────────────────────────
+
+name: Copilot PR Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+concurrency:
+  # Coalesce rapid synchronize events on the same PR — the gate
+  # mutates labels, posts comments, and (mode A/B) calls --auto;
+  # racing runs would double-comment / double-label.
+  group: copilot-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    # NOTE: The Copilot coding agent's PR author login is literally `Copilot`
+    # (user.type == 'Bot', user.id 198982749). The `copilot-swe-agent[bot]`
+    # form is a *display* name in the GitHub UI — not the actual login.
+    # Accept both spellings to stay resilient to future renaming.
+    if: github.event.pull_request.user.login == 'Copilot' || github.event.pull_request.user.login == 'copilot-swe-agent[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # Required: Django TestCase needs a real Postgres for migrate +
+      # per-test transactions (pytest collects the unittest.TestCase
+      # subclasses; the DB requirement is the same). Mirrors
+      # showcase_tests.yml so cluster fixtures behave identically here
+      # vs. the full suite.
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: lundadminlocal
+          POSTGRES_DB: db_lex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Match showcase_tests.yml so the gate runs against the same
+          # interpreter the project itself targets.
+          python-version: "3.12.0"
+
+      - name: Install system dependencies
+        # pycairo + weasyprint dependencies build from source without
+        # these. Must mirror showcase_tests.yml or `pip install` of
+        # requirements.txt fails with "Package 'cairo' not found".
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcairo2-dev pkg-config \
+            libpango-1.0-0 libpangoft2-1.0-0
+
+      - name: Install lex-app
+        # `pip install -e .` puts the project's `lex` console-script on
+        # PATH — Mode-A/B/C invoke `lex pytest ...` (pytest via the lex CLI
+        # wrapper, which calls django.setup() before collection).
+        # Without this, `lex` is "command not found" on the GHA runner.
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --prefer-binary -r requirements.txt
+          pip install -e .
+
+      # ── 1. Discover mode from the linked issue ─────────────────
+      # Copilot's coding agent does NOT reliably emit "Fixes #N" in the
+      # PR body — it links the issue via GitHub's Development sidebar,
+      # which is invisible to text grep but surfaces via the GraphQL
+      # `closingIssuesReferences` field. The Python resolver walks every
+      # available signal (closing-issue refs → close-keyword regex →
+      # bare #N) and dereferences task issues to the source issue that
+      # carries the copilot:<mode> label. See
+      # .github/scripts/copilot_discover_mode.py for the full chain.
+      - name: Discover mode
+        id: mode
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python .github/scripts/copilot_discover_mode.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "${{ github.event.pull_request.number }}" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: On mode-discovery failure, label + comment
+        if: failure() && steps.mode.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Mode discovery is the very first gate step that can fail
+          # against a real Copilot artefact — give the human a concrete
+          # explanation rather than a silent red ❌. The resolver's own
+          # error message already explains *why* it couldn't find the
+          # source issue (no closingIssuesReferences, no #N in body, or
+          # candidates lacked copilot:<mode> labels).
+          BODY=$'Copilot PR Gate could not determine the source issue / mode for this PR.\n\nThe resolver checks (in order): GitHub Development-sidebar links (closingIssuesReferences), `Fixes/Closes/Resolves #N` in the PR body, and bare `#N` references. None of the candidates carried a `copilot:<mode>` label, or none could be dereferenced to one.\n\n**Fix:** make sure the source issue (the user-filed one with the `copilot:regression` / `copilot:bug-repro` / `copilot:fix-and-test` label) is linked from this PR — either via the Development sidebar or by adding `Fixes #<issue>` to the PR body.'
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          gh pr edit    "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+          exit 1
+
+      # ── 1b. Retarget coverage-task PRs onto the parent branch ──
+      # Feature-4 coverage tasks must merge into the *parent feature
+      # branch*, not lex-app-v2, so the new test ships in the same diff
+      # as the source change and the parent PR's `coverage / required`
+      # check re-runs green (see the coverage-check spec §7.2). Copilot's
+      # coding agent bases its PR on the repo default branch regardless of
+      # the explicit instruction in the coverage-task issue body, so we
+      # correct the base here deterministically rather than relying on the
+      # agent. The parent PR head SHA is the merge-base of both branches
+      # (both branched off lex-app-v2), so GitHub's three-dot PR diff stays
+      # test-only after the retarget — no source is reverted. No-op when
+      # the PR already targets the parent branch (Copilot complied) or when
+      # this isn't a coverage-task PR.
+      - name: Retarget coverage-task PR onto parent branch
+        if: steps.mode.outputs.kind == 'coverage-task' && github.event.pull_request.base.ref == 'lex-app-v2'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COVERAGE_ISSUE: ${{ steps.mode.outputs.issue }}
+        run: |
+          set -euo pipefail
+          # The coverage-task issue body carries `*Parent PR:* #N`. Resolve
+          # that PR's head branch and make it this PR's base.
+          ISSUE_BODY=$(gh issue view "$COVERAGE_ISSUE" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          PARENT_PR=$(printf '%s' "$ISSUE_BODY" | grep -oE 'Parent PR:\*? +#[0-9]+' | grep -oE '[0-9]+' | head -n1)
+          if [[ -z "${PARENT_PR:-}" ]]; then
+            echo "::error::could not find 'Parent PR: #N' in coverage-task issue #${COVERAGE_ISSUE} body — cannot retarget."
+            exit 1
+          fi
+          PARENT_BRANCH=$(gh pr view "$PARENT_PR" --repo "$GITHUB_REPOSITORY" --json headRefName --jq .headRefName)
+          if [[ -z "${PARENT_BRANCH:-}" || "$PARENT_BRANCH" == "lex-app-v2" ]]; then
+            echo "::error::parent PR #${PARENT_PR} head branch resolved to '${PARENT_BRANCH:-<empty>}' — refusing to retarget."
+            exit 1
+          fi
+          echo "Retargeting PR #${PR_NUMBER} base lex-app-v2 → ${PARENT_BRANCH} (parent PR #${PARENT_PR})."
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --base "$PARENT_BRANCH"
+
+      # ── 2. PR-shape gate ───────────────────────────────────────
+      - name: Build files JSON + body file
+        id: files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Use the REST API (paginated) so we get per-file `status`
+          # (added|modified|removed|renamed). `gh pr view --json files`
+          # does not surface status, which the test-file locator needs
+          # to filter to additions-only — otherwise a `synchronize`
+          # event editing a pre-existing test file would be picked.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+            --jq '[.[] | {path: .filename, additions: .additions, deletions: .deletions, status: .status}]' \
+            > files.json
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body > body.txt
+
+      - name: Run shape validator
+        id: shape
+        run: |
+          python .github/scripts/copilot_validate_pr_shape.py \
+            --mode "${{ steps.mode.outputs.mode }}" \
+            --files-json files.json \
+            --body-file body.txt \
+            --linked-issue "${{ steps.mode.outputs.issue }}" | tee shape.out
+
+      - name: On shape failure, label + comment
+        # Scope to the shape step only. Previously this used a bare
+        # `if: failure()`, which fires on ANY prior step failure — so
+        # when "Discover mode" exploded (no shape.out yet), this handler
+        # would still run and add `cat: shape.out: No such file` to the
+        # log on top of the real error. Now mode-discovery has its own
+        # dedicated handler above; this one stays scoped to shape.
+        if: failure() && steps.shape.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          BODY="PR-shape check failed:\n\n$(cat shape.out)"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          gh pr edit    "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+          exit 1
+
+      # ── 3. Run the new tests (mode A: all must pass; mode B/C: single-file contract) ──
+      - name: Locate new test files
+        id: testfile
+        run: |
+          set -euo pipefail
+          # Filter to status=='added' — on a `synchronize` event the PR
+          # may also touch an existing test file matching the naming regex;
+          # without this filter we'd run pre-existing tests as if they
+          # were the Copilot-authored ones.
+          # Regression mode may produce multiple new test files (one per
+          # cluster the feature touches — see the cluster-decomposition
+          # section of the assembled prompt). Bug-repro and fix-and-test
+          # must produce exactly one.
+          NEW_TESTS=$(jq -r '.[] | select(.status == "added") | .path | select(test("^lex/test_project/tests/[^/]+/test_[0-9]+[a-z]?_[A-Za-z0-9_]+\\.py$"))' files.json)
+          if [[ -z "$NEW_TESTS" ]]; then
+            echo "::error::could not locate any new test file (no added file matching test_<Nx>_<slug>.py under lex/test_project/tests/<cluster>/)."
+            exit 1
+          fi
+          COUNT=$(echo "$NEW_TESTS" | wc -l)
+          MODE="${{ steps.mode.outputs.mode }}"
+          if [[ "$MODE" != "regression" && "$COUNT" -gt 1 ]]; then
+            echo "::error::mode '$MODE' requires exactly one new test file (found $COUNT). Cross-cluster decomposition is a regression-mode concept; bug-repro and fix-and-test stay single-file."
+            echo "$NEW_TESTS" | sed 's/^/  - /'
+            exit 1
+          fi
+          # Persist as a newline-separated multiline GitHub output.
+          {
+            echo "paths<<EOF"
+            echo "$NEW_TESTS"
+            echo "EOF"
+            echo "first=$(echo "$NEW_TESTS" | head -n1)"
+            echo "count=$COUNT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mode A or C — run all new tests, expect pass
+        if: steps.mode.outputs.mode != 'bug-repro'
+        env:
+          # Mirror showcase_tests.yml so the gate exercises the new
+          # tests under the same Django settings as the full cluster
+          # suite — a bug-repro that only fires under different
+          # settings would otherwise slip through.
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
+        run: |
+          set -euo pipefail
+          # `lex pytest` is the Lex CLI wrapper around pytest.main. The CLI
+          # calls django.setup() in lex/bin/lex.py before pytest collection,
+          # so Django ORM imports inside tests work without pytest-django.
+          # Feed file paths (not dotted module names) to pytest.
+          PATHS=""
+          while IFS= read -r TEST_PATH; do
+            [[ -z "$TEST_PATH" ]] && continue
+            PATHS="$PATHS $TEST_PATH"
+          done <<< "${{ steps.testfile.outputs.paths }}"
+          echo "Running paths:$PATHS"
+          python -m lex pytest $PATHS
+
+      - name: Mode B — strip @expectedFailure, expect FAIL
+        if: steps.mode.outputs.mode == 'bug-repro'
+        env:
+          DJANGO_SETTINGS_MODULE: lex_app.settings
+          DATABASE_DEPLOYMENT_TARGET: default
+          CELERY_ACTIVE: "False"
+        run: |
+          set -euo pipefail
+          # Single-file: locate step already errored out if >1 new test.
+          TEST_PATH="${{ steps.testfile.outputs.first }}"
+          # Strip the @(unittest.)?expectedFailure decorator IN PLACE.
+          # The CI checkout is throwaway; overwriting keeps the file at
+          # its real package path so the test runner discovers it as part
+          # of lex/test_project/tests/<cluster>/.
+          python - "$TEST_PATH" <<'PY'
+          import re, sys, pathlib
+          p = pathlib.Path(sys.argv[1])
+          src = p.read_text()
+          out = re.sub(r"(?m)^\s*@(?:unittest\.)?expectedFailure\s*\n", "", src)
+          if out == src:
+              print("::error::no @expectedFailure decorator found to strip — Mode-B requires one on the new test")
+              sys.exit(2)
+          p.write_text(out)
+          PY
+          # Run via `lex pytest`. The lex CLI calls django.setup() before
+          # pytest collection, so Django ORM is available.
+          set +e
+          python -m lex pytest "$TEST_PATH" -v 2>&1 | tee mode_b.out
+          EXIT=${PIPESTATUS[0]}
+          set -e
+          if [[ $EXIT -eq 0 ]]; then
+            echo "::error::Mode-B test passed without @expectedFailure — bug is not reproducible."
+            exit 1
+          fi
+          # Distinguish "ran and asserted FAIL" from "errored on
+          # import/setup". Pytest prints lines starting with `FAILED`,
+          # `ERROR`, or a `==== FAILURES ====` separator for genuine test
+          # failures. A collection or import error prints `ERRORS` (note
+          # the plural separator) and exits non-zero too — we treat those
+          # as non-reproductions because the test body never asserted.
+          if grep -qE '^(FAILED |=+ FAILURES =+)' mode_b.out; then
+            echo "Mode-B test correctly fails without the decorator."
+          elif grep -qE '^(=+ ERRORS =+|ERROR )' mode_b.out; then
+            echo "::error::Mode-B test errored before assertion (likely import/setup failure) — not a real bug repro."
+            exit 1
+          else
+            echo "::error::Mode-B exit code non-zero but no recognised pytest FAILED/ERROR output — not a real bug repro."
+            exit 1
+          fi
+
+      # ── 4. Apply merge labels ──────────────────────────────────
+      - name: Apply auto-merge (modes A/B)
+        if: steps.mode.outputs.mode != 'fix-and-test'
+        env:
+          # COPILOT_PAT, not GITHUB_TOKEN. The `gh pr merge --auto` call
+          # invokes the `enablePullRequestAutoMerge` GraphQL mutation,
+          # which the default workflow token cannot call in repos with
+          # branch protection requiring review — fails with
+          # "Resource not accessible by integration". The classic PAT
+          # acts as a real user and has the required permission. Same
+          # constraint that drives PAT usage in copilot_coverage_check.yml
+          # and copilot_test_bot.yml.
+          GH_TOKEN: ${{ secrets.COPILOT_PAT }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr edit  "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "auto-merge"
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --auto
+
+      - name: Route mode-C to human review
+        if: steps.mode.outputs.mode == 'fix-and-test'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "needs-human-review"
+          # The team-review request is best-effort — if the team isn't configured, log and continue.
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-reviewer "lex-maintainers" || \
+            echo "::warning::could not request review from lex-maintainers (team not found?)"

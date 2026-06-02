@@ -2,7 +2,6 @@ from datetime import timedelta
 from unittest import TestCase
 
 from django.test import override_settings
-
 from lex.api.utils.temporal import parse_as_of_datetime
 
 

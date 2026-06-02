@@ -27,7 +27,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.api.serializers.base_serializers import (
     _get_capabilities,
     _get_lexmodel_fields,

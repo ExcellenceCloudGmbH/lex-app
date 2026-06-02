@@ -1,7 +1,8 @@
+import logging
 import sched
 import threading
 import time
-import logging
+
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)

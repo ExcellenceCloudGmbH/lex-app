@@ -25,12 +25,9 @@ Run::
 from unittest.mock import patch, MagicMock
 
 from django.core.cache import caches
-from django.core.cache.backends.base import InvalidCacheBackendError
 from django.test import SimpleTestCase, override_settings
-
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.DataModels import CacheCleanupResult
-
 
 TEST_CACHES = {
     "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},

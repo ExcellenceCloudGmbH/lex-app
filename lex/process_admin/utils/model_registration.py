@@ -1,15 +1,13 @@
 import asyncio
+import logging
 import os
 from typing import List, Type, Optional
 
 import nest_asyncio
 from asgiref.sync import sync_to_async
-from django.db import models
 from django.contrib import admin
-
+from django.db import models
 from lex.lex_app.simple_history_config import get_model_exclusion_reason
-
-import logging
 
 logger = logging.getLogger(__name__)
 

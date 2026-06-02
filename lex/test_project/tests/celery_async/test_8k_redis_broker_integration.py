@@ -25,17 +25,16 @@ Scenario numbering continues after Cluster 8j at 8.45.
 from __future__ import annotations
 
 import os
-import uuid
 import unittest
+import uuid
 from contextlib import contextmanager
+from unittest.mock import patch
 
 from celery.contrib.testing.worker import start_worker
 from celery.result import allow_join_result
-from kombu.serialization import enable_insecure_serializers
-
 from django.conf import settings as django_settings
 from django.test import SimpleTestCase
-from unittest.mock import patch
+from kombu.serialization import enable_insecure_serializers
 
 _UNSET = object()
 
@@ -45,6 +44,10 @@ from lex.lex_app.celery_tasks import WaitForTasks, tasks_context, unblock_tasks_
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, CeleryCalc
+
+import pytest
+
+pytestmark = pytest.mark.celery_async
 
 
 RUN_ENV = "LEX_RUN_REDIS_CELERY_TESTS"

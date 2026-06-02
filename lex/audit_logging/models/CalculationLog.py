@@ -23,7 +23,7 @@ class CalculationLog(models.Model):
     modification_restriction = AdminReportsModificationRestriction()
     id = models.AutoField(primary_key=True)
     timestamp = models.DateTimeField(auto_now_add=True)
-    calculationId = models.TextField(default="test_id")
+    calculationId = models.TextField(default="test_id", db_index=True)
     calculation_log = models.TextField(default="")
     parent_log = models.ForeignKey(
         "self",

@@ -1,18 +1,17 @@
+import os
+import platform
+from typing import Set
+from urllib.parse import unquote, urlparse
+
+from django.db import connection
+from django.db.models.fields.files import FileField
+from django.http import JsonResponse
+from django_sharepoint_storage.SharePointCloudStorageUtils import get_server_relative_path
+from django_sharepoint_storage.SharePointContext import SharePointContext
+from lex.lex_app import settings
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
-from django.http import JsonResponse
-from django_sharepoint_storage.SharePointContext import SharePointContext
-from django_sharepoint_storage.SharePointCloudStorageUtils import get_server_relative_path
-import os
-from pathlib import Path
-from typing import Set
-from lex.lex_app import settings
-from django.db.models.fields.files import FileField
-import platform
-from django.db import connection
-from urllib.parse import unquote, urlparse
-
 
 DB_NAME = connection.settings_dict["NAME"]
 

@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import unittest
 
+from lex.tests.e2e._e2e_test_case import E2ETestCase
 from rest_framework import status
 
-from lex.tests.e2e._e2e_test_case import E2ETestCase
-
 from .models import ALL_MODELS, HIST_SIMPLE, HistSimpleItem
+
+import pytest
+
+pytestmark = pytest.mark.history
 
 
 class TestCluster05c_HistoryAPI(E2ETestCase):

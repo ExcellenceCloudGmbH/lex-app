@@ -17,7 +17,6 @@ from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.process_admin.utils.model_structure_builder import ModelStructureBuilder
 
 

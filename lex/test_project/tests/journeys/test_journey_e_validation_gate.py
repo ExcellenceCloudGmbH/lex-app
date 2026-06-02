@@ -32,6 +32,10 @@ from lex.tests.e2e._authenticated_e2e_test_case import AuthenticatedE2ETestCase
 
 from .models import ALL_MODELS, VALIDATED_INVOICE, ValidatedInvoice
 
+import pytest
+
+pytestmark = pytest.mark.journeys
+
 
 class TestJourneyE_ValidationGate(AuthenticatedE2ETestCase):
     """Customer API pushes a mix of valid/invalid records; gates must hold."""

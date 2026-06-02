@@ -5,13 +5,12 @@ from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import TemporaryUploadedFile
 from django.http import QueryDict
-from rest_framework.exceptions import APIException
-
 from lex.api.views.model_entries.One import OneModelEntry
-from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.api.views.process_flow.CreateOrUpdate import CreateOrUpdate
+from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 from lex.core.models.LexModel import should_use_atomic_model_operations
+from rest_framework.exceptions import APIException
 
 
 class AtomicModel:

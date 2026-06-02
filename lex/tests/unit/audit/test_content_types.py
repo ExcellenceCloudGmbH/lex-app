@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.contenttypes.models import ContentType
 from django.test import SimpleTestCase
-
 from lex.api.serializers.base_serializers import LexSerializer
 from lex.api.utils.helpers import resolve_target_model
 from lex.audit_logging.serializers.AuditLogSerializer import AuditLogDefaultSerializer

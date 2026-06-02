@@ -1,6 +1,6 @@
 import copy
-import traceback
 import logging
+import traceback
 from contextlib import nullcontext
 from datetime import date, datetime
 from typing import Iterable, cast
@@ -8,19 +8,6 @@ from typing import Iterable, cast
 from django.core.files.base import File
 from django.db import transaction
 from django.db.models import Model, QuerySet
-from rest_framework_api_key.permissions import HasAPIKey
-
-from lex.audit_logging.utils.ModelContext import model_logging_context
-from rest_framework.exceptions import APIException, ValidationError
-from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
-from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
-
-from rest_framework.response import Response
-from rest_framework import status
-from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
-from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
-
-from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.api.utils.Context import OperationContext
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
     DestroyOneWithPayloadMixin,
@@ -28,13 +15,22 @@ from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import (
     ModelEntryProviderMixin,
 )
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
-
 from lex.api.views.permissions.UserPermission import UserPermission
+from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
+from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
+from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
 from lex.core.models.LexModel import should_use_atomic_model_operations
+from rest_framework import status
+from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
+from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_api_key.permissions import HasAPIKey
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +75,19 @@ class OneModelEntry(
             and isinstance(serializer.instance, CalculationModel)
         ):
             serializer.instance._skip_history_for_current_save_only = True
+            # ── Async-202 contract: defer the AFTER_UPDATE calculate_hook ──
+            # ``OneModelEntry.update`` submits ``calculate_hook`` to the
+            # background ``_calculation_executor`` and returns HTTP 202.
+            # For that split to work, the request-thread save must NOT
+            # fire the calc inline.  We set the deferral flag on
+            # ``serializer.instance`` (rather than on the view-local
+            # ``instance``) because DRF's ``UpdateModelMixin.update``
+            # calls ``self.get_object()`` independently, producing a
+            # *different* Python object for the same DB row — any flag
+            # set on the view-local copy never reaches the actual save.
+            # ``CalculationModel.calculate_hook`` checks this flag at
+            # entry and returns early without running ``calculate()``.
+            serializer.instance._defer_calculate_hook = True
         return super().perform_update(serializer)
 
     def _normalize_temporal_value_for_noop_check(self, value):
@@ -403,6 +412,25 @@ class OneModelEntry(
         with OperationContext(request, calculationId):
             instance = self.get_object()
             with model_logging_context(instance):
+                # ── Cancel button short-circuit ────────────────────────
+                # PATCH .../{pk}/?cancel=true (or body {"cancel":"true"})
+                # asks the framework to revoke the in-progress Celery
+                # calculation for this row. Mirrors the existing
+                # ``calculate=true`` trigger pattern so no new URL route
+                # is needed. The handler runs *before* any other update
+                # logic — cancel does not touch any other field.
+                if (
+                    isinstance(instance, CalculationModel)
+                    and str(request.data.get("cancel", "")).lower() == "true"
+                ):
+                    report = CalculationModel.cancel(instance, recursive=True)
+                    http_status = (
+                        status.HTTP_202_ACCEPTED
+                        if report.get("cancelled")
+                        else status.HTTP_409_CONFLICT
+                    )
+                    return Response(report, status=http_status)
+
                 self._calculate_requested = (
                         isinstance(instance, CalculationModel)
                         and str(request.data.get("calculate", "")).lower() == "true"
@@ -568,6 +596,20 @@ class OneModelEntry(
                             calculationId,
                         )
                         CacheManager.store_message(cache_key, "")
+
+                        # ── Async calculation (HTTP 202) ────────────────────
+                        # The actual deferral that prevents the calc from
+                        # running on the request thread is applied in
+                        # ``perform_update`` on ``serializer.instance``
+                        # (the object DRF's UpdateModelMixin re-fetches
+                        # and saves).  Setting the flag here on the
+                        # view-local ``instance`` would have no effect —
+                        # it's a *different* Python object than the one
+                        # going through ``save()``.  Kept as a no-op
+                        # safety net in case any code path reads from
+                        # this in-memory object before the background
+                        # submit clears it (see below).
+                        instance._defer_calculate_hook = True
                     prepared_request = self._prepare_update_request(
                         request,
                         reset_is_calculated=should_reset_is_calculated,
@@ -580,6 +622,91 @@ class OneModelEntry(
                             skip_history=should_skip_history_for_sharepoint_edit,
                             history_change_reason=sharepoint_history_change_reason,
                         )
+
+                    if self._calculate_requested:
+                        # Fire the calculation in the background and return
+                        # HTTP 202 immediately.  The frontend already listens
+                        # for calculation_success / calculation_error via the
+                        # update_calculation_status WebSocket.
+                        from contextvars import copy_context
+                        from lex.core.models.CalculationModel import _calculation_executor
+                        from lex.audit_logging.utils.ModelContext import (
+                            _model_context,
+                            ModelContext,
+                        )
+                        from django.db import close_old_connections
+
+                        ctx = copy_context()
+
+                        def _invoke_calculate_hook():
+                            # Runs inside ``ctx.run(...)`` below so the
+                            # request's ``operation_context`` (with
+                            # ``calculation_id``) is visible to both the
+                            # hook and the terminal-audit finalizer.
+                            #
+                            # Install a FRESH model context for the
+                            # background thread.  ``copy_context()``
+                            # captures a reference to the same mutable
+                            # ``ModelContext`` object that the request
+                            # thread's ``model_logging_context`` will
+                            # pop upon returning the 202 response.  By
+                            # the time this thread starts, the shared
+                            # stack is empty → ContextResolver.resolve()
+                            # cannot determine ``current_record`` →
+                            # WebSocket log delivery and cache routing
+                            # break.  Setting a new ModelContext here
+                            # (inside ``ctx.run``) scopes it to this
+                            # execution without affecting the request
+                            # thread.
+                            _model_context.set(
+                                {"model_context": ModelContext([instance])}
+                            )
+                            instance._defer_calculate_hook = False
+                            try:
+                                instance.calculate_hook()
+                            except Exception:
+                                # The terminal failure audit is normally
+                                # flushed by ``LexModel.save``'s except
+                                # block (see
+                                # ``_finalize_pending_terminal_audit``).
+                                # In the async path we invoke
+                                # ``calculate_hook`` directly — outside
+                                # any ``save()`` — so we own that flush
+                                # here.  Without it, the pending audit
+                                # dict that ``calculate_hook`` set on
+                                # the instance never becomes a row and
+                                # the operator sees a 'success' audit
+                                # for a calc that actually failed.
+                                try:
+                                    instance._finalize_pending_terminal_audit()
+                                except Exception:
+                                    logger.exception(
+                                        "Failed to finalize terminal failure "
+                                        "audit for %s after background "
+                                        "calculation raised",
+                                        calculation_record,
+                                    )
+                                raise
+
+                        def _background_calculate():
+                            try:
+                                ctx.run(_invoke_calculate_hook)
+                            except Exception as exc:
+                                logger.error(
+                                    "Background calculation failed for %s: %s",
+                                    calculation_record, exc, exc_info=True,
+                                )
+                            finally:
+                                close_old_connections()
+
+                        _calculation_executor.submit(_background_calculate)
+
+                        # Return the IN_PROGRESS state immediately
+                        return Response(
+                            self.get_serializer(instance).data,
+                            status=status.HTTP_202_ACCEPTED,
+                        )
+
                     return response
 
                 except CalculationModelException as exc:

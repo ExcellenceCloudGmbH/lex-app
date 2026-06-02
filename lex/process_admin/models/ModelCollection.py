@@ -1,7 +1,7 @@
 import copy
 from typing import Dict, Any, Set, Type, Union
-from django.db.models import Model
 
+from django.db.models import Model
 from lex.process_admin.models.ModelContainer import ModelContainer
 from lex.process_admin.models.utils import enrich_model_structure_with_readable_names_and_types
 from lex.process_admin.utils import ModelStructureBuilder
@@ -112,7 +112,7 @@ class ModelCollection:
 
         # Build a nested "Models" fallback structure from filesystem paths
         # instead of dumping everything flat.  For a model with
-        #   __module__ == "ArmiraCashflowDB.Upload.UploadCashflow.UploadCashflow"
+        #   __module__ == "MyApp.Upload.UploadCashflow.UploadCashflow"
         # the container id "uploadcashflow" will be placed under
         #   Models → Upload → uploadcashflow: None
         if auto_include_missing_models:
@@ -129,7 +129,7 @@ class ModelCollection:
                     continue
                 parts = module.split(".")
                 # Try to find the repo segment and derive the subfolder path
-                # e.g. ["ArmiraCashflowDB", "Upload", "UploadCashflow", "UploadCashflow"]
+                # e.g. ["MyApp", "Upload", "UploadCashflow", "UploadCashflow"]
                 #        repo_index=0        → path parts = ["Upload", "UploadCashflow"]
                 #        we drop the last part (filename == class name) → ["Upload"]
                 repo_name_local = parts[0] if parts else ""

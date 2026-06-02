@@ -151,8 +151,8 @@ section("4. MINIMUM_DUAL_MODE_VERSION constant")
 from lex.tools.setup_with_ai import MINIMUM_DUAL_MODE_VERSION
 
 check(
-    MINIMUM_DUAL_MODE_VERSION == "0.2.3",
-    f"equals '0.2.3' (got {MINIMUM_DUAL_MODE_VERSION!r})",
+    MINIMUM_DUAL_MODE_VERSION == "1.0.0",
+    f"equals '1.0.0' (got {MINIMUM_DUAL_MODE_VERSION!r})",
 )
 
 
@@ -954,7 +954,7 @@ section("18. mode_switch.apply_mode_change_to_external_state — eager external 
 # or the equivalent VSCode paths during the test.
 os.environ["LEX_MCP_DISABLE_IDE_AUTODISCOVER"] = "1"
 
-# Import from lex-mcp-local (installed in our venv as lex-mcp-local 0.2.3)
+# Import from lex-mcp-local (installed in our venv as lex-mcp-local 1.0.0)
 try:
     from lex_mcp import mode_switch as _ms
 except ImportError:

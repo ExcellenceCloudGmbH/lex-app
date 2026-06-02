@@ -37,7 +37,6 @@ import threading
 import unittest
 
 from django.test import SimpleTestCase
-
 from lex.core.services.bitemporal_signals import (
     _suppress_history_valid_to_chaining,
     _suppress_main_table_sync,
@@ -46,6 +45,10 @@ from lex.core.services.bitemporal_signals import (
     suppress_main_table_sync,
     suppress_meta_sys_to_chaining,
 )
+
+import pytest
+
+pytestmark = pytest.mark.signals_ws
 
 
 class TestCluster09_SuppressionGuards(SimpleTestCase):

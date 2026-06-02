@@ -26,10 +26,13 @@ from __future__ import annotations
 import unittest
 
 from lex.core.models.CalculationModel import CalculationModel
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HistAtomicCalc
+
+import pytest
+
+pytestmark = pytest.mark.history
 
 
 class TestCluster05b_CalculationHistory(E2ETestCase):

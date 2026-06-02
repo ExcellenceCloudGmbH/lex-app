@@ -13,12 +13,14 @@ Scenarios:
 
 from __future__ import annotations
 
-import unittest
-
 from django.db import connection
 
 from ._stress_test_case import StressTestCase
 from .models import ALL_MODELS, INVOICE, StressInvoice
+
+import pytest
+
+pytestmark = pytest.mark.stress
 
 
 class TestCluster11b_ListEndpoint(StressTestCase):

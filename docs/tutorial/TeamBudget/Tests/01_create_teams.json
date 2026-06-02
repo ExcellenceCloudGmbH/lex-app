@@ -1,0 +1,32 @@
+[
+  {
+    "class": "Team",
+    "action": "create",
+    "tag": "team_design",
+    "parameters": {
+      "name": "Design",
+      "budget": 15000.00,
+      "manager_email": "thomas.mueller@apex-consulting.com"
+    }
+  },
+  {
+    "class": "Team",
+    "action": "create",
+    "tag": "team_engineering",
+    "parameters": {
+      "name": "Engineering",
+      "budget": 25000.00,
+      "manager_email": "sarah.becker@apex-consulting.com"
+    }
+  },
+  {
+    "class": "Team",
+    "action": "create",
+    "tag": "team_marketing",
+    "parameters": {
+      "name": "Marketing",
+      "budget": 10000.00,
+      "manager_email": "lisa.hoffmann@apex-consulting.com"
+    }
+  }
+]

@@ -1,4 +1,5 @@
 import sys
+
 from .module_finder import ModuleAliasingFinder
 
 

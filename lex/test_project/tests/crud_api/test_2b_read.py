@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import unittest
 
+from lex.tests.e2e._e2e_test_case import E2ETestCase
 from rest_framework import status
 
-from lex.tests.e2e._e2e_test_case import E2ETestCase
-
 from .models import ALL_MODELS, SIMPLE, SimpleItem
+
+import pytest
+
+pytestmark = pytest.mark.crud_api
 
 
 class TestCluster02b_Read(E2ETestCase):

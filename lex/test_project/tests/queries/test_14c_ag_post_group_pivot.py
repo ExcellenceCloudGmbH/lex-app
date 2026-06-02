@@ -25,9 +25,8 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
-from rest_framework import status
-
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import (
     ALL_MODELS,
@@ -38,6 +37,10 @@ from .models import (
     QueryCategory,
     QueryItem,
 )
+
+import pytest
+
+pytestmark = pytest.mark.queries
 
 
 def _ag(**overrides) -> dict:

@@ -1,17 +1,14 @@
-import traceback
 import logging
 import time
+import traceback
 
 from django.db import transaction
 from django.utils import timezone
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
-
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload
 from lex.audit_logging.utils.content_types import safe_get_content_type as _safe_get_content_type
 from lex.core.exceptions import resolve_exception_traceback
-
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +261,12 @@ class AuditLogMixin:
             audit_log.object_id = instance.pk
             audit_log.payload = updated_payload
             audit_log.save()
-            AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
+            # When a background calculation is pending (HTTP 202 path),
+            # leave the status as 'pending' — the terminal audit
+            # (ensure_terminal_calculation_audit) will set it to
+            # 'success' or 'failure' once the calculation completes.
+            if not getattr(instance, "_defer_calculate_hook", False):
+                AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return instance
         except Exception as e:
             error_msg = _resolve_audit_failure_traceback(e)

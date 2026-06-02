@@ -1,7 +1,9 @@
+import logging
 import os
 import traceback
-from abc import abstractmethod
-import logging
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 
 from django.db import models
@@ -14,9 +16,9 @@ from django_lifecycle import (
     BEFORE_SAVE,
 )
 from django_lifecycle.conditions import WhenFieldValueIs
-from rest_framework.exceptions import APIException
-
-from lex.core.models.LexModel import LexModel
+from lex.api.utils import operation_context, OperationContext
+from lex.audit_logging.utils.CacheManager import CacheManager
+from lex.audit_logging.utils.ContextResolver import ContextResolver
 from lex.core.exceptions import (
     ensure_list,
     find_exception_artifacts,
@@ -25,11 +27,39 @@ from lex.core.exceptions import (
     select_preferred_exception_detail,
     select_preferred_stack_trace,
 )
-from lex.api.utils import operation_context, OperationContext
-from lex.audit_logging.utils.CacheManager import CacheManager
-from lex.audit_logging.utils.ContextResolver import ContextResolver
+from lex.core.models.LexModel import LexModel
+from rest_framework.exceptions import APIException
 
 logger = logging.getLogger(__name__)
+
+# ContextVar that is True while user code (calculate/update) is executing
+# inside a calculation cycle.  Child record saves that happen during this
+# window should NOT update edited_by / edited_at because the change is
+# system-triggered, not a direct user edit.
+_in_calculation_execution: ContextVar[bool] = ContextVar(
+    '_in_calculation_execution', default=False,
+)
+
+# Dedicated thread pool for calculations.  This keeps long-running
+# calculations OFF the ASGI single_thread_executor so they don't starve
+# other sync operations (API views, WS auth, DB queries).
+# Unbounded (default) so concurrent calculations on different records
+# never block each other — the GIL serializes CPU work regardless.
+_calculation_executor = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("LEX_CALCULATION_THREADS", "10")),
+    thread_name_prefix="lex-calc",
+)
+
+
+@contextmanager
+def calculation_execution_context():
+    """Mark the current thread as inside a calculation's user-code execution."""
+    token = _in_calculation_execution.set(True)
+    try:
+        yield
+    finally:
+        _in_calculation_execution.reset(token)
+
 
 class CalculationModelException(APIException):
     @staticmethod
@@ -51,6 +81,21 @@ class CalculationModelException(APIException):
         super().__init__(*api_args)
 
 
+class CalculationCancelled(Exception):
+    """Raised inside a worker when the caller revoked the calculation.
+
+    A small marker exception so :class:`CallbackTask.on_failure` (and any
+    in-process error handlers) can distinguish a user-initiated cancel
+    from an unrelated runtime ``Exception`` and persist ``CANCELLED``
+    instead of ``ERROR``. Carries an optional ``reason`` for the audit
+    trail.
+    """
+
+    def __init__(self, reason: str = "Calculation cancelled by user"):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class CalculationModel(LexModel):
 
     _TERMINAL_STATE_PERSISTENCE_ATTR = "_persisted_terminal_calculation_state"
@@ -61,13 +106,27 @@ class CalculationModel(LexModel):
     ERROR = "ERROR"
     SUCCESS = "SUCCESS"
     NOT_CALCULATED = "NOT_CALCULATED"
+    # Two distinct "non-success" terminal states:
+    #   ABORTED   — server-side recovery: a row was found stuck in IN_PROGRESS
+    #               at startup (worker crashed / process killed mid-run) and is
+    #               flipped here by ``process_admin.utils.model_registration``.
+    #               No human cancelled it; the framework gave up on its behalf.
+    #   CANCELLED — explicit user-initiated cancel via ``CalculationModel.cancel()``
+    #               (or the cooperative ``CalculationCancelled`` exception raised
+    #               from inside ``calculate()``). A person/operator deliberately
+    #               stopped a running calculation.
+    # Both are non-success and both audit as ``failure``, but they answer
+    # different "what happened?" questions in the compliance trail, so the
+    # state machine keeps them separate.
     ABORTED = "ABORTED"
+    CANCELLED = "CANCELLED"
     STATUSES = [
         (IN_PROGRESS, "IN_PROGRESS"),
         (ERROR, "ERROR"),
         (SUCCESS, "SUCCESS"),
         (NOT_CALCULATED, "NOT_CALCULATED"),
         (ABORTED, "ABORTED"),
+        (CANCELLED, "CANCELLED"),
     ]
 
     is_calculated = models.CharField(
@@ -98,10 +157,12 @@ class CalculationModel(LexModel):
             # to the DB (or to the enclosing savepoint) *before* the
             # calculation runs.
             self._defer_calculate_hook = True
+            self._is_calculation_triggered_save = True
             try:
                 result = super().save(*args, **kwargs)
             finally:
                 self._defer_calculate_hook = False
+                self._is_calculation_triggered_save = False
 
             # Register that IN_PROGRESS has been written (on_commit for
             # nested atomics, or immediately for autocommit).
@@ -300,6 +361,204 @@ class CalculationModel(LexModel):
 
         return persisted_objects
 
+    # ------------------------------------------------------------------
+    # Public cancellation API (Celery-only design)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def cancel(cls, instance, *, recursive: bool = True, reason: str = "") -> dict:
+        """Request cancellation of an in-progress calculation.
+
+        Public surface for the abort/cancel button. Per the framework's
+        Celery-only cancel design:
+
+        * If the calculation was dispatched to a Celery worker we have
+          a ``task_id`` in :class:`ActiveCalculationStateStore` — we
+          ``app.control.revoke(task_id, terminate=True, signal="SIGTERM")``
+          and immediately persist ``CANCELLED``. The worker's
+          :class:`CallbackTask.on_failure` maps the resulting
+          ``TaskRevokedError`` / ``SoftTimeLimitExceeded`` /
+          ``WorkerLostError`` onto ``CANCELLED`` rather than ``ERROR``.
+        * If no ``task_id`` is registered (sync-dispatched calc, or
+          Celery never reached) we return ``cancellable=False`` —
+          synchronous calculations cannot be killed in this design;
+          the API layer surfaces this as HTTP 409.
+        * When ``recursive=True`` (the default), every active descendant
+          that shares the cancelled record's ``calculation_id`` is
+          revoked the same way. This matches the user expectation that
+          "abort" stops the whole running tree, not just the entry
+          point the button was attached to.
+
+        Returns a small report dict the REST endpoint serialises back
+        to the caller::
+
+            {
+                "cancelled": <bool>,            # primary target outcome
+                "cancellable": <bool>,          # had task_id?
+                "status": "CANCELLED" | "...",    # persisted is_calculated
+                "revoked_tasks": [<task_id>, ...],
+                "descendants_cancelled": <int>,
+            }
+        """
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+        from lex.core.signals.CalculationSignals import update_calculation_status
+
+        if instance is None or getattr(instance, "pk", None) is None:
+            return {
+                "cancelled": False,
+                "cancellable": False,
+                "status": getattr(instance, "is_calculated", None),
+                "revoked_tasks": [],
+                "descendants_cancelled": 0,
+            }
+
+        # Only meaningful while running. Idempotent on terminal states.
+        current_status = getattr(instance, "is_calculated", None)
+        if current_status != cls.IN_PROGRESS:
+            return {
+                "cancelled": False,
+                "cancellable": False,
+                "status": current_status,
+                "revoked_tasks": [],
+                "descendants_cancelled": 0,
+                "reason": "not_in_progress",
+            }
+
+        record_id = f"{instance._meta.model_name}_{instance.pk}"
+        entry = ActiveCalculationStateStore.get_entry(record_id)
+        task_id = entry.get("task_id") or None
+        calculation_id = entry.get("calculation_id") or None
+
+        # Collect every descendant first so we revoke and persist them
+        # in the same pass — children dispatched from inside a parent
+        # share the parent's calculation_id.
+        descendants = []
+        if recursive and calculation_id:
+            descendants = [
+                d
+                for d in ActiveCalculationStateStore.find_descendants(calculation_id)
+                if d.get("record_id") != record_id
+            ]
+
+        if not task_id and not descendants:
+            return {
+                "cancelled": False,
+                "cancellable": False,
+                "status": current_status,
+                "revoked_tasks": [],
+                "descendants_cancelled": 0,
+                "reason": "sync_calculation_not_cancellable",
+            }
+
+        revoked = []
+        revoke_reason = reason or "Calculation cancelled by user"
+
+        # Issue the revokes BEFORE flipping DB state. If revoke raises,
+        # we surface the error rather than leaving the DB in a state
+        # that says "CANCELLED" while a worker is still computing.
+        if task_id:
+            cls._revoke_celery_task(task_id)
+            revoked.append(task_id)
+
+        descendants_cancelled = 0
+        for desc in descendants:
+            desc_task = desc.get("task_id") or None
+            if desc_task:
+                try:
+                    cls._revoke_celery_task(desc_task)
+                    revoked.append(desc_task)
+                except Exception:  # pragma: no cover — best-effort
+                    logger.warning(
+                        "Failed to revoke descendant task %s during cancel of %s",
+                        desc_task,
+                        record_id,
+                        exc_info=True,
+                    )
+            # Persist CANCELLED on the descendant row too — the worker
+            # callback will also do this, but doing it here guarantees
+            # the UI sees the new state immediately even if the worker
+            # is wedged.
+            cls._persist_cancelled_by_entry(desc, revoke_reason)
+            descendants_cancelled += 1
+
+        # Persist CANCELLED on the primary target.
+        cls._persist_cancelled(instance, revoke_reason)
+        try:
+            update_calculation_status(instance)
+        except Exception:  # pragma: no cover
+            logger.warning(
+                "Failed to broadcast CANCELLED status for %s", record_id, exc_info=True
+            )
+
+        return {
+            "cancelled": True,
+            "cancellable": True,
+            "status": cls.CANCELLED,
+            "revoked_tasks": revoked,
+            "descendants_cancelled": descendants_cancelled,
+        }
+
+    @staticmethod
+    def _revoke_celery_task(task_id: str) -> None:
+        """Revoke a Celery task by id with SIGTERM (instant kill)."""
+        from celery import current_app
+
+        current_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+
+    @classmethod
+    def _persist_cancelled(cls, instance, reason: str) -> None:
+        """Flip ``is_calculated=CANCELLED`` and persist, mirroring ERROR path."""
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+
+        try:
+            instance.is_calculated = cls.CANCELLED
+            if hasattr(instance, "calculation_error_message"):
+                instance.calculation_error_message = reason
+            elif hasattr(instance, "error_message"):
+                instance.error_message = reason
+            instance.save(skip_hooks=True)
+            cls._register_terminal_state_persistence(instance)
+        except Exception:
+            logger.error(
+                "Failed to persist CANCELLED state for %s", instance, exc_info=True
+            )
+        finally:
+            try:
+                record_id = f"{instance._meta.model_name}_{instance.pk}"
+                ActiveCalculationStateStore.clear(record_id)
+            except Exception:  # pragma: no cover
+                pass
+
+    @classmethod
+    def _persist_cancelled_by_entry(cls, entry: dict, reason: str) -> None:
+        """Resolve a state-store entry back to a row and persist CANCELLED."""
+        from django.apps import apps
+        from lex.core.signals.ActiveCalculationStateStore import (
+            ActiveCalculationStateStore,
+        )
+
+        model_label = entry.get("model_label") or ""
+        record_pk = entry.get("record_pk") or ""
+        if not model_label or "." not in model_label or not record_pk:
+            return
+        app_label, model_name = model_label.split(".", 1)
+        try:
+            model_class = apps.get_model(app_label, model_name)
+        except Exception:
+            return
+        try:
+            row = model_class._default_manager.filter(pk=record_pk).first()
+        except Exception:
+            row = None
+        if row is None:
+            ActiveCalculationStateStore.clear(entry.get("record_id", ""))
+            return
+        cls._persist_cancelled(row, reason)
+
     @staticmethod
     def build_exception_chain(exception, current_obj=None):
         calc_obj, exception_details, stack_trace = find_exception_artifacts(exception)
@@ -387,13 +646,19 @@ class CalculationModel(LexModel):
         """
         Determine if calculation should use Celery based on configuration and availability.
 
+        The framework dispatches every root calculation to Celery whenever
+        ``CELERY_ACTIVE=true`` and the broker is reachable, regardless of
+        whether the user's ``calculate()`` / ``update()`` method is wrapped
+        with ``@lex_shared_task``. Undecorated methods are dispatched
+        through the generic ``calc_and_save`` task — see
+        :meth:`dispatch_calculation_task`.
+
         Returns:
             bool: True if Celery should be used, False for synchronous execution
         """
-        from lex.lex_app import settings
 
-        # Check if Celery is enabled in setting
-        if not os.getenv("CELERY_ACTIVE", "").lower() == 'true' or not hasattr(self.lex_func(), 'delay'):
+        # Check if Celery is enabled in settings
+        if not os.getenv("CELERY_ACTIVE", "").lower() == 'true':
             return False
 
         # Check if Celery is available by trying to import and test connection
@@ -408,7 +673,14 @@ class CalculationModel(LexModel):
 
     def dispatch_calculation_task(self):
         """
-        Dispatch calculation to Celery worker using the calc_and_save task.
+        Dispatch calculation to a Celery worker.
+
+        If the user's calculate/update method is decorated with
+        ``@lex_shared_task`` (i.e. ``lex_func()`` exposes ``.delay``) the
+        task is dispatched directly. Otherwise the calculation is wrapped
+        in the generic ``calc_and_save`` task, so any
+        :class:`CalculationModel` can run on a worker without requiring
+        the user to decorate their method.
 
         Returns:
             AsyncResult: Celery task result object
@@ -427,13 +699,88 @@ class CalculationModel(LexModel):
         from lex.audit_logging.utils.ModelContext import _model_context
         model_context = deepcopy(_model_context.get()['model_context'])
 
-        # Dispatch the task
-        from lex.lex_app.celery_tasks import WaitForTasks
-        task_result = func.delay(context=new_context, model_context=model_context)
+        if hasattr(func, 'delay'):
+            # Method itself is a @lex_shared_task — dispatch it directly.
+            task_result = func.delay(context=new_context, model_context=model_context)
+        else:
+            # Undecorated method — use the generic calc_and_save task,
+            # which calls ``model.lex_func()()`` inside the worker. This
+            # is the path that makes every calculation Celery-eligible
+            # regardless of user decoration.
+            from lex.lex_app.celery_tasks import calc_and_save
+            task_result = calc_and_save.delay(
+                [self],
+                context=new_context,
+                model_context=model_context,
+            )
+
+        # Record the celery task_id against this record so that a later
+        # cancel request has a handle to revoke. The active-state store
+        # is already the per-process registry tracking active calcs;
+        # piggybacking on it avoids inventing a parallel cache and keeps
+        # the parent->child relationship (shared calculation_id) trivially
+        # queryable for the recursive-cancel walk in ``cancel()``.
+        try:
+            from lex.core.signals.ActiveCalculationStateStore import (
+                ActiveCalculationStateStore,
+            )
+
+            record_id = f"{self._meta.model_name}_{self.pk}"
+            ActiveCalculationStateStore.set_task_id(
+                record_id, getattr(task_result, "id", None)
+            )
+        except Exception as store_error:  # pragma: no cover — defensive
+            logger.warning(
+                "Failed to register task_id for cancel support: %s",
+                store_error,
+                exc_info=True,
+            )
 
         # Register with WaitForTasks context if one exists
         from lex.lex_app.celery_tasks import register_task_with_context
         return register_task_with_context(task_result)
+
+    def _run_in_calculation_executor(self):
+        """
+        Synchronous-fallback dispatcher for ``execute_calculation_sync``.
+
+        Historically this method submitted the calculation to a dedicated
+        thread pool in order to free the ASGI single-thread executor.  That
+        introduced two regressions that the Cluster-7 behavioural tests
+        ([test-plan/test-clusters.md#7-calculation-state-machine](../../test_project/test-plan/test-clusters.md))
+        immediately surfaced:
+
+        1. **Cross-thread DB deadlock.**  ``LexModel.save()`` runs inside
+           ``transaction.atomic()`` and holds row locks on the caller's
+           connection.  The worker thread opens its **own** Django
+           connection (connections are thread-local) and any write against
+           the same row waits forever for the caller's lock — while the
+           caller is blocked on ``future.result()``.  Parent → child
+           hierarchies (test 7.5+) hang outright.
+        2. **`operation_context` ContextVar isolation.**  ``copy_context()``
+           gives the worker a *copy*; mutations made inside the worker
+           (e.g. ``OperationContext.__enter__`` setting ``calculation_id``)
+           **do not propagate back** to the caller.  The caller's
+           except-branch cleanup then calls ``ContextResolver.resolve()``
+           which raises ``Missing calculation_id in operation context``.
+
+        Both problems disappear when the sync fallback runs inline on the
+        caller's thread — which is also the only way to preserve the
+        documented "synchronous" contract.
+
+        The original goal of the thread pool — freeing the ASGI
+        single-thread executor during heavy calculations — is **already
+        achieved upstream** by ``One.update()``, which submits
+        ``calculate_hook`` to ``_calculation_executor`` and returns HTTP
+        202 immediately.  By the time ``calculate_hook`` reaches this
+        fallback it is already off the ASGI thread, so a second hop is
+        both unnecessary and harmful.
+
+        ``_calculation_executor`` is still exported at module scope for
+        ``One.py``'s fire-and-forget HTTP-202 path; only the nested
+        re-submit was removed.
+        """
+        return self.execute_calculation_sync()
 
     def execute_calculation_sync(self):
         """
@@ -447,11 +794,13 @@ class CalculationModel(LexModel):
         stack_trace = None
         try:
             if hasattr(self, "is_atomic") and not self.is_atomic:
-                func()
+                with calculation_execution_context():
+                    func()
                 self.is_calculated = self.SUCCESS
             else:
                 with transaction.atomic():
-                    func()
+                    with calculation_execution_context():
+                        func()
                     self.is_calculated = self.SUCCESS
 
         except Exception as e:
@@ -463,7 +812,18 @@ class CalculationModel(LexModel):
                 fallback=fallback_stack_trace,
             )
             error_details = f"{exception_details}\n\n{stack_trace}"
-            self.is_calculated = self.ERROR
+            # If the exception bubbling up is a cancellation signal
+            # (cooperative CalculationCancelled, or a worker-side
+            # Terminated/SoftTimeLimit/Revoked/WorkerLost propagated
+            # synchronously into this thread), the terminal state must
+            # be CANCELLED, not ERROR. ERROR would lie to the user — they
+            # pressed cancel and the audit would say "the calc crashed".
+            from lex.lex_app.celery_tasks import _is_cancellation_exception
+
+            if _is_cancellation_exception(e):
+                self.is_calculated = self.CANCELLED
+            else:
+                self.is_calculated = self.ERROR
 
             if hasattr(self, 'calculation_error_message'):
                 self.calculation_error_message = error_details
@@ -518,7 +878,7 @@ class CalculationModel(LexModel):
                     status_update_error,
                     exc_info=True,
                 )
-            if self.is_calculated != self.ERROR:
+            if self.is_calculated == self.SUCCESS:
                 try:
                     from lex.audit_logging.utils.calculation_audit import (
                         ensure_terminal_calculation_audit,
@@ -528,6 +888,25 @@ class CalculationModel(LexModel):
                         self,
                         audit_status="success",
                         error_message=exception_details,
+                        stack_trace=stack_trace,
+                    )
+                except Exception as audit_error:
+                    logger.error(
+                        "Failed to finalize terminal audit log for %s: %s",
+                        self,
+                        audit_error,
+                        exc_info=True,
+                    )
+            elif self.is_calculated == self.CANCELLED:
+                try:
+                    from lex.audit_logging.utils.calculation_audit import (
+                        ensure_terminal_calculation_audit,
+                    )
+
+                    ensure_terminal_calculation_audit(
+                        self,
+                        audit_status="cancelled",
+                        error_message=exception_details or "Calculation cancelled by user",
                         stack_trace=stack_trace,
                     )
                 except Exception as audit_error:
@@ -645,7 +1024,7 @@ class CalculationModel(LexModel):
             else:
                 # Execute synchronously as fallback
                 logger.info(f"Executing calculation for {self} synchronously (Celery not available)")
-                self.execute_calculation_sync()
+                self._run_in_calculation_executor()
 
         except Exception as e:
             # Nested hook invocations may already normalize failures into
@@ -655,8 +1034,23 @@ class CalculationModel(LexModel):
 
             # Handle any errors in task dispatch or synchronous execution
             logger.error(f"Calculation failed for {self}: {e}", exc_info=True)
+            # Cancellation must collapse onto CANCELLED rather than ERROR —
+            # whether it surfaced from a Celery worker that was revoked
+            # (TaskRevokedError / WorkerLostError / SoftTimeLimitExceeded /
+            # Terminated) or from a cooperative in-process raise
+            # (CalculationCancelled). Without this branch, the
+            # except-block below would persist ERROR and overwrite the
+            # CANCELLED state cancel() already wrote, leaving the audit row
+            # in the wrong terminal state.
+            from lex.lex_app.celery_tasks import _is_cancellation_exception
+
+            is_cancellation = _is_cancellation_exception(e)
             status_was_error = self.is_calculated == self.ERROR
-            self.is_calculated = self.ERROR
+            status_was_cancelled = self.is_calculated == self.CANCELLED
+            target_terminal_state = (
+                self.CANCELLED if is_cancellation else self.ERROR
+            )
+            self.is_calculated = target_terminal_state
 
             # Store error message if the model has an error_message field
             stack_trace = traceback.format_exc()
@@ -703,20 +1097,20 @@ class CalculationModel(LexModel):
                 or stack_trace
             )
 
-            # Persist ERROR state and notify websocket clients.
-            # Always save self to ERROR — even when execute_calculation_sync
-            # already did — to cover cases where the error originated in
+            # Persist terminal state (ERROR or CANCELLED) and notify websocket
+            # clients. Always save self even when execute_calculation_sync
+            # already did — to cover cases where the failure originated in
             # calculate_hook itself (e.g. dispatch failure) or where the
             # parent's own calculate() raised directly.
-            error_state_already_persisted = self._has_persisted_terminal_state(
+            terminal_state_already_persisted = self._has_persisted_terminal_state(
                 self,
-                self.ERROR,
+                target_terminal_state,
             )
             try:
-                if not error_state_already_persisted:
+                if not terminal_state_already_persisted:
                     self.save(skip_hooks=True)
                     self._register_terminal_state_persistence(self)
-                if not status_was_error:
+                if not (status_was_error or status_was_cancelled):
                     update_calculation_status(
                         self,
                         exception_details=preferred_exception_detail,
@@ -724,16 +1118,24 @@ class CalculationModel(LexModel):
                     )
             except Exception as status_update_error:
                 logger.error(
-                    f"Failed to persist/notify ERROR state for {self}: {status_update_error}",
+                    f"Failed to persist/notify {target_terminal_state} state for {self}: {status_update_error}",
                     exc_info=True,
                 )
             self._pending_terminal_audit = {
-                "audit_status": "failure",
+                # Distinguish user-cancellation from a genuine crash in the
+                # deferred audit row, mirroring the in-process branch above
+                # and the worker-side ``CallbackTask._update_model_status``
+                # mapping in ``lex_app.celery_tasks``.
+                "audit_status": "cancelled" if is_cancellation else "failure",
                 "error_message": preferred_exception_detail,
                 "stack_trace": preferred_stack_trace,
             }
             calc_obj_to_persist = calc_obj[:-1] if calc_obj and calc_obj[-1] is self else calc_obj
-            self.persist_error_state(calc_obj_to_persist)
+            # On cancellation, descendants were already revoked + flipped to
+            # CANCELLED by ``cancel()``'s recursive walk; we must not now
+            # persist ERROR on top of them via the generic error path.
+            if not is_cancellation:
+                self.persist_error_state(calc_obj_to_persist)
             raise CalculationModelException(
                 calc_obj=calc_obj,
                 exception_details=full_exception_chain,

@@ -1,6 +1,5 @@
-import warnings
 import importlib.abc
-from django.apps import apps
+import warnings
 
 
 class ModelAwareLoader(importlib.abc.Loader):
@@ -28,7 +27,7 @@ class ModelAwareLoader(importlib.abc.Loader):
         module.__file__ = self.filepath
         module.__name__ = self.fullname
 
-        # Extract repo_name from fullname (e.g., "ArmiraCashflowDB" from "ArmiraCashflowDB.Upload.Upload")
+        # Extract repo_name from fullname (e.g., "MyApp" from "MyApp.Upload.Upload")
         repo_name = self.fullname.split('.')[0]
 
         # Read source code
@@ -48,7 +47,6 @@ class ModelAwareLoader(importlib.abc.Loader):
         def patched_new(mcs, name, bases, namespace, **kwargs):
             """Force app_label to match repo_name for all models."""
             # Only patch non-abstract Django models
-            from django.db import models
             is_model = any(isinstance(base, ModelBase) for base in bases)
 
             if is_model:

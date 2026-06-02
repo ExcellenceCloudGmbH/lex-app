@@ -1,10 +1,12 @@
-from django.http import HttpResponse
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-import markdown2
-from xhtml2pdf import pisa
 import io
+
+import markdown2
+from django.http import HttpResponse
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from xhtml2pdf import pisa
+
 
 class DownloadMarkdownPdf(APIView):
     permission_classes = [IsAuthenticated]

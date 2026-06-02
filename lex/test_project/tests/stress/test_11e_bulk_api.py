@@ -13,11 +13,15 @@ from __future__ import annotations
 from urllib.parse import urlencode
 
 from django.db import connection
-from rest_framework import status
 from django.test.utils import CaptureQueriesContext
+from rest_framework import status
 
 from ._stress_test_case import StressTestCase
 from .models import ALL_MODELS, INVOICE, StressInvoice
+
+import pytest
+
+pytestmark = pytest.mark.stress
 
 
 class TestCluster11e_BulkAPI(StressTestCase):

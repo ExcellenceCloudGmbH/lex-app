@@ -5,11 +5,10 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from django.contrib import admin
 from django.conf import settings
+from django.contrib import admin
 from django.core.exceptions import SynchronousOnlyOperation
 from django.db import connection, models
-
 from lex.lex_app.apps import LexAppConfig
 
 

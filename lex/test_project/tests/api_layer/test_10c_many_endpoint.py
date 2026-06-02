@@ -16,11 +16,14 @@ from __future__ import annotations
 import unittest
 from urllib.parse import urlencode
 
+from lex.tests.e2e._e2e_test_case import E2ETestCase
 from rest_framework import status
 
-from lex.tests.e2e._e2e_test_case import E2ETestCase
-
 from ..crud_api.models import ALL_MODELS, SIMPLE, SimpleItem
+
+import pytest
+
+pytestmark = pytest.mark.api_layer
 
 
 class TestCluster10c_ManyEndpoint(E2ETestCase):

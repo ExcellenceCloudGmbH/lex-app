@@ -1,0 +1,110 @@
+[
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_anna",
+    "parameters": {
+      "first_name": "Anna",
+      "last_name": "Schmidt",
+      "email": "anna.schmidt@apex-consulting.com",
+      "team": "tag:team_design",
+      "role": "employee"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_max",
+    "parameters": {
+      "first_name": "Max",
+      "last_name": "Weber",
+      "email": "max.weber@apex-consulting.com",
+      "team": "tag:team_design",
+      "role": "employee"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_thomas",
+    "parameters": {
+      "first_name": "Thomas",
+      "last_name": "Müller",
+      "email": "thomas.mueller@apex-consulting.com",
+      "team": "tag:team_design",
+      "role": "manager"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_julia",
+    "parameters": {
+      "first_name": "Julia",
+      "last_name": "Fischer",
+      "email": "julia.fischer@apex-consulting.com",
+      "team": "tag:team_engineering",
+      "role": "employee"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_lukas",
+    "parameters": {
+      "first_name": "Lukas",
+      "last_name": "Wagner",
+      "email": "lukas.wagner@apex-consulting.com",
+      "team": "tag:team_engineering",
+      "role": "employee"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_sarah",
+    "parameters": {
+      "first_name": "Sarah",
+      "last_name": "Becker",
+      "email": "sarah.becker@apex-consulting.com",
+      "team": "tag:team_engineering",
+      "role": "manager"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_nina",
+    "parameters": {
+      "first_name": "Nina",
+      "last_name": "Braun",
+      "email": "nina.braun@apex-consulting.com",
+      "team": "tag:team_marketing",
+      "role": "employee"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_lisa",
+    "parameters": {
+      "first_name": "Lisa",
+      "last_name": "Hoffmann",
+      "email": "lisa.hoffmann@apex-consulting.com",
+      "team": "tag:team_marketing",
+      "role": "manager"
+    }
+  },
+  {
+    "class": "Employee",
+    "action": "create",
+    "tag": "emp_michael",
+    "parameters": {
+      "first_name": "Michael",
+      "last_name": "Richter",
+      "email": "michael.richter@apex-consulting.com",
+      "team": "tag:team_engineering",
+      "role": "cfo"
+    }
+  }
+]

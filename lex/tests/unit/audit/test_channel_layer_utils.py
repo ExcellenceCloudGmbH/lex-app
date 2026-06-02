@@ -25,7 +25,6 @@ Run::
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
-
 from lex.utilities.channel_layer import _is_celery_worker
 
 

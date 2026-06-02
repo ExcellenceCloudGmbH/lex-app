@@ -19,9 +19,10 @@ cache keys, or pass specific_keys to cleanup_calculation().
 import logging
 import os
 from typing import List, Optional
+
 from django.core.cache import caches
 from django.core.cache.backends.base import InvalidCacheBackendError
-from lex.audit_logging.utils.DataModels import CacheCleanupResult, CacheOperationError
+from lex.audit_logging.utils.DataModels import CacheCleanupResult
 
 logger = logging.getLogger(__name__)
 

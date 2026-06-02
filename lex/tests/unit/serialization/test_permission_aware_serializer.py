@@ -30,13 +30,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-from rest_framework.exceptions import PermissionDenied
-
 from lex.api.views.model_entries.mixins.PermissionAwareSerializerMixin import (
     _camel_to_snake,
     PermissionAwareSerializerMixin,
     add_permission_checks,
 )
+from rest_framework.exceptions import PermissionDenied
 
 
 # ─── test infrastructure ──────────────────────────────────────────────

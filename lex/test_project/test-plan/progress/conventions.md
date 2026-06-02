@@ -1,0 +1,221 @@
+# Test-Plan Conventions
+
+> **Back to:** [Progress index](../progress.md) | [Test Plan Index](../index.md)
+> **Audience:** anyone authoring a new test (human or Copilot) — the stable rules that don't change per session.
+
+This file owns the methodology, naming, and quality gates. The high-churn per-cluster status lives in [`dashboard.md`](dashboard.md); the per-session narrative lives in [`session-log.md`](session-log.md).
+
+---
+
+## How We Organize the Work
+
+### Rule: Work in Cluster Order
+
+Clusters are ordered by the user journey (see [test-clusters.md](../test-clusters.md#ordering-the-user-journey)). We implement them **in order** because each cluster builds on the one before it:
+
+```
+1. Initial Data → 2. CRUD → 3. Validation → 4. Permissions → 5. History → ...
+```
+
+**Exception:** If a cluster is blocked by a framework bug, skip it (mark ) and move to the next. Come back after the bug is fixed.
+
+### Rule: One Cluster at a Time
+
+Don't start Cluster N+1 until Cluster N is  or . This keeps work focused and progress visible.
+
+### Rule: Test Intent, Never Overfit to Source Code
+
+> Canonical statement (philosophy + red flags) lives in **[test-clusters.md → Testing Philosophy](../test-clusters.md#testing-philosophy)**. Read it once before writing any test.
+>
+> Operational corollary for this file: when a test exposes a bug, mark it `@unittest.expectedFailure`, add the bug to the [Known Bugs Tracker](../known-bugs.md), and continue — see the next rule.
+
+### Rule: Test First, Then Fix
+
+When a test exposes a framework bug:
+1. Write the test asserting the **correct** behavior (from docs / intent)
+2. Mark it `@unittest.expectedFailure` with a comment explaining the bug and linking the tracker entry
+3. Add the bug to the [Known Bugs Tracker](../known-bugs.md)
+4. Move on — don't block the test suite on the fix
+5. When the bug is fixed, remove `@unittest.expectedFailure` — the test should now pass naturally
+
+`@pytest.mark.xfail(strict=True)` is an acceptable equivalent for tests
+authored after the pytest cutover, but existing `@unittest.expectedFailure`
+markers are not bulk-converted.
+
+---
+
+## Enumerate Behaviour Surfaces Before Allocating Clusters
+
+> **Canonical source.** This is the one authoritative statement of the surface rule.
+> Every agent front-end — the cloud Copilot prompt (which inlines this file), the IDE
+> instructions, `AGENTS.md`, and the `lex-testing` skill — derives the rule from here.
+> Change it here and nowhere else, so the cloud and local paths can never drift.
+
+Before picking any cluster, list *every externally-observable behaviour* the change
+introduces or alters — **don't reason about "the feature" as one thing.** Each of these is
+a distinct **surface** that needs its own scenario:
+
+- every public entry point a caller can invoke — instance method, classmethod, REST
+  endpoint, management command, anything a customer or the framework dispatches;
+- **every distinct execution path the same operation can take.** One logical operation may
+  run by more than one route depending on configuration, runtime mode, or how the work is
+  dispatched — and those routes can have entirely different machinery, failure modes, and
+  ways of being stopped. Each route is its own surface: a test that drives one route tells
+  you *nothing* about the others. Enumerate every route the operation can take and cover
+  each independently — do not assume the behaviour of one generalises to the rest;
+- every state transition or status change the change can produce;
+- every persisted or emitted side-effect — a written audit/history row, a signal or
+  broadcast, a record that lands in a different terminal state;
+- every error/edge path — not-found, no-op, permission-denied, already-finished,
+  failure-during-X.
+
+**A surface is only "covered" when a test drives it the way a real caller reaches it —
+end-to-end through the public entry point, not by exercising the private helper or
+in-memory data structure underneath it.** Testing the easy internal layer while leaving the
+public entry points and their integration paths unexercised is the single most common way a
+change *looks* tested but isn't. If your scenarios only touch the data structure and the
+no-op/error returns, you have not tested the feature — go back and add the happy-path and
+integration surfaces.
+
+**Map each surface to its owning cluster — often more than one.** A single change
+frequently spans clusters. Map each surface by *what the surface is*, not where the source
+line lives: a REST surface belongs to the API-layer cluster even if the code sits on a
+model; a persisted side-effect belongs to the cluster that owns that record type. Surfaces
+in different clusters become separate batches. If you can't confidently place a surface, or
+a surface genuinely cannot be exercised in the test environment, **say so explicitly** —
+gate it with a documented reason or stop and ask the developer — **never** silently omit it
+and still call the change tested.
+
+---
+
+## User Experience: Making Tests Readable
+
+Tests are documentation. A new developer reading a test should understand:
+- **What** is being tested (the scenario)
+- **Why** it matters (the risk)
+- **How** to reproduce it (the setup)
+
+### Naming Convention
+
+```python
+def test_<cluster_number>_<short_description>(self):
+    """
+    Scenario X.Y: <one-line description from the cluster table>
+    
+    Given: <setup>
+    When: <action>
+    Then: <expected outcome>
+    """
+```
+
+**Example:**
+```python
+def test_02_01_create_sets_timestamps(self):
+    """
+    Scenario 2.1: Create a record via ORM
+    
+    Given: A SimpleItem model
+    When: We create and save a new instance
+    Then: created_at and edited_at are set, created_by = resolved actor
+    """
+    item = SimpleItem(name="Test", value=42)
+    item.save()
+    
+    self.assertIsNotNone(item.created_at)
+    self.assertIsNotNone(item.edited_at)
+    self.assertEqual(item.created_by, "Initial Data Upload")
+```
+
+Tests live in a `tests/<cluster_slug>/` folder. The folder's name is the
+pytest group. At the top of each test module,
+`pytestmark = pytest.mark.<cluster_slug>` declares the group once and
+applies it to every test in the file.
+
+### Assertion Messages
+
+Every assertion has a human-readable failure message:
+
+```python
+# Bad
+self.assertEqual(item.is_calculated, "SUCCESS")
+
+# Good
+self.assertEqual(
+    item.is_calculated, "SUCCESS",
+    "After successful calculation, state must be SUCCESS"
+)
+```
+
+### Test Class Organization
+
+One test class per cluster, named clearly:
+
+```python
+class TestCluster02_CRUDLifecycle(E2ETestCase):
+    """Cluster 2: CRUD & Lifecycle — tests the basic LexModel contract"""
+    e2e_models = [SimpleItem, TrackedItem]
+```
+
+Classes inherit from `E2ETestCase` as before; no per-class `@pytest.mark`
+decoration is needed because the module-level `pytestmark` already applies
+to every test in the file.
+
+---
+
+## How to Run Tests
+
+### Run all clusters (excluding stress)
+```bash
+source /path/to/your-project/.venv/bin/activate  # the host project where lex-app is installed editable
+python -m lex pytest -m "not stress"
+```
+
+### Run a single cluster
+```bash
+python -m lex pytest -m crud_api
+```
+
+### Run a single scenario by ID
+```bash
+python -m lex pytest -k "2_1"
+```
+
+### Run with coverage
+```bash
+coverage run -m lex pytest -m "not stress"
+coverage report
+```
+
+---
+
+## Definition of Done (per cluster)
+
+A cluster is ** Complete** when:
+
+1. ✅ Every scenario from [test-clusters.md](../test-clusters.md) has a corresponding test method
+2. ✅ All tests either **pass** or are marked `@unittest.expectedFailure` (or `@pytest.mark.xfail(strict=True)`) with a tracked bug reference
+3. ✅ Tests use the canonical customer code path (no `skip_hooks`, no `calculate_hook()` in E2E tests)
+4. ✅ Tests run in CI without flakiness (3 consecutive green runs)
+5. ✅ No mocks on the class under test or the ORM
+
+A cluster is ** In progress** when some but not all of the above are true. The
+[dashboard](dashboard.md) tracks which state each cluster is in; this section owns what the states
+*mean*.
+
+---
+
+## Quality Gates
+
+The Definition of Done above is per-cluster. These are the **release-wide** gates — before any
+release, all must hold:
+
+1. **All clusters  or ** — no cluster in  or  state
+2. **Zero unexpected failures** — every failure is either a passing test or an `expectedFailure` with a tracked bug
+3. **CI pipeline green** — `lex test lex.test_project.tests --noinput` passes in CI
+4. **No overfitting** — no test uses `skip_hooks=True` + `calculate_hook()` (the pattern that works around bugs). No test mocks the class under test. No test was written by reading the implementation instead of the docs.
+5. **Every `expectedFailure` is tracked** — must have an entry in the [Known Bugs Tracker](../known-bugs.md) with severity and cluster
+6. **Coverage threshold met** — `COVERAGE_FAIL_UNDER` not decreased
+
+---
+
+> **Back to:** [Progress index](../progress.md) | **See also:** [Test Clusters](../test-clusters.md) | [Dashboard](dashboard.md) | [Session Log](session-log.md)

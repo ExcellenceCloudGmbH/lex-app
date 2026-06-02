@@ -1,11 +1,13 @@
 from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
+from lex.core.models.CalculationModel import calculation_execution_context
 # TODO: DependencyAnalysisMixin was not migrated from old structure
 # from lex.process_admin.models.model_process_admin import DependencyAnalysisMixin
 
 
 def calc_and_save(entry):
-    entry.calculate()
-    entry.save()
+    with calculation_execution_context():
+        entry.calculate()
+        entry.save()
 
 
 class CalculatedModelUpdateHandler:

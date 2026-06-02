@@ -12,11 +12,11 @@ The control fields are prefixed with ``meta_`` to avoid collisions with
 the Level 1 fields that are copied into the MetaHistory model.
 """
 
+import logging
+
 from django.db import models, transaction
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
-
-import logging
 
 logger = logging.getLogger(__name__)
 

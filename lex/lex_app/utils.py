@@ -37,11 +37,11 @@ MIGRATION GUIDE:
 
 import warnings
 
+from lex.utilities.config.generic_app_config import GenericAppConfig
+from lex.utilities.import_system.import_utils import install_custom_import_system
+from lex.utilities.import_system.model_loader import ModelAwareLoader
 # Import system components moved to utilities app
 from lex.utilities.import_system.module_finder import ModuleAliasingFinder
-from lex.utilities.import_system.model_loader import ModelAwareLoader
-from lex.utilities.import_system.import_utils import install_custom_import_system
-from lex.utilities.config.generic_app_config import GenericAppConfig
 
 
 def _deprecated_import_warning(old_path, new_path):

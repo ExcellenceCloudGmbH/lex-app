@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, override_settings
-
 from lex.api.views.authentication.KeycloakManager import (
     DEFAULT_KEYCLOAK_AUTHZ_REQUEST_TIMEOUT,
     KeycloakManager,

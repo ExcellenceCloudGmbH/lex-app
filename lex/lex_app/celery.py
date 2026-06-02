@@ -1,12 +1,16 @@
 from __future__ import absolute_import
 
-import os
 import logging
+import os
+import signal
+import threading
 from typing import Optional
 
 from celery import Celery
 from celery.app.control import Control
 from celery.signals import task_postrun
+from celery.worker import state as worker_state
+from celery.worker.control import Panel
 from django.apps import apps
 
 # set the default Django settings module for the 'celery' program.
@@ -27,6 +31,52 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 # )
 
 app.autodiscover_tasks(lambda: [n.name for n in apps.get_app_configs()])
+
+
+@Panel.register
+def lex_shutdown_if_idle(panel, completed_task_id=None):
+    """
+    Remote-control command that runs in the worker's MainProcess.
+
+    Checks the canonical request bookkeeping (``celery.worker.state``) and
+    only triggers a warm shutdown if no other task is active or reserved
+    on this worker. The just-completed ``completed_task_id`` is subtracted
+    because, depending on timing, MainProcess may not have processed the
+    pool's "task ready" message yet when this command arrives.
+
+    Returns a small dict for observability (visible via ``celery inspect``
+    style replies when ``reply=True``).
+    """
+    try:
+        active_ids = {getattr(req, "id", None) for req in worker_state.active_requests}
+        reserved_ids = {getattr(req, "id", None) for req in worker_state.reserved_requests}
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("lex_shutdown_if_idle: failed to read worker state")
+        return {"shutting_down": False, "error": "state_unavailable"}
+
+    pending = (active_ids | reserved_ids) - {None}
+    if completed_task_id:
+        pending.discard(completed_task_id)
+
+    if pending:
+        return {
+            "shutting_down": False,
+            "pending_count": len(pending),
+            "pending": sorted(pending),
+        }
+
+    # Worker is idle. Schedule a SIGTERM on a short delay so we can return
+    # the reply (and let the broadcast machinery finish) before the warm
+    # shutdown begins. Celery's MainProcess handles SIGTERM as a graceful
+    # shutdown (finish in-flight tasks, then exit) — there are none here.
+    def _terminate():
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("lex_shutdown_if_idle: SIGTERM failed")
+
+    threading.Timer(0.05, _terminate).start()
+    return {"shutting_down": True}
 
 
 def _is_non_local_deployment_target() -> bool:
@@ -56,12 +106,17 @@ def shutdown_worker_after_task_completion(
     **extra,
 ):
     """
-    Shut down only the worker that completed the task in non-local deployments.
+    Request a warm shutdown of the worker that completed this task — but only
+    if that worker has no other active or reserved tasks.
 
-    Workers in this project run with concurrency/prefetch set to 1, so once the
-    current task finishes there is no additional in-flight work reserved on that
-    worker. Targeting the current hostname avoids broadcasting shutdown to other
-    workers that may still be busy.
+    The decision is made in the worker's MainProcess via the
+    ``lex_shutdown_if_idle`` remote-control command (see above), because the
+    child fork running this signal handler does not have an accurate view of
+    sibling pool workers or of the consumer's reserved queue.
+
+    Safe under any ``--concurrency`` setting and under ``prefetch-multiplier``
+    > 1, because the MainProcess-side check considers both ``active_requests``
+    and ``reserved_requests`` before terminating.
     """
     if not _is_non_local_deployment_target() or task is None:
         return
@@ -73,14 +128,19 @@ def shutdown_worker_after_task_completion(
 
     try:
         logger.info(
-            "Shutting down Celery worker %s after task %s completed",
+            "Requesting idle-shutdown of Celery worker %s after task %s",
             hostname,
             task_id,
         )
-        Control(app=app_instance).shutdown(destination=[hostname])
+        app_instance.control.broadcast(
+            "lex_shutdown_if_idle",
+            arguments={"completed_task_id": task_id},
+            destination=[hostname],
+            reply=False,
+        )
     except Exception:
         logger.exception(
-            "Failed to shut down Celery worker %s after task %s",
+            "Failed to request idle-shutdown for worker %s after task %s",
             hostname,
             task_id,
         )

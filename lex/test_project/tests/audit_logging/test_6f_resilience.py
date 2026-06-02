@@ -17,12 +17,10 @@ Scenario numbering matches docs/test-plan/test-clusters.md § 6f.
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from django.contrib.contenttypes.models import ContentType
 from django.db.utils import OperationalError
 from django.test import SimpleTestCase, TestCase
-
 from lex.audit_logging.mixins.AuditLogMixin import (
     BASE_RETRY_DELAY_SECONDS,
     MAX_UPDATE_RETRIES,
@@ -31,6 +29,10 @@ from lex.audit_logging.mixins.AuditLogMixin import (
     _is_retryable_db_error,
 )
 from lex.audit_logging.utils.content_types import safe_get_content_type
+
+import pytest
+
+pytestmark = pytest.mark.audit_logging
 
 
 def _make_pg_operational_error(pgcode):

@@ -6,14 +6,15 @@ the ``TemporalReconciler`` runs once the record’s validity window
 has arrived.
 """
 
-import unittest
-from unittest.mock import patch
-from django.test import TransactionTestCase
-from django.db import models, connection
-from datetime import timedelta
-from lex.core.models.LexModel import LexModel
 import datetime
-from django.utils import timezone
+import unittest
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.db import models, connection
+from django.test import TransactionTestCase
+from lex.core.models.LexModel import LexModel
+
 
 class TemporalTestModel(LexModel):
     name = models.CharField(max_length=100)

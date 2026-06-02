@@ -35,7 +35,6 @@ import unittest
 from unittest import TestCase, mock
 
 from django.core.management.base import CommandError
-
 from lex.lex_app.management.commands import init as init_module
 from lex.lex_app.management.commands.init import (
     build_instance_controller_url,
@@ -43,6 +42,10 @@ from lex.lex_app.management.commands.init import (
     poll_bootstrap_status,
     wait_for_keycloak_setup_v2,
 )
+
+import pytest
+
+pytestmark = pytest.mark.init
 
 
 def _http_response(status_code=200, json_body=None, raise_for_status=False, text=""):

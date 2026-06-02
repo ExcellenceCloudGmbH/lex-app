@@ -33,8 +33,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import TestCase
-
 from lex.api.views.global_search_for_models.Search import (
     EXCLUDED_MODELS,
     EXCLUDED_TYPES,
@@ -43,6 +41,10 @@ from lex.api.views.global_search_for_models.Search import (
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, SchemaItem
+
+import pytest
+
+pytestmark = pytest.mark.api_layer
 
 
 def _container(model_class, *, container_id=None, title=None):

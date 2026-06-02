@@ -25,13 +25,16 @@ from __future__ import annotations
 
 import unittest
 
-from rest_framework import status
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import ALL_MODELS, AUDIT_SIMPLE, AuditSimpleItem
+
+import pytest
+
+pytestmark = pytest.mark.audit_logging
 
 
 class TestCluster06a_APIAuditLog(E2ETestCase):

@@ -2,7 +2,6 @@ import logging
 from typing import Optional
 
 from django.dispatch import Signal
-
 from lex.api.utils import operation_context
 from lex.core.calculated_updates.update_handler import CalculatedModelUpdateHandler
 from lex.core.models.CalculationModel import CalculationModel
@@ -33,8 +32,13 @@ def update_calculation_status(
     ------------
     1. IN_PROGRESS  → register in ActiveCalculationStateStore, broadcast.
     2. SUCCESS/ERROR → clear from ActiveCalculationStateStore, broadcast.
-    3. ABORTED      → clear from ActiveCalculationStateStore, broadcast.
-    4. **Never** suppress a broadcast — the frontend idempotently handles
+    3. ABORTED      → clear from ActiveCalculationStateStore, broadcast
+       (``calculation_aborted`` — set by the startup-reset sweep when a row
+       was found stuck in IN_PROGRESS after a worker crash).
+    4. CANCELLED    → clear from ActiveCalculationStateStore, broadcast
+       (``calculation_cancelled`` — set by ``CalculationModel.cancel()`` when
+       a user explicitly stops a running calculation).
+    5. **Never** suppress a broadcast — the frontend idempotently handles
        duplicates and needs every signal to stay in sync (especially across
        multiple browser tabs / users).
     """
@@ -67,12 +71,18 @@ def update_calculation_status(
         message_type = "calculation_aborted"
         ActiveCalculationStateStore.clear(record_id)
 
+    elif instance.is_calculated == CalculationModel.CANCELLED:
+        message_type = "calculation_cancelled"
+        ActiveCalculationStateStore.clear(record_id)
+
     if not message_type:
         return
 
+    model_name = instance._meta.model_name
     payload = {
         "record": str(instance),
         "record_id": record_id,
+        "model_name": model_name,
     }
     if calculation_id:
         payload["calculation_id"] = calculation_id

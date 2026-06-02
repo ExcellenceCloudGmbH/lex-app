@@ -31,12 +31,15 @@ import datetime as _dt
 import time
 import unittest
 
-from rest_framework import status
-
 from lex.core.services.Bitemporal import get_queryset_as_of
 from lex.tests.e2e._e2e_test_case import E2ETestCase
+from rest_framework import status
 
 from .models import ALL_MODELS, HIST_SIMPLE, HistSimpleItem
+
+import pytest
+
+pytestmark = pytest.mark.history
 
 
 def _meta_history_wired_for_hist_simple() -> bool:

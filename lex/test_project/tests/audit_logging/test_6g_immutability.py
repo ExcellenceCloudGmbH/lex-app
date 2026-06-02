@@ -25,10 +25,13 @@ from __future__ import annotations
 import unittest
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.core.models.LexModel import PermissionResult
+
+import pytest
+
+pytestmark = pytest.mark.audit_logging
 
 
 class _FakeUserContext:

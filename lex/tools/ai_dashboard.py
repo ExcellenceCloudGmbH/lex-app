@@ -5,7 +5,7 @@ Opens a local HTTP page that displays and lets the user edit:
 * **MCP workflow mode** (forward / backward) — writes the one-shot override
   file at ``~/.lex-mcp/mode-override`` and updates ``LEX_MCP_MODE`` in the
   project ``.env`` and ``mcp.json``.  With the crash-and-reboot mechanism
-  in lex-mcp-local ≥ 0.2.3, mode changes are instant: the MCP server
+  in lex-mcp-local ≥ 1.0.0, mode changes are instant: the MCP server
   self-terminates and the IDE auto-restarts it with the new tool surface.
 * **GitHub token** — written to ``GITHUB_TOKEN`` in ``.env`` and ``mcp.json``.
 * **Remote MCP API key** — written to ``REMOTE_MCP_API_KEY`` in ``.env`` and
@@ -22,9 +22,8 @@ import html
 import json
 import os
 import secrets
-import sqlite3
-import subprocess
 import signal
+import sqlite3
 import threading
 import time
 import webbrowser
@@ -40,7 +39,6 @@ from lex.tools.setup_with_ai import (
     GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY,
     GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY,
     LEX_MCP_LOCAL_SERVER_NAME,
-    SetupWithAIError,
     _atomic_write_text,
     _ensure_github_copilot_state_table,
     _load_github_copilot_mcp_servers_cache,

@@ -29,7 +29,6 @@ from unittest.mock import MagicMock, patch
 
 from django.db import models
 from django.test import SimpleTestCase
-
 from lex.api.serializers.base_serializers import (
     LexSerializer,
     _get_capabilities,

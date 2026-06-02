@@ -21,18 +21,13 @@ from datetime import date, datetime, time
 from unittest.mock import MagicMock, patch, PropertyMock
 
 from django.test import SimpleTestCase
-
 from lex.api.serializers.base_serializers import (
     _get_lexmodel_fields,
     _get_capabilities,
     FilteredListSerializer,
     LexSerializer,
     model2serializer,
-    _wrap_custom_serializer,
     get_serializer_map_for_model,
-    ID_FIELD_NAME,
-    SHORT_DESCR_NAME,
-    LEX_SCOPES_NAME,
 )
 
 

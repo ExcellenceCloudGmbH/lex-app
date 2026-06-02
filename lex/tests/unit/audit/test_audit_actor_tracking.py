@@ -31,7 +31,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
-
 from lex.core.models.LexModel import LexModel
 
 

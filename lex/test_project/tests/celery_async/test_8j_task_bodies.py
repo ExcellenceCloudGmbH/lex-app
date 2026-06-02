@@ -44,7 +44,6 @@ from unittest.mock import MagicMock, patch
 from django.db import IntegrityError
 from django.test import SimpleTestCase
 from django.utils import timezone
-
 from lex.lex_app.celery_tasks import (
     activate_history_version,
     calc_and_save,
@@ -53,6 +52,10 @@ from lex.lex_app.celery_tasks import (
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, CelerySyncCalc
+
+import pytest
+
+pytestmark = pytest.mark.celery_async
 
 
 # ════════════════════════════════════════════════════════════════════════

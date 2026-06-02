@@ -7,16 +7,12 @@ import traceback
 
 import nest_asyncio
 from asgiref.sync import sync_to_async
-from celery import shared_task
 from django.apps import apps
 from django.contrib.admin.apps import AdminConfig
-
-
-from lex.authentication.utils.lex_authentication import LexAuthentication
-from lex.core.config import LexProjectConfig
-from lex.lex_app.settings import repo_name, CELERY_ACTIVE
-from lex.utilities.config.generic_app_config import GenericAppConfig
 from lex.audit_logging.utils.config import is_audit_logging_enabled, get_audit_logging_config
+from lex.core.config import LexProjectConfig
+from lex.lex_app.settings import repo_name
+from lex.utilities.config.generic_app_config import GenericAppConfig
 
 logger = logging.getLogger(__name__)
 

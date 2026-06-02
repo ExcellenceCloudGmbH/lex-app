@@ -27,6 +27,10 @@ from lex.core.models.LexModel import PermissionResult
 from ._stress_test_case import StressTestCase
 from .models import ALL_MODELS, INVOICE, StressInvoice
 
+import pytest
+
+pytestmark = pytest.mark.stress
+
 
 class TestCluster11f_Concurrency(StressTestCase):
     """11.12 — concurrent writes."""

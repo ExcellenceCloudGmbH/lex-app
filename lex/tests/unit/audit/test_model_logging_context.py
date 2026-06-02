@@ -44,7 +44,6 @@ How to run
 from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase
-
 from lex.audit_logging.utils.ModelContext import (
     ModelContext,
     model_logging_context,

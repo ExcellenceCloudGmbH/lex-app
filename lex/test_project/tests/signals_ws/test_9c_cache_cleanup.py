@@ -20,7 +20,6 @@ docs/test-plan/test-clusters.md#9-signals--websocket.
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
@@ -28,6 +27,10 @@ from lex.core.models.CalculationModel import CalculationModel
 from lex.tests.e2e._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, SigAtomicCalc
+
+import pytest
+
+pytestmark = pytest.mark.signals_ws
 
 
 class TestCluster09c_CacheCleanup(E2ETestCase):

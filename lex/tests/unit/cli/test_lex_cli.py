@@ -1,20 +1,18 @@
 import json
 import os
-from pathlib import Path
 import sqlite3
 import subprocess
+import sys
+import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest import TestCase
 from unittest.mock import Mock
 from unittest.mock import patch
-import sys
-
-from click.testing import CliRunner
 
 import lex.tools.setup_with_ai as setup_with_ai_module
-
+from click.testing import CliRunner
 from generate_pycharm_configs import (
     CELERY_WORKER_COUNT_PROMPT,
     _build_celery_workers_parameters,
@@ -36,8 +34,6 @@ from lex.tools.setup_with_ai import (
     SetupWithAICredentials,
     SetupWithAIArtifacts,
     SetupWithAIMCPProbeResult,
-    SetupWithAIServerRuntime,
-    SetupWithAIUpdateResult,
     apply_ai_update,
     apply_ai_update_0_2_1,
     apply_ai_update_0_2_2,
@@ -355,6 +351,7 @@ class LexFlowerCommandTests(TestCase):
                     "REMOTE_MCP_API_KEY": "remote_api_key",
                     "GITHUB_TOKEN": "ghu_example",
                     "LEX_MCP_MODE": "forward",
+                    "LEX_MCP_ANALYTICS_BACKEND": "remote",
                 },
             )
             bootstrap_copilot_state_mock.assert_called_once_with(
@@ -425,7 +422,11 @@ class SetupWithAIToolsTests(TestCase):
                 "Planning docs\n",
             )
 
-    def test_copy_lex_app_docs_directory_skips_when_docs_are_already_inside_project(self):
+    def test_copy_lex_app_docs_directory_refreshes_even_when_source_lives_inside_project(self):
+        # Editable installs put ``lex/docs`` inside the project checkout. The
+        # destination (``<project>/docs``) is still a different directory, so
+        # the copy must proceed so the AI agent always sees the canonical
+        # dev-shipped docs in its working directory.
         with TemporaryDirectory() as tmp_dir:
             temp_root = Path(tmp_dir)
             project_root = temp_root / "project"
@@ -440,8 +441,25 @@ class SetupWithAIToolsTests(TestCase):
                 lex_package_root,
             )
 
+            self.assertEqual(docs_directory, (project_root / "docs").resolve())
+            self.assertTrue((project_root / "docs" / "planning" / "README.md").is_file())
+
+    def test_copy_lex_app_docs_directory_skips_true_self_copy(self):
+        # If source and destination resolve to the same directory (the project
+        # root itself is the lex package root), there is nothing to copy.
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            (project_root / "docs" / "planning").mkdir(parents=True)
+            (project_root / "docs" / "planning" / "README.md").write_text(
+                "Planning docs\n", encoding="utf-8"
+            )
+
+            docs_directory = setup_with_ai_module.copy_lex_app_docs_directory(
+                project_root,
+                project_root,
+            )
+
             self.assertIsNone(docs_directory)
-            self.assertFalse((project_root / "docs").exists())
 
     def test_configure_ai_integration_copies_github_and_docs_directories_into_project_root(self):
         with TemporaryDirectory() as tmp_dir:
@@ -1123,13 +1141,15 @@ class AIUpdateTests(TestCase):
                     project_root, mcp_config_path=mcp_path,
                 )
 
-            self.assertEqual(len(results), 3)
+            self.assertEqual(len(results), 4)
             self.assertEqual(results[0].version, "0.2.1")
             self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
             self.assertIn("GEMINI_API_KEY", results[0].mcp_env_keys_removed)
             self.assertEqual(results[1].version, "0.2.2")
             self.assertTrue(results[1].package_upgraded)
-            self.assertEqual(results[2].version, "0.2.3")
+            self.assertEqual(results[2].version, "1.0.0")
+            self.assertEqual(results[3].version, "1.0.1")
+            self.assertTrue(results[3].package_upgraded)
 
     def test_ai_update_cli_command_reports_removed_keys(self):
         runner = CliRunner()
@@ -1476,12 +1496,14 @@ class AIUpdate022Tests(TestCase):
                     project_root, mcp_config_path=mcp_path,
                 )
 
-            self.assertEqual(len(results), 3)
+            self.assertEqual(len(results), 4)
             self.assertEqual(results[0].version, "0.2.1")
             self.assertIn("GEMINI_API_KEY", results[0].env_keys_removed)
             self.assertEqual(results[1].version, "0.2.2")
             self.assertTrue(results[1].package_upgraded)
-            self.assertEqual(results[2].version, "0.2.3")
+            self.assertEqual(results[2].version, "1.0.0")
+            self.assertEqual(results[3].version, "1.0.1")
+            self.assertTrue(results[3].package_upgraded)
 
     def test_ai_update_cli_command_reports_0_2_2_actions(self):
         runner = CliRunner()

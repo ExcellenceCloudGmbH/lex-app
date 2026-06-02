@@ -34,6 +34,6 @@ runnable with the standard `django_test_settings.py`.
 ## How to Run
 
 ```bash
-source ~/LUND_IT/ArmiraCashflowDB/.venv/bin/activate
+source /path/to/your-project/.venv/bin/activate  # the host project where lex-app is installed editable
 lex test lex.tests.e2e --noinput
 ```

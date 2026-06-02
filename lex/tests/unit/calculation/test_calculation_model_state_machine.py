@@ -45,7 +45,6 @@ from unittest.mock import MagicMock, patch
 
 from django.db import connection, models
 from django.test import SimpleTestCase, TransactionTestCase
-
 from lex.api.utils import OperationContext
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
@@ -118,9 +117,30 @@ class TestCalculationModelStatuses(SimpleTestCase):
         """``ABORTED`` == ``'ABORTED'``."""
         self.assertEqual(CalculationModel.ABORTED, "ABORTED")
 
-    def test_statuses_tuple_has_five_entries(self):
-        """``STATUSES`` must contain exactly five (value, label) pairs."""
-        self.assertEqual(len(CalculationModel.STATUSES), 5)
+    def test_cancelled_constant(self):
+        """``CANCELLED`` == ``'CANCELLED'`` — distinct from ABORTED.
+
+        ABORTED is the startup-recovery state (stuck IN_PROGRESS row found
+        at boot); CANCELLED is the explicit user-initiated cancel state
+        (``CalculationModel.cancel()`` or ``CalculationCancelled`` raised
+        from inside ``calculate()``). Both audit as ``failure`` but answer
+        different "what happened?" questions.
+        """
+        self.assertEqual(CalculationModel.CANCELLED, "CANCELLED")
+        self.assertNotEqual(CalculationModel.CANCELLED, CalculationModel.ABORTED)
+
+    def test_statuses_tuple_has_six_entries(self):
+        """``STATUSES`` must contain exactly six (value, label) pairs.
+
+        Five legacy states (NOT_CALCULATED / IN_PROGRESS / SUCCESS / ERROR /
+        ABORTED) plus the explicit user-cancel state ``CANCELLED`` added
+        when the cancel-calculation feature shipped (PR #547 / #549). The
+        two non-success terminal states (ABORTED for startup-reset,
+        CANCELLED for user cancel) are deliberately kept separate so the
+        audit trail can answer "did an operator stop this?" vs "did the
+        framework give up on a crashed worker's row?".
+        """
+        self.assertEqual(len(CalculationModel.STATUSES), 6)
 
     def test_default_is_not_calculated(self):
         """A fresh instance defaults to ``NOT_CALCULATED``."""

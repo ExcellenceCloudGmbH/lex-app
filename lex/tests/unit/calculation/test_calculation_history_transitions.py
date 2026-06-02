@@ -12,15 +12,14 @@ from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.db import connection, models
 from django.test import TransactionTestCase
-from rest_framework.test import APIRequestFactory, force_authenticate
-
 from lex.api.serializers.base_serializers import get_serializer_map_for_model
 from lex.api.views.model_entries.One import OneModelEntry
+from lex.core.mixins.ModelModificationRestriction import ModelModificationRestriction
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import PermissionResult
-from lex.core.mixins.ModelModificationRestriction import ModelModificationRestriction
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 from lex.process_admin.utils.model_registration import ModelRegistration
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 
 class CalculationHistoryTestModel(CalculationModel):
