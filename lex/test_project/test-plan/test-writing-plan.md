@@ -313,6 +313,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Prereqs | none |
 | Status | ✅ Complete (Session 67 — 8 scenarios; 3 pure-logic pass locally, 5 DB-needing scenarios require CI test DB) |
 
+### Batch 7o — ForeignKey integrity violation aborts batch (Session 72 — June 2)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.176 – 7.176 |
+| Type | I |
+| Files covered | `lex/core/mixins/CalculatedModelMixin.py`, `lex/lex_app/celery_tasks.py` |
+| Test file | `lex/test_project/tests/calculations/test_7o_fk_violation_abort.py` |
+| Test classes | `TestCluster07o_ForeignKeyAbort` |
+| Fixtures | `FKViolationAbortCalc`, `FKAbortWrite`, `FKAbortTarget` (`calculations/models.py`) |
+| Tests landed | **not run locally (requires Postgres test DB in this environment)** |
+| Coverage gain | n/a (behaviour regression gate) |
+| Prereqs | none |
+| Status | ✅ Complete (Session 72 — pins immediate abort on unhandled FK integrity failure) |
+
 
 ---
 
@@ -546,7 +561,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 

@@ -174,7 +174,7 @@ def _normalize_field_values(field_values: Any) -> List[Any]:
     return [field_values]
 
 
-from django.db import connection
+from django.db import connection, IntegrityError
 
 def get_transaction_depth():
     """Returns the current savepoint/transaction nesting level"""
@@ -183,6 +183,24 @@ def get_transaction_depth():
 def assert_in_transaction():
     """Enforce transaction context requirement"""
     assert connection.in_atomic_block, "This function must run inside a transaction"
+
+
+def _is_foreign_key_integrity_error(exc: BaseException | None) -> bool:
+    """Return True when an exception chain contains a FK integrity violation."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, IntegrityError):
+            msg = str(current).lower()
+            if "foreign key" in msg or "violates foreign key constraint" in msg:
+                return True
+        current = getattr(current, "__cause__", None) or getattr(
+            current,
+            "__context__",
+            None,
+        )
+    return False
 
 
 class ModelCombinationGenerator:
@@ -904,6 +922,13 @@ def calc_and_save_sync(models, *args):
             except CalculatedModelError:
                 raise
             except Exception as save_error:
+                if _is_foreign_key_integrity_error(save_error):
+                    raise CalculatedModelError(
+                        f"ForeignKey integrity violation while saving model {i + 1}: {save_error}",
+                        model_class=model.__class__.__name__,
+                        model_index=i,
+                        total_models=model_count,
+                    ) from save_error
                 logger.warning(f"Save failed for model {i + 1}, attempting duplicate handling: {save_error}")
                 
                 try:
@@ -930,6 +955,8 @@ def calc_and_save_sync(models, *args):
                     logger.error(error_msg)
             
         except CalculatedModelError as calc_model_error:
+            if _is_foreign_key_integrity_error(calc_model_error):
+                raise
             error_count += 1
             error_msg = f"Model {i + 1}: {str(calc_model_error)}"
             errors.append(error_msg)

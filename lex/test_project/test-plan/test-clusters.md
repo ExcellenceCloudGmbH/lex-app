@@ -398,6 +398,7 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 7.12 | `calculate()` does NOT call `self.save()` | Framework handles saves; model's calculate just does computation |
 | 7.13 | Error message stored | When calculation fails, `calculation_error_message` or `error_message` field populated |
 | 7.14 | Calculation via REST API (PATCH is_calculated=IN_PROGRESS) | API path commits IN_PROGRESS independently, then hooks run |
+| 7.176 | ForeignKey integrity violation inside `CalculatedModelMixin.create()` aborts immediately | Unhandled FK integrity failures are propagated and later models in the batch are not processed |
 | 7.32 | Atomic parent, atomic child, both pass | Parent and child both settle at SUCCESS |
 | 7.33 | Atomic parent, atomic child, child fails | Child settles at ERROR and propagates ERROR to parent |
 | 7.34 | Atomic parent, atomic child, parent fails after child pass | Parent settles at ERROR; successful child is rolled back by the parent's atomic transaction |
@@ -449,6 +450,12 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Gap:** The published state machine in `docs/features/processing/calculations.md` advertised `IN_PROGRESS → ABORTED` (the startup-reset terminal state), but the only wiring in the framework was the **startup** sweep in `process_admin/utils/model_registration.py` (any IN_PROGRESS row found at boot is reset to ABORTED). There was no live cancel path — no public method, no REST handler, no Celery revoke — so the user-facing abort button had nothing to call. 7n closes that gap end-to-end on the state-machine side by introducing a **separate** `CANCELLED` terminal state for explicit user cancellation (kept distinct from the recovery-only `ABORTED` so the audit answers "did the operator stop it?" vs "did the framework give up on a crashed worker's row?"): `CalculationModel.cancel(instance, *, recursive=True, reason="")` revokes the Celery task by id (instant kill via `SIGTERM`), persists `CANCELLED` (and the cancellation reason into `calculation_error_message`/`error_message`), and — by default — recurses to every active descendant sharing the parent's `calculation_id`. Sync-dispatched calcs have no `task_id` to revoke; the method returns `cancellable=False, reason="sync_calculation_not_cancellable"` so the API layer can surface a precise 409 instead of silently pretending the cancel worked. Companion store contracts (`ActiveCalculationStateStore.set_task_id` / `get_task_id` / `find_descendants`) and the `CalculationCancelled` marker exception are pinned here too — they're the load-bearing seam between the REST short-circuit (cluster 2i) and the Celery callback (cluster 8u).
 
 **Scenario range:** 7.166 – 7.175. **Test file:** `lex/test_project/tests/calculations/test_7n_cancellation.py`. **Type:** I. **Status:** ✅ Complete (Session 66 — June 1; extended Session 67 with 7.174 / 7.175 covering the in-process exception paths — `execute_calculation_sync` and the outer `calculate_hook` except branches — so a `CalculationCancelled` (or any worker-side `Terminated` / `SoftTimeLimitExceeded` / `WorkerLostError` / `TaskRevokedError` propagated synchronously) lands in `CANCELLED`, not `ERROR`; the hook path additionally skips `persist_error_state` on cancellation so descendants already revoked by the recursive walk are not overwritten with ERROR).
+
+### 7o. ForeignKey integrity violations abort calculated batches ✅
+
+**Gap:** `CalculatedModelMixin.create()`'s synchronous pipeline (`calc_and_save_sync`) intentionally tolerates partial failures for regular per-row calculation errors, but a database-level ForeignKey integrity failure is a data-integrity contract breach, not a recoverable row-level warning. This scenario pins the expected customer behaviour: once a FK violation occurs inside `calculate()`, the computation aborts immediately and must not process later models in the same batch.
+
+**Scenario range:** 7.176 – 7.176. **Test file:** `lex/test_project/tests/calculations/test_7o_fk_violation_abort.py`. **Type:** I. **Status:** ✅ Complete (Session 72 — June 2).
 
 ---
 

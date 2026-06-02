@@ -41,10 +41,11 @@
 | 6g. Audit-log immutability (Session 51 — May 5) | 3 | 3 | 3 | 0 | 0 |  Complete — create/delete/edit all denied (incl. `AuditLogStatus`) |
 | 6j. Audit-utils singletons & data-model contracts (coverage-driven — May 12) | 16 | 16 | 16 | 0 | 0 |  Complete — scenarios 6.80–6.95 |
 | 6n. `AuditLogSerializer` + `AuditLogMixinSerializer` surface (coverage-driven — May 12) | 15 | 15 | 15 | 0 | 0 |  Complete — scenarios 6.141–6.155 |
-| 7. Calculation State Machine | 94 | 94 | 93 | 1 | 0 |  Complete (BUG-009 tracked; 7i 2-level matrix 7.32–7.47; 7j 3-level matrix 7.48–7.111) |
+| 7. Calculation State Machine | 95 | 95 | 94 | 1 | 0 |  Complete (BUG-009 tracked; 7i 2-level matrix 7.32–7.47; 7j 3-level matrix 7.48–7.111) |
 | 7g. `CalculatedModel.create()` pipeline (coverage-driven — April 21) | 6 | 6 | 6 | 0 | 0 |  Complete — drove `CalculatedModelMixin` 33.74% → 64.75% (`CombinatorialCalc` fixture added April 23) |
 | 7h. `_dispatch_model_processing` Celery branch (coverage-driven — April 23) | 1 | 1 | 1 | 0 | 0 |  Complete — async branch 7g never reached; broker-free |
 | 7n. Calculation cancellation — state machine + recursive cancel (Session 67 — June 1) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.166–7.173; pins `CalculationModel.cancel()` happy path + sync-not-cancellable + recursive descendant revoke (mocks `_revoke_celery_task`) |
+| 7o. ForeignKey integrity violation abort semantics (Session 72 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 7.176; unhandled FK integrity errors abort `CalculatedModelMixin.create()` immediately (no silent continuation to later rows) |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |

@@ -73,6 +73,8 @@ def _is_cancellation_exception(exc: BaseException) -> bool:
     """Return True if ``exc`` is one of the cancellation signals."""
     if exc is None:
         return False
+
+
     for klass in type(exc).__mro__:
         if klass.__name__ in _CANCELLATION_EXC_NAMES:
             return True
@@ -824,6 +826,15 @@ def calc_and_save(models: List[Model], *args, **kwargs):
             summary["processed_successfully"] += 1
 
         except IntegrityError as integrity_error:
+            msg = str(integrity_error).lower()
+            if "foreign key" in msg or "violates foreign key constraint" in msg:
+                logger.error(
+                    "Foreign-key integrity violation for %s; aborting batch",
+                    model,
+                    exc_info=True,
+                )
+                summary["errors"] += 1
+                raise
             try:
                 logger.warning(f"Integrity error for {model}, attempting conflict resolution.")
 
