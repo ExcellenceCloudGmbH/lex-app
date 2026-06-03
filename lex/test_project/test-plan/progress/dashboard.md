@@ -19,6 +19,7 @@
 | 1o. Lazy imports + sync-exclusion + history-config helpers (coverage-driven — May 12) | 15 | 15 | 15 | 0 | 0 |  Complete — scenarios 1.110–1.124 |
 | 1p. Settings / URLs / health view / config singletons (coverage-driven — May 12) | 22 | 22 | 22 | 0 | 0 |  Complete — scenarios 1.125–1.146 |
 | 1q. Migration file completeness release gate (Session 70 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 1.147; `lex makemigrations ... --check --dry-run` must stay clean for framework apps |
+| 1r. `lex_view(no_refresh=...)` embed-iframe param contract (Session 74 — June 3) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 1.148–1.151; host-side opt-out for the 9e live list refresh; paired React `ModelDataUpdate` change (+3 vitest) |
 | 7k. Core exceptions + `ModelModificationRestriction` ABC + XLSXField spotter (coverage-driven — May 12) | 21 | 21 | 21 | 0 | 0 |  Complete — scenarios 7.122–7.142 |
 | 2. CRUD via REST API | 23 | 23 | 23 | 0 | 0 |  Complete (Many bulk-write reconciled to DELETE-only; BUG-004 removed per product decision; BUG-005 fixed; 2.1 = CRUD showcase) |
 | 2i. Cancel-calculation REST endpoint (Session 67 — June 1) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored) |

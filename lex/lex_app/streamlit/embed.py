@@ -72,6 +72,7 @@ def lex_view(
     scrolling: bool = _DEFAULT_SCROLLING,
     hide_toolbar: bool = False,
     hide_actions: bool = False,
+    no_refresh: bool = False,
     redirect_after: Optional[str] = None,
     redirect_after_create: Optional[str] = None,
     redirect_after_update: Optional[str] = None,
@@ -106,6 +107,14 @@ def lex_view(
         If ``True``, hides the top actions bar (Create button, Refresh,
         Export).  Maps to the ``?hide_actions=true`` query parameter
         read by ``CustomListActions``.
+    no_refresh : bool
+        If ``True``, the embedded view ignores the live ``record_mutation``
+        WebSocket broadcasts, so an open list view is **not** auto-refreshed
+        when another client creates / updates / deletes a record.  Use this
+        for a static snapshot where the host page controls when (or whether)
+        the data reloads.  Maps to the ``?no_refresh=true`` query parameter
+        read by the React ``ModelDataUpdate`` socket listener.  Calculation
+        progress updates are unaffected.
     redirect_after : str, optional
         React route to navigate to after *any* successful create or update.
         Supports ``{resource}`` and ``{id}`` template tokens.
@@ -173,6 +182,8 @@ def lex_view(
         params["hide_toolbar"] = ["true"]
     if hide_actions:
         params["hide_actions"] = ["true"]
+    if no_refresh:
+        params["no_refresh"] = ["true"]
 
     # Post-operation redirect overrides
     if redirect_after:

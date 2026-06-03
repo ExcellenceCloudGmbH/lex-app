@@ -136,6 +136,24 @@ release.
 
 **Scenario range:** 1.147 – 1.147. **Test file:** `lex/test_project/tests/init/test_1q_migration_files_complete.py`. **Type:** U. **Status:** ✅ Complete (Session 70 — June 2).
 
+### 1r. `lex_view` embed-iframe query-parameter contract ✅
+
+**Gap:** `lex/lex_app/streamlit/embed.py`'s `lex_view()` is the host-side entry point
+for embedding a React view; the React app keys its behaviour off the query params
+baked into the iframe URL. The `no_refresh` opt-out (counterpart to cluster 9e's live
+list refresh) had no test, so a regression that dropped the flag would silently leave
+an embedded "static snapshot" view auto-refreshing — or, inversely, break the default
+auto-refresh — with no error.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.148 | `no_refresh=True` | iframe URL carries `no_refresh=true` so the React `ModelDataUpdate` listener opts out |
+| 1.149 | `no_refresh` defaulted | param absent → embedded view keeps auto-refreshing (default not regressed) |
+| 1.150 | `no_refresh=False` | param still absent (only a truthy opt-in emits it) |
+| 1.151 | composes with flags | `no_refresh` + `hide_toolbar` + `hide_actions` all present; `embed=true` marker + `#embed` fragment preserved |
+
+**Scenario range:** 1.148 – 1.151. **Test file:** `lex/test_project/tests/init/test_1r_embed_view_params.py`. **Type:** U. **Status:** ✅ Complete (Session 74 — June 3). Paired frontend change: React `ModelDataUpdate` honours `no_refresh` (+3 vitest cases).
+
 ---
 
 ## 2. CRUD via REST API
