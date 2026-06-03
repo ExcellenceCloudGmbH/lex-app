@@ -1152,6 +1152,30 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 24 pass / 0 fail / 0.009s. Coverage: 27.03% → ~95%+ (whole file minus 1-2 unreachable defensive branches).
 
+### 9e — Thread-pool ContextVar regression (May 2026)
+
+**Gap:** `_run_in_calculation_executor` originally submitted the calculation to
+`_calculation_executor` (a `ThreadPoolExecutor`).  Worker threads do **not**
+inherit the caller's `ContextVar` state — they see fresh default values unless
+`copy_context()` is used.  As a result `_resolve_calculation_id` returned `None`
+and every SUCCESS / ERROR WebSocket broadcast was emitted without a
+`calculation_id`.  The frontend spinner never resolved and the calculation-log
+panel showed no entries.
+
+The fix: `_run_in_calculation_executor` now delegates to
+`execute_calculation_sync()` inline on the **same** thread.
+
+**Shape:** `E2ETestCase` — real DB, `SigAtomicCalc` model from `signals_ws/models.py`.
+Three tests, all pass in < 1 s.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.29 | SUCCESS broadcast carries `calculation_id` from `operation_context` | `sync_channel_group_send` called with `payload["calculation_id"] == calc_id`; fails if executor runs on a bare thread without ContextVar propagation |
+| 9.30 | ERROR broadcast carries `calculation_id` from `operation_context` | Same contract on the failure path — `calculation_error` payload includes the correct id |
+| 9.31 | `_run_in_calculation_executor` is transparent to `ContextVar` | A sentinel `ContextVar` set on the caller's thread is visible inside `execute_calculation_sync` — direct proof that no thread-hop occurs |
+
+**Status:** Complete — 3 pass / 0 fail.
+
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
 **Gap (April 25):** `CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:
