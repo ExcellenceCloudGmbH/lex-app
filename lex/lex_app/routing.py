@@ -16,6 +16,7 @@ def authenticated_websocket_urlpatterns():
     from lex.api.consumers.CalculationLogConsumer import CalculationLogConsumer
     from lex.api.consumers.CalculationsConsumer import CalculationsConsumer
     from lex.api.consumers.LogConsumer import LogConsumer
+    from lex.api.consumers.ModelDataUpdateConsumer import ModelDataUpdateConsumer
     from lex.api.consumers.UpdateCalculationStatusConsumer import UpdateCalculationStatusConsumer
 
     return [
@@ -23,6 +24,7 @@ def authenticated_websocket_urlpatterns():
         path("ws/calculations", CalculationsConsumer.as_asgi(), name="calculations"),
         path("ws/calculation_logs/<str:calculationId>", CalculationLogConsumer.as_asgi(), name="calculation-logs"),
         path("ws/calculation_status_update", UpdateCalculationStatusConsumer.as_asgi(), name="calculation-status-update"),
+        path("ws/model_data_update", ModelDataUpdateConsumer.as_asgi(), name="model-data-update"),
     ]
 
 
