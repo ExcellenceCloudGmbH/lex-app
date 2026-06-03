@@ -1013,3 +1013,103 @@ def activate_history_version(model_app_label: str, model_name: str, history_id: 
     except Exception as e:
         logger.error(f"Activation Error for History {history_id}: {e}", exc_info=True)
         raise e
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Scheduled calculations (see lex/lex_app/scheduling.py)
+#
+# This task is registered in django-celery-beat as a one-shot
+# PeriodicTask whose ``clocked_time`` is ``ScheduledCalculation.run_at``.
+# When beat fires it, we resolve the target row, transition it to
+# IN_PROGRESS — and the regular calculation pipeline handles the rest.
+# We never reimplement calculation dispatch here.
+# ──────────────────────────────────────────────────────────────────────
+
+
+@lex_shared_task(name="lex_scheduled_calculation")
+def run_scheduled_calculation(schedule_pk):
+    """Dispatch the calculation for a ``ScheduledCalculation`` row.
+
+    Outcomes (each becomes the schedule's terminal status):
+
+    * ``FIRED`` — happy path: target was found, ``target.save()`` was
+      called with ``is_calculated=IN_PROGRESS``. From here the
+      target's normal calculation state machine takes over — the
+      schedule has done its job.
+    * ``MISSED`` — target row no longer exists (deleted between
+      ``ensure()`` and the scheduled time). Recorded explicitly so an
+      operator can see *why* a "scheduled" report never produced a
+      number.
+
+    Errors during dispatch (the rare case) are recorded in
+    ``error_message`` and re-raised so beat / supervisor can surface them.
+    """
+    from django.apps import apps as django_apps
+    from lex.lex_app.scheduling import ScheduledCalculation
+    from lex.core.models.CalculationModel import CalculationModel
+
+    try:
+        schedule = ScheduledCalculation.objects.get(pk=schedule_pk)
+    except ScheduledCalculation.DoesNotExist:
+        logger.warning(
+            "run_scheduled_calculation: schedule %s not found (cancelled?)",
+            schedule_pk,
+        )
+        return "schedule_not_found"
+
+    if schedule.status != ScheduledCalculation.PENDING:
+        logger.info(
+            "run_scheduled_calculation: schedule %s already in terminal state %s",
+            schedule_pk,
+            schedule.status,
+        )
+        return f"already_{schedule.status.lower()}"
+
+    ct = schedule.target_content_type
+    target_model = django_apps.get_model(ct.app_label, ct.model)
+    target = target_model._default_manager.filter(pk=schedule.target_object_id).first()
+
+    if target is None:
+        schedule.status = ScheduledCalculation.MISSED
+        schedule.fired_at = timezone_now_safe()
+        schedule.error_message = "target_deleted_before_fire"
+        schedule.save(update_fields=["status", "fired_at", "error_message"])
+        logger.warning(
+            "run_scheduled_calculation: target %s/%s missing — marked MISSED",
+            ct.model,
+            schedule.target_object_id,
+        )
+        return "missed_target_deleted"
+
+    if not isinstance(target, CalculationModel):
+        # Defensive: ensure() should have caught this, but if a row was
+        # written by an older version we still don't want to crash beat.
+        schedule.status = ScheduledCalculation.MISSED
+        schedule.error_message = "target_is_not_a_calculation_model"
+        schedule.save(update_fields=["status", "error_message"])
+        return "missed_not_calc_model"
+
+    try:
+        target.is_calculated = CalculationModel.IN_PROGRESS
+        target.save()
+    except Exception as exc:
+        # Saving with IN_PROGRESS triggers the calculation pipeline,
+        # which has its own error handling (the row will end up in
+        # ERROR or CANCELLED on its own merits). We only record the
+        # *dispatch* failure here.
+        schedule.error_message = f"dispatch_failed: {exc!r}"
+        schedule.save(update_fields=["error_message"])
+        raise
+
+    schedule.status = ScheduledCalculation.FIRED
+    schedule.fired_at = timezone_now_safe()
+    schedule.save(update_fields=["status", "fired_at"])
+    return "fired"
+
+
+def timezone_now_safe():
+    """Return ``timezone.now()`` lazily so tests can monkeypatch it."""
+    from django.utils import timezone
+
+    return timezone.now()
+

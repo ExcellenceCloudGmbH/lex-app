@@ -314,6 +314,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Status | ✅ Complete (Session 67 — 8 scenarios; 3 pure-logic pass locally, 5 DB-needing scenarios require CI test DB) |
 
 
+### Batch 7o — Scheduled calculations (`ensure` / `cancel` + worker entry point) (Session 72 — June 3)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.176 – 7.192 |
+| Type | I |
+| Files covered | `lex/lex_app/scheduling.py` (`ScheduledCalculation` model, `ensure`, `cancel`, `_coerce_run_at`, `_register_periodic_task`, `_delete_periodic_task`, `_celery_active`, `ScheduledCalculationUnavailable`); `lex/lex_app/celery_tasks.py::run_scheduled_calculation` |
+| Test file | `lex/test_project/tests/calculations/test_7o_scheduled_calculations.py` |
+| Test classes | `TestCluster07o_Ensure` (first-time PENDING + PeriodicTask, dedupe, replace, debounce-later/equal/earlier, validation: unsaved/empty-tag/bad-on_conflict, run_at coercion, `ScheduledCalculationUnavailable`); `TestCluster07o_Cancel` (PENDING→CANCELLED + PeriodicTask deleted, terminal-state idempotency, None/unsaved safety); `TestCluster07o_WorkerEntryPoint` (FIRED + target pipeline ran through to SUCCESS, target deleted → MISSED, schedule deleted → not_found, already-terminal → no-op, non-CalculationModel target → MISSED) |
+| Fixtures | `AtomicCalc` (existing); real `ScheduledCalculation` rows + real `django_celery_beat.PeriodicTask` / `ClockedSchedule` rows (no broker contact); only `CalculationModel.should_use_celery → False` patched in the worker happy-path scenario so the dispatched calc lands synchronously |
+| Tests landed | **17 pass / 0 fail in 16.2s against PostgreSQL** |
+| Coverage gain | +0.4 % (estimated) |
+| Prereqs | none |
+| Status | ✅ Complete — surfaced and fixed `_coerce_run_at` `USE_TZ=False` aware-vs-naive comparison bug in `lex/lex_app/scheduling.py` (debounce branch raised `TypeError` on every customer running `USE_TZ=False`); `assertSameMoment` test helper introduced for `USE_TZ`-agnostic moment comparisons across DB roundtrips |
+
+
 ---
 
 ## Cluster 8 — Celery & Async (existing 8a–8g)
