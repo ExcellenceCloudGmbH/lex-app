@@ -399,6 +399,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 `CalculationLogConsumer.py` is **parked** until §6 decision #3 confirms it's still wired anywhere.
 
+### Batch 9e — Generic CRUD mutation broadcast (live list refresh — June 3)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.29 – 9.36 |
+| Type | U + I + E |
+| Files covered | `core/signals/ModelMutationSignal.py` (new), `api/consumers/ModelDataUpdateConsumer.py` (new), `lex_app/routing.py`, `api/views/model_entries/One.py`, `api/views/model_entries/Many.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9e_model_mutation_broadcast.py` |
+| Test classes | `TestCluster09e_ModelMutationBroadcastHelper` (I), `TestCluster09e_ModelDataUpdateConsumer` (U), `TestCluster09e_CrudTriggersBroadcast` (E) |
+| Fixtures | `SimpleItem` / `ALL_MODELS` from `crud_api/models.py`; `E2ETestCase` (TransactionTestCase so commits fire `on_commit`) |
+| Est. tests | 8 |
+| Coverage gain | new files (broadcast helper + consumer) covered end-to-end |
+| Prereqs | none |
+| Status | ✅ Complete — 8 pass / 0 fail locally (Postgres test DB available) |
+| Note | Fixes the customer-visible "open list view goes stale until manual Refresh" bug: plain CRUD on a non-`CalculationModel` now emits a `model_data_update` `record_mutation` over WebSocket. Generic broadcast is skipped on `calculate=true` updates (`calculation_success` already refreshes). Frontend `ModelDataUpdate` listener lands in the same change. |
+
 ---
 
 ## Cluster 10 — API Layer (existing 10a–10f)

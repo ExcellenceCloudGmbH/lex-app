@@ -5,6 +5,7 @@ from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBack
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
 from lex.audit_logging.mixins.BulkAuditLogMixin import BulkAuditLogMixin
 from lex.core.exceptions import resolve_exception_traceback
+from lex.core.signals.ModelMutationSignal import broadcast_model_mutation
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
 
@@ -70,6 +71,9 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
                 exception=exc,
             )
             raise
+        broadcast_model_mutation(
+            self.kwargs['model_container'].model_class._meta.model_name, "updated"
+        )
         pk_name = self.kwargs['model_container'].pk_name
         return Response([d[pk_name] for d in serializer.data])
 
@@ -89,4 +93,7 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
                 exception=exc,
             )
             raise
+        broadcast_model_mutation(
+            self.kwargs['model_container'].model_class._meta.model_name, "deleted"
+        )
         return Response(deleted_ids)

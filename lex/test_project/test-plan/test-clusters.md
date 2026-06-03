@@ -1152,6 +1152,27 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 
 **Status:**  Complete — 24 pass / 0 fail / 0.009s. Coverage: 27.03% → ~95%+ (whole file minus 1-2 unreachable defensive branches).
 
+### 9e — Generic CRUD mutation broadcast (live list refresh — June 3)
+
+**Gap (June 3):** the framework broadcast *calculation* state changes over WebSocket (frontend listens, refreshes the AG Grid), but ordinary CRUD on a **non-`CalculationModel`** record emitted **no** WebSocket traffic at all. A list view open in another tab, iframe, or window silently went stale — the customer had to press "Refresh" to see a newly created/updated/deleted row. New surfaces: a generic `model_data_update`-group `record_mutation` broadcast emitted from every REST mutation entry point, and the consumer that fans it out.
+
+**Covers:** `lex/core/signals/ModelMutationSignal.py` (new — `broadcast_model_mutation` defers a group send via `transaction.on_commit`), `lex/api/consumers/ModelDataUpdateConsumer.py` (new — joins `model_data_update`, forwards verbatim), `lex/lex_app/routing.py` (route `ws/model_data_update`), `lex/api/views/model_entries/One.py` (create/update/destroy; skips the generic broadcast when `calculate=true`), `lex/api/views/model_entries/Many.py` (bulk patch/delete).
+
+**Shape:** U (helper message-shape) + I (`TestCase` — on_commit deferral, empty-name no-op) + U (`SimpleTestCase` consumer) + E (`E2ETestCase` — real REST CRUD end-to-end; `TransactionTestCase` so commits fire `on_commit`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.29 | `build_model_mutation_message` envelope | type `record_mutation`; payload carries `model_name`/`action`/`record_id` so the frontend can match the open resource |
+| 9.30 | Empty `model_name` is a no-op | defensive guard — nothing ever reaches the channel layer |
+| 9.31 | Broadcast deferred until commit | 0 sends before commit, exactly 1 to `model_data_update` after — emitting early would let a client refresh and miss the just-written row |
+| 9.32 | Consumer joins group + forwards payload | `connect` adds to `model_data_update`; `record_mutation` forwards JSON to the socket verbatim |
+| 9.33 | POST create emits `created` | real REST create broadcasts a `record_mutation` for the model |
+| 9.34 | PATCH update emits `updated` | real REST update broadcasts |
+| 9.35 | DELETE emits `deleted` | real REST delete broadcasts |
+| 9.36 | Bulk DELETE (`Many` endpoint) emits `deleted` | bulk path broadcasts too |
+
+**Status:** Complete — 8 pass / 0 fail locally (Postgres test DB available).
+
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
 **Gap (April 25):** `CalculatedModelMixin.py` baseline **33.74%** after 7a–7f. The remaining 369 missing statements were concentrated in the four-step orchestrator invoked by `Model.create(**overrides)`:

@@ -22,6 +22,7 @@ from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
+from lex.core.signals.ModelMutationSignal import broadcast_model_mutation
 from lex.core.models.LexModel import should_use_atomic_model_operations
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
@@ -45,6 +46,19 @@ class OneModelEntry(
     # Keep parity with ModelEntryProviderMixin defaults so model-level
     # modification_restriction rules (e.g. legacy read-only) are enforced.
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
+
+    def _broadcast_update(self, instance):
+        """Notify open list views that *instance* was updated.
+
+        Emits a generic ``record_mutation`` broadcast (deferred to commit) so
+        grids open in other tabs / users / embedded views refresh without a
+        manual reload. Calculation-driven refreshes are handled separately by
+        the ``update_calculation_status`` broadcast.
+        """
+        model_name = instance._meta.model_name
+        broadcast_model_mutation(
+            model_name, "updated", f"{model_name}_{instance.pk}"
+        )
 
     def _build_sharepoint_history_change_reason(self, request):
         edited_file = ""
@@ -378,6 +392,19 @@ class OneModelEntry(
                     {"error": f"{e} ", "traceback": traceback.format_exc()}
                 ) from e
 
+            # Notify open list views (other tabs / users / embedded grids) that
+            # a row was created, so they refresh without a manual reload.
+            model_name = model_container.model_class._meta.model_name
+            created_id = (
+                response.data.get(model_container.pk_name)
+                if isinstance(getattr(response, "data", None), dict)
+                else None
+            )
+            record_id = (
+                f"{model_name}_{created_id}" if created_id is not None else None
+            )
+            broadcast_model_mutation(model_name, "created", record_id)
+
             return response
 
     def destroy(self, request, *args, **kwargs):
@@ -389,8 +416,12 @@ class OneModelEntry(
             audit_payload = self.get_serializer(instance).data
 
             with model_logging_context(instance):
+                model_name = instance._meta.model_name
+                record_id = f"{model_name}_{instance.pk}"
                 try:
-                    return super().destroy(request, *args, **kwargs)
+                    response = super().destroy(request, *args, **kwargs)
+                    broadcast_model_mutation(model_name, "deleted", record_id)
+                    return response
                 except Exception as e:
                     self._log_failed_request_audit_if_needed(
                         action="delete",
@@ -506,6 +537,7 @@ class OneModelEntry(
                         )
                         audit_payload = getattr(prepared_request, "_data", getattr(prepared_request, "data", {}))
                         response = UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
+                        self._broadcast_update(instance)
                         if should_reset_is_calculated:
                             return self._reset_instance_is_calculated(
                                 response,
@@ -616,6 +648,11 @@ class OneModelEntry(
                     )
                     audit_payload = getattr(prepared_request, "_data", getattr(prepared_request, "data", {}))
                     response = UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
+                    # A calculate=true request refreshes open lists via the
+                    # calculation_success broadcast, so only emit the generic
+                    # data-mutation broadcast for plain updates here.
+                    if not self._calculate_requested:
+                        self._broadcast_update(instance)
                     if should_reset_is_calculated:
                         return self._reset_instance_is_calculated(
                             response,

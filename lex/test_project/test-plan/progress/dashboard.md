@@ -57,6 +57,7 @@
 | 9. Signals & WebSocket | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 9.7–9.10. Bitemporal signal branches (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — suppression primitives in `bitemporal_signals.py` |
 | 9d. `ActiveCalculationStateStore` full surface (coverage-driven — May 12) | 24 | 24 | 24 | 0 | 0 |  Complete — scenarios 9.11–9.28; coverage 27.03% → ~95% |
+| 9e. Generic CRUD mutation broadcast — live list refresh (Session 73 — June 3) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 9.29–9.36; plain CRUD now emits a `model_data_update` `record_mutation` so open lists refresh without manual reload |
 | 10. API Layer | 9 | 9 | 8 | 0 | 0 |  Complete (10.9 dup skipped; 10.8 retired — BUG-009 at 7.14) |
 | 10e. Schema introspection (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete (BUG-015 documented in-test — CharField w/o default reports `required=False`) |
 | 10f. Global search (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — 10.15–10.16b |
