@@ -64,6 +64,21 @@
 | Coverage gain | n/a (release-gate drift test) |
 | Status | ✅ Complete (Session 70 — June 2) |
 
+### Batch 1r — `lex_view(no_refresh=...)` embed-iframe param contract ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.148 – 1.151 |
+| Type | U |
+| Files covered | `lex/lex_app/streamlit/embed.py` (new `no_refresh` keyword on `lex_view()`) |
+| Test file | `lex/test_project/tests/init/test_1r_embed_view_params.py` |
+| Test classes | `TestCluster01r_NoRefreshParam` |
+| Fixtures | none (`components.iframe` patched to capture the built URL) |
+| Tests landed | **4 pass / 0 fail in 0.05s** |
+| Coverage gain | embed.py `lex_view` URL-building covered |
+| Status | ✅ Complete (Session 74 — June 3) |
+| Note | Host-side opt-out for cluster 9e's live list refresh: `no_refresh=True` → `no_refresh=true` in the iframe URL; default/`False` keeps the param absent so auto-refresh does not regress. Paired frontend change — React `ModelDataUpdate` reads the param and opens no socket when set (+3 vitest cases); calculation-progress sockets unaffected. |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)
