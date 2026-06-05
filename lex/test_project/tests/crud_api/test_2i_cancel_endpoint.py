@@ -38,7 +38,7 @@ from rest_framework import status
 
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from ..calculations.models import ALL_MODELS, ATOMIC, AtomicCalc
 

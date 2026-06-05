@@ -188,7 +188,7 @@ class TestCluster08v_StoreWriteThrough(SimpleTestCase):
         unregister.assert_called_once_with("calc-1", "m_5")
 
 
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import CelerySyncCalc
 

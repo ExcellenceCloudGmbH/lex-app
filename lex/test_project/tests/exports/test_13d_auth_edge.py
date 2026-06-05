@@ -18,7 +18,7 @@ from __future__ import annotations
 import unittest
 
 from lex.core.models.LexModel import PermissionResult
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 

@@ -54,7 +54,7 @@ from lex.lex_app.celery_tasks import (
     tasks_context,
     unblock_tasks_context,
 )
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, CeleryCalc
 

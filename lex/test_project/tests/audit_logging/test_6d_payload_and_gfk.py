@@ -35,7 +35,7 @@ import unittest
 from django.contrib.contenttypes.models import ContentType
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .extra_models import AUDIT_PREVAL, AuditPreValItem
 from .models import ALL_MODELS, AUDIT_SIMPLE, AuditSimpleItem

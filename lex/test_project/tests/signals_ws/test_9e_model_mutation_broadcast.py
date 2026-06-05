@@ -26,7 +26,7 @@ from asgiref.sync import async_to_sync
 from django.test import SimpleTestCase, TestCase
 from rest_framework import status
 
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from ..crud_api.models import ALL_MODELS, SIMPLE, SimpleItem
 
