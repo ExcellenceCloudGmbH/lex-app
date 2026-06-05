@@ -38,4 +38,12 @@ include = ["lex*", "migrations_logic*"]
 [tool.setuptools.package-data]
 "lex.react" = ["**/*"]
 "lex.assets" = ["**/*"]
+"lex.lex_app.streamlit._lex_view_component" = ["frontend/**/*"]
+
+[tool.pytest.ini_options]
+# The lex CLI bootstraps Django and calls setup_test_environment() before
+# handing off to pytest.main(). Disable the pytest-django plugin so it
+# does not call setup_test_environment() a second time (which raises
+# RuntimeError since Django 4.2+).
+addopts = "-p no:django"
 

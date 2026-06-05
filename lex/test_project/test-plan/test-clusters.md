@@ -512,6 +512,14 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 **Scenario range:** 8.73 – 8.77. **Test file:** `lex/test_project/tests/celery_async/test_8u_cancel_revoke.py`. **Type:** U. **Status:** ✅ Complete (Session 67 — June 1; extended Session 68 with 8.77 covering the audit-status mapping, and Session 69 tightened it to SUCCESS → `success`, CANCELLED → `cancelled`, ERROR → `failure` so the four non-pending `AuditLogStatus.status` values — including the startup-reset `aborted` — are all distinct; 5 pass / 12 sub-tests / 0.11s broker-free).
 
+### 8v. Cluster-wide cascade cancellation — Redis cancel index ✅
+
+**Gap:** `cancel()` could only revoke the task_ids it found in `ActiveCalculationStateStore`, which is **per-process in-memory**. When a calculation tree fans children out to other KEDA worker pods, those child task_ids live in *those* pods' memory — the root pod's `cancel()` never sees them, so pressing Abort flipped the root to CANCELLED while dangling children on other pods kept executing. 8v pins the fix: a best-effort Redis "cluster cancel index" (a HASH tree keyed by `calculation_id`) written through at the existing `ActiveCalculationStateStore.set_task_id` / `clear` chokepoints, so `cancel()` can discover and revoke the **whole tree cluster-wide**, plus a `calculation_id`-keyed cooperative cancelled-marker checked at `calc_and_save` start as a non-relied-upon net for the late-booting-pod / discovery-gap case. Every Redis op degrades silently (no client / `CELERY_ACTIVE` off / `LEX_CLUSTER_CANCEL_ENABLED=false` → full no-op) so the index can never break a calculation.
+
+**Why a mix of U and one E:** the index operations, the disabled-config no-ops, the store write-through, and the cooperative marker check are pure logic driven against a mocked Redis client (U). Scenario 8.87 — that `cancel()` revokes a child registered *only* in the Redis index (i.e. on another pod) — is the integration surface, so it drives the real `cancel()` end-to-end through an `E2ETestCase` (schema-editor table creation matching `test_7n_cancellation.py`).
+
+**Scenario range:** 8.78 – 8.89. **Test file:** `lex/test_project/tests/celery_async/test_8v_cluster_cascade_cancel.py`. **Type:** U (+ one E for 8.87). **Status:** ✅ Complete (Session 74 — June 5). Covers `lex/core/cancellation/cluster_cancel_index.py` (register/unregister/get_tree/mark_cancelled/is_cancelled + disabled-config no-ops), the `ActiveCalculationStateStore` write-through, the `cancel()` cluster-tree union+revoke, and the `calc_and_save` cooperative self-abort. 12 pass / 0 fail; existing 8u + 7n cancellation suites stay green; regression across `celery_async` + `calculations` = 252 pass / 4 skip.
+
 ---
 
 ## 9. Signals & WebSocket

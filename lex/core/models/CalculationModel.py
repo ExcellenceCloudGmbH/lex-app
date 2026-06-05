@@ -443,7 +443,19 @@ class CalculationModel(LexModel):
                 if d.get("record_id") != record_id
             ]
 
-        if not task_id and not descendants:
+        # Cluster-wide discovery: child task_ids registered by *other*
+        # worker pods are invisible to this process's in-memory store.
+        # Pull them from the Redis cancel index so cancel() can revoke
+        # the whole tree, and set the cooperative marker so a late-booting
+        # pod self-aborts. Best-effort; empty/no-op without Redis.
+        from lex.core.cancellation import cluster_cancel_index
+
+        cluster_tree = {}
+        if recursive and calculation_id:
+            cluster_tree = cluster_cancel_index.get_tree(calculation_id)
+            cluster_cancel_index.mark_cancelled(calculation_id)
+
+        if not task_id and not descendants and not cluster_tree:
             return {
                 "cancelled": False,
                 "cancellable": False,
@@ -483,6 +495,28 @@ class CalculationModel(LexModel):
             # is wedged.
             cls._persist_cancelled_by_entry(desc, revoke_reason)
             descendants_cancelled += 1
+
+        # Revoke any cluster-discovered task not already handled above
+        # (children that ran on other pods). The worker's on_failure maps
+        # the resulting Terminated/TaskRevokedError to CANCELLED and the
+        # merged self-termination work makes the now-idle pod exit.
+        already_revoked = set(revoked)
+        for cluster_record_id, cluster_task in cluster_tree.items():
+            if not cluster_task or cluster_task in already_revoked:
+                continue
+            if cluster_record_id == record_id:
+                continue
+            try:
+                cls._revoke_celery_task(cluster_task)
+                revoked.append(cluster_task)
+                already_revoked.add(cluster_task)
+            except Exception:  # pragma: no cover — best-effort
+                logger.warning(
+                    "Failed to revoke cluster-discovered task %s during cancel of %s",
+                    cluster_task,
+                    record_id,
+                    exc_info=True,
+                )
 
         # Persist CANCELLED on the primary target.
         cls._persist_cancelled(instance, revoke_reason)

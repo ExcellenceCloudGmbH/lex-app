@@ -105,10 +105,28 @@ class ActiveCalculationStateStore:
         """
         if not record_id or not task_id:
             return
+        calculation_id = None
         with cls._lock:
             entry = cls._state_map.get(record_id)
             if isinstance(entry, dict):
                 entry["task_id"] = str(task_id)
+                calculation_id = entry.get("calculation_id") or None
+        # Mirror into the cluster cancel index so other processes (the
+        # backend running cancel()) can discover this node's task_id.
+        # Best-effort: a Redis failure never breaks registration.
+        if calculation_id:
+            try:
+                from lex.core.cancellation import cluster_cancel_index
+
+                cluster_cancel_index.register_task(
+                    calculation_id, record_id, str(task_id)
+                )
+            except Exception:  # pragma: no cover — defensive
+                logger.warning(
+                    "Failed to mirror task_id into cluster cancel index for %s",
+                    record_id,
+                    exc_info=True,
+                )
 
     @classmethod
     def get_task_id(cls, record_id: str) -> Optional[str]:
@@ -193,8 +211,22 @@ class ActiveCalculationStateStore:
         """Remove a record from the active-calculations store (terminal state reached)."""
         if not record_id:
             return
+        calculation_id = None
         with cls._lock:
-            cls._state_map.pop(record_id, None)
+            entry = cls._state_map.pop(record_id, None)
+            if isinstance(entry, dict):
+                calculation_id = entry.get("calculation_id") or None
+        if calculation_id:
+            try:
+                from lex.core.cancellation import cluster_cancel_index
+
+                cluster_cancel_index.unregister_task(calculation_id, record_id)
+            except Exception:  # pragma: no cover — defensive
+                logger.warning(
+                    "Failed to remove task_id from cluster cancel index for %s",
+                    record_id,
+                    exc_info=True,
+                )
 
     @classmethod
     def clear_all(cls) -> None:
