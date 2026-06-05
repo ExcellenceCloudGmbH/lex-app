@@ -133,3 +133,13 @@ class TaskRevokedFastPathTests(SimpleTestCase):
                 with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
                     celery_mod.shutdown_worker_after_task_revoked(request=request)
         helper.assert_not_called()
+
+    def test_calls_helper_with_empty_exclude_when_request_has_no_id(self):
+        request = types.SimpleNamespace()  # a revoke context with no .id
+        with mock.patch.object(celery_mod, "_is_non_local_deployment_target",
+                               return_value=True):
+            with mock.patch.object(celery_mod, "_idle_shutdown_enabled",
+                                   return_value=True):
+                with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
+                    celery_mod.shutdown_worker_after_task_revoked(request=request)
+        helper.assert_called_once_with(exclude_task_ids=set())
