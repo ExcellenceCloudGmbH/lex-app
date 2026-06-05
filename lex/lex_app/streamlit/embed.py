@@ -31,12 +31,15 @@ Usage
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import urllib.parse
 from typing import Any, Dict, Optional, Union
 
 import streamlit.components.v1 as components
+
+from lex.lex_app.streamlit._lex_view_component import render_lex_view_component
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,44 @@ logger = logging.getLogger(__name__)
 _DEFAULT_HEIGHT: int = 800
 _DEFAULT_WIDTH: Union[int, str] = "100%"
 _DEFAULT_SCROLLING: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Flow builder — ergonomic multi-step redirect definition
+# ---------------------------------------------------------------------------
+
+
+class Flow(dict):
+    """
+    A dict subclass for defining multi-step redirect workflows declaratively.
+
+    Each key is ``"<resource>/<operation>"`` (operation: ``create`` or ``update``),
+    and each value is the target path (supports ``{resource}`` and ``{id}`` tokens).
+
+    Can be built via the constructor or the fluent builder methods::
+
+        # Dict-style (passed directly to flow= param)
+        Flow({
+            "investor/create": "/cashflow/{id}/edit",
+            "cashflow/update": "/investor",
+        })
+
+        # Fluent builder style
+        (Flow()
+            .after_create("investor", "/cashflow/{id}/edit")
+            .after_update("cashflow", "/investor")
+        )
+    """
+
+    def after_create(self, resource: str, target: str) -> "Flow":
+        """Add a redirect rule: after creating a record of ``resource``, go to ``target``."""
+        self[f"{resource}/create"] = target
+        return self
+
+    def after_update(self, resource: str, target: str) -> "Flow":
+        """Add a redirect rule: after updating a record of ``resource``, go to ``target``."""
+        self[f"{resource}/update"] = target
+        return self
 
 
 def _resolve_base_url() -> str:
@@ -75,15 +116,39 @@ def lex_view(
     redirect_after: Optional[str] = None,
     redirect_after_create: Optional[str] = None,
     redirect_after_update: Optional[str] = None,
+    flow: Optional[Dict[str, str]] = None,
+    serializer: Optional[str] = None,
+    on_create: bool = False,
+    on_update: bool = False,
+    on_delete: bool = False,
+    on_select: bool = False,
+    on_navigate: bool = False,
+    on_flow_step: bool = False,
     extra_params: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
-) -> None:
+    key: Optional[str] = None,
+) -> Optional[dict]:
     """
     Embed a page from the React application inside the current Streamlit page.
 
     The React frontend detects embed mode via the ``embed=true`` query
     parameter **and** the ``#embed`` URL fragment, and renders the content
     without its own sidebar/appbar chrome.
+
+    Two modes
+    ---------
+    * **Plain iframe (legacy).** No ``on_*`` flag and no ``serializer``
+      requesting event-bearing behaviour → renders ``components.iframe``
+      and returns ``None``. Existing call sites are unchanged.
+    * **Bidirectional component.** At least one of ``on_create``,
+      ``on_update``, ``on_select``, ``on_navigate``, ``on_flow_step`` is
+      ``True`` → renders the lex_view custom component which forwards
+      ``postMessage`` events from the React app back to Python.
+      ``lex_view(...)`` then returns the latest event envelope (or
+      ``None`` until the first event arrives).
+
+    See ``docs/features/access-and-ui/lex_view callbacks.md`` for the
+    event envelope schema and the per-type payload contracts.
 
     Parameters
     ----------
@@ -95,9 +160,11 @@ def lex_view(
         Iframe height in pixels.  Default ``800``.
     width : int | str
         Iframe width — either an integer (pixels) or a CSS string like
-        ``"100%"`` or ``"50vw"``.  Default ``"100%"``.
+        ``"100%"`` or ``"50vw"``.  Default ``"100%"``.  Ignored in
+        bidirectional mode (the custom component is always 100% wide).
     scrolling : bool
         Whether the iframe should be scrollable.  Default ``True``.
+        Ignored in bidirectional mode.
     hide_toolbar : bool
         If ``True``, hides the local toolbar row (History, Analytics,
         Density, Views, Sidebar toggle, etc.).  Maps to the
@@ -109,49 +176,69 @@ def lex_view(
     redirect_after : str, optional
         React route to navigate to after *any* successful create or update.
         Supports ``{resource}`` and ``{id}`` template tokens.
-        Example: ``"/{resource}/{id}"`` → show the record after save.
     redirect_after_create : str, optional
         Override ``redirect_after`` for create operations only.
-        Example: ``"/{resource}"`` → go back to the list after creation.
     redirect_after_update : str, optional
         Override ``redirect_after`` for update operations only.
-        Example: ``"/{resource}/{id}"`` → show the record after editing.
+    flow : dict, optional
+        Multi-step redirect routing table — see ``Flow``.
+    serializer : str, optional
+        Name of a registered DRF serializer on the model. Forwarded as
+        ``?serializer=<name>`` so the embedded list/detail uses that
+        serializer to shape its response. An unknown name surfaces as
+        HTTP 400 (see cluster 12h). Resolves through
+        ``ModelEntryProviderMixin.get_serializer_class``.
+    on_create, on_update, on_delete, on_select, on_navigate, on_flow_step : bool
+        Opt-in flags for the bidirectional event channel. Setting any
+        of them switches ``lex_view`` to the custom-component path and
+        causes the return value to carry event dicts.
+
+        ``on_select`` additionally forwards as ``?emit_select=true`` so
+        the React side wires the AG Grid ``onSelectionChanged`` callback
+        only when explicitly requested (it is opt-in because driving
+        Streamlit re-runs on every grid click is expensive).
     extra_params : dict, optional
         Arbitrary extra query parameters forwarded to the React app.
-        Useful for future extensions or custom frontend logic.
     base_url : str, optional
         Override the React app base URL for this call only.
         By default uses ``REACT_APP_URL`` / ``LEX_FRONTEND_URL`` env vars.
+    key : str, optional
+        Streamlit component key — only used in bidirectional mode.
+        Defaults to the resolved URL so different embeds in the same
+        script get distinct component slots automatically.
+
+    Returns
+    -------
+    None | dict
+        ``None`` in plain-iframe mode (no callbacks requested), or in
+        bidirectional mode before the first event has arrived.
+        Otherwise the latest event envelope dict.
 
     Examples
     --------
-    Basic table embed::
+    Basic table embed (plain iframe, no callbacks)::
 
         lex_view("quarter")
 
-    Create form without toolbar or actions::
+    React to AG Grid selection changes::
 
-        lex_view("quarter/create", hide_toolbar=True, hide_actions=True, height=600)
+        event = lex_view("investor", on_select=True)
+        if event and event["type"] == "select":
+            st.write(event["payload"]["ids"])
 
-    Side-by-side layout using Streamlit columns::
+    Request a specific serializer for the embedded list::
 
-        col1, col2 = st.columns(2)
-        with col1:
-            lex_view("fund", height=500)
-        with col2:
-            lex_view("investor", height=500)
+        lex_view("investor", serializer="InvestorWithFundSerializer")
 
-    Custom width in pixels::
+    Multi-step workflow with creation hooks::
 
-        lex_view("nav_overview", width=1200)
-
-    Redirect to the record detail page after create::
-
-        lex_view("investor/create", redirect_after_create="/{resource}/{id}")
-
-    Redirect to a different model's list after update::
-
-        lex_view("cashflow/42/edit", redirect_after_update="/investor")
+        event = lex_view(
+            "investor",
+            on_create=True,
+            flow=Flow().after_create("investor", "/cashflow/{id}/edit"),
+        )
+        if event and event["type"] == "create":
+            st.toast(f"Created investor #{event['payload']['id']}")
     """
     resolved_base = base_url.rstrip("/") if base_url else _resolve_base_url()
 
@@ -182,10 +269,34 @@ def lex_view(
     if redirect_after_update:
         params["redirect_after_update"] = [redirect_after_update]
 
+    # Flow routing table — JSON-encoded, takes priority over flat params
+    if flow:
+        params["lex_flow"] = [json.dumps(flow, separators=(",", ":"))]
+
+    # Serializer override (per docs/features/access-and-ui/lex_view callbacks.md)
+    if serializer:
+        params["serializer"] = [serializer]
+
+    # Event opt-in flags forwarded to the React bridge. The React side
+    # only attaches handlers / emits events for the flags it sees here,
+    # so off-by-default cost stays zero for plain iframe embeds.
+    if on_create:
+        params["emit_create"] = ["true"]
+    if on_update:
+        params["emit_update"] = ["true"]
+    if on_delete:
+        params["emit_delete"] = ["true"]
+    if on_select:
+        params["emit_select"] = ["true"]
+    if on_navigate:
+        params["emit_navigate"] = ["true"]
+    if on_flow_step:
+        params["emit_flow_step"] = ["true"]
+
     # Extra user-supplied params
     if extra_params:
-        for key, value in extra_params.items():
-            params[key] = [str(value)]
+        for key_, value in extra_params.items():
+            params[key_] = [str(value)]
 
     new_query = urllib.parse.urlencode(params, doseq=True)
 
@@ -199,12 +310,34 @@ def lex_view(
     )
 
     logger.debug("lex_view → %s", final_url)
-
     # ── Render ──
-    # Streamlit's components.iframe accepts width as int (pixels) or str
-    # (CSS value).  We pass it through directly.
+    callbacks_requested = any(
+        (on_create, on_update, on_delete, on_select, on_navigate, on_flow_step)
+    )
+
+    if callbacks_requested:
+        # Bidirectional path: custom component returns the latest event.
+        # Origin used to gate inbound postMessage events to the resolved
+        # frontend base. ``urlparse(resolved_base)`` keeps scheme+netloc
+        # only — the React app's window.location.origin must match.
+        parsed_base = urllib.parse.urlparse(resolved_base)
+        expected_origin = (
+            f"{parsed_base.scheme}://{parsed_base.netloc}"
+            if parsed_base.scheme and parsed_base.netloc
+            else None
+        )
+        return render_lex_view_component(
+            url=final_url,
+            height=height,
+            expected_origin=expected_origin,
+            key=key,
+        )
+
+    # Legacy iframe path. Streamlit's components.iframe accepts width as
+    # int (pixels) or str (CSS value); pass it through directly.
     width_arg: Any = width
     if isinstance(width, str) and width.isdigit():
         width_arg = int(width)
 
     components.iframe(final_url, height=height, width=width_arg, scrolling=scrolling)
+    return None

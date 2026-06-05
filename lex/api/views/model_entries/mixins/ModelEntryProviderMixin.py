@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.permissions.UserPermission import UserPermission
 from rest_framework import serializers
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_api_key.permissions import HasAPIKey
 
@@ -82,7 +82,7 @@ class ModelEntryProviderMixin:
             return UserModelSerializer
 
         if choice not in mapping:
-            raise APIException(
+            raise ValidationError(
                 {
                     "error": f"Unknown serializer '{choice}' for model '{container.model_class._meta.model_name}'",
                     "available": list(mapping.keys()),

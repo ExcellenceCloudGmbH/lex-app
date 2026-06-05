@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>lex_view bridge</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+    #frame { display: block; width: 100%; border: 0; }
+  </style>
+</head>
+<body>
+  <!--
+    Streamlit Custom Component frontend for lex_view().
+
+    Responsibilities:
+      1. Mount an iframe pointed at the lex-app React frontend (URL built in Python).
+      2. Listen for postMessage events from that iframe whose data.source === "lex-app".
+      3. Validate the message origin against the expected base URL.
+      4. Forward each event back to Python via Streamlit.setComponentValue.
+
+    The component is deliberately tiny and dependency-free — no build step,
+    no framework — so it can ship as a static asset inside the wheel.
+
+    Streamlit lifecycle:
+      * The render event delivers `args` from the Python `lex_view(...)` call.
+      * setComponentValue triggers a Python re-run; the value is returned by
+        the component function.
+      * setFrameHeight tells Streamlit how tall to render the iframe.
+  -->
+  <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+
+  <script>
+    // ── Streamlit bridge minimal shim ────────────────────────────────
+    // We avoid importing Streamlit's npm package — this is the public
+    // postMessage protocol that streamlit-component-lib uses underneath.
+    const Streamlit = (function () {
+      const RENDER_EVENT = "streamlit:render";
+      const COMPONENT_READY = "streamlit:componentReady";
+      const SET_COMPONENT_VALUE = "streamlit:setComponentValue";
+      const SET_FRAME_HEIGHT = "streamlit:setFrameHeight";
+
+      function _post(type, payload) {
+        const msg = Object.assign({ isStreamlitMessage: true, type }, payload || {});
+        window.parent.postMessage(msg, "*");
+      }
+
+      return {
+        RENDER_EVENT,
+        setComponentReady() { _post(COMPONENT_READY, { apiVersion: 1 }); },
+        setComponentValue(value) { _post(SET_COMPONENT_VALUE, { value, dataType: "json" }); },
+        setFrameHeight(height) { _post(SET_FRAME_HEIGHT, { height }); },
+        events: {
+          addEventListener(type, cb) {
+            window.addEventListener("message", (ev) => {
+              const d = ev.data || {};
+              if (d.type === type) {
+                cb({ detail: d });
+              }
+            });
+          },
+        },
+      };
+    })();
+
+    // ── Constants ────────────────────────────────────────────────────
+    const PROTOCOL_VERSION = 1;
+    const SOURCE_TAG = "lex-app";
+
+    let _expectedOrigin = null;
+    let _lastEventId = null;
+    let _rendered = false;
+
+    // ── Lifecycle: render ────────────────────────────────────────────
+    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (ev) => {
+      const args = (ev.detail && ev.detail.args) || {};
+      const url = args.url;
+      const height = args.height || 800;
+      _expectedOrigin = args.expected_origin || null;
+
+      const frame = document.getElementById("frame");
+      frame.style.height = height + "px";
+
+      // Only navigate the iframe on first render or when the URL truly
+      // changed. Streamlit re-fires RENDER on every script rerun, and
+      // re-pointing src on every rerun would reload the embedded React
+      // app and wipe the user's grid state.
+      if (!_rendered || frame.dataset.url !== url) {
+        frame.src = url;
+        frame.dataset.url = url;
+        _rendered = true;
+      }
+
+      Streamlit.setFrameHeight(height);
+    });
+
+    // ── Inbound: lex-app → Streamlit ─────────────────────────────────
+    window.addEventListener("message", (ev) => {
+      const data = ev.data;
+      if (!data || typeof data !== "object") return;
+      if (data.source !== SOURCE_TAG) return;
+
+      // Origin gate. If the embed URL is "" / file:// during dev,
+      // _expectedOrigin will be null and we accept any origin so local
+      // testing works; in production the Python side always resolves a
+      // real http(s) origin.
+      if (_expectedOrigin && ev.origin !== _expectedOrigin) {
+        // Silent drop — do not surface foreign messages to Python.
+        return;
+      }
+
+      // Reject envelopes with a version we don't understand. Additive
+      // changes do not bump the version; only breaking ones.
+      if (typeof data.version === "number" && data.version > PROTOCOL_VERSION) {
+        console.warn(
+          "[lex_view] dropping event with unsupported protocol version",
+          data.version, "(supported:", PROTOCOL_VERSION + ")"
+        );
+        return;
+      }
+
+      // Re-run dedupe: Streamlit may re-render us while the same event
+      // is still the current value; forwarding twice would re-trigger
+      // the user's handler. The id is a ULID generated lex-app-side.
+      if (data.id && data.id === _lastEventId) return;
+      _lastEventId = data.id || null;
+
+      Streamlit.setComponentValue(data);
+    });
+
+    Streamlit.setComponentReady();
+  </script>
+</body>
+</html>
