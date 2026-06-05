@@ -380,6 +380,23 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8v — Cluster-wide cascade cancellation: Redis cancel index (Session 74 — June 5)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.78 – 8.89 |
+| Type | U (+ one E for 8.87) |
+| Files covered | `lex/core/cancellation/cluster_cancel_index.py` (new — best-effort Redis HASH tree keyed by `calculation_id`: `register_task` / `unregister_task` / `get_tree` / `mark_cancelled` / `is_cancelled`, lazy `redis.from_url(CELERY_BROKER_URL)` client, `_enabled_by_config` gate on `CELERY_ACTIVE` + `LEX_CLUSTER_CANCEL_ENABLED`, all ops try/except → silent no-op, never raise); `lex/core/signals/ActiveCalculationStateStore.py` (`set_task_id` → `register_task`, `clear` → `unregister_task`, both outside the store lock); `lex/core/models/CalculationModel.py` (`cancel()` unions in-memory descendants with `get_tree`, revokes every cluster-discovered task, `mark_cancelled` when recursive); `lex/lex_app/celery_tasks.py` (`calc_and_save` checks `is_cancelled` at task start, raises `CalculationCancelled`); `lex/lex_app/settings.py` (`LEX_CLUSTER_CANCEL_ENABLED` + tree/marker TTL knobs) |
+| Test file | `lex/test_project/tests/celery_async/test_8v_cluster_cascade_cancel.py` |
+| Test classes | `TestCluster08v_IndexOperations` (8.78–8.82 register/unregister/get_tree/mark+is_cancelled/no-client-degrades, `SimpleTestCase`, mocked redis); `TestCluster08v_IndexDisabled` (8.83–8.84 `CELERY_ACTIVE` off + master-switch off → no-op); `TestCluster08v_StoreWriteThrough` (8.85–8.86 attach task_id writes through / terminal node leaves the index); `TestCluster08v_CancelUnionsClusterTree` (8.87 — **`E2ETestCase`**, `e2e_models=[CelerySyncCalc]`, `e2e_unpatch={"mark_in_progress"}`: `cancel()` revokes a child registered only in the Redis index); `TestCluster08v_CooperativeMarkerCheck` (8.88–8.89 late pod self-aborts on marker / no marker → runs normally) |
+| Fixtures | none — `unittest.mock` on the redis client + `CeleryTaskDispatcher.app.control.revoke`; 8.87 reuses the `CelerySyncCalc` E2E model (schema-editor table creation, matching `test_7n_cancellation.py`) |
+| Tests landed | **12 pass / 0 fail** (8.78–8.89); cluster_cancel_index coverage 70 % (uncovered lines are the Redis-failure `except` branches, exercised only on a real connection error — the suite mocks redis); regression across `celery_async` + `calculations` = 252 pass / 4 skip; existing 8u + 7n cancellation suites green |
+| Coverage gain | new module `cluster_cancel_index.py` 0 → 70 % |
+| Prereqs | none (graceful-degradation means no live Redis required for the suite) |
+| Status | ✅ Complete (Session 74 — June 5; designed brainstorming→spec→plan, executed subagent-driven) |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)
