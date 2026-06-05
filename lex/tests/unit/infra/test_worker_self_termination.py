@@ -72,3 +72,35 @@ class WarmShutdownIfIdleTests(SimpleTestCase):
         self.assertTrue(first["shutting_down"])
         self.assertTrue(second.get("already_scheduled"))
         timer.assert_called_once()
+
+
+class IdleShutdownConfigTests(SimpleTestCase):
+    def test_enabled_defaults_true(self):
+        import os
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("LEX_WORKER_IDLE_SHUTDOWN_ENABLED", None)
+            self.assertTrue(celery_mod._idle_shutdown_enabled())
+
+    def test_enabled_can_be_disabled(self):
+        with mock.patch.dict(
+            "os.environ", {"LEX_WORKER_IDLE_SHUTDOWN_ENABLED": "false"}, clear=False
+        ):
+            self.assertFalse(celery_mod._idle_shutdown_enabled())
+
+    def test_seconds_defaults_to_30(self):
+        import os
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("LEX_WORKER_IDLE_SHUTDOWN_SECONDS", None)
+            self.assertEqual(celery_mod._idle_shutdown_seconds(), 30.0)
+
+    def test_seconds_reads_env(self):
+        with mock.patch.dict(
+            "os.environ", {"LEX_WORKER_IDLE_SHUTDOWN_SECONDS": "12"}, clear=False
+        ):
+            self.assertEqual(celery_mod._idle_shutdown_seconds(), 12.0)
+
+    def test_seconds_falls_back_on_garbage(self):
+        with mock.patch.dict(
+            "os.environ", {"LEX_WORKER_IDLE_SHUTDOWN_SECONDS": "notanumber"}, clear=False
+        ):
+            self.assertEqual(celery_mod._idle_shutdown_seconds(), 30.0)

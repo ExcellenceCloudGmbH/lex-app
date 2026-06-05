@@ -114,6 +114,20 @@ def _is_non_local_deployment_target() -> bool:
     return deployment_target not in {"", "local"}
 
 
+def _idle_shutdown_enabled() -> bool:
+    """Master switch for both new self-termination triggers (env-read so the
+    unit tests don't need full Django settings)."""
+    return os.getenv("LEX_WORKER_IDLE_SHUTDOWN_ENABLED", "true").strip().lower() == "true"
+
+
+def _idle_shutdown_seconds() -> float:
+    """Idle grace before the watchdog terminates a never-busy/idle worker."""
+    try:
+        return float(os.getenv("LEX_WORKER_IDLE_SHUTDOWN_SECONDS", "30"))
+    except (TypeError, ValueError):
+        return 30.0
+
+
 def _get_worker_hostname(task) -> Optional[str]:
     request = getattr(task, "request", None)
     hostname = getattr(request, "hostname", None)

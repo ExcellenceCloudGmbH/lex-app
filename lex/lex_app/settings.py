@@ -475,6 +475,24 @@ LEX_TASK_SUPERVISOR_SCAN_INTERVAL = int(
 )
 LEX_TASK_MAX_RETRIES = int(os.getenv("LEX_TASK_MAX_RETRIES", "4"))
 
+# ---------------------------------------------------------------------------
+# Worker self-termination knobs
+# (see docs/superpowers/specs/2026-06-05-worker-self-termination-design.md)
+#
+# Drive the two in-framework triggers that make an idle worker exit so its
+# KEDA ScaledJob pod terminates: a task_revoked cancel fast-path and an idle
+# watchdog. Both are additionally gated behind a non-local DEPLOYMENT_TARGET,
+# so local dev and CI are unaffected regardless of these values.
+# Surfaced here for operator discoverability; lex/lex_app/celery.py reads the
+# same env vars directly.
+# ---------------------------------------------------------------------------
+LEX_WORKER_IDLE_SHUTDOWN_ENABLED = (
+    os.getenv("LEX_WORKER_IDLE_SHUTDOWN_ENABLED", "true").strip().lower() == "true"
+)
+LEX_WORKER_IDLE_SHUTDOWN_SECONDS = int(
+    os.getenv("LEX_WORKER_IDLE_SHUTDOWN_SECONDS", "30")
+)
+
 if LEX_TASK_RECOVERY_ENABLED:
     # django-celery-beat's DatabaseScheduler ingests CELERY_BEAT_SCHEDULE at
     # startup via update_from_dict, so this entry lands as a PeriodicTask row
