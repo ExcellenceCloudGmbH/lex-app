@@ -171,6 +171,33 @@ Cluster 8 ("Celery & Async") is the home.
 - All new behavior stays behind the non-local gate, so the existing ~350 framework tests stay
   green.
 
+### 5.1 Unit results (landed)
+
+- New module `lex/tests/unit/infra/test_worker_self_termination.py` — **20 pass / 0 fail**
+  (`WarmShutdownIfIdleTests` ×4, `IdleShutdownConfigTests` ×5, `TaskRevokedFastPathTests` ×4,
+  `IdleWatchdogTests` ×7). Placed beside the pre-existing `test_celery_worker_shutdown.py` in the
+  same `infra` audit tree, per this plan's §7.
+- Regression: `lex test lex.tests.unit.infra` → 235 pass; the only failures are two pre-existing,
+  feature-unrelated errors (`test_injector_decorator` loader error, `test_init_retry`) present on
+  `origin/lex-app-v2` and 1 pre-existing skip. The new signal imports temporarily broke the
+  incomplete `celery.signals` stub in `test_celery_worker_shutdown.py`; that stub was repaired and
+  its postrun assertions updated to the current `control.broadcast(...)` path (still green).
+
+### 5.2 Cluster acceptance — recorded (pending a cluster run)
+
+- **Home:** Cluster 8 ("Celery & Async"), next free letter **8v** (8a–8u in use; 8r/8s/8t are the
+  separate, still-uncommitted heartbeat-recovery batches — do not collide). Scenario range to be
+  pinned in `test-writing-plan.md` when the cluster run is recorded.
+- **Harness:** `~/LUND_IT/LexStressLab/D_WorkerRecovery`. Two acceptance scenarios:
+  1. **Cancel kills the pod:** start a real calculation, `CalculationModel.cancel()` it, observe the
+     worker pod that held the task terminate within ~1s; a sibling task on a concurrency>1 worker is
+     unaffected.
+  2. **Surplus pod self-reaps:** over-provision so KEDA spawns a worker that receives no task;
+     confirm it self-terminates after `LEX_WORKER_IDLE_SHUTDOWN_SECONDS`.
+- **Status:** _not yet observed in-cluster_ — this is a manual integration check requiring GKE
+  access; mark done once both scenarios are seen. Unit coverage above proves the decision logic; the
+  real SIGTERM → process-exit → pod-termination is what the harness confirms.
+
 ---
 
 ## 6. Acceptance criteria
