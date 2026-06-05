@@ -186,3 +186,63 @@ class TestCluster08v_StoreWriteThrough(SimpleTestCase):
         with mock.patch.object(idx, "unregister_task") as unregister:
             ActiveCalculationStateStore.clear("m_5")
         unregister.assert_called_once_with("calc-1", "m_5")
+
+
+from lex.tests.e2e._e2e_test_case import E2ETestCase
+
+from .models import CelerySyncCalc
+
+
+class TestCluster08v_CancelUnionsClusterTree(E2ETestCase):
+    """Cluster 8v: cancel() revokes tasks discovered only in Redis."""
+
+    e2e_models = [CelerySyncCalc]
+    e2e_unpatch = {"mark_in_progress"}
+
+    def setUp(self):
+        super().setUp()
+        ActiveCalculationStateStore.clear_all()
+        self.addCleanup(ActiveCalculationStateStore.clear_all)
+
+    def test_08_87_cancel_revokes_cluster_discovered_descendant(self):
+        """
+        Scenario 8.87: a child registered only on another pod is revoked.
+        Given: a parent (in-memory, with task_id) whose child task_id
+               lives only in the Redis tree (the cross-pod case).
+        When:  CalculationModel.cancel(parent) runs.
+        Then:  _revoke_celery_task is called for BOTH the parent's task
+               and the cluster-discovered child task; revoked_tasks
+               reflects the full cluster set — no dangling worker.
+        """
+        from lex.core.models.CalculationModel import CalculationModel
+
+        parent = CelerySyncCalc.objects.create(name="parent")
+        parent.is_calculated = CalculationModel.IN_PROGRESS
+        parent.save(skip_hooks=True)
+
+        record_id = f"{parent._meta.model_name}_{parent.pk}"
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id=record_id, calculation_id="calc-1", record=str(parent),
+            model_label=parent._meta.label_lower, record_pk=parent.pk,
+        )
+        # Parent's own task is in memory; the child task is only in Redis.
+        with mock.patch.object(idx, "register_task"):
+            ActiveCalculationStateStore.set_task_id(record_id, "task-parent")
+
+        revoked = []
+        with mock.patch.object(
+            CalculationModel, "_revoke_celery_task",
+            side_effect=lambda tid: revoked.append(tid),
+        ), mock.patch.object(
+            idx, "get_tree",
+            return_value={record_id: "task-parent", "celerysynccalc_999": "task-child"},
+        ), mock.patch.object(idx, "mark_cancelled") as mark:
+            result = CalculationModel.cancel(parent)
+
+        self.assertIn("task-parent", revoked)
+        self.assertIn(
+            "task-child", revoked,
+            msg="cluster-discovered child task must be revoked too",
+        )
+        self.assertIn("task-child", result["revoked_tasks"])
+        mark.assert_called_once_with("calc-1")
