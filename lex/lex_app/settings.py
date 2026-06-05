@@ -437,6 +437,20 @@ CELERY_TASK_TIMEOUT = int(os.getenv("CELERY_TASK_TIMEOUT", "3600"))  # 1 hour
 CELERY_MAX_RETRIES = int(os.getenv("CELERY_MAX_RETRIES", "3"))
 CELERY_RETRY_DELAY = int(os.getenv("CELERY_RETRY_DELAY", "60"))  # seconds
 
+# Cluster-wide cascade cancellation (Redis cancel index).
+# When enabled, CalculationModel.cancel discovers child task_ids that
+# other worker pods registered (via the Redis tree index) and revokes
+# them too. Inert whenever CELERY_ACTIVE is off or no Redis is reachable.
+LEX_CLUSTER_CANCEL_ENABLED = (
+    os.getenv("LEX_CLUSTER_CANCEL_ENABLED", "true").lower() == "true"
+)
+LEX_CLUSTER_CANCEL_TREE_TTL_SECONDS = int(
+    os.getenv("LEX_CLUSTER_CANCEL_TREE_TTL_SECONDS", "14400")  # 4 hours
+)
+LEX_CLUSTER_CANCEL_MARKER_TTL_SECONDS = int(
+    os.getenv("LEX_CLUSTER_CANCEL_MARKER_TTL_SECONDS", "3600")  # 1 hour
+)
+
 # Legacy support for C_FORCE_ROOT (backward compatibility)
 try:
     c_force_root = os.getenv("C_FORCE_ROOT")
