@@ -199,6 +199,32 @@ the existing `test_7n_cancellation.py` is the cluster-7 home to extend.
 
 ---
 
+## 5a. Deferred optimization — broker queue purge (not in this cut)
+
+Revoke marks a task revoked but does **not** remove its message from the Redis broker
+list. So cancelled-but-pending children keep sitting in the queue, which means KEDA still
+counts them in `listLength` and spawns pods to drain them; each spawned pod pulls a
+cancelled task, discards/self-aborts (via the cooperative marker), then terminates — pure
+churn. For a large cancelled tree this is a burst of pointless pod spawns.
+
+This is **purely an efficiency concern, not a correctness one**: between signal-revoke
+(already-running tasks) and the `calculation_id`-keyed cooperative marker (not-yet-started
+tasks, including ones `cancel()` never discovered), no cancelled task ever computes to
+completion regardless of whether its queued message lingers.
+
+Physically removing the pending messages would let KEDA see true depth and skip the churn,
+but Celery offers no clean per-task queue-removal API: `purge()` wipes the *entire* queue
+(all calculations — too broad), and selective removal means scanning the broker LIST,
+decoding each message, and `LREM`-ing by `task_id` — O(queue-depth), racy against
+concurrent worker pops, and coupled to Celery's internal message format (fragile across
+upgrades).
+
+**Decision:** deferred. Add selective queue-purge (flag-gated) only if cluster acceptance
+testing shows the pod-churn / KEDA queue-inflation is a real operational problem. Not built
+in this cut (YAGNI until measured).
+
+---
+
 ## 6. Acceptance criteria
 
 1. Cancelling a parent calculation revokes and terminates **every** descendant task across
