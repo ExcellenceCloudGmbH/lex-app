@@ -4,11 +4,12 @@ import logging
 import os
 import signal
 import threading
+import time
 from typing import Optional
 
 from celery import Celery
 from celery.app.control import Control
-from celery.signals import task_postrun
+from celery.signals import task_postrun, task_revoked, worker_ready, worker_shutting_down
 from celery.worker import state as worker_state
 from celery.worker.control import Panel
 from django.apps import apps
@@ -33,30 +34,40 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(lambda: [n.name for n in apps.get_app_configs()])
 
 
-@Panel.register
-def lex_shutdown_if_idle(panel, completed_task_id=None):
+# Module-level guard so at most one SIGTERM timer is ever armed per process.
+_shutdown_lock = threading.Lock()
+_shutdown_scheduled = False
+
+
+def _read_pending_task_ids(exclude_task_ids=()):
     """
-    Remote-control command that runs in the worker's MainProcess.
-
-    Checks the canonical request bookkeeping (``celery.worker.state``) and
-    only triggers a warm shutdown if no other task is active or reserved
-    on this worker. The just-completed ``completed_task_id`` is subtracted
-    because, depending on timing, MainProcess may not have processed the
-    pool's "task ready" message yet when this command arrives.
-
-    Returns a small dict for observability (visible via ``celery inspect``
-    style replies when ``reply=True``).
+    Return the set of task ids this worker still owns (active or reserved),
+    minus ``exclude_task_ids``. Runs in the worker MainProcess. Raises if the
+    canonical ``celery.worker.state`` bookkeeping cannot be read.
     """
-    try:
-        active_ids = {getattr(req, "id", None) for req in worker_state.active_requests}
-        reserved_ids = {getattr(req, "id", None) for req in worker_state.reserved_requests}
-    except Exception:  # pragma: no cover - defensive
-        logger.exception("lex_shutdown_if_idle: failed to read worker state")
-        return {"shutting_down": False, "error": "state_unavailable"}
-
+    active_ids = {getattr(req, "id", None) for req in worker_state.active_requests}
+    reserved_ids = {getattr(req, "id", None) for req in worker_state.reserved_requests}
     pending = (active_ids | reserved_ids) - {None}
-    if completed_task_id:
-        pending.discard(completed_task_id)
+    pending -= set(exclude_task_ids)
+    return pending
+
+
+def _warm_shutdown_if_idle(exclude_task_ids=()):
+    """
+    Schedule a single graceful SIGTERM (warm shutdown) iff this worker has no
+    active or reserved task other than ``exclude_task_ids``. MainProcess-only.
+
+    Idempotent: once a shutdown is scheduled, ``_shutdown_scheduled`` makes
+    subsequent calls no-ops so stacked SIGTERM timers can never be armed.
+
+    Returns a small dict for observability.
+    """
+    global _shutdown_scheduled
+    try:
+        pending = _read_pending_task_ids(exclude_task_ids)
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("_warm_shutdown_if_idle: failed to read worker state")
+        return {"shutting_down": False, "error": "state_unavailable"}
 
     if pending:
         return {
@@ -65,18 +76,31 @@ def lex_shutdown_if_idle(panel, completed_task_id=None):
             "pending": sorted(pending),
         }
 
-    # Worker is idle. Schedule a SIGTERM on a short delay so we can return
-    # the reply (and let the broadcast machinery finish) before the warm
-    # shutdown begins. Celery's MainProcess handles SIGTERM as a graceful
-    # shutdown (finish in-flight tasks, then exit) — there are none here.
+    with _shutdown_lock:
+        if _shutdown_scheduled:
+            return {"shutting_down": True, "already_scheduled": True}
+        _shutdown_scheduled = True
+
     def _terminate():
         try:
             os.kill(os.getpid(), signal.SIGTERM)
         except Exception:  # pragma: no cover - defensive
-            logger.exception("lex_shutdown_if_idle: SIGTERM failed")
+            logger.exception("_warm_shutdown_if_idle: SIGTERM failed")
 
     threading.Timer(0.05, _terminate).start()
     return {"shutting_down": True}
+
+
+@Panel.register
+def lex_shutdown_if_idle(panel, completed_task_id=None):
+    """
+    Remote-control command (MainProcess) used by the existing ``task_postrun``
+    broadcast path. Thin wrapper over ``_warm_shutdown_if_idle`` that excludes
+    the just-completed task id (MainProcess may not have processed the pool's
+    "task ready" message yet when this command arrives).
+    """
+    exclude = {completed_task_id} if completed_task_id else set()
+    return _warm_shutdown_if_idle(exclude_task_ids=exclude)
 
 
 def _is_non_local_deployment_target() -> bool:
