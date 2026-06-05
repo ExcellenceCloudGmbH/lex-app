@@ -26,6 +26,7 @@ import pytest
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from lex.core.cancellation import cluster_cancel_index as idx
+from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
 
 pytestmark = pytest.mark.celery_async
 
@@ -144,3 +145,44 @@ class TestCluster08v_IndexDisabled(SimpleTestCase):
         Then:  it returns None regardless of CELERY_ACTIVE.
         """
         self.assertIsNone(idx._get_client())
+
+
+class TestCluster08v_StoreWriteThrough(SimpleTestCase):
+    """Cluster 8v: set_task_id / clear mirror into the cluster index."""
+
+    def setUp(self):
+        ActiveCalculationStateStore.clear_all()
+        self.addCleanup(ActiveCalculationStateStore.clear_all)
+
+    def test_08_85_set_task_id_registers_in_cluster_index(self):
+        """
+        Scenario 8.85: attaching a task_id writes through to the index.
+        Given: a tracked record with a known calculation_id.
+        When:  set_task_id attaches its Celery task_id.
+        Then:  cluster_cancel_index.register_task is called with that
+               calculation_id, record_id, and task_id — making the node
+               discoverable cluster-wide.
+        """
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id="m_5", calculation_id="calc-1", record="m_5",
+            model_label="lex_app.celerysynccalc", record_pk=5,
+        )
+        with mock.patch.object(idx, "register_task") as register:
+            ActiveCalculationStateStore.set_task_id("m_5", "task-9")
+        register.assert_called_once_with("calc-1", "m_5", "task-9")
+
+    def test_08_86_clear_unregisters_from_cluster_index(self):
+        """
+        Scenario 8.86: a terminal node leaves the cluster index.
+        Given: a tracked record with a calculation_id.
+        When:  clear() removes it from the in-memory store.
+        Then:  cluster_cancel_index.unregister_task is called with the
+               record's calculation_id and record_id.
+        """
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id="m_5", calculation_id="calc-1", record="m_5",
+            model_label="lex_app.celerysynccalc", record_pk=5,
+        )
+        with mock.patch.object(idx, "unregister_task") as unregister:
+            ActiveCalculationStateStore.clear("m_5")
+        unregister.assert_called_once_with("calc-1", "m_5")
