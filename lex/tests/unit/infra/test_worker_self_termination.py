@@ -149,6 +149,7 @@ class IdleWatchdogTests(SimpleTestCase):
     def setUp(self):
         celery_mod._shutdown_scheduled = False
         celery_mod._watchdog_stop.clear()
+        celery_mod._watchdog_thread = None
 
     def _clock(self, values):
         """A fake monotonic() that yields successive values then holds the last."""
@@ -231,3 +232,34 @@ class IdleWatchdogTests(SimpleTestCase):
         celery_mod._watchdog_stop.clear()
         celery_mod.stop_idle_watchdog()
         self.assertTrue(celery_mod._watchdog_stop.is_set())
+
+    def test_read_error_treated_as_busy_no_shutdown(self):
+        # An unreadable worker state must never trigger shutdown, even with a
+        # zero-second timeout: the conservative branch resets last_active.
+        calls = {"n": 0}
+
+        def fake_sleep(interval):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                celery_mod._watchdog_stop.set()
+
+        with mock.patch.object(celery_mod, "_read_pending_task_ids",
+                               side_effect=RuntimeError("state unavailable")):
+            with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
+                celery_mod._idle_watchdog_loop(
+                    timeout_seconds=0,
+                    poll_interval=5,
+                    monotonic=self._clock([0, 100, 200]),
+                    sleep=fake_sleep,
+                )
+        helper.assert_not_called()
+
+    def test_worker_ready_noop_when_thread_already_alive(self):
+        celery_mod._watchdog_thread = types.SimpleNamespace(is_alive=lambda: True)
+        with mock.patch.object(celery_mod, "_is_non_local_deployment_target",
+                               return_value=True):
+            with mock.patch.object(celery_mod, "_idle_shutdown_enabled",
+                                   return_value=True):
+                with mock.patch.object(celery_mod.threading, "Thread") as thread_cls:
+                    celery_mod.start_idle_watchdog()
+        thread_cls.assert_not_called()

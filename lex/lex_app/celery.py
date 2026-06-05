@@ -265,6 +265,8 @@ def start_idle_watchdog(sender=None, **extra):
     global _watchdog_thread
     if not _is_non_local_deployment_target() or not _idle_shutdown_enabled():
         return
+    if _watchdog_thread is not None and _watchdog_thread.is_alive():
+        return
     _watchdog_stop.clear()
     _watchdog_thread = threading.Thread(
         target=_idle_watchdog_loop,
