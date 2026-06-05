@@ -103,3 +103,33 @@ class IdleShutdownConfigTests(SimpleTestCase):
             "os.environ", {"LEX_WORKER_IDLE_SHUTDOWN_SECONDS": "notanumber"}, clear=False
         ):
             self.assertEqual(celery_mod._idle_shutdown_seconds(), 30.0)
+
+
+class TaskRevokedFastPathTests(SimpleTestCase):
+    def test_calls_helper_excluding_revoked_id_when_non_local(self):
+        request = _fake_request("revoked-1")
+        with mock.patch.object(celery_mod, "_is_non_local_deployment_target",
+                               return_value=True):
+            with mock.patch.object(celery_mod, "_idle_shutdown_enabled",
+                                   return_value=True):
+                with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
+                    celery_mod.shutdown_worker_after_task_revoked(request=request)
+        helper.assert_called_once_with(exclude_task_ids={"revoked-1"})
+
+    def test_noop_when_local(self):
+        request = _fake_request("revoked-1")
+        with mock.patch.object(celery_mod, "_is_non_local_deployment_target",
+                               return_value=False):
+            with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
+                celery_mod.shutdown_worker_after_task_revoked(request=request)
+        helper.assert_not_called()
+
+    def test_noop_when_feature_disabled(self):
+        request = _fake_request("revoked-1")
+        with mock.patch.object(celery_mod, "_is_non_local_deployment_target",
+                               return_value=True):
+            with mock.patch.object(celery_mod, "_idle_shutdown_enabled",
+                                   return_value=False):
+                with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
+                    celery_mod.shutdown_worker_after_task_revoked(request=request)
+        helper.assert_not_called()

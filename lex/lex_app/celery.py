@@ -183,6 +183,38 @@ def shutdown_worker_after_task_completion(
             task_id,
         )
 
+@task_revoked.connect
+def shutdown_worker_after_task_revoked(
+    sender=None,
+    request=None,
+    terminated=None,
+    signum=None,
+    expired=None,
+    **extra,
+):
+    """
+    Cancel fast-path (fixes cluster bug #1). ``CalculationModel.cancel()`` ->
+    ``revoke(terminate=True)`` fires ``task_revoked`` in the worker MainProcess.
+    If the revoked task was the worker's only work, the worker is now idle and
+    we schedule a warm shutdown so the KEDA ScaledJob pod terminates within ~1s.
+    A concurrency>1 worker with other live tasks stays up (the revoked id is
+    excluded, the siblings keep ``pending`` non-empty).
+
+    Runs in MainProcess, so unlike ``task_postrun`` it does not depend on a
+    hard-terminated pool child completing its signal handler.
+    """
+    if not _is_non_local_deployment_target() or not _idle_shutdown_enabled():
+        return
+
+    revoked_id = getattr(request, "id", None)
+    exclude = {revoked_id} if revoked_id else set()
+    try:
+        logger.info("Worker idle-check after revoke of task %s", revoked_id)
+        _warm_shutdown_if_idle(exclude_task_ids=exclude)
+    except Exception:
+        logger.exception("shutdown_worker_after_task_revoked failed for %s", revoked_id)
+
+
 # Configuration validation function
 def validate_celery_redis_config():
     """
