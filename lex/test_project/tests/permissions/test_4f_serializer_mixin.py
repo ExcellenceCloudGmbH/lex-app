@@ -51,7 +51,7 @@ from lex.api.views.model_entries.mixins.PermissionAwareSerializerMixin import (
     _camel_to_snake,
     add_permission_checks,
 )
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIRequestFactory

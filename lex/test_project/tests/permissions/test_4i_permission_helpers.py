@@ -53,7 +53,7 @@ import unittest
 from django.contrib.auth.models import User
 from django.test import RequestFactory, SimpleTestCase
 from lex.core.models.LexModel import PermissionResult, UserContext
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, FieldLevelItem, OwnedItem, ProtectedItem
 

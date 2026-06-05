@@ -47,7 +47,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.utils import timezone
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, HistSimpleItem
 

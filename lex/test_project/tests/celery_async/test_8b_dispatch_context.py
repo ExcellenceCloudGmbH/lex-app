@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from lex.api.utils import operation_context
 from lex.lex_app.celery_tasks import is_celery_worker_process, lex_shared_task
-from lex.tests.e2e._e2e_test_case import E2ETestCase
+from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import ALL_MODELS, CeleryCalc, CelerySyncCalc
 
