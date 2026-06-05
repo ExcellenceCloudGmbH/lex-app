@@ -45,6 +45,9 @@ def _install_celery_and_django_stubs():
 
     celery_module.Celery = DummyCelery
     signals_module.task_postrun = DummySignal()
+    signals_module.task_revoked = DummySignal()
+    signals_module.worker_ready = DummySignal()
+    signals_module.worker_shutting_down = DummySignal()
     celery_control_module.Control = DummyControl
     django_apps_module.apps = types.SimpleNamespace(get_app_configs=lambda: [])
 
@@ -77,37 +80,36 @@ class CeleryWorkerShutdownTests(TestCase):
             self.assertFalse(self.celery_module._is_non_local_deployment_target())
 
     def test_postrun_shutdown_targets_only_current_worker(self):
+        fake_app = types.SimpleNamespace(control=MagicMock())
         fake_task = types.SimpleNamespace(
-            app=object(),
+            app=fake_app,
             request=types.SimpleNamespace(hostname="worker1@example"),
         )
 
         with patch.dict(os.environ, {"DEPLOYMENT_TARGET": "prod"}, clear=False):
-            with patch.object(self.celery_module, "Control") as control_cls:
-                control_instance = MagicMock()
-                control_cls.return_value = control_instance
+            self.celery_module.shutdown_worker_after_task_completion(
+                task_id="task-123",
+                task=fake_task,
+            )
 
-                self.celery_module.shutdown_worker_after_task_completion(
-                    task_id="task-123",
-                    task=fake_task,
-                )
-
-        control_cls.assert_called_once_with(app=fake_task.app)
-        control_instance.shutdown.assert_called_once_with(
-            destination=["worker1@example"]
+        fake_app.control.broadcast.assert_called_once_with(
+            "lex_shutdown_if_idle",
+            arguments={"completed_task_id": "task-123"},
+            destination=["worker1@example"],
+            reply=False,
         )
 
     def test_postrun_shutdown_is_skipped_in_local_environment(self):
+        fake_app = types.SimpleNamespace(control=MagicMock())
         fake_task = types.SimpleNamespace(
-            app=object(),
+            app=fake_app,
             request=types.SimpleNamespace(hostname="worker1@example"),
         )
 
         with patch.dict(os.environ, {"DEPLOYMENT_TARGET": "local"}, clear=False):
-            with patch.object(self.celery_module, "Control") as control_cls:
-                self.celery_module.shutdown_worker_after_task_completion(
-                    task_id="task-123",
-                    task=fake_task,
-                )
+            self.celery_module.shutdown_worker_after_task_completion(
+                task_id="task-123",
+                task=fake_task,
+            )
 
-        control_cls.assert_not_called()
+        fake_app.control.broadcast.assert_not_called()
