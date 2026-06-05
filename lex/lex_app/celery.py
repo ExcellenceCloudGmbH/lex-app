@@ -215,6 +215,72 @@ def shutdown_worker_after_task_revoked(
         logger.exception("shutdown_worker_after_task_revoked failed for %s", revoked_id)
 
 
+# Idle watchdog: a single daemon thread that terminates a worker which has been
+# idle (no active/reserved task) for >= LEX_WORKER_IDLE_SHUTDOWN_SECONDS. Catches
+# KEDA-spawned surplus pods that never receive a task (cluster bug #2).
+_WATCHDOG_POLL_SECONDS = 5.0
+_watchdog_stop = threading.Event()
+_watchdog_thread = None
+
+
+def _idle_watchdog_loop(
+    timeout_seconds,
+    poll_interval=_WATCHDOG_POLL_SECONDS,
+    monotonic=time.monotonic,
+    sleep=None,
+):
+    """
+    MainProcess daemon loop. Seeds ``last_active`` now (so a legitimately
+    spawned worker gets the full grace window to receive its task), then polls:
+    if any task is active/reserved, refresh ``last_active``; if idle for at
+    least ``timeout_seconds``, request a warm shutdown and exit. ``monotonic``
+    and ``sleep`` are injectable for testing.
+    """
+    sleep = sleep if sleep is not None else _watchdog_stop.wait
+    last_active = monotonic()
+    while not _watchdog_stop.is_set():
+        try:
+            pending = _read_pending_task_ids()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("idle watchdog: failed to read worker state")
+            last_active = monotonic()  # conservative: treat unknown as busy
+            sleep(poll_interval)
+            continue
+
+        if pending:
+            last_active = monotonic()
+        elif monotonic() - last_active >= timeout_seconds:
+            logger.info(
+                "idle watchdog: worker idle >= %ss; requesting warm shutdown",
+                timeout_seconds,
+            )
+            _warm_shutdown_if_idle()
+            return
+        sleep(poll_interval)
+
+
+@worker_ready.connect
+def start_idle_watchdog(sender=None, **extra):
+    """Start the single idle-watchdog daemon thread on worker startup."""
+    global _watchdog_thread
+    if not _is_non_local_deployment_target() or not _idle_shutdown_enabled():
+        return
+    _watchdog_stop.clear()
+    _watchdog_thread = threading.Thread(
+        target=_idle_watchdog_loop,
+        args=(_idle_shutdown_seconds(),),
+        name="lex-idle-watchdog",
+        daemon=True,
+    )
+    _watchdog_thread.start()
+
+
+@worker_shutting_down.connect
+def stop_idle_watchdog(sender=None, **extra):
+    """Signal the watchdog loop to stop cleanly on worker shutdown."""
+    _watchdog_stop.set()
+
+
 # Configuration validation function
 def validate_celery_redis_config():
     """

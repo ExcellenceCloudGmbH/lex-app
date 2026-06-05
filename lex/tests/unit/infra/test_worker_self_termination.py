@@ -143,3 +143,91 @@ class TaskRevokedFastPathTests(SimpleTestCase):
                 with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
                     celery_mod.shutdown_worker_after_task_revoked(request=request)
         helper.assert_called_once_with(exclude_task_ids=set())
+
+
+class IdleWatchdogTests(SimpleTestCase):
+    def setUp(self):
+        celery_mod._shutdown_scheduled = False
+        celery_mod._watchdog_stop.clear()
+
+    def _clock(self, values):
+        """A fake monotonic() that yields successive values then holds the last."""
+        seq = list(values)
+
+        def _monotonic():
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+
+        return _monotonic
+
+    def test_shuts_down_after_idle_timeout(self):
+        # Idle the whole time; clock jumps past the 30s timeout on poll 2.
+        sleeps = []
+
+        def fake_sleep(interval):
+            sleeps.append(interval)
+            if len(sleeps) > 5:  # safety valve so a bug can't hang the suite
+                celery_mod._watchdog_stop.set()
+
+        with _patch_state(active_ids=(), reserved_ids=()):
+            with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
+                celery_mod._idle_watchdog_loop(
+                    timeout_seconds=30,
+                    poll_interval=5,
+                    monotonic=self._clock([100, 100, 140]),
+                    sleep=fake_sleep,
+                )
+        helper.assert_called_once_with()
+
+    def test_activity_refreshes_last_active(self):
+        # Busy on first poll (resets last_active), then idle but not yet past
+        # timeout -> no shutdown; loop bounded by the stop event.
+        calls = {"n": 0}
+
+        def fake_sleep(interval):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                celery_mod._watchdog_stop.set()
+
+        busy_then_idle = [
+            types.SimpleNamespace(
+                active_requests=[_fake_request("t1")], reserved_requests=[]
+            ),
+            types.SimpleNamespace(active_requests=[], reserved_requests=[]),
+        ]
+
+        def _read(exclude_task_ids=()):
+            state = busy_then_idle[min(calls["n"], 1)]
+            ids = {getattr(r, "id", None) for r in state.active_requests}
+            return ids - {None}
+
+        with mock.patch.object(celery_mod, "_read_pending_task_ids", side_effect=_read):
+            with mock.patch.object(celery_mod, "_warm_shutdown_if_idle") as helper:
+                celery_mod._idle_watchdog_loop(
+                    timeout_seconds=30,
+                    poll_interval=5,
+                    monotonic=self._clock([0, 1, 2]),
+                    sleep=fake_sleep,
+                )
+        helper.assert_not_called()
+
+    def test_worker_ready_starts_thread_when_non_local(self):
+        with mock.patch.object(celery_mod, "_is_non_local_deployment_target",
+                               return_value=True):
+            with mock.patch.object(celery_mod, "_idle_shutdown_enabled",
+                                   return_value=True):
+                with mock.patch.object(celery_mod.threading, "Thread") as thread_cls:
+                    celery_mod.start_idle_watchdog()
+        thread_cls.assert_called_once()
+        self.assertTrue(thread_cls.call_args.kwargs.get("daemon"))
+
+    def test_worker_ready_noop_when_local(self):
+        with mock.patch.object(celery_mod, "_is_non_local_deployment_target",
+                               return_value=False):
+            with mock.patch.object(celery_mod.threading, "Thread") as thread_cls:
+                celery_mod.start_idle_watchdog()
+        thread_cls.assert_not_called()
+
+    def test_worker_shutting_down_sets_stop_event(self):
+        celery_mod._watchdog_stop.clear()
+        celery_mod.stop_idle_watchdog()
+        self.assertTrue(celery_mod._watchdog_stop.is_set())
