@@ -803,7 +803,26 @@ def calc_and_save(models: List[Model], *args, **kwargs):
     """
     Calculates and saves a list of models.
     Aborts the entire batch immediately if any error occurs.
+
+    Cooperative cancellation net (not the primary mechanism): if the
+    calculation's cancelled marker is already set in the cluster cancel
+    index, abort before running anything. This catches a child task that
+    a late-booting worker pod pulled *after* cancel()'s revoke broadcast,
+    so it lands CANCELLED instead of computing to completion. Signal
+    revoke remains the relied-upon kill; this is skipped without Redis.
     """
+    from lex.core.cancellation import cluster_cancel_index
+    from lex.core.models.CalculationModel import CalculationCancelled
+
+    try:
+        from lex.api.utils import operation_context
+
+        _calc_id = operation_context.get().get("calculation_id") or ""
+    except Exception:
+        _calc_id = ""
+    if _calc_id and cluster_cancel_index.is_cancelled(_calc_id):
+        raise CalculationCancelled("Calculation cancelled before task start")
+
     summary = {
         "total_models": len(models),
         "processed_successfully": 0,

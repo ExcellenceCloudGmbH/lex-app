@@ -246,3 +246,47 @@ class TestCluster08v_CancelUnionsClusterTree(E2ETestCase):
         )
         self.assertIn("task-child", result["revoked_tasks"])
         mark.assert_called_once_with("calc-1")
+
+
+class TestCluster08v_CooperativeMarkerCheck(SimpleTestCase):
+    """Cluster 8v: calc_and_save aborts when the cancelled marker is set."""
+
+    def test_08_88_calc_and_save_aborts_when_marker_set(self):
+        """
+        Scenario 8.88: a late pod pulling a cancelled task self-aborts.
+        Given: the cancelled marker is set for the active calculation_id.
+        When:  calc_and_save runs (as a late-booting pod would).
+        Then:  it raises CalculationCancelled before touching any model,
+               so on_failure records CANCELLED instead of running to SUCCESS.
+        """
+        from lex.core.models.CalculationModel import CalculationCancelled
+        from lex.lex_app.celery_tasks import calc_and_save
+
+        model = mock.MagicMock(name="model")
+        with mock.patch(
+            "lex.api.utils.operation_context"
+        ) as op_ctx, mock.patch.object(idx, "is_cancelled", return_value=True):
+            op_ctx.get.return_value = {"calculation_id": "calc-1"}
+            with self.assertRaises(CalculationCancelled):
+                calc_and_save([model])
+        model.lex_func.assert_not_called()
+
+    def test_08_89_calc_and_save_runs_when_marker_absent(self):
+        """
+        Scenario 8.89: no marker => the calculation runs normally.
+        Given: is_cancelled returns False for the calculation_id.
+        When:  calc_and_save runs.
+        Then:  the model's lex_func/save are invoked (no spurious abort);
+               the cooperative net never blocks healthy work.
+        """
+        from lex.lex_app.celery_tasks import calc_and_save
+
+        model = mock.MagicMock(name="model")
+        model.lex_func.return_value = lambda: None
+        with mock.patch(
+            "lex.api.utils.operation_context"
+        ) as op_ctx, mock.patch.object(idx, "is_cancelled", return_value=False):
+            op_ctx.get.return_value = {"calculation_id": "calc-1"}
+            summary, _args = calc_and_save([model])
+        model.lex_func.assert_called()
+        self.assertEqual(summary["processed_successfully"], 1)
