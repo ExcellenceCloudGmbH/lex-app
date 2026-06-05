@@ -14,6 +14,7 @@ How it runs:
   real module and patch ``celery_mod.worker_state``, ``threading.Timer``
   and ``os.kill`` so no signal is actually delivered.
 """
+import os
 import types
 from unittest import mock
 
@@ -76,7 +77,6 @@ class WarmShutdownIfIdleTests(SimpleTestCase):
 
 class IdleShutdownConfigTests(SimpleTestCase):
     def test_enabled_defaults_true(self):
-        import os
         with mock.patch.dict("os.environ", {}, clear=False):
             os.environ.pop("LEX_WORKER_IDLE_SHUTDOWN_ENABLED", None)
             self.assertTrue(celery_mod._idle_shutdown_enabled())
@@ -88,7 +88,6 @@ class IdleShutdownConfigTests(SimpleTestCase):
             self.assertFalse(celery_mod._idle_shutdown_enabled())
 
     def test_seconds_defaults_to_30(self):
-        import os
         with mock.patch.dict("os.environ", {}, clear=False):
             os.environ.pop("LEX_WORKER_IDLE_SHUTDOWN_SECONDS", None)
             self.assertEqual(celery_mod._idle_shutdown_seconds(), 30.0)
