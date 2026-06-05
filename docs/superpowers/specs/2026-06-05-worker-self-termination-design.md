@@ -65,8 +65,9 @@ preserved for free.
 
 ## 3. Design
 
-One shared decision helper, three triggers, all in `lex/lex_app/celery.py`. Nothing touches
-infra, the worker image, or the broker.
+One shared decision helper plus two new triggers (alongside the existing `task_postrun` path,
+which is retained unchanged), all in `lex/lex_app/celery.py`. Nothing touches infra, the worker
+image, or the broker.
 
 ### 3.1 Refactor: `_warm_shutdown_if_idle(exclude_task_ids=())`
 
