@@ -397,6 +397,23 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8w — Cancelled-calculation audit status finalization (Session 75 — June 6)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.90 – 8.90 |
+| Type | E |
+| Files covered | `lex/core/models/CalculationModel.py` (`cancel()` + `_persist_cancelled` path), `lex/api/views/model_entries/One.py` (public `PATCH {"calculate":"true"}` then `PATCH {"cancel":"true"}` flow) |
+| Test file | `lex/test_project/tests/celery_async/test_8w_cancelled_audit_pending.py` |
+| Test classes | `TestCluster08w_CancelledAuditStatus` (8.90 — API-triggered Celery cancellation must finalize audit status to `cancelled`, not linger `pending`) |
+| Fixtures | Reuses cluster-8 E2E models (`CelerySyncCalc`) + framework `AuditLog` / `AuditLogStatus` tables; patches Celery dispatch/revoke boundary only |
+| Tests landed | **1 expectedFailure / 0 unexpected failures** (BUG-023 repro) |
+| Coverage gain | N/A (bug-repro mode) |
+| Prereqs | none |
+| Status | 🚧 In progress — bug-repro only (`@unittest.expectedFailure`) |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)
@@ -594,7 +611,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 

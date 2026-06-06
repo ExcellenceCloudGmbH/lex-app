@@ -520,6 +520,16 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 **Scenario range:** 8.78 – 8.89. **Test file:** `lex/test_project/tests/celery_async/test_8v_cluster_cascade_cancel.py`. **Type:** U (+ one E for 8.87). **Status:** ✅ Complete (Session 74 — June 5). Covers `lex/core/cancellation/cluster_cancel_index.py` (register/unregister/get_tree/mark_cancelled/is_cancelled + disabled-config no-ops), the `ActiveCalculationStateStore` write-through, the `cancel()` cluster-tree union+revoke, and the `calc_and_save` cooperative self-abort. 12 pass / 0 fail; existing 8u + 7n cancellation suites stay green; regression across `celery_async` + `calculations` = 252 pass / 4 skip.
 
+### 8w. Cancelled-calculation audit terminal status (BUG-023) 🚧
+
+**Gap:** The cancellation state machine now persists `CalculationModel.is_calculated=CANCELLED`, but the audit timeline can still leave the paired `AuditLogStatus` row at `pending` for API-triggered Celery cancels. That violates the audit lifecycle contract (`pending` must always resolve to a terminal status) and makes operator forensics ambiguous.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.90 | API-triggered Celery cancel finalizes pending audit row | `PATCH {"calculate":"true"}` followed by `PATCH {"cancel":"true"}` ends with model `CANCELLED` **and** audit status terminal `cancelled` (no lingering `pending`) |
+
+**Scenario range:** 8.90 – 8.90. **Test file:** `lex/test_project/tests/celery_async/test_8w_cancelled_audit_pending.py`. **Type:** E (`E2ETestCase`). **Status:** 🚧 In progress — `@unittest.expectedFailure` repro for **BUG-023**.
+
 ---
 
 ## 9. Signals & WebSocket
