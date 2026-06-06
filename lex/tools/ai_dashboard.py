@@ -8,10 +8,13 @@ Opens a local HTTP page that displays and lets the user edit:
   in lex-mcp-local ≥ 1.0.0, mode changes are instant: the MCP server
   self-terminates and the IDE auto-restarts it with the new tool surface.
 * **GitHub token** — written to ``GITHUB_TOKEN`` in ``.env`` and ``mcp.json``.
+  The MCP server is restarted so the new token takes effect immediately.
 * **Remote MCP API key** — written to ``REMOTE_MCP_API_KEY`` in ``.env`` and
-  ``mcp.json``.
+  ``mcp.json``.  The MCP server is restarted so the new key takes effect
+  immediately.
 * **Remote MCP URL** — written to ``REMOTE_MCP_URL`` in ``.env`` and
-  ``mcp.json``.
+  ``mcp.json``.  The MCP server is restarted so the new URL takes effect
+  immediately.
 * Read-only system information (installed package version, Python
   executable, override file status, etc.).
 """
@@ -490,7 +493,21 @@ def _handle_save(
                 mcp_config_path, mcp_env_updates, server_name=server_name,
             )
             keys = ", ".join(sorted(env_updates))
-            successes.append(f"Updated: {keys}")
+            # Restart the MCP server so new credentials take effect
+            # immediately — but skip if a mode change already restarted it.
+            if not mode_changed:
+                stopped = _stop_mcp_server(
+                    mcp_config_path, server_name=server_name,
+                )
+                if stopped:
+                    successes.append(
+                        f"Updated: {keys}. Server restarted; "
+                        "the IDE will auto-restart it with the new values."
+                    )
+                else:
+                    successes.append(f"Updated: {keys}")
+            else:
+                successes.append(f"Updated: {keys}")
         except Exception as exc:
             errors.append(f"Failed to update credentials: {exc}")
 

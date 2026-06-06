@@ -315,6 +315,131 @@ def _build_faq_html() -> str:
         color: var(--teal);
       }}
 
+      /* ---- prompt builder ---- */
+      .pb-tabs {{
+        display: flex;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+        margin-bottom: 1.25rem;
+      }}
+      .pb-tab {{
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        cursor: pointer;
+        padding: 0.7rem 1.1rem;
+        text-align: left;
+        transition: all 150ms ease;
+        flex: 1 1 160px;
+        min-width: 160px;
+      }}
+      .pb-tab:hover {{
+        border-color: var(--teal);
+        box-shadow: 0 2px 8px rgba(36, 182, 187, 0.12);
+      }}
+      .pb-tab.active {{
+        background: linear-gradient(135deg, #24b6bb 0%, #1a9a9e 100%);
+        border-color: var(--teal);
+        box-shadow: 0 3px 12px rgba(36, 182, 187, 0.25);
+      }}
+      .pb-tab .tab-title {{
+        display: block;
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: var(--blue);
+        margin-bottom: 0.15rem;
+      }}
+      .pb-tab .tab-desc {{
+        display: block;
+        font-size: 0.76rem;
+        color: var(--muted);
+        font-style: italic;
+        line-height: 1.35;
+      }}
+      .pb-tab.active .tab-title,
+      .pb-tab.active .tab-desc {{
+        color: #fff;
+      }}
+      .pb-scenario-desc {{
+        background: linear-gradient(135deg, rgba(36,182,187,0.06) 0%, rgba(40,48,103,0.04) 100%);
+        border-left: 3px solid var(--teal);
+        border-radius: 0 6px 6px 0;
+        padding: 0.75rem 1rem;
+        margin-bottom: 1.25rem;
+        font-size: 0.9rem;
+        color: var(--text);
+        line-height: 1.55;
+      }}
+      .pb-scenario-desc strong {{
+        color: var(--blue);
+      }}
+      .pb-scenario-desc em {{
+        color: var(--teal);
+        font-style: italic;
+      }}
+      .pb-fields {{
+        display: grid;
+        gap: 1rem;
+      }}
+      .pb-field {{
+        display: none;
+      }}
+      .pb-field.visible {{
+        display: block;
+      }}
+      .pb-field label {{
+        display: block;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--teal);
+        margin-bottom: 0.3rem;
+      }}
+      .pb-field input,
+      .pb-field textarea,
+      .pb-field select {{
+        display: block;
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0.6rem 0.8rem;
+        font-size: 0.9rem;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--bg);
+        transition: border-color 150ms ease, box-shadow 150ms ease;
+      }}
+      .pb-field input:focus,
+      .pb-field textarea:focus,
+      .pb-field select:focus {{
+        outline: none;
+        border-color: var(--teal);
+        box-shadow: 0 0 0 3px rgba(36, 182, 187, 0.12);
+      }}
+      .pb-field textarea {{
+        resize: vertical;
+        min-height: 2.6rem;
+      }}
+      .pb-field select {{
+        cursor: pointer;
+      }}
+      .pb-field .hint {{
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin-top: 0.25rem;
+        font-style: italic;
+      }}
+      .pb-preview-label {{
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--teal);
+        margin: 1.5rem 0 0.4rem;
+      }}
+
       /* ---- responsive ---- */
       @media (max-width: 860px) {{
         .hero {{
@@ -322,7 +447,160 @@ def _build_faq_html() -> str:
           align-items: flex-start;
           gap: 1rem;
         }}
+        .flow-tabs {{ flex-direction: column; }}
+        .flow-tab {{ min-width: unset; }}
       }}
+
+      /* ---- behavior map flow tabs ---- */
+      .flow-tabs {{
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin: 1rem 0;
+      }}
+      .flow-tab {{
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        cursor: pointer;
+        padding: 0.6rem 1rem;
+        text-align: left;
+        flex: 1 1 140px;
+        min-width: 140px;
+        transition: all 150ms ease;
+      }}
+      .flow-tab:hover {{
+        border-color: var(--teal);
+        box-shadow: 0 2px 8px rgba(36, 182, 187, 0.12);
+      }}
+      .flow-tab.active {{
+        background: linear-gradient(135deg, #24b6bb 0%, #1a9a9e 100%);
+        border-color: var(--teal);
+        box-shadow: 0 3px 12px rgba(36, 182, 187, 0.25);
+      }}
+      .flow-tab .ft-icon {{
+        font-size: 1.2rem;
+        display: block;
+        margin-bottom: 0.2rem;
+      }}
+      .flow-tab .ft-label {{
+        display: block;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: var(--blue);
+      }}
+      .flow-tab.active .ft-label {{
+        color: #fff;
+      }}
+      .flow-panel {{
+        display: none;
+      }}
+      .flow-panel.active {{
+        display: block;
+      }}
+      .flow-desc {{
+        background: linear-gradient(135deg, rgba(36,182,187,0.06) 0%, rgba(40,48,103,0.04) 100%);
+        border-left: 3px solid var(--teal);
+        border-radius: 0 6px 6px 0;
+        padding: 0.65rem 1rem;
+        margin-bottom: 1.25rem;
+        font-size: 0.9rem;
+        color: var(--text);
+        line-height: 1.5;
+      }}
+      .flow-desc strong {{ color: var(--blue); }}
+      .flow-desc em {{ color: var(--teal); font-style: italic; }}
+
+      /* ---- timeline ---- */
+      .timeline {{
+        position: relative;
+        padding: 0 0 0 2.2rem;
+        margin: 0;
+        list-style: none;
+      }}
+      .timeline::before {{
+        content: "";
+        position: absolute;
+        left: 0.7rem;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: linear-gradient(180deg, var(--teal) 0%, var(--blue) 100%);
+        border-radius: 1px;
+      }}
+      .tl-item {{
+        position: relative;
+        padding: 0.5rem 0 1rem;
+      }}
+      .tl-item:last-child {{
+        padding-bottom: 0;
+      }}
+      .tl-dot {{
+        position: absolute;
+        left: -1.85rem;
+        top: 0.65rem;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--teal);
+        border: 2px solid var(--card);
+        box-shadow: 0 0 0 2px var(--teal);
+        z-index: 1;
+      }}
+      .tl-dot.blue {{ background: var(--blue); box-shadow: 0 0 0 2px var(--blue); }}
+      .tl-dot.gold {{ background: #e6a817; box-shadow: 0 0 0 2px #e6a817; }}
+      .tl-dot.green {{ background: #27ae60; box-shadow: 0 0 0 2px #27ae60; }}
+      .tl-dot.purple {{ background: #8e44ad; box-shadow: 0 0 0 2px #8e44ad; }}
+      .tl-phase {{
+        display: inline-block;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        margin-bottom: 0.3rem;
+      }}
+      .tl-phase.setup {{ background: rgba(36,182,187,0.12); color: var(--teal); }}
+      .tl-phase.plan {{ background: rgba(40,48,103,0.1); color: var(--blue); }}
+      .tl-phase.build {{ background: rgba(230,168,23,0.12); color: #c48f00; }}
+      .tl-phase.harden {{ background: rgba(39,174,96,0.12); color: #1e8449; }}
+      .tl-phase.docs {{ background: rgba(142,68,173,0.12); color: #8e44ad; }}
+      .tl-phase.finish {{ background: rgba(40,48,103,0.08); color: var(--blue); }}
+      .tl-phase.user {{ background: rgba(230,168,23,0.15); color: #c48f00; }}
+      .tl-title {{
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 0.15rem 0 0.15rem;
+      }}
+      .tl-detail {{
+        font-size: 0.82rem;
+        color: var(--muted);
+        line-height: 1.5;
+        margin: 0;
+      }}
+      .tl-detail code {{
+        background: var(--bg);
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+        font-size: 0.85em;
+        font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+      }}
+
+      /* ---- mode pill ---- */
+      .mode-pill {{
+        display: inline-block;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        margin-right: 0.3rem;
+      }}
+      .mode-pill.fwd {{ background: rgba(36,182,187,0.15); color: var(--teal); }}
+      .mode-pill.bwd {{ background: rgba(40,48,103,0.1); color: var(--blue); }}
     </style>
   </head>
   <body>
@@ -341,8 +619,98 @@ def _build_faq_html() -> str:
       <!-- FAQ accordions -->
       <section class="faq-list">
 
+        <!-- Prompt Builder -->
+        <details class="faq">
+          <summary>
+            <span class="q-label">BUILDER</span>
+            <span class="q-title">Prompt Builder &mdash; craft the ideal prompt for your scenario</span>
+          </summary>
+          <div class="answer">
+            <p><strong>Pick your scenario below</strong>, fill in the fields that appear, and <strong>copy the generated prompt</strong>. Each scenario only shows the fields <em>you</em> need to fill &mdash; the rest is handled automatically.</p>
+
+            <div class="pb-tabs">
+              <button class="pb-tab active" type="button" data-scenario="feature" onclick="pbSwitchScenario('feature')">
+                <span class="tab-title">&#x2795; Add Feature</span>
+                <span class="tab-desc">Extend an existing Lex project with a new capability</span>
+              </button>
+              <button class="pb-tab" type="button" data-scenario="revision" onclick="pbSwitchScenario('revision')">
+                <span class="tab-title">&#x1F4DD; Revise Plan</span>
+                <span class="tab-desc">You changed a planning step &mdash; propagate it downstream</span>
+              </button>
+              <button class="pb-tab" type="button" data-scenario="forward" onclick="pbSwitchScenario('forward')">
+                <span class="tab-title">&#x1F680; New Project</span>
+                <span class="tab-desc">Start a brand-new Lex app from scratch</span>
+              </button>
+              <button class="pb-tab" type="button" data-scenario="docs" onclick="pbSwitchScenario('docs')">
+                <span class="tab-title">&#x1F4D6; Document</span>
+                <span class="tab-desc">Auto-generate docs for an existing Lex project</span>
+              </button>
+            </div>
+
+            <div class="pb-scenario-desc" id="pb-scenario-desc"></div>
+
+            <div class="pb-fields">
+              <!-- All possible fields — visibility toggled per scenario -->
+              <div class="pb-field" id="pb-field-project">
+                <label for="pb-project" id="pb-label-project">Project</label>
+                <input type="text" id="pb-project" placeholder="">
+                <div class="hint" id="pb-hint-project"></div>
+              </div>
+              <div class="pb-field" id="pb-field-feature">
+                <label for="pb-feature">Feature Description</label>
+                <textarea id="pb-feature" rows="2" placeholder="e.g. add a bulk-import wizard for CSV files"></textarea>
+                <div class="hint"><em>What</em> do you want to add? Be as specific as you can.</div>
+              </div>
+              <div class="pb-field" id="pb-field-mode">
+                <label for="pb-mode">MCP Mode</label>
+                <select id="pb-mode">
+                  <option value="FORWARD">FORWARD</option>
+                  <option value="BACKWARD">BACKWARD</option>
+                </select>
+                <div class="hint">FORWARD re-runs planning from scratch; BACKWARD preserves existing structure</div>
+              </div>
+              <div class="pb-field" id="pb-field-revision">
+                <label for="pb-revision">What Did You Change?</label>
+                <textarea id="pb-revision" rows="2" placeholder="e.g. I rewrote step 3 to use a queue-based architecture instead of synchronous calls"></textarea>
+                <div class="hint">Describe <em>which step</em> you revised and <em>what changed</em></div>
+              </div>
+              <div class="pb-field" id="pb-field-overview">
+                <label for="pb-overview">Project Idea &amp; Requirements</label>
+                <textarea id="pb-overview" rows="3" placeholder="e.g. A fleet-management dashboard that tracks vehicle locations, maintenance schedules, and driver assignments"></textarea>
+                <div class="hint">Describe the <em>purpose</em>, <em>intended users</em>, and <em>core capabilities</em></div>
+              </div>
+              <div class="pb-field" id="pb-field-scope">
+                <label for="pb-scope" id="pb-label-scope">Focus Areas</label>
+                <textarea id="pb-scope" rows="2" placeholder=""></textarea>
+                <div class="hint" id="pb-hint-scope"></div>
+              </div>
+              <div class="pb-field" id="pb-field-audience">
+                <label for="pb-audience">Documentation Audience</label>
+                <textarea id="pb-audience" rows="1" placeholder="e.g. new developers joining the team"></textarea>
+                <div class="hint">Who will <em>read</em> these docs? This shapes tone, depth, and examples.</div>
+              </div>
+              <div class="pb-field" id="pb-field-constraints">
+                <label for="pb-constraints" id="pb-label-constraints">Constraints</label>
+                <textarea id="pb-constraints" rows="2" placeholder=""></textarea>
+                <div class="hint" id="pb-hint-constraints"></div>
+              </div>
+              <div class="pb-field" id="pb-field-done">
+                <label for="pb-done" id="pb-label-done">Done When&hellip;</label>
+                <textarea id="pb-done" rows="2" placeholder=""></textarea>
+                <div class="hint" id="pb-hint-done"></div>
+              </div>
+            </div>
+
+            <div class="pb-preview-label">Generated Prompt</div>
+            <div class="copy-wrap">
+              <span class="copy-bubble" id="pb-output" style="min-height:4rem"></span>
+              <button class="copy-btn" type="button" onclick="copyPrompt(this, 'pb-output')">Copy</button>
+            </div>
+          </div>
+        </details>
+
         <!-- Q1 -->
-        <details class="faq" open>
+        <details class="faq">
           <summary>
             <span class="q-label">Q1</span>
             <span class="q-title">Clicking the &ldquo;Allow&rdquo; button is a burden?</span>
@@ -468,10 +836,239 @@ def _build_faq_html() -> str:
           </div>
         </details>
 
+        <!-- Q6 -->
+        <details class="faq">
+          <summary>
+            <span class="q-label">Q6</span>
+            <span class="q-title">How does the Lex AI workflow actually work under the hood?</span>
+          </summary>
+          <div class="answer">
+            <p>This is the <strong>Lex AI Behavior Map</strong>. Pick a workflow type to see its <em>step-by-step timeline</em>.</p>
+
+            <p style="margin:0.5rem 0 0.2rem">
+              <span class="mode-pill fwd">FORWARD</span> planning, implementation &amp; hardening &nbsp;
+              <span class="mode-pill bwd">BACKWARD</span> scanning, docs &amp; reverse questionnaire
+            </p>
+
+            <div class="flow-tabs">
+              <button class="flow-tab active" type="button" data-flow="new" onclick="flowSwitch('new')">
+                <span class="ft-icon">&#x1F680;</span>
+                <span class="ft-label">New Project</span>
+              </button>
+              <button class="flow-tab" type="button" data-flow="feat" onclick="flowSwitch('feat')">
+                <span class="ft-icon">&#x2795;</span>
+                <span class="ft-label">Add Feature</span>
+              </button>
+              <button class="flow-tab" type="button" data-flow="rev" onclick="flowSwitch('rev')">
+                <span class="ft-icon">&#x1F4DD;</span>
+                <span class="ft-label">Plan Revision</span>
+              </button>
+              <button class="flow-tab" type="button" data-flow="docs" onclick="flowSwitch('docs')">
+                <span class="ft-icon">&#x1F4D6;</span>
+                <span class="ft-label">Documentation</span>
+              </button>
+            </div>
+
+            <!-- Flow 1: New Project -->
+            <div class="flow-panel active" id="flow-new">
+              <div class="flow-desc"><span class="mode-pill fwd">FORWARD</span> <strong>Create a brand-new Lex app</strong> &mdash; from repo creation to merged PR, fully automated.</div>
+              <ol class="timeline">
+                <li class="tl-item">
+                  <span class="tl-dot"></span>
+                  <span class="tl-phase setup">Setup</span>
+                  <div class="tl-title">Kickstart Workflow</div>
+                  <p class="tl-detail"><code>kickstart_workflow(...)</code> &mdash; validates GitHub credentials, creates the repo, initializes git, writes <code>AGENTS.md</code>, pushes initial commit, creates workflow branch &amp; tracking issue.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot blue"></span>
+                  <span class="tl-phase plan">Plan</span>
+                  <div class="tl-title">Steps 0 &ndash; 8: Build Planning Artifacts</div>
+                  <p class="tl-detail">Requirements, IO analysis, data models, business rules, UI mockups, calculation specs, test strategy, and the master plan.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot gold"></span>
+                  <span class="tl-phase build">Build</span>
+                  <div class="tl-title">Steps 9 &ndash; 11: Implement the Code</div>
+                  <p class="tl-detail">Models, views, calculations, templates, and all application code. Each step commits &amp; pushes via <code>notify_step_complete(...)</code>.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot green"></span>
+                  <span class="tl-phase harden">Harden</span>
+                  <div class="tl-title">Steps 12 &ndash; 14: Test &amp; Harden</div>
+                  <p class="tl-detail">Automated tests, edge-case coverage, compliance checks, and code cleanup.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot purple"></span>
+                  <span class="tl-phase docs">Docs</span>
+                  <div class="tl-title">Steps 15 &ndash; 18: Generate &amp; Enrich Wiki</div>
+                  <p class="tl-detail">Build <code>technical-map/</code>, per-module <code>CONTEXT.md</code> files, and enriched documentation.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot blue"></span>
+                  <span class="tl-phase finish">Sync</span>
+                  <div class="tl-title">Step 19: Cross-Check</div>
+                  <p class="tl-detail">Validates that forward docs, backward docs, and code are all consistent.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot green"></span>
+                  <span class="tl-phase finish">Finish</span>
+                  <div class="tl-title">Audit &amp; Merge</div>
+                  <p class="tl-detail">First <code>finalize_workflow()</code> &rarr; write <code>audit-report.md</code>. Second <code>finalize_workflow(audit_complete=True)</code> &rarr; PR &amp; squash-merge.</p>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Flow 2: Add Feature -->
+            <div class="flow-panel" id="flow-feat">
+              <div class="flow-desc"><span class="mode-pill bwd">BACKWARD</span> <em>optional scan first</em>, then <span class="mode-pill fwd">FORWARD</span> <strong>implement the feature</strong> in an existing codebase.</div>
+              <ol class="timeline">
+                <li class="tl-item">
+                  <span class="tl-dot blue"></span>
+                  <span class="tl-phase plan">Assess</span>
+                  <div class="tl-title">Optional: Map the Current System</div>
+                  <p class="tl-detail">If the project is poorly understood, start in <strong>backward mode</strong>: <code>reverse_kickstart(...)</code> &rarr; <code>scan_project()</code> &rarr; <code>generate_wiki()</code> &rarr; reverse steps 3&ndash;6 &rarr; questionnaire &rarr; <code>finalize_reverse()</code>.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot"></span>
+                  <span class="tl-phase setup">Setup</span>
+                  <div class="tl-title">Switch to Forward &amp; Kickstart Run</div>
+                  <p class="tl-detail"><code>kickstart_run(...)</code> on the existing repo. Creates a fresh workflow branch &amp; tracking issue.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot blue"></span>
+                  <span class="tl-phase plan">Plan</span>
+                  <div class="tl-title">Steps 0 &ndash; 10: Re-Plan the Delta</div>
+                  <p class="tl-detail">Analyzes the existing code and plans only what needs to change for the new feature.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot gold"></span>
+                  <span class="tl-phase build">Build</span>
+                  <div class="tl-title">Step 11: Refactor Agent</div>
+                  <p class="tl-detail">Routes to the <em>refactor agent</em> (not the greenfield agent) &mdash; incremental changes, not a rewrite.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot green"></span>
+                  <span class="tl-phase harden">Harden &amp; Docs</span>
+                  <div class="tl-title">Steps 12 &ndash; 19: Harden, Enrich &amp; Sync</div>
+                  <p class="tl-detail">Tests, doc enrichment, artifact sync &mdash; same pipeline as a new project.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot green"></span>
+                  <span class="tl-phase finish">Finish</span>
+                  <div class="tl-title">Audit &amp; Merge</div>
+                  <p class="tl-detail">Two-stage <code>finalize_workflow(...)</code> &rarr; audit report &rarr; PR &amp; squash-merge.</p>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Flow 3: Plan Revision -->
+            <div class="flow-panel" id="flow-rev">
+              <div class="flow-desc"><span class="mode-pill fwd">FORWARD</span> <strong>Propagate a plan change</strong> &mdash; the server detects which steps are affected and re-runs only what&rsquo;s needed.</div>
+              <ol class="timeline">
+                <li class="tl-item">
+                  <span class="tl-dot"></span>
+                  <span class="tl-phase setup">Setup</span>
+                  <div class="tl-title">Resume or Start a Run</div>
+                  <p class="tl-detail">If a workflow is in progress: <code>resume_workflow(...)</code>. Otherwise: <code>kickstart_run(...)</code> on the existing repo.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot gold"></span>
+                  <span class="tl-phase user">User Edit</span>
+                  <div class="tl-title">You Modify a Planning Artifact</div>
+                  <p class="tl-detail">Change a requirements doc, IO spec, or any planning file &mdash; then call <code>get_plan_step(step=N)</code>.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot blue"></span>
+                  <span class="tl-phase plan">Detect</span>
+                  <div class="tl-title">Server Detects Changes</div>
+                  <p class="tl-detail">Checks the working tree, maps changed files to originating steps via <code>.lex-workflow/manifest.json</code>, and returns <code>user_changes_detected</code>.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot gold"></span>
+                  <span class="tl-phase build">Re-Run</span>
+                  <div class="tl-title">Re-Execute Affected Steps</div>
+                  <p class="tl-detail">Re-runs from the <strong>earliest affected step</strong> through the target. If new <code>.csv</code>/<code>.xlsx</code> files were added, restarts from <strong>step 2</strong>. Step 11 uses the refactor agent.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot green"></span>
+                  <span class="tl-phase harden">Continue</span>
+                  <div class="tl-title">Complete Remaining Steps</div>
+                  <p class="tl-detail">After catching up, continues through the remaining forward steps (hardening, docs, sync).</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot green"></span>
+                  <span class="tl-phase finish">Finish</span>
+                  <div class="tl-title">Audit &amp; Merge</div>
+                  <p class="tl-detail">Standard audit, PR, and auto-merge flow.</p>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Flow 4: Documentation -->
+            <div class="flow-panel" id="flow-docs">
+              <div class="flow-desc"><span class="mode-pill bwd">BACKWARD</span> <strong>Generate comprehensive documentation</strong> for an existing project &mdash; no code changes, purely docs.</div>
+              <ol class="timeline">
+                <li class="tl-item">
+                  <span class="tl-dot"></span>
+                  <span class="tl-phase setup">Setup</span>
+                  <div class="tl-title">Reverse Kickstart</div>
+                  <p class="tl-detail"><code>reverse_kickstart(project_path=... or github_url=...)</code>. Resumes automatically if <code>.lex-reverse/manifest.json</code> exists.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot blue"></span>
+                  <span class="tl-phase plan">Scan</span>
+                  <div class="tl-title">Project Scan (R-00 &ndash; R-02)</div>
+                  <p class="tl-detail"><code>scan_project()</code> writes scan artifacts under <code>plans/business_docs/</code>.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot purple"></span>
+                  <span class="tl-phase docs">Wiki</span>
+                  <div class="tl-title">Generate Technical Wiki</div>
+                  <p class="tl-detail"><code>generate_wiki()</code> creates <code>technical-map/</code> and per-module <code>CONTEXT.md</code> files.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot purple"></span>
+                  <span class="tl-phase docs">Enrich</span>
+                  <div class="tl-title">Steps 3 &ndash; 6: Enrich Wiki</div>
+                  <p class="tl-detail">AI reviews and enriches the technical documentation.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot gold"></span>
+                  <span class="tl-phase user">User Input</span>
+                  <div class="tl-title">Questionnaire</div>
+                  <p class="tl-detail"><code>generate_questionnaire()</code> creates <code>discovery-questionnaire.md</code>. <strong>Workflow pauses</strong> &mdash; you validate <code>[LLM-FILLED]</code> answers and fill <code>[USER-REQUIRED]</code> placeholders. Then <code>submit_questionnaire(...)</code>.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot purple"></span>
+                  <span class="tl-phase docs">Generate</span>
+                  <div class="tl-title">Steps 8 &ndash; 16: Business Docs</div>
+                  <p class="tl-detail">Generates the full business-facing documentation set.</p>
+                </li>
+                <li class="tl-item">
+                  <span class="tl-dot green"></span>
+                  <span class="tl-phase finish">Finish</span>
+                  <div class="tl-title">Gap Report &amp; Complete</div>
+                  <p class="tl-detail"><code>finalize_reverse()</code> &rarr; step 17 writes the final gap report &rarr; <code>notify_reverse_complete(step=17)</code>. <em>No PR is created &mdash; this is a documentation workflow.</em></p>
+                </li>
+              </ol>
+            </div>
+          </div>
+        </details>
+
       </section>
     </main>
 
     <script>
+      /* ---- Flow tab switcher ---- */
+      function flowSwitch(id) {{
+        document.querySelectorAll(".flow-tab").forEach(function(t) {{
+          t.classList.toggle("active", t.getAttribute("data-flow") === id);
+        }});
+        document.querySelectorAll(".flow-panel").forEach(function(p) {{
+          p.classList.toggle("active", p.id === "flow-" + id);
+        }});
+      }}
+
       function copyPrompt(btn, elId) {{
         var el = document.getElementById(elId || "recommended-prompt");
         var text = el.textContent;
@@ -496,6 +1093,251 @@ def _build_faq_html() -> str:
           setTimeout(function() {{ btn.textContent = "Copy"; btn.classList.remove("copied"); }}, 2000);
         }}
       }}
+
+      /* ---- Prompt Builder Logic ---- */
+      var pbScenarios = {{
+        feature: {{
+          mode: "FORWARD",
+          visibleFields: ["project", "feature", "scope", "constraints", "done"],
+          projectRequired: false,
+          desc: "<strong>Add a feature</strong> to an existing Lex project. The MCP server runs in <em>FORWARD</em> mode &mdash; it plans the new capability, implements it, and validates it within your existing codebase.",
+          labels: {{
+            project: "Project (optional)",
+            scope: "Files & Modules to Touch",
+            constraints: "Constraints",
+            done: "Done When\u2026"
+          }},
+          hints: {{
+            project: "Optional \u2014 the AI auto-detects the project from the .git folder in your workspace",
+            scope: "Which files, modules, or areas should the AI focus on?",
+            constraints: "e.g. must be backward-compatible, no new pip dependencies",
+            done: "How will you know this feature is complete?"
+          }},
+          placeholders: {{
+            project: "auto-detected from .git \u2014 or type a name / URL if you prefer",
+            scope: "models.py, views.py, calculations/",
+            constraints: "must be backward-compatible, no new dependencies",
+            done: "the feature works end-to-end with tests passing"
+          }}
+        }},
+        revision: {{
+          mode: "FORWARD",
+          visibleFields: ["project", "mode", "revision", "scope", "constraints", "done"],
+          projectRequired: false,
+          desc: "<strong>Propagate a plan change.</strong> You revised a planning step &mdash; this tells the AI to <em>re-evaluate everything downstream</em> and update code, docs, and artifacts to match your new plan.",
+          labels: {{
+            project: "Project (optional)",
+            scope: "Stable Areas (don\u2019t touch unless required)",
+            constraints: "Risks or Priorities",
+            done: "Done When\u2026"
+          }},
+          hints: {{
+            project: "Optional \u2014 the AI auto-detects the project from the .git folder in your workspace",
+            scope: "Areas that should NOT change unless the revision explicitly requires it",
+            constraints: "Any risks, edge cases, or priorities the AI should watch for",
+            done: "How will you know the reconfiguration is complete?"
+          }},
+          placeholders: {{
+            project: "auto-detected from .git \u2014 or type a name / URL if you prefer",
+            scope: "authentication module, database schema",
+            constraints: "preserve existing API contracts",
+            done: "downstream plan, code, docs, and artifacts all reflect the revision"
+          }}
+        }},
+        forward: {{
+          mode: "FORWARD",
+          visibleFields: ["project", "overview", "scope", "constraints", "done"],
+          projectRequired: true,
+          desc: "<strong>Create a brand-new Lex project</strong> from scratch. The MCP server runs in <em>FORWARD</em> mode &mdash; it walks through the full planning-to-implementation workflow, generating everything from models to UI.",
+          labels: {{
+            project: "Project Name",
+            scope: "Core Features",
+            constraints: "Environment & Constraints",
+            done: "Done When\u2026"
+          }},
+          hints: {{
+            project: "Give your new project a name (kebab-case works best)",
+            scope: "The main features or modules the app needs",
+            constraints: "Python version, database, deployment target, etc.",
+            done: "What does \u201csuccess\u201d look like?"
+          }},
+          placeholders: {{
+            project: "fleet-tracker",
+            scope: "vehicle tracking, maintenance schedules, driver management",
+            constraints: "Python 3.11+, PostgreSQL, deploy to Docker",
+            done: "a fully scaffolded, running Lex application with all core features"
+          }}
+        }},
+        docs: {{
+          mode: "BACKWARD",
+          visibleFields: ["project", "audience", "scope", "constraints", "done"],
+          projectRequired: false,
+          desc: "<strong>Auto-generate documentation</strong> for an existing Lex project. The MCP server runs in <em>BACKWARD</em> mode &mdash; it reverse-engineers your codebase and produces structured docs, not a quick manual scan.",
+          labels: {{
+            project: "Project (optional)",
+            scope: "Areas to Document",
+            constraints: "Known Gaps or Risks",
+            done: "Done When\u2026"
+          }},
+          hints: {{
+            project: "Optional \u2014 the AI auto-detects the project from the .git folder in your workspace",
+            scope: "Which modules, endpoints, or workflows need documentation?",
+            constraints: "Any known gaps, outdated docs, or areas of concern",
+            done: "What must the documentation clearly explain?"
+          }},
+          placeholders: {{
+            project: "auto-detected from .git \u2014 or type a name / URL if you prefer",
+            scope: "API endpoints, data models, calculation logic",
+            constraints: "existing README is outdated, no docs for the reporting module",
+            done: "every public module, endpoint, and workflow has clear, accurate documentation"
+          }}
+        }}
+      }};
+
+      var pbNonGoals = {{
+        feature: "Do not bypass the MCP by free-exploring Lex docs or by starting a new project.",
+        revision: "Do not ignore my revised planning document, do use it to guide your actions, and do not improvise a separate plan outside the Lex MCP flow, do follow the path laid out by the Lex MCP completely.",
+        forward: "Do not create a generic Django, FastAPI, React, or other non-Lex project unless the Lex MCP workflow explicitly calls for it.",
+        docs: "Do not write ad hoc docs from a quick manual scan; use the MCP-guided reverse flow."
+      }};
+
+      function pbBuildPrompt(sc, v) {{
+        var cfg = pbScenarios[sc];
+        var m = cfg.mode;
+        if (sc === "revision") {{
+          var modeEl = document.getElementById("pb-mode");
+          m = modeEl ? modeEl.value : cfg.mode;
+        }}
+        var ng = pbNonGoals[sc];
+        var parts = [];
+        var proj = v.project;
+
+        if (sc === "feature") {{
+          if (proj) {{
+            parts.push("I need to add a feature to the existing Lex AI project " + proj + ".");
+          }} else {{
+            parts.push("I need to add a feature to the existing Lex AI project in the current workspace.");
+          }}
+          if (v.feature) parts.push("The feature: " + v.feature + ".");
+          parts.push("Mandatory: use the Lex MCP server as the controlling workflow and switch it to " + m + " mode before doing anything else. " + ng + " Work from the existing project structure and follow the MCP-guided process for modifying an existing Lex app.");
+          if (v.scope) parts.push("Focus on these areas first: " + v.scope + ".");
+          if (v.constraints) parts.push("Respect these constraints: " + v.constraints + ".");
+          if (v.done) parts.push("The feature is complete when: " + v.done + ".");
+        }} else if (sc === "revision") {{
+          if (proj) {{
+            parts.push("I updated a planning document in my Lex project " + proj + ".");
+          }} else {{
+            parts.push("I updated a planning document in the Lex project in the current workspace.");
+          }}
+          parts.push("Mandatory: use the Lex MCP server as the controlling workflow and switch it to " + m + " mode before doing anything else.");
+          if (v.revision) parts.push("Here is what changed: " + v.revision + ".");
+          parts.push("Treat my revised planning document as the source of truth. " + ng + " Re-evaluate the downstream plan, identify which later steps are now affected, and update the code, docs, and supporting artifacts accordingly.");
+          if (v.scope) parts.push("Preserve these stable areas unless the revision requires changes: " + v.scope + ".");
+          if (v.constraints) parts.push("Pay special attention to: " + v.constraints + ".");
+          if (v.done) parts.push("The reconfiguration is complete when: " + v.done + ".");
+        }} else if (sc === "forward") {{
+          parts.push("I want to start a new Lex AI project called " + (proj || "my-new-project") + ".");
+          parts.push("Mandatory: use the Lex MCP server in " + m + " mode from the very beginning. " + ng);
+          if (v.overview) parts.push("Project idea and requirements: " + v.overview + ".");
+          if (v.scope) parts.push("Core features: " + v.scope + ".");
+          if (v.constraints) parts.push("Constraints: " + v.constraints + ".");
+          if (v.done) parts.push("The workflow should be considered successful when: " + v.done + ".");
+        }} else if (sc === "docs") {{
+          if (proj) {{
+            parts.push("I want to document the existing Lex project " + proj + ".");
+          }} else {{
+            parts.push("I want to document the existing Lex project in the current workspace.");
+          }}
+          parts.push("Mandatory: use the Lex MCP server in " + m + " mode and follow the reverse-documentation workflow. " + ng);
+          if (v.audience) parts.push("The main documentation audience is: " + v.audience + ".");
+          if (v.scope) parts.push("I especially need coverage for: " + v.scope + ".");
+          if (v.constraints) parts.push("Note these known gaps or risks: " + v.constraints + ".");
+          if (v.done) parts.push("The documentation is complete when: " + v.done + ".");
+        }}
+
+        return parts.join(" ");
+      }}
+
+      function pbUserVal(id) {{
+        var el = document.getElementById(id);
+        if (!el) return "";
+        return el.value.trim();
+      }}
+
+      var pbCurrentScenario = "feature";
+
+      function pbSwitchScenario(sc) {{
+        pbCurrentScenario = sc;
+        var cfg = pbScenarios[sc];
+
+        /* tabs */
+        document.querySelectorAll(".pb-tab").forEach(function(tab) {{
+          tab.classList.toggle("active", tab.getAttribute("data-scenario") === sc);
+        }});
+
+        /* scenario description */
+        document.getElementById("pb-scenario-desc").innerHTML = cfg.desc;
+
+        /* show/hide fields */
+        document.querySelectorAll(".pb-field").forEach(function(f) {{
+          f.classList.remove("visible");
+        }});
+        cfg.visibleFields.forEach(function(f) {{
+          var fieldDiv = document.getElementById("pb-field-" + f);
+          if (fieldDiv) fieldDiv.classList.add("visible");
+        }});
+
+        /* update labels, hints, placeholders for shared fields */
+        ["project", "scope", "constraints", "done"].forEach(function(f) {{
+          var labelEl = document.getElementById("pb-label-" + f);
+          if (labelEl && cfg.labels[f]) labelEl.textContent = cfg.labels[f];
+          var hintEl = document.getElementById("pb-hint-" + f);
+          if (hintEl && cfg.hints[f]) hintEl.textContent = cfg.hints[f];
+          var inputEl = document.getElementById("pb-" + f);
+          if (inputEl && cfg.placeholders[f]) inputEl.placeholder = cfg.placeholders[f];
+        }});
+
+        /* clear all input values */
+        ["project","feature","mode","revision","overview","scope","audience","constraints","done"].forEach(function(f) {{
+          var el = document.getElementById("pb-" + f);
+          if (el && el.tagName !== "SELECT") el.value = "";
+        }});
+
+        /* mode selector */
+        var modeEl = document.getElementById("pb-mode");
+        modeEl.value = cfg.mode;
+
+        pbUpdatePreview();
+      }}
+
+      function pbUpdatePreview() {{
+        var sc = pbCurrentScenario;
+        var cfg = pbScenarios[sc];
+        var v = {{
+          project: pbUserVal("pb-project"),
+          feature: pbUserVal("pb-feature"),
+          revision: pbUserVal("pb-revision"),
+          overview: pbUserVal("pb-overview"),
+          audience: pbUserVal("pb-audience"),
+          scope: pbUserVal("pb-scope"),
+          constraints: pbUserVal("pb-constraints"),
+          done: pbUserVal("pb-done")
+        }};
+        var prompt = pbBuildPrompt(sc, v);
+        document.getElementById("pb-output").textContent = prompt;
+      }}
+
+      document.addEventListener("DOMContentLoaded", function() {{
+        pbSwitchScenario("feature");
+        var ids = ["pb-project","pb-feature","pb-mode","pb-revision","pb-overview","pb-scope","pb-audience","pb-constraints","pb-done"];
+        ids.forEach(function(id) {{
+          var el = document.getElementById(id);
+          if (el) {{
+            el.addEventListener("input", pbUpdatePreview);
+            el.addEventListener("change", pbUpdatePreview);
+          }}
+        }});
+      }});
     </script>
   </body>
 </html>
