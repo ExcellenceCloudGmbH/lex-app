@@ -1549,7 +1549,7 @@ def apply_ai_update_0_2_2(
     remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
     if not remote_mcp_api_key:
         raise SetupWithAIError(
-            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local."
+            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local. Please run lex setup-with-ai to set your .env file."
         )
 
     install_lex_mcp_local(python_executable, remote_mcp_api_key, runner=runner, upgrade=True)
@@ -1655,7 +1655,7 @@ def apply_ai_update_1_0_0(
     remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
     if not remote_mcp_api_key:
         raise SetupWithAIError(
-            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local."
+            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local. Please run lex setup-with-ai to set your .env file."
         )
 
     install_lex_mcp_local(
@@ -1737,7 +1737,7 @@ def apply_ai_update_1_0_1(
     remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
     if not remote_mcp_api_key:
         raise SetupWithAIError(
-            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local."
+            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local. Please run lex setup-with-ai to set your .env file."
         )
 
     install_lex_mcp_local(
