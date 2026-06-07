@@ -312,3 +312,16 @@ def validate_celery_redis_config():
 # Validate configuration on import (optional - can be disabled in production)
 if os.getenv('CELERY_VALIDATE_CONFIG', 'True').lower() == 'true':
     validate_celery_redis_config()
+
+
+# Worker-recovery: connect the heartbeat handlers and register the sweep task.
+# Gated internally by CELERY_ACTIVE + LEX_TASK_RECOVERY_ENABLED, so this is a
+# no-op for local/sync/CI runs. Importing the supervisor registers the
+# `sweep_dead_workers` task referenced by the beat schedule in settings.
+try:
+    from lex.lex_app.celery_recovery import enable as _enable_recovery
+    from lex.lex_app.celery_recovery import supervisor as _recovery_supervisor  # noqa: F401
+
+    _enable_recovery(app)
+except Exception:  # pragma: no cover - never block worker boot on recovery wiring
+    logger.exception("Failed to wire Celery worker-recovery; continuing without it")
