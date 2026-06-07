@@ -24,6 +24,7 @@ Homepage = "https://github.com/ExcellenceCloudGmbH/lex-app"
 [project.scripts]
 lex = "lex.__main__:main"
 lex-generate-configs = "generate_pycharm_configs:generate_pycharm_configs"
+lex-recovery-supervisor = "lex.lex_app.celery_recovery.entrypoint:main"
 
 [tool.setuptools]
 py-modules = ["generate_pycharm_configs"]

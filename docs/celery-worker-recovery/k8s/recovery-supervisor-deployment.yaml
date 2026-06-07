@@ -1,0 +1,159 @@
+# =============================================================================
+# Celery worker-recovery supervisor — reference Kubernetes Deployment
+# =============================================================================
+#
+# WHAT THIS IS
+#   A single, always-on companion process that runs the worker-recovery sweep
+#   loop (lex/lex_app/celery_recovery/supervisor.py::run_forever). Every scan
+#   interval it looks for tasks whose worker died (expired Redis heartbeat) and
+#   either re-dispatches them (within the retry budget) or finalizes them as
+#   ABORTED. The re-dispatch puts a message on the queue KEDA watches, which is
+#   what brings a fresh worker up to actually run the recovered task.
+#
+# WHY IT'S A STANDALONE SINGLETON (and can't live in the backend or workers)
+#   In the cluster the Celery workers run as a KEDA ScaledJob and the backend
+#   runs as a KEDA ScaledObject scaled 0..1 — BOTH scale to zero when idle. The
+#   recovery loop must be always-on (a dead worker can only be detected by a
+#   process that is still alive), so it cannot reliably live in either of those.
+#   This Deployment hosts it as its own always-on pod.
+#
+#   replicas: 1 because the supervisor is a singleton. The recovery code does
+#   hold a per-task Redis lock (try_acquire_recovery_lock), so running >1 is
+#   SAFE but unnecessary — keep it at 1.
+#
+# CRITICAL: REDIS DB INDEX MUST MATCH THE WORKERS
+#   Heartbeats, the task registry, and the broker all live in Redis. This pod
+#   MUST point at the SAME Redis instance AND the same DB index the workers use
+#   (the broker URL in settings.py uses redis .../1, the results/heartbeat
+#   client uses .../2 — see CELERY_BROKER_URL and the recovery Redis client).
+#   If this pod talks to a different Redis or DB index it will see an empty
+#   registry and silently recover nothing. Reuse the worker's Redis env exactly.
+#
+# WHERE THIS GETS USED
+#   This is a REFERENCE TEMPLATE. It is adapted into the LEX_TERRAFORM_MODULES
+#   lex-instance Helm chart (modules/lex-instance/chart/templates/). The
+#   envFrom configMap/secret names below are placeholders — wire them to the
+#   same ConfigMap/Secret the backend and worker pods already consume so all
+#   three share identical Redis + Postgres connection settings.
+#
+# HEALTH / RESTART
+#   No HTTP healthcheck is needed: this is a headless polling loop with no
+#   server. If the process crashes the Deployment restarts the pod (and the
+#   management command exits non-zero on an unexpected failure precisely so K8s
+#   restarts it). On normal pod termination K8s sends SIGTERM; the command
+#   installs a SIGTERM/SIGINT handler that calls supervisor.stop_forever() so
+#   the loop finishes its current pass and exits cleanly within the grace
+#   period below.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recovery-supervisor
+  labels:
+    app.kubernetes.io/name: recovery-supervisor
+    app.kubernetes.io/component: celery-worker-recovery
+    app.kubernetes.io/part-of: lex-instance
+spec:
+  # Singleton: exactly one supervisor process cluster-wide.
+  replicas: 1
+  # Recreate (not RollingUpdate): never run two supervisors at once during a
+  # rollout. The new pod only starts after the old one is fully terminated.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: recovery-supervisor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: recovery-supervisor
+        app.kubernetes.io/component: celery-worker-recovery
+        app.kubernetes.io/part-of: lex-instance
+    spec:
+      # Give the SIGTERM handler time to finish the in-flight sweep before the
+      # kubelet escalates to SIGKILL.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: recovery-supervisor
+          # Same image the backend / workers run (it ships the lex-app package
+          # and therefore the lex-recovery-supervisor console script).
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          # Console-script form (preferred — added to [project.scripts] in
+          # pyproject.toml as lex-recovery-supervisor).
+          command: ["lex-recovery-supervisor"]
+          # Alternative if you prefer the lex CLI / Django management path:
+          #   command: ["python", "-m", "lex", "run_recovery_supervisor"]
+          # Both run the same `run_recovery_supervisor` management command.
+          # Optional args: ["--interval", "10"]  (defaults to the
+          # LEX_TASK_SUPERVISOR_SCAN_INTERVAL setting).
+          envFrom:
+            # Reuse the SAME ConfigMap + Secret the backend and worker pods
+            # consume so Redis + Postgres connection settings are identical.
+            # Replace these names with the chart's actual resource names.
+            - configMapRef:
+                name: lex-instance-config       # PLACEHOLDER — shared app config
+            - secretRef:
+                name: lex-instance-secrets       # PLACEHOLDER — shared app secrets
+          env:
+            # ----- Recovery must be active for the supervisor to do work -----
+            - name: CELERY_ACTIVE
+              value: "TRUE"
+            - name: LEX_TASK_RECOVERY_ENABLED
+              value: "true"
+            # ----- Deployment target (non-local enables deployed behavior) ---
+            - name: DEPLOYMENT_TARGET
+              value: "{{ .Values.deploymentTarget | default \"kubernetes\" }}"
+            - name: DEPLOYMENT_ENVIRONMENT
+              value: "{{ .Values.deploymentEnvironment }}"
+            # ----- Cluster / queue identity (must match the workers) ---------
+            # CELERY_TASK_DEFAULT_QUEUE and the Redis/Celery key prefix both
+            # derive from INSTANCE_RESOURCE_IDENTIFIER in settings.py — it MUST
+            # match the workers or recovery re-dispatches onto the wrong queue.
+            - name: INSTANCE_RESOURCE_IDENTIFIER
+              value: "{{ .Values.instanceResourceIdentifier }}"
+            # ----- Redis (broker + heartbeat/registry) — MUST match workers --
+            # settings.py builds the broker/result URLs from these. The DB
+            # index is baked into settings (.../1 broker, .../2 results); just
+            # ensure HOST/credentials point at the workers' Redis.
+            - name: REDIS_HOST
+              value: "{{ .Values.redis.host }}"            # PLACEHOLDER
+            - name: REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: lex-instance-secrets               # PLACEHOLDER
+                  key: REDIS_USERNAME
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lex-instance-secrets               # PLACEHOLDER
+                  key: REDIS_PASSWORD
+            # ----- Postgres (finalizing stuck calculation rows) --------------
+            - name: DATABASE_DEPLOYMENT_TARGET
+              value: "default"
+            - name: DATABASE_DOMAIN
+              value: "{{ .Values.database.domain }}"        # PLACEHOLDER
+            - name: DATABASE_NAME
+              value: "{{ .Values.database.name }}"          # PLACEHOLDER
+            - name: POSTGRES_USERNAME
+              value: "{{ .Values.database.username | default \"django\" }}"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lex-instance-secrets                # PLACEHOLDER
+                  key: POSTGRES_PASSWORD
+            # ----- Optional recovery tuning (defaults shown) -----------------
+            # - name: LEX_TASK_SUPERVISOR_SCAN_INTERVAL
+            #   value: "10"
+            # - name: LEX_TASK_MAX_RETRIES
+            #   value: "4"
+            # - name: LEX_TASK_REQUEUE_GRACE_SECONDS
+            #   value: "60"
+          resources:
+            # Light polling loop — modest footprint.
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"

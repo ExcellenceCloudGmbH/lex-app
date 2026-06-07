@@ -1,0 +1,229 @@
+"""
+Unit tests for the Celery worker-recovery subsystem
+(``lex/lex_app/celery_recovery/``).
+
+What is tested:
+  * ``registry`` encodes/decodes the re-dispatch payload losslessly.
+  * ``supervisor.scan_and_recover`` leaves live tasks alone, requeues a dead
+    task under budget (same task_id, incremented retry count), and gives up
+    once the bounded budget is exhausted (FAILURE result + row abort).
+  * A dead task whose payload has vanished is dropped rather than requeued.
+
+How it runs:
+  Pure logic — Redis and Celery are never contacted. ``registry`` access and
+  the row-abort side effect are patched, and a fake Celery app records
+  ``send_task`` / ``backend.mark_as_failure`` calls.
+"""
+
+import types
+from unittest import mock
+
+from django.test import SimpleTestCase
+
+from lex.lex_app.celery_recovery import heartbeat, registry, supervisor
+from lex.lex_app.celery_recovery.exceptions import MaxRequeueExceeded
+
+
+def _fake_app():
+    backend = types.SimpleNamespace(mark_as_failure=mock.Mock())
+    return types.SimpleNamespace(send_task=mock.Mock(), backend=backend)
+
+
+class RegistryPayloadCodecTests(SimpleTestCase):
+    def test_encode_decode_round_trip(self):
+        payload = {
+            "name": "calc_and_save",
+            "args": ([1, 2, 3],),
+            "kwargs": {"context": {"calculation_id": "c1"}},
+            "queue": "inst-q",
+            "retries": 2,
+        }
+        restored = registry._decode(registry._encode(payload))
+        self.assertEqual(restored, payload)
+
+
+class ScanAndRecoverTests(SimpleTestCase):
+    def setUp(self):
+        # Default settings stubs so the supervisor's helpers are deterministic.
+        # The recovery lock and cancellation gate are stubbed to their
+        # "act normally" values (lock acquired, not cancelled) so the core
+        # requeue/give-up behaviour is exercised; tests that target those two
+        # gates override these stubs explicitly.
+        self._patches = [
+            mock.patch.object(supervisor, "_max_retries", return_value=4),
+            mock.patch.object(supervisor, "_requeue_grace_seconds", return_value=60),
+            mock.patch.object(supervisor, "_default_queue", return_value="default-q"),
+            mock.patch.object(registry, "try_acquire_recovery_lock", return_value=True),
+            mock.patch.object(supervisor, "_is_cancelled", return_value=False),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+
+    def test_live_task_is_left_alone(self):
+        app = _fake_app()
+        with mock.patch.object(registry, "list_tracked", return_value=["t-alive"]), \
+             mock.patch.object(registry, "is_alive", return_value=True), \
+             mock.patch.object(registry, "get_payload") as get_payload:
+            stats = supervisor.scan_and_recover(app)
+        self.assertEqual(stats["alive"], 1)
+        self.assertEqual(stats["requeued"], 0)
+        app.send_task.assert_not_called()
+        get_payload.assert_not_called()
+
+    def test_dead_task_under_budget_is_requeued_same_id(self):
+        app = _fake_app()
+        payload = {
+            "name": "calc_and_save",
+            "args": ((),),
+            "kwargs": {},
+            "queue": "inst-q",
+            "retries": 1,
+        }
+        with mock.patch.object(registry, "list_tracked", return_value=["t-dead"]), \
+             mock.patch.object(registry, "is_alive", return_value=False), \
+             mock.patch.object(registry, "get_payload", return_value=payload), \
+             mock.patch.object(registry, "grant_grace") as grant_grace, \
+             mock.patch.object(registry, "persist_payload") as persist_payload:
+            stats = supervisor.scan_and_recover(app)
+
+        self.assertEqual(stats["requeued"], 1)
+        # Same task_id reused so the parent's AsyncResult still resolves.
+        _, kwargs = app.send_task.call_args
+        self.assertEqual(kwargs["task_id"], "t-dead")
+        self.assertEqual(kwargs["queue"], "inst-q")
+        # Grace granted before dispatch; incremented retries persisted after.
+        grant_grace.assert_called_once()
+        saved_payload = persist_payload.call_args[0][1]
+        self.assertEqual(saved_payload["retries"], 2)
+
+    def test_dead_task_without_payload_is_dropped(self):
+        app = _fake_app()
+        with mock.patch.object(registry, "list_tracked", return_value=["t-orphan"]), \
+             mock.patch.object(registry, "is_alive", return_value=False), \
+             mock.patch.object(registry, "get_payload", return_value=None), \
+             mock.patch.object(registry, "deregister") as deregister:
+            stats = supervisor.scan_and_recover(app)
+        self.assertEqual(stats["orphaned"], 1)
+        deregister.assert_called_once_with("t-orphan")
+        app.send_task.assert_not_called()
+
+    def test_exhausted_budget_marks_failure_and_aborts(self):
+        app = _fake_app()
+        payload = {
+            "name": "calc_and_save",
+            "args": ((),),
+            "kwargs": {},
+            "queue": "inst-q",
+            "retries": 4,  # == max, so the next detection gives up
+        }
+        with mock.patch.object(registry, "list_tracked", return_value=["t-dead"]), \
+             mock.patch.object(registry, "is_alive", return_value=False), \
+             mock.patch.object(registry, "get_payload", return_value=payload), \
+             mock.patch.object(registry, "deregister") as deregister, \
+             mock.patch.object(supervisor, "_abort_calculation_rows") as abort_rows:
+            stats = supervisor.scan_and_recover(app)
+
+        self.assertEqual(stats["gave_up"], 1)
+        app.send_task.assert_not_called()
+        deregister.assert_called_once_with("t-dead")
+        abort_rows.assert_called_once()
+        exc = app.backend.mark_as_failure.call_args[0][1]
+        self.assertIsInstance(exc, MaxRequeueExceeded)
+
+    def test_cancelled_calculation_is_finalized_not_requeued(self):
+        """Fix A: a dead task whose calculation was cancelled is finalized
+        CANCELLED (row finalize + deregister), never requeued."""
+        app = _fake_app()
+        payload = {
+            "name": "calc_and_save",
+            "args": ((),),
+            "kwargs": {"context": {"calculation_id": "calc-99"}},
+            "queue": "inst-q",
+            "retries": 1,  # under budget — would normally requeue
+        }
+        with mock.patch.object(registry, "list_tracked", return_value=["t-dead"]), \
+             mock.patch.object(registry, "is_alive", return_value=False), \
+             mock.patch.object(registry, "get_payload", return_value=payload), \
+             mock.patch.object(supervisor, "_is_cancelled", return_value=True), \
+             mock.patch.object(registry, "deregister") as deregister, \
+             mock.patch.object(supervisor, "_cancel_calculation_rows") as cancel_rows:
+            stats = supervisor.scan_and_recover(app)
+
+        self.assertEqual(stats["cancelled"], 1)
+        self.assertEqual(stats["requeued"], 0)
+        app.send_task.assert_not_called()
+        cancel_rows.assert_called_once()
+        deregister.assert_called_once_with("t-dead")
+
+    def test_calculation_id_of_reads_nested_context(self):
+        """Fix A helper: calculation_id is read from kwargs.context."""
+        payload = {"kwargs": {"context": {"calculation_id": "calc-7"}}}
+        self.assertEqual(supervisor._calculation_id_of(payload), "calc-7")
+        # Missing layers degrade to None rather than raising.
+        self.assertIsNone(supervisor._calculation_id_of({"kwargs": {}}))
+        self.assertIsNone(supervisor._calculation_id_of({}))
+
+    def test_dead_task_skipped_when_lock_not_acquired(self):
+        """Fix B: when another supervisor holds the recovery lock, this pass
+        skips the task entirely — no requeue, counted under skipped_locked."""
+        app = _fake_app()
+        payload = {
+            "name": "calc_and_save",
+            "args": ((),),
+            "kwargs": {},
+            "queue": "inst-q",
+            "retries": 1,
+        }
+        with mock.patch.object(registry, "list_tracked", return_value=["t-dead"]), \
+             mock.patch.object(registry, "is_alive", return_value=False), \
+             mock.patch.object(registry, "get_payload", return_value=payload), \
+             mock.patch.object(registry, "try_acquire_recovery_lock", return_value=False):
+            stats = supervisor.scan_and_recover(app)
+
+        self.assertEqual(stats["skipped_locked"], 1)
+        self.assertEqual(stats["requeued"], 0)
+        app.send_task.assert_not_called()
+
+    def test_requeue_does_not_persist_retries_when_dispatch_fails(self):
+        """Fix D: if send_task raises (broker down), the retry budget is NOT
+        consumed — grant_grace ran but persist_payload did not."""
+        app = _fake_app()
+        app.send_task.side_effect = RuntimeError("broker down")
+        payload = {
+            "name": "calc_and_save",
+            "args": ((),),
+            "kwargs": {},
+            "queue": "inst-q",
+            "retries": 1,
+        }
+        with mock.patch.object(registry, "grant_grace") as grant_grace, \
+             mock.patch.object(registry, "persist_payload") as persist_payload:
+            with self.assertRaises(RuntimeError):
+                supervisor._requeue(app, "t-dead", payload)
+
+        grant_grace.assert_called_once()
+        # Budget not burned: incremented payload never persisted.
+        persist_payload.assert_not_called()
+        # Original payload retries unchanged (we built a copy internally).
+        self.assertEqual(payload["retries"], 1)
+
+
+class TaskRevokedHandlerTests(SimpleTestCase):
+    def test_on_task_revoked_deregisters_request_id(self):
+        """Fix E: a revoked task is deregistered by its request id so the
+        supervisor can never later requeue it."""
+        request = types.SimpleNamespace(id="t-revoked")
+        with mock.patch.object(registry, "deregister") as deregister:
+            heartbeat.on_task_revoked(request=request)
+        deregister.assert_called_once_with("t-revoked")
+
+    def test_on_task_revoked_without_id_is_noop(self):
+        """No request id (or no request) → best-effort no-op, never raises."""
+        with mock.patch.object(registry, "deregister") as deregister:
+            heartbeat.on_task_revoked(request=None)
+            heartbeat.on_task_revoked(request=types.SimpleNamespace(id=None))
+        deregister.assert_not_called()
