@@ -1,9 +1,14 @@
 import copy
 import importlib
+import logging
 import os
 from typing import Dict, Iterable, List, Set
 
 from lex.process_admin.utils.model_structure import ModelStructure
+
+# Under the lex.* namespace, so output is gated by LEX_LOG_LEVEL (see settings.py):
+# these messages are benign at startup and only surface with LEX_LOG_LEVEL=DEBUG.
+logger = logging.getLogger(__name__)
 
 
 class ModelStructureBuilder:
@@ -139,9 +144,9 @@ class ModelStructureBuilder:
                     if attr == "model_structure":
                         self.model_structure_is_explicitly_defined = True
                 except Exception as e:
-                    print(f"Error calling {method_name}: {e}")
+                    logger.warning("Error calling %s: %s", method_name, e)
             else:
-                print(f"Warning: {method_name} not found in {full_module_name}")
+                logger.debug("%s not found in %s", method_name, full_module_name)
 
     def get_extracted_structures(self):
         return {

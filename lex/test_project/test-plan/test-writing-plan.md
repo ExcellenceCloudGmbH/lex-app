@@ -64,6 +64,26 @@
 | Coverage gain | n/a (release-gate drift test) |
 | Status | ✅ Complete (Session 70 — June 2) |
 
+### Batch 1s — Log-noise cleanup + lex-namespace debug control (EXC-1787) ✅
+
+> **Letter note (June 8):** letter **1r** was already taken on disk by an in-flight,
+> untracked batch (`test_1r_lex_view_embed_helper.py`, Streamlit `lex_view` embed
+> helper, scenarios up to 1.158) that is not yet documented in this plan. Per the
+> never-renumber rule, this batch took the next free letter **1s** and the next free
+> scenario ID after 1.158 → **1.159**.
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.159 – 1.168 |
+| Type | U |
+| Files covered | `lex/lex_app/settings.py` (urllib3 `InsecureRequestWarning` suppression gate `LEX_SUPPRESS_INSECURE_WARNING`; new `LEX_LOG_LEVEL` + `lex` logger entry; `CONSOLE_HANDLER_LEVEL` = `min(CONSOLE_LEVEL, LEX_LOG_LEVEL)` derivation; blanket `LEX_SUPPRESS_WARNINGS` → `warnings.filterwarnings("ignore")` gate) |
+| Test file | `lex/test_project/tests/init/test_1s_log_cleanup_and_lex_debug.py` |
+| Test classes | `TestCluster01s_InsecureWarningSuppression` (1.159 default-suppressed, 1.160 opt-out honoured, 1.161 opt-out case-insensitive), `TestCluster01s_LexNamespaceDebugLevel` (1.162 lex logger defaults INFO + propagate False, 1.163 `LEX_LOG_LEVEL=DEBUG` raises lex only while root stays INFO, 1.164 console handler drops to DEBUG for lex, 1.165 console handler stays INFO by default), `TestCluster01s_BlanketWarningSuppression` (1.166 default installs `filterwarnings("ignore")`, 1.167 opt-out skips it, 1.168 opt-out case-insensitive) |
+| Fixtures | none (reloads `lex.lex_app.settings` under patched `os.environ`; `sentry_sdk.init` mocked across reloads; env restored in cleanup) |
+| Tests landed | **10 pass / 0 fail in 0.26s** |
+| Coverage gain | negligible (settings is import-time; pins env-var-driven branches) |
+| Status | ✅ Complete (Session 75 — June 8) |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)

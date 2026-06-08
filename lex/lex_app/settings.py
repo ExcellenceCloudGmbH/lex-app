@@ -1,9 +1,12 @@
 from __future__ import absolute_import
 
+import logging
 import re
 import sys
 import warnings
 from pathlib import Path
+
+import urllib3
 
 from django.core.cache import CacheKeyWarning
 from google.oauth2 import service_account
@@ -64,6 +67,22 @@ if (
 
 
 warnings.simplefilter("ignore", CacheKeyWarning)
+
+# Suppress urllib3's InsecureRequestWarning. The Keycloak admin client may run
+# with TLS verification disabled (KEYCLOAK_VERIFY_SSL), which otherwise floods
+# local logs with one InsecureRequestWarning per request. Set
+# LEX_SUPPRESS_INSECURE_WARNING=False to restore the warning while debugging TLS.
+if os.getenv("LEX_SUPPRESS_INSECURE_WARNING", "True").lower() == "true":
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Quiet Python's warning system so local startup logs stay clean — e.g. Django's
+# "Accessing the database during app initialization is discouraged" RuntimeWarning
+# and any other library warnings raised through the `warnings` module. Settings is
+# imported before app initialisation, so the filter is installed in time to catch
+# warnings raised from AppConfig.ready(). Set LEX_SUPPRESS_WARNINGS=False to restore
+# Python's default warning behaviour while debugging.
+if os.getenv("LEX_SUPPRESS_WARNINGS", "True").lower() == "true":
+    warnings.filterwarnings("ignore")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = resolve_project_root(os.getenv("PROJECT_ROOT"), os.getcwd()).as_posix()
@@ -706,6 +725,20 @@ OAUTH2_LEVEL = "INFO" if IS_DEPLOYED else os.getenv("LOG_LEVEL", "INFO").upper()
 # from flooding the console with DEBUG messages during local development.
 ROOT_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
+# lex framework namespace level: controls debug output for lex.* loggers ONLY.
+# Set LEX_LOG_LEVEL=DEBUG to see the framework's logger.debug(...) output without
+# the third-party debug noise that LOG_LEVEL=DEBUG would pull in (root stays at
+# ROOT_LEVEL, so non-lex DEBUG records are dropped at their logger).
+LEX_LOG_LEVEL = os.getenv("LEX_LOG_LEVEL", "INFO").upper()
+
+# The console handler must be at least as verbose as the most verbose logger that
+# routes to it, otherwise it would drop lex.* DEBUG records before emitting them.
+# Lower numeric level = more verbose (DEBUG=10, INFO=20).
+CONSOLE_HANDLER_LEVEL = min(
+    logging.getLevelName(CONSOLE_LEVEL),
+    logging.getLevelName(LEX_LOG_LEVEL),
+)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -717,7 +750,7 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "default",
-            "level": CONSOLE_LEVEL,
+            "level": CONSOLE_HANDLER_LEVEL,
         },
         "ws": {
             "()": "lex.audit_logging.handlers.WebSocketHandler.WebSocketHandler",
@@ -726,6 +759,13 @@ LOGGING = {
         },
     },
     "loggers": {
+        # Framework namespace: LEX_LOG_LEVEL=DEBUG surfaces lex.* debug logs only.
+        # More specific child loggers (e.g. lex.calclog) keep their own config.
+        "lex": {
+            "handlers": ["console"],
+            "level": LEX_LOG_LEVEL,
+            "propagate": False,
+        },
         "lex.calclog": {
             "handlers": ["ws", "console"],
             "level": "DEBUG",
