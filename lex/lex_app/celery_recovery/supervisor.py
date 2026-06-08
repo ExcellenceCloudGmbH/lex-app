@@ -121,6 +121,31 @@ def _extract_calculation_models(args: Any) -> List[Any]:
     return [c for c in candidates if isinstance(c, CalculationModel)]
 
 
+def tracked_calculation_record_ids() -> set:
+    """``(_meta.label_lower, pk)`` for every calculation row a tracked recovery
+    task currently owns — whether its worker is alive or merely tracked.
+
+    The startup reset sweep (``process_admin.utils.model_registration``) consults
+    this to decide which stuck ``IN_PROGRESS`` rows it must NOT abort: a row owned
+    by a tracked task will either be finished by its still-running worker or
+    requeued/resumed by :func:`scan_and_recover`. Aborting it at startup would,
+    via the terminal-outcome guard, block that resume and lose recoverable state.
+
+    Ownership deliberately does not depend on a live heartbeat — an expired-but-
+    tracked task (its worker died) is exactly the case the supervisor resumes.
+    Best-effort: when recovery is disabled or Redis is unreadable,
+    ``registry.list_tracked()`` returns ``[]`` so the set is empty and the sweep
+    keeps its original blind-abort behavior.
+    """
+    owned = set()
+    for task_id in registry.list_tracked():
+        payload = registry.get_payload(task_id) or {}
+        for instance in _extract_calculation_models(payload.get("args")):
+            if instance.pk is not None:
+                owned.add((type(instance)._meta.label_lower, instance.pk))
+    return owned
+
+
 def _calculation_id_of(payload: Dict[str, Any]) -> Optional[str]:
     """Extract the calculation_id carried in the task's re-dispatch kwargs.
 
