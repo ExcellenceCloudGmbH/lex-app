@@ -8,7 +8,7 @@ for use in calculation logging operations.
 
 import logging
 
-from audit_logging.mixins.AuditLogMixin import _safe_get_content_type
+from lex.audit_logging.mixins.AuditLogMixin import _safe_get_content_type
 from lex.api.utils import operation_context
 from lex.audit_logging.utils.DataModels import ContextInfo, ContextResolutionError
 from lex.audit_logging.utils.ModelContext import _model_context

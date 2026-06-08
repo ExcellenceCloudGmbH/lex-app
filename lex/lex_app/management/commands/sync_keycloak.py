@@ -116,7 +116,7 @@ class Command(BaseCommand):
             return
 
         # ── 4. Initialize KeycloakSyncManager ────────────────────────────
-        from lex_app.management.commands.init import KeycloakSyncManager
+        from lex.lex_app.management.commands.init import KeycloakSyncManager
 
         try:
             sync_manager = KeycloakSyncManager()

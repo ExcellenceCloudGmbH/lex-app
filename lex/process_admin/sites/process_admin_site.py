@@ -1,4 +1,3 @@
-from api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_save
 from django.http import HttpResponse
@@ -21,6 +20,7 @@ from lex.api.views.model_info.Widgets import Widgets
 from lex.api.views.permissions.ModelPermissions import ModelPermissions
 from lex.api.views.process_flow.CreateOrUpdate import CreateOrUpdate
 from lex.api.views.project_info.ProjectInfo import ProjectInfo
+from lex.api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
 from lex.api.views.sharepoint.SharePointFileDownload import SharePointFileDownload
 from lex.api.views.sharepoint.SharePointPreview import SharePointPreview
 from lex.api.views.sharepoint.SharePointShareLink import SharePointShareLink

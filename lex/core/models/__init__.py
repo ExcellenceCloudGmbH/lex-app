@@ -4,4 +4,4 @@
 
 __all__ = ['LexModel', 'UserContext', 'PermissionResult', 'Process', 'CalculationModel', 'HTMLReport']
 
-from core.models.LexModel import UserContext, PermissionResult
+from lex.core.models.LexModel import UserContext, PermissionResult

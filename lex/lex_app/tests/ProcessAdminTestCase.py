@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import TestCase
 
 import dateutil.parser
-from audit_logging.mixins.AuditLogMixin import _safe_get_content_type
+from lex.audit_logging.mixins.AuditLogMixin import _safe_get_content_type
 from django.apps import apps
 from django.core.cache import cache
 from django.core.files import File

@@ -11,6 +11,6 @@ __all__ = [
     'ExampleModelModificationRestriction'
 ]
 
-from core.mixins.CalculatedModelMixin import ModelCombinationGenerator, calc_and_save_sync, ModelClusterManager
-from core.mixins.ModelModificationRestriction import AdminReportsModificationRestriction, \
+from lex.core.mixins.CalculatedModelMixin import ModelCombinationGenerator, calc_and_save_sync, ModelClusterManager
+from lex.core.mixins.ModelModificationRestriction import AdminReportsModificationRestriction, \
     ExampleModelModificationRestriction

@@ -14,15 +14,12 @@ Flow:
 import uuid
 import webbrowser
 
-from core.management.commands.bootstrap_callback_server import start_callback_server
+# from lex.core.management.commands.bootstrap_callback_server import start_callback_server
 from django.core.management.base import BaseCommand
-from lex_app.management.commands.init import (
-    ENV_FILE,
-    STATE_FILE,
-    build_instance_controller_url,
-    get_missing_keycloak_env,
-    wait_for_keycloak_setup,
-)
+from lex.core.management.commands.bootstrap_callback_server import start_callback_server
+from lex.lex_app.management.commands.init import get_missing_keycloak_env, ENV_FILE, STATE_FILE, \
+    build_instance_controller_url, wait_for_keycloak_setup
+
 
 
 class Command(BaseCommand):
