@@ -417,6 +417,23 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8w — Worker-recovery terminal-outcome guard: no ERROR→SUCCESS resurrection
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.90 – 8.102 |
+| Type | U (helper logic + `scan_and_recover` orchestration, mocked registry/backend) + I (real `CalculationModel` rows for the row-state signal) |
+| Files covered | `lex/lex_app/celery_recovery/supervisor.py` — new `_result_already_settled` (ready `AsyncResult` ⇒ task body concluded; defensive degrade to False on backend error), `_rows_already_settled` (every extracted `CalculationModel` row out of `IN_PROGRESS`/`NOT_CALCULATED` ⇒ settled; False on no rows / any unfinished / DB error), `_already_finished` (OR of the two), and the `scan_and_recover` guard inserted **after** the cancellation check and **before** the retries/budget branch (deregister + count `already_finished`, never requeue) |
+| Test file | `lex/test_project/tests/celery_async/test_8w_recovery_terminal_guard.py` |
+| Test classes | `TestCluster08w_ResultBackendSettled` (8.90–8.92 ready ⇒ settled / unready ⇒ not / backend error degrades, `SimpleTestCase`, mocked app); `TestCluster08w_AlreadyFinishedCombination` (8.98–8.99 backend alone settles / neither signal ⇒ unfinished); `TestCluster08w_ScanSkipsFinished` (8.100–8.102 — drives real `scan_and_recover` with the registry boundary mocked: finished ⇒ deregister-not-requeue, unfinished-under-budget ⇒ requeue, finished-beats-budget-exhaustion ordering); `TestCluster08w_RowsSettled` (8.93–8.97 + 8.93b — **`E2ETestCase`**, `e2e_models=[CelerySyncCalc]`: all-terminal/IN_PROGRESS/NOT_CALCULATED/mixed/no-rows + every terminal state) |
+| Fixtures | none — `unittest.mock` on `app.AsyncResult` and the `registry`/`_requeue`/`_give_up` seams; the row scenarios reuse the existing `CelerySyncCalc` E2E model |
+| Tests landed | **8 pass / 0 fail** (the U scenarios: result-backend signal, OR-combination, full `scan_and_recover` orchestration incl. resurrection-prevention + guard-before-budget ordering). The 6 I (real-row) scenario **bodies pass their assertions** — only Django's shared `TransactionTestCase` teardown-flush errors in the borrowed local venv (`test_db_lex` missing tables), identically to the pre-existing 8v E2E test; a DB-provisioning gap of the local environment, not a code defect — they gate normally on the CI Postgres service |
+| Coverage gain | `lex/lex_app/celery_recovery/supervisor.py` — terminal-guard branch + 3 new helpers newly covered |
+| Prereqs | the I (real-row) scenarios need a Postgres test DB with the lex schema migrated (CI service); the U scenarios are broker-/DB-free |
+| Status | ✅ Complete — source fix + paired tests + plan sync in one change |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)

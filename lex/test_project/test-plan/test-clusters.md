@@ -535,6 +535,14 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 **Scenario range:** 8.78 – 8.89. **Test file:** `lex/test_project/tests/celery_async/test_8v_cluster_cascade_cancel.py`. **Type:** U (+ one E for 8.87). **Status:** ✅ Complete (Session 74 — June 5). Covers `lex/core/cancellation/cluster_cancel_index.py` (register/unregister/get_tree/mark_cancelled/is_cancelled + disabled-config no-ops), the `ActiveCalculationStateStore` write-through, the `cancel()` cluster-tree union+revoke, and the `calc_and_save` cooperative self-abort. 12 pass / 0 fail; existing 8u + 7n cancellation suites stay green; regression across `celery_async` + `calculations` = 252 pass / 4 skip.
 
+### Sub-cluster 8w — worker-recovery terminal-outcome guard (no resurrection)
+
+**Gap:** the heartbeat recovery supervisor (`lex/lex_app/celery_recovery/supervisor.py`) requeues tasks whose worker died, but an expired heartbeat only proves the *worker* is gone — not that the *task* was unfinished. A worker can persist a calculation's terminal state (e.g. `ERROR`) and then be hard-killed (SIGKILL / OOM / eviction) *before* `task_postrun` deregistered it; the stale registry entry then looks like a dead in-progress task, the supervisor requeues the same `task_id`, the re-run succeeds, and a row the user already saw as `ERROR` silently flips to `SUCCESS` — the ERROR→SUCCESS resurrection bug observed in the cluster. 8w pins the fix: before requeueing, `scan_and_recover` consults two authoritative completion signals — a *ready* `AsyncResult` (with `task_reject_on_worker_lost` a merely-lost worker never writes one, so a ready result proves the body ran) and the calculation rows themselves (every row out of `IN_PROGRESS`). If either says "done", the supervisor deregisters instead of requeueing.
+
+**Why a mix of U and I:** the result-backend signal, the OR-combination, and the full `scan_and_recover` orchestration (deregister-not-requeue, no-false-positive on a live task, and guard-before-budget ordering) are pure logic driven against a mocked registry/backend (U). The row-state signal — the half that catches the reported bug — is exercised against real persisted `CalculationModel` rows through an `E2ETestCase` (I).
+
+**Scenario range:** 8.90 – 8.102. **Test file:** `lex/test_project/tests/celery_async/test_8w_recovery_terminal_guard.py`. **Type:** U (+ I for the real-row signal). **Status:** ✅ Complete. Covers `lex/lex_app/celery_recovery/supervisor.py` (`_result_already_settled`, `_rows_already_settled`, `_already_finished`, and the `scan_and_recover` terminal guard). 8 U scenarios pass locally; the 6 I (real-row) scenarios pass their assertions — only the shared `TransactionTestCase` teardown-flush errors in the borrowed local venv, identically to the pre-existing E2E suite (a DB-provisioning gap, not a code issue); they gate normally on the CI Postgres.
+
 ---
 
 ## 9. Signals & WebSocket
