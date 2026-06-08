@@ -95,7 +95,7 @@ class ModelRegistration:
                         history_failed.append(model.__name__)
 
                     if issubclass(model, CalculationModel):
-                        if tracked_record_ids is None:
+                        if tracked_record_ids is None and os.getenv("CALLED_FROM_START_COMMAND"):
                             from lex.lex_app.celery_recovery.supervisor import (
                                 tracked_calculation_record_ids,
                             )

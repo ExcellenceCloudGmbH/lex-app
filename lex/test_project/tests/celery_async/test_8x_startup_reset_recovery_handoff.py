@@ -250,6 +250,8 @@ class TestCluster08x_StartupSweepDefersToOwnership(E2ETestCase):
         """
         row = self._make_in_progress("gated")
         with mock.patch.dict(os.environ, {}, clear=False):
+            # Relies on the gate being the sole short-circuit, so the ownership
+            # branch never runs outside startup once the env var is removed.
             os.environ.pop("CALLED_FROM_START_COMMAND", None)
             ModelRegistration._handle_calculation_model_reset(
                 CelerySyncCalc, tracked_record_ids=set(),
@@ -272,5 +274,28 @@ class TestCluster08x_StartupSweepDefersToOwnership(E2ETestCase):
         ) as compute:
             self._run_sweep(self._owned(row))
         compute.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(row.is_calculated, CalculationModel.IN_PROGRESS)
+
+    def test_08_115_no_kwarg_self_computes_ownership_from_registry(self):
+        """
+        Scenario 8.115: a direct caller omitting the kwarg self-computes.
+        Given: an IN_PROGRESS row the registry reports as owned, and the sweep is
+               invoked with no tracked_record_ids argument (back-compat path used
+               by existing direct callers).
+        When:  _handle_calculation_model_reset runs.
+        Then:  it calls tracked_calculation_record_ids() itself and honors the
+               result — the owned row stays IN_PROGRESS. This exercises the
+               lazy-import self-compute branch the caller normally precomputes.
+        """
+        row = self._make_in_progress("self-compute")
+        with mock.patch.object(
+            supervisor, "tracked_calculation_record_ids",
+            return_value=self._owned(row),
+        ) as compute, mock.patch.dict(
+            os.environ, {"CALLED_FROM_START_COMMAND": "1"}
+        ):
+            ModelRegistration._handle_calculation_model_reset(CelerySyncCalc)
+        compute.assert_called_once()
         row.refresh_from_db()
         self.assertEqual(row.is_calculated, CalculationModel.IN_PROGRESS)
