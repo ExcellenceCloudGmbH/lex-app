@@ -16,11 +16,18 @@ class CalculationLogTreeSerializer(serializers.ModelSerializer):
         return str(obj)
 
     def get_isRoot(self, obj):
-        # A node is considered root if it has no parent_calculation_log
-        return obj.parent_log is None
+        # A node is considered root if it has no parent. Check the FK id rather
+        # than the related object so we don't lazy-load the parent row per node.
+        return obj.parent_log_id is None
 
     def get_children(self, obj):
-        # Retrieve the immediate children for the same calculation (returning just their IDs)
+        # Prefer a prefetched parent->children map supplied by the view (one
+        # query for the whole page) to avoid an N+1 query per node.
+        children_map = self.context.get('children_map')
+        if children_map is not None:
+            return list(children_map.get(obj.id, []))
+        # Fallback for callers that don't supply a prefetched map: retrieve the
+        # immediate children for the same calculation (returning just their IDs).
         children_qs = CalculationLog.objects.filter(
             parent_log=obj,
             calculationId=obj.calculationId

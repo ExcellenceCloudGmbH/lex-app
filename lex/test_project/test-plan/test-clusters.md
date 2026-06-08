@@ -377,6 +377,14 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 > * **`history_user` definition clarified.** The doc says: "the person who edited the record, or the user who launched the calculation." Updated Cluster 5 contract.
 > * **BUG-001b expanded (Session 54).** 6.10 now has 6 companion scenarios. The synthetic ones — **6.10-control** (sanity), **6.10b** (`AuditLogStatus` child also wiped), **6.10c** (3 retries → 0 rows), **6.10d** (nested savepoint shape) — call `ensure_terminal_calculation_audit()` directly inside a synthetic outer atomic and remain live regression gates (1 pass + 4 xfail). The end-to-end ones — **6.10e** (programmatic `calc.save()` inside outer atomic) and **6.10f** (API POST → PATCH → fallback) — are now `@unittest.skip` because the audit log's API-only contract poisons their diagnostic value: a programmatic `calc.save()` never seeds the API-layer `_pending_terminal_audit`, so the except-branch finalize has nothing to finalize and the 0-row outcome is ambiguous (could be "row rolled back" OR "row never written"). 6.10f's API path is the right shape but blocked by BUG-009 (PATCH of `is_calculated` is silently dropped). Both unblock once BUG-009 is fixed and the API path can drive a calc end-to-end with a real audit-mixin-seeded pending row in scope.
 
+### 6p. Calculation-log cache backfill buffer cap ✅
+
+**What it tests:** `CacheManager.store_message` (the server-side buffer that backfills the "recent history" shown when the calculation-log panel opens, while newer lines keep arriving over the WebSocket stream). Before this change, every log line did an unbounded `cache.get()` + string-concat + `cache.set()` — O(N²) bandwidth with multiple multi-MB copies alive at once, no size cap, and `CACHE_TIMEOUT` was defined but never passed to `set()`. On a long/heavy calculation this OOM-ed the backend pod when a user opened the log. The fix bounds the buffer to a 256 KB tail (full log always persists in `CalculationLog`) and applies the one-week TTL.
+
+**Why a regression matters:** an unbounded backfill buffer is a direct path to a production pod restart — the exact crash this batch closes. The cap must keep only the most recent tail and start on a clean line boundary so the backfill is never a partial leading line.
+
+**Scenario range:** 6.109 – 6.113. **Test file:** `lex/test_project/tests/audit_logging/test_6p_cache_buffer_cap.py`. **Type:** U. **Status:** ✅ Complete (Session 77 — June 8). Scenarios: 6.109 buffer never exceeds the cap; 6.110 trim starts on a clean line boundary; 6.111 newest retained / oldest dropped; 6.112 under-cap buffer left untouched; 6.113 `set()` uses the configured `CACHE_TIMEOUT`.
+
 ---
 
 ## 7. Calculation State Machine
@@ -599,6 +607,14 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 10.7 | Many endpoint bulk delete | DELETE with repeated `ids` query params removes selected records only |
 | 10.9 | Invalid data returns 400 | Validation errors in response |
 | 10.10 | Unauthenticated request handled | 401 or redirect |
+
+### 10m. Calculation-log tree pagination + N+1 fix ✅
+
+**What it tests:** `CalculationLogTreeView` (the endpoint that backfills the calculation-log tree when the panel opens). Before this change the view ran `CalculationLog.objects.all()` (or every row for one calc) and the serializer issued one child query per node (N+1) — loading the whole table into memory in one shot, a second compounding offender behind the backend OOM. The fix paginates with `limit`/`offset` (default 1000, max 5000), resolves every page's child ids in a single query via a prefetched `children_map`, and checks `parent_log_id` instead of lazy-loading the parent FK per node.
+
+**Why a regression matters:** the unbounded query + N+1 is the read-path twin of the 6p buffer leak — together they were the calculation-log OOM. Pagination caps how much a single request can materialize; the `assertNumQueries` gate is what stops the N+1 from silently creeping back.
+
+**Scenario range:** 10.61 – 10.66. **Test file:** `lex/test_project/tests/api_layer/test_10m_calculation_log_tree.py`. **Type:** I. **Status:** ✅ Complete (Session 77 — June 8). Scenarios: 10.61 default limit bounds the page; 10.62 offset walks the dataset; 10.63 child ids resolved per parent; 10.64 `isRoot` present only for parentless rows (stripped on children); 10.65 the integration surface — `assertNumQueries(3)` across 25 parents+children proves the N+1 is gone; 10.66 `calculation_id` filter scopes the rows.
 
 ---
 

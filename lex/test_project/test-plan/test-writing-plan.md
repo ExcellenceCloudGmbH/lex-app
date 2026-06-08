@@ -264,6 +264,24 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 6p — Calculation-log cache backfill buffer cap ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.109 – 6.113 |
+| Type | U |
+| Files covered | `audit_logging/utils/CacheManager.py` (`store_message` buffer cap + TTL) |
+| Test file | `lex/test_project/tests/audit_logging/test_6p_cache_buffer_cap.py` |
+| Test classes | `TestCluster06p_CacheBufferCap` |
+| Fixtures | none (LocMemCache via `CALC_CACHE_NAME="local"`) |
+| Est. tests | 5 |
+| Coverage gain | measured locally; CacheManager store path |
+| Prereqs | none |
+| Status | ✅ Complete — 5 pass / 0 fail |
+| Note | Backend OOM fix (session 77): the live-log backfill buffer was an unbounded `get`+concat+`set` per line. Now capped to a ~256 KB tail (`MAX_CACHE_MESSAGE_CHARS`), trimmed to a clean line boundary, written with `CACHE_TIMEOUT`. Full log still persists in `CalculationLog`; only the recent-history backfill is bounded. |
+
+---
+
 ## Cluster 7 — Calculation State Machine (existing 7a–7j, plus new 7k)
 
 > **Renumbering note (May 12):** the plan's original 7i/7j/7k labels collided with already-shipped sub-clusters (7i = 2-level atomicity matrix Session 42; 7j = 3-level matrix Session 45). The supervisor's "exceptions / restrictions / XLSX" batch landed under **7k**; the queue + signals batches shift to **7l / 7m**.
@@ -517,6 +535,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Est. tests | ~14 |
 | Coverage gain | +0.8 % |
 | Prereqs | none |
+
+### Batch 10m — Calculation-log tree pagination + N+1 fix ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.61 – 10.66 |
+| Type | I |
+| Files covered | `views/model_entries/CalculationLogTreeView.py`, `views/model_entries/serializers/CalculationLogTreeSerializer.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10m_calculation_log_tree.py` |
+| Test classes | `TestCluster10m_TreeViewPagination` |
+| Fixtures | none (creates `CalculationLog` rows inline) |
+| Est. tests | 6 |
+| Coverage gain | measured locally; tree view + serializer |
+| Prereqs | none |
+| Status | ✅ Complete — 6 pass / 0 fail |
+| Note | Backend OOM fix (session 77). The tree endpoint previously loaded the whole `CalculationLog` table (or every row for a calc) with a per-node child query (N+1). Now: limit/offset pagination (`DEFAULT_LIMIT=1000`, `MAX_LIMIT=5000`, `has_more`), children resolved for the whole page in one query via serializer context, `get_isRoot` reads `parent_log_id` (no lazy parent fetch). Scenario 10.61 placed past the 10.60 ceiling; the 10g-reserved "calculation-log tree" slot was never implemented (the on-disk 10g file became `one_endpoint_lifecycle`), so this lands as 10m. |
 
 > `ModelExport.py` (cluster 13f), `List.py` AG-Grid path (14f), `base_serializers.py` (12g) keep their forecasted homes.
 

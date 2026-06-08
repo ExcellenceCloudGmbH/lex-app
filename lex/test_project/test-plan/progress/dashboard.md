@@ -42,6 +42,7 @@
 | 6g. Audit-log immutability (Session 51 — May 5) | 3 | 3 | 3 | 0 | 0 |  Complete — create/delete/edit all denied (incl. `AuditLogStatus`) |
 | 6j. Audit-utils singletons & data-model contracts (coverage-driven — May 12) | 16 | 16 | 16 | 0 | 0 |  Complete — scenarios 6.80–6.95 |
 | 6n. `AuditLogSerializer` + `AuditLogMixinSerializer` surface (coverage-driven — May 12) | 15 | 15 | 15 | 0 | 0 |  Complete — scenarios 6.141–6.155 |
+| 6p. Calculation-log cache backfill buffer cap (Session 77 — June 8) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 6.109–6.113; bounds `CacheManager.store_message` to a 256 KB tail (+ applies `CACHE_TIMEOUT`) so opening a long calc log can't OOM the backend |
 | 7. Calculation State Machine | 95 | 95 | 94 | 1 | 0 |  Complete (BUG-009 tracked; 7i 2-level matrix 7.32–7.47; 7j 3-level matrix 7.48–7.111) |
 | 7g. `CalculatedModel.create()` pipeline (coverage-driven — April 21) | 6 | 6 | 6 | 0 | 0 |  Complete — drove `CalculatedModelMixin` 33.74% → 64.75% (`CombinatorialCalc` fixture added April 23) |
 | 7h. `_dispatch_model_processing` Celery branch (coverage-driven — April 23) | 1 | 1 | 1 | 0 | 0 |  Complete — async branch 7g never reached; broker-free |
@@ -66,6 +67,7 @@
 | 10e. Schema introspection (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete (BUG-015 documented in-test — CharField w/o default reports `required=False`) |
 | 10f. Global search (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — 10.15–10.16b |
 | 10h. `LexAPI` outbound-client SDK (coverage-driven — May 12) | 7 | 7 | 7 | 0 | 0 |  Complete — scenarios 10.17–10.23; `requests` patched |
+| 10m. Calculation-log tree pagination + N+1 fix (Session 77 — June 8) | 6 | 6 | 6 | 0 | 0 | ✅ Complete — scenarios 10.61–10.66; `CalculationLogTreeView` now paginates (limit/offset) and resolves child ids in one query (`assertNumQueries(3)` pins N+1 gone) instead of loading every row + per-node child query |
 | 11. Stress & Performance | 20 | 20 | 15 | 2 | 0 |  Complete (3 skipped — 11.12/11.15/11.19 at SMALL; BUG-011 tracked) |
 | 12. Serializer Contract | 32 | 32 | 29 | 3 | 0 |  Complete — 12a–12e (BUG-012/013 type round-trip xfail; BUG-017 cache xfail) |
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
