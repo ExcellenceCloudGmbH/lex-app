@@ -136,6 +136,21 @@ release.
 
 **Scenario range:** 1.147 – 1.147. **Test file:** `lex/test_project/tests/init/test_1q_migration_files_complete.py`. **Type:** U. **Status:** ✅ Complete (Session 70 — June 2).
 
+### 1s. Log-noise cleanup + lex-namespace debug control (EXC-1787) ✅
+
+**Gap:** A customer running LEX App V2 locally (ticket EXC-1787) reported two
+log-ergonomics problems. (1) urllib3's `InsecureRequestWarning` spams local logs
+on every Keycloak request because TLS verification defaults off; the framework's
+intent is clean logs by default, suppressed at startup with an opt-out
+(`LEX_SUPPRESS_INSECURE_WARNING=False`). (2) There was no way to see the
+framework's own `logger.debug(...)` without the third-party DEBUG firehose that
+`LOG_LEVEL=DEBUG` pulls in; `LEX_LOG_LEVEL=DEBUG` must raise only the `lex.*`
+namespace while root stays at INFO. (3) Local startup also emitted Python warnings
+(e.g. Django's "Accessing the database during app initialization" RuntimeWarning);
+a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-out.
+
+**Scenario range:** 1.159 – 1.168. **Test file:** `lex/test_project/tests/init/test_1s_log_cleanup_and_lex_debug.py`. **Type:** U. **Status:** ✅ Complete (Session 75 — June 8). Letter note: 1r is an in-flight WIP batch (lex_view embed helper), so this batch took the next free letter 1s.
+
 ---
 
 ## 2. CRUD via REST API
