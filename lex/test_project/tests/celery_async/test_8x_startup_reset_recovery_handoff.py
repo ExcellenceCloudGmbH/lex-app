@@ -22,10 +22,14 @@ Run: python -m lex pytest lex/test_project/tests/celery_async/test_8x_startup_re
 
 from __future__ import annotations
 
+import asyncio
 import os
 from unittest import mock
 
+import nest_asyncio
 import pytest
+from asgiref.sync import sync_to_async
+from django.db import connections
 from django.test import SimpleTestCase
 
 from lex.core.models.CalculationModel import CalculationModel
@@ -163,6 +167,23 @@ class TestCluster08x_StartupSweepDefersToOwnership(E2ETestCase):
     """
 
     e2e_models = [CelerySyncCalc]
+
+    def tearDown(self):
+        # The production startup sweep runs its ORM work inside
+        # ``sync_to_async`` (asgiref's shared single-worker executor
+        # thread). That thread opens its own Django DB connection which is
+        # never closed, leaving "1 other session" holding the test database
+        # open and making the session-wide DROP DATABASE fail at teardown.
+        # Close it through the same loop+executor so the cleanup runs in
+        # that very thread before the test framework tears the DB down.
+        try:
+            nest_asyncio.apply()
+            asyncio.get_event_loop().run_until_complete(
+                sync_to_async(connections.close_all)()
+            )
+        except Exception:  # pragma: no cover — best-effort connection cleanup
+            pass
+        super().tearDown()
 
     def _make_in_progress(self, name):
         row = CelerySyncCalc.objects.create(name=name)
