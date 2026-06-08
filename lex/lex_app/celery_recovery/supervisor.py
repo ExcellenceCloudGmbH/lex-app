@@ -223,6 +223,82 @@ def _give_up(app, task_id: str, payload: Dict[str, Any]) -> None:
     )
 
 
+def _result_already_settled(app, task_id: str) -> bool:
+    """True if the result backend already holds a terminal result for task_id.
+
+    With ``task_reject_on_worker_lost=True`` a worker that merely died mid-task
+    never writes a result — Celery re-queues the message instead. So a *ready*
+    ``AsyncResult`` (SUCCESS / FAILURE / REVOKED) is proof the task body ran to a
+    conclusion, not evidence of the crash we recover from. Defensive: any backend
+    error degrades to ``False`` so recovery still falls back to requeueing.
+    """
+    try:
+        return bool(app.AsyncResult(task_id).ready())
+    except Exception:
+        logger.debug(
+            "Celery recovery: result lookup failed for %s", task_id, exc_info=True
+        )
+        return False
+
+
+def _rows_already_settled(payload: Dict[str, Any]) -> bool:
+    """True if every calculation row tracked by this task is already terminal.
+
+    A worker can persist a row's terminal state (e.g. ``ERROR``) and then be hard
+    killed *before* ``task_postrun`` deregistered it. The stale index entry then
+    looks like a dead in-progress task; re-running it would re-execute work that
+    already concluded — the ERROR→SUCCESS resurrection bug. When the database
+    says every row settled, the work is done regardless of the missing heartbeat.
+
+    Returns ``False`` when there are no extractable rows, when any row is still
+    ``IN_PROGRESS`` / ``NOT_CALCULATED``, or on any DB error — all of which fall
+    back to the normal requeue path rather than wrongly abandoning unfinished
+    work.
+    """
+    from lex.core.models.CalculationModel import CalculationModel
+
+    terminal = {
+        CalculationModel.SUCCESS,
+        CalculationModel.ERROR,
+        CalculationModel.ABORTED,
+        CalculationModel.CANCELLED,
+    }
+    instances = _extract_calculation_models(payload.get("args"))
+    if not instances:
+        return False
+    try:
+        for instance in instances:
+            current = (
+                instance.__class__._default_manager
+                .filter(pk=instance.pk)
+                .values_list("is_calculated", flat=True)
+                .first()
+            )
+            if current not in terminal:
+                return False
+        return True
+    except Exception:
+        logger.debug(
+            "Celery recovery: row-state lookup failed during terminal guard",
+            exc_info=True,
+        )
+        return False
+
+
+def _already_finished(app, task_id: str, payload: Dict[str, Any]) -> bool:
+    """A dead-but-tracked task already reached a terminal outcome.
+
+    The expired heartbeat proves the *worker* died; it does not prove the *task*
+    was unfinished. A worker that persisted a terminal result and was then hard
+    killed before ``task_postrun`` deregistered it leaves a stale index entry.
+    Requeuing it re-runs concluded work and can resurrect a finished outcome (an
+    ``ERROR`` row coming back ``SUCCESS``). Two independent authoritative signals
+    say "done": the result backend, and the calculation rows themselves. Either
+    is sufficient.
+    """
+    return _result_already_settled(app, task_id) or _rows_already_settled(payload)
+
+
 def scan_and_recover(app=None) -> Dict[str, int]:
     """Run one recovery pass. Returns counters for observability/tests."""
     app = app or _get_app()
@@ -233,6 +309,7 @@ def scan_and_recover(app=None) -> Dict[str, int]:
         "gave_up": 0,
         "orphaned": 0,
         "cancelled": 0,
+        "already_finished": 0,
         "skipped_locked": 0,
     }
 
@@ -261,6 +338,21 @@ def scan_and_recover(app=None) -> Dict[str, int]:
         if _is_cancelled(_calculation_id_of(payload)):
             _finalize_cancelled(task_id, payload)
             stats["cancelled"] += 1
+            continue
+
+        # A dead heartbeat proves the worker died, not that the task was
+        # unfinished. If the task already settled — a terminal result or every
+        # row out of IN_PROGRESS — requeuing would re-run concluded work and
+        # resurrect a finished outcome (e.g. an ERROR row coming back SUCCESS).
+        # Finalize tracking instead of requeueing.
+        if _already_finished(app, task_id, payload):
+            registry.deregister(task_id)
+            stats["already_finished"] += 1
+            logger.info(
+                "Celery recovery: dead task %s already settled to a terminal "
+                "outcome; deregistered instead of requeueing",
+                task_id,
+            )
             continue
 
         if int(payload.get("retries", 0)) < _max_retries():
