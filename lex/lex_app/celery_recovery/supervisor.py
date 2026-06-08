@@ -121,7 +121,7 @@ def _extract_calculation_models(args: Any) -> List[Any]:
     return [c for c in candidates if isinstance(c, CalculationModel)]
 
 
-def tracked_calculation_record_ids() -> set:
+def tracked_calculation_record_ids() -> set[tuple[str, Any]]:
     """``(_meta.label_lower, pk)`` for every calculation row a tracked recovery
     task currently owns — whether its worker is alive or merely tracked.
 
