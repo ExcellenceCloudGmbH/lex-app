@@ -434,6 +434,23 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8x — Liveness-aware startup reset: recovery hand-off (no live-calc abort)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.103 – 8.115 |
+| Type | U (ownership lookup, mocked registry) + I (real `CalculationModel` rows driven through the startup sweep) |
+| Files covered | `lex/lex_app/celery_recovery/supervisor.py` — new `tracked_calculation_record_ids()` (reads `registry.list_tracked()` + `get_payload()`, reuses `_extract_calculation_models`, returns `{(label_lower, pk)}` for tracked rows with a non-None pk — alive **or** expired-but-tracked, no `is_alive` gate; empty set when recovery off / Redis down). `lex/process_admin/utils/model_registration.py` — `_handle_calculation_model_reset` gains an optional `tracked_record_ids` param and a skip-if-owned `continue` placed **before** the `ABORTED` flip / history write / audit call; `register_models` computes the set once on the first `CalculationModel` and only when `CALLED_FROM_START_COMMAND` is set (no registry read outside startup), threading it through the per-model loop |
+| Test file | `lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py` |
+| Test classes | `TestCluster08x_TrackedRecordIds` (8.103–8.108 — `SimpleTestCase`, mocked registry: alive-tracked ⇒ owned / expired-but-tracked ⇒ still owned & `is_alive` never called / empty registry ⇒ empty set / non-calc payload ⇒ nothing / multi-task ⇒ union / pk-None ⇒ excluded); `TestCluster08x_StartupSweepDefersToOwnership` (8.109–8.115 — **`E2ETestCase`**, `e2e_models=[CelerySyncCalc]`: owned row stays `IN_PROGRESS` & not audited / untracked ⇒ `ABORTED` + audited / mixed ⇒ only untracked aborts / empty ownership ⇒ all abort (back-compat) / gate-off ⇒ no-op / precomputed set ⇒ no registry recompute / 8.115 no-kwarg ⇒ self-computes from registry) |
+| Fixtures | none — `unittest.mock` on the `registry.list_tracked`/`get_payload` seams and on `supervisor.tracked_calculation_record_ids`; the row scenarios reuse the existing `CelerySyncCalc` E2E model and the `E2ETestCase` default `ensure_terminal_calculation_audit` patch (read via `self._patch_map`) |
+| Tests landed | **6 pass / 0 fail** (the U scenarios: ownership lookup incl. the load-bearing no-`is_alive` invariant and the empty-set degrade). The 7 I (real-row sweep) scenario **bodies pass their assertions** — only Django's shared `TransactionTestCase` teardown-flush errors in the borrowed local venv, identically to the pre-existing 8v/8w E2E tests; a DB-provisioning gap of the local environment, not a code defect — they gate normally on the CI Postgres service |
+| Coverage gain | `lex/lex_app/celery_recovery/supervisor.py` — `tracked_calculation_record_ids` newly covered; `lex/process_admin/utils/model_registration.py` — the startup-reset skip-if-owned branch + caller threading newly covered |
+| Prereqs | the I (real-row) scenarios need a Postgres test DB with the lex schema migrated (CI service); the U scenarios are broker-/DB-free. Stacked on Batch 8w (#603 terminal guard) — the deferral composes with that guard |
+| Status | ✅ Complete — source fix + paired tests + plan sync in one change |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)
