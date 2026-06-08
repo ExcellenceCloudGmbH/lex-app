@@ -59,6 +59,7 @@ class ModelRegistration:
         history_ok = []
         history_skipped = []
         history_failed = []
+        tracked_record_ids = None
 
         for model in models:
             try:
@@ -94,7 +95,14 @@ class ModelRegistration:
                         history_failed.append(model.__name__)
 
                     if issubclass(model, CalculationModel):
-                        cls._handle_calculation_model_reset(model)
+                        if tracked_record_ids is None:
+                            from lex.lex_app.celery_recovery.supervisor import (
+                                tracked_calculation_record_ids,
+                            )
+                            tracked_record_ids = tracked_calculation_record_ids()
+                        cls._handle_calculation_model_reset(
+                            model, tracked_record_ids=tracked_record_ids,
+                        )
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to register model {model.__name__}: {str(e)}"
@@ -381,9 +389,20 @@ class ModelRegistration:
         return result
 
     @classmethod
-    def _handle_calculation_model_reset(cls, model: Type[models.Model]) -> None:
+    def _handle_calculation_model_reset(
+        cls,
+        model: Type[models.Model],
+        tracked_record_ids=None,
+    ) -> None:
         """
         Reset CalculationModel instances left in IN_PROGRESS state on startup.
+
+        Rows owned by a tracked recovery task (alive worker, or expired-but-
+        tracked → resumed by the supervisor) are left IN_PROGRESS so recovery
+        can finish them; only genuinely untracked rows are flipped to ABORTED.
+        ``tracked_record_ids`` is the ``{(label_lower, pk)}`` ownership set; when
+        omitted it is computed once here (the caller passes it in to avoid a
+        per-model registry read).
 
         Uses per-instance ``.save(skip_hooks=True)`` so that
         django-simple-history records an ABORTED history row for each
@@ -395,6 +414,14 @@ class ModelRegistration:
         if not os.getenv("CALLED_FROM_START_COMMAND"):
             return
 
+        if tracked_record_ids is None:
+            from lex.lex_app.celery_recovery.supervisor import (
+                tracked_calculation_record_ids,
+            )
+            tracked_record_ids = tracked_calculation_record_ids()
+
+        model_label = model._meta.label_lower
+
         @sync_to_async
         def reset_instances_with_aborted_calculations():
             from lex.audit_logging.utils.calculation_audit import (
@@ -405,6 +432,12 @@ class ModelRegistration:
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
             )
             for instance in stuck:
+                if (model_label, instance.pk) in tracked_record_ids:
+                    # Owned by the recovery machinery: a live worker will finish
+                    # it, or the supervisor will requeue/resume it. Aborting here
+                    # would, via the terminal-outcome guard, block that resume
+                    # and permanently lose recoverable calculation state.
+                    continue
                 instance.is_calculated = CalculationModel.ABORTED
                 instance._history_change_reason = (
                     "Startup reset: calculation was still IN_PROGRESS"

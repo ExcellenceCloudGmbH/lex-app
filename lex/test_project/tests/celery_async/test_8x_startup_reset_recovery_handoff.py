@@ -150,3 +150,127 @@ class TestCluster08x_TrackedRecordIds(SimpleTestCase):
         with p1, p2:
             result = supervisor.tracked_calculation_record_ids()
         self.assertEqual(result, set())
+
+
+class TestCluster08x_StartupSweepDefersToOwnership(E2ETestCase):
+    """Cluster 8x: the startup sweep skips rows the recovery registry owns.
+
+    Real ``CalculationModel`` rows are driven straight through
+    ``_handle_calculation_model_reset`` with the recovery-ownership set injected,
+    so the abort/skip decision is the genuine one. The default E2E patch already
+    mocks ``ensure_terminal_calculation_audit``; we read that mock from
+    ``self._patch_map`` to prove whether an audit row would have been written.
+    """
+
+    e2e_models = [CelerySyncCalc]
+
+    def _make_in_progress(self, name):
+        row = CelerySyncCalc.objects.create(name=name)
+        row.is_calculated = CalculationModel.IN_PROGRESS
+        row.save(skip_hooks=True)
+        return row
+
+    def _owned(self, *rows):
+        return {(CelerySyncCalc._meta.label_lower, r.pk) for r in rows}
+
+    def _run_sweep(self, tracked_record_ids):
+        with mock.patch.dict(os.environ, {"CALLED_FROM_START_COMMAND": "1"}):
+            ModelRegistration._handle_calculation_model_reset(
+                CelerySyncCalc, tracked_record_ids=tracked_record_ids,
+            )
+
+    def test_08_109_owned_row_stays_in_progress_and_is_not_audited(self):
+        """
+        Scenario 8.109: a row a tracked task owns is left for recovery.
+        Given: an IN_PROGRESS row whose (label, pk) is in the owned set.
+        When:  the startup sweep runs.
+        Then:  the row stays IN_PROGRESS and no aborted-audit is written — the
+               worker (alive) or the supervisor (resume) will conclude it.
+        """
+        row = self._make_in_progress("live")
+        audit = self._patch_map["ensure_terminal_calculation_audit"]
+        self._run_sweep(self._owned(row))
+        row.refresh_from_db()
+        self.assertEqual(row.is_calculated, CalculationModel.IN_PROGRESS)
+        audit.assert_not_called()
+
+    def test_08_110_untracked_row_is_aborted_and_audited(self):
+        """
+        Scenario 8.110: an unowned row is the only thing the sweep aborts.
+        Given: an IN_PROGRESS row that no tracked task owns (empty owned set).
+        When:  the startup sweep runs.
+        Then:  the row flips to ABORTED and an aborted-audit is written — today's
+               behavior, preserved for genuinely unrecoverable rows.
+        """
+        row = self._make_in_progress("orphan")
+        audit = self._patch_map["ensure_terminal_calculation_audit"]
+        self._run_sweep(set())
+        row.refresh_from_db()
+        self.assertEqual(row.is_calculated, CalculationModel.ABORTED)
+        audit.assert_called_once()
+
+    def test_08_111_mixed_rows_only_unowned_is_aborted(self):
+        """
+        Scenario 8.111: ownership is per-row, not all-or-nothing.
+        Given: two IN_PROGRESS rows — one owned by a tracked task, one not.
+        When:  the startup sweep runs.
+        Then:  the owned row stays IN_PROGRESS, the unowned row goes ABORTED.
+        """
+        owned_row = self._make_in_progress("keep")
+        orphan_row = self._make_in_progress("drop")
+        self._run_sweep(self._owned(owned_row))
+        owned_row.refresh_from_db()
+        orphan_row.refresh_from_db()
+        self.assertEqual(owned_row.is_calculated, CalculationModel.IN_PROGRESS)
+        self.assertEqual(orphan_row.is_calculated, CalculationModel.ABORTED)
+
+    def test_08_112_empty_ownership_aborts_all_rows_backcompat(self):
+        """
+        Scenario 8.112: recovery off → identical to the original blind sweep.
+        Given: two IN_PROGRESS rows and an empty owned set (recovery disabled /
+               Redis down — tracked_calculation_record_ids() returns set()).
+        When:  the startup sweep runs.
+        Then:  both rows are aborted — no regression when recovery is unavailable.
+        """
+        r1 = self._make_in_progress("a")
+        r2 = self._make_in_progress("b")
+        self._run_sweep(set())
+        r1.refresh_from_db()
+        r2.refresh_from_db()
+        self.assertEqual(r1.is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(r2.is_calculated, CalculationModel.ABORTED)
+
+    def test_08_113_gate_off_is_a_noop(self):
+        """
+        Scenario 8.113: without CALLED_FROM_START_COMMAND the sweep does nothing.
+        Given: an IN_PROGRESS row and the start-command gate unset.
+        When:  _handle_calculation_model_reset is invoked.
+        Then:  the row is untouched — the gate still fully short-circuits the
+               sweep, so the new ownership logic never runs outside startup.
+        """
+        row = self._make_in_progress("gated")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CALLED_FROM_START_COMMAND", None)
+            ModelRegistration._handle_calculation_model_reset(
+                CelerySyncCalc, tracked_record_ids=set(),
+            )
+        row.refresh_from_db()
+        self.assertEqual(row.is_calculated, CalculationModel.IN_PROGRESS)
+
+    def test_08_114_precomputed_set_skips_the_registry_read(self):
+        """
+        Scenario 8.114: passing the set in avoids a per-model registry hit.
+        Given: a precomputed tracked_record_ids is supplied to the sweep.
+        When:  the sweep runs.
+        Then:  it uses the given set and does NOT call
+               tracked_calculation_record_ids() again — the caller computes once
+               and threads it through the per-model loop.
+        """
+        row = self._make_in_progress("precomputed")
+        with mock.patch.object(
+            supervisor, "tracked_calculation_record_ids",
+        ) as compute:
+            self._run_sweep(self._owned(row))
+        compute.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(row.is_calculated, CalculationModel.IN_PROGRESS)
