@@ -37,6 +37,13 @@ class CacheManager:
     """
     
     CACHE_TIMEOUT = 60 * 60 * 24 * 7  # Cache for one week
+    # Upper bound on the accumulated backfill buffer (~256 KB). The full log is
+    # always persisted in CalculationLog; this cache only serves the "recent
+    # history" backfill shown when the log panel opens, while newer lines keep
+    # arriving over the WebSocket stream. Bounding it keeps each read-modify-write
+    # in store_message O(cap) instead of growing without limit, which was OOM-ing
+    # the backend when the panel was opened on a long/heavy calculation.
+    MAX_CACHE_MESSAGE_CHARS = 256 * 1024
     # Use Redis cache when deployed OR when Celery is active.
     # LocMemCache is per-process, so Celery workers (separate processes)
     # cannot share cached calculation logs with the ASGI/Django server.
@@ -70,9 +77,18 @@ class CacheManager:
             # Get existing message from cache, append new message
             existing_message = cache.get(cache_key, "")
             updated_message = existing_message + "\n" + message if existing_message else message
-            
-            # Store updated message with timeout
-            cache.set(cache_key, updated_message)
+
+            # Bound the buffer so it can never grow without limit. Keep only the
+            # most recent tail, dropping the now-partial leading line so the
+            # backfill always starts on a clean line boundary.
+            if len(updated_message) > CacheManager.MAX_CACHE_MESSAGE_CHARS:
+                updated_message = updated_message[-CacheManager.MAX_CACHE_MESSAGE_CHARS:]
+                newline_index = updated_message.find("\n")
+                if newline_index != -1:
+                    updated_message = updated_message[newline_index + 1:]
+
+            # Store updated message with the configured one-week timeout.
+            cache.set(cache_key, updated_message, timeout=CacheManager.CACHE_TIMEOUT)
             
             logger.debug(f"Successfully stored message in cache with key: {cache_key}")
             return True
