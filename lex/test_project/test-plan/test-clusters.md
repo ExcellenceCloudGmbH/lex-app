@@ -151,6 +151,17 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.159 – 1.168. **Test file:** `lex/test_project/tests/init/test_1s_log_cleanup_and_lex_debug.py`. **Type:** U. **Status:** ✅ Complete (Session 75 — June 8). Letter note: 1r is an in-flight WIP batch (lex_view embed helper), so this batch took the next free letter 1s.
 
+### Batch 1t — `DISABLE_SERVER_SIDE_CURSORS` placement (production cursor crash)
+
+`lex/lex_app/settings.py` declared `DISABLE_SERVER_SIDE_CURSORS = True` at **module level**, where Django ignores it — the flag is only read from the per-database config dict (`connection.settings_dict`). In deployed environments behind the `cloud-sql-proxy-...-pooling` transaction-pooling proxy, PostgreSQL server-side (named) cursors therefore stayed enabled, and every `.iterator()` query (permission filter backend, list views, exports) raised `psycopg2.OperationalError: cursor "_django_curs_..." does not exist` because the `DECLARE` and a later `FETCH` were routed to different backend connections. Deterministic per request → no reload recovered, and the calculation-log panel never loaded from the DB. **Fix:** loop over `DATABASES` after the default is resolved and set `DISABLE_SERVER_SIDE_CURSORS=True` on every PostgreSQL-engine alias, so `.iterator()` falls back to pooling-safe client-side reads.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.169 | Flag set in every Postgres DB config dict | each PostgreSQL alias carries `DISABLE_SERVER_SIDE_CURSORS: True` inside its config dict — the only place Django reads it; guards against the module-level regression |
+| 1.170 | Live default connection honours the flag | `connections["default"].settings_dict` reports it True on PostgreSQL (Django defaults the key to False when absent, so the old placement surfaces here as False); engine-gated for local SQLite |
+
+**Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
+
 ---
 
 ## 2. CRUD via REST API

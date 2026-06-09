@@ -84,6 +84,20 @@
 | Coverage gain | negligible (settings is import-time; pins env-var-driven branches) |
 | Status | ✅ Complete (Session 75 — June 8) |
 
+### Batch 1t — `DISABLE_SERVER_SIDE_CURSORS` placement (production cursor crash) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.169 – 1.170 |
+| Type | U |
+| Files covered | `lex/lex_app/settings.py` (the flag was declared at module level, where Django ignores it; moved into each PostgreSQL `DATABASES` alias config dict — the only place `connection.settings_dict` reads it — so server-side cursors are actually disabled behind the `cloud-sql-proxy`/pgbouncer transaction-pooling proxy that otherwise causes `InvalidCursorName` on every `.iterator()`) |
+| Test file | `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py` |
+| Test classes | `TestCluster01t_DisableServerSideCursors` (1.169 every Postgres alias carries the flag in its config dict, 1.170 the live `connections["default"].settings_dict` honours it on Postgres / engine-gated for SQLite) |
+| Fixtures | none (introspects `settings.DATABASES` + `django.db.connections`) |
+| Tests landed | **2 pass / 0 fail in 0.09s** |
+| Coverage gain | negligible (settings is import-time; pins a config-placement contract) |
+| Status | ✅ Complete (Session 78 — June 9) |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)

@@ -385,6 +385,17 @@ if DATABASE_DEPLOYMENT_TARGET != "local":
 else:
     DATABASES["default"] = DATABASES["local"]
 
+# Django only honors DISABLE_SERVER_SIDE_CURSORS when it is set *inside* the
+# per-database config dict (it is read from connection.settings_dict), not as a
+# module-level setting. Server-side (named) cursors break behind a
+# transaction-pooling proxy (cloud-sql-proxy / pgbouncer): the DECLARE and a
+# later FETCH can land on different backend connections, raising
+# "cursor _django_curs_... does not exist". Disable them on every PostgreSQL
+# alias so .iterator() falls back to client-side reads.
+for _db_config in DATABASES.values():
+    if "postgresql" in _db_config.get("ENGINE", ""):
+        _db_config["DISABLE_SERVER_SIDE_CURSORS"] = True
+
 MIGRATION_MODULES = {}
 
 
