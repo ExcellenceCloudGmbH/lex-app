@@ -1,14 +1,10 @@
 import json
 from typing import Any, Awaitable, Callable, Dict
 
+from lex.lex_app.runtime_health import build_health_payload
+
 
 FAST_HEALTH_PATHS = frozenset({"/health", "/health/", "/api/health", "/api/health/"})
-_HEALTH_BODY = json.dumps({"status": "Healthy :)"}).encode("utf-8")
-_HEALTH_HEADERS = [
-    (b"content-type", b"application/json"),
-    (b"content-length", str(len(_HEALTH_BODY)).encode("ascii")),
-    (b"cache-control", b"no-store"),
-]
 
 
 def is_fast_health_path(path: str) -> bool:
@@ -34,11 +30,17 @@ async def health_asgi_app(
 ) -> None:
     # Consume request bodies so keep-alive connections remain in a clean state.
     await _drain_http_body(receive)
+    body = json.dumps(build_health_payload(), separators=(",", ":")).encode("utf-8")
+    headers = [
+        (b"content-type", b"application/json"),
+        (b"content-length", str(len(body)).encode("ascii")),
+        (b"cache-control", b"no-store"),
+    ]
     await send(
         {
             "type": "http.response.start",
             "status": 200,
-            "headers": _HEALTH_HEADERS,
+            "headers": headers,
         }
     )
-    await send({"type": "http.response.body", "body": _HEALTH_BODY})
+    await send({"type": "http.response.body", "body": body})

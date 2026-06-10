@@ -98,6 +98,20 @@
 | Coverage gain | negligible (settings is import-time; pins a config-placement contract) |
 | Status | ✅ Complete (Session 78 — June 9) |
 
+### Batch 1u — encrypted runtime metadata on health endpoint ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.171 – 1.178 |
+| Type | U + I |
+| Files covered | `lex/lex_app/runtime_health.py` (new — builds legacy health payload plus optional Fernet-encrypted runtime token derived from `LEX_API_KEY`, containing `lex_app_version`, `instance_commit_sha`, `commit_sha_source`); `lex/lex_app/fast_health.py` (production ASGI health path emits the same payload); `lex/lex_app/views.py` (Django health route emits the same payload); `lex/lex_app/apps.py` (old startup push hook removed) |
+| Test file | `lex/test_project/tests/init/test_1u_runtime_health_metadata.py` |
+| Test classes | `TestCluster01u_RuntimeHealthMetadata` (1.171 missing key keeps legacy payload; 1.172 deployed env adds decryptable token; 1.173 token hides plaintext values; 1.174 wrong key cannot decrypt; 1.175 encryption failure degrades to legacy health; 1.176 Django `/api/health` includes runtime; 1.177 fast ASGI `/api/health` includes runtime; 1.178 missing `COMMIT_SHA` is marked unknown) |
+| Fixtures | none (`patch.dict('os.environ', …)`, Django `Client`, direct ASGI send/receive harness, Fernet decrypt helper) |
+| Tests landed | **8 pass / 0 fail in 0.16s** (`python -m lex pytest lex/test_project/tests/init/test_1u_runtime_health_metadata.py -v`; Postgres test DB created and destroyed cleanly) |
+| Coverage gain | ~+0.1 % (small new module + health-path integration coverage) |
+| Status | ✅ Complete (Session 80 — supersedes Session 79 push design) |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)
@@ -696,8 +710,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
-
 
 
 

@@ -162,6 +162,12 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
+### 1u. encrypted runtime metadata on health endpoint ✅
+
+**Gap:** The IC instance-details panel needs to display the lex-app package version and customer-project commit SHA actually reported by the running pod. Reading IC's stored `image_version` / `commit_sha` is unreliable — a failed release Terraform apply can leave the DB on the attempted target while the old pod keeps serving traffic. Probing via `kubectl exec` is blocked by RBAC (`pods/exec` is not granted to the IC service account, and granting it is essentially "shell into any customer pod"). Solution: the public health endpoint keeps its legacy `{"status":"Healthy :)"}` contract but, when `LEX_API_KEY` exists, adds a Fernet-encrypted `runtime` token derived from that same per-instance key. The decrypted payload contains `lex_app_version`, `instance_commit_sha`, and `commit_sha_source`. The production ASGI fast-health path and Django health view share the same payload builder. Failures degrade to status-only so liveness can never be broken by metadata.
+
+**Scenario range:** 1.171 – 1.178. **Test file:** `lex/test_project/tests/init/test_1u_runtime_health_metadata.py`. **Type:** U + I. **Status:** ✅ Complete (Session 80 — supersedes Session 79 push design). Source: `lex/lex_app/runtime_health.py`, `lex/lex_app/fast_health.py`, `lex/lex_app/views.py`.
+
 ---
 
 ## 2. CRUD via REST API

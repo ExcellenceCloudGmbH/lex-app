@@ -120,7 +120,6 @@ class LexAppConfig(GenericAppConfig):
 
 
             asyncio.run(self.async_ready(generic_app_models))
-
     def register_models(self):
         """
         Override parent's register_models to filter out lex core models
