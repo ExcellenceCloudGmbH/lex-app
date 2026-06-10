@@ -24,6 +24,8 @@ from lex.core.mixins.CalculatedModelMixin import (
     ModelCombinationGenerator,
     _sync_streaming_enabled,
 )
+from lex.test_project.tests._e2e_test_case import E2ETestCase
+from lex.test_project.tests.calculations.models import ALL_MODELS, CombinatorialCalc
 
 pytestmark = pytest.mark.calculations
 
@@ -175,3 +177,35 @@ class TestCluster07p_StreamingFlag(SimpleTestCase):
         """Scenario 7.185: explicit 'true' -> streaming."""
         with mock.patch.dict(os.environ, {"LEX_SYNC_STREAMING_EXPANSION": "true"}):
             assert _sync_streaming_enabled() is True
+
+
+class TestCluster07p_SyncCreateEquivalence(E2ETestCase):
+    """create() in sync mode: streaming vs legacy produce identical saved rows."""
+
+    e2e_models = ALL_MODELS
+
+    def setUp(self):
+        super().setUp()
+        # Reset mutable class-level knobs between tests (same as 7g).
+        CombinatorialCalc._region_keys = ["US", "EU", "APAC"]
+        CombinatorialCalc._category_keys = ["A", "B"]
+        CombinatorialCalc.fail_for_region = None
+
+    def _run_and_fingerprint(self):
+        CombinatorialCalc.create()
+        rows = list(
+            CombinatorialCalc.objects.order_by("region", "category")
+            .values_list("region", "category", "name")
+        )
+        return rows
+
+    def test_7_186_sync_streaming_saves_same_rows_as_legacy(self):
+        """Scenario 7.186: streaming default vs flag-off legacy -> identical rows."""
+        with mock.patch.dict(os.environ, {"LEX_SYNC_STREAMING_EXPANSION": "false"}):
+            legacy_rows = self._run_and_fingerprint()
+        CombinatorialCalc.objects.all().delete()
+        with mock.patch.dict(os.environ, {"LEX_SYNC_STREAMING_EXPANSION": "true"}):
+            streaming_rows = self._run_and_fingerprint()
+        assert streaming_rows == legacy_rows
+        # 3 regions x 2 categories = 6 rows.
+        assert len(streaming_rows) == 6

@@ -1334,7 +1334,25 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
                 logger.debug(f"Parallelizable fields: {cls.parallelizable_fields}")
             if kwargs:
                 logger.debug(f"Field overrides provided: {list(kwargs.keys())}")
-            
+
+            # Sync-mode streaming short-circuit: when Celery is not active and
+            # streaming is enabled (default), expand depth-first and process one
+            # model at a time so peak memory is O(depth), not O(N). Celery mode
+            # and the flag-off legacy path fall through to the four-stage pipeline.
+            celery_active = (
+                os.getenv('CELERY_ACTIVE', "").lower() == 'true'
+                and hasattr(cls.calculate, 'delay')
+            )
+            if not celery_active and _sync_streaming_enabled():
+                logger.info(f"Sync streaming expansion for {cls.__name__}")
+                base_model = cls()
+                model_iter = ModelCombinationGenerator.generate_model_combinations_streaming(
+                    base_model, cls.defining_fields, kwargs
+                )
+                calc_and_save_streaming(model_iter, *args)
+                logger.info(f"Sync streaming expansion completed for {cls.__name__}")
+                return
+
             # Step 1: Generate all model combinations based on defining fields
             logger.debug(f"Step 1: Generating model combinations for {cls.__name__}")
             try:
