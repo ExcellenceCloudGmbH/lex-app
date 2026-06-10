@@ -118,6 +118,7 @@ class TestCluster07p_StreamingEquivalence(SimpleTestCase):
             )
         )
         assert _tuples(streamed, fields) == _tuples(legacy, fields)
+        assert len(streamed) == 6
 
     def test_7_181_empty_value_list_prunes_branch(self):
         """Scenario 7.181: a field returning [] for some parent prunes that branch."""
@@ -148,3 +149,4 @@ class TestCluster07p_StreamingEquivalence(SimpleTestCase):
             )
         )
         assert streamed == [base]
+        assert streamed[0] is base  # no-fields branch yields the base model itself, not a copy
