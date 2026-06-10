@@ -15,6 +15,7 @@ Run: python -m lex pytest lex/test_project/tests/calculations/test_7p_streaming_
 
 from __future__ import annotations
 
+import math
 import os
 import tracemalloc
 from unittest import mock
@@ -216,39 +217,45 @@ class TestCluster07p_StreamingMemoryBound(SimpleTestCase):
     """Streaming generator holds O(depth) models, not O(N), at peak."""
 
     def test_7_187_streaming_peak_is_bounded_not_linear(self):
-        """Scenario 7.187: peak live count stays small while N grows large.
+        """Scenario 7.187: streaming peak bytes stay far below legacy's as N grows.
 
-        We instrument the generator: at no point are more than (depth + small
-        constant) freshly-yielded models retained by the consumer. We prove it
-        by consuming lazily and asserting the generator never materializes the
-        full set — peak tracemalloc for a large N streaming consume stays far
-        below materializing the same N via the legacy list generator.
+        The legacy generator returns a fully-materialized list of all N models
+        (peak O(N) bytes); the streaming generator yields one root-to-leaf path
+        at a time and we drop each immediately (peak O(depth) bytes). We measure
+        each phase's peak with tracemalloc and assert the streaming peak is a
+        small fraction of the legacy peak — a guard against a future change that
+        accidentally materializes the full set.
         """
         fields = ["a", "b", "c"]
-        # 25 * 25 * 25 = 15625 combinations
         key_lists = {"a": list(range(25)), "b": list(range(25)), "c": list(range(25))}
+        # Combinations = product of per-field value counts (25 * 25 * 25).
+        expected_count = math.prod(len(key_lists[f]) for f in fields)
 
         base_legacy = _FakeCalcModel(key_lists=key_lists)
         tracemalloc.start()
-        legacy = ModelCombinationGenerator.generate_model_combinations(
-            base_legacy, fields, {}
-        )
-        _, legacy_peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
+        try:
+            legacy = ModelCombinationGenerator.generate_model_combinations(
+                base_legacy, fields, {}
+            )
+            _, legacy_peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
         legacy_count = len(legacy)
         del legacy
 
         base_stream = _FakeCalcModel(key_lists=key_lists)
         tracemalloc.start()
-        stream_count = 0
-        for _m in ModelCombinationGenerator.generate_model_combinations_streaming(
-            base_stream, fields, {}
-        ):
-            stream_count += 1  # consume + immediately drop (mimics save+release)
-        _, stream_peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
+        try:
+            stream_count = 0
+            for _m in ModelCombinationGenerator.generate_model_combinations_streaming(
+                base_stream, fields, {}
+            ):
+                stream_count += 1  # consume + immediately drop (mimics save+release)
+            _, stream_peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
 
-        assert stream_count == legacy_count == 15625
+        assert stream_count == legacy_count == expected_count
         # Streaming peak must be a small fraction of materializing all N.
         assert stream_peak < legacy_peak / 5, (
             f"streaming peak {stream_peak} not << legacy peak {legacy_peak}"
