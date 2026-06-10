@@ -4,8 +4,16 @@ Sized to N ~= 10k (22^3 = 10648). Measures tracemalloc peak for each path and
 asserts the produced fingerprint (ordered defining-field tuples) is identical.
 Pure-logic (no DB) so it isolates the expansion engine's memory cost.
 
-Run: DJANGO_SETTINGS_MODULE=lex_app.settings python -m lex run scripts/bench_sync_expansion.py
-(or invoke run_benchmark() from a pytest).
+Run (the `lex` CLI has no `run` subcommand, and the script needs django.setup()
+before importing CalculatedModelMixin, so bootstrap Django inline):
+
+    set -a && source .env && set +a
+    CELERY_ACTIVE=False PROJECT_ROOT="$(pwd)" DJANGO_SETTINGS_MODULE=lex_app.settings \\
+      python -c "import sys, os; sys.path.insert(0, os.path.join(os.getcwd(),'lex')); \\
+      import django; django.setup(); import runpy; \\
+      runpy.run_path('scripts/bench_sync_expansion.py', run_name='__main__')"
+
+(or invoke run_benchmark() from a pytest where Django is already configured).
 """
 
 from __future__ import annotations
@@ -61,6 +69,11 @@ def run_benchmark():
 
     base = _FakeCalcModel(key_lists=key_lists)
     tracemalloc.start()
+    # NOTE: the fingerprint list accumulates inside the tracemalloc window, so
+    # stream_peak overstates the generator's true working set (legacy builds its
+    # fingerprint AFTER stop()). This makes the reported reduction conservative —
+    # the clean generator-only bound is proven by test_7_187. See the
+    # 2026-06-10 report under docs/runs/.
     stream_fp = []
     n = 0
     for m in ModelCombinationGenerator.generate_model_combinations_streaming(
