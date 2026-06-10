@@ -162,12 +162,6 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
-### 1u. lex-app version reporter — instance pushes installed version to IC at startup ✅
-
-**Gap:** The IC instance-details panel needs to display the lex-app package version actually running in each customer pod. Reading IC's stored `image_version` is unreliable — a failed release Terraform apply leaves either a stale value (if save was guarded) or the *attempted target* value (which never actually deployed), and the existing pod-readiness auto-refresh can flip an `ERROR` instance back to `RUNNING` without correcting either. Probing the pod live via `kubectl exec` is blocked by RBAC (`pods/exec` is not granted to the IC service account, and granting it is essentially "shell into any customer pod"). Solution: the running customer instance reports its own `lex._version.__version__` to IC at startup over the already-existing instance→IC HTTP channel (env-injected `DOMAIN_BASE` + `LEX_API_KEY`, `Authorization: Api-Key`, same pattern as `LexAPI.send_email`). Each Python process pushes at most once (latch with documented `force=True` test escape), the push runs on a daemon thread so it cannot block server startup, and every failure path (env not deployed, IC unreachable, non-200) returns silently — pod startup must never fail because of version reporting. Older lex-app versions without this module simply don't push; IC keeps `lex_app_version=""` and the UI renders `Unknown`.
-
-**Scenario range:** 1.171 – 1.177. **Test file:** `lex/test_project/tests/init/test_1u_lex_app_version_reporter.py`. **Type:** U. **Status:** ✅ Complete (Session 79). Source: `lex/lex_app/report_lex_app_version.py` + hook in `lex/lex_app/apps.py`.
-
 ---
 
 ## 2. CRUD via REST API
