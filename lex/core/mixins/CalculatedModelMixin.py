@@ -498,6 +498,75 @@ class ModelCombinationGenerator:
                 model_class=model.__class__.__name__
             ) from e
 
+    @staticmethod
+    def generate_model_combinations_streaming(
+        base_model: 'CalculatedModelMixin',
+        defining_fields: List[str],
+        field_overrides: Dict[str, Any],
+    ):
+        """Depth-first streaming twin of generate_model_combinations.
+
+        Yields one fully-expanded model at a time. At most `depth` models
+        (root-to-leaf path) are alive at once, vs the legacy generator's N.
+        Mirrors _expand_models_for_field value-for-value and deepcopy-for-
+        value, and computes field values from the PARTIALLY-built model via
+        the same _get_field_values helper, so dependency-aware
+        get_selected_key_list semantics are identical. Field ordering matches
+        legacy: override fields first.
+        """
+        if not base_model:
+            raise ModelCombinationError(
+                "Base model cannot be None",
+                model_class=base_model.__class__.__name__ if base_model else "Unknown",
+            )
+
+        if not defining_fields:
+            yield base_model
+            return
+
+        ordered_defining_fields = sorted(
+            defining_fields,
+            key=lambda x: 0 if x in field_overrides.keys() else 1,
+        )
+        ordered_defining_fields = [
+            f.__str__().split('.')[-1] for f in ordered_defining_fields
+        ]
+
+        def _expand(model, field_index):
+            if field_index == len(ordered_defining_fields):
+                yield model
+                return
+            field_name = ordered_defining_fields[field_index]
+            try:
+                field_values = ModelCombinationGenerator._get_field_values(
+                    model, field_name, field_overrides
+                )
+            except ModelCombinationError:
+                raise
+            except Exception as field_error:
+                raise ModelCombinationError(
+                    f"Failed to expand defining field '{field_name}': {str(field_error)}",
+                    field_name=field_name,
+                    model_class=base_model.__class__.__name__,
+                ) from field_error
+
+            if not field_values:
+                # Empty value list prunes this branch (matches legacy `continue`).
+                return
+            if not isinstance(field_values, list):
+                raise ModelCombinationError(
+                    f"Field values must normalize to a list, got {type(field_values).__name__}",
+                    field_name=field_name,
+                    model_class=model.__class__.__name__,
+                )
+
+            for value in field_values:
+                model_copy = deepcopy(model)
+                setattr(model_copy, field_name, value)
+                yield from _expand(model_copy, field_index + 1)
+
+        yield from _expand(base_model, 0)
+
 
 class ModelClusterManager:
     """
