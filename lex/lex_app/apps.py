@@ -121,6 +121,16 @@ class LexAppConfig(GenericAppConfig):
 
             asyncio.run(self.async_ready(generic_app_models))
 
+        # Report the installed lex-app version to the LEX Instance Controller.
+        # No-op outside a deployed instance pod, runs in a daemon thread, and
+        # never raises — startup cannot be blocked or broken by IC issues.
+        # See lex.lex_app.report_lex_app_version for the full rationale.
+        try:
+            from lex.lex_app.report_lex_app_version import report_lex_app_version_to_ic
+            report_lex_app_version_to_ic()
+        except Exception:  # noqa: BLE001 - belt & braces; reporter is itself defensive
+            logger.exception("Failed to schedule lex-app version report to IC")
+
     def register_models(self):
         """
         Override parent's register_models to filter out lex core models

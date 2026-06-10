@@ -98,6 +98,20 @@
 | Coverage gain | negligible (settings is import-time; pins a config-placement contract) |
 | Status | ✅ Complete (Session 78 — June 9) |
 
+### Batch 1u — lex-app version reporter — instance pushes installed version to IC at startup ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.171 – 1.177 |
+| Type | U |
+| Files covered | `lex/lex_app/report_lex_app_version.py` (new — gated by deployed env vars, daemon-thread HTTP push to `POST /api/report_lex_app_version/`, once-per-process latch with `force=True` test escape, swallows network + non-200 errors); `lex/lex_app/apps.py` (`LexAppConfig.ready` schedules the push so it runs on every server startup) |
+| Test file | `lex/test_project/tests/init/test_1u_lex_app_version_reporter.py` |
+| Test classes | `TestCluster01u_LexAppVersionReporter` (1.171 not-deployed skips; 1.172 deployed first call schedules daemon thread targeting `_do_report`; 1.173 second call without force is guarded; 1.174 `force=True` bypasses guard; 1.175 `_do_report` posts correct URL + `Api-Key` header + body; 1.176 `requests.RequestException` is swallowed; 1.177 non-200 response is swallowed) |
+| Fixtures | none (`patch.dict('os.environ', …)` + `patch.object(reporter.threading, 'Thread')` + `patch.object(reporter.requests, 'post')`) |
+| Tests landed | **7 pass / 0 fail in 0.04s** (`python -m lex pytest`, Postgres test DB created and destroyed cleanly; pure-logic `SimpleTestCase` so the wrapper's DB setup is incidental) |
+| Coverage gain | ~+0.1 % (small new module; full surface enumeration covered) |
+| Status | ✅ Complete (Session 79) |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)
