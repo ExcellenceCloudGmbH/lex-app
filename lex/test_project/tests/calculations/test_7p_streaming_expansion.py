@@ -15,8 +15,6 @@ Run: python -m lex pytest lex/test_project/tests/calculations/test_7p_streaming_
 
 from __future__ import annotations
 
-import copy
-
 import pytest
 from django.test import SimpleTestCase
 from lex.core.mixins.CalculatedModelMixin import ModelCombinationGenerator
