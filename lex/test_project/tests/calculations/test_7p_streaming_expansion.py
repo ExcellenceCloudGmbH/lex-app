@@ -74,3 +74,77 @@ class TestCluster07p_StreamingEquivalence(SimpleTestCase):
 
         assert _tuples(streamed, fields) == _tuples(legacy, fields)
         assert len(streamed) == 6
+
+    def test_7_179_dependency_aware_fields_match_legacy(self):
+        """Scenario 7.179: a field whose values depend on an earlier field.
+
+        product values depend on the already-set region — exercises the DFS
+        trap. Streaming must see the partially-built model exactly as legacy.
+        """
+        fields = ["region", "product"]
+        key_lists = {
+            "region": ["US", "EU"],
+            "product": lambda m: (
+                ["us-only"] if getattr(m, "region", None) == "US" else ["eu-1", "eu-2"]
+            ),
+        }
+        base_legacy = _FakeCalcModel(key_lists=key_lists)
+        legacy = ModelCombinationGenerator.generate_model_combinations(
+            base_legacy, fields, {}
+        )
+        base_stream = _FakeCalcModel(key_lists=key_lists)
+        streamed = list(
+            ModelCombinationGenerator.generate_model_combinations_streaming(
+                base_stream, fields, {}
+            )
+        )
+        assert _tuples(streamed, fields) == _tuples(legacy, fields)
+        # US -> 1 product, EU -> 2 products = 3 total
+        assert len(streamed) == 3
+
+    def test_7_180_field_overrides_match_legacy(self):
+        """Scenario 7.180: override values + ordering (override fields first)."""
+        fields = ["region", "product"]
+        key_lists = {"region": ["US", "EU", "APAC"], "product": ["A"]}
+        overrides = {"product": ["X", "Y"]}
+        base_legacy = _FakeCalcModel(key_lists=key_lists)
+        legacy = ModelCombinationGenerator.generate_model_combinations(
+            base_legacy, fields, overrides
+        )
+        base_stream = _FakeCalcModel(key_lists=key_lists)
+        streamed = list(
+            ModelCombinationGenerator.generate_model_combinations_streaming(
+                base_stream, fields, overrides
+            )
+        )
+        assert _tuples(streamed, fields) == _tuples(legacy, fields)
+
+    def test_7_181_empty_value_list_prunes_branch(self):
+        """Scenario 7.181: a field returning [] for some parent prunes that branch."""
+        fields = ["region", "product"]
+        key_lists = {
+            "region": ["US", "EU"],
+            "product": lambda m: [] if getattr(m, "region", None) == "EU" else ["A", "B"],
+        }
+        base_legacy = _FakeCalcModel(key_lists=key_lists)
+        legacy = ModelCombinationGenerator.generate_model_combinations(
+            base_legacy, fields, {}
+        )
+        base_stream = _FakeCalcModel(key_lists=key_lists)
+        streamed = list(
+            ModelCombinationGenerator.generate_model_combinations_streaming(
+                base_stream, fields, {}
+            )
+        )
+        assert _tuples(streamed, fields) == _tuples(legacy, fields)
+        assert len(streamed) == 2  # only US -> A, US -> B
+
+    def test_7_182_no_defining_fields_yields_single_base(self):
+        """Scenario 7.182: empty defining_fields yields exactly the base model."""
+        base = _FakeCalcModel()
+        streamed = list(
+            ModelCombinationGenerator.generate_model_combinations_streaming(
+                base, [], {}
+            )
+        )
+        assert streamed == [base]
