@@ -150,3 +150,27 @@ class TestCluster07p_StreamingEquivalence(SimpleTestCase):
         )
         assert streamed == [base]
         assert streamed[0] is base  # no-fields branch yields the base model itself, not a copy
+
+
+import os
+from unittest import mock
+from lex.core.mixins.CalculatedModelMixin import _sync_streaming_enabled
+
+
+class TestCluster07p_StreamingFlag(SimpleTestCase):
+    """LEX_SYNC_STREAMING_EXPANSION valve: default on, opt-out to legacy."""
+
+    def test_7_183_flag_default_on(self):
+        """Scenario 7.183: unset env -> streaming enabled (default on)."""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            assert _sync_streaming_enabled() is True
+
+    def test_7_184_flag_false_disables(self):
+        """Scenario 7.184: explicit 'false' -> legacy materialized path."""
+        with mock.patch.dict(os.environ, {"LEX_SYNC_STREAMING_EXPANSION": "false"}):
+            assert _sync_streaming_enabled() is False
+
+    def test_7_185_flag_true_enables(self):
+        """Scenario 7.185: explicit 'true' -> streaming."""
+        with mock.patch.dict(os.environ, {"LEX_SYNC_STREAMING_EXPANSION": "true"}):
+            assert _sync_streaming_enabled() is True

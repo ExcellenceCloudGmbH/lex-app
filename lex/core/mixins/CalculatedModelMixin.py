@@ -989,6 +989,56 @@ def calc_and_save_sync(models, *args):
     logger.info(f"Synchronous processing completed successfully: {model_count} models processed")
 
 
+def _sync_streaming_enabled() -> bool:
+    """Whether sync-mode expansion streams (default) or materializes (legacy).
+
+    Default ON: streaming is the memory-safe path and the whole point of the
+    fix. Set LEX_SYNC_STREAMING_EXPANSION=false for a one-line rollback to the
+    legacy materialized path without a redeploy.
+    """
+    return os.getenv("LEX_SYNC_STREAMING_EXPANSION", "true").lower() != "false"
+
+
+def calc_and_save_streaming(model_iter, *args):
+    """Streaming sync consumer: prepare -> calculate -> save -> release, per model.
+
+    Consumes the streaming combination generator one model at a time so peak
+    memory is O(depth), not O(N). Per yielded model it runs the same stage-2
+    prepare (delete_models_with_same_defining_fields) and the same
+    calculate+save body as calc_and_save_sync, then drops the reference.
+    """
+    from lex.core.models.CalculationModel import calculation_execution_context
+    processed = 0
+    for i, model in enumerate(model_iter):
+        if model is None:
+            logger.warning(f"Streaming model {i + 1} is None, skipping")
+            continue
+        # Stage-2 prepare inline (dedup + pk reset), matching the legacy
+        # _prepare_models_for_processing per-model step.
+        prepared = model.delete_models_with_same_defining_fields()
+        try:
+            with calculation_execution_context():
+                try:
+                    prepared.lex_func()(*args)
+                except Exception as calc_error:
+                    raise CalculatedModelError(
+                        f"Calculation failed for streaming model {i + 1}: {str(calc_error)}",
+                        model_class=prepared.__class__.__name__,
+                        model_index=i,
+                    ) from calc_error
+                prepared.save()
+        except CalculatedModelError:
+            raise
+        except Exception as save_error:
+            raise CalculatedModelError(
+                f"Save failed for streaming model {i + 1}: {save_error}",
+                model_class=prepared.__class__.__name__,
+                model_index=i,
+            ) from save_error
+        processed += 1
+    logger.info(f"Streaming sync processing completed: {processed} models processed")
+
+
 class CalculatedModelMixinMeta(ModelBase):
     def __new__(cls, name, bases, attrs, **kwargs):
         if 'Meta' not in attrs:
