@@ -15,9 +15,15 @@ Run: python -m lex pytest lex/test_project/tests/calculations/test_7p_streaming_
 
 from __future__ import annotations
 
+import os
+from unittest import mock
+
 import pytest
 from django.test import SimpleTestCase
-from lex.core.mixins.CalculatedModelMixin import ModelCombinationGenerator
+from lex.core.mixins.CalculatedModelMixin import (
+    ModelCombinationGenerator,
+    _sync_streaming_enabled,
+)
 
 pytestmark = pytest.mark.calculations
 
@@ -150,11 +156,6 @@ class TestCluster07p_StreamingEquivalence(SimpleTestCase):
         )
         assert streamed == [base]
         assert streamed[0] is base  # no-fields branch yields the base model itself, not a copy
-
-
-import os
-from unittest import mock
-from lex.core.mixins.CalculatedModelMixin import _sync_streaming_enabled
 
 
 class TestCluster07p_StreamingFlag(SimpleTestCase):
