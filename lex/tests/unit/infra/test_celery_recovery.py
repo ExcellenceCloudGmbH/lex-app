@@ -229,6 +229,43 @@ class TaskRevokedHandlerTests(SimpleTestCase):
         deregister.assert_not_called()
 
 
+class RequeueRoutingInvariantTests(SimpleTestCase):
+    """Recovered tasks must go to their original (main) queue, never the
+    'recovery' queue. This is what lets KEDA scale real workers while the
+    recovery pod stays isolated on -Q recovery."""
+
+    def test_requeue_uses_payload_queue_not_recovery_queue(self):
+        app = _fake_app()
+        with mock.patch.object(supervisor, "_requeue_grace_seconds", return_value=60), \
+             mock.patch.object(supervisor, "_default_queue", return_value="main-q"), \
+             mock.patch.object(registry, "grant_grace"), \
+             mock.patch.object(registry, "persist_payload"):
+            supervisor._requeue(
+                app,
+                "task-1",
+                {"name": "calc_and_save", "args": (), "kwargs": {},
+                 "queue": "main-q", "retries": 0},
+            )
+        self.assertEqual(app.send_task.call_count, 1)
+        _, called_kwargs = app.send_task.call_args
+        self.assertEqual(called_kwargs["queue"], "main-q")
+        self.assertNotEqual(called_kwargs["queue"], "recovery")
+
+    def test_requeue_falls_back_to_default_main_queue_when_payload_lacks_queue(self):
+        app = _fake_app()
+        with mock.patch.object(supervisor, "_requeue_grace_seconds", return_value=60), \
+             mock.patch.object(supervisor, "_default_queue", return_value="main-q"), \
+             mock.patch.object(registry, "grant_grace"), \
+             mock.patch.object(registry, "persist_payload"):
+            supervisor._requeue(
+                app,
+                "task-2",
+                {"name": "calc_and_save", "args": (), "kwargs": {}, "retries": 0},
+            )
+        _, called_kwargs = app.send_task.call_args
+        self.assertEqual(called_kwargs["queue"], "main-q")
+
+
 class BeatScheduleWiringTests(SimpleTestCase):
     """The beat schedule must reference the actually-registered sweep task,
     and that task must be excluded from heartbeat tracking. A drift here means
