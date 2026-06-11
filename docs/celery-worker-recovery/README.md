@@ -208,3 +208,9 @@ one per instance via the Helm value `workers.recoveryDriver`:
 Both preserve the non-circular property (the scan runs in an always-on pod, not
 in a scale-to-0 worker). Run exactly one; running both is safe (per-task Redis
 lock) but wasteful.
+
+> **Prerequisite for `beat`:** the `DatabaseScheduler` reads its schedule from
+> `django_celery_beat` tables, so that app's migrations must be applied (run the
+> backend `migrate` once) before the `lex-recovery-beat` pod starts — otherwise
+> it crash-loops on missing tables. The `supervisor` driver has no such
+> requirement.
