@@ -519,6 +519,23 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8y — Initial-data-upload calculations honour the normal dispatch contract
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.116 – 8.120 |
+| Type | I (real `CalculationModel` rows driven through the real seed loader) |
+| Files covered | `lex/lex_app/tests/ProcessAdminTestCase.py` (`setUpCloudStorage` seed loader), `lex/core/models/CalculationModel.py` (`calculate_hook` / `should_use_celery` / `dispatch_calculation_task`), `lex/lex_app/celery_tasks.py` (`calc_and_save`). **Tests-only** — verifies existing behaviour; no source change. A seeded `CalculationModel` is a *root* calculation and already routes through `calculate_hook`, so the "every root calc dispatches as a job when `CELERY_ACTIVE=true`, decorator-optional" intent (PR #544) is honoured during initial-data load via the same path as a UI/REST calc |
+| Test file | `lex/test_project/tests/celery_async/test_8y_initial_data_calc_dispatch.py` |
+| Test classes | `TestCluster08y_InitialDataCalculationDispatch` (**`E2ETestCase`**, `e2e_models=[CelerySyncCalc]`): 8.116 undecorated seed calc + `CELERY_ACTIVE`/reachable broker + no scope ⇒ dispatched via generic `calc_and_save`, not inline / 8.117 same under an explicit `WaitForTasks` scope (MQ/Worker `async_ready` branch) ⇒ still dispatched (branch parity) / 8.118 `CELERY_ACTIVE` off ⇒ synchronous in-process fallback, no dispatch / 8.119 `CELERY_ACTIVE=true` but broker unreachable ⇒ `should_use_celery` False ⇒ sync fallback / 8.120 seed object without `is_calculated=IN_PROGRESS` ⇒ not a calc trigger (no dispatch, no inline run, row stays `NOT_CALCULATED`) |
+| Fixtures | none — drives the real `ProcessAdminTestCase.setUpCloudStorage` with an in-memory seed plan (`get_test_data` is the file-IO boundary); `unittest.mock` pins the Celery decision boundary (`CELERY_ACTIVE` env + `celery.current_app.control.inspect`) and spies the dispatch (`calc_and_save`) vs. sync (`execute_calculation_sync`) seams; reuses the existing `CelerySyncCalc` E2E model |
+| Tests landed | **5 pass / 0 fail** (8.116–8.120); full `celery_async` suite 121 pass / 4 skip — no regressions |
+| Coverage gain | exercises `calculate_hook` → `dispatch_calculation_task` / sync-fallback branches reached **through the initial-data seed loader** (`setUpCloudStorage`), an integration path not previously covered |
+| Prereqs | needs a Postgres/SQLite test DB with the `CelerySyncCalc` schema (provided by `E2ETestCase` schema-editor table creation); broker-free (boundary mocked) |
+| Status | ✅ Complete — tests-only + plan sync in one change |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)
