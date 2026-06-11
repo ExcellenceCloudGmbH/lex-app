@@ -401,6 +401,24 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 7q — Calc-path skips per-save initial-state re-baseline (memory-pin fix) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.188 – 7.192 |
+| Type | U (registration gate, pure logic) + I (E2E request-path + calc-path) |
+| Files covered | `lex/core/models/LexModel.py` (`_register_initial_state_reset`, gated on `_in_calculation_execution`) |
+| Test file | `lex/test_project/tests/calculations/test_7q_calc_save_initial_state_pin.py` |
+| Test classes | `TestCluster07q_RegistrationGate` (7.188–7.189), `TestCluster07q_RequestPathRebaseline` (7.190), `TestCluster07q_CalcPathPinBounded` (7.191–7.192) |
+| Fixtures | existing `FKAbortTarget` (plain LexModel) + `CombinatorialCalc` E2E model (reused, no new model) |
+| Tests landed | 5 pass / 0 fail |
+| Coverage gain | the new gate branch (calc-path skip + request-path register) |
+| Status | ✅ Complete (Session 80 — June 11) |
+| Note | Backend memory fix: `LexModel.save()` no longer queues `on_commit(self._reset_initial_state)` for saves issued inside a calculation. Those callbacks never drained until the outer atomic committed, pinning every instance + its `_initial_state` snapshot → O(N) retained memory (the v2 calc-memory regression vs v1). Safe because the re-baseline never fires mid-calc anyway and calc instances are write-once-discarded. Benchmark: `scripts/bench_save_oncommit_memory.py`. |
+
+
+---
+
 ## Cluster 8 — Celery & Async (existing 8a–8g)
 
 ### Batch 8h — Dispatcher & local scheduler
