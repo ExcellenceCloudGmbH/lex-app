@@ -227,3 +227,33 @@ class TaskRevokedHandlerTests(SimpleTestCase):
             heartbeat.on_task_revoked(request=None)
             heartbeat.on_task_revoked(request=types.SimpleNamespace(id=None))
         deregister.assert_not_called()
+
+
+class BeatScheduleWiringTests(SimpleTestCase):
+    """The beat schedule must reference the actually-registered sweep task,
+    and that task must be excluded from heartbeat tracking. A drift here means
+    beat enqueues a task name no worker has registered -> recovery silently
+    never runs under the beat-driven driver."""
+
+    def test_schedule_task_name_matches_registered_sweep(self):
+        from django.conf import settings as dj_settings
+
+        # The registered task name (source of truth) lives on the @shared_task.
+        registered_name = supervisor.sweep_dead_workers.name
+        self.assertEqual(
+            registered_name,
+            "lex.lex_app.celery_recovery.supervisor.sweep_dead_workers",
+        )
+
+        schedule = getattr(dj_settings, "CELERY_BEAT_SCHEDULE", {})
+        entry = schedule.get("lex-celery-recovery-sweep")
+        self.assertIsNotNone(
+            entry, "lex-celery-recovery-sweep entry missing from CELERY_BEAT_SCHEDULE"
+        )
+        self.assertEqual(entry["task"], registered_name)
+
+    def test_registered_sweep_is_excluded_from_heartbeat_tracking(self):
+        self.assertIn(
+            supervisor.sweep_dead_workers.name,
+            heartbeat._UNTRACKED_TASK_NAMES,
+        )

@@ -552,7 +552,7 @@ if LEX_TASK_RECOVERY_ENABLED:
     CELERY_BEAT_SCHEDULE = {
         **(globals().get("CELERY_BEAT_SCHEDULE") or {}),
         "lex-celery-recovery-sweep": {
-            "task": "lex.lex_app.celery_recovery.tasks.sweep_dead_workers",
+            "task": "lex.lex_app.celery_recovery.supervisor.sweep_dead_workers",
             "schedule": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
             "options": {"expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL)},
         },
