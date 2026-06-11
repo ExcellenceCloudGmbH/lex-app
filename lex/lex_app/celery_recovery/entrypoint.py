@@ -54,22 +54,18 @@ def main() -> None:
 def beat_main(argv: Optional[List[str]] = None) -> None:
     """Launch an embedded-beat worker bound to the 'recovery' queue.
 
-    Uses ``app.worker_main`` so the already-imported Celery app is reused (no
-    ``-A`` discovery, which is fragile in this image). Concurrency 1: the only
-    work on this queue is the lightweight sweep; the heavy recovered tasks run
-    on the autoscaled main-queue workers, not here.
-
-    Import style note: we import via ``from lex.lex_app import celery as
-    celery_mod`` (not ``from lex.lex_app.celery import app``) so that we
-    resolve the Celery ``app`` through the package attribute that the
-    ``lex_app.__init__`` already set up, rather than triggering a fresh module
-    import of ``lex.lex_app.celery`` as a separate sys.modules entry. This
-    ensures the ``app`` object is identical to the one the caller has a
-    reference to, which is required for correct mock interception in tests.
+    Obtains the Celery app via ``supervisor._get_app()`` — the same configured
+    app the supervisor and ``_requeue`` use — so there is exactly one app
+    object, and launches via ``app.worker_main`` to avoid fragile ``-A``
+    discovery (the worker image's ``celery -A`` target is not in this repo).
+    Concurrency 1: the only work on this queue is the lightweight sweep; the
+    heavy recovered tasks run on the autoscaled main-queue workers, not here.
     """
     _bootstrap_django()
 
-    from lex.lex_app import celery as celery_mod
+    from lex.lex_app.celery_recovery import supervisor
+
+    app = supervisor._get_app()
 
     worker_argv = [
         "worker",
@@ -84,7 +80,7 @@ def beat_main(argv: Optional[List[str]] = None) -> None:
         "info",
         *(argv if argv is not None else sys.argv[1:]),
     ]
-    celery_mod.app.worker_main(worker_argv)
+    app.worker_main(worker_argv)
 
 
 if __name__ == "__main__":

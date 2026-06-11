@@ -326,16 +326,16 @@ class RecoveryBeatEntrypointTests(SimpleTestCase):
     the 'recovery' queue with the django_celery_beat DatabaseScheduler."""
 
     def test_beat_main_invokes_worker_main_with_embedded_beat_on_recovery_queue(self):
-        from lex.lex_app.celery_recovery import entrypoint
-        from lex.lex_app import celery as celery_module
+        from lex.lex_app.celery_recovery import entrypoint, supervisor
 
-        with mock.patch.object(celery_module.app, "worker_main") as worker_main:
+        app = supervisor._get_app()
+        with mock.patch.object(app, "worker_main") as worker_main:
             entrypoint.beat_main(argv=[])
 
         self.assertEqual(worker_main.call_count, 1)
         (passed_argv,), _ = worker_main.call_args
         self.assertEqual(passed_argv[0], "worker")
-        self.assertIn("-B", passed_argv)                 # embedded beat
+        self.assertIn("-B", passed_argv)
         self.assertIn("-Q", passed_argv)
         q_index = passed_argv.index("-Q")
         self.assertEqual(passed_argv[q_index + 1], "recovery")
