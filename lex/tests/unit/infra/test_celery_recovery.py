@@ -260,3 +260,25 @@ class BeatScheduleWiringTests(SimpleTestCase):
             supervisor.sweep_dead_workers.name,
             heartbeat._UNTRACKED_TASK_NAMES,
         )
+
+    def test_sweep_is_routed_to_dedicated_recovery_queue(self):
+        from django.conf import settings as dj_settings
+
+        entry = dj_settings.CELERY_BEAT_SCHEDULE["lex-celery-recovery-sweep"]
+        self.assertEqual(
+            entry["options"].get("queue"),
+            "recovery",
+            "sweep must target the dedicated 'recovery' queue, not the main "
+            "KEDA-watched queue",
+        )
+
+    def test_sweep_queue_differs_from_main_default_queue(self):
+        from django.conf import settings as dj_settings
+
+        entry = dj_settings.CELERY_BEAT_SCHEDULE["lex-celery-recovery-sweep"]
+        self.assertNotEqual(
+            entry["options"].get("queue"),
+            getattr(dj_settings, "CELERY_TASK_DEFAULT_QUEUE", "celery"),
+            "the recovery sweep queue must be distinct from the main queue so "
+            "it never pollutes the KEDA scaling signal",
+        )
