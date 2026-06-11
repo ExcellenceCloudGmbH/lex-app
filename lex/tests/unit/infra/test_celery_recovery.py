@@ -319,3 +319,29 @@ class BeatScheduleWiringTests(SimpleTestCase):
             "the recovery sweep queue must be distinct from the main queue so "
             "it never pollutes the KEDA scaling signal",
         )
+
+
+class RecoveryBeatEntrypointTests(SimpleTestCase):
+    """lex-recovery-beat must launch an embedded-beat worker that consumes ONLY
+    the 'recovery' queue with the django_celery_beat DatabaseScheduler."""
+
+    def test_beat_main_invokes_worker_main_with_embedded_beat_on_recovery_queue(self):
+        from lex.lex_app.celery_recovery import entrypoint
+        from lex.lex_app import celery as celery_module
+
+        with mock.patch.object(celery_module.app, "worker_main") as worker_main:
+            entrypoint.beat_main(argv=[])
+
+        self.assertEqual(worker_main.call_count, 1)
+        (passed_argv,), _ = worker_main.call_args
+        self.assertEqual(passed_argv[0], "worker")
+        self.assertIn("-B", passed_argv)                 # embedded beat
+        self.assertIn("-Q", passed_argv)
+        q_index = passed_argv.index("-Q")
+        self.assertEqual(passed_argv[q_index + 1], "recovery")
+        self.assertIn("--scheduler", passed_argv)
+        s_index = passed_argv.index("--scheduler")
+        self.assertEqual(
+            passed_argv[s_index + 1],
+            "django_celery_beat.schedulers:DatabaseScheduler",
+        )
