@@ -392,6 +392,7 @@ def wait_for_keycloak_setup_v2(state: str, timeout_seconds: int = 900, poll_inte
         if not get_missing_keycloak_env():
             return {
                 "KEYCLOAK_URL": os.getenv("KEYCLOAK_URL", ""),
+                "KEYCLOAK_INTERNAL_URL": os.getenv("KEYCLOAK_INTERNAL_URL", ""),
                 "KEYCLOAK_REALM": os.getenv("KEYCLOAK_REALM", "") or os.getenv("KEYCLOAK_REALM_NAME", ""),
                 "OIDC_RP_CLIENT_ID": os.getenv("OIDC_RP_CLIENT_ID", ""),
                 "OIDC_RP_CLIENT_SECRET": os.getenv("OIDC_RP_CLIENT_SECRET", ""),

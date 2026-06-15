@@ -46,6 +46,12 @@ def _extract_bootstrap_env_values(data: dict) -> dict[str, str]:
                 _mapping_value(client_data, "keycloak_url", "keycloakUrl", "url"),
             )
         ),
+        "KEYCLOAK_INTERNAL_URL": str(
+            _first_present(
+                _mapping_value(data, "keycloak_internal_url", "keycloakInternalUrl", "KEYCLOAK_INTERNAL_URL"),
+                _mapping_value(client_data, "keycloak_internal_url", "keycloakInternalUrl", "internal_url"),
+            )
+        ),
         "KEYCLOAK_REALM": str(
             _first_present(
                 _mapping_value(data, "realm", "realm_name", "realmName", "KEYCLOAK_REALM", "KEYCLOAK_REALM_NAME"),
@@ -75,7 +81,7 @@ def _extract_bootstrap_env_values(data: dict) -> dict[str, str]:
 
 def build_env_lines(data: dict) -> list[str]:
     env_values = _extract_bootstrap_env_values(data)
-    return [f"{key}={_format_env_value(value)}" for key, value in env_values.items()]
+    return [f"{key}={_format_env_value(value)}" for key, value in env_values.items() if value]
 
 
 class CallbackHandler(BaseHTTPRequestHandler):

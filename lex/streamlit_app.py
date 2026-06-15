@@ -26,7 +26,7 @@ _TOKEN_REFRESH_LOCK = threading.Lock()
 st.set_page_config(layout="wide")
 
 def _oidc_token_endpoint() -> str:
-    base = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
+    base = (os.getenv("KEYCLOAK_INTERNAL_URL") or os.getenv("KEYCLOAK_URL") or "").rstrip("/")
     realm = os.getenv("KEYCLOAK_REALM") or ""
     return f"{base}/realms/{realm}/protocol/openid-connect/token"
 
@@ -284,12 +284,13 @@ def decode_jwt_claims_no_verify(token: str) -> Dict:
 
 def get_user_info(access_token: str):
     keycloak_url = os.getenv("KEYCLOAK_URL")
+    keycloak_internal_url = os.getenv("KEYCLOAK_INTERNAL_URL") or keycloak_url
     realm_name = os.getenv("KEYCLOAK_REALM")
 
-    if not keycloak_url or not realm_name:
-        return None
+    if not keycloak_internal_url or not realm_name:
+        return {}
 
-    userinfo_url = f"{keycloak_url}/realms/{realm_name}/protocol/openid-connect/userinfo"
+    userinfo_url = f"{keycloak_internal_url}/realms/{realm_name}/protocol/openid-connect/userinfo"
     try:
         headers = {"Authorization": f"Bearer {access_token}"}
         response = requests.get(userinfo_url, headers=headers, timeout=10)

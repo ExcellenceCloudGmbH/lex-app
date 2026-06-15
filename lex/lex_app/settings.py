@@ -580,16 +580,17 @@ CORS_ORIGIN_ALLOW_ALL = True
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = None
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL")
+KEYCLOAK_INTERNAL_URL = os.getenv("KEYCLOAK_INTERNAL_URL", KEYCLOAK_URL)
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM")
 OIDC_RP_CLIENT_ID = os.getenv("OIDC_RP_CLIENT_ID")
 OIDC_RP_CLIENT_SECRET = os.getenv("OIDC_RP_CLIENT_SECRET")
 OIDC_RP_CLIENT_UUID = os.getenv("OIDC_RP_CLIENT_UUID")
 if OIDC_ENABLED:
     OIDC_OP_USER_ENDPOINT = (
-        f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo"
+        f"{KEYCLOAK_INTERNAL_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/userinfo"
     )
     OIDC_OP_DISCOVERY_DOCUMENT_URL = (
-        f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+        f"{KEYCLOAK_INTERNAL_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
     )
     AUTHENTICATION_BACKENDS = (
         "oauth2_authcodeflow.auth.AuthenticationBackend",

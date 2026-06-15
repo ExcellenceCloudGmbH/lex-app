@@ -111,6 +111,7 @@ JWT_VERIFY_ISSUER = _env_bool("JWT_VERIFY_ISSUER", False)
 JWT_LEEWAY_SECONDS = int(os.getenv("JWT_LEEWAY_SECONDS", "2"))
 
 KEYCLOAK_URL = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
+KEYCLOAK_INTERNAL_URL = (os.getenv("KEYCLOAK_INTERNAL_URL") or KEYCLOAK_URL).rstrip("/")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM") or ""
 EXPECTED_ISSUER = os.getenv("OIDC_ISSUER") or (
     f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}" if KEYCLOAK_URL and KEYCLOAK_REALM else ""
@@ -124,7 +125,7 @@ oauth.register(
     name="oidc",
     client_id=os.getenv("OIDC_RP_CLIENT_ID"),
     client_secret=os.getenv("OIDC_RP_CLIENT_SECRET"),
-    server_metadata_url=f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration",
+    server_metadata_url=f"{KEYCLOAK_INTERNAL_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration",
     client_kwargs={"scope": "openid email profile", "verify": OIDC_VERIFY_SSL},
 )
 
@@ -267,7 +268,7 @@ async def _get_oidc_endpoints() -> Dict[str, str]:
     global _OIDC_META
     if _OIDC_META is None:
         meta_url = getattr(oauth.oidc, "server_metadata_url", None) or \
-                   f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+                   f"{KEYCLOAK_INTERNAL_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
         async with httpx.AsyncClient(timeout=10.0, verify=OIDC_VERIFY_SSL) as client:
             try:
                 r = await client.get(meta_url)
@@ -382,11 +383,11 @@ def _get_jwks_sync() -> Optional[Dict[str, Any]]:
     if _JWKS_CACHE and (time.time() - _JWKS_CACHE_TIME) < _JWKS_CACHE_TTL:
         return _JWKS_CACHE
 
-    if not KEYCLOAK_URL or not KEYCLOAK_REALM:
-        print("[proxy] JWKS fetch skipped: KEYCLOAK_URL or KEYCLOAK_REALM not set")
+    if not KEYCLOAK_INTERNAL_URL or not KEYCLOAK_REALM:
+        print("[proxy] JWKS fetch skipped: KEYCLOAK_INTERNAL_URL or KEYCLOAK_REALM not set")
         return None
 
-    certs_url = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
+    certs_url = f"{KEYCLOAK_INTERNAL_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
     try:
         with httpx.Client(timeout=10.0, verify=OIDC_VERIFY_SSL) as client:
             resp = client.get(certs_url)

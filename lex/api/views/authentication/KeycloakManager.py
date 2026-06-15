@@ -99,7 +99,7 @@ class KeycloakManager:
 
         try:
             self.conn = KeycloakOpenIDConnection(
-                server_url=os.getenv("KEYCLOAK_URL"),
+                server_url=os.getenv("KEYCLOAK_INTERNAL_URL", os.getenv("KEYCLOAK_URL")),
                 client_id=os.getenv("OIDC_RP_CLIENT_ID"),
                 realm_name=self.realm_name,
                 client_secret_key=os.getenv("OIDC_RP_CLIENT_SECRET"),
