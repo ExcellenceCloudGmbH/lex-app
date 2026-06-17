@@ -104,11 +104,12 @@ class TestCluster09d_Mutators(_StoreTestBase):
 
     # 9.12 -------------------------------------------------------------
     def test_9_12_mark_in_progress_persists_full_payload(self) -> None:
-        """All five fields land on the entry verbatim."""
+        """All metadata fields land on the entry verbatim."""
         ActiveCalculationStateStore.mark_in_progress(
             record_id="simpleitem_42",
             calculation_id="calc-xyz",
             record="SimpleItem #42",
+            model_name="SimpleItem",
             model_label="lex_app.SimpleItem",
             record_pk=42,
         )
@@ -116,6 +117,7 @@ class TestCluster09d_Mutators(_StoreTestBase):
         self.assertEqual(entry["record_id"], "simpleitem_42")
         self.assertEqual(entry["record"], "SimpleItem #42")
         self.assertEqual(entry["calculation_id"], "calc-xyz")
+        self.assertEqual(entry["model_name"], "SimpleItem")
         self.assertEqual(entry["model_label"], "lex_app.SimpleItem")
         # int pk normalised to str so JSON-serializable downstream
         self.assertEqual(entry["record_pk"], "42")
@@ -137,6 +139,7 @@ class TestCluster09d_Mutators(_StoreTestBase):
         # ``record`` falls back to record_id when not supplied.
         self.assertEqual(entry["record"], "x_1")
         self.assertEqual(entry["calculation_id"], "")
+        self.assertEqual(entry["model_name"], "")
         self.assertEqual(entry["model_label"], "")
         self.assertEqual(entry["record_pk"], "")
 
@@ -473,6 +476,9 @@ class TestCluster09d_SnapshotAndPrune(_StoreTestBase):
         ids = [r["record_id"] for r in result]
         self.assertEqual(ids, ["live_1"])
         self.assertEqual(result[0]["calculation_id"], "c-live")
+        self.assertEqual(result[0]["model_name"], "")
+        self.assertEqual(result[0]["model_label"], "")
+        self.assertEqual(result[0]["record_pk"], "")
         # Stale entry removed from the store too.
         self.assertEqual(ActiveCalculationStateStore.get_entry("stale_2"), {})
         # Live entry retained.
@@ -606,6 +612,5 @@ class TestCluster09d_SnapshotAndPrune(_StoreTestBase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
-
 
 

@@ -50,6 +50,7 @@ class ActiveCalculationStateStore:
         record_id: str,
         calculation_id: Optional[str],
         record: Optional[str],
+        model_name: Optional[str] = None,
         model_label: Optional[str] = None,
         record_pk: Optional[Any] = None,
     ) -> None:
@@ -83,6 +84,7 @@ class ActiveCalculationStateStore:
                 "record_id": record_id,
                 "record": record or record_id,
                 "calculation_id": calculation_id or "",
+                "model_name": model_name or "",
                 "model_label": model_label or "",
                 "record_pk": str(record_pk) if record_pk is not None else "",
                 "task_id": existing.get("task_id", ""),
@@ -302,6 +304,9 @@ class ActiveCalculationStateStore:
                 "record_id": entry.get("record_id", ""),
                 "record": entry.get("record", entry.get("record_id", "")),
                 "calculation_id": entry.get("calculation_id", ""),
+                "model_name": entry.get("model_name", ""),
+                "model_label": entry.get("model_label", ""),
+                "record_pk": entry.get("record_pk", ""),
             })
 
         # Prune stale entries from the store
