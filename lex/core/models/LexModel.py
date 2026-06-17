@@ -529,7 +529,7 @@ class LexModel(LifecycleModel):
                 else:
                     self._run_hooked_methods(AFTER_UPDATE, **kwargs)
 
-                transaction.on_commit(self._reset_initial_state)
+                self._register_initial_state_reset()
                 return result
         except Exception:
             clear_transient_skip_history_flag()
@@ -537,6 +537,43 @@ class LexModel(LifecycleModel):
             raise
         finally:
             clear_transient_skip_history_flag()
+
+    def _register_initial_state_reset(self):
+        """Re-baseline django-lifecycle's change-tracking snapshot after commit.
+
+        ``_initial_state`` (set in ``__init__``) is the baseline that powers
+        ``has_changed()`` / ``initial_value()`` / ``_diff_with_initial``. After a
+        successful save it is stale, so django-lifecycle re-snapshots it. The
+        reset is deferred to ``on_commit`` so a rolled-back save leaves the
+        baseline at its pre-save values (rollback-correct).
+
+        EXCEPTION — saves issued by calculation user-code are skipped. A
+        calculation runs *every* save inside one outer ``transaction.atomic()``
+        (``CalculationModel.execute_calculation_sync``), so the queued
+        ``on_commit`` callbacks never drain until the whole calculation
+        finishes. Each queued bound method pins its instance — and its
+        ``_initial_state`` snapshot — alive for the entire run, turning N bulk
+        saves into O(N) retained Python memory (the v2 calc-memory regression
+        vs v1's plain ``Model.save``). This is safe to skip because:
+
+        * ``on_commit`` callbacks do not fire until the *outermost* atomic
+          commits, so the re-baseline never takes effect *during* a
+          calculation anyway — within-calc behaviour is byte-for-byte
+          identical whether or not it is registered;
+        * calculation instances are write-once-and-discarded — the reset would
+          only fire at the final commit, after which the instance is dropped,
+          so skipping it is unobservable.
+
+        Request-path saves (the common case) are outside any calculation, so
+        ``_in_calculation_execution`` is False there and the reset is registered
+        exactly as before — no behaviour change for normal saves.
+        """
+        from lex.core.models.CalculationModel import _in_calculation_execution
+
+        if _in_calculation_execution.get(False):
+            return
+
+        transaction.on_commit(self._reset_initial_state)
 
     def _finalize_pending_terminal_audit(self):
         pending_terminal_audit = getattr(self, "_pending_terminal_audit", None)

@@ -504,6 +504,14 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 ---
 
+### 7q. Calc-path skips per-save initial-state re-baseline (memory-pin fix) ✅
+
+`LexModel.save()` defers django-lifecycle's change-tracking re-baseline to `transaction.on_commit(self._reset_initial_state)`. That bound method holds a strong reference to its instance — and the instance's `_initial_state` snapshot. A whole calculation runs inside **one** outer `transaction.atomic()` (`CalculationModel.execute_calculation_sync`), so those commit callbacks never drain until the entire calculation finishes; every one of N bulk saves pins its instance + snapshot alive for the whole run → O(N) retained Python memory (~1.5 KB/save). This is the v2 calc-memory regression vs v1, which used plain `Model.save` with no `on_commit`. The fix routes the registration through a new `LexModel._register_initial_state_reset()` that returns early when `_in_calculation_execution` (the existing calc-context ContextVar) is True. It is safe because the callback never fires until the *outermost* atomic commits — so the re-baseline never takes effect *during* a calculation anyway (within-calc behaviour is byte-for-byte identical) — and calc instances are write-once-and-discarded. Request-path saves are outside any calculation, so the reset is still registered and applied exactly as before.
+
+**Scenario range:** 7.188 – 7.192. **Test file:** `lex/test_project/tests/calculations/test_7q_calc_save_initial_state_pin.py`. **Type:** U (registration gate) + I (E2E request-path + calc-path). **Status:** ✅ Complete (Session 80 — June 11). Covers `lex/core/models/LexModel.py`. Pins: request-path save registers + applies the re-baseline (`has_changed`/`initial_value` advance after a non-calc save); calc-path save skips registration; calc output stays correct; reset-registration count is O(1), not O(N), regardless of saved-row count (the regression guard). Benchmark: `scripts/bench_save_oncommit_memory.py`.
+
+---
+
 ## 8. Celery & Async
 
 **What it tests:** Task dispatch to Celery, sync fallback when Celery is unavailable, `FireAndForget` / `WaitForTasks` context managers, and nested calculation dispatch.

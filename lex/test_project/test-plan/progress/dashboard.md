@@ -50,6 +50,7 @@
 | 7n. Calculation cancellation — state machine + recursive cancel (Session 67 — June 1) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.166–7.173; pins `CalculationModel.cancel()` happy path + sync-not-cancellable + recursive descendant revoke (mocks `_revoke_celery_task`) |
 | 7o. ForeignKey integrity violation abort semantics (Session 72 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 7.176; unhandled FK integrity errors abort `CalculatedModelMixin.create()` immediately (no silent continuation to later rows) |
 | 7p. Sync-mode streaming combinatorial expansion (OOM fix — June 10) | 10 | 10 | 10 | 0 | 0 | ✅ Complete — scenarios 7.178–7.187; depth-first generator yields one model at a time (O(depth) vs O(N)) so sync calcs (CELERY_ACTIVE=False) stop OOM-ing the web pod; byte-identical ordered output vs legacy; LEX_SYNC_STREAMING_EXPANSION=false valve |
+| 7q. Calc-path skips per-save initial-state re-baseline (memory-pin fix — June 11) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 7.188–7.192; `LexModel.save()` no longer queues `on_commit(self._reset_initial_state)` for saves inside a calculation — those callbacks never drained until the outer atomic committed, pinning every instance + its `_initial_state` snapshot → O(N) retained memory (v2 calc-memory regression vs v1). Gated on `_in_calculation_execution`; request-path re-baseline preserved; pin count now O(1) regardless of N |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |
@@ -75,7 +76,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **583** | **583** | **562** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **588** | **588** | **567** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet
