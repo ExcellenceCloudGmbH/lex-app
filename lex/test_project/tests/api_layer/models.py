@@ -9,6 +9,7 @@ observable REST-layer wiring on top of everything below.
 from __future__ import annotations
 
 from django.db import models
+from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 
@@ -111,7 +112,24 @@ class SchemaHiddenItem(LexModel):
         return self.name
 
 
-ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem]
+@_permissive
+class ApiLayerCalc(CalculationModel):
+    """CalculationModel used to exercise API-layer calc control endpoints."""
+
+    name = models.CharField(max_length=200)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):  # pragma: no cover
+        return None
+
+
+ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
 
 API_SIMPLE = "apisimpleitem"
-
+API_LAYER_CALC = "apilayercalc"

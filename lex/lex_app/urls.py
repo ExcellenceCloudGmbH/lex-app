@@ -18,6 +18,7 @@ import re
 
 from django.contrib.staticfiles.views import serve as staticfiles_serve
 from django.urls import path, include, re_path
+from lex.api.views.calculations.ActiveCalculations import ActiveCalculations
 from lex.authentication.views.user_api import CurrentUser
 from lex.lex_app import settings
 from lex.process_admin.settings import processAdminSite, adminSite
@@ -33,6 +34,7 @@ process_admin_route = f"{url_prefix}/" if url_prefix else ""
 urlpatterns = [
     path("health", views.HealthCheck.as_view(), name="health_view"),
     path("api/health", views.HealthCheck.as_view(), name="api_health_view"),
+    path("api/active-calculations", ActiveCalculations.as_view(), name="active-calculations"),
     path("api/user/", CurrentUser.as_view(), name="current-user"),
     path(admin_route, adminSite.urls),
     path(process_admin_route, processAdminSite.urls),
