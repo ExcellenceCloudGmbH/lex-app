@@ -162,6 +162,28 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
+### Batch 1u — Readiness probe + ASGI HTTP routing (coverage task for PR #615 — June 18)
+
+**Gap (June 18):** PR #615 added a `/readiness` Kubernetes probe path (`READINESS_PATHS` constant, `is_readiness_path()` predicate, `readiness_asgi_app()` ASGI handler in `fast_health.py`) and wired it into `http_application()` in `asgi.py`. No tests existed for the new readiness path machinery.
+
+**Covers:** `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
+
+**Shape:** `SimpleTestCase` — pure Python, no DB. `_database_ready()` patched via `AsyncMock`; sub-apps in `http_application` patched via `patch.object`.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.171 | `is_readiness_path()` accepts all four canonical forms | `/readiness`, `/readiness/`, `/api/readiness`, `/api/readiness/` all return True |
+| 1.172 | `is_readiness_path()` rejects non-readiness paths | Liveness path, root, arbitrary API path, similar-looking string all return False |
+| 1.173 | `readiness_asgi_app()` returns 200 + `{"status":"ready"}` when DB is up | Pod is marked Ready; traffic is routed |
+| 1.174 | `readiness_asgi_app()` returns 503 + not-ready body when DB is down | Kubernetes withholds traffic until the DB comes up |
+| 1.175 | Readiness response carries `cache-control: no-store` and `content-type: application/json` | Probers never cache a stale result |
+| 1.176 | `_database_ready()` returns `False` on any exception | DB blip must not crash the ASGI process |
+| 1.177 | `http_application()` routes `/health` to `health_asgi_app` | Fast liveness path bypasses Django entirely |
+| 1.178 | `http_application()` routes `/readiness` to `readiness_asgi_app` | Readiness path handled separately from normal requests |
+| 1.179 | `http_application()` routes ordinary paths to `django_asgi_app` | Normal traffic still reaches Django |
+
+**Scenario range:** 1.171 – 1.179. **Test file:** `lex/test_project/tests/init/test_1u_readiness_probe_and_asgi_routing.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). Sources: `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
+
 ---
 
 ## 2. CRUD via REST API
@@ -1270,6 +1292,24 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 9.36 | Bulk DELETE (`Many` endpoint) emits `deleted` | bulk path broadcasts too |
 
 **Status:** Complete — 8 pass / 0 fail locally (Postgres test DB available).
+
+### 9f — Consumer disconnect cleanup (coverage task for PR #615 — June 18)
+
+**Gap (June 18):** `BackendHealthConsumer`, `CalculationLogConsumer`, and `CalculationsConsumer` each call `self.active_consumers.discard(self)` in `disconnect()` (added by PR #615), but no test asserted the bookkeeping contract: that a disconnected consumer is removed from the class-level set so `disconnect_all()` does not double-close it on server shutdown.
+
+**Covers:** `lex/api/consumers/BackendHealthConsumer.py`, `lex/api/consumers/CalculationLogConsumer.py`, `lex/api/consumers/CalculationsConsumer.py`.
+
+**Shape:** `SimpleTestCase` — pure Python, no DB. Channels plumbing mocked via `MagicMock`/`AsyncMock`; `super().disconnect` patched so the Channels base-class transport layer is not invoked.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.37 | `BackendHealthConsumer.disconnect()` removes self from `active_consumers` | Post-disconnect the consumer is absent from the class-level set — a stale reference cannot cause a double-disconnect on shutdown |
+| 9.38 | `CalculationLogConsumer.disconnect()` removes self from `active_consumers` | Same contract for the calculation-log streaming consumer |
+| 9.39 | `CalculationsConsumer.disconnect()` removes self from `active_consumers` | Same contract for the calculations broadcast consumer |
+| 9.40 | `disconnect()` when not in the set is idempotent | `set.discard()` must not raise `KeyError` — a duplicate close event (e.g. network reset + graceful close) must be harmless |
+| 9.41 | `disconnect_all()` finds an empty set after all consumers individually disconnected | No stale reference leaks through; shutdown calls disconnect on zero consumers |
+
+**Status:** ✅ Complete — 5 pass / 0 fail locally (0.15s, PostgreSQL test DB).
 
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 

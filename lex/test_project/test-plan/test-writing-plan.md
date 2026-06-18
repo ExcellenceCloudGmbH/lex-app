@@ -100,6 +100,22 @@
 
 ---
 
+### Batch 1u — Readiness probe + ASGI HTTP routing (coverage task for PR #615 — June 18) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.171 – 1.179 |
+| Type | U |
+| Files covered | `lex/lex_app/fast_health.py` (new `READINESS_PATHS`, `is_readiness_path()`, `_database_ready()`, `readiness_asgi_app()`), `lex/lex_app/asgi.py` (new readiness routing in `http_application()`) |
+| Test file | `lex/test_project/tests/init/test_1u_readiness_probe_and_asgi_routing.py` |
+| Test classes | `TestCluster01u_ReadinessProbeAndAsgiRouting` (1.171–1.179) |
+| Fixtures | none — `_database_ready` patched via `AsyncMock`; sub-apps in `http_application` patched via `patch.object` |
+| Tests landed | **9 pass / 0 fail in 0.15s** |
+| Coverage gain | new readiness probe code (fast_health.py) + routing branch (asgi.py) |
+| Status | ✅ Complete (Session 81 — June 18) |
+
+---
+
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)
 
 ### Batch 2f — Model-entry mixins & serialisers
@@ -583,6 +599,23 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Prereqs | none |
 | Status | ✅ Complete — 8 pass / 0 fail locally (Postgres test DB available) |
 | Note | Fixes the customer-visible "open list view goes stale until manual Refresh" bug: plain CRUD on a non-`CalculationModel` now emits a `model_data_update` `record_mutation` over WebSocket. Generic broadcast is skipped on `calculate=true` updates (`calculation_success` already refreshes). Frontend `ModelDataUpdate` listener lands in the same change. |
+
+---
+
+### Batch 9f — Consumer disconnect cleanup (coverage task for PR #615 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.37 – 9.41 |
+| Type | U |
+| Files covered | `api/consumers/BackendHealthConsumer.py`, `api/consumers/CalculationLogConsumer.py`, `api/consumers/CalculationsConsumer.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9f_consumer_disconnect_cleanup.py` |
+| Test classes | `TestCluster09f_ConsumerDisconnectCleanup` (U) |
+| Fixtures | none — Channels plumbing mocked via `MagicMock`/`AsyncMock` |
+| Est. tests | 5 |
+| Coverage gain | pins `discard()` call in all three consumer `disconnect()` overrides |
+| Prereqs | none |
+| Status | ✅ Complete — 5 pass / 0 fail locally (0.15s) |
 
 ---
 
