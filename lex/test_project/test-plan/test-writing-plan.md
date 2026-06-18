@@ -161,6 +161,22 @@
 
 ---
 
+### Batch 2j — Instance API-key extraction and matching (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.97 – 2.107 |
+| Type | U |
+| Files covered | `lex/api/utils/api_key_requests.py` (`get_raw_api_key`, `is_instance_api_key_request`) |
+| Test file | `lex/test_project/tests/crud_api/test_2j_instance_api_key.py` |
+| Test classes | `TestCluster02j_GetRawApiKey` (2.97–2.103 — KeyParser hit, header fallback, prefix strip, empty candidate, no source, DRF wrapped request, non-ApiKey header), `TestCluster02j_IsInstanceApiKeyRequest` (2.104–2.107 — match, mismatch, no env var, no key in request) |
+| Fixtures | none — `SimpleTestCase` with `patch` on `KeyParser` and `patch.dict("os.environ")` |
+| Tests landed | 11 pass / 0 fail |
+| Coverage gain | `lex/api/utils/api_key_requests.py` `get_raw_api_key` + `is_instance_api_key_request` branches |
+| Status | ✅ Complete (Session 80 — June 18) |
+
+---
+
 ## Cluster 4 — Permissions (existing 4a–4i)
 
 ### Batch 4j — Middleware & bearer-token authentication
@@ -194,6 +210,22 @@
 ### Batch 4l — User API endpoint *(blocked — see §6 decision #2)*
 
 `UserAPIView.py` vs `user_api.py` — slot once supervisor confirms which is live.
+
+---
+
+### Batch 4m — `ApiKeyAwareLoginRequiredMiddleware` instance-key bypass (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.66 – 4.70 |
+| Type | U |
+| Files covered | `lex/authentication/middleware.py` (`ApiKeyAwareLoginRequiredMiddleware.check_login_required`) |
+| Test file | `lex/test_project/tests/permissions/test_4m_api_key_middleware.py` |
+| Test classes | `TestCluster04m_ApiKeyAwareMiddleware` (4.66–4.70 — instance key bypass, DRF key bypass, non-key delegates to parent, instance check still evaluated when DRF check false, subclass contract) |
+| Fixtures | none — `SimpleTestCase` with `patch` on `is_instance_api_key_request`, `is_api_key_request`, and parent `check_login_required` |
+| Tests landed | 5 pass / 0 fail |
+| Coverage gain | `lex/authentication/middleware.py` new `is_instance_api_key_request` branch |
+| Status | ✅ Complete (Session 80 — June 18) |
 
 ---
 
@@ -398,6 +430,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Status | ✅ Complete (Session 79 — June 10) |
 | Note | Backend OOM fix: sync-mode expansion now streams (O(depth)) instead of materializing all N. `LEX_SYNC_STREAMING_EXPANSION=false` valve. Benchmark in `docs/runs/`. |
 
+
+---
+
+### Batch 7m — `CalculationSignals` + `One.py` `model_name` propagation (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.188 – 7.195 |
+| Type | U + E |
+| Files covered | `lex/core/signals/CalculationSignals.py` (`update_calculation_status` IN_PROGRESS branch), `lex/api/views/model_entries/One.py` (early-registration `mark_in_progress` call) |
+| Test file | `lex/test_project/tests/calculations/test_7m_calc_signals.py` |
+| Test classes | `TestCluster07m_SignalModelName` (7.188–7.191 — IN_PROGRESS passes object_name, SUCCESS/ERROR do not call mark_in_progress, non-calculation model returns early), `TestCluster07m_OneModelNamePropagation` (7.192–7.193 — calculate=true passes model_name to store, record_id matches) |
+| Fixtures | `_FakeInstance` / `_FakeSignal` (pure unit); `AtomicCalc` (reused from cluster 7, via E2ETestCase) |
+| Tests landed | 8 pass / 0 fail |
+| Coverage gain | `CalculationSignals.py` IN_PROGRESS `model_name` kwarg path; `One.py` early-registration `mark_in_progress(model_name=…)` branch |
+| Status | ✅ Complete (Session 80 — June 18) |
 
 ---
 

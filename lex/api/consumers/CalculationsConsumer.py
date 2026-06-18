@@ -17,6 +17,7 @@ class CalculationsConsumer(AsyncWebsocketConsumer):
             "calculations",
             self.channel_name
         )
+        self.active_consumers.discard(self)
         await super().disconnect(close_code)
 
     async def calculation_id(self, event):
