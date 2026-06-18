@@ -98,19 +98,19 @@
 | Coverage gain | negligible (settings is import-time; pins a config-placement contract) |
 | Status | ✅ Complete (Session 78 — June 9) |
 
-### Batch 1u — encrypted runtime metadata on health endpoint ✅
+### Batch 1u — Fast ASGI health/readiness probes (coverage task #620) ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.171 – 1.178 |
-| Type | U + I |
-| Files covered | `lex/lex_app/runtime_health.py` (new — builds legacy health payload plus optional Fernet-encrypted runtime token derived from `LEX_API_KEY`, containing `lex_app_version`, `instance_commit_sha`, `commit_sha_source`); `lex/lex_app/fast_health.py` (production ASGI health path emits the same payload); `lex/lex_app/views.py` (Django health route emits the same payload); `lex/lex_app/apps.py` (old startup push hook removed) |
-| Test file | `lex/test_project/tests/init/test_1u_runtime_health_metadata.py` |
-| Test classes | `TestCluster01u_RuntimeHealthMetadata` (1.171 missing key keeps legacy payload; 1.172 deployed env adds decryptable token; 1.173 token hides plaintext values; 1.174 wrong key cannot decrypt; 1.175 encryption failure degrades to legacy health; 1.176 Django `/api/health` includes runtime; 1.177 fast ASGI `/api/health` includes runtime; 1.178 missing `COMMIT_SHA` is marked unknown) |
-| Fixtures | none (`patch.dict('os.environ', …)`, Django `Client`, direct ASGI send/receive harness, Fernet decrypt helper) |
-| Tests landed | **8 pass / 0 fail in 0.16s** (`python -m lex pytest lex/test_project/tests/init/test_1u_runtime_health_metadata.py -v`; Postgres test DB created and destroyed cleanly) |
-| Coverage gain | ~+0.1 % (small new module + health-path integration coverage) |
-| Status | ✅ Complete (Session 80 — supersedes Session 79 push design) |
+| Scenario range | 1.171 – 1.175 |
+| Type | U |
+| Files covered | `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py` |
+| Test file | `lex/test_project/tests/init/test_1u_fast_health_asgi.py` |
+| Test classes | `TestCluster01u_FastHealthAsgi` (1.171 path helpers separate liveness/readiness, 1.172 health app drains request body and returns static Healthy payload, 1.173 readiness returns 200/503 based on DB readiness seam, 1.174 top-level HTTP ASGI app short-circuits probe paths before Django, 1.175 non-probe HTTP delegates to Django) |
+| Fixtures | none — ASGI `receive`/`send` callables and `AsyncMock` seams only |
+| Tests landed | **5 pass / 0 fail** (direct pytest) |
+| Coverage gain | `fast_health.py` path helpers + health/readiness ASGI apps; `asgi.py` `http_application` health/readiness/Django routing branches |
+| Status | ✅ Complete (Session 81 — June 18). `python -m lex pytest ...` blocked locally by no PostgreSQL service; pure U tests pass with `DJANGO_SETTINGS_MODULE=lex_app.settings python -m pytest ...`. |
 
 ---
 
@@ -175,6 +175,22 @@
 
 ---
 
+### Batch 2j — Instance API-key extraction and matching (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.97 – 2.107 |
+| Type | U |
+| Files covered | `lex/api/utils/api_key_requests.py` (`get_raw_api_key`, `is_instance_api_key_request`) |
+| Test file | `lex/test_project/tests/crud_api/test_2j_instance_api_key.py` |
+| Test classes | `TestCluster02j_GetRawApiKey` (2.97–2.103 — KeyParser hit, header fallback, prefix strip, empty candidate, no source, DRF wrapped request, non-ApiKey header), `TestCluster02j_IsInstanceApiKeyRequest` (2.104–2.107 — match, mismatch, no env var, no key in request) |
+| Fixtures | none — `SimpleTestCase` with `patch` on `KeyParser` and `patch.dict("os.environ")` |
+| Tests landed | 11 pass / 0 fail |
+| Coverage gain | `lex/api/utils/api_key_requests.py` `get_raw_api_key` + `is_instance_api_key_request` branches |
+| Status | ✅ Complete (Session 80 — June 18) |
+
+---
+
 ## Cluster 4 — Permissions (existing 4a–4i)
 
 ### Batch 4j — Middleware & bearer-token authentication
@@ -208,6 +224,22 @@
 ### Batch 4l — User API endpoint *(blocked — see §6 decision #2)*
 
 `UserAPIView.py` vs `user_api.py` — slot once supervisor confirms which is live.
+
+---
+
+### Batch 4m — `ApiKeyAwareLoginRequiredMiddleware` instance-key bypass (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.66 – 4.70 |
+| Type | U |
+| Files covered | `lex/authentication/middleware.py` (`ApiKeyAwareLoginRequiredMiddleware.check_login_required`) |
+| Test file | `lex/test_project/tests/permissions/test_4m_api_key_middleware.py` |
+| Test classes | `TestCluster04m_ApiKeyAwareMiddleware` (4.66–4.70 — instance key bypass, DRF key bypass, non-key delegates to parent, instance check still evaluated when DRF check false, subclass contract) |
+| Fixtures | none — `SimpleTestCase` with `patch` on `is_instance_api_key_request`, `is_api_key_request`, and parent `check_login_required` |
+| Tests landed | 5 pass / 0 fail |
+| Coverage gain | `lex/authentication/middleware.py` new `is_instance_api_key_request` branch |
+| Status | ✅ Complete (Session 80 — June 18) |
 
 ---
 
@@ -415,6 +447,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 7m — `CalculationSignals` + `One.py` `model_name` propagation (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.188 – 7.195 |
+| Type | U + E |
+| Files covered | `lex/core/signals/CalculationSignals.py` (`update_calculation_status` IN_PROGRESS branch), `lex/api/views/model_entries/One.py` (early-registration `mark_in_progress` call) |
+| Test file | `lex/test_project/tests/calculations/test_7m_calc_signals.py` |
+| Test classes | `TestCluster07m_SignalModelName` (7.188–7.191 — IN_PROGRESS passes object_name, SUCCESS/ERROR do not call mark_in_progress, non-calculation model returns early), `TestCluster07m_OneModelNamePropagation` (7.192–7.193 — calculate=true passes model_name to store, record_id matches) |
+| Fixtures | `_FakeInstance` / `_FakeSignal` (pure unit); `AtomicCalc` (reused from cluster 7, via E2ETestCase) |
+| Tests landed | 8 pass / 0 fail |
+| Coverage gain | `CalculationSignals.py` IN_PROGRESS `model_name` kwarg path; `One.py` early-registration `mark_in_progress(model_name=…)` branch |
+| Status | ✅ Complete (Session 80 — June 18) |
+
+---
+
 ## Cluster 8 — Celery & Async (existing 8a–8g)
 
 ### Batch 8h — Dispatcher & local scheduler
@@ -549,6 +597,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Prereqs | none |
 | Status | ✅ Complete — 8 pass / 0 fail locally (Postgres test DB available) |
 | Note | Fixes the customer-visible "open list view goes stale until manual Refresh" bug: plain CRUD on a non-`CalculationModel` now emits a `model_data_update` `record_mutation` over WebSocket. Generic broadcast is skipped on `calculate=true` updates (`calculation_success` already refreshes). Frontend `ModelDataUpdate` listener lands in the same change. |
+
+### Batch 9f — Core health/calculation/log WebSocket consumers (coverage task #620) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.37 – 9.42 |
+| Type | U |
+| Files covered | `lex/api/consumers/BackendHealthConsumer.py`, `lex/api/consumers/CalculationsConsumer.py`, `lex/api/consumers/CalculationLogConsumer.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9f_core_consumers.py` |
+| Test classes | `TestCluster09f_BackendHealthConsumer` (9.37 connect/receive health payload, 9.38 disconnect untracks), `TestCluster09f_CalculationsConsumer` (9.39 joins calculations group and forwards ID/notification events, 9.40 disconnect leaves group), `TestCluster09f_CalculationLogConsumer` (9.41 per-record log group and log envelope), `TestCluster09f_ShutdownDisconnectAll` (9.42 shutdown calls `disconnect(None)` on active consumers for all three classes) |
+| Fixtures | none — consumer instances with mocked channel layer / socket boundary |
+| Tests landed | **6 pass / 0 fail** (direct pytest) |
+| Coverage gain | Core consumer connect/disconnect/send branches + `disconnect_all` classmethods for the three coverage-task files |
+| Prereqs | none |
+| Status | ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked: PR #615 wires it in `authenticated_websocket_urlpatterns()`. |
 
 ---
 
@@ -728,6 +791,7 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
+
 
 
 

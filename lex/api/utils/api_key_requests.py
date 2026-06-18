@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import FrozenSet, Optional
 
@@ -44,6 +45,20 @@ def _get_request_holder(request):
     return getattr(request, "_request", request)
 
 
+def get_raw_api_key(request) -> Optional[str]:
+    holder = _get_request_holder(request)
+    raw_key = KeyParser().get(holder)
+    if raw_key:
+        return raw_key
+
+    auth_header = holder.META.get("HTTP_AUTHORIZATION", "")
+    prefix = "Api-Key "
+    if auth_header.startswith(prefix):
+        candidate = auth_header[len(prefix) :].strip()
+        return candidate or None
+    return None
+
+
 def get_api_key_request_identity(request) -> Optional[APIKeyRequestIdentity]:
     holder = _get_request_holder(request)
     cached_identity = getattr(holder, "_lex_api_key_identity", _UNSET)
@@ -52,7 +67,7 @@ def get_api_key_request_identity(request) -> Optional[APIKeyRequestIdentity]:
 
     identity = None
     try:
-        raw_key = KeyParser().get(holder)
+        raw_key = get_raw_api_key(holder)
         if raw_key:
             api_key = APIKey.objects.get_from_key(raw_key)
             api_key_name = str(api_key).strip() or "Technical User"
@@ -69,3 +84,9 @@ def get_api_key_request_identity(request) -> Optional[APIKeyRequestIdentity]:
 
 def is_api_key_request(request) -> bool:
     return get_api_key_request_identity(request) is not None
+
+
+def is_instance_api_key_request(request) -> bool:
+    raw_key = get_raw_api_key(request)
+    expected_key = os.getenv("LEX_API_KEY")
+    return bool(raw_key and expected_key and raw_key == expected_key)

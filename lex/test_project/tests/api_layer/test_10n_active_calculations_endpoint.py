@@ -74,6 +74,7 @@ class TestCluster10n_ActiveCalculationsEndpoint(E2ETestCase):
             record_id=_record_id(calc),
             calculation_id="calc-10n-running",
             record=str(calc),
+            model_name=calc._meta.object_name,
             model_label=calc._meta.label_lower,
             record_pk=calc.pk,
         )
@@ -94,6 +95,9 @@ class TestCluster10n_ActiveCalculationsEndpoint(E2ETestCase):
                         "record_id": _record_id(calc),
                         "record": "Quarterly refresh",
                         "calculation_id": "calc-10n-running",
+                        "model_name": "ApiLayerCalc",
+                        "model_label": calc._meta.label_lower,
+                        "record_pk": str(calc.pk),
                     }
                 ]
             },
@@ -116,6 +120,7 @@ class TestCluster10n_ActiveCalculationsEndpoint(E2ETestCase):
             record_id=_record_id(calc),
             calculation_id="calc-10n-stale",
             record=str(calc),
+            model_name=calc._meta.object_name,
             model_label=calc._meta.label_lower,
             record_pk=calc.pk,
         )
@@ -146,6 +151,7 @@ class TestCluster10n_ActiveCalculationsEndpoint(E2ETestCase):
             record_id=_record_id(calc),
             calculation_id="calc-10n-auth",
             record=str(calc),
+            model_name=calc._meta.object_name,
             model_label=calc._meta.label_lower,
             record_pk=calc.pk,
         )

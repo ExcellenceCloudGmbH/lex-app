@@ -162,11 +162,23 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
-### 1u. encrypted runtime metadata on health endpoint ✅
+### Batch 1u — Fast ASGI health/readiness probes ✅
 
-**Gap:** The IC instance-details panel needs to display the lex-app package version and customer-project commit SHA actually reported by the running pod. Reading IC's stored `image_version` / `commit_sha` is unreliable — a failed release Terraform apply can leave the DB on the attempted target while the old pod keeps serving traffic. Probing via `kubectl exec` is blocked by RBAC (`pods/exec` is not granted to the IC service account, and granting it is essentially "shell into any customer pod"). Solution: the public health endpoint keeps its legacy `{"status":"Healthy :)"}` contract but, when `LEX_API_KEY` exists, adds a Fernet-encrypted `runtime` token derived from that same per-instance key. The decrypted payload contains `lex_app_version`, `instance_commit_sha`, and `commit_sha_source`. The production ASGI fast-health path and Django health view share the same payload builder. Failures degrade to status-only so liveness can never be broken by metadata.
+**Gap:** PR #615 added a lightweight ASGI health/readiness layer so Kubernetes
+liveness can return `200` without touching Django/DB, while readiness only
+returns `200` once the database is reachable. A regression here either restarts
+healthy pods (`/health` stops being cheap/static) or sends WebSocket/API traffic
+to a pod before it can serve (`/readiness` lies ready).
 
-**Scenario range:** 1.171 – 1.178. **Test file:** `lex/test_project/tests/init/test_1u_runtime_health_metadata.py`. **Type:** U + I. **Status:** ✅ Complete (Session 80 — supersedes Session 79 push design). Source: `lex/lex_app/runtime_health.py`, `lex/lex_app/fast_health.py`, `lex/lex_app/views.py`.
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.171 | Health/readiness path helpers are disjoint | `/health` and `/api/health` are fast liveness only; `/readiness` and `/api/readiness` are DB-aware readiness only |
+| 1.172 | Fast health ASGI app drains request body and returns static payload | multi-message request body is consumed; response is `200` with `{"status": "Healthy :)"}` and no-store headers |
+| 1.173 | Readiness reflects DB availability | patched DB-ready seam returns `200 {"status":"ready"}`; DB-unavailable returns `503 {"status":"not-ready","reason":"database-unavailable"}` |
+| 1.174 | Top-level ASGI app short-circuits probe paths | `/health` and `/readiness` call their lightweight ASGI apps and do not invoke Django |
+| 1.175 | Non-probe HTTP delegates to Django | arbitrary application paths bypass health shortcuts and reach `django_asgi_app` |
+
+**Scenario range:** 1.171 – 1.175. **Test file:** `lex/test_project/tests/init/test_1u_fast_health_asgi.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). Sources: `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
 
 ---
 
@@ -238,6 +250,12 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 2.93 – 2.96. **Test file:** `lex/test_project/tests/crud_api/test_2i_cancel_endpoint.py`. **Type:** E. **Status:** ✅ Complete (Session 66 — June 1).
 
+### 2j. Instance API-key extraction and matching ✅
+
+**Gap:** PR #615 ("feat(calculations): expose active release warnings") introduced two helpers in `lex/api/utils/api_key_requests.py` that allow the framework to authenticate machine-to-machine requests using a shared secret stored in `LEX_API_KEY`: `get_raw_api_key()` extracts the raw key from a `KeyParser` or falls back to the `Authorization: ApiKey <token>` header; `is_instance_api_key_request()` compares the extracted key to the env var. If either helper regresses — e.g. header fallback stops working, or the env-var comparison becomes case-insensitive — silent auth bypasses or auth failures will appear in production without any framework-level guard.
+
+**Scenario range:** 2.97 – 2.107. **Test file:** `lex/test_project/tests/crud_api/test_2j_instance_api_key.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/api/utils/api_key_requests.py`.
+
 ---
 
 ## 3. Validation Hooks
@@ -295,6 +313,14 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
 | 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
 | 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
+
+---
+
+### 4m. `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass ✅
+
+**Gap:** PR #615 added a short-circuit to `ApiKeyAwareLoginRequiredMiddleware.check_login_required` so that requests authenticated with the instance API key (`is_instance_api_key_request`) bypass the OAuth2 login redirect, the same way DRF API-key requests already did. Without a regression gate, a refactor of the `or` chain (e.g. swapping evaluation order, mis-importing `is_instance_api_key_request`, or accidentally removing the branch) would silently revert all machine-to-machine requests to a login redirect with no framework-level signal.
+
+**Scenario range:** 4.66 – 4.70. **Test file:** `lex/test_project/tests/permissions/test_4m_api_key_middleware.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/authentication/middleware.py`.
 
 ---
 
@@ -507,6 +533,14 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 **Scenario range:** 7.178 – 7.187. **Test file:** `lex/test_project/tests/calculations/test_7p_streaming_expansion.py`. **Type:** U (+ I for the E2E sync create path). **Status:** ✅ Complete (Session 79 — June 10). Covers `lex/core/mixins/CalculatedModelMixin.py`. Equivalence gate: ordered defining-field fingerprint identical legacy-vs-streaming; bounded-peak memory regression test; N≈10k benchmark in `docs/runs/`.
 
 **Out of scope (accepted by design):** when two expanded combinations resolve to the *same* defining-field tuple within one `create()`, streaming saves each model before preparing the next, so the second `delete_models_with_same_defining_fields()` sees the first's just-saved row and reuses it (one row) where the legacy batch-prepare would insert two. This degenerate same-tuple-collision case is intentionally not covered by the equivalence suite; the `LEX_SYNC_STREAMING_EXPANSION=false` env var is the rollback path if a project relies on the legacy behavior.
+
+---
+
+### 7m. `CalculationSignals.update_calculation_status` + `One.py` `model_name` propagation ✅
+
+**Gap:** PR #615 threaded `model_name=instance._meta.object_name` through two call sites: `update_calculation_status` in `CalculationSignals.py` now passes it to `mark_in_progress` on the IN_PROGRESS branch, and `One.update()` in `One.py` does the same in the early-registration block when `calculate=true`. The `ActiveCalculationStateStore` uses `model_name` to partition active-calculation lookups; if the propagation silently regresses (e.g. the kwarg is dropped or passed as `None`), the store records calculations under the wrong key and the active-release endpoint returns stale or missing data.
+
+**Scenario range:** 7.188 – 7.195. **Test file:** `lex/test_project/tests/calculations/test_7m_calc_signals.py`. **Type:** U + E. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/core/signals/CalculationSignals.py`, `lex/api/views/model_entries/One.py`.
 
 ---
 
@@ -1254,6 +1288,32 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 9.36 | Bulk DELETE (`Many` endpoint) emits `deleted` | bulk path broadcasts too |
 
 **Status:** Complete — 8 pass / 0 fail locally (Postgres test DB available).
+
+### 9f — Core health/calculation/log WebSocket consumers ✅
+
+**Gap:** PR #615 touched the core WebSocket consumer files that the frontend uses
+for public backend health, calculation notifications, and live calculation logs.
+These are long-lived sockets, so regressions leak active consumer references,
+stop shutdown cleanup, or silently break the JSON envelopes frontend listeners
+dispatch on.
+
+**Covers:** `lex/api/consumers/BackendHealthConsumer.py`,
+`lex/api/consumers/CalculationsConsumer.py`,
+`lex/api/consumers/CalculationLogConsumer.py`.
+
+**Shape:** U (`SimpleTestCase`) with mocked channel layer and socket boundary.
+No broker, Redis, or database required.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.37 | Backend health socket accepts and returns Healthy payload | `connect()` accepts and tracks the consumer; `receive()` sends `{"status": "Healthy :)"}` |
+| 9.38 | Backend health disconnect untracks connection | disconnect removes the consumer from the process-global active set |
+| 9.39 | Calculations socket joins group and forwards events | joins `calculations`; forwards `calculation_id` events and `calculation_notification` payloads in the frontend contract shape |
+| 9.40 | Calculations disconnect leaves group | discards `test-channel` from `calculations` and untracks the consumer |
+| 9.41 | Calculation-log socket groups by record prefix and streams logs | `calculationId="record-..."` joins group `record`; sends `calculation_log_real_time` envelope with `logs` |
+| 9.42 | Shutdown `disconnect_all` closes tracked consumers | all three classes call `disconnect(None)` on a snapshot of active consumers |
+
+**Scenario range:** 9.37 – 9.42. **Test file:** `lex/test_project/tests/signals_ws/test_9f_core_consumers.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked because PR #615 wires it in `authenticated_websocket_urlpatterns()`.
 
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 

@@ -611,6 +611,7 @@ class OneModelEntry(
                             record_id=calculation_record,
                             calculation_id=calculationId,
                             record=str(instance),
+                            model_name=instance._meta.object_name,
                             model_label=instance._meta.label_lower,
                             record_pk=instance.pk,
                         )
