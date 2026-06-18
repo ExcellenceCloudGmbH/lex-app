@@ -397,6 +397,24 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 7p — Sync-mode streaming combinatorial expansion (OOM fix) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.178 – 7.187 |
+| Type | U (generator + flag, pure logic) + I (E2E sync create saved rows) |
+| Files covered | `lex/core/mixins/CalculatedModelMixin.py` (`generate_model_combinations_streaming`, `calc_and_save_streaming`, `_sync_streaming_enabled`, `create()` mode branch) |
+| Test file | `lex/test_project/tests/calculations/test_7p_streaming_expansion.py` |
+| Test classes | `TestCluster07p_StreamingEquivalence` (7.178–7.182), `TestCluster07p_StreamingFlag` (7.183–7.185), `TestCluster07p_SyncCreateEquivalence` (7.186), `TestCluster07p_StreamingMemoryBound` (7.187) |
+| Fixtures | `_FakeCalcModel` (pure logic); existing `CombinatorialCalc` E2E model (reused, no new model) |
+| Tests landed | 10 pass / 0 fail |
+| Coverage gain | streaming generator + consumer + flag + create() sync branch |
+| Status | ✅ Complete (Session 79 — June 10) |
+| Note | Backend OOM fix: sync-mode expansion now streams (O(depth)) instead of materializing all N. `LEX_SYNC_STREAMING_EXPANSION=false` valve. Benchmark in `docs/runs/`. |
+
+
+---
+
 ## Cluster 8 — Celery & Async (existing 8a–8g)
 
 ### Batch 8h — Dispatcher & local scheduler

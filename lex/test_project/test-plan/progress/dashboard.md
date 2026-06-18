@@ -50,6 +50,7 @@
 | 7h. `_dispatch_model_processing` Celery branch (coverage-driven — April 23) | 1 | 1 | 1 | 0 | 0 |  Complete — async branch 7g never reached; broker-free |
 | 7n. Calculation cancellation — state machine + recursive cancel (Session 67 — June 1) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.166–7.173; pins `CalculationModel.cancel()` happy path + sync-not-cancellable + recursive descendant revoke (mocks `_revoke_celery_task`) |
 | 7o. ForeignKey integrity violation abort semantics (Session 72 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 7.176; unhandled FK integrity errors abort `CalculatedModelMixin.create()` immediately (no silent continuation to later rows) |
+| 7p. Sync-mode streaming combinatorial expansion (OOM fix — June 10) | 10 | 10 | 10 | 0 | 0 | ✅ Complete — scenarios 7.178–7.187; depth-first generator yields one model at a time (O(depth) vs O(N)) so sync calcs (CELERY_ACTIVE=False) stop OOM-ing the web pod; byte-identical ordered output vs legacy; LEX_SYNC_STREAMING_EXPANSION=false valve |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |

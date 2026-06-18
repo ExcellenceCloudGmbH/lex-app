@@ -500,6 +500,16 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 
 ---
 
+### 7p. Sync-mode streaming combinatorial expansion (OOM fix) ✅
+
+In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI process. `CalculatedModelMixin.create()`'s four-stage pipeline (generate → prepare → cluster → dispatch) materialized **all N** expanded models and held them alive for the whole run, so peak memory was O(N) and a large fan-out OOM-killed the pod. 7p adds a depth-first `generate_model_combinations_streaming` generator that yields one fully-expanded model at a time (O(depth) live), and a `calc_and_save_streaming` consumer that prepares → calculates → saves → releases each one. `create()` branches on mode at the top: the Celery path and the legacy list/cluster helpers are untouched; the sync path skips stages 1–3. A `LEX_SYNC_STREAMING_EXPANSION=false` env var rolls back to the legacy materialized path. The expansion is dependency-aware (a field's values can depend on an earlier field), so the generator reuses `_get_field_values` and recurses depth-first to preserve identical semantics.
+
+**Scenario range:** 7.178 – 7.187. **Test file:** `lex/test_project/tests/calculations/test_7p_streaming_expansion.py`. **Type:** U (+ I for the E2E sync create path). **Status:** ✅ Complete (Session 79 — June 10). Covers `lex/core/mixins/CalculatedModelMixin.py`. Equivalence gate: ordered defining-field fingerprint identical legacy-vs-streaming; bounded-peak memory regression test; N≈10k benchmark in `docs/runs/`.
+
+**Out of scope (accepted by design):** when two expanded combinations resolve to the *same* defining-field tuple within one `create()`, streaming saves each model before preparing the next, so the second `delete_models_with_same_defining_fields()` sees the first's just-saved row and reuses it (one row) where the legacy batch-prepare would insert two. This degenerate same-tuple-collision case is intentionally not covered by the equivalence suite; the `LEX_SYNC_STREAMING_EXPANSION=false` env var is the rollback path if a project relies on the legacy behavior.
+
+---
+
 ## 8. Celery & Async
 
 **What it tests:** Task dispatch to Celery, sync fallback when Celery is unavailable, `FireAndForget` / `WaitForTasks` context managers, and nested calculation dispatch.

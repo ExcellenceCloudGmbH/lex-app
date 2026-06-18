@@ -498,6 +498,75 @@ class ModelCombinationGenerator:
                 model_class=model.__class__.__name__
             ) from e
 
+    @staticmethod
+    def generate_model_combinations_streaming(
+        base_model: 'CalculatedModelMixin',
+        defining_fields: List[str],
+        field_overrides: Dict[str, Any],
+    ):
+        """Depth-first streaming twin of generate_model_combinations.
+
+        Yields one fully-expanded model at a time. At most `depth` models
+        (root-to-leaf path) are alive at once, vs the legacy generator's N.
+        Mirrors _expand_models_for_field value-for-value and deepcopy-for-
+        value, and computes field values from the PARTIALLY-built model via
+        the same _get_field_values helper, so dependency-aware
+        get_selected_key_list semantics are identical. Field ordering matches
+        legacy: override fields first.
+        """
+        if not base_model:
+            raise ModelCombinationError(
+                "Base model cannot be None",
+                model_class=base_model.__class__.__name__ if base_model else "Unknown",
+            )
+
+        if not defining_fields:
+            yield base_model
+            return
+
+        ordered_defining_fields = sorted(
+            defining_fields,
+            key=lambda x: 0 if x in field_overrides.keys() else 1,
+        )
+        ordered_defining_fields = [
+            f.__str__().split('.')[-1] for f in ordered_defining_fields
+        ]
+
+        def _expand(model, field_index):
+            if field_index == len(ordered_defining_fields):
+                yield model
+                return
+            field_name = ordered_defining_fields[field_index]
+            try:
+                field_values = ModelCombinationGenerator._get_field_values(
+                    model, field_name, field_overrides
+                )
+            except ModelCombinationError:
+                raise
+            except Exception as field_error:
+                raise ModelCombinationError(
+                    f"Failed to expand defining field '{field_name}': {str(field_error)}",
+                    field_name=field_name,
+                    model_class=base_model.__class__.__name__,
+                ) from field_error
+
+            if not field_values:
+                # Empty value list prunes this branch (matches legacy `continue`).
+                return
+            if not isinstance(field_values, list):
+                raise ModelCombinationError(
+                    f"Field values must normalize to a list, got {type(field_values).__name__}",
+                    field_name=field_name,
+                    model_class=model.__class__.__name__,
+                )
+
+            for value in field_values:
+                model_copy = deepcopy(model)
+                setattr(model_copy, field_name, value)
+                yield from _expand(model_copy, field_index + 1)
+
+        yield from _expand(base_model, 0)
+
 
 class ModelClusterManager:
     """
@@ -920,6 +989,56 @@ def calc_and_save_sync(models, *args):
     logger.info(f"Synchronous processing completed successfully: {model_count} models processed")
 
 
+def _sync_streaming_enabled() -> bool:
+    """Whether sync-mode expansion streams (default) or materializes (legacy).
+
+    Default ON: streaming is the memory-safe path and the whole point of the
+    fix. Set LEX_SYNC_STREAMING_EXPANSION=false for a one-line rollback to the
+    legacy materialized path without a redeploy.
+    """
+    return os.getenv("LEX_SYNC_STREAMING_EXPANSION", "true").lower() != "false"
+
+
+def calc_and_save_streaming(model_iter, *args):
+    """Streaming sync consumer: prepare -> calculate -> save -> release, per model.
+
+    Consumes the streaming combination generator one model at a time so peak
+    memory is O(depth), not O(N). Per yielded model it runs the same stage-2
+    prepare (delete_models_with_same_defining_fields) and the same
+    calculate+save body as calc_and_save_sync, then drops the reference.
+    """
+    from lex.core.models.CalculationModel import calculation_execution_context
+    processed = 0
+    for i, model in enumerate(model_iter):
+        if model is None:
+            logger.warning(f"Streaming model {i + 1} is None, skipping")
+            continue
+        # Stage-2 prepare inline (dedup + pk reset), matching the legacy
+        # _prepare_models_for_processing per-model step.
+        prepared = model.delete_models_with_same_defining_fields()
+        try:
+            with calculation_execution_context():
+                try:
+                    prepared.lex_func()(*args)
+                except Exception as calc_error:
+                    raise CalculatedModelError(
+                        f"Calculation failed for streaming model {i + 1}: {str(calc_error)}",
+                        model_class=prepared.__class__.__name__,
+                        model_index=i,
+                    ) from calc_error
+                prepared.save()
+        except CalculatedModelError:
+            raise
+        except Exception as save_error:
+            raise CalculatedModelError(
+                f"Save failed for streaming model {i + 1}: {save_error}",
+                model_class=prepared.__class__.__name__,
+                model_index=i,
+            ) from save_error
+        processed += 1
+    logger.info(f"Streaming sync processing completed: {processed} models processed")
+
+
 class CalculatedModelMixinMeta(ModelBase):
     def __new__(cls, name, bases, attrs, **kwargs):
         if 'Meta' not in attrs:
@@ -1215,7 +1334,25 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
                 logger.debug(f"Parallelizable fields: {cls.parallelizable_fields}")
             if kwargs:
                 logger.debug(f"Field overrides provided: {list(kwargs.keys())}")
-            
+
+            # Sync-mode streaming short-circuit: when Celery is not active and
+            # streaming is enabled (default), expand depth-first and process one
+            # model at a time so peak memory is O(depth), not O(N). Celery mode
+            # and the flag-off legacy path fall through to the four-stage pipeline.
+            celery_active = (
+                os.getenv('CELERY_ACTIVE', "").lower() == 'true'
+                and hasattr(cls.calculate, 'delay')
+            )
+            if not celery_active and _sync_streaming_enabled():
+                logger.info(f"Sync streaming expansion for {cls.__name__}")
+                base_model = cls()
+                model_iter = ModelCombinationGenerator.generate_model_combinations_streaming(
+                    base_model, cls.defining_fields, kwargs
+                )
+                calc_and_save_streaming(model_iter, *args)
+                logger.info(f"Sync streaming expansion completed for {cls.__name__}")
+                return
+
             # Step 1: Generate all model combinations based on defining fields
             logger.debug(f"Step 1: Generating model combinations for {cls.__name__}")
             try:

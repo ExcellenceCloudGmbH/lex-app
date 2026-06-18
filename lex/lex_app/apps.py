@@ -118,8 +118,23 @@ class LexAppConfig(GenericAppConfig):
                                       + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
             nest_asyncio.apply()
 
+            # Run the initial-data check (config load + are_all_models_empty()
+            # DB query) OFF the ready() critical path so django.setup() returns
+            # promptly and uvicorn can start serving / register WebSocket routes
+            # immediately. The actual data load was already backgrounded inside
+            # async_ready(); this moves the decision + DB query off startup too.
+            # A slow startup otherwise widens the window in which the frontend
+            # health check fails and redirects users to /server-not-ready.
+            def _run_async_ready() -> None:
+                try:
+                    asyncio.run(self.async_ready(generic_app_models))
+                except Exception:
+                    logger.exception("async_ready() failed during background startup")
 
-            asyncio.run(self.async_ready(generic_app_models))
+            threading.Thread(
+                target=_run_async_ready, name="lex-async-ready", daemon=True
+            ).start()
+
     def register_models(self):
         """
         Override parent's register_models to filter out lex core models
