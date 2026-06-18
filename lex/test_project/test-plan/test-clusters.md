@@ -162,6 +162,24 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
+### Batch 1u — Fast ASGI health/readiness probes ✅
+
+**Gap:** PR #615 added a lightweight ASGI health/readiness layer so Kubernetes
+liveness can return `200` without touching Django/DB, while readiness only
+returns `200` once the database is reachable. A regression here either restarts
+healthy pods (`/health` stops being cheap/static) or sends WebSocket/API traffic
+to a pod before it can serve (`/readiness` lies ready).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.171 | Health/readiness path helpers are disjoint | `/health` and `/api/health` are fast liveness only; `/readiness` and `/api/readiness` are DB-aware readiness only |
+| 1.172 | Fast health ASGI app drains request body and returns static payload | multi-message request body is consumed; response is `200` with `{"status": "Healthy :)"}` and no-store headers |
+| 1.173 | Readiness reflects DB availability | patched DB-ready seam returns `200 {"status":"ready"}`; DB-unavailable returns `503 {"status":"not-ready","reason":"database-unavailable"}` |
+| 1.174 | Top-level ASGI app short-circuits probe paths | `/health` and `/readiness` call their lightweight ASGI apps and do not invoke Django |
+| 1.175 | Non-probe HTTP delegates to Django | arbitrary application paths bypass health shortcuts and reach `django_asgi_app` |
+
+**Scenario range:** 1.171 – 1.175. **Test file:** `lex/test_project/tests/init/test_1u_fast_health_asgi.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). Sources: `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
+
 ---
 
 ## 2. CRUD via REST API
@@ -1270,6 +1288,32 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 9.36 | Bulk DELETE (`Many` endpoint) emits `deleted` | bulk path broadcasts too |
 
 **Status:** Complete — 8 pass / 0 fail locally (Postgres test DB available).
+
+### 9f — Core health/calculation/log WebSocket consumers ✅
+
+**Gap:** PR #615 touched the core WebSocket consumer files that the frontend uses
+for public backend health, calculation notifications, and live calculation logs.
+These are long-lived sockets, so regressions leak active consumer references,
+stop shutdown cleanup, or silently break the JSON envelopes frontend listeners
+dispatch on.
+
+**Covers:** `lex/api/consumers/BackendHealthConsumer.py`,
+`lex/api/consumers/CalculationsConsumer.py`,
+`lex/api/consumers/CalculationLogConsumer.py`.
+
+**Shape:** U (`SimpleTestCase`) with mocked channel layer and socket boundary.
+No broker, Redis, or database required.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.37 | Backend health socket accepts and returns Healthy payload | `connect()` accepts and tracks the consumer; `receive()` sends `{"status": "Healthy :)"}` |
+| 9.38 | Backend health disconnect untracks connection | disconnect removes the consumer from the process-global active set |
+| 9.39 | Calculations socket joins group and forwards events | joins `calculations`; forwards `calculation_id` events and `calculation_notification` payloads in the frontend contract shape |
+| 9.40 | Calculations disconnect leaves group | discards `test-channel` from `calculations` and untracks the consumer |
+| 9.41 | Calculation-log socket groups by record prefix and streams logs | `calculationId="record-..."` joins group `record`; sends `calculation_log_real_time` envelope with `logs` |
+| 9.42 | Shutdown `disconnect_all` closes tracked consumers | all three classes call `disconnect(None)` on a snapshot of active consumers |
+
+**Scenario range:** 9.37 – 9.42. **Test file:** `lex/test_project/tests/signals_ws/test_9f_core_consumers.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked because PR #615 wires it in `authenticated_websocket_urlpatterns()`.
 
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 
