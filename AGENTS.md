@@ -152,3 +152,4 @@ If the developer says **no**, leave the commits as they are and continue.
 | Framework conventions & feature docs | [`docs/`](docs/) |
 | Session history & CI/CD architecture | [`CLAUDE.md`](CLAUDE.md), [`docs/ci-cd/`](docs/ci-cd/) |
 | Claude Code skill for cluster tests | [`.claude/skills/lex-testing/SKILL.md`](.claude/skills/lex-testing/SKILL.md) |
+
