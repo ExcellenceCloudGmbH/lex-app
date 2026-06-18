@@ -652,9 +652,13 @@ OIDC_MIDDLEWARE_NO_AUTH_URL_PATTERNS = [
     "api/user/",
     "/api/user",
     "api/health",
+    "api/active-calculations",
+    "/api/active-calculations",
     "api/favicon.ico",
     "api/api/user/",
     "api/api/user",
+    "api/api/active-calculations",
+    "/api/api/active-calculations",
 ] + _admin_exempt_patterns
 
 OIDC_MIDDLEWARE_NO_REFRESH_URL_PATTERNS = [
