@@ -13,6 +13,7 @@ Run: python -m lex pytest lex/test_project/tests/init/test_1u_fast_health_asgi.p
 
 from __future__ import annotations
 
+import atexit
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -29,6 +30,11 @@ from lex.lex_app.fast_health import (
 )
 
 pytestmark = pytest.mark.init
+
+try:
+    atexit.unregister(asgi.on_server_shutdown)
+except ValueError:
+    pass
 
 
 async def _run_asgi_app(app, path: str = "/health", messages: list[dict] | None = None):

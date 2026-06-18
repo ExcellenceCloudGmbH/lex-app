@@ -98,6 +98,20 @@
 | Coverage gain | negligible (settings is import-time; pins a config-placement contract) |
 | Status | ✅ Complete (Session 78 — June 9) |
 
+### Batch 1u — Fast ASGI health/readiness probes (coverage task #620) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.171 – 1.175 |
+| Type | U |
+| Files covered | `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py` |
+| Test file | `lex/test_project/tests/init/test_1u_fast_health_asgi.py` |
+| Test classes | `TestCluster01u_FastHealthAsgi` (1.171 path helpers separate liveness/readiness, 1.172 health app drains request body and returns static Healthy payload, 1.173 readiness returns 200/503 based on DB readiness seam, 1.174 top-level HTTP ASGI app short-circuits probe paths before Django, 1.175 non-probe HTTP delegates to Django) |
+| Fixtures | none — ASGI `receive`/`send` callables and `AsyncMock` seams only |
+| Tests landed | **5 pass / 0 fail** (direct pytest) |
+| Coverage gain | `fast_health.py` path helpers + health/readiness ASGI apps; `asgi.py` `http_application` health/readiness/Django routing branches |
+| Status | ✅ Complete (Session 81 — June 18). `python -m lex pytest ...` blocked locally by no PostgreSQL service; pure U tests pass with `DJANGO_SETTINGS_MODULE=lex_app.settings python -m pytest ...`. |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)
@@ -584,6 +598,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Status | ✅ Complete — 8 pass / 0 fail locally (Postgres test DB available) |
 | Note | Fixes the customer-visible "open list view goes stale until manual Refresh" bug: plain CRUD on a non-`CalculationModel` now emits a `model_data_update` `record_mutation` over WebSocket. Generic broadcast is skipped on `calculate=true` updates (`calculation_success` already refreshes). Frontend `ModelDataUpdate` listener lands in the same change. |
 
+### Batch 9f — Core health/calculation/log WebSocket consumers (coverage task #620) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.37 – 9.42 |
+| Type | U |
+| Files covered | `lex/api/consumers/BackendHealthConsumer.py`, `lex/api/consumers/CalculationsConsumer.py`, `lex/api/consumers/CalculationLogConsumer.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9f_core_consumers.py` |
+| Test classes | `TestCluster09f_BackendHealthConsumer` (9.37 connect/receive health payload, 9.38 disconnect untracks), `TestCluster09f_CalculationsConsumer` (9.39 joins calculations group and forwards ID/notification events, 9.40 disconnect leaves group), `TestCluster09f_CalculationLogConsumer` (9.41 per-record log group and log envelope), `TestCluster09f_ShutdownDisconnectAll` (9.42 shutdown calls `disconnect(None)` on active consumers for all three classes) |
+| Fixtures | none — consumer instances with mocked channel layer / socket boundary |
+| Tests landed | **6 pass / 0 fail** (direct pytest) |
+| Coverage gain | Core consumer connect/disconnect/send branches + `disconnect_all` classmethods for the three coverage-task files |
+| Prereqs | none |
+| Status | ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked: PR #615 wires it in `authenticated_websocket_urlpatterns()`. |
+
 ---
 
 ## Cluster 10 — API Layer (existing 10a–10f)
@@ -762,7 +791,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 
