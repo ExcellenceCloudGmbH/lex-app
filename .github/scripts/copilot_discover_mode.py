@@ -176,9 +176,9 @@ def _candidates_from_branch(branch: str) -> list[int]:
 
     Matches patterns like ``copilot/fix-issue-618`` or
     ``fix-issue-42-some-description``, returning each embedded number in
-    order.  This is the last-resort fallback for coverage-task PRs where
-    Copilot sets the branch name correctly but omits ``Fixes #N`` from the
-    PR body.
+    order of first appearance, deduplicated.  This is the last-resort
+    fallback for coverage-task PRs where Copilot sets the branch name
+    correctly but omits ``Fixes #N`` from the PR body.
     """
     seen: list[int] = []
     for m in _ISSUE_FROM_BRANCH_RE.finditer(branch or ""):
@@ -201,6 +201,10 @@ def resolve(repo: str, pr: int) -> tuple[str, int, str]:
     candidates: list[int] = list(_closing_issue_references(repo, pr))
 
     pr_info_raw = _gh(
+        # headRefName is fetched here to support the branch-name fallback
+        # (step 4 in the resolver chain): when the PR body omits a Fixes #N
+        # line, the branch name (e.g. "copilot/fix-issue-618") is the only
+        # reliable signal pointing to the coverage-task issue.
         ["pr", "view", str(pr), "--repo", repo, "--json", "body,headRefName"]
     )
     pr_info = json.loads(pr_info_raw)
