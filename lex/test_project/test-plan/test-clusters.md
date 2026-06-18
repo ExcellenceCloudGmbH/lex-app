@@ -232,6 +232,12 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 2.93 – 2.96. **Test file:** `lex/test_project/tests/crud_api/test_2i_cancel_endpoint.py`. **Type:** E. **Status:** ✅ Complete (Session 66 — June 1).
 
+### 2j. Instance API-key extraction and matching ✅
+
+**Gap:** PR #615 ("feat(calculations): expose active release warnings") introduced two helpers in `lex/api/utils/api_key_requests.py` that allow the framework to authenticate machine-to-machine requests using a shared secret stored in `LEX_API_KEY`: `get_raw_api_key()` extracts the raw key from a `KeyParser` or falls back to the `Authorization: ApiKey <token>` header; `is_instance_api_key_request()` compares the extracted key to the env var. If either helper regresses — e.g. header fallback stops working, or the env-var comparison becomes case-insensitive — silent auth bypasses or auth failures will appear in production without any framework-level guard.
+
+**Scenario range:** 2.97 – 2.107. **Test file:** `lex/test_project/tests/crud_api/test_2j_instance_api_key.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/api/utils/api_key_requests.py`.
+
 ---
 
 ## 3. Validation Hooks
@@ -289,6 +295,14 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
 | 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
 | 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
+
+---
+
+### 4m. `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass ✅
+
+**Gap:** PR #615 added a short-circuit to `ApiKeyAwareLoginRequiredMiddleware.check_login_required` so that requests authenticated with the instance API key (`is_instance_api_key_request`) bypass the OAuth2 login redirect, the same way DRF API-key requests already did. Without a regression gate, a refactor of the `or` chain (e.g. swapping evaluation order, mis-importing `is_instance_api_key_request`, or accidentally removing the branch) would silently revert all machine-to-machine requests to a login redirect with no framework-level signal.
+
+**Scenario range:** 4.66 – 4.70. **Test file:** `lex/test_project/tests/permissions/test_4m_api_key_middleware.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/authentication/middleware.py`.
 
 ---
 
@@ -501,6 +515,14 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 **Scenario range:** 7.178 – 7.187. **Test file:** `lex/test_project/tests/calculations/test_7p_streaming_expansion.py`. **Type:** U (+ I for the E2E sync create path). **Status:** ✅ Complete (Session 79 — June 10). Covers `lex/core/mixins/CalculatedModelMixin.py`. Equivalence gate: ordered defining-field fingerprint identical legacy-vs-streaming; bounded-peak memory regression test; N≈10k benchmark in `docs/runs/`.
 
 **Out of scope (accepted by design):** when two expanded combinations resolve to the *same* defining-field tuple within one `create()`, streaming saves each model before preparing the next, so the second `delete_models_with_same_defining_fields()` sees the first's just-saved row and reuses it (one row) where the legacy batch-prepare would insert two. This degenerate same-tuple-collision case is intentionally not covered by the equivalence suite; the `LEX_SYNC_STREAMING_EXPANSION=false` env var is the rollback path if a project relies on the legacy behavior.
+
+---
+
+### 7m. `CalculationSignals.update_calculation_status` + `One.py` `model_name` propagation ✅
+
+**Gap:** PR #615 threaded `model_name=instance._meta.object_name` through two call sites: `update_calculation_status` in `CalculationSignals.py` now passes it to `mark_in_progress` on the IN_PROGRESS branch, and `One.update()` in `One.py` does the same in the early-registration block when `calculate=true`. The `ActiveCalculationStateStore` uses `model_name` to partition active-calculation lookups; if the propagation silently regresses (e.g. the kwarg is dropped or passed as `None`), the store records calculations under the wrong key and the active-release endpoint returns stale or missing data.
+
+**Scenario range:** 7.188 – 7.195. **Test file:** `lex/test_project/tests/calculations/test_7m_calc_signals.py`. **Type:** U + E. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/core/signals/CalculationSignals.py`, `lex/api/views/model_entries/One.py`.
 
 ---
 
