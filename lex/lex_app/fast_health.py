@@ -61,7 +61,7 @@ async def health_asgi_app(
             "headers": headers,
         }
     )
-    await send({"type": "http.response.body", "body": _HEALTH_BODY})
+    await send({"type": "http.response.body", "body": body})
 
 
 async def _database_ready() -> bool:
