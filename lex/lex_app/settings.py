@@ -200,6 +200,35 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
 ]
 
+# Fail fast on missing critical configuration when deployed, instead of silently
+# falling back to "localhost". A missing DOMAIN_HOSTED makes ALLOWED_HOSTS only
+# match localhost, so every WebSocket/CSRF check rejects the real instance
+# hostname -> the frontend continuously redirects to /server-not-ready. A
+# crash-looping pod surfaces the misconfiguration immediately; a silently broken
+# one does not. Only enforced in deployed pods (DEPLOYMENT_ENVIRONMENT set), so
+# local development and tests are unaffected.
+if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
+    from django.core.exceptions import ImproperlyConfigured
+
+    if not os.getenv("DOMAIN_HOSTED"):
+        raise ImproperlyConfigured(
+            "DOMAIN_HOSTED must be set when DEPLOYMENT_ENVIRONMENT is set; without "
+            "it ALLOWED_HOSTS only matches 'localhost' and all WebSocket/CSRF "
+            "checks reject the real instance hostname."
+        )
+
+    if _use_redis_channel_layer:
+        _missing_redis = [
+            name
+            for name in ("REDIS_HOST", "REDIS_USERNAME", "REDIS_PASSWORD")
+            if not os.getenv(name)
+        ]
+        if _missing_redis:
+            raise ImproperlyConfigured(
+                "Redis channel layer is active but required env vars are missing: "
+                + ", ".join(_missing_redis)
+            )
+
 REACT_APP_BUILD_PATH = (
     Path(__file__).resolve().parent.parent / Path("react/build")
 ).as_posix()
