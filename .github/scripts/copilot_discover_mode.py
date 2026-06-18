@@ -29,6 +29,9 @@ Resolver chain (first match wins):
 2. Body grep for any close-keyword form (``Fixes / Closes / Resolves
    #N``, case-insensitive, optional URL form).
 3. Body grep for any bare ``#N`` — last resort.
+4. Branch-name grep for ``issue-N`` (e.g. ``copilot/fix-issue-618``).
+   Copilot names its branches this way even when it forgets to add a
+   ``Fixes #N`` line to the PR body.
 
 For each candidate we then walk:
 
@@ -76,6 +79,9 @@ _BARE_HASH_RE = re.compile(r"#(\d+)")
 _ASSEMBLED_FROM_RE = re.compile(
     r"Assembled from issue #(\d+)", re.IGNORECASE
 )
+# Matches the issue number in branch names like "copilot/fix-issue-618"
+# or "fix-issue-42-some-description".
+_ISSUE_FROM_BRANCH_RE = re.compile(r"issue-(\d+)")
 
 
 def _gh(args: list[str]) -> str:
@@ -165,6 +171,23 @@ def _candidates_from_pr_body(body: str) -> list[int]:
     return seen
 
 
+def _candidates_from_branch(branch: str) -> list[int]:
+    """Extract issue numbers from a branch name.
+
+    Matches patterns like ``copilot/fix-issue-618`` or
+    ``fix-issue-42-some-description``, returning each embedded number in
+    order.  This is the last-resort fallback for coverage-task PRs where
+    Copilot sets the branch name correctly but omits ``Fixes #N`` from the
+    PR body.
+    """
+    seen: list[int] = []
+    for m in _ISSUE_FROM_BRANCH_RE.finditer(branch or ""):
+        n = int(m.group(1))
+        if n not in seen:
+            seen.append(n)
+    return seen
+
+
 def resolve(repo: str, pr: int) -> tuple[str, int, str]:
     """Return ``(mode, source_issue_number, kind)``.
 
@@ -177,18 +200,23 @@ def resolve(repo: str, pr: int) -> tuple[str, int, str]:
     # Step 1 — gather candidates from every available signal.
     candidates: list[int] = list(_closing_issue_references(repo, pr))
 
-    pr_body_raw = _gh(
-        ["pr", "view", str(pr), "--repo", repo, "--json", "body"]
+    pr_info_raw = _gh(
+        ["pr", "view", str(pr), "--repo", repo, "--json", "body,headRefName"]
     )
-    pr_body = json.loads(pr_body_raw).get("body") or ""
+    pr_info = json.loads(pr_info_raw)
+    pr_body = pr_info.get("body") or ""
+    pr_branch = pr_info.get("headRefName") or ""
     for n in _candidates_from_pr_body(pr_body):
+        if n not in candidates:
+            candidates.append(n)
+    for n in _candidates_from_branch(pr_branch):
         if n not in candidates:
             candidates.append(n)
 
     if not candidates:
         raise RuntimeError(
-            "PR has no closingIssuesReferences and no #N in body — "
-            "cannot determine source issue."
+            "PR has no closingIssuesReferences, no #N in body, and no "
+            "issue-N in branch name — cannot determine source issue."
         )
 
     # Step 2 — for each candidate, check labels; if it's a task issue,
@@ -223,7 +251,8 @@ def resolve(repo: str, pr: int) -> tuple[str, int, str]:
         f"None of the candidate issues ({candidates}) carry a copilot:<mode> "
         "or coverage-task label, and none dereference to a source issue that "
         "does. The PR is either not Copilot-triggered or the source issue lost "
-        "its label."
+        "its label. Candidates were drawn from: closingIssuesReferences, PR "
+        "body (#N references), and branch name (issue-N patterns)."
     )
 
 

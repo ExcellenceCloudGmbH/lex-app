@@ -20,7 +20,10 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from copilot_discover_mode import _mode_and_kind_from_labels  # noqa: E402
+from copilot_discover_mode import (  # noqa: E402
+    _candidates_from_branch,
+    _mode_and_kind_from_labels,
+)
 
 
 def _labels(*names: str) -> list[dict]:
@@ -58,3 +61,31 @@ def test_explicit_mode_wins_over_coverage_task() -> None:
         _labels("coverage-task", "copilot:bug-repro")
     )
     assert (m, kind) == ("bug-repro", "test-bot")
+
+
+# ---------------------------------------------------------------------------
+# _candidates_from_branch
+# ---------------------------------------------------------------------------
+
+def test_branch_standard_copilot_pattern() -> None:
+    """The canonical Copilot branch name yields the embedded issue number."""
+    assert _candidates_from_branch("copilot/fix-issue-618") == [618]
+
+
+def test_branch_no_issue_number() -> None:
+    """Branches without 'issue-N' return an empty list."""
+    assert _candidates_from_branch("feat/my-feature") == []
+    assert _candidates_from_branch("") == []
+
+
+def test_branch_multiple_issue_numbers() -> None:
+    """All embedded issue numbers are returned in order, deduplicated."""
+    assert _candidates_from_branch("fix-issue-10-issue-20") == [10, 20]
+    assert _candidates_from_branch("issue-42-issue-42-extra") == [42]
+
+
+def test_branch_none_treated_as_empty() -> None:
+    """None is safely handled as empty (no AttributeError)."""
+    # The function accepts str and guards with `or ""`; passing None would
+    # require a type violation, so we only test the empty string edge case.
+    assert _candidates_from_branch("") == []
