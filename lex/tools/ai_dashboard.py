@@ -2,7 +2,8 @@
 
 Opens a local HTTP page that displays and lets the user edit:
 
-* **MCP workflow mode** (forward / backward) — writes the one-shot override
+* **MCP workflow mode** (forward / backward / edit / review /
+    mvp_generator) — writes the one-shot override
   file at ``~/.lex-mcp/mode-override`` and updates ``LEX_MCP_MODE`` in the
   project ``.env`` and ``mcp.json``.  With the crash-and-reboot mechanism
   in lex-mcp-local ≥ 1.0.0, mode changes are instant: the MCP server
@@ -62,6 +63,60 @@ from lex.tools.setup_with_ai import (
 
 MODE_OVERRIDE_DIR = Path.home() / ".lex-mcp"
 MODE_OVERRIDE_FILE = MODE_OVERRIDE_DIR / "mode-override"
+
+SUPPORTED_MCP_MODES: tuple[str, ...] = (
+    "forward",
+    "backward",
+    "edit",
+    "review",
+    "mvp_generator",
+    "mvp_completion",
+)
+
+MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
+    {
+        "value": "forward",
+        "title": "New Project",
+        "desc": "Full planning and implementation flow from scratch.",
+        "tone": "forward",
+        "icon": "&#x1F680;",
+    },
+    {
+        "value": "backward",
+        "title": "Documentation",
+        "desc": "Reverse-map an existing codebase and generate docs.",
+        "tone": "backward",
+        "icon": "&#x1F4D6;",
+    },
+    {
+        "value": "edit",
+        "title": "Edit",
+        "desc": "Targeted code modifications in an existing project.",
+        "tone": "edit",
+        "icon": "&#x270F;&#xFE0F;",
+    },
+    {
+        "value": "review",
+        "title": "Review",
+        "desc": "Audit, validate, and improve quality before merge.",
+        "tone": "review",
+        "icon": "&#x1F50D;",
+    },
+    {
+        "value": "mvp_generator",
+        "title": "MVP Generator",
+        "desc": "Generate a lean, production-minded MVP baseline.",
+        "tone": "mvp",
+        "icon": "&#x1F4A1;",
+    },
+    {
+        "value": "mvp_completion",
+        "title": "MVP Completion",
+        "desc": "Finalize and polish an MVP to production readiness.",
+        "tone": "mvp_completion",
+        "icon": "&#x2705;",
+    },
+)
 
 
 # ---------------------------------------------------------------------------
@@ -178,13 +233,13 @@ def _read_mode_from_mcp_json(
             for i, arg in enumerate(args):
                 if arg == "--mode" and i + 1 < len(args):
                     val = str(args[i + 1]).strip().lower()
-                    if val in ("forward", "backward"):
+                    if val in SUPPORTED_MCP_MODES:
                         return val
         # Fall back to the env block.
         env_block = server_def.get("env", {})
         if isinstance(env_block, dict):
             val = str(env_block.get("LEX_MCP_MODE", "")).strip().lower()
-            if val in ("forward", "backward"):
+            if val in SUPPORTED_MCP_MODES:
                 return val
     return None
 
@@ -192,6 +247,27 @@ def _read_mode_from_mcp_json(
 def _read_override_file() -> dict[str, Any] | None:
     if not MODE_OVERRIDE_FILE.exists():
         return None
+
+
+def _render_mode_cards(mode: str) -> str:
+    cards: list[str] = []
+    for card in MODE_CARD_DEFS:
+        value = card["value"]
+        selected = value == mode
+        sel_class = " selected" if selected else ""
+        checked = "checked" if selected else ""
+        cards.append(
+            f'<label class="mode-card {card["tone"]}{sel_class}" data-mode="{value}">'
+            f'<input type="radio" name="mcp_mode_select" value="{value}" {checked}>'
+            f'<div class="mode-icon" aria-hidden="true">{card["icon"]}</div>'
+            f'<div class="mode-title">{html.escape(card["title"])}</div>'
+            f'<p class="mode-desc">{html.escape(card["desc"])}</p>'
+            f'<div class="mode-check">'
+            f'<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+            f'</div>'
+            f'</label>'
+        )
+    return "".join(cards)
     try:
         raw = MODE_OVERRIDE_FILE.read_text(encoding="utf-8").strip()
         return json.loads(raw) if raw.startswith("{") else {"mode": raw}
@@ -358,7 +434,7 @@ def _read_dashboard_state(
     override_mode = None
     if override and isinstance(override, dict):
         candidate = str(override.get("mode", "")).strip().lower()
-        if candidate in ("forward", "backward"):
+        if candidate in SUPPORTED_MCP_MODES:
             override_mode = candidate
     persisted_mode = (
         _read_dotenv_value(env_file_path, "LEX_MCP_MODE")
@@ -428,7 +504,7 @@ def _handle_save(
     override_mode = None
     if override and isinstance(override, dict):
         candidate = str(override.get("mode", "")).strip().lower()
-        if candidate in ("forward", "backward"):
+        if candidate in SUPPORTED_MCP_MODES:
             override_mode = candidate
     state_is_stale = bool(
         override_mode
@@ -445,7 +521,7 @@ def _handle_save(
     #   (c) the persisted state is stale relative to the override file.
     mode_changed = (
         new_mode
-        and new_mode in ("forward", "backward")
+        and new_mode in SUPPORTED_MCP_MODES
         and (
             new_mode != current_mode
             or stored_mode is None
@@ -557,10 +633,7 @@ def _build_dashboard_html(
     errors: list[str] | None = None,
 ) -> str:
     mode = config["mcp_mode"]
-    forward_sel = "selected" if mode == "forward" else ""
-    backward_sel = "selected" if mode == "backward" else ""
-    forward_checked = "checked" if mode == "forward" else ""
-    backward_checked = "checked" if mode == "backward" else ""
+    mode_cards_html = _render_mode_cards(mode)
 
     masked_gh = html.escape(_mask_token(config["github_token"]))
     masked_key = html.escape(_mask_token(config["remote_mcp_api_key"]))
@@ -652,10 +725,13 @@ def _build_dashboard_html(
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: Arial, Helvetica, sans-serif;
+            font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       font-size: 16px;
       line-height: 26px;
-      background: var(--neutral-page);
+            background:
+                radial-gradient(circle at 10% 10%, #dbeafe 0%, rgba(219, 234, 254, 0) 45%),
+                radial-gradient(circle at 85% 15%, #e0f2fe 0%, rgba(224, 242, 254, 0) 40%),
+                linear-gradient(180deg, #f8fbff 0%, var(--neutral-page) 55%, #eaf2fb 100%);
       color: var(--text-primary);
     }}
     .shell {{
@@ -674,6 +750,7 @@ def _build_dashboard_html(
       align-items: center;
       gap: 1.25rem;
       margin-bottom: 1.25rem;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
     }}
     .hero-logo {{ flex-shrink: 0; }}
     .hero-logo svg {{ height: 48px; width: auto; }}
@@ -729,6 +806,7 @@ def _build_dashboard_html(
       border-radius: var(--rounded-container);
       padding: 1.5rem;
       margin-bottom: 1.25rem;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
     }}
     .badge {{
       display: inline-block;
@@ -759,7 +837,7 @@ def _build_dashboard_html(
     /* ── Mode toggle ──────────────────────────────────────────── */
     .mode-toggle {{
       display: grid;
-      grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1rem;
     }}
     .mode-card {{
@@ -769,9 +847,9 @@ def _build_dashboard_html(
       border-radius: var(--rounded-md);
       padding: 1.15rem 1.15rem 1rem;
       cursor: pointer;
-      transition: border-color 150ms ease, box-shadow 150ms ease;
+            transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
     }}
-    .mode-card:hover {{ border-color: var(--tertiary); }}
+        .mode-card:hover {{ border-color: var(--tertiary); transform: translateY(-2px); }}
     .mode-card.selected {{
       border-color: var(--tertiary);
       box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
@@ -779,14 +857,18 @@ def _build_dashboard_html(
     .mode-card input[type="radio"] {{
       position: absolute; opacity: 0; pointer-events: none;
     }}
-    .mode-icon {{
-      width: 38px; height: 38px; border-radius: var(--rounded-sm);
+        .mode-icon {{
+            width: 38px; height: 38px; border-radius: var(--rounded-sm);
       display: flex; align-items: center; justify-content: center;
       margin-bottom: 0.65rem;
+            font-size: 18px;
     }}
-    .mode-icon svg {{ width: 20px; height: 20px; }}
     .mode-card.forward .mode-icon {{ background: rgba(56, 189, 248, 0.12); }}
     .mode-card.backward .mode-icon {{ background: rgba(29, 78, 216, 0.08); }}
+        .mode-card.edit .mode-icon {{ background: rgba(16, 185, 129, 0.12); }}
+        .mode-card.review .mode-icon {{ background: rgba(234, 179, 8, 0.14); }}
+        .mode-card.mvp .mode-icon {{ background: rgba(99, 102, 241, 0.12); }}
+    .mode-card.mvp_completion .mode-icon {{ background: rgba(34, 197, 94, 0.12); }}
     .mode-title {{
       font-size: 15px; font-weight: 700; color: var(--primary);
       margin-bottom: 0.3rem;
@@ -815,6 +897,60 @@ def _build_dashboard_html(
       font-size: 13px;
       line-height: 20px;
     }}
+
+        .promo-card {{
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 45%, #1d4ed8 100%);
+            color: var(--text-inverse);
+            border-radius: var(--rounded-container);
+            border: 1px solid #1e3a8a;
+            padding: 1.5rem;
+            margin-bottom: 1.25rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            box-shadow: 0 14px 28px rgba(15, 23, 42, 0.2);
+        }}
+        .promo-icon {{
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            background: rgba(255, 255, 255, 0.14);
+            flex-shrink: 0;
+        }}
+        .promo-title {{
+            margin: 0;
+            font-size: 18px;
+            line-height: 25px;
+            font-weight: 700;
+        }}
+        .promo-desc {{
+            margin: 0.25rem 0 0.75rem;
+            color: rgba(255, 255, 255, 0.88);
+            font-size: 14px;
+            line-height: 21px;
+        }}
+        .promo-link {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.5rem 0.85rem;
+            border-radius: var(--rounded-pill);
+            background: #e0f2fe;
+            color: #0f172a;
+            font-size: 13px;
+            font-weight: 700;
+            text-decoration: none;
+            border: 1px solid #93c5fd;
+            transition: transform 120ms ease, box-shadow 120ms ease;
+        }}
+        .promo-link:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(14, 116, 144, 0.25);
+        }}
 
     /* ── Form elements ────────────────────────────────────────── */
     form {{ display: grid; gap: 0.9rem; }}
@@ -879,10 +1015,15 @@ def _build_dashboard_html(
     }}
 
     @media (max-width: 640px) {{
-      .mode-toggle {{ grid-template-columns: 1fr; }}
+            .mode-toggle {{ grid-template-columns: 1fr; }}
       .hero {{ flex-direction: column; align-items: flex-start; gap: 0.75rem; }}
       .info-row {{ grid-template-columns: 1fr; }}
+            .promo-card {{ align-items: flex-start; }}
     }}
+
+        @media (min-width: 641px) and (max-width: 900px) {{
+            .mode-toggle {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+        }}
   </style>
 </head>
 <body>
@@ -897,6 +1038,18 @@ def _build_dashboard_html(
 
   {toast_html}
 
+    <section class="promo-card" aria-label="Lex AI FAQ promotion">
+        <div class="promo-icon" aria-hidden="true">&#x2753;</div>
+        <div>
+            <h2 class="promo-title">Need guidance while using the dashboard?</h2>
+            <p class="promo-desc">Open the Lex AI FAQ for mode walkthroughs, upgrade notes, and workflow tips while keeping this dashboard open.</p>
+            <a class="promo-link" href="/faq" target="_blank" rel="noopener noreferrer">
+                Open Lex AI FAQ
+                <span aria-hidden="true">&#x2197;</span>
+            </a>
+        </div>
+    </section>
+
   <form method="post" action="/save">
     <input type="hidden" name="state" value="{html.escape(state)}">
     <input type="hidden" name="mcp_mode" id="mcpModeInput" value="{html.escape(mode)}">
@@ -907,28 +1060,7 @@ def _build_dashboard_html(
       <h2>Workflow Mode</h2>
       <p>Choose which MCP workflow the server exposes. Changing mode writes a one-shot override file and stops the running server.</p>
       <div class="mode-toggle" id="modeToggle">
-        <label class="mode-card forward {forward_sel}" data-mode="forward">
-          <input type="radio" name="mcp_mode_select" value="forward" {forward_checked}>
-          <div class="mode-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-          </div>
-          <div class="mode-title">Create new project</div>
-          <p class="mode-desc">AI-assisted planning, implementation, and documentation from scratch.</p>
-          <div class="mode-check">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </div>
-        </label>
-        <label class="mode-card backward {backward_sel}" data-mode="backward">
-          <input type="radio" name="mcp_mode_select" value="backward" {backward_checked}>
-          <div class="mode-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          </div>
-          <div class="mode-title">Document existing project</div>
-          <p class="mode-desc">Generate documentation and canonical context files for an existing codebase.</p>
-          <div class="mode-check">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </div>
-        </label>
+                {mode_cards_html}
       </div>
       <p class="mode-note">Mode changes take effect instantly. The unified server switches the tool surface live; the IDE refreshes automatically.</p>
     </section>
@@ -1044,6 +1176,18 @@ def launch_ai_dashboard(
     class DashboardHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/faq":
+                from lex.tools.ai_faq import _build_faq_html
+
+                body = _build_faq_html()
+                encoded = body.encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+                return
+
             if parsed.path not in {"", "/"}:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return

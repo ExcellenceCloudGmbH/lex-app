@@ -132,7 +132,9 @@ def _build_faq_html() -> str:
         margin: 0;
         font-family: "Segoe UI", "Avenir Next", system-ui, sans-serif;
         color: var(--text);
-        background: var(--bg);
+        background: linear-gradient(135deg, #f0f4f8 0%, #e8f0f7 50%, #f5f7fc 100%);
+        background-attachment: fixed;
+        min-height: 100vh;
       }}
 
       /* ---- shell ---- */
@@ -148,10 +150,16 @@ def _build_faq_html() -> str:
         border: 1px solid var(--line);
         border-radius: 1rem;
         padding: 1.75rem 1.5rem;
-        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
+        box-shadow: 0 4px 16px rgba(40, 48, 103, 0.08);
         display: flex;
         align-items: center;
         gap: 1.5rem;
+        transition: box-shadow 300ms ease, border-color 300ms ease;
+      }}
+
+      .hero:hover {{
+        box-shadow: 0 8px 24px rgba(36, 182, 187, 0.12);
+        border-color: rgba(36, 182, 187, 0.3);
       }}
       .hero-logo {{
         flex-shrink: 0;
@@ -186,8 +194,8 @@ def _build_faq_html() -> str:
       /* ---- faq list ---- */
       .faq-list {{
         display: grid;
-        gap: 1.25rem;
-        margin-top: 1.25rem;
+        gap: 1.5rem;
+        margin-top: 2rem;
       }}
 
       /* ---- faq accordion ---- */
@@ -195,8 +203,18 @@ def _build_faq_html() -> str:
         background: var(--card);
         border: 1px solid var(--line);
         border-radius: 1rem;
-        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.06);
+        box-shadow: 0 2px 12px rgba(40, 48, 103, 0.05);
         overflow: hidden;
+        transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+      }}
+
+      .faq:hover {{
+        box-shadow: 0 6px 20px rgba(36, 182, 187, 0.15);
+        border-color: rgba(36, 182, 187, 0.2);
+      }}
+
+      .faq[open] {{
+        box-shadow: 0 8px 28px rgba(40, 48, 103, 0.12);
       }}
       .faq summary {{
         display: flex;
@@ -318,30 +336,32 @@ def _build_faq_html() -> str:
       /* ---- prompt builder ---- */
       .pb-tabs {{
         display: flex;
-        gap: 0.65rem;
+        gap: 0.75rem;
         flex-wrap: wrap;
-        margin-bottom: 1.25rem;
+        margin-bottom: 1.5rem;
       }}
       .pb-tab {{
         appearance: none;
-        border: 1px solid var(--line);
-        border-radius: 8px;
+        border: 1.5px solid var(--line);
+        border-radius: 10px;
         background: var(--card);
         cursor: pointer;
-        padding: 0.7rem 1.1rem;
+        padding: 0.85rem 1.25rem;
         text-align: left;
-        transition: all 150ms ease;
+        transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
         flex: 1 1 160px;
         min-width: 160px;
       }}
       .pb-tab:hover {{
         border-color: var(--teal);
-        box-shadow: 0 2px 8px rgba(36, 182, 187, 0.12);
+        box-shadow: 0 4px 12px rgba(36, 182, 187, 0.16);
+        transform: translateY(-2px);
       }}
       .pb-tab.active {{
         background: linear-gradient(135deg, #24b6bb 0%, #1a9a9e 100%);
         border-color: var(--teal);
-        box-shadow: 0 3px 12px rgba(36, 182, 187, 0.25);
+        box-shadow: 0 6px 20px rgba(36, 182, 187, 0.3);
+        color: #fff;
       }}
       .pb-tab .tab-title {{
         display: block;
@@ -454,30 +474,31 @@ def _build_faq_html() -> str:
       /* ---- behavior map flow tabs ---- */
       .flow-tabs {{
         display: flex;
-        gap: 0.5rem;
+        gap: 0.65rem;
         flex-wrap: wrap;
-        margin: 1rem 0;
+        margin: 1.25rem 0;
       }}
       .flow-tab {{
         appearance: none;
-        border: 1px solid var(--line);
-        border-radius: 8px;
+        border: 1.5px solid var(--line);
+        border-radius: 10px;
         background: var(--card);
         cursor: pointer;
-        padding: 0.6rem 1rem;
+        padding: 0.75rem 1.15rem;
         text-align: left;
         flex: 1 1 140px;
         min-width: 140px;
-        transition: all 150ms ease;
+        transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
       }}
       .flow-tab:hover {{
         border-color: var(--teal);
-        box-shadow: 0 2px 8px rgba(36, 182, 187, 0.12);
+        box-shadow: 0 4px 12px rgba(36, 182, 187, 0.16);
+        transform: translateY(-2px);
       }}
       .flow-tab.active {{
         background: linear-gradient(135deg, #24b6bb 0%, #1a9a9e 100%);
         border-color: var(--teal);
-        box-shadow: 0 3px 12px rgba(36, 182, 187, 0.25);
+        box-shadow: 0 6px 20px rgba(36, 182, 187, 0.3);
       }}
       .flow-tab .ft-icon {{
         font-size: 1.2rem;
@@ -664,10 +685,13 @@ def _build_faq_html() -> str:
               <div class="pb-field" id="pb-field-mode">
                 <label for="pb-mode">MCP Mode</label>
                 <select id="pb-mode">
-                  <option value="FORWARD">FORWARD</option>
-                  <option value="BACKWARD">BACKWARD</option>
+                  <option value="FORWARD">FORWARD — Full Re-Planning</option>
+                  <option value="BACKWARD">BACKWARD — Reverse & Docs</option>
+                  <option value="EDIT">EDIT — Code Modifications</option>
+                  <option value="REVIEW">REVIEW — Code Quality & Audit</option>
+                  <option value="MVP_GENERATOR">MVP GENERATOR — Minimal Viable Product</option>
                 </select>
-                <div class="hint">FORWARD re-runs planning from scratch; BACKWARD preserves existing structure</div>
+                <div class="hint">FORWARD re-runs planning; BACKWARD reverses & documents; EDIT modifies code; REVIEW audits quality; MVP GENERATOR creates lightweight versions</div>
               </div>
               <div class="pb-field" id="pb-field-revision">
                 <label for="pb-revision">What Did You Change?</label>

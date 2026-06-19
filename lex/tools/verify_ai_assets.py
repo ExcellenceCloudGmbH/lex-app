@@ -71,6 +71,10 @@ DEFAULT_MCP_MODE = MCP_MODE_FORWARD
 MCP_MODE_PACKAGE: dict[str, str] = {
     MCP_MODE_FORWARD: "lex_mcp_local",
     MCP_MODE_BACKWARD: "lex_mcp_reverse",
+    "edit": "lex_mcp_edit",
+    "review": "lex_mcp_review",
+    "mvp_generator": "lex_mcp_mvp_generator",
+    "mvp_completion": "lex_mcp_mvp_completion",
 }
 
 # Directories shipped inside each mode's package that must mirror to project
