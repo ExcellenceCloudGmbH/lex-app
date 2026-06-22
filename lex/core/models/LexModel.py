@@ -648,6 +648,15 @@ class LexModel(LifecycleModel):
 
             logger.debug(f"Post-validation successful for {self.__class__.__name__}")
 
+            # Release the pre-validation snapshot now that the save has
+            # succeeded. It is only needed to roll back a failed post-validation
+            # (see _execute_rollback); once we reach this point rollback can no
+            # longer happen, so holding a full copy of every field on the live
+            # instance is pure overhead. Freeing it roughly halves the per-row
+            # snapshot footprint that otherwise persists for the instance's
+            # lifetime during large calculate-all runs.
+            self._pre_validation_snapshot = None
+
         except Exception as e:
             logger.error(f"Post-validation failed for {self.__class__.__name__}: {e}")
 

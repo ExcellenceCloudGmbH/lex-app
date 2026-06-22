@@ -26,7 +26,7 @@
 | 2. CRUD via REST API | 23 | 23 | 23 | 0 | 0 |  Complete (Many bulk-write reconciled to DELETE-only; BUG-004 removed per product decision; BUG-005 fixed; 2.1 = CRUD showcase) |
 | 2i. Cancel-calculation REST endpoint (Session 67 — June 1) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored) |
 | 2j. Instance API-key extraction and matching (Session 80 — June 18) | 11 | 11 | 11 | 0 | 0 | ✅ Complete — scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key) |
-| 3. Validation Hooks | 8 | 9 | 9 | 0 | 0 |  Complete |
+| 3. Validation Hooks | 10 | 11 | 11 | 0 | 0 |  Complete (3e snapshot lifecycle — 3.9/3.10 — frees the pre-validation rollback buffer after a successful save) |
 | 4. Permissions | 14 | 14 | 12 | 2 | 0 |  Complete (BUG-008/010 tracked; 4.40 export full-deny; 4.41 read full-deny at detail endpoint) |
 | 4e. Read-restriction filter backend (planned — April 21) | 7 | 7 | 5 | 0 | 0 |  Complete (2 skipped — 4.14/4.15 AuditLog DB-filter path deferred; 4.41 pins detail-GET read-deny) |
 | 4f. Serializer-level masking (planned — April 21) | 8 | 8 | 8 | 0 | 0 |  Complete — 4.19–4.26 |

@@ -191,6 +191,25 @@
 
 ---
 
+## Cluster 3 — Validation Hooks (existing 3a–3d)
+
+### Batch 3e — Pre-validation snapshot lifecycle (v1→v2 calculate-all memory fix) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 3.9 – 3.10 |
+| Type | E (E2E save through the public `save()` entry point) |
+| Files covered | `lex/core/models/LexModel.py` (`post_validation_hook` — releases `_pre_validation_snapshot` on the successful path) |
+| Test file | `lex/test_project/tests/validation_hooks/test_3e_snapshot_lifecycle.py` |
+| Test classes | `TestCluster03e_SnapshotLifecycle` (3.9 snapshot released after a successful create *and* update, 3.10 release-on-success does not weaken rollback — a later rejected update still restores the pre-save value) |
+| Fixtures | existing `PostValidatedItem` (reused, no new model) |
+| Tests landed | 2 pass / 0 fail (full cluster 3: 11 pass / 0 fail) |
+| Coverage gain | successful-path snapshot release in `post_validation_hook` |
+| Status | ✅ Complete (Session 82 — June 22) |
+| Note | The `_pre_validation_snapshot` is an in-flight rollback buffer (a second full-field copy per row); it was never freed after a successful save, pinning ~1800 B/inst (~34% of the v2 per-instance footprint) for the instance's lifetime — the measured driver of the non-atomic `calculate_all` v1→v2 RAM regression (3.28× → ~2.17× per saved row). |
+
+---
+
 ## Cluster 4 — Permissions (existing 4a–4i)
 
 ### Batch 4j — Middleware & bearer-token authentication

@@ -281,6 +281,8 @@ to a pod before it can serve (`/readiness` lies ready).
 | 3.6 | Hook execution order on update | BEFORE_UPDATE → BEFORE_SAVE → (save) → AFTER_SAVE → AFTER_UPDATE |
 | 3.7 | Validation recursion guard | `_validation_in_progress` prevents infinite recursion |
 | 3.8 | Rollback restores field values | After `post_validation` failure, DB record matches pre-save snapshot |
+| 3.9 | Snapshot released after success | After a successful save (create/update), the pre-validation rollback buffer is not pinned on the instance |
+| 3.10 | Snapshot release keeps rollback intact | A `post_validation` failure on a later update still rolls back, even though the buffer is freed after each successful save |
 
 ---
 
