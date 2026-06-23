@@ -17,6 +17,12 @@ from django_lifecycle import (
     BEFORE_UPDATE,
     hook,
 )
+from django_lifecycle.conditions import (
+    WhenFieldHasChanged,
+    WhenFieldValueChangesTo,
+    WhenFieldValueIs,
+    WhenFieldValueWas,
+)
 from lex.core.models.LexModel import LexModel, PermissionResult
 
 
@@ -128,4 +134,129 @@ class HookOrderItem(LexModel):
         type(self).hook_log.append("AFTER_UPDATE")
 
 
-ALL_MODELS = [PreValidatedItem, PostValidatedItem, HookOrderItem]
+@_permissive
+class _ConditionalHooksBase(LexModel):
+    """
+    Abstract carrier of every conditional-hook form the lean snapshot must
+    keep working: legacy ``when=`` / ``when_any=`` parameters and the modern
+    ``condition=`` objects, including a chained condition.
+
+    Each hook appends a distinct label to ``type(self).hook_log`` so a test can
+    assert exactly which hooks fired for a given mutation. Concrete subclasses
+    differ only in ``lex_lean_initial_state`` so lean-vs-full behaviour can be
+    compared field-for-field on identical hook declarations.
+    """
+
+    # Concrete subclasses each define their own; declared here for the type
+    # checker / clarity only.
+    hook_log: list[str] = []
+
+    name = models.CharField(max_length=200)
+    status = models.CharField(max_length=50, default="draft")
+    amount = models.IntegerField(default=0)
+    a = models.IntegerField(default=0)
+    b = models.IntegerField(default=0)
+    note = models.CharField(max_length=200, default="")
+
+    class Meta:
+        abstract = True
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    # Legacy parameter form: single field.
+    @hook(AFTER_UPDATE, when="status", has_changed=True)
+    def _legacy_when_status(self):
+        type(self).hook_log.append("legacy_when_status")
+
+    # Legacy parameter form: any of several fields.
+    @hook(AFTER_UPDATE, when_any=["a", "b"], has_changed=True)
+    def _legacy_when_any_ab(self):
+        type(self).hook_log.append("legacy_when_any_ab")
+
+    # Modern condition objects.
+    @hook(AFTER_UPDATE, condition=WhenFieldHasChanged("amount"))
+    def _cond_amount_changed(self):
+        type(self).hook_log.append("cond_amount_changed")
+
+    @hook(AFTER_UPDATE, condition=WhenFieldValueWas("status", "draft"))
+    def _cond_status_was_draft(self):
+        type(self).hook_log.append("cond_status_was_draft")
+
+    @hook(AFTER_UPDATE, condition=WhenFieldValueChangesTo("status", "paid"))
+    def _cond_status_changes_to_paid(self):
+        type(self).hook_log.append("cond_status_changes_to_paid")
+
+    # Chained condition: amount changed AND status is now paid.
+    @hook(
+        AFTER_UPDATE,
+        condition=WhenFieldHasChanged("amount") & WhenFieldValueIs("status", "paid"),
+    )
+    def _cond_amount_changed_and_paid(self):
+        type(self).hook_log.append("cond_amount_changed_and_paid")
+
+
+@_permissive
+class LeanConditionalItem(_ConditionalHooksBase):
+    """Lean snapshot ON — every hook above must still behave identically."""
+
+    hook_log: list[str] = []
+
+    lex_lean_initial_state = True
+
+    class Meta:
+        app_label = "lex_app"
+
+
+@_permissive
+class FullConditionalItem(_ConditionalHooksBase):
+    """Lean snapshot OFF — the control for lean-vs-full parity assertions."""
+
+    hook_log: list[str] = []
+
+    lex_lean_initial_state = False
+
+    class Meta:
+        app_label = "lex_app"
+
+
+@_permissive
+class LeanExtraFieldItem(LexModel):
+    """
+    Lean snapshot ON with a field consulted *imperatively* (not via any hook
+    decorator), declared through ``lex_initial_state_extra_fields`` so the
+    escape hatch keeps ``self.has_changed('note')`` working.
+    """
+
+    hook_log: list[str] = []
+
+    lex_lean_initial_state = True
+    lex_initial_state_extra_fields = ("note",)
+
+    name = models.CharField(max_length=200)
+    note = models.CharField(max_length=200, default="")
+    untracked = models.CharField(max_length=200, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    @hook(AFTER_UPDATE)
+    def _maybe_log_note(self):
+        # Imperative change-detection — field name is invisible to the static
+        # decorator scan, so it relies on lex_initial_state_extra_fields.
+        if self.has_changed("note"):
+            type(self).hook_log.append("note_changed")
+
+
+ALL_MODELS = [
+    PreValidatedItem,
+    PostValidatedItem,
+    HookOrderItem,
+    LeanConditionalItem,
+    FullConditionalItem,
+    LeanExtraFieldItem,
+]

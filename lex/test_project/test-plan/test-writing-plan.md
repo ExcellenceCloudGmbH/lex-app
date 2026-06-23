@@ -210,6 +210,23 @@
 
 ---
 
+### Batch 3f — Default-on lean `_initial_state` (last full-field snapshot removed; hooks preserved) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 3.11 – 3.32 |
+| Type | E (E2E through `save()` / `refresh_from_db`; on-commit re-baseline needs `TransactionTestCase`) |
+| Files covered | `lex/core/models/LexModel.py` (`lex_lean_initial_state` flag, `lex_initial_state_extra_fields`, `_expand_field_ref`, `_field_names_from_condition`, `_fields_from_hook_config`, `_lean_tracked_field_names`, `_build_lean_initial_state`, `_reset_initial_state` override, `refresh_from_db` override, `__init__` hook) |
+| Test file | `lex/test_project/tests/validation_hooks/test_3f_lean_initial_state.py` |
+| Test classes | `TestCluster03f_LeanInitialState` — 3.11 default-on + explicit opt-out keeps full snapshot; 3.12–3.13 lean snapshot shape (tracked-only); 3.14–3.15 `edited_at` auto-stamp + explicit override; 3.16–3.23 every conditional form (legacy `when=`/`when_any=`, `WhenFieldHasChanged`/`WhenFieldValueWas`/`WhenFieldValueChangesTo`, chained); 3.24 lean-vs-full parity; 3.25–3.27 `has_changed`/`initial_value`; 3.28 escape hatch; 3.29 post-save re-baseline; 3.30 `refresh_from_db` re-baseline; 3.31 create-path stamping; 3.32 snapshot strictly smaller |
+| Fixtures | `_ConditionalHooksBase` (abstract) → `LeanConditionalItem` (lean, matches the new default) / `FullConditionalItem` (explicit `lex_lean_initial_state=False` opt-out, control) + `LeanExtraFieldItem` (escape hatch) — added to `validation_hooks/models.py` |
+| Tests landed | 22 pass / 0 fail (full cluster 3: 33 pass / 0 fail) |
+| Coverage gain | the new lean-snapshot machinery on `LexModel` |
+| Status | ✅ Complete (Session 83 — June 23) |
+| Note | django-lifecycle's `_initial_state` is a second full-field copy per instance (set in `__init__`, re-captured after each save) — the ~2.17× per-row floor left after 3e. The framework's only dependency is `has_changed('edited_at')`; all other consumers are statically-discoverable hook clauses. The opt-in narrows the retained snapshot to `edited_at` + hook-clause fields + declared extras, built by filtering the full snapshot so tracked values stay byte-for-byte identical. Default **on** framework-wide — the narrowing is transparent because every consumer is either `has_changed('edited_at')` or a statically-discoverable hook clause; a model that queries `has_changed`/`initial_value` on an undeclared field lists it in `lex_initial_state_extra_fields` or sets `lex_lean_initial_state = False`. |
+
+---
+
 ## Cluster 4 — Permissions (existing 4a–4i)
 
 ### Batch 4j — Middleware & bearer-token authentication

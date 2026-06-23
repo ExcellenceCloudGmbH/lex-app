@@ -1,6 +1,7 @@
 import logging
 from contextlib import nullcontext
 from dataclasses import dataclass
+from functools import lru_cache
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, Mapping, Optional, Set, Union
 
@@ -17,6 +18,11 @@ except ImportError:
     from django_lifecycle.mixins import LifecycleModelMixin
 
     lifecycle_bypass_state = None
+
+try:
+    from django_lifecycle.model_state import ModelState
+except Exception:  # pragma: no cover - older/newer django-lifecycle layout
+    ModelState = None
 
 try:
     from api.utils import operation_context
@@ -443,6 +449,38 @@ class LexModel(LifecycleModel):
     FALLBACK_AUDIT_ACTOR = 'Initial Data Upload'
     API_KEY_AUDIT_ACTOR = 'Technical User'
 
+    # -- Lean initial-state -------------------------------------------
+    # django-lifecycle keeps a full-field snapshot (``_initial_state``) on
+    # every instance so it can answer "has this field changed since load?".
+    # On a large calculate-all that snapshot is a second full copy of every
+    # field per live row, pinned for the instance's lifetime — the bulk of
+    # the v1->v2 per-instance memory regression that remains after the
+    # pre-validation buffer is freed.
+    #
+    # When ``lex_lean_initial_state`` is True the snapshot is narrowed to only
+    # the fields whose initial value is actually consulted: ``edited_at`` (the
+    # framework's own dependency, see ``_has_explicit_edited_at_override``),
+    # every field named in this class's ``@hook(when=/when_any=/condition=)``
+    # clauses, and anything listed in ``lex_initial_state_extra_fields``.
+    # Change-detection (``has_changed`` / ``initial_value`` / ``when=`` hook
+    # conditions) stays byte-for-byte identical for those tracked fields;
+    # untracked fields report "unchanged".
+    #
+    # Default is True: the only framework dependency is
+    # ``has_changed('edited_at')`` (always tracked) and every other consumer is
+    # a statically-discoverable hook clause, so the narrowing is transparent
+    # for the vast majority of models and the memory win applies by default.
+    # A model that queries ``has_changed`` / ``initial_value`` on a field it
+    # does NOT name in a hook clause must either list that field in
+    # ``lex_initial_state_extra_fields`` or opt out with
+    # ``lex_lean_initial_state = False`` to restore the full snapshot.
+    lex_lean_initial_state = True
+    # Extra field names to keep in the lean snapshot for models that consult
+    # change-detection imperatively (e.g. ``self.has_changed('x')`` inside a
+    # method body), where the field name cannot be discovered statically from
+    # the hook decorators.
+    lex_initial_state_extra_fields = ()
+
     created_at = models.DateTimeField(null=True, blank=True, editable=False)
     edited_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_by = models.TextField(null=True, blank=True, editable=False)
@@ -460,6 +498,10 @@ class LexModel(LifecycleModel):
         super().__init__(*args, **kwargs)
         self._pre_validation_snapshot = None
         self._validation_in_progress = False
+        if self.lex_lean_initial_state and ModelState is not None:
+            # django-lifecycle set a full snapshot in super().__init__();
+            # replace it with the narrowed one before the instance is retained.
+            self._initial_state = self._build_lean_initial_state()
 
     def _should_use_atomic_save(self) -> bool:
         return should_use_atomic_model_operations(self)
@@ -576,6 +618,116 @@ class LexModel(LifecycleModel):
         for field_name, value in snapshot.items():
             if hasattr(self, field_name):
                 setattr(self, field_name, value)
+
+    # -- Lean initial-state machinery ----------------------------------
+    @staticmethod
+    def _expand_field_ref(ref: Any) -> Set[str]:
+        """Candidate snapshot keys a single field reference can map to.
+
+        We deliberately over-include — the raw reference, its head segment
+        (for FK paths like ``customer.status``) and the FK attname
+        (``customer_id``) — because the lean snapshot is built by *filtering*
+        the full snapshot (see :meth:`_build_lean_initial_state`): any key that
+        is not actually present is dropped, so an extra candidate costs
+        nothing, while a missing one would silently break change-detection.
+        """
+        if not ref or not isinstance(ref, str):
+            return set()
+        head = ref.split('.')[0]
+        return {ref, head, head + '_id'}
+
+    @classmethod
+    def _field_names_from_condition(cls, condition: Any) -> Set[str]:
+        """Field names referenced by a (possibly chained) hook condition.
+
+        Modern ``@hook(condition=...)`` conditions (``WhenFieldHasChanged``,
+        ``WhenFieldValueWas`` …) expose ``field_name``; ``&`` / ``|`` compose
+        them into a ``ChainedCondition`` with ``left`` / ``right`` children.
+        Walk the tree and collect every referenced field.
+        """
+        found: Set[str] = set()
+        seen: Set[int] = set()
+        stack = [condition]
+        while stack:
+            obj = stack.pop()
+            if obj is None or id(obj) in seen:
+                continue
+            seen.add(id(obj))
+            field_name = getattr(obj, 'field_name', None)
+            if isinstance(field_name, str) and field_name:
+                found |= cls._expand_field_ref(field_name)
+            for child_attr in ('left', 'right'):
+                child = getattr(obj, child_attr, None)
+                if child is not None:
+                    stack.append(child)
+        return found
+
+    @classmethod
+    def _fields_from_hook_config(cls, hook_config: Any) -> Set[str]:
+        """Every field a single hook declaration consults for change-detection.
+
+        Covers the legacy ``when=`` / ``when_any=`` parameters and the modern
+        ``condition=`` object form (the documented public API).
+        """
+        names: Set[str] = set()
+        when = getattr(hook_config, 'when', None)
+        if when:
+            names |= cls._expand_field_ref(when)
+        when_any = getattr(hook_config, 'when_any', None)
+        if when_any:
+            for entry in when_any:
+                names |= cls._expand_field_ref(entry)
+        condition = getattr(hook_config, 'condition', None)
+        if condition is not None:
+            names |= cls._field_names_from_condition(condition)
+        return names
+
+    @classmethod
+    @lru_cache(maxsize=None)
+    def _lean_tracked_field_names(cls) -> FrozenSet[str]:
+        """Snapshot keys to retain in lean mode (cached per concrete class).
+
+        ``edited_at`` is always tracked (the framework's own
+        ``_has_explicit_edited_at_override`` depends on it); every field named
+        in any of this class's hook ``when=`` / ``when_any=`` / ``condition=``
+        clauses is tracked so those hooks keep firing; and
+        ``lex_initial_state_extra_fields`` lets a model declare fields it
+        queries imperatively.
+        """
+        tracked: Set[str] = set(LexModel._expand_field_ref('edited_at'))
+        for extra in cls.lex_initial_state_extra_fields:
+            tracked |= cls._expand_field_ref(extra)
+        for method in cls._potentially_hooked_methods():
+            for hook_config in getattr(method, '_hooked', ()):  # noqa: SLF001
+                tracked |= cls._fields_from_hook_config(hook_config)
+        return frozenset(tracked)
+
+    def _build_lean_initial_state(self):
+        """Build a ``_initial_state`` holding only the tracked field keys.
+
+        The full snapshot is built first (so the stored values are byte-for-
+        byte what django-lifecycle would have stored) and then filtered to the
+        tracked keys. The transient full copy is discarded immediately; what is
+        *retained* on the instance is the narrowed dict — that is where the
+        per-row memory saving comes from.
+        """
+        full_state = ModelState.from_instance(self).initial_state
+        tracked = self._lean_tracked_field_names()
+        lean = {key: value for key, value in full_state.items() if key in tracked}
+        return ModelState(lean)
+
+    def _reset_initial_state(self):
+        """Re-baseline change-detection after a save, lean when opted in."""
+        if self.lex_lean_initial_state and ModelState is not None:
+            self._initial_state = self._build_lean_initial_state()
+        else:
+            super()._reset_initial_state()
+
+    def refresh_from_db(self, *args, **kwargs):
+        """Reload from DB, re-baselining change-detection lean when opted in."""
+        super().refresh_from_db(*args, **kwargs)
+        if self.lex_lean_initial_state and ModelState is not None:
+            self._initial_state = self._build_lean_initial_state()
 
     def post_validation(self):
         """
