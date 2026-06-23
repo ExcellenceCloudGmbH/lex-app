@@ -94,21 +94,31 @@ class TestCluster03f_LeanInitialState(E2ETestCase):
         return item
 
     # -- 3.11 ----------------------------------------------------------
-    def test_3_11_flag_off_keeps_full_snapshot(self) -> None:
+    def test_3_11_default_on_explicit_opt_out_keeps_full_snapshot(self) -> None:
         """
-        Scenario 3.11: the default (flag off) retains the full snapshot.
+        Scenario 3.11: lean is the default; explicit opt-out keeps the full
+        snapshot.
 
-        Given a model with ``lex_lean_initial_state = False``,
-        When it is instantiated,
+        Given the framework default is ``lex_lean_initial_state = True``,
+        And a model that explicitly sets ``lex_lean_initial_state = False``,
+        When that opt-out model is instantiated,
         Then its ``_initial_state`` still holds the untracked fields (``name``)
-        exactly as stock django-lifecycle would — opting out changes nothing.
+        exactly as stock django-lifecycle would — opting out restores the full
+        snapshot.
         """
+        from lex.core.models.LexModel import LexModel
+
+        self.assertTrue(
+            LexModel.lex_lean_initial_state,
+            "Lean snapshot must be the framework default (opt-out, not opt-in)",
+        )
+
         item = FullConditionalItem(name="ctl", status="draft", amount=1)
         keys = self._snapshot_keys(item)
         self.assertIn(
             "name", keys,
-            "Flag-off model must keep the full snapshot, including untracked "
-            "fields like 'name'",
+            "An explicit opt-out (lex_lean_initial_state=False) must keep the "
+            "full snapshot, including untracked fields like 'name'",
         )
         self.assertTrue(
             self._TRACKED.issubset(keys),

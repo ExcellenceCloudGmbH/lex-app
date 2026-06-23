@@ -285,7 +285,7 @@ to a pod before it can serve (`/readiness` lies ready).
 | 3.8 | Rollback restores field values | After `post_validation` failure, DB record matches pre-save snapshot |
 | 3.9 | Snapshot released after success | After a successful save (create/update), the pre-validation rollback buffer is not pinned on the instance |
 | 3.10 | Snapshot release keeps rollback intact | A `post_validation` failure on a later update still rolls back, even though the buffer is freed after each successful save |
-| 3.11 | Lean opt-out keeps full snapshot | With `lex_lean_initial_state=False`, `_initial_state` still holds untracked fields — default unchanged |
+| 3.11 | Lean is the default; opt-out keeps full snapshot | Class default `lex_lean_initial_state=True`; a model that explicitly sets it `False` still holds untracked fields in `_initial_state` |
 | 3.12 | Lean snapshot shape | Lean snapshot keys == exactly the change-detected fields (`edited_at` + hook-clause fields) |
 | 3.13 | Lean snapshot drops untracked | Fields no hook consults (`name`, `note`) are absent from the lean snapshot |
 | 3.14 | Lean `edited_at` auto-stamp | Lean update still auto-stamps `edited_at` (framework `has_changed('edited_at')` dependency intact) |
@@ -308,7 +308,7 @@ to a pod before it can serve (`/readiness` lies ready).
 | 3.31 | Create-path hooks unaffected | Lean create still stamps `created_at` / `created_by` (no change-detection involved) |
 | 3.32 | Lean snapshot is smaller | Lean `_initial_state` holds strictly fewer keys than the full snapshot |
 
-**Sub-clusters:** 3a `pre_validation` (3.1–3.2) · 3b `post_validation` (3.3–3.4) · 3c hook ordering (3.5–3.6) · 3d recursion guard (3.7) · 3e snapshot lifecycle (3.8–3.10) · **3f lean `_initial_state` opt-in (3.11–3.32)** — covers `lex/core/models/LexModel.py`, Type E, ✅ Complete (22 pass / 0 fail).
+**Sub-clusters:** 3a `pre_validation` (3.1–3.2) · 3b `post_validation` (3.3–3.4) · 3c hook ordering (3.5–3.6) · 3d recursion guard (3.7) · 3e snapshot lifecycle (3.8–3.10) · **3f lean `_initial_state` default-on / opt-out (3.11–3.32)** — covers `lex/core/models/LexModel.py`, Type E, ✅ Complete (22 pass / 0 fail).
 
 ---
 

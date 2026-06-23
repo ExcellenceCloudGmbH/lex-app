@@ -449,7 +449,7 @@ class LexModel(LifecycleModel):
     FALLBACK_AUDIT_ACTOR = 'Initial Data Upload'
     API_KEY_AUDIT_ACTOR = 'Technical User'
 
-    # -- Lean initial-state opt-in -------------------------------------
+    # -- Lean initial-state -------------------------------------------
     # django-lifecycle keeps a full-field snapshot (``_initial_state``) on
     # every instance so it can answer "has this field changed since load?".
     # On a large calculate-all that snapshot is a second full copy of every
@@ -464,10 +464,17 @@ class LexModel(LifecycleModel):
     # clauses, and anything listed in ``lex_initial_state_extra_fields``.
     # Change-detection (``has_changed`` / ``initial_value`` / ``when=`` hook
     # conditions) stays byte-for-byte identical for those tracked fields;
-    # untracked fields report "unchanged". Default is False so existing
-    # behaviour is preserved — opt in per model once you've confirmed it does
-    # not query ``has_changed`` on undeclared fields from imperative code.
-    lex_lean_initial_state = False
+    # untracked fields report "unchanged".
+    #
+    # Default is True: the only framework dependency is
+    # ``has_changed('edited_at')`` (always tracked) and every other consumer is
+    # a statically-discoverable hook clause, so the narrowing is transparent
+    # for the vast majority of models and the memory win applies by default.
+    # A model that queries ``has_changed`` / ``initial_value`` on a field it
+    # does NOT name in a hook clause must either list that field in
+    # ``lex_initial_state_extra_fields`` or opt out with
+    # ``lex_lean_initial_state = False`` to restore the full snapshot.
+    lex_lean_initial_state = True
     # Extra field names to keep in the lean snapshot for models that consult
     # change-detection imperatively (e.g. ``self.has_changed('x')`` inside a
     # method body), where the field name cannot be discovered statically from
