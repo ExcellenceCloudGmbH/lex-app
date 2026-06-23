@@ -26,7 +26,7 @@
 | 2. CRUD via REST API | 23 | 23 | 23 | 0 | 0 |  Complete (Many bulk-write reconciled to DELETE-only; BUG-004 removed per product decision; BUG-005 fixed; 2.1 = CRUD showcase) |
 | 2i. Cancel-calculation REST endpoint (Session 67 — June 1) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored) |
 | 2j. Instance API-key extraction and matching (Session 80 — June 18) | 11 | 11 | 11 | 0 | 0 | ✅ Complete — scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key) |
-| 3. Validation Hooks | 10 | 11 | 11 | 0 | 0 |  Complete (3e snapshot lifecycle — 3.9/3.10 — frees the pre-validation rollback buffer after a successful save) |
+| 3. Validation Hooks | 32 | 33 | 33 | 0 | 0 |  Complete (3e frees the rollback buffer after success; **3f — 3.11–3.32 — opt-in lean `_initial_state` removes the last full-field snapshot from the per-row footprint, proven not to weaken any conditional hook**) |
 | 4. Permissions | 14 | 14 | 12 | 2 | 0 |  Complete (BUG-008/010 tracked; 4.40 export full-deny; 4.41 read full-deny at detail endpoint) |
 | 4e. Read-restriction filter backend (planned — April 21) | 7 | 7 | 5 | 0 | 0 |  Complete (2 skipped — 4.14/4.15 AuditLog DB-filter path deferred; 4.41 pins detail-GET read-deny) |
 | 4f. Serializer-level masking (planned — April 21) | 8 | 8 | 8 | 0 | 0 |  Complete — 4.19–4.26 |
@@ -80,7 +80,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **594** | **594** | **573** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **616** | **616** | **595** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet
