@@ -1231,6 +1231,7 @@ class CalculationModel(LexModel):
                     record_id=record_id,
                     calculation_id=calc_id,
                     record=str(self),
+                    model_name=self._meta.object_name,
                     model_label=self._meta.label_lower,
                     record_pk=self.pk,
                 )

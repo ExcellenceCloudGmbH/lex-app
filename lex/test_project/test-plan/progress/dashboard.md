@@ -21,13 +21,16 @@
 | 1q. Migration file completeness release gate (Session 70 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 1.147; `lex makemigrations ... --check --dry-run` must stay clean for framework apps |
 | 1s. Log-noise cleanup + lex-namespace debug control — EXC-1787 (Session 75 — June 8) | 10 | 10 | 10 | 0 | 0 | ✅ Complete — scenarios 1.159–1.168; urllib3 InsecureRequestWarning gate + `LEX_LOG_LEVEL` lex-only DEBUG + console-handler level + blanket `LEX_SUPPRESS_WARNINGS` filter |
 | 1t. `DISABLE_SERVER_SIDE_CURSORS` placement — production cursor crash (Session 78 — June 9) | 2 | 2 | 2 | 0 | 0 | ✅ Complete — scenarios 1.169–1.170; flag was module-level (ignored by Django) so server-side cursors stayed on behind the pooling proxy → `InvalidCursorName` on every `.iterator()`; now set per-Postgres-alias |
+| 1u. Fast ASGI health/readiness probes (coverage task #620) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 1.171–1.175; `/health` short-circuits to static liveness, `/readiness` gates on DB readiness, non-probe HTTP falls through to Django |
 | 7k. Core exceptions + `ModelModificationRestriction` ABC + XLSXField spotter (coverage-driven — May 12) | 21 | 21 | 21 | 0 | 0 |  Complete — scenarios 7.122–7.142 |
 | 2. CRUD via REST API | 23 | 23 | 23 | 0 | 0 |  Complete (Many bulk-write reconciled to DELETE-only; BUG-004 removed per product decision; BUG-005 fixed; 2.1 = CRUD showcase) |
 | 2i. Cancel-calculation REST endpoint (Session 67 — June 1) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored) |
-| 3. Validation Hooks | 8 | 9 | 9 | 0 | 0 |  Complete |
+| 2j. Instance API-key extraction and matching (Session 80 — June 18) | 11 | 11 | 11 | 0 | 0 | ✅ Complete — scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key) |
+| 3. Validation Hooks | 32 | 33 | 33 | 0 | 0 |  Complete (3e frees the rollback buffer after success; **3f — 3.11–3.32 — opt-in lean `_initial_state` removes the last full-field snapshot from the per-row footprint, proven not to weaken any conditional hook**) |
 | 4. Permissions | 14 | 14 | 12 | 2 | 0 |  Complete (BUG-008/010 tracked; 4.40 export full-deny; 4.41 read full-deny at detail endpoint) |
 | 4e. Read-restriction filter backend (planned — April 21) | 7 | 7 | 5 | 0 | 0 |  Complete (2 skipped — 4.14/4.15 AuditLog DB-filter path deferred; 4.41 pins detail-GET read-deny) |
 | 4f. Serializer-level masking (planned — April 21) | 8 | 8 | 8 | 0 | 0 |  Complete — 4.19–4.26 |
+| 4m. `ApiKeyAwareLoginRequiredMiddleware` instance-key bypass (Session 80 — June 18) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit order + subclass contract |
 | 5. History & Bitemporal | 10 | 10 | 10 | 0 | 0 |  Complete |
 | 5.11. History fallback-snapshot path (planned — April 21) | 1 | 1 | 1 | 0 | 0 |  Complete |
 | 5g. History `valid_to` chaining contract (Session 51 — May 5) | 2 | 2 | 2 | 0 | 0 |  Complete — 5.61/5.61b close 5.4's unasserted half |
@@ -49,6 +52,8 @@
 | 7h. `_dispatch_model_processing` Celery branch (coverage-driven — April 23) | 1 | 1 | 1 | 0 | 0 |  Complete — async branch 7g never reached; broker-free |
 | 7n. Calculation cancellation — state machine + recursive cancel (Session 67 — June 1) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.166–7.173; pins `CalculationModel.cancel()` happy path + sync-not-cancellable + recursive descendant revoke (mocks `_revoke_celery_task`) |
 | 7o. ForeignKey integrity violation abort semantics (Session 72 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 7.176; unhandled FK integrity errors abort `CalculatedModelMixin.create()` immediately (no silent continuation to later rows) |
+| 7p. Sync-mode streaming combinatorial expansion (OOM fix — June 10) | 10 | 10 | 10 | 0 | 0 | ✅ Complete — scenarios 7.178–7.187; depth-first generator yields one model at a time (O(depth) vs O(N)) so sync calcs (CELERY_ACTIVE=False) stop OOM-ing the web pod; byte-identical ordered output vs legacy; LEX_SYNC_STREAMING_EXPANSION=false valve |
+| 7m. `CalculationSignals` + `One.py` `model_name` propagation (Session 80 — June 18) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.188–7.195; `update_calculation_status` IN_PROGRESS passes `model_name=instance._meta.object_name` to store; `One.update()` early-registration block does the same; pins ActiveCalculationStateStore partition key correctness |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |
@@ -65,6 +70,7 @@
 | 9.7–9.10. Bitemporal signal branches (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — suppression primitives in `bitemporal_signals.py` |
 | 9d. `ActiveCalculationStateStore` full surface (coverage-driven — May 12) | 24 | 24 | 24 | 0 | 0 |  Complete — scenarios 9.11–9.28; coverage 27.03% → ~95% |
 | 9e. Generic CRUD mutation broadcast — live list refresh (Session 73 — June 3) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 9.29–9.36; plain CRUD now emits a `model_data_update` `record_mutation` so open lists refresh without manual reload |
+| 9f. Core health/calculation/log WebSocket consumers (coverage task #620) | 6 | 6 | 6 | 0 | 0 | ✅ Complete — scenarios 9.37–9.42; public backend-health socket, calculations group fan-out, per-record calculation-log stream, and shutdown `disconnect_all` tracking |
 | 10. API Layer | 9 | 9 | 8 | 0 | 0 |  Complete (10.9 dup skipped; 10.8 retired — BUG-009 at 7.14) |
 | 10e. Schema introspection (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete (BUG-015 documented in-test — CharField w/o default reports `required=False`) |
 | 10f. Global search (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — 10.15–10.16b |
@@ -75,7 +81,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **583** | **583** | **562** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **616** | **616** | **595** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet

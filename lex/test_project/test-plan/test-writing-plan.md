@@ -98,6 +98,20 @@
 | Coverage gain | negligible (settings is import-time; pins a config-placement contract) |
 | Status | ✅ Complete (Session 78 — June 9) |
 
+### Batch 1u — Fast ASGI health/readiness probes (coverage task #620) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.171 – 1.175 |
+| Type | U |
+| Files covered | `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py` |
+| Test file | `lex/test_project/tests/init/test_1u_fast_health_asgi.py` |
+| Test classes | `TestCluster01u_FastHealthAsgi` (1.171 path helpers separate liveness/readiness, 1.172 health app drains request body and returns static Healthy payload, 1.173 readiness returns 200/503 based on DB readiness seam, 1.174 top-level HTTP ASGI app short-circuits probe paths before Django, 1.175 non-probe HTTP delegates to Django) |
+| Fixtures | none — ASGI `receive`/`send` callables and `AsyncMock` seams only |
+| Tests landed | **5 pass / 0 fail** (direct pytest) |
+| Coverage gain | `fast_health.py` path helpers + health/readiness ASGI apps; `asgi.py` `http_application` health/readiness/Django routing branches |
+| Status | ✅ Complete (Session 81 — June 18). `python -m lex pytest ...` blocked locally by no PostgreSQL service; pure U tests pass with `DJANGO_SETTINGS_MODULE=lex_app.settings python -m pytest ...`. |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)
@@ -161,6 +175,58 @@
 
 ---
 
+### Batch 2j — Instance API-key extraction and matching (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.97 – 2.107 |
+| Type | U |
+| Files covered | `lex/api/utils/api_key_requests.py` (`get_raw_api_key`, `is_instance_api_key_request`) |
+| Test file | `lex/test_project/tests/crud_api/test_2j_instance_api_key.py` |
+| Test classes | `TestCluster02j_GetRawApiKey` (2.97–2.103 — KeyParser hit, header fallback, prefix strip, empty candidate, no source, DRF wrapped request, non-ApiKey header), `TestCluster02j_IsInstanceApiKeyRequest` (2.104–2.107 — match, mismatch, no env var, no key in request) |
+| Fixtures | none — `SimpleTestCase` with `patch` on `KeyParser` and `patch.dict("os.environ")` |
+| Tests landed | 11 pass / 0 fail |
+| Coverage gain | `lex/api/utils/api_key_requests.py` `get_raw_api_key` + `is_instance_api_key_request` branches |
+| Status | ✅ Complete (Session 80 — June 18) |
+
+---
+
+## Cluster 3 — Validation Hooks (existing 3a–3d)
+
+### Batch 3e — Pre-validation snapshot lifecycle (v1→v2 calculate-all memory fix) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 3.9 – 3.10 |
+| Type | E (E2E save through the public `save()` entry point) |
+| Files covered | `lex/core/models/LexModel.py` (`post_validation_hook` — releases `_pre_validation_snapshot` on the successful path) |
+| Test file | `lex/test_project/tests/validation_hooks/test_3e_snapshot_lifecycle.py` |
+| Test classes | `TestCluster03e_SnapshotLifecycle` (3.9 snapshot released after a successful create *and* update, 3.10 release-on-success does not weaken rollback — a later rejected update still restores the pre-save value) |
+| Fixtures | existing `PostValidatedItem` (reused, no new model) |
+| Tests landed | 2 pass / 0 fail (full cluster 3: 11 pass / 0 fail) |
+| Coverage gain | successful-path snapshot release in `post_validation_hook` |
+| Status | ✅ Complete (Session 82 — June 22) |
+| Note | The `_pre_validation_snapshot` is an in-flight rollback buffer (a second full-field copy per row); it was never freed after a successful save, pinning ~1800 B/inst (~34% of the v2 per-instance footprint) for the instance's lifetime — the measured driver of the non-atomic `calculate_all` v1→v2 RAM regression (3.28× → ~2.17× per saved row). |
+
+---
+
+### Batch 3f — Default-on lean `_initial_state` (last full-field snapshot removed; hooks preserved) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 3.11 – 3.32 |
+| Type | E (E2E through `save()` / `refresh_from_db`; on-commit re-baseline needs `TransactionTestCase`) |
+| Files covered | `lex/core/models/LexModel.py` (`lex_lean_initial_state` flag, `lex_initial_state_extra_fields`, `_expand_field_ref`, `_field_names_from_condition`, `_fields_from_hook_config`, `_lean_tracked_field_names`, `_build_lean_initial_state`, `_reset_initial_state` override, `refresh_from_db` override, `__init__` hook) |
+| Test file | `lex/test_project/tests/validation_hooks/test_3f_lean_initial_state.py` |
+| Test classes | `TestCluster03f_LeanInitialState` — 3.11 default-on + explicit opt-out keeps full snapshot; 3.12–3.13 lean snapshot shape (tracked-only); 3.14–3.15 `edited_at` auto-stamp + explicit override; 3.16–3.23 every conditional form (legacy `when=`/`when_any=`, `WhenFieldHasChanged`/`WhenFieldValueWas`/`WhenFieldValueChangesTo`, chained); 3.24 lean-vs-full parity; 3.25–3.27 `has_changed`/`initial_value`; 3.28 escape hatch; 3.29 post-save re-baseline; 3.30 `refresh_from_db` re-baseline; 3.31 create-path stamping; 3.32 snapshot strictly smaller |
+| Fixtures | `_ConditionalHooksBase` (abstract) → `LeanConditionalItem` (lean, matches the new default) / `FullConditionalItem` (explicit `lex_lean_initial_state=False` opt-out, control) + `LeanExtraFieldItem` (escape hatch) — added to `validation_hooks/models.py` |
+| Tests landed | 22 pass / 0 fail (full cluster 3: 33 pass / 0 fail) |
+| Coverage gain | the new lean-snapshot machinery on `LexModel` |
+| Status | ✅ Complete (Session 83 — June 23) |
+| Note | django-lifecycle's `_initial_state` is a second full-field copy per instance (set in `__init__`, re-captured after each save) — the ~2.17× per-row floor left after 3e. The framework's only dependency is `has_changed('edited_at')`; all other consumers are statically-discoverable hook clauses. The opt-in narrows the retained snapshot to `edited_at` + hook-clause fields + declared extras, built by filtering the full snapshot so tracked values stay byte-for-byte identical. Default **on** framework-wide — the narrowing is transparent because every consumer is either `has_changed('edited_at')` or a statically-discoverable hook clause; a model that queries `has_changed`/`initial_value` on an undeclared field lists it in `lex_initial_state_extra_fields` or sets `lex_lean_initial_state = False`. |
+
+---
+
 ## Cluster 4 — Permissions (existing 4a–4i)
 
 ### Batch 4j — Middleware & bearer-token authentication
@@ -194,6 +260,22 @@
 ### Batch 4l — User API endpoint *(blocked — see §6 decision #2)*
 
 `UserAPIView.py` vs `user_api.py` — slot once supervisor confirms which is live.
+
+---
+
+### Batch 4m — `ApiKeyAwareLoginRequiredMiddleware` instance-key bypass (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.66 – 4.70 |
+| Type | U |
+| Files covered | `lex/authentication/middleware.py` (`ApiKeyAwareLoginRequiredMiddleware.check_login_required`) |
+| Test file | `lex/test_project/tests/permissions/test_4m_api_key_middleware.py` |
+| Test classes | `TestCluster04m_ApiKeyAwareMiddleware` (4.66–4.70 — instance key bypass, DRF key bypass, non-key delegates to parent, instance check still evaluated when DRF check false, subclass contract) |
+| Fixtures | none — `SimpleTestCase` with `patch` on `is_instance_api_key_request`, `is_api_key_request`, and parent `check_login_required` |
+| Tests landed | 5 pass / 0 fail |
+| Coverage gain | `lex/authentication/middleware.py` new `is_instance_api_key_request` branch |
+| Status | ✅ Complete (Session 80 — June 18) |
 
 ---
 
@@ -383,6 +465,40 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 7p — Sync-mode streaming combinatorial expansion (OOM fix) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.178 – 7.187 |
+| Type | U (generator + flag, pure logic) + I (E2E sync create saved rows) |
+| Files covered | `lex/core/mixins/CalculatedModelMixin.py` (`generate_model_combinations_streaming`, `calc_and_save_streaming`, `_sync_streaming_enabled`, `create()` mode branch) |
+| Test file | `lex/test_project/tests/calculations/test_7p_streaming_expansion.py` |
+| Test classes | `TestCluster07p_StreamingEquivalence` (7.178–7.182), `TestCluster07p_StreamingFlag` (7.183–7.185), `TestCluster07p_SyncCreateEquivalence` (7.186), `TestCluster07p_StreamingMemoryBound` (7.187) |
+| Fixtures | `_FakeCalcModel` (pure logic); existing `CombinatorialCalc` E2E model (reused, no new model) |
+| Tests landed | 10 pass / 0 fail |
+| Coverage gain | streaming generator + consumer + flag + create() sync branch |
+| Status | ✅ Complete (Session 79 — June 10) |
+| Note | Backend OOM fix: sync-mode expansion now streams (O(depth)) instead of materializing all N. `LEX_SYNC_STREAMING_EXPANSION=false` valve. Benchmark in `docs/runs/`. |
+
+
+---
+
+### Batch 7m — `CalculationSignals` + `One.py` `model_name` propagation (Session 80 — June 18)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.188 – 7.195 |
+| Type | U + E |
+| Files covered | `lex/core/signals/CalculationSignals.py` (`update_calculation_status` IN_PROGRESS branch), `lex/api/views/model_entries/One.py` (early-registration `mark_in_progress` call) |
+| Test file | `lex/test_project/tests/calculations/test_7m_calc_signals.py` |
+| Test classes | `TestCluster07m_SignalModelName` (7.188–7.191 — IN_PROGRESS passes object_name, SUCCESS/ERROR do not call mark_in_progress, non-calculation model returns early), `TestCluster07m_OneModelNamePropagation` (7.192–7.193 — calculate=true passes model_name to store, record_id matches) |
+| Fixtures | `_FakeInstance` / `_FakeSignal` (pure unit); `AtomicCalc` (reused from cluster 7, via E2ETestCase) |
+| Tests landed | 8 pass / 0 fail |
+| Coverage gain | `CalculationSignals.py` IN_PROGRESS `model_name` kwarg path; `One.py` early-registration `mark_in_progress(model_name=…)` branch |
+| Status | ✅ Complete (Session 80 — June 18) |
+
+---
+
 ## Cluster 8 — Celery & Async (existing 8a–8g)
 
 ### Batch 8h — Dispatcher & local scheduler
@@ -534,6 +650,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Prereqs | none |
 | Status | ✅ Complete — 8 pass / 0 fail locally (Postgres test DB available) |
 | Note | Fixes the customer-visible "open list view goes stale until manual Refresh" bug: plain CRUD on a non-`CalculationModel` now emits a `model_data_update` `record_mutation` over WebSocket. Generic broadcast is skipped on `calculate=true` updates (`calculation_success` already refreshes). Frontend `ModelDataUpdate` listener lands in the same change. |
+
+### Batch 9f — Core health/calculation/log WebSocket consumers (coverage task #620) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.37 – 9.42 |
+| Type | U |
+| Files covered | `lex/api/consumers/BackendHealthConsumer.py`, `lex/api/consumers/CalculationsConsumer.py`, `lex/api/consumers/CalculationLogConsumer.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9f_core_consumers.py` |
+| Test classes | `TestCluster09f_BackendHealthConsumer` (9.37 connect/receive health payload, 9.38 disconnect untracks), `TestCluster09f_CalculationsConsumer` (9.39 joins calculations group and forwards ID/notification events, 9.40 disconnect leaves group), `TestCluster09f_CalculationLogConsumer` (9.41 per-record log group and log envelope), `TestCluster09f_ShutdownDisconnectAll` (9.42 shutdown calls `disconnect(None)` on active consumers for all three classes) |
+| Fixtures | none — consumer instances with mocked channel layer / socket boundary |
+| Tests landed | **6 pass / 0 fail** (direct pytest) |
+| Coverage gain | Core consumer connect/disconnect/send branches + `disconnect_all` classmethods for the three coverage-task files |
+| Prereqs | none |
+| Status | ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked: PR #615 wires it in `authenticated_websocket_urlpatterns()`. |
 
 ---
 
@@ -713,7 +844,6 @@ Same as cluster-doc Golden Rule. Reproduced here to keep this doc self-contained
 > New batches add `pytestmark = pytest.mark.<cluster_slug>` to each test
 > module. See [`progress/conventions.md` §How to Run Tests](progress/conventions.md#how-to-run-tests)
 > for the runner commands.
-
 
 
 

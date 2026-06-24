@@ -549,12 +549,12 @@ def reset_streamlit_form_context() -> None:
     Clears leaked Streamlit internal form context so the next st.form() starts clean.
 
     Streamlit marks a DG as "in a form" by setting dg._form_data (FormData). [web:46]
-    Root DGs include st._main, st.sidebar, st._event, st._bottom. [web:59]
+    Root DGs include st._main, st.sidebar, st._event, st.bottom. [web:59]
     Streamlit also tracks the active container stack (context_dg_stack). [web:48]
     """
     try:
         # 1) Clear known root DGs
-        for attr in ("_main", "sidebar", "_event", "_bottom"):
+        for attr in ("_main", "sidebar", "_event", "bottom"):
             dg = getattr(st, attr, None)
             if dg is not None and getattr(dg, "_form_data", None) is not None:
                 dg._form_data = None

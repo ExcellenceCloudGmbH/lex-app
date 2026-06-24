@@ -30,31 +30,51 @@ SyncToAsync.single_thread_executor = ThreadPoolExecutor(
 )
 
 from lex.lex_app import routing
-from lex.lex_app.fast_health import health_asgi_app, is_fast_health_path
+from lex.lex_app.fast_health import (
+    health_asgi_app,
+    is_fast_health_path,
+    is_readiness_path,
+    readiness_asgi_app,
+)
 from django.urls import re_path
 
 
 async def http_application(scope, receive, send):
     request_path = scope.get("path", "")
-    if scope.get("type") == "http" and is_fast_health_path(request_path):
-        await health_asgi_app(scope, receive, send)
-        return
+    if scope.get("type") == "http":
+        # Fast liveness path: 200 without touching Django/DB.
+        if is_fast_health_path(request_path):
+            await health_asgi_app(scope, receive, send)
+            return
+        # Readiness path: 200 only when the DB (and thus the app) can serve.
+        if is_readiness_path(request_path):
+            await readiness_asgi_app(scope, receive, send)
+            return
     await django_asgi_app(scope, receive, send)
 
 
 application = ProtocolTypeRouter(
     {
         "http": http_application,
-        "websocket": AllowedHostsOriginValidator(
-            URLRouter(
-                routing.public_websocket_urlpatterns()
-                + [
-                    # All other WS routes require authentication
-                    re_path(r"", AuthMiddlewareStack(
+        # The PUBLIC health route is intentionally NOT wrapped in
+        # AllowedHostsOriginValidator. It only echoes a static "Healthy :)"
+        # payload and requires no auth/cookies, so cross-origin access is
+        # harmless. Gating it on ALLOWED_HOSTS previously caused the health
+        # WebSocket handshake to be rejected (closing the socket -> the frontend
+        # redirects to /server-not-ready) whenever the instance was reached via
+        # a host absent from ALLOWED_HOSTS (e.g. the `www.` alias) or when
+        # DOMAIN_HOSTED was missing/misconfigured. Authenticated routes keep the
+        # full origin + auth checks.
+        "websocket": URLRouter(
+            routing.public_websocket_urlpatterns()
+            + [
+                # All other WS routes require origin validation + authentication
+                re_path(r"", AllowedHostsOriginValidator(
+                    AuthMiddlewareStack(
                         URLRouter(routing.authenticated_websocket_urlpatterns())
-                    )),
-                ]
-            )
+                    )
+                )),
+            ]
         ),
     }
 )

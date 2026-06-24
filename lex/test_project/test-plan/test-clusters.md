@@ -162,6 +162,24 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
+### Batch 1u — Fast ASGI health/readiness probes ✅
+
+**Gap:** PR #615 added a lightweight ASGI health/readiness layer so Kubernetes
+liveness can return `200` without touching Django/DB, while readiness only
+returns `200` once the database is reachable. A regression here either restarts
+healthy pods (`/health` stops being cheap/static) or sends WebSocket/API traffic
+to a pod before it can serve (`/readiness` lies ready).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.171 | Health/readiness path helpers are disjoint | `/health` and `/api/health` are fast liveness only; `/readiness` and `/api/readiness` are DB-aware readiness only |
+| 1.172 | Fast health ASGI app drains request body and returns static payload | multi-message request body is consumed; response is `200` with `{"status": "Healthy :)"}` and no-store headers |
+| 1.173 | Readiness reflects DB availability | patched DB-ready seam returns `200 {"status":"ready"}`; DB-unavailable returns `503 {"status":"not-ready","reason":"database-unavailable"}` |
+| 1.174 | Top-level ASGI app short-circuits probe paths | `/health` and `/readiness` call their lightweight ASGI apps and do not invoke Django |
+| 1.175 | Non-probe HTTP delegates to Django | arbitrary application paths bypass health shortcuts and reach `django_asgi_app` |
+
+**Scenario range:** 1.171 – 1.175. **Test file:** `lex/test_project/tests/init/test_1u_fast_health_asgi.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). Sources: `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
+
 ---
 
 ## 2. CRUD via REST API
@@ -232,6 +250,12 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 2.93 – 2.96. **Test file:** `lex/test_project/tests/crud_api/test_2i_cancel_endpoint.py`. **Type:** E. **Status:** ✅ Complete (Session 66 — June 1).
 
+### 2j. Instance API-key extraction and matching ✅
+
+**Gap:** PR #615 ("feat(calculations): expose active release warnings") introduced two helpers in `lex/api/utils/api_key_requests.py` that allow the framework to authenticate machine-to-machine requests using a shared secret stored in `LEX_API_KEY`: `get_raw_api_key()` extracts the raw key from a `KeyParser` or falls back to the `Authorization: ApiKey <token>` header; `is_instance_api_key_request()` compares the extracted key to the env var. If either helper regresses — e.g. header fallback stops working, or the env-var comparison becomes case-insensitive — silent auth bypasses or auth failures will appear in production without any framework-level guard.
+
+**Scenario range:** 2.97 – 2.107. **Test file:** `lex/test_project/tests/crud_api/test_2j_instance_api_key.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/api/utils/api_key_requests.py`.
+
 ---
 
 ## 3. Validation Hooks
@@ -244,6 +268,8 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 - `PreValidatedItem` — raises exception in `pre_validation()` for specific values
 - `PostValidatedItem` — raises exception in `post_validation()` for specific values
 - `HookOrderItem` — records hook execution order in a class-level list
+- `_ConditionalHooksBase` (abstract) → `LeanConditionalItem` / `FullConditionalItem` — identical conditional-hook declarations (legacy `when=`/`when_any=` + `condition=` objects incl. chained) differing only in `lex_lean_initial_state`, for lean-vs-full parity (3f)
+- `LeanExtraFieldItem` — lean model that consults `has_changed()` imperatively and declares the field via `lex_initial_state_extra_fields` (3f escape hatch)
 
 **Test scenarios:**
 
@@ -257,6 +283,32 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 | 3.6 | Hook execution order on update | BEFORE_UPDATE → BEFORE_SAVE → (save) → AFTER_SAVE → AFTER_UPDATE |
 | 3.7 | Validation recursion guard | `_validation_in_progress` prevents infinite recursion |
 | 3.8 | Rollback restores field values | After `post_validation` failure, DB record matches pre-save snapshot |
+| 3.9 | Snapshot released after success | After a successful save (create/update), the pre-validation rollback buffer is not pinned on the instance |
+| 3.10 | Snapshot release keeps rollback intact | A `post_validation` failure on a later update still rolls back, even though the buffer is freed after each successful save |
+| 3.11 | Lean is the default; opt-out keeps full snapshot | Class default `lex_lean_initial_state=True`; a model that explicitly sets it `False` still holds untracked fields in `_initial_state` |
+| 3.12 | Lean snapshot shape | Lean snapshot keys == exactly the change-detected fields (`edited_at` + hook-clause fields) |
+| 3.13 | Lean snapshot drops untracked | Fields no hook consults (`name`, `note`) are absent from the lean snapshot |
+| 3.14 | Lean `edited_at` auto-stamp | Lean update still auto-stamps `edited_at` (framework `has_changed('edited_at')` dependency intact) |
+| 3.15 | Lean explicit `edited_at` respected | An explicitly-set `edited_at` is not overwritten on a lean update |
+| 3.16 | Legacy `when=` fires (lean) | `when='status'` hook fires on a status change |
+| 3.17 | Legacy `when=` silent (lean) | `when='status'` hook does not fire when status is unchanged |
+| 3.18 | Legacy `when_any=` fires (lean) | `when_any=['a','b']` fires when `b` changes |
+| 3.19 | `WhenFieldHasChanged` fires (lean) | `condition=WhenFieldHasChanged('amount')` fires on amount change |
+| 3.20 | `WhenFieldValueWas` fires (lean) | `condition=WhenFieldValueWas('status','draft')` fires when prior status was draft |
+| 3.21 | `WhenFieldValueChangesTo` fires (lean) | `condition=WhenFieldValueChangesTo('status','paid')` fires on draft→paid |
+| 3.22 | Chained condition fires (lean) | `WhenFieldHasChanged('amount') & WhenFieldValueIs('status','paid')` fires when both limbs hold |
+| 3.23 | Chained condition silent (lean) | Chained condition does not fire when only one limb holds |
+| 3.24 | Lean-vs-full hook parity | Identical mutation fires an identical set of hooks on lean and full models |
+| 3.25 | `has_changed` True tracked (lean) | `has_changed` is True for a changed tracked field |
+| 3.26 | `has_changed` False untracked (lean) | `has_changed` reports False for a changed untracked field (documented trade-off) |
+| 3.27 | `initial_value` tracked (lean) | `initial_value` returns the pre-change value for a tracked field |
+| 3.28 | Extra-fields escape hatch | `lex_initial_state_extra_fields` keeps an imperatively-queried field tracked |
+| 3.29 | Post-save re-baseline is lean | The on-commit re-baseline re-narrows the snapshot; a stale change is not re-reported |
+| 3.30 | `refresh_from_db` re-baseline is lean | `refresh_from_db` rebuilds a lean snapshot and resets `has_changed` |
+| 3.31 | Create-path hooks unaffected | Lean create still stamps `created_at` / `created_by` (no change-detection involved) |
+| 3.32 | Lean snapshot is smaller | Lean `_initial_state` holds strictly fewer keys than the full snapshot |
+
+**Sub-clusters:** 3a `pre_validation` (3.1–3.2) · 3b `post_validation` (3.3–3.4) · 3c hook ordering (3.5–3.6) · 3d recursion guard (3.7) · 3e snapshot lifecycle (3.8–3.10) · **3f lean `_initial_state` default-on / opt-out (3.11–3.32)** — covers `lex/core/models/LexModel.py`, Type E, ✅ Complete (22 pass / 0 fail).
 
 ---
 
@@ -289,6 +341,14 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
 | 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
 | 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
+
+---
+
+### 4m. `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass ✅
+
+**Gap:** PR #615 added a short-circuit to `ApiKeyAwareLoginRequiredMiddleware.check_login_required` so that requests authenticated with the instance API key (`is_instance_api_key_request`) bypass the OAuth2 login redirect, the same way DRF API-key requests already did. Without a regression gate, a refactor of the `or` chain (e.g. swapping evaluation order, mis-importing `is_instance_api_key_request`, or accidentally removing the branch) would silently revert all machine-to-machine requests to a login redirect with no framework-level signal.
+
+**Scenario range:** 4.66 – 4.70. **Test file:** `lex/test_project/tests/permissions/test_4m_api_key_middleware.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/authentication/middleware.py`.
 
 ---
 
@@ -491,6 +551,24 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Gap:** `CalculatedModelMixin.create()`'s synchronous pipeline (`calc_and_save_sync`) was tolerating partial failures and continuing to process later models in the batch. Any error during calculation or saving is a non-recoverable condition that must abort the entire batch immediately — whether it's an IntegrityError, a RuntimeError, or any other exception. This ensures data consistency and prevents silent partial processing.
 
 **Scenario range:** 7.176 – 7.177. **Test file:** `lex/test_project/tests/calculations/test_7o_fk_violation_abort.py`. **Type:** I. **Status:** ✅ Complete (Session 72 — June 2).
+
+---
+
+### 7p. Sync-mode streaming combinatorial expansion (OOM fix) ✅
+
+In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI process. `CalculatedModelMixin.create()`'s four-stage pipeline (generate → prepare → cluster → dispatch) materialized **all N** expanded models and held them alive for the whole run, so peak memory was O(N) and a large fan-out OOM-killed the pod. 7p adds a depth-first `generate_model_combinations_streaming` generator that yields one fully-expanded model at a time (O(depth) live), and a `calc_and_save_streaming` consumer that prepares → calculates → saves → releases each one. `create()` branches on mode at the top: the Celery path and the legacy list/cluster helpers are untouched; the sync path skips stages 1–3. A `LEX_SYNC_STREAMING_EXPANSION=false` env var rolls back to the legacy materialized path. The expansion is dependency-aware (a field's values can depend on an earlier field), so the generator reuses `_get_field_values` and recurses depth-first to preserve identical semantics.
+
+**Scenario range:** 7.178 – 7.187. **Test file:** `lex/test_project/tests/calculations/test_7p_streaming_expansion.py`. **Type:** U (+ I for the E2E sync create path). **Status:** ✅ Complete (Session 79 — June 10). Covers `lex/core/mixins/CalculatedModelMixin.py`. Equivalence gate: ordered defining-field fingerprint identical legacy-vs-streaming; bounded-peak memory regression test; N≈10k benchmark in `docs/runs/`.
+
+**Out of scope (accepted by design):** when two expanded combinations resolve to the *same* defining-field tuple within one `create()`, streaming saves each model before preparing the next, so the second `delete_models_with_same_defining_fields()` sees the first's just-saved row and reuses it (one row) where the legacy batch-prepare would insert two. This degenerate same-tuple-collision case is intentionally not covered by the equivalence suite; the `LEX_SYNC_STREAMING_EXPANSION=false` env var is the rollback path if a project relies on the legacy behavior.
+
+---
+
+### 7m. `CalculationSignals.update_calculation_status` + `One.py` `model_name` propagation ✅
+
+**Gap:** PR #615 threaded `model_name=instance._meta.object_name` through two call sites: `update_calculation_status` in `CalculationSignals.py` now passes it to `mark_in_progress` on the IN_PROGRESS branch, and `One.update()` in `One.py` does the same in the early-registration block when `calculate=true`. The `ActiveCalculationStateStore` uses `model_name` to partition active-calculation lookups; if the propagation silently regresses (e.g. the kwarg is dropped or passed as `None`), the store records calculations under the wrong key and the active-release endpoint returns stale or missing data.
+
+**Scenario range:** 7.188 – 7.195. **Test file:** `lex/test_project/tests/calculations/test_7m_calc_signals.py`. **Type:** U + E. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/core/signals/CalculationSignals.py`, `lex/api/views/model_entries/One.py`.
 
 ---
 
@@ -1246,6 +1324,32 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 9.36 | Bulk DELETE (`Many` endpoint) emits `deleted` | bulk path broadcasts too |
 
 **Status:** Complete — 8 pass / 0 fail locally (Postgres test DB available).
+
+### 9f — Core health/calculation/log WebSocket consumers ✅
+
+**Gap:** PR #615 touched the core WebSocket consumer files that the frontend uses
+for public backend health, calculation notifications, and live calculation logs.
+These are long-lived sockets, so regressions leak active consumer references,
+stop shutdown cleanup, or silently break the JSON envelopes frontend listeners
+dispatch on.
+
+**Covers:** `lex/api/consumers/BackendHealthConsumer.py`,
+`lex/api/consumers/CalculationsConsumer.py`,
+`lex/api/consumers/CalculationLogConsumer.py`.
+
+**Shape:** U (`SimpleTestCase`) with mocked channel layer and socket boundary.
+No broker, Redis, or database required.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.37 | Backend health socket accepts and returns Healthy payload | `connect()` accepts and tracks the consumer; `receive()` sends `{"status": "Healthy :)"}` |
+| 9.38 | Backend health disconnect untracks connection | disconnect removes the consumer from the process-global active set |
+| 9.39 | Calculations socket joins group and forwards events | joins `calculations`; forwards `calculation_id` events and `calculation_notification` payloads in the frontend contract shape |
+| 9.40 | Calculations disconnect leaves group | discards `test-channel` from `calculations` and untracks the consumer |
+| 9.41 | Calculation-log socket groups by record prefix and streams logs | `calculationId="record-..."` joins group `record`; sends `calculation_log_real_time` envelope with `logs` |
+| 9.42 | Shutdown `disconnect_all` closes tracked consumers | all three classes call `disconnect(None)` on a snapshot of active consumers |
+
+**Scenario range:** 9.37 – 9.42. **Test file:** `lex/test_project/tests/signals_ws/test_9f_core_consumers.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked because PR #615 wires it in `authenticated_websocket_urlpatterns()`.
 
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 

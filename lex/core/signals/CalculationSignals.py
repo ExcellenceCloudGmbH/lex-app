@@ -55,6 +55,7 @@ def update_calculation_status(
             record_id=record_id,
             calculation_id=calculation_id,
             record=str(instance),
+            model_name=instance._meta.object_name,
             model_label=instance._meta.label_lower,
             record_pk=instance.pk,
         )
