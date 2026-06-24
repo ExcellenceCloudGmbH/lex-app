@@ -599,6 +599,23 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8y — Embedded-beat recovery driver: schedule wiring, queue isolation, entrypoint
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.116 – 8.122 |
+| Type | U |
+| Files covered | `lex/lex_app/settings.py` — the `CELERY_BEAT_SCHEDULE` `lex-celery-recovery-sweep` entry: `task` bound to the registered `sweep_dead_workers` name, `options.queue = "recovery"` (off the main KEDA-watched queue), `options.expires` bounding stale ticks. `lex/lex_app/celery_recovery/entrypoint.py` — new `beat_main(argv=None)` obtains the one canonical app via `supervisor._get_app()` and calls `app.worker_main(["worker","-B","-Q","recovery","--concurrency","1","--scheduler","django_celery_beat.schedulers:DatabaseScheduler","-l","info", …])`; registered as the `lex-recovery-beat` console script in `pyproject.toml`. `lex/lex_app/celery_recovery/supervisor.py` — `_requeue` queue routing (unchanged, pinned: `incremented.get("queue") or _default_queue()` ⇒ recovered task to its main queue, never `recovery`). `lex/lex_app/celery_recovery/heartbeat.py` — `_UNTRACKED_TASK_NAMES` already excludes the sweep (pinned). |
+| Test file | `lex/test_project/tests/celery_async/test_8y_beat_recovery_driver.py` |
+| Test classes | `TestCluster08y_BeatScheduleWiring` (8.116–8.119 — `SimpleTestCase`, reads `django.conf.settings` + `heartbeat._UNTRACKED_TASK_NAMES`: schedule names the registered sweep / sweep excluded from heartbeat tracking / sweep on dedicated `recovery` queue / that queue ≠ main default queue); `TestCluster08y_RequeueRoutingInvariant` (8.120–8.121 — fake Celery app records `send_task`: recovered task to payload's main queue not `recovery` / missing-queue fallback is the default main queue); `TestCluster08y_RecoveryBeatEntrypoint` (8.122 — `mock.patch` `worker_main` on `supervisor._get_app()`: argv starts `worker` with `-B`, binds `-Q recovery`, selects the `DatabaseScheduler`) |
+| Fixtures | none — `unittest.mock` on `app.worker_main` and a synthetic fake Celery app (`send_task`/`backend.mark_as_failure`); settings read directly from `django.conf.settings`. Broker, Redis, and Celery itself never contacted |
+| Tests landed | **7 pass / 0 fail** locally (0.09s) — pure-logic U across the settings dict, the heartbeat frozenset, `_requeue`'s queue selection, and the `worker_main` argv |
+| Coverage gain | `lex/lex_app/celery_recovery/entrypoint.py` — `beat_main` + factored `_bootstrap_django` newly covered; `lex/lex_app/celery_recovery/supervisor.py` — `_requeue` main-queue routing pinned; `settings.py` `CELERY_BEAT_SCHEDULE` recovery entry asserted |
+| Prereqs | none — all scenarios are broker-/DB-free. Infra (chart `celery_beat_recovery.yaml` + `workers.recoveryDriver` selector, supervisor gating) lives in `LEX_TERRAFORM_MODULES` on a matching branch and is out of scope for the framework test-plan |
+| Status | ✅ Complete — source + paired cluster tests + plan sync in one change (tests were first mis-placed in the legacy `lex/tests/unit/infra/` audit tree; reverted and rewritten here per AGENTS.md Prime Directive 2) |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)

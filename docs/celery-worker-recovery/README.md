@@ -186,3 +186,31 @@ in environments where no real Redis-backed Celery is running.
 
 The `sweep_dead_workers` task is itself excluded from tracking, so the recovery
 machinery never tries to recover its own sweeps.
+
+## Recovery driver: supervisor (default) vs beat
+
+Two interchangeable drivers run the identical `scan_and_recover()` engine; pick
+one per instance via the Helm value `workers.recoveryDriver`:
+
+- **`supervisor`** (default) — the dedicated `lex-recovery-supervisor` pod runs
+  the scan loop in-process. No broker round-trip; nothing to schedule.
+- **`beat`** — a singleton `lex-recovery-beat` pod runs, in effect, `celery
+  worker -B -Q recovery --concurrency 1 --scheduler
+  django_celery_beat.schedulers:DatabaseScheduler` (the `lex-recovery-beat`
+  console script wraps exactly this; the chart just sets
+  `command: ["lex-recovery-beat"]`). Embedded beat (`-B`) fires
+  `sweep_dead_workers` on the `django_celery_beat` DatabaseScheduler (schedule
+  visible/editable in the Django admin), and the same single-concurrency pod
+  consumes the dedicated `recovery` queue. Recovered tasks are still
+  re-dispatched to their main queue, so KEDA scales real workers 0→N exactly as
+  with the supervisor.
+
+Both preserve the non-circular property (the scan runs in an always-on pod, not
+in a scale-to-0 worker). Run exactly one; running both is safe (per-task Redis
+lock) but wasteful.
+
+> **Prerequisite for `beat`:** the `DatabaseScheduler` reads its schedule from
+> `django_celery_beat` tables, so that app's migrations must be applied (run the
+> backend `migrate` once) before the `lex-recovery-beat` pod starts — otherwise
+> it crash-loops on missing tables. The `supervisor` driver has no such
+> requirement.
