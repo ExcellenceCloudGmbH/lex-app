@@ -990,7 +990,9 @@ def ai_verify(project_root, mode, quiet, silent):
     package (``lex_mcp_local`` for forward, ``lex_mcp_reverse`` for backward)
     and the ``docs`` directory shipped by ``lex``, then rewrites any file under
     the project root that is missing or whose contents have drifted. Existing
-    user-only files are left untouched.
+    user-only files are left untouched, except mode-managed paths under
+    ``.github`` (agents/instructions/prompts), which are mirrored exactly to
+    prevent stale cross-mode AI assets.
     """
     # The directory passed via --project-root (or cwd) IS the LLM working
     # directory. We verify assets in *that* directory literally; we do not

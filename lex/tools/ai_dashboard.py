@@ -56,6 +56,7 @@ from lex.tools.setup_with_ai import (
     resolve_github_copilot_state_db_path,
     update_env_file,
 )
+from lex.tools.verify_ai_assets import verify_ai_assets
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -247,6 +248,11 @@ def _read_mode_from_mcp_json(
 def _read_override_file() -> dict[str, Any] | None:
     if not MODE_OVERRIDE_FILE.exists():
         return None
+    try:
+        raw = MODE_OVERRIDE_FILE.read_text(encoding="utf-8").strip()
+        return json.loads(raw) if raw.startswith("{") else {"mode": raw}
+    except Exception:
+        return None
 
 
 def _render_mode_cards(mode: str) -> str:
@@ -268,11 +274,6 @@ def _render_mode_cards(mode: str) -> str:
             f'</label>'
         )
     return "".join(cards)
-    try:
-        raw = MODE_OVERRIDE_FILE.read_text(encoding="utf-8").strip()
-        return json.loads(raw) if raw.startswith("{") else {"mode": raw}
-    except Exception:
-        return None
 
 
 def _write_mode_override(mode: str) -> None:
@@ -533,11 +534,19 @@ def _handle_save(
             _write_mode_override(new_mode)
             update_env_file(env_file_path, {"LEX_MCP_MODE": new_mode})
             _update_mcp_json_mode(mcp_config_path, new_mode, server_name=server_name)
+            verification = verify_ai_assets(project_root=project_root, mode=new_mode)
             cache_cleared = _invalidate_copilot_mcp_cache(
                 mcp_config_path, server_name=server_name,
             )
             stopped = _stop_mcp_server(mcp_config_path, server_name=server_name)
             msg = f"Mode changed to {new_mode}."
+            restored_files = len(verification.restored_files)
+            removed_files = len(verification.removed_files)
+            if restored_files or removed_files:
+                msg += (
+                    f" Synced AI assets ({restored_files} restored,"
+                    f" {removed_files} removed)."
+                )
             if stopped:
                 msg += " Server stopped; the IDE will auto-restart it in the new mode."
             if cache_cleared:

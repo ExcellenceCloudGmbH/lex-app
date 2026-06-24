@@ -38,7 +38,10 @@ This module exposes :func:`verify_ai_assets`, which:
 3. Restores any file under the project root that is missing or whose contents
    have drifted from the canonical copy (byte-for-byte comparison).
 
-User-added files in the destination are never deleted.
+User-added files in the destination are preserved except in mode-managed
+subdirectories (currently ``.github/agents``, ``.github/instructions``, and
+``.github/prompts``), which are mirrored exactly so stale mode assets are
+removed during mode switches.
 """
 
 from __future__ import annotations
@@ -100,13 +103,18 @@ class DirectoryVerificationResult:
     source_directory: Path | None
     destination_directory: Path
     restored_files: tuple[Path, ...] = ()
+    removed_files: tuple[Path, ...] = ()
     missing_files: tuple[Path, ...] = ()
     modified_files: tuple[Path, ...] = ()
     skipped_reason: str | None = None
 
     @property
     def ok(self) -> bool:
-        return self.skipped_reason is None and not self.restored_files
+        return (
+            self.skipped_reason is None
+            and not self.restored_files
+            and not self.removed_files
+        )
 
 
 @dataclass(frozen=True)
@@ -121,6 +129,10 @@ class VerifyAIAssetsResult:
     @property
     def restored_files(self) -> tuple[Path, ...]:
         return tuple(p for d in self.directories for p in d.restored_files)
+
+    @property
+    def removed_files(self) -> tuple[Path, ...]:
+        return tuple(p for d in self.directories for p in d.removed_files)
 
     @property
     def ok(self) -> bool:
@@ -385,6 +397,59 @@ def _restore_file(source_file: Path, destination_file: Path) -> None:
         ) from exc
 
 
+def _prune_managed_files(
+    source_directory: Path,
+    destination_directory: Path,
+    *,
+    managed_relative_dirs: tuple[str, ...],
+) -> tuple[Path, ...]:
+    """Delete stale files in managed subdirectories that are absent in source.
+
+    This is used for mode-scoped AI assets (for example ``.github/agents``),
+    where leaving old files in place causes mixed-mode tool surfaces.
+    """
+    removed: list[Path] = []
+
+    for relative_dir in managed_relative_dirs:
+        source_root = source_directory / relative_dir
+        destination_root = destination_directory / relative_dir
+
+        if not destination_root.exists():
+            continue
+
+        source_relative_files: set[Path] = set()
+        if source_root.is_dir():
+            for source_file in _iter_source_files(source_root):
+                source_relative_files.add(source_file.relative_to(source_directory))
+
+        for current_root, _dirs, files in os.walk(destination_root):
+            current_root_path = Path(current_root)
+            for file_name in files:
+                destination_file = current_root_path / file_name
+                destination_relative = destination_file.relative_to(destination_directory)
+                if destination_relative in source_relative_files:
+                    continue
+                try:
+                    destination_file.unlink()
+                    removed.append(destination_relative)
+                except OSError as exc:
+                    raise SetupWithAIError(
+                        f"Could not remove stale mode asset {destination_file}: {exc}"
+                    ) from exc
+
+        # Best-effort cleanup of empty directories left behind.
+        for current_root, _dirs, _files in os.walk(destination_root, topdown=False):
+            current_root_path = Path(current_root)
+            if current_root_path == destination_root:
+                continue
+            try:
+                current_root_path.rmdir()
+            except OSError:
+                continue
+
+    return tuple(removed)
+
+
 def verify_directory(
     project_root: Path,
     source_directory: Path | None,
@@ -392,6 +457,7 @@ def verify_directory(
     *,
     skipped_reason: str | None = None,
     display_name: str | None = None,
+    prune_extra_relative_dirs: tuple[str, ...] = (),
 ) -> DirectoryVerificationResult:
     """Verify (and restore) every file inside *source_directory* under *project_root*."""
     destination_directory = Path(project_root).resolve() / directory_name
@@ -435,14 +501,31 @@ def verify_directory(
         _restore_file(source_file, destination_file)
         restored.append(relative_path)
 
+    removed = ()
+    if prune_extra_relative_dirs:
+        removed = _prune_managed_files(
+            source_directory,
+            destination_directory,
+            managed_relative_dirs=prune_extra_relative_dirs,
+        )
+
     return DirectoryVerificationResult(
         directory_name=label,
         source_directory=source_directory,
         destination_directory=destination_directory,
         restored_files=tuple(restored),
+        removed_files=removed,
         missing_files=tuple(missing),
         modified_files=tuple(modified),
     )
+
+# Subdirectories in ``.github`` that are mode-owned. During mode switch, these
+# must be mirrored exactly to avoid carrying stale assets from the previous mode.
+MODE_MANAGED_GITHUB_SUBDIRS: tuple[str, ...] = (
+    "agents",
+    "instructions",
+    "prompts",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +613,11 @@ def verify_ai_assets(
                     source,
                     directory_name,
                     display_name=display_name,
+                    prune_extra_relative_dirs=(
+                        MODE_MANAGED_GITHUB_SUBDIRS
+                        if directory_name == ".github" and active_mode != "all"
+                        else ()
+                    ),
                 )
             )
 
