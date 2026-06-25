@@ -520,6 +520,14 @@ def _handle_save(
     #   (a) the user picked a different mode than current, OR
     #   (b) the mode was never explicitly written to .env yet, OR
     #   (c) the persisted state is stale relative to the override file.
+    mode_selected = bool(new_mode and new_mode in SUPPORTED_MCP_MODES)
+    mode_state_mismatch = bool(
+        mode_selected
+        and (
+            stored_mode != new_mode
+            or mcp_json_mode != new_mode
+        )
+    )
     mode_changed = (
         new_mode
         and new_mode in SUPPORTED_MCP_MODES
@@ -527,19 +535,28 @@ def _handle_save(
             new_mode != current_mode
             or stored_mode is None
             or state_is_stale
+            or mode_state_mismatch
         )
     )
-    if mode_changed:
+    if mode_selected:
         try:
-            _write_mode_override(new_mode)
+            if mode_changed:
+                _write_mode_override(new_mode)
             update_env_file(env_file_path, {"LEX_MCP_MODE": new_mode})
             _update_mcp_json_mode(mcp_config_path, new_mode, server_name=server_name)
             verification = verify_ai_assets(project_root=project_root, mode=new_mode)
-            cache_cleared = _invalidate_copilot_mcp_cache(
-                mcp_config_path, server_name=server_name,
+            cache_cleared = False
+            stopped = False
+            if mode_changed:
+                cache_cleared = _invalidate_copilot_mcp_cache(
+                    mcp_config_path, server_name=server_name,
+                )
+                stopped = _stop_mcp_server(mcp_config_path, server_name=server_name)
+            msg = (
+                f"Mode changed to {new_mode}."
+                if mode_changed
+                else f"Mode saved as {new_mode}."
             )
-            stopped = _stop_mcp_server(mcp_config_path, server_name=server_name)
-            msg = f"Mode changed to {new_mode}."
             restored_files = len(verification.restored_files)
             removed_files = len(verification.removed_files)
             if restored_files or removed_files:
@@ -547,6 +564,8 @@ def _handle_save(
                     f" Synced AI assets ({restored_files} restored,"
                     f" {removed_files} removed)."
                 )
+            else:
+                msg += " AI assets verified."
             if stopped:
                 msg += " Server stopped; the IDE will auto-restart it in the new mode."
             if cache_cleared:
