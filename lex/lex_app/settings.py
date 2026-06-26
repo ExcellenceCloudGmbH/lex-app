@@ -581,9 +581,16 @@ if LEX_TASK_RECOVERY_ENABLED:
     CELERY_BEAT_SCHEDULE = {
         **(globals().get("CELERY_BEAT_SCHEDULE") or {}),
         "lex-celery-recovery-sweep": {
-            "task": "lex.lex_app.celery_recovery.tasks.sweep_dead_workers",
+            "task": "lex.lex_app.celery_recovery.supervisor.sweep_dead_workers",
             "schedule": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
-            "options": {"expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL)},
+            # Route to a dedicated queue consumed ONLY by the recovery pod
+            # (celery worker -B -Q recovery). Keeps the sweep off the main
+            # KEDA-watched queue so it never inflates the worker scaling signal
+            # nor gets eaten by a scaled-up real worker. expires bounds backlog.
+            "options": {
+                "queue": "recovery",
+                "expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
+            },
         },
     }
 

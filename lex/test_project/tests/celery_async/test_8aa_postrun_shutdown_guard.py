@@ -15,9 +15,9 @@ beat with it and crash-looping the pod — exactly the regression observed in
 prod (sweep fires, then ``worker: Warm shutdown`` / ``beat: Shutting down``).
 A regression here silently breaks the whole recovery/future-edit scheduler.
 
-Cluster 8y — scenarios 8.125–8.128. Type: U.
+Cluster 8aa — scenarios 8.125–8.128. Type: U.
 Covers: lex/lex_app/celery.py (shutdown_worker_after_task_completion).
-Run: python -m lex pytest lex/test_project/tests/celery_async/test_8y_postrun_shutdown_guard.py -v
+Run: python -m lex pytest lex/test_project/tests/celery_async/test_8aa_postrun_shutdown_guard.py -v
 """
 
 import types
@@ -43,8 +43,8 @@ def _fake_task(hostname="celery@recovery-beat-pod"):
     return types.SimpleNamespace(request=request, app=app), control
 
 
-class TestCluster08y_PostrunShutdownGuard(SimpleTestCase):
-    """Cluster 8y: the post-task warm shutdown respects the idle-shutdown switch."""
+class TestCluster08aa_PostrunShutdownGuard(SimpleTestCase):
+    """Cluster 8aa: the post-task warm shutdown respects the idle-shutdown switch."""
 
     def test_8_125_noop_when_idle_shutdown_disabled(self):
         """
