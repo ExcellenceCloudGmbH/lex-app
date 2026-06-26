@@ -739,7 +739,20 @@ USE_L10N = True
 USE_TZ = True if DATABASE_DEPLOYMENT_TARGET not in ("default", "GCP") else False
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
-TIME_ZONE = "Europe/Berlin"
+#
+# TIME_ZONE is coupled to USE_TZ on purpose. django_celery_beat's scheduler
+# (DatabaseScheduler, used for both the recovery sweep IntervalSchedule and the
+# future-edit ClockedSchedule) interprets *naive* datetimes as UTC — see
+# celery.utils.time.maybe_make_aware, called unconditionally in
+# django_celery_beat.schedulers.ModelEntry.is_due and clockedschedule.clocked.
+# When USE_TZ is False we store naive datetimes (e.g. PeriodicTask.last_run_at,
+# History.valid_from). If TIME_ZONE were a non-UTC zone the stored naive value
+# would be local wall-clock while beat reads it as UTC, so is_due() is off by the
+# UTC offset (the interval sweep never becomes due; clocked activations fire
+# hours late). Forcing UTC here makes the naive-as-UTC assumption correct.
+# When USE_TZ is True, datetimes are tz-aware and the display zone is free to be
+# Europe/Berlin without affecting scheduling.
+TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
