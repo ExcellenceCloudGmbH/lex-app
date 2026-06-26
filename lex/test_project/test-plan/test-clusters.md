@@ -677,6 +677,21 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 ---
 
+### Sub-cluster 8y — post-task warm shutdown honours the idle-shutdown master switch
+
+**Gap:** `LEX_WORKER_IDLE_SHUTDOWN_ENABLED` is the single master switch meant to turn off *all* worker self-termination. `lex/lex_app/celery.py` has three self-termination paths: the `task_postrun` post-task warm shutdown (`shutdown_worker_after_task_completion`, for KEDA ScaledJob workers that should exit after their one task), the `task_revoked` cancel fast-path, and the `worker_ready` idle watchdog. The revoke path and the watchdog both early-return on `not _idle_shutdown_enabled()`, but the `task_postrun` handler only checked `_is_non_local_deployment_target()` and `task is None` — it ignored the switch. The embedded-beat recovery pod (`celery_beat_recovery.yaml`) sets the switch to `false` because it runs `celery worker -B` and is idle by design between sweeps; with the guard missing it warm-shut-down after its first `sweep_dead_workers` and crash-looped, taking beat with it (observed in prod: sweep succeeds, then `worker: Warm shutdown` / `beat: Shutting down`). The fix adds the same `_idle_shutdown_enabled()` guard so the switch disables every path, matching the promise in the chart comment (`celery_beat_recovery.yaml:81-90`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.125 | Master switch off ⇒ no post-task shutdown | non-local target + `_idle_shutdown_enabled()` False: `task_postrun` sends no warm-shutdown broadcast, so the recovery-beat pod survives between sweeps |
+| 8.126 | Switch on + non-local ⇒ broadcast still fires | the KEDA scale-to-zero path is preserved: the warm shutdown is broadcast to the completing worker with `completed_task_id` excluded from the idle check |
+| 8.127 | Local deployment target ⇒ never broadcasts | dev/local runs never self-terminate, regardless of the switch |
+| 8.128 | `task=None` ⇒ safe no-op | the defensive path returns without raising and broadcasts nothing |
+
+**Scenario range:** 8.125 – 8.128. **Test file:** `lex/test_project/tests/celery_async/test_8y_postrun_shutdown_guard.py`. **Type:** U. **Status:** ✅ Complete (Session 85 — June 26). Source: `lex/lex_app/celery.py` (`shutdown_worker_after_task_completion`). 4 U scenarios pass locally (broker-free, signal handler driven directly with mocked deployment-target / switch / `control.broadcast`).
+
+---
+
 ## 9. Signals & WebSocket
 
 **What it tests:** `ActiveCalculationStateStore` tracking, `WebSocketNotifier` broadcasts, `CacheManager` cleanup, and `update_calculation_status` signal.
