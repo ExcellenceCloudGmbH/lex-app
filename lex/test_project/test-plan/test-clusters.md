@@ -180,6 +180,33 @@ to a pod before it can serve (`/readiness` lies ready).
 
 **Scenario range:** 1.171 – 1.175. **Test file:** `lex/test_project/tests/init/test_1u_fast_health_asgi.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). Sources: `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
 
+### 1v. `TIME_ZONE`↔`USE_TZ` coupling — `django_celery_beat` DatabaseScheduler correctness
+
+`django_celery_beat`'s `DatabaseScheduler` reads naive datetimes through
+`celery.utils.time.maybe_make_aware`, which **hardcodes naive == UTC**
+(`ModelEntry.is_due` and `clocked.__init__`). The framework runs two beat
+schedules through it: the recovery sweep (an `IntervalSchedule`) and future
+history edits (a one-off `ClockedSchedule` fired at `History.valid_from`, see
+`bitemporal_signals._schedule_future_activation`). Under `USE_TZ=False` (the
+deliberate GCP/default production setting) Django stores **naive Berlin
+wall-clock**, so if `TIME_ZONE` were a non-UTC zone beat would misread every
+stored timestamp by the UTC offset — the interval sweep never becomes due and
+clocked activations fire 1–2h late (DST-dependent). `settings.py` therefore
+pins `TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"`: under `USE_TZ=False`
+the naive frame Django writes **is** real UTC; under `USE_TZ=True` datetimes
+are tz-aware so the display zone stays free. Decoupling the two silently breaks
+every beat-driven feature on a `USE_TZ=False` deployment.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.179 | `USE_TZ=False` forces UTC | when `settings.USE_TZ` is False, `settings.TIME_ZONE == "UTC"` so beat's naive-as-UTC read is correct; under `USE_TZ=True` a display zone is still configured |
+| 1.180 | Django's naive frame matches beat's assumption | under `USE_TZ=False`, `timezone.now()` is naive and within seconds of real UTC, so a stored timestamp round-trips through `maybe_make_aware` unchanged |
+| 1.181 | Recovery `IntervalSchedule` is due in the live frame | replicating `ModelEntry.is_due` (`maybe_make_aware(last_run_at).astimezone(app.timezone)`): just-ran → not due with `next ≤ interval`; 3×-overdue → due (the original stuck-sweep symptom) |
+| 1.182 | Future-edit `ClockedSchedule` fires at `valid_from` | `clocked(now+30s)` is ~30s away (not hours) and not due; a past target is due immediately — the exact path future history edits take under Celery |
+| 1.183 | Non-UTC naive storage is misread by the offset (regression rationale) | the same instant stored naive-UTC round-trips exactly through beat's reader, while naive-Berlin is misread by ≥3600s — the skew the coupling eliminates |
+
+**Scenario range:** 1.179 – 1.183. **Test file:** `lex/test_project/tests/init/test_1v_scheduler_tz_invariant.py`. **Type:** U. **Status:** ✅ Complete (Session 84 — June 26). Source: `lex/lex_app/settings.py` (USE_TZ↔TIME_ZONE coupling); guards the `django_celery_beat` `is_due` path it must keep correct.
+
 ---
 
 ## 2. CRUD via REST API
