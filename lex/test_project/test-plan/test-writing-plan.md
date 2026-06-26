@@ -632,6 +632,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8aa — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.125 – 8.128 |
+| Type | U |
+| Files covered | `lex/lex_app/celery.py` — `shutdown_worker_after_task_completion` (the `task_postrun` handler). Added the missing `_idle_shutdown_enabled()` early-return guard so `LEX_WORKER_IDLE_SHUTDOWN_ENABLED=false` disables the post-task warm shutdown, matching the `task_revoked` fast-path and the `worker_ready` idle watchdog (which already gate on it). Fixes the embedded-beat recovery pod (`celery_beat_recovery.yaml`) crash-loop: it warm-shut-down after its first `sweep_dead_workers`, killing beat |
+| Test file | `lex/test_project/tests/celery_async/test_8aa_postrun_shutdown_guard.py` |
+| Test classes | `TestCluster08aa_PostrunShutdownGuard` (8.125 master switch off ⇒ no broadcast — the recovery-beat bug; 8.126 switch on + non-local ⇒ broadcast still fires to the completing worker with `completed_task_id` excluded; 8.127 local target ⇒ never broadcasts; 8.128 `task=None` ⇒ safe no-op) |
+| Fixtures | none — `unittest.mock` on `_is_non_local_deployment_target` / `_idle_shutdown_enabled` and a task stand-in whose `.app.control.broadcast` is observed; broker-/DB-free |
+| Tests landed | **4 pass / 0 fail** (8.125–8.128). Regression: full `celery_async` cluster + `lex/tests/unit/infra/test_worker_self_termination.py` = 144 pass / 4 skip / 12 subtests |
+| Coverage gain | `lex/lex_app/celery.py` — the disabled-flag branch of `shutdown_worker_after_task_completion`, which previously had **no** test (the gap that let the bug ship) |
+| Status | ✅ Complete — source fix + paired tests + plan sync in one change. Allocated `8aa` because `8y` (recovery driver) and `8z` (initial-data executor) were both already taken |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)
