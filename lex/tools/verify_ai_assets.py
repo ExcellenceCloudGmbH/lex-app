@@ -76,7 +76,7 @@ MCP_MODE_PACKAGE: dict[str, str] = {
     MCP_MODE_BACKWARD: "lex_mcp_reverse",
     "edit": "lex_mcp_edit",
     "review": "lex_mcp_review",
-    "mvp_generator": "lex_mcp_mvp_generator",
+    "mvp_generator": "lex_mcp_mvp",
     "mvp_completion": "lex_mcp_mvp_completion",
 }
 
@@ -547,6 +547,9 @@ def verify_ai_assets(
     env: Mapping[str, str] | None = None,
     docs_directory_names: tuple[str, ...] = LEX_APP_EMBEDDED_DIRECTORY_NAMES,
     mode_directory_names: tuple[str, ...] = MCP_MODE_DIRECTORIES,
+    align_mcp_mode: bool = False,
+    mcp_config_path: Path | None = None,
+    mode_align_source_tool: str = "lex-ai-verify",
 ) -> VerifyAIAssetsResult:
     """Verify every asset directory required by the active MCP mode.
 
@@ -560,8 +563,61 @@ def verify_ai_assets(
     python_executable:
         Interpreter used to locate installed packages. Defaults to the active
         virtual environment's interpreter.
+    align_mcp_mode:
+        When *True*, treat ``<project_root>/.env``'s ``LEX_MCP_MODE`` as the
+        source of truth. If the persisted MCP runtime view (override file or
+        ``mcp.json``) disagrees, invoke the equivalent of the in-server
+        ``switch_to_mode`` MCP tool to align them before verifying assets.
+        Disabled by default to preserve the lightweight pre-flight behaviour.
+    mcp_config_path:
+        Path to the IDE ``mcp.json`` used for mode alignment. When *None*,
+        the GitHub Copilot config is auto-resolved.
     """
     project_root_resolved = Path(project_root).resolve()
+
+    # ── Optional: align MCP runtime mode with project .env ────────────────
+    # Treat the project's .env ``LEX_MCP_MODE`` as the source of truth. If
+    # the runtime (override file or mcp.json) disagrees, run the
+    # ``switch_to_mode`` primitives so the running MCP server is told to
+    # adopt the .env mode before we restore assets for it.
+    if align_mcp_mode and mode != "all":
+        try:
+            from lex.tools.mcp_mode_invoke import invoke_switch_to_mode
+            from lex.tools.setup_with_ai import (
+                resolve_github_copilot_mcp_config_path,
+            )
+
+            env_mode = _read_env_file_value(
+                project_root_resolved / ".env", "LEX_MCP_MODE"
+            )
+            env_mode = (env_mode or "").strip().lower() or None
+            if env_mode and env_mode in MCP_MODE_PACKAGE:
+                resolved_mcp_path = (
+                    Path(mcp_config_path).resolve()
+                    if mcp_config_path is not None
+                    else resolve_github_copilot_mcp_config_path()
+                )
+                runtime_mode = (
+                    _read_override_mode()
+                    or _read_mode_from_mcp_json(resolved_mcp_path)
+                    or _resolve_mode_from_mcp_json_files(project_root_resolved)
+                )
+                if runtime_mode != env_mode:
+                    invoke_switch_to_mode(
+                        env_mode,
+                        project_root=project_root_resolved,
+                        mcp_config_path=resolved_mcp_path,
+                        source_tool=mode_align_source_tool,
+                        reason="aligning runtime mode with project .env",
+                    )
+                if mode is None:
+                    mode = env_mode
+        except Exception:
+            # Best-effort — alignment failures must never block verification.
+            # If the Copilot mcp.json path cannot be resolved, the mode
+            # cannot be aligned, but we can still verify assets for
+            # whatever mode resolve_active_mcp_mode picks up.
+            pass
 
     if mode == "all":
         active_mode, mode_source = "all", "cli"

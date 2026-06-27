@@ -540,18 +540,44 @@ def _handle_save(
     )
     if mode_selected:
         try:
-            if mode_changed:
-                _write_mode_override(new_mode)
+            from lex.tools.mcp_mode_invoke import invoke_switch_to_mode
+
+            # Write .env first so the project SoT reflects the user choice
+            # immediately. invoke_switch_to_mode also syncs it, but writing
+            # eagerly guarantees the next verify_ai_assets call sees the
+            # new mode even if the lex_mcp helpers are unavailable.
             update_env_file(env_file_path, {"LEX_MCP_MODE": new_mode})
-            _update_mcp_json_mode(mcp_config_path, new_mode, server_name=server_name)
-            verification = verify_ai_assets(project_root=project_root, mode=new_mode)
-            cache_cleared = False
-            stopped = False
+
+            switch_result = None
             if mode_changed:
-                cache_cleared = _invalidate_copilot_mcp_cache(
-                    mcp_config_path, server_name=server_name,
+                switch_result = invoke_switch_to_mode(
+                    new_mode,
+                    project_root=project_root,
+                    mcp_config_path=mcp_config_path,
+                    source_tool="lex-ai-dashboard",
+                    reason="dashboard mode switch",
+                    server_name=server_name,
                 )
-                stopped = _stop_mcp_server(mcp_config_path, server_name=server_name)
+            else:
+                # Idempotent re-sync: keep mcp.json aligned to the SoT
+                # without writing the override or restarting the server.
+                _update_mcp_json_mode(
+                    mcp_config_path, new_mode, server_name=server_name,
+                )
+
+            verification = verify_ai_assets(
+                project_root=project_root,
+                mode=new_mode,
+                align_mcp_mode=True,
+                mcp_config_path=mcp_config_path,
+                mode_align_source_tool="lex-ai-dashboard",
+            )
+
+            cache_cleared = bool(
+                switch_result and switch_result.ide_caches_cleared
+            )
+            stopped = bool(switch_result and switch_result.server_stopped)
+
             msg = (
                 f"Mode changed to {new_mode}."
                 if mode_changed
@@ -566,6 +592,10 @@ def _handle_save(
                 )
             else:
                 msg += " AI assets verified."
+            if switch_result and switch_result.strategy == "lex_mcp":
+                msg += " switch_to_mode invoked via lex_mcp."
+            elif switch_result and switch_result.strategy == "fallback":
+                msg += " switch_to_mode invoked via fallback path."
             if stopped:
                 msg += " Server stopped; the IDE will auto-restart it in the new mode."
             if cache_cleared:

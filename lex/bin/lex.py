@@ -983,7 +983,18 @@ def ai_faq():
     help="Print nothing on success. Implies --quiet. Intended for use as a fast pre-flight "
          "guard at the start of every MCP tool call.",
 )
-def ai_verify(project_root, mode, quiet, silent):
+@click.option(
+    "--align-mcp-mode/--no-align-mcp-mode",
+    default=None,
+    help=(
+        "Treat the project .env LEX_MCP_MODE as the source of truth and "
+        "invoke the equivalent of the MCP `switch_to_mode` tool when the "
+        "running MCP server / mcp.json disagree. Enabled by default for "
+        "interactive runs; disabled under --silent to avoid restarting the "
+        "server in the middle of an MCP tool call."
+    ),
+)
+def ai_verify(project_root, mode, quiet, silent, align_mcp_mode):
     """Verify (and silently restore) the LEX AI asset directories.
 
     Walks the canonical ``.github`` directory shipped by the active MCP mode's
@@ -1000,9 +1011,19 @@ def ai_verify(project_root, mode, quiet, silent):
     root = resolve_llm_working_directory(project_root)
     quiet = quiet or silent
     explicit_mode = None if mode == "auto" else mode.lower()
+    if align_mcp_mode is None:
+        # Default: align in interactive runs, skip during --silent pre-flight
+        # (the MCP wrapper invokes ai-verify on every tool call; auto-switch
+        # there would loop / restart the server mid-call).
+        align_mcp_mode = not silent
 
     try:
-        result = verify_ai_assets(project_root=root, mode=explicit_mode)
+        result = verify_ai_assets(
+            project_root=root,
+            mode=explicit_mode,
+            align_mcp_mode=align_mcp_mode,
+            mode_align_source_tool="lex-ai-verify",
+        )
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
 
