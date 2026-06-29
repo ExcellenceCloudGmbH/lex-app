@@ -179,6 +179,7 @@ if os.getenv("STORAGE_TYPE") == "GCS":
 SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY", default="pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
 )
+QUACKBACK_WIDGET_SECRET = os.getenv("QUACKBACK_WIDGET_SECRET", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
