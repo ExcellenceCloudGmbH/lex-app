@@ -180,6 +180,33 @@ to a pod before it can serve (`/readiness` lies ready).
 
 **Scenario range:** 1.171 – 1.175. **Test file:** `lex/test_project/tests/init/test_1u_fast_health_asgi.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). Sources: `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
 
+### 1v. `TIME_ZONE`↔`USE_TZ` coupling — `django_celery_beat` DatabaseScheduler correctness
+
+`django_celery_beat`'s `DatabaseScheduler` reads naive datetimes through
+`celery.utils.time.maybe_make_aware`, which **hardcodes naive == UTC**
+(`ModelEntry.is_due` and `clocked.__init__`). The framework runs two beat
+schedules through it: the recovery sweep (an `IntervalSchedule`) and future
+history edits (a one-off `ClockedSchedule` fired at `History.valid_from`, see
+`bitemporal_signals._schedule_future_activation`). Under `USE_TZ=False` (the
+deliberate GCP/default production setting) Django stores **naive Berlin
+wall-clock**, so if `TIME_ZONE` were a non-UTC zone beat would misread every
+stored timestamp by the UTC offset — the interval sweep never becomes due and
+clocked activations fire 1–2h late (DST-dependent). `settings.py` therefore
+pins `TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"`: under `USE_TZ=False`
+the naive frame Django writes **is** real UTC; under `USE_TZ=True` datetimes
+are tz-aware so the display zone stays free. Decoupling the two silently breaks
+every beat-driven feature on a `USE_TZ=False` deployment.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.179 | `USE_TZ=False` forces UTC | when `settings.USE_TZ` is False, `settings.TIME_ZONE == "UTC"` so beat's naive-as-UTC read is correct; under `USE_TZ=True` a display zone is still configured |
+| 1.180 | Django's naive frame matches beat's assumption | under `USE_TZ=False`, `timezone.now()` is naive and within seconds of real UTC, so a stored timestamp round-trips through `maybe_make_aware` unchanged |
+| 1.181 | Recovery `IntervalSchedule` is due in the live frame | replicating `ModelEntry.is_due` (`maybe_make_aware(last_run_at).astimezone(app.timezone)`): just-ran → not due with `next ≤ interval`; 3×-overdue → due (the original stuck-sweep symptom) |
+| 1.182 | Future-edit `ClockedSchedule` fires at `valid_from` | `clocked(now+30s)` is ~30s away (not hours) and not due; a past target is due immediately — the exact path future history edits take under Celery |
+| 1.183 | Non-UTC naive storage is misread by the offset (regression rationale) | the same instant stored naive-UTC round-trips exactly through beat's reader, while naive-Berlin is misread by ≥3600s — the skew the coupling eliminates |
+
+**Scenario range:** 1.179 – 1.183. **Test file:** `lex/test_project/tests/init/test_1v_scheduler_tz_invariant.py`. **Type:** U. **Status:** ✅ Complete (Session 84 — June 26). Source: `lex/lex_app/settings.py` (USE_TZ↔TIME_ZONE coupling); guards the `django_celery_beat` `is_due` path it must keep correct.
+
 ---
 
 ## 2. CRUD via REST API
@@ -268,6 +295,8 @@ to a pod before it can serve (`/readiness` lies ready).
 - `PreValidatedItem` — raises exception in `pre_validation()` for specific values
 - `PostValidatedItem` — raises exception in `post_validation()` for specific values
 - `HookOrderItem` — records hook execution order in a class-level list
+- `_ConditionalHooksBase` (abstract) → `LeanConditionalItem` / `FullConditionalItem` — identical conditional-hook declarations (legacy `when=`/`when_any=` + `condition=` objects incl. chained) differing only in `lex_lean_initial_state`, for lean-vs-full parity (3f)
+- `LeanExtraFieldItem` — lean model that consults `has_changed()` imperatively and declares the field via `lex_initial_state_extra_fields` (3f escape hatch)
 
 **Test scenarios:**
 
@@ -281,6 +310,32 @@ to a pod before it can serve (`/readiness` lies ready).
 | 3.6 | Hook execution order on update | BEFORE_UPDATE → BEFORE_SAVE → (save) → AFTER_SAVE → AFTER_UPDATE |
 | 3.7 | Validation recursion guard | `_validation_in_progress` prevents infinite recursion |
 | 3.8 | Rollback restores field values | After `post_validation` failure, DB record matches pre-save snapshot |
+| 3.9 | Snapshot released after success | After a successful save (create/update), the pre-validation rollback buffer is not pinned on the instance |
+| 3.10 | Snapshot release keeps rollback intact | A `post_validation` failure on a later update still rolls back, even though the buffer is freed after each successful save |
+| 3.11 | Lean is the default; opt-out keeps full snapshot | Class default `lex_lean_initial_state=True`; a model that explicitly sets it `False` still holds untracked fields in `_initial_state` |
+| 3.12 | Lean snapshot shape | Lean snapshot keys == exactly the change-detected fields (`edited_at` + hook-clause fields) |
+| 3.13 | Lean snapshot drops untracked | Fields no hook consults (`name`, `note`) are absent from the lean snapshot |
+| 3.14 | Lean `edited_at` auto-stamp | Lean update still auto-stamps `edited_at` (framework `has_changed('edited_at')` dependency intact) |
+| 3.15 | Lean explicit `edited_at` respected | An explicitly-set `edited_at` is not overwritten on a lean update |
+| 3.16 | Legacy `when=` fires (lean) | `when='status'` hook fires on a status change |
+| 3.17 | Legacy `when=` silent (lean) | `when='status'` hook does not fire when status is unchanged |
+| 3.18 | Legacy `when_any=` fires (lean) | `when_any=['a','b']` fires when `b` changes |
+| 3.19 | `WhenFieldHasChanged` fires (lean) | `condition=WhenFieldHasChanged('amount')` fires on amount change |
+| 3.20 | `WhenFieldValueWas` fires (lean) | `condition=WhenFieldValueWas('status','draft')` fires when prior status was draft |
+| 3.21 | `WhenFieldValueChangesTo` fires (lean) | `condition=WhenFieldValueChangesTo('status','paid')` fires on draft→paid |
+| 3.22 | Chained condition fires (lean) | `WhenFieldHasChanged('amount') & WhenFieldValueIs('status','paid')` fires when both limbs hold |
+| 3.23 | Chained condition silent (lean) | Chained condition does not fire when only one limb holds |
+| 3.24 | Lean-vs-full hook parity | Identical mutation fires an identical set of hooks on lean and full models |
+| 3.25 | `has_changed` True tracked (lean) | `has_changed` is True for a changed tracked field |
+| 3.26 | `has_changed` False untracked (lean) | `has_changed` reports False for a changed untracked field (documented trade-off) |
+| 3.27 | `initial_value` tracked (lean) | `initial_value` returns the pre-change value for a tracked field |
+| 3.28 | Extra-fields escape hatch | `lex_initial_state_extra_fields` keeps an imperatively-queried field tracked |
+| 3.29 | Post-save re-baseline is lean | The on-commit re-baseline re-narrows the snapshot; a stale change is not re-reported |
+| 3.30 | `refresh_from_db` re-baseline is lean | `refresh_from_db` rebuilds a lean snapshot and resets `has_changed` |
+| 3.31 | Create-path hooks unaffected | Lean create still stamps `created_at` / `created_by` (no change-detection involved) |
+| 3.32 | Lean snapshot is smaller | Lean `_initial_state` holds strictly fewer keys than the full snapshot |
+
+**Sub-clusters:** 3a `pre_validation` (3.1–3.2) · 3b `post_validation` (3.3–3.4) · 3c hook ordering (3.5–3.6) · 3d recursion guard (3.7) · 3e snapshot lifecycle (3.8–3.10) · **3f lean `_initial_state` default-on / opt-out (3.11–3.32)** — covers `lex/core/models/LexModel.py`, Type E, ✅ Complete (22 pass / 0 fail).
 
 ---
 
@@ -544,6 +599,14 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 ---
 
+### 7q. Nested fan-out dispatches by default from inside a worker ✅
+
+**Gap:** A real production calc (`InvestmentPosting`, 65 568 models across 50 clusters) ran *synchronously* instead of dispatching to Celery. Root cause: an `is_celery_worker_process()` worker-detection guard (added commit `40d17b3`, 2026-03-29) made nested fan-out **opt-in** — a calculation already executing inside a Celery worker would collapse its nested work to an inline synchronous run unless the caller opened an explicit async context. This silently serialised large combinatorial calcs onto a single worker slot. The guard was removed in **both** dispatch paths so the default is "always dispatch": `CalculatedModelMixin._dispatch_model_processing` (fan-out) now dispatches whenever `CELERY_ACTIVE` + `.delay` exist, and `CalculationModel.calculate_hook` (single-instance) opens its own `WaitForTasks` when no async context is active (reusing an outer scope when present). When no context is active the dispatcher blocks on the children — correctness/ordering preserved at the cost of holding the worker slot, per the explicit "don't worry about blocking" decision. `is_celery_worker_process()` itself is retained for diagnostics/logging (still asserted correct by 8.6).
+
+**Scenario range:** 7.196 – 7.201. **Test file:** `lex/test_project/tests/calculations/test_7q_worker_default_dispatch.py`. **Type:** E. **Status:** ✅ Complete (Session 86 — June 29). Covers `lex/core/mixins/CalculatedModelMixin.py` (`_dispatch_model_processing`) and `lex/core/models/CalculationModel.py` (`calculate_hook` dispatch branch). 7.196–7.198 drive the mixin (inside-worker, no-context / WaitForTasks / FireAndForget — all fan out to `CeleryTaskDispatcher`, never `calc_and_save_sync`); 7.199–7.201 drive `CalculationModel` (no-context ⇒ own `WaitForTasks` blocks; outer `WaitForTasks` ⇒ drains on scope exit; `FireAndForget` ⇒ never blocks). 6 pass / 0 fail. Companion stale-test updates: `test_calculation_wait_contexts.py`, `test_calculated_model_mixin.py`, and 8.6 message in `test_8b_dispatch_context.py`.
+
+---
+
 ## 8. Celery & Async
 
 **What it tests:** Task dispatch to Celery, sync fallback when Celery is unavailable, `FireAndForget` / `WaitForTasks` context managers, and nested calculation dispatch.
@@ -619,6 +682,29 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 **Why a mix of U and I:** the ownership lookup `tracked_calculation_record_ids()` (registry → `{(label_lower, pk)}`, alive-or-expired, degrades to empty) is pure logic driven against a mocked registry (U). The sweep's actual abort/skip decision — the half that protects live calculations — is exercised against real persisted `CalculationModel` rows driven straight through `_handle_calculation_model_reset` with the ownership set injected, asserting both the row's terminal state and whether an aborted-audit was written (I, `E2ETestCase`).
 
 **Scenario range:** 8.103 – 8.115. **Test file:** `lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py`. **Type:** U (+ I for the real-row sweep). **Status:** ✅ Complete. Covers `lex/lex_app/celery_recovery/supervisor.py` (`tracked_calculation_record_ids`) and `lex/process_admin/utils/model_registration.py` (`_handle_calculation_model_reset` skip-if-owned filter + the `register_models` compute-once threading, gated so no registry read happens outside startup). 6 U scenarios pass locally; the 7 I (real-row) scenarios pass their assertions — only the shared `TransactionTestCase` teardown-flush errors in the borrowed local venv, identically to the pre-existing E2E suite (a DB-provisioning gap, not a code issue); they gate normally on the CI Postgres.
+
+### Sub-cluster 8y — embedded-beat recovery driver (admin-visible schedule, queue isolation)
+
+**Gap:** worker recovery shipped with a single cluster driver — the always-on `recovery-supervisor` pod looping `scan_and_recover()` in-process. Operators wanted the *scheduler tooling of Celery beat* — a DB-driven schedule visible and editable in the Django admin (`django_celery_beat` `PeriodicTask` rows via `DatabaseScheduler`) — **without** giving up the property that makes the supervisor correct on this cluster, where workers are a KEDA ScaledJob scale-to-0. Vanilla beat is wrong here: beat only *enqueues* the sweep; a worker must dequeue it, and with scale-to-0 workers that is a chicken-and-egg loop (to detect a dead worker, beat needs a worker to run the sweep), forces a KEDA cold-start every interval, and pollutes the very Redis list KEDA scales on. The chosen driver is an **embedded-beat, self-consuming pod**: `celery worker -B -Q recovery --concurrency 1 --scheduler django_celery_beat.schedulers:DatabaseScheduler` — the same singleton pod fires the existing `sweep_dead_workers` task onto a dedicated `recovery` queue it consumes *itself*, so the scan runs in-process (no worker needed to *detect* deaths), and `_requeue` re-dispatches recovered work to the calc's main queue, which raises `listLength` and drives KEDA 0→N. The recovery pod subscribes to **only** `-Q recovery`, so recovered work always flows outward and never loops back (the non-circular property).
+
+**Why pure U:** every make-or-break property of this driver is a wiring invariant that fails *silently*, and each is exercisable without a broker, Redis, or Celery itself: the beat-schedule dict naming the registered sweep task, the `frozenset` of heartbeat-untracked task names, the sweep's target queue vs. the main default queue (settings reads), `_requeue`'s queue selection (fake app records `send_task`), and the argv `beat_main` hands `app.worker_main` (mocked on the one canonical app from `supervisor._get_app()`).
+
+**Scenario range:** 8.116 – 8.122. **Test file:** `lex/test_project/tests/celery_async/test_8y_beat_recovery_driver.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 11). Covers `lex/lex_app/settings.py` (`CELERY_BEAT_SCHEDULE`), `lex/lex_app/celery_recovery/entrypoint.py` (`beat_main`), and `lex/lex_app/celery_recovery/supervisor.py` (`_requeue` routing — pinned). 8.116 schedule names the registered sweep; 8.117 sweep excluded from heartbeat tracking; 8.118 sweep routed to the dedicated `recovery` queue; 8.119 that queue is distinct from the main default queue; 8.120 `_requeue` targets the payload's main queue, never `recovery`; 8.121 missing-queue fallback is the default main queue; 8.122 `beat_main` launches `worker -B -Q recovery --scheduler DatabaseScheduler`. 7 pass / 0 fail locally (0.09s). Infra (chart `celery_beat_recovery.yaml` + `workers.recoveryDriver` selector) lives in `LEX_TERRAFORM_MODULES` on a matching branch.
+
+---
+
+### Sub-cluster 8aa — post-task warm shutdown honours the idle-shutdown master switch
+
+**Gap:** `LEX_WORKER_IDLE_SHUTDOWN_ENABLED` is the single master switch meant to turn off *all* worker self-termination. `lex/lex_app/celery.py` has three self-termination paths: the `task_postrun` post-task warm shutdown (`shutdown_worker_after_task_completion`, for KEDA ScaledJob workers that should exit after their one task), the `task_revoked` cancel fast-path, and the `worker_ready` idle watchdog. The revoke path and the watchdog both early-return on `not _idle_shutdown_enabled()`, but the `task_postrun` handler only checked `_is_non_local_deployment_target()` and `task is None` — it ignored the switch. The embedded-beat recovery pod (`celery_beat_recovery.yaml`) sets the switch to `false` because it runs `celery worker -B` and is idle by design between sweeps; with the guard missing it warm-shut-down after its first `sweep_dead_workers` and crash-looped, taking beat with it (observed in prod: sweep succeeds, then `worker: Warm shutdown` / `beat: Shutting down`). The fix adds the same `_idle_shutdown_enabled()` guard so the switch disables every path, matching the promise in the chart comment (`celery_beat_recovery.yaml:81-90`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.125 | Master switch off ⇒ no post-task shutdown | non-local target + `_idle_shutdown_enabled()` False: `task_postrun` sends no warm-shutdown broadcast, so the recovery-beat pod survives between sweeps |
+| 8.126 | Switch on + non-local ⇒ broadcast still fires | the KEDA scale-to-zero path is preserved: the warm shutdown is broadcast to the completing worker with `completed_task_id` excluded from the idle check |
+| 8.127 | Local deployment target ⇒ never broadcasts | dev/local runs never self-terminate, regardless of the switch |
+| 8.128 | `task=None` ⇒ safe no-op | the defensive path returns without raising and broadcasts nothing |
+
+**Scenario range:** 8.125 – 8.128. **Test file:** `lex/test_project/tests/celery_async/test_8aa_postrun_shutdown_guard.py`. **Type:** U. **Status:** ✅ Complete (Session 85 — June 26). Allocated `8aa` because `8y` (recovery driver) and `8z` (initial-data executor) were both already taken. Source: `lex/lex_app/celery.py` (`shutdown_worker_after_task_completion`). 4 U scenarios pass locally (broker-free, signal handler driven directly with mocked deployment-target / switch / `control.broadcast`).
 
 ---
 

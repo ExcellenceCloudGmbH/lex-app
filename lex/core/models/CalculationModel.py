@@ -1253,7 +1253,6 @@ class CalculationModel(LexModel):
                 from lex.lex_app.celery_tasks import (
                     FireAndForget,
                     WaitForTasks,
-                    is_celery_worker_process,
                 )
 
                 has_explicit_async_context = (
@@ -1261,15 +1260,13 @@ class CalculationModel(LexModel):
                     or WaitForTasks.get_current_context() is not None
                 )
 
+                # Always dispatch. If an explicit async context is active we
+                # reuse it; otherwise we open our own WaitForTasks and block on
+                # the child task. A nested calculation inside a worker therefore
+                # dispatches (and blocks) by default rather than running inline.
                 if has_explicit_async_context:
                     task_result = self.dispatch_calculation_task()
                     task_dispatched = True
-                elif is_celery_worker_process():
-                    logger.info(
-                        "Executing nested calculation for %s synchronously inside Celery worker",
-                        self,
-                    )
-                    self.execute_calculation_sync()
                 else:
                     with WaitForTasks():
                         task_result = self.dispatch_calculation_task()

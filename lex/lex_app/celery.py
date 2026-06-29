@@ -156,7 +156,7 @@ def shutdown_worker_after_task_completion(
     > 1, because the MainProcess-side check considers both ``active_requests``
     and ``reserved_requests`` before terminating.
     """
-    if not _is_non_local_deployment_target() or task is None:
+    if not _is_non_local_deployment_target() or not _idle_shutdown_enabled() or task is None:
         return
 
     hostname = _get_worker_hostname(task)

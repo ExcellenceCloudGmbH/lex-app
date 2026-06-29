@@ -582,9 +582,16 @@ if LEX_TASK_RECOVERY_ENABLED:
     CELERY_BEAT_SCHEDULE = {
         **(globals().get("CELERY_BEAT_SCHEDULE") or {}),
         "lex-celery-recovery-sweep": {
-            "task": "lex.lex_app.celery_recovery.tasks.sweep_dead_workers",
+            "task": "lex.lex_app.celery_recovery.supervisor.sweep_dead_workers",
             "schedule": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
-            "options": {"expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL)},
+            # Route to a dedicated queue consumed ONLY by the recovery pod
+            # (celery worker -B -Q recovery). Keeps the sweep off the main
+            # KEDA-watched queue so it never inflates the worker scaling signal
+            # nor gets eaten by a scaled-up real worker. expires bounds backlog.
+            "options": {
+                "queue": "recovery",
+                "expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
+            },
         },
     }
 
@@ -733,7 +740,20 @@ USE_L10N = True
 USE_TZ = True if DATABASE_DEPLOYMENT_TARGET not in ("default", "GCP") else False
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
-TIME_ZONE = "Europe/Berlin"
+#
+# TIME_ZONE is coupled to USE_TZ on purpose. django_celery_beat's scheduler
+# (DatabaseScheduler, used for both the recovery sweep IntervalSchedule and the
+# future-edit ClockedSchedule) interprets *naive* datetimes as UTC — see
+# celery.utils.time.maybe_make_aware, called unconditionally in
+# django_celery_beat.schedulers.ModelEntry.is_due and clockedschedule.clocked.
+# When USE_TZ is False we store naive datetimes (e.g. PeriodicTask.last_run_at,
+# History.valid_from). If TIME_ZONE were a non-UTC zone the stored naive value
+# would be local wall-clock while beat reads it as UTC, so is_due() is off by the
+# UTC offset (the interval sweep never becomes due; clocked activations fire
+# hours late). Forcing UTC here makes the naive-as-UTC assumption correct.
+# When USE_TZ is True, datetimes are tz-aware and the display zone is free to be
+# Europe/Berlin without affecting scheduling.
+TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
