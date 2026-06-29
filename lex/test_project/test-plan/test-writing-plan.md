@@ -515,6 +515,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 7q — Nested fan-out dispatches by default from inside a worker (Session 86 — June 29)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.196 – 7.201 |
+| Type | E |
+| Files covered | `lex/core/mixins/CalculatedModelMixin.py` (`_dispatch_model_processing` — removed the `is_celery_worker_process()` inline-inside-worker guard; now fans out to `CeleryTaskDispatcher` whenever `CELERY_ACTIVE` + `cls.calculate.delay` exist) and `lex/core/models/CalculationModel.py` (`calculate_hook` dispatch branch — removed the `elif is_celery_worker_process(): execute_calculation_sync()` branch; now always dispatches, reusing an outer async context or opening its own `WaitForTasks` + blocking on the child result). Driven by a production bug: `InvestmentPosting` (65 568 models, 50 clusters) ran synchronously on one worker slot because the guard made nested fan-out opt-in |
+| Test file | `lex/test_project/tests/calculations/test_7q_worker_default_dispatch.py` |
+| Test classes | `TestCluster07q_MixinWorkerDefaultDispatch` (7.196 no-context / 7.197 WaitForTasks / 7.198 FireAndForget — all fan out to the dispatcher, never `calc_and_save_sync`); `TestCluster07q_CalculationModelWorkerDefaultDispatch` (7.199 no-context ⇒ own WaitForTasks dispatches + blocks; 7.200 outer WaitForTasks ⇒ child drained only on scope exit; 7.201 FireAndForget ⇒ dispatches, never blocks) |
+| Fixtures | `CombinatorialCalc` / `AtomicCalc` (reused from cluster 7, via E2ETestCase); explicit async contexts entered inside the `_celery_is_active=True` patch via a `_worker_patches` helper-CM so they register on the contextvar stack |
+| Tests landed | 6 pass / 0 fail. Companion stale-test updates flipped to the new default: `test_calculation_wait_contexts.py` (2 pass), `test_calculated_model_mixin.py` (dispatch tests pass; `test_create_treats_empty_selections_as_valid_noop` is a pre-existing streaming-path failure unrelated to this change — confirmed via git stash), `test_8b_dispatch_context.py` 8.6 message (2 pass) |
+| Coverage gain | the default-dispatch branch of both `_dispatch_model_processing` and `calculate_hook` (previously only the explicit-context and inline-worker branches were exercised) |
+| Status | ✅ Complete — source fix (2 files) + paired tests + stale-test fixes + plan sync in one change. Allocated `7q` (next free letter after `7p`); 7.196 picks up after cluster-7 scenario max 7.195 |
+
+---
+
 ## Cluster 8 — Celery & Async (existing 8a–8g)
 
 ### Batch 8h — Dispatcher & local scheduler

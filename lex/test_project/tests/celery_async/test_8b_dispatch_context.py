@@ -87,9 +87,10 @@ class TestCluster08b_DispatchContext(E2ETestCase):
         self.assertEqual(result[0], "observed")
         self.assertEqual(
             observations, [True],
-            "Nested calculations running inside a Celery task body must see "
-            "is_celery_worker_process()=True so recursive dispatch can fall "
-            "back to synchronous execution.",
+            "Code running inside a Celery task body must see "
+            "is_celery_worker_process()=True. (The helper is no longer used to "
+            "gate nested dispatch — that now defaults to WaitForTasks dispatch — "
+            "but the detection itself must stay correct for diagnostics/logging.)",
         )
 
 

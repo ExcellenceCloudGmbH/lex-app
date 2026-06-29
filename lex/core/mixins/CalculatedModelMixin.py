@@ -1662,26 +1662,14 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
             return
         
         try:
-            # Determine processing mode based on Celery configuration
+            # Determine processing mode based on Celery configuration.
+            # When Celery is active we always dispatch — the CeleryTaskDispatcher
+            # opens its own WaitForTasks scope when no async context is active, so
+            # a nested calculation running inside a worker still fans out (and
+            # blocks on its children) by default rather than collapsing to inline.
             celery_active = os.getenv('CELERY_ACTIVE', "").lower() == 'true' and hasattr(cls.calculate, 'delay')
-            if celery_active:
-                from lex.lex_app.celery_tasks import (
-                    FireAndForget,
-                    WaitForTasks,
-                    is_celery_worker_process,
-                )
 
-                has_explicit_async_context = (
-                    FireAndForget.get_current_context() is not None
-                    or WaitForTasks.get_current_context() is not None
-                )
-                inline_inside_worker = (
-                    is_celery_worker_process() and not has_explicit_async_context
-                )
-            else:
-                inline_inside_worker = False
-            
-            if celery_active and not inline_inside_worker:
+            if celery_active:
                 logger.info(f"Celery is active, dispatching {cls.__name__} models to parallel processing")
 
                 try:
@@ -1725,14 +1713,8 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
                     ) from dispatch_error
                     
             else:
-                if inline_inside_worker:
-                    logger.info(
-                        "Running %s models synchronously inside Celery worker because no explicit async context is active",
-                        cls.__name__,
-                    )
-                else:
-                    logger.info(f"Celery not active, using synchronous processing for {cls.__name__}")
-                
+                logger.info(f"Celery not active, using synchronous processing for {cls.__name__}")
+
                 try:
                     # Flatten all models from clusters for synchronous processing
                     processing_groups = ModelClusterManager.flatten_clusters_to_groups(processing_clusters)

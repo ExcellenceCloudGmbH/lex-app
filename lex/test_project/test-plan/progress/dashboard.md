@@ -55,6 +55,7 @@
 | 7o. ForeignKey integrity violation abort semantics (Session 72 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 7.176; unhandled FK integrity errors abort `CalculatedModelMixin.create()` immediately (no silent continuation to later rows) |
 | 7p. Sync-mode streaming combinatorial expansion (OOM fix — June 10) | 10 | 10 | 10 | 0 | 0 | ✅ Complete — scenarios 7.178–7.187; depth-first generator yields one model at a time (O(depth) vs O(N)) so sync calcs (CELERY_ACTIVE=False) stop OOM-ing the web pod; byte-identical ordered output vs legacy; LEX_SYNC_STREAMING_EXPANSION=false valve |
 | 7m. `CalculationSignals` + `One.py` `model_name` propagation (Session 80 — June 18) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 7.188–7.195; `update_calculation_status` IN_PROGRESS passes `model_name=instance._meta.object_name` to store; `One.update()` early-registration block does the same; pins ActiveCalculationStateStore partition key correctness |
+| 7q. Nested fan-out dispatches by default inside a worker (Session 86 — June 29) | 6 | 6 | 6 | 0 | 0 | ✅ Complete — scenarios 7.196–7.201; removed the `is_celery_worker_process()` inline guard from both dispatch paths (`CalculatedModelMixin._dispatch_model_processing`, `CalculationModel.calculate_hook`) so a calc running inside a worker fans out to Celery by default instead of collapsing to inline sync (the 65k-row InvestmentPosting serialisation bug); no-context opens its own WaitForTasks + blocks, outer scope is reused, FireAndForget never blocks |
 | 8. Celery & Async | 6 | 6 | 6 | 0 | 0 |  Complete |
 | 8g. Task infrastructure (planned — April 24) | 9 | 9 | 9 | 0 | 0 |  Complete — Redis-free (`celery_tasks.py`) |
 | 8h. Celery **eager-mode** end-to-end (planned — April 24) | 6 | 6 | 6 | 0 | 0 |  Complete — 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%) |
@@ -83,7 +84,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **625** | **625** | **604** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **631** | **631** | **610** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet

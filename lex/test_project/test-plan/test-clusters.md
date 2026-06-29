@@ -599,6 +599,14 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 ---
 
+### 7q. Nested fan-out dispatches by default from inside a worker ✅
+
+**Gap:** A real production calc (`InvestmentPosting`, 65 568 models across 50 clusters) ran *synchronously* instead of dispatching to Celery. Root cause: an `is_celery_worker_process()` worker-detection guard (added commit `40d17b3`, 2026-03-29) made nested fan-out **opt-in** — a calculation already executing inside a Celery worker would collapse its nested work to an inline synchronous run unless the caller opened an explicit async context. This silently serialised large combinatorial calcs onto a single worker slot. The guard was removed in **both** dispatch paths so the default is "always dispatch": `CalculatedModelMixin._dispatch_model_processing` (fan-out) now dispatches whenever `CELERY_ACTIVE` + `.delay` exist, and `CalculationModel.calculate_hook` (single-instance) opens its own `WaitForTasks` when no async context is active (reusing an outer scope when present). When no context is active the dispatcher blocks on the children — correctness/ordering preserved at the cost of holding the worker slot, per the explicit "don't worry about blocking" decision. `is_celery_worker_process()` itself is retained for diagnostics/logging (still asserted correct by 8.6).
+
+**Scenario range:** 7.196 – 7.201. **Test file:** `lex/test_project/tests/calculations/test_7q_worker_default_dispatch.py`. **Type:** E. **Status:** ✅ Complete (Session 86 — June 29). Covers `lex/core/mixins/CalculatedModelMixin.py` (`_dispatch_model_processing`) and `lex/core/models/CalculationModel.py` (`calculate_hook` dispatch branch). 7.196–7.198 drive the mixin (inside-worker, no-context / WaitForTasks / FireAndForget — all fan out to `CeleryTaskDispatcher`, never `calc_and_save_sync`); 7.199–7.201 drive `CalculationModel` (no-context ⇒ own `WaitForTasks` blocks; outer `WaitForTasks` ⇒ drains on scope exit; `FireAndForget` ⇒ never blocks). 6 pass / 0 fail. Companion stale-test updates: `test_calculation_wait_contexts.py`, `test_calculated_model_mixin.py`, and 8.6 message in `test_8b_dispatch_context.py`.
+
+---
+
 ## 8. Celery & Async
 
 **What it tests:** Task dispatch to Celery, sync fallback when Celery is unavailable, `FireAndForget` / `WaitForTasks` context managers, and nested calculation dispatch.
