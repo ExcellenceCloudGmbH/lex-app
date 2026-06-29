@@ -1,6 +1,7 @@
 import inspect
 import io
 import json
+import logging
 import os
 import threading
 from pathlib import Path
@@ -19,8 +20,101 @@ from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.config import is_audit_logging_enabled
 from lex.lex_app import settings
 
+logger = logging.getLogger(__name__)
+
 
 class ProcessAdminTestCase(TestCase):
+
+    def _save_seed_instance(self, instance, calculation_id, audit_log):
+        """Persist a seed object, running any triggered calculation on the
+        dedicated calculation thread pool — mirroring the live ``One.update``
+        path — instead of inline on the initial-data loader thread.
+
+        A seeded ``CalculationModel`` whose ``is_calculated`` is
+        ``IN_PROGRESS`` turns ``save()`` into a calculation trigger. The live
+        request path (``lex.api.views.model_entries.One``) never runs that
+        calculation on the request/ASGI thread: it persists ``IN_PROGRESS``
+        with the hook deferred, then submits ``calculate_hook`` to
+        ``_calculation_executor``. We do the same here so initial-data
+        calculations execute on the ``lex-calc`` pool, off the bootstrap
+        thread.
+
+        Unlike the request path (which returns HTTP 202 and lets the pool
+        finish in the background), the loader processes actions **in order**
+        and a later action may reference an earlier calculation's result, so
+        we block on the future before returning — the calculation still runs
+        on the pool, but the ordering guarantee of the initial-data upload is
+        preserved.
+
+        Deferring is required, not cosmetic: submitting the hook from *inside*
+        ``save()``'s ``transaction.atomic()`` would deadlock (the pool thread
+        opens its own connection and waits on the row lock the loader thread
+        holds) — see ``CalculationModel._run_in_calculation_executor``.
+        """
+        from lex.core.models.CalculationModel import (
+            CalculationModel,
+            _calculation_executor,
+        )
+
+        is_calculation_trigger = (
+            isinstance(instance, CalculationModel)
+            and getattr(instance, "is_calculated", None) == CalculationModel.IN_PROGRESS
+            and not getattr(instance, "_calculation_hook_in_progress", False)
+        )
+
+        with OperationContext({}, calculation_id, audit_log=audit_log):
+            with model_logging_context(instance):
+                if not is_calculation_trigger:
+                    instance.save()
+                    return
+
+                # Phase 1: persist IN_PROGRESS with the hook deferred so the
+                # calculation runs OUTSIDE this save's atomic block.
+                instance._defer_calculate_hook = True
+                instance.save()
+
+                # Phase 2: run calculate_hook on the calculation pool, then
+                # wait for it (ordered seeding). copy_context() captures this
+                # OperationContext so the calculation_id reaches the pool
+                # thread; the pool callable installs its own ModelContext.
+                from contextvars import copy_context
+
+                from django.db import close_old_connections
+                from lex.audit_logging.utils.ModelContext import (
+                    ModelContext,
+                    _model_context,
+                )
+
+                ctx = copy_context()
+
+                def _invoke_calculate_hook():
+                    _model_context.set(
+                        {"model_context": ModelContext([instance])}
+                    )
+                    instance._defer_calculate_hook = False
+                    try:
+                        instance.calculate_hook()
+                    except Exception:
+                        # Outside save(), so we own the terminal-failure audit
+                        # flush that LexModel.save would otherwise perform.
+                        try:
+                            instance._finalize_pending_terminal_audit()
+                        except Exception:
+                            logger.exception(
+                                "Failed to finalize terminal failure audit for "
+                                "%s after initial-data calculation raised",
+                                instance,
+                            )
+                        raise
+
+                def _background_calculate():
+                    try:
+                        ctx.run(_invoke_calculate_hook)
+                    finally:
+                        close_old_connections()
+
+                future = _calculation_executor.submit(_background_calculate)
+                future.result()
 
     def replace_tagged_parameters(self, object_parameters):
         for key in object_parameters:
@@ -77,9 +171,9 @@ class ProcessAdminTestCase(TestCase):
 
                     cache.set(threading.get_ident(), str(object['class']) + "_" + action)
 
-                    with OperationContext({}, calculation_id, audit_log=audit_log):
-                        with model_logging_context(self.tagged_objects[tag]):
-                            self.tagged_objects[tag].save()
+                    self._save_seed_instance(
+                        self.tagged_objects[tag], calculation_id, audit_log
+                    )
 
                     instance = self.tagged_objects[tag]
                     if audit_enabled:
@@ -122,9 +216,9 @@ class ProcessAdminTestCase(TestCase):
                         cache.set(threading.get_ident(),
                                   str(object['class']) + "_" + action + "_" + str(self.tagged_objects[tag].pk))
 
-                        with OperationContext({}, calculation_id, audit_log=audit_log):
-                            with model_logging_context(self.tagged_objects[tag]):
-                                self.tagged_objects[tag].save()
+                        self._save_seed_instance(
+                            self.tagged_objects[tag], calculation_id, audit_log
+                        )
                         instance = self.tagged_objects[tag]
                         if audit_enabled:
                             if CalculationLog.objects.filter(calculationId=calculation_id).count() == 0:
@@ -135,7 +229,7 @@ class ProcessAdminTestCase(TestCase):
                         # Mark audit log as successful if audit logging is enabled
                         if audit_enabled and audit_log:
                             audit_logger.mark_operation_success(audit_log)
-                            
+
                 elif action == 'delete':
                     # Log audit entry before deletion if audit logging is enabled
                     instances = klass.objects.filter(**object['filter_parameters'])
@@ -202,9 +296,9 @@ class ProcessAdminTestCase(TestCase):
                     self.tagged_objects[tag] = klass(**object['parameters'])
                     cache.set(threading.get_ident(), str(object['class']) + "_" + action)
 
-                    with OperationContext({}, calculation_id, audit_log=audit_log):
-                        with model_logging_context(self.tagged_objects[tag]):
-                            self.tagged_objects[tag].save()
+                    self._save_seed_instance(
+                        self.tagged_objects[tag], calculation_id, audit_log
+                    )
 
                     instance = self.tagged_objects[tag]
 
@@ -236,9 +330,9 @@ class ProcessAdminTestCase(TestCase):
                         cache.set(threading.get_ident(),
                                   str(object['class']) + "_" + action + "_" + str(self.tagged_objects[tag].pk))
 
-                        with OperationContext({}, calculation_id, audit_log=audit_log):
-                            with model_logging_context(self.tagged_objects[tag]):
-                                self.tagged_objects[tag].save()
+                        self._save_seed_instance(
+                            self.tagged_objects[tag], calculation_id, audit_log
+                        )
 
                         instance = self.tagged_objects[tag]
                         if audit_enabled:
