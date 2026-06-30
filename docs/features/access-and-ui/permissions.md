@@ -176,6 +176,8 @@ The `SessionAuthGate` component handles this transparently — including redirec
 
 For non-browser clients (for example scripts, integrations, or dashboards calling the API directly), you can authenticate with an `Authorization: Bearer <token>` header. Lex App will resolve roles and scopes from that token even when there is no browser session.
 
+For the embedded Quackback feedback widget, Lex App exposes `POST /api/quackback-widget-token` for logged-in users. It returns a short-lived (5-minute) `ssoToken` carrying the user's id, email, and name, signed with `QUACKBACK_WIDGET_SECRET`, so the widget can identify the user without a second login. The frontend wires this up automatically — you only need to set the secret.
+
 ### Access Scopes
 
 Permissions are enforced across 6 scopes:

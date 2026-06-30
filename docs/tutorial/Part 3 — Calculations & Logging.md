@@ -199,7 +199,7 @@ stateDiagram-v2
 If your `calculate()` method throws an exception, the framework sets `is_calculated = ERROR`, stores the error message, and the user can retry. For more details, see [[features/processing/calculations]].
 
 > [!tip]
-> In production, large calculations can be dispatched to [[features/processing/celery and async calculations|Celery workers]] for parallel processing. During development, everything runs synchronously.
+> In production, large calculations can be dispatched to [[features/processing/celery and async calculations|Celery workers]] for parallel processing. During development, they stay in-process in your app, so you can work without separate workers.
 
 ## Checkpoint
 

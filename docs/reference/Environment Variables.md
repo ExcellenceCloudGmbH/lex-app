@@ -11,8 +11,34 @@ Lex App reads its runtime configuration from environment variables — usually l
 
 | Variable               | Purpose                                                                                       |
 | ---------------------- | --------------------------------------------------------------------------------------------- |
-| `CELERY_ACTIVE`        | `true` to dispatch `@lex_shared_task`-decorated functions to Celery workers; otherwise tasks run synchronously in the current process. See [[features/processing/celery and async calculations]]. |
-| `IS_RUNNING_IN_CELERY` | Set to `true` inside Celery worker processes so the framework knows it's executing a queued task rather than a web request. Set automatically when you launch via `lex celery` / `lex celery-workers`. |
+| `CELERY_ACTIVE`        | `true` to let the framework dispatch calculations to Celery workers when they're available. `@lex_shared_task` still works, but root `CalculationModel` runs no longer require it just to use Celery. Otherwise tasks run synchronously in the current process. See [[features/processing/celery and async calculations]]. |
+| `IS_RUNNING_IN_CELERY` | Set to `true` inside Celery worker processes so the framework knows it's executing a queued task rather than a web request. Set automatically when you launch via `lex celery` / `lex celery-workers`; if you run a standalone recovery worker such as `lex-recovery-beat`, export it there too. |
+
+## Calculation threading
+
+These control the thread pools that keep long-running calculations from blocking the web server. Defaults are sensible — only tune them if you have a specific throughput or responsiveness problem.
+
+| Variable                  | Purpose                                                                                       |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| `LEX_CALCULATION_THREADS` | Size of the dedicated pool that runs in-process calculations off the request thread, so calculations never starve API calls, WebSocket auth, or health checks. Default `10`. |
+| `ASGI_THREADS`            | Size of the ASGI sync executor used for regular sync work. Raising it gives the server more headroom for concurrent sync operations. Default `3`. |
+
+## Worker recovery & shutdown
+
+These govern how the framework recovers tasks from dead workers and how idle workers shut themselves down. Defaults are production-ready; the idle-shutdown knobs only take effect in a non-local `DEPLOYMENT_TARGET`. See [[features/processing/celery and async calculations]] for the full picture.
+
+| Variable                          | Purpose                                                                                       |
+| --------------------------------- | --------------------------------------------------------------------------------------------- |
+| `LEX_TASK_RECOVERY_ENABLED`       | Master switch for the heartbeat/dead-worker recovery system. Set `false` in local dev and CI where there's no real Redis-backed Celery. Default `true`. |
+| `LEX_TASK_HEARTBEAT_INTERVAL`     | How often (seconds) a running task emits a liveness heartbeat. Default `5`. |
+| `LEX_TASK_HB_TTL_MULTIPLIER`      | A task is considered dead after `HEARTBEAT_INTERVAL × TTL_MULTIPLIER` seconds without a heartbeat. Default `3`. |
+| `LEX_TASK_SUPERVISOR_SCAN_INTERVAL` | How often (seconds) the supervisor sweeps for dead workers and requeues their tasks. Default `10`. |
+| `LEX_TASK_MAX_RETRIES`            | Max automatic requeues after a dead-worker event before the task is marked failed. Default `4`. |
+| `LEX_WORKER_IDLE_SHUTDOWN_ENABLED` | Master switch for all worker self-termination — idle watchdog, cancel fast-path, and post-task warm shutdown. Non-local `DEPLOYMENT_TARGET` only. Set `false` for long-lived `-B`/recovery-beat workers. Default `true`. |
+| `LEX_WORKER_IDLE_SHUTDOWN_SECONDS` | Seconds a worker may sit with no work before the idle watchdog shuts it down. Default `30`. |
+| `LEX_CLUSTER_CANCEL_ENABLED`       | Whether cancelling a calculation cascades to descendant tasks on other worker pods via the Redis cancel index. Inert when `CELERY_ACTIVE` is off or no Redis is reachable. Default `true`. |
+| `LEX_CLUSTER_CANCEL_TREE_TTL_SECONDS` | TTL (seconds) for the Redis cancel-index tree mapping a calculation to its descendant task IDs. Default `14400` (4 h). |
+| `LEX_CLUSTER_CANCEL_MARKER_TTL_SECONDS` | TTL (seconds) for the cooperative cancel marker a task checks to self-abort. Default `3600` (1 h). |
 
 ## Streamlit
 
@@ -35,6 +61,20 @@ Additional `KEYCLOAK_*` / `OIDC_*` variables (server URL, client secret, admin c
 | Variable            | Purpose                                                              |
 | ------------------- | -------------------------------------------------------------------- |
 | `SENDGRID_API_KEY`  | API key used to send the PDF test report (`lex pytest --report-and-email`) and any project-level transactional mail. |
+
+## Widget integrations
+
+| Variable                   | Purpose                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `QUACKBACK_WIDGET_SECRET`  | Shared secret used to sign the short-lived HS256 SSO token the frontend mints at `POST /api/quackback-widget-token` to identify the logged-in user to the embedded Quackback feedback widget. Leave unset to disable token minting. |
+
+## Logging & warnings
+
+| Variable                | Purpose                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `LEX_LOG_LEVEL`         | Log level for the framework's own `lex.*` loggers. Set `DEBUG` to surface the framework's debug output **without** turning on the third-party DEBUG firehose. Default `INFO`. |
+| `LEX_SUPPRESS_INSECURE_WARNING` | Suppresses urllib3's `InsecureRequestWarning` (the Keycloak admin client can emit one per request against a self-signed dev endpoint). Set `False` to restore the warning while debugging TLS. Default `True`. |
+| `LEX_SUPPRESS_WARNINGS` | Suppresses Python warnings raised during app startup (`AppConfig.ready()`). Set `False` to restore them. Default `True`. |
 
 ## Where these get set
 

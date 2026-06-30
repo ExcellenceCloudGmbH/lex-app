@@ -110,7 +110,7 @@ For the complete method list, see the [[reference/LexLogger API|LexLogger API re
 
 LexLogger output is rendered in the frontend in real-time:
 
-- **Calculation Log Panel** — a slide-out drawer during calculation showing live Markdown-rendered output as the calculation progresses
+- **Calculation Log Panel** — a slide-out drawer during calculation showing live Markdown-rendered output as the calculation progresses, including background calculations after an initial HTTP `202` response
 - **Hierarchical Log Tree** — when a parent calculation triggers children, logs are nested in a tree view showing the full execution hierarchy
 - **PDF Export** — the calculation log for any record can be exported as a PDF, useful for compliance documentation and auditing
 - **Rich Rendering** — headings, tables, DataFrames, and code blocks are all rendered with proper formatting and syntax highlighting

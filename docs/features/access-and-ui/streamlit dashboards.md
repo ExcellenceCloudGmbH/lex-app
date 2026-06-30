@@ -96,3 +96,7 @@ Dashboards appear in two places:
 If the Streamlit server is unavailable, the UI shows a graceful fallback with a "Retry Connection" button. The rest of the application continues to work normally.
 
 See [[interface/record-detail/analytics tab|Analytics Tab]] for the full user-facing documentation.
+
+## Going the Other Way: Embedding Lex App in Streamlit
+
+The sections above embed Streamlit *inside* Lex App. You can also do the reverse — embed a Lex App page inside a Streamlit script with `lex_view()`, and have Python react to create/update/select/navigation events. See [[features/access-and-ui/lex_view callbacks]].

@@ -157,3 +157,22 @@ def permission_read(self, user_context):
 | `save_without_historical_record()` | Save once without creating a history entry |
 
 For bulk operations where history tracking is expensive, use `Model.objects.bulk_create(objs, skip_history=True)`.
+
+## Change Detection & Lean Initial State
+
+django-lifecycle powers change detection — `has_changed('field')`, `initial_value('field')`, and the conditional `@hook(when=..., has_changed=True)` forms — by keeping a snapshot of the instance's field values from when it was loaded. By default Lex App keeps a **lean** snapshot rather than a full copy of every field, which materially cuts per-row memory on large `calculate`-all runs (where every live row would otherwise carry a second full copy of itself).
+
+The lean snapshot retains only the fields the framework can prove are needed: `edited_at`, every field named in this class's hook clauses (the `when=` / `when_any=` / `condition=` conditions, including chained `&`/`|` forms), and anything you list in `lex_initial_state_extra_fields`. Tracked values stay byte-for-byte identical to the full snapshot — the narrowing is transparent for the vast majority of models.
+
+| Attribute | Default | What It Does |
+|---|---|---|
+| `lex_lean_initial_state` | `True` | When `True`, narrow the change-detection snapshot to the tracked fields above. Set `False` to restore the full per-field snapshot. |
+| `lex_initial_state_extra_fields` | `()` | Field names to keep in the lean snapshot beyond what's auto-discovered. The escape hatch for models that call `has_changed` / `initial_value` imperatively. |
+
+> [!warning] If you query change detection on a field outside a hook clause
+> Calling `has_changed('x')` or `initial_value('x')` on a field that isn't tracked by a `@hook` clause won't be auto-discovered. Either declare it:
+> ```python
+> class MyModel(LexModel):
+>     lex_initial_state_extra_fields = ("x",)
+> ```
+> or opt the whole model out with `lex_lean_initial_state = False` to restore the full snapshot.

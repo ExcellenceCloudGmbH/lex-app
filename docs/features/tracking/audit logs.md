@@ -40,7 +40,7 @@ sequenceDiagram
     API-->>User: 200 OK
 ```
 
-The key insight: the audit log is created **before** the actual operation, with a `pending` status. If the operation succeeds, the status is updated to `success` and the payload is refreshed with the final state. If it fails, the status becomes `failure` and the error traceback is stored. This means even failed operations are recorded — critical for security auditing.
+The key insight: the audit log is created **before** the actual operation, with a `pending` status. For normal synchronous requests, the status is updated to `success` right away when the operation finishes. For calculations accepted with HTTP `202`, the status stays `pending` until the background calculation completes, then moves to `success` or `failure`. If an operation fails immediately, the status becomes `failure` and the error traceback is stored. This means even failed operations are recorded — critical for security auditing.
 
 ## Audit Log vs. Bitemporal History
 

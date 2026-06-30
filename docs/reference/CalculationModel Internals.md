@@ -13,7 +13,7 @@ from lex.core.models.CalculationModel import CalculationModel
 
 ## The State Machine
 
-Every `CalculationModel` has an `is_calculated` field that transitions through five states:
+Every `CalculationModel` has an `is_calculated` field that transitions through six states:
 
 ```mermaid
 stateDiagram-v2
@@ -21,9 +21,11 @@ stateDiagram-v2
     NOT_CALCULATED --> IN_PROGRESS : "Calculate" clicked
     IN_PROGRESS --> SUCCESS : calculate() completed
     IN_PROGRESS --> ERROR : Exception raised
-    IN_PROGRESS --> ABORTED : Manually aborted
+    IN_PROGRESS --> CANCELLED : User cancelled
+    IN_PROGRESS --> ABORTED : Startup recovery
     ERROR --> IN_PROGRESS : Retry
     SUCCESS --> IN_PROGRESS : Recalculate
+    CANCELLED --> IN_PROGRESS : Retry
     ABORTED --> IN_PROGRESS : Retry
 ```
 
@@ -33,7 +35,8 @@ stateDiagram-v2
 | `IN_PROGRESS` | `CalculationModel.IN_PROGRESS` | Calculation is running (triggers `calculate()` via lifecycle hook) |
 | `SUCCESS` | `CalculationModel.SUCCESS` | Calculation completed without error |
 | `ERROR` | `CalculationModel.ERROR` | An exception was raised — error details are stored on the record |
-| `ABORTED` | `CalculationModel.ABORTED` | Calculation was manually cancelled |
+| `CANCELLED` | `CalculationModel.CANCELLED` | A user cancelled a running calculation |
+| `ABORTED` | `CalculationModel.ABORTED` | The framework recovered a calculation that was left stuck in progress |
 
 The `is_calculated` field is **not editable** in the UI — it's managed entirely by the framework. When a user clicks **Calculate ▶️** in the frontend, the framework sets `is_calculated = IN_PROGRESS`, which triggers the `calculate_hook`.
 
@@ -58,8 +61,8 @@ class BudgetSummary(CalculationModel):
 | Concern | Handled By |
 |---|---|
 | `self.save()` | Framework saves automatically after `calculate()` returns (without bumping `edited_by` / `edited_at`) |
-| Error handling | Framework catches exceptions and sets `is_calculated = ERROR` |
-| State transitions | Lifecycle hooks manage the `IN_PROGRESS → SUCCESS/ERROR` flow |
+| Error handling | Framework catches exceptions and stores the error details on the record |
+| State transitions | Lifecycle hooks manage the `IN_PROGRESS → terminal state` flow |
 | Logging context | [[reference/LexLogger API|LexLogger]] automatically links to the current calculation |
 | Concurrency | Runs inside `transaction.atomic()` by default |
 | `edited_by` / `edited_at` on child saves | Any records you save inside `calculate()` are treated as system-triggered — their `edited_by` / `edited_at` are not stamped with the user who clicked Calculate |
@@ -85,11 +88,11 @@ class LargeImport(CalculationModel):
 In production, calculations can be dispatched to [Celery](https://docs.celeryq.dev/) workers for background/parallel processing. The framework checks two things automatically:
 
 1. Is the `CELERY_ACTIVE` environment variable set to `true`?
-2. Does the `calculate()` method have a `.delay()` attribute (i.e., is it decorated with `@lex_shared_task`)?
+2. Is Celery available and the broker reachable?
 
-If both are true, the calculation is dispatched to a Celery worker via `calc_and_save.delay()`. Otherwise, it runs synchronously in the request thread.
+If both are true, the calculation is dispatched to a Celery worker — decorated methods are dispatched directly, undecorated methods are wrapped automatically. Otherwise, it runs in-process on the app server. Either way, the record is first saved in `IN_PROGRESS` and then updated again when the calculation finishes.
 
-To make a calculation Celery-capable, decorate it with `@lex_shared_task`:
+If you want the method itself to behave like a Celery task, decorate it with `@lex_shared_task`:
 
 ```python
 from lex.lex_app.celery_tasks import lex_shared_task
@@ -100,12 +103,34 @@ class HeavyReport(CalculationModel):
         ...
 ```
 
-`@lex_shared_task` wraps your method with context-aware dispatch, automatic status callbacks (`SUCCESS` / `ERROR`), and audit logging context propagation to worker processes. Without the decorator, `calculate()` always runs synchronously — even when `CELERY_ACTIVE=true`.
+`@lex_shared_task` wraps your method with context-aware dispatch, automatic status callbacks, and audit logging context propagation to worker processes. For root `CalculationModel` runs, the decorator is optional — the framework will still dispatch to Celery when it's available.
 
 > [!note]
 > Set `CELERY_ACTIVE=true` in your project's `.env` file to enable Celery dispatch. You also need a running Redis instance (or [Memurai](https://www.memurai.com/get-memurai) on Windows) as the message broker.
 
 See [[features/processing/celery and async calculations]] for the full setup guide — environment variables, running workers, and the `WaitForTasks` / `FireAndForget` context managers.
+
+## Cancelling a Running Calculation
+
+Use `CalculationModel.cancel(instance, recursive=True)` to stop an in-progress calculation that is currently running on Celery. The framework revokes the worker task, persists `CANCELLED`, and cancels active descendants in the same calculation tree as well.
+
+For batch fan-outs whose tasks are spread across multiple worker pods, `cancel()` also consults a **Redis cluster cancel index**: each task registers its ID under the calculation's tree, so `cancel()` discovers and revokes descendant tasks it didn't directly dispatch. It additionally writes a cooperative cancel marker that an unstarted or between-models task checks and self-aborts on. This cascade is gated by `LEX_CLUSTER_CANCEL_ENABLED` and is inert without a reachable Redis.
+
+If the record is not in progress — or it's running synchronously with no worker task to revoke — `cancel()` returns a report saying it wasn't cancellable instead of forcing the state change.
+
+## Operator Recovery API
+
+For triaging and recovering from calculations that are wedged in `IN_PROGRESS`, `CalculationModel` exposes three classmethods. They're the public surface behind an operator dashboard, CLI, or REST endpoint — each returns plain dicts/lists, never internal bookkeeping.
+
+| Method | Returns | Use it to |
+|---|---|---|
+| `list_in_progress()` | List of active calculations, **sorted oldest-first**, each with `record_id`, `record`, `model_label`, `calculation_id`, `task_id`, `started_at` (UTC ISO-8601), `age_seconds`, and `cancellable` | See everything currently running |
+| `find_stuck(older_than_seconds)` | Same shape, filtered to runs at least `older_than_seconds` old (inclusive; `0` returns all, negative raises `ValueError`) | Find runs that have overstayed a threshold |
+| `cancel_stuck(older_than_seconds, *, reason="…")` | A report dict (`threshold_seconds`, `candidates`, `cancelled`, `skipped_not_cancellable`, `errors`, and a per-record `results` list) | Bulk-cancel everything older than the threshold |
+
+`cancel_stuck()` reuses the per-record `cancel()` machinery, so each cancelled run gets the identical terminal state, audit row, and WebSocket broadcast as a single user-initiated cancel — there's no parallel recovery code path. Because `cancel()` is recursive, cancelling a parent also revokes descendants sharing its `calculation_id`; each parent appears only once in `results`. Synchronously-dispatched runs (no `task_id`) can't be revoked and are reported as `skipped_not_cancellable` rather than force-failed.
+
+`started_at` is anchored to a monotonic clock internally, so `age_seconds` stays correct even if the system wall-clock jumps.
 
 ## Nested Calculations
 

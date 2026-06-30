@@ -35,7 +35,7 @@ flowchart LR
     A -->|operation fails| C["🔴 Failure"]
 ```
 
-- **Pending** — the operation has been requested but not yet completed
+- **Pending** — the operation has been requested but not yet completed (for HTTP `202` calculations, this can remain until background work finishes)
 - **Success** — the operation completed successfully; payload updated to reflect final state
 - **Failure** — the operation failed; the error traceback is stored for investigation
 

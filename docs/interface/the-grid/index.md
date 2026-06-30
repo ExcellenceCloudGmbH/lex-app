@@ -6,6 +6,8 @@ The grid is where you'll spend most of your time. It's an enterprise-grade datag
 
 Every model in your project gets a grid automatically. Open a model, and you'll see your data laid out in rows and columns with a full toolbar of capabilities above it.
 
+If the same model is open in another tab or window, ordinary record changes show up automatically. Create, edit, or delete a row elsewhere — including bulk edits and deletes — and open lists refresh on their own once the change is committed, without a manual reload.
+
 ## What You Can Do
 
 ```mermaid
@@ -55,6 +57,8 @@ Above every grid is a toolbar that gives you quick access to key actions:
 Double-click any editable cell to modify it directly in the grid. Changes are validated in real-time — if a [[features/data-pipeline/serializers|serializer]] rejects the value, you'll see the error immediately. No separate edit form needed for quick corrections.
 
 Fields you don't have [[features/access-and-ui/permissions|permission]] to edit appear as read-only — the grid respects your access level down to individual cells.
+
+Those edits also refresh other open lists for the same model, so you don't need to ask teammates to reload before they see the updated row.
 
 > [!example]- 🎬 Video — Inline editing with live validation
 > <video controls width="100%">

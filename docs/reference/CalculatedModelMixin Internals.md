@@ -89,11 +89,11 @@ If `parallelizable_fields` is empty, all models go into a single group.
 Checks `CELERY_ACTIVE` environment variable and whether `calculate()` has a `.delay()` attribute:
 
 - **Celery path:** `CeleryTaskDispatcher.dispatch_calculation_groups()` sends each group as a `calc_and_save.delay()` call inside a `WaitForTasks` context, then waits for completion.
-- **Sync path:** `calc_and_save_sync()` processes all models sequentially — calls `lex_func()` then `save()` on each. `None` models are skipped. Individual failures are logged and collected; an error is only raised if every model in the batch fails.
+- **Sync path:** `calc_and_save_sync()` processes all models sequentially — calls `lex_func()` then `save()` on each. `None` models are skipped. The path is **fail-fast**: the first model whose `calculate()` or `save()` raises immediately aborts the batch with `CalculatedModelError` (wrapping the underlying error with `model_class` / `model_index` / `total_models` context). Earlier successful saves are not rolled back by the helper itself, so wrap the trigger in a transaction if you need all-or-nothing semantics.
 
 In both paths, the framework sets logging context for the currently executing child model automatically.
 
-Failed Celery groups are automatically retried synchronously.
+Failed Celery *dispatch* (the broker is unreachable, or a single group's `.delay()` call fails) falls back to synchronous processing. A calculation error raised *inside* a task does not fall back — it aborts the batch.
 
 ## The `CalculatedModelMixinMeta` Metaclass
 
