@@ -639,6 +639,25 @@ class RestApiModelViewSetTemplate(viewsets.ModelViewSet):
 
 # --- HELPER FUNCTIONS (Unchanged) ---
 
+
+def resolve_fk_label(related_obj):
+    """Human-readable label for a foreign-key target object.
+
+    Uses the target model's declared ``lex_fk_label_field`` when set and the
+    value is non-null; otherwise falls back to ``str(obj)``. Returns ``None``
+    for a null relation. The FK cell value itself stays the PK — this is a
+    *sibling* display string only.
+    """
+    if related_obj is None:
+        return None
+    label_field = getattr(type(related_obj), "lex_fk_label_field", None)
+    if label_field:
+        value = getattr(related_obj, label_field, None)
+        if value is not None:
+            return str(value)
+    return str(related_obj)
+
+
 def model2serializer(model, fields=None, name_suffix=""):
     if not hasattr(model, "_meta"):
         return None

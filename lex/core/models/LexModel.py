@@ -481,6 +481,16 @@ class LexModel(LifecycleModel):
     # the hook decorators.
     lex_initial_state_extra_fields = ()
 
+    # --- Frontend redesign hints (opt-in, non-breaking) -------------------
+    # Field name on THIS model used as its human label when it is the target
+    # of a foreign key elsewhere. None -> fall back to str(obj). Consumed by
+    # ``resolve_fk_label`` (serializer) and ``/fields/`` FK metadata.
+    lex_fk_label_field = None
+    # Per-field display format specs surfaced in ``/fields/`` metadata, e.g.
+    # {"revenue": {"format": "currency", "currency": "EUR", "decimals": 2}}.
+    # Frontend builds an AG-Grid valueFormatter from these (hybrid defaults).
+    lex_field_formats = {}
+
     created_at = models.DateTimeField(null=True, blank=True, editable=False)
     edited_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_by = models.TextField(null=True, blank=True, editable=False)
