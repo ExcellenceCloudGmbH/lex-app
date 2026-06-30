@@ -56,6 +56,14 @@ DRF_FIELD2TYPE_NAME = {
 }
 
 
+def _target_has_preview_serializer(model):
+    """True when the FK target model registers a ``preview`` serializer via
+    ``api_serializers`` — the curated, permission-aware field set the FK hover
+    card fetches with ``?serializer=preview``."""
+    custom = getattr(model, "api_serializers", None)
+    return bool(isinstance(custom, dict) and "preview" in custom)
+
+
 def create_field_info(field):
     """Turn a Django ModelField into the dict the FE expects."""
     default = None
@@ -67,9 +75,14 @@ def create_field_info(field):
     ftype = type(field)
 
     additional_info = {}
-    if ftype == ForeignKey:
-        additional_info['target'] = field.remote_field.model._meta.model_name
+    if isinstance(field, ForeignKey):
+        target_model = field.remote_field.model
+        additional_info['target'] = target_model._meta.model_name
         additional_info['limit_choices_to'] = field.remote_field.limit_choices_to
+        # Frontend redesign: which target field is the human label, and whether
+        # the target offers a curated 'preview' serializer for the hover card.
+        additional_info['fk_label_field'] = getattr(target_model, "lex_fk_label_field", None)
+        additional_info['fk_preview'] = _target_has_preview_serializer(target_model)
 
     info = {
         "name": field.name,
