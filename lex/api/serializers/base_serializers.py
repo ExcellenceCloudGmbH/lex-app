@@ -643,11 +643,18 @@ class _FkLabelInjectionMixin:
     """
     def to_representation(self, instance):
         representation = super().to_representation(instance)
+        # Respect deny-all: LexSerializer returns {} when permission denies the row.
         if isinstance(representation, dict) and representation:
             self._inject_fk_labels(representation, instance)
         return representation
 
     def _inject_fk_labels(self, representation, instance):
+        """Mutates *representation* in place: adds ``<fk>_label`` siblings.
+
+        Skips FKs absent from the representation (visibility-filtered out) and
+        never overwrites an explicitly declared label field. The FK value
+        itself is left untouched (stays the PK).
+        """
         meta = getattr(getattr(self, "Meta", None), "model", None)
         # Fallback to type(instance) only when Meta.model is unset (e.g. the
         # bare base template). Normal auto/wrapped serializers always set it.
