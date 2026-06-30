@@ -114,8 +114,12 @@ class TestCluster12i_InjectFkLabels(SimpleTestCase):
 
     def test_label_added_for_present_fk(self):
         """Scenario 12.44: a 'fund_label' sibling appears next to 'fund' PK."""
-        related = SimpleNamespace(__str__=lambda self=None: "Fund Alpha")
-        instance = SimpleNamespace(fund=related)
+
+        class FundStub:
+            def __str__(self):
+                return "Fund Alpha"
+
+        instance = SimpleNamespace(fund=FundStub())
         # Bind the unbound helper to a lightweight object carrying a model meta.
         carrier = SimpleNamespace(
             Meta=SimpleNamespace(

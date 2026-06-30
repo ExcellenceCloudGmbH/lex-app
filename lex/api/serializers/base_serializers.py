@@ -624,6 +624,33 @@ class RestApiModelSerializerTemplate(LexSerializer):
     def get_short_description(self, obj):
         return str(obj)
 
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        # Respect deny-all (LexSerializer returns {} when permission denies).
+        if isinstance(representation, dict) and representation:
+            self._inject_fk_labels(representation, instance)
+        return representation
+
+    def _inject_fk_labels(self, representation, instance):
+        """Add a sibling ``"<fk>_label"`` string for every FK present in the
+        representation. The FK value itself is left untouched (stays the PK),
+        so filter/sort/edit/group/SSRM are unaffected. Skips FKs that were
+        removed by visibility filtering (only adds a label when the FK key is
+        still present) and never overwrites an explicitly declared label.
+        """
+        meta = getattr(getattr(self, "Meta", None), "model", None)
+        model = meta if meta is not None else type(instance)
+        for field in model._meta.concrete_fields:
+            if not isinstance(field, ForeignKey):
+                continue
+            fk_name = field.name
+            if fk_name not in representation:
+                continue
+            label_key = f"{fk_name}_label"
+            if label_key in representation:
+                continue
+            representation[label_key] = resolve_fk_label(getattr(instance, fk_name, None))
+
     class Meta:
         model = None
         fields = "__all__"
