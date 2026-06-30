@@ -766,6 +766,24 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 10o — `/fields/` FK display hints + per-field format spec (Session 87 — June 30) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.70 – 10.74 |
+| Type | U |
+| Files covered | `lex/api/views/model_info/Fields.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10o_fields_fk_and_format.py` |
+| Test classes | `TestCluster10o_FkDisplayHints`, `TestCluster10o_FieldFormatSpec` |
+| Fixtures | `SchemaLabeledFKTarget` + `SchemaLabeledItem` (api_layer `models.py`); reuses `SchemaItem`/`SchemaFKTarget` |
+| Est. tests | 5 |
+| Coverage gain | `Fields.py` FK branch + `Fields.get` format attach |
+| Prereqs | none (Type U, no DB rows — real FK fields introspected only) |
+| Status | ✅ Complete — 5 pass / 0 fail |
+| Note | Frontend-redesign Phase 1 (Tasks 3+4). `create_field_info` FK branch adds `fk_label_field` + `fk_preview` (helper `_target_has_preview_serializer`); `Fields.get` attaches `info["format"]` from `lex_field_formats` for declared columns only. Non-breaking: exact `ftype == ForeignKey` identity check kept (an `isinstance` widening was reverted to avoid OneToOneField), undeclared columns/targets carry no new keys. FK-hint tests drive real Django FK fields (mirroring 10e) so the production identity check is exercised exactly. |
+
+---
+
 ## Cluster 13 — Process Admin (new — opens here)
 
 ### Batch 13a — Container, collection, model registration

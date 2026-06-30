@@ -79,12 +79,14 @@
 | 10f. Global search (planned — April 21) | 4 | 4 | 4 | 0 | 0 |  Complete — 10.15–10.16b |
 | 10h. `LexAPI` outbound-client SDK (coverage-driven — May 12) | 7 | 7 | 7 | 0 | 0 |  Complete — scenarios 10.17–10.23; `requests` patched |
 | 10m. Calculation-log tree pagination + N+1 fix (Session 77 — June 8) | 6 | 6 | 6 | 0 | 0 | ✅ Complete — scenarios 10.61–10.66; `CalculationLogTreeView` now paginates (limit/offset) and resolves child ids in one query (`assertNumQueries(3)` pins N+1 gone) instead of loading every row + per-node child query |
+| 10o. `/fields/` FK display hints + per-field format spec (Session 87 — June 30) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 10.70–10.74; frontend-redesign Phase 1. `create_field_info` FK branch adds `fk_label_field` + `fk_preview` (target's `lex_fk_label_field` / whether it registers a `preview` serializer), `Fields.get` attaches `info["format"]` only for columns declared in `lex_field_formats` — non-breaking (undeclared cols/targets carry no new keys, exact `ftype == ForeignKey` check preserved). FK tests use real Django FK fields |
 | 11. Stress & Performance | 20 | 20 | 15 | 2 | 0 |  Complete (3 skipped — 11.12/11.15/11.19 at SMALL; BUG-011 tracked) |
 | 12. Serializer Contract | 32 | 32 | 29 | 3 | 0 |  Complete — 12a–12e (BUG-012/013 type round-trip xfail; BUG-017 cache xfail) |
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
+| 12i. FK label injection — `"<fk>_label"` sibling (Session 87 — June 30) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 12.40–12.47; frontend-redesign Phase 1. `_FkLabelInjectionMixin` emits a sibling `"<fk>_label"` next to each FK PK (value stays the PK) via `resolve_fk_label` (target's `lex_fk_label_field` → else `str(obj)`); applied to both `RestApiModelSerializerTemplate` and the `_wrap_custom_serializer` path; respects deny-all + visibility-filtered FKs + explicit label overrides |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **631** | **631** | **610** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **644** | **644** | **623** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet

@@ -1256,6 +1256,16 @@ Split across two classes: **`TestCluster04f_MixinMachinery`** (4.19–4.22, `Sim
 
 **Status:**  Complete — 3 pass / 0 fail. See progress.md Sessions 18 + 29.
 
+### 12i. FK label injection — `"<fk>_label"` sibling (Session 87 — June 30) ✅
+
+**What it tests:** the serializer-layer half of the frontend-redesign FK display work. A new `_FkLabelInjectionMixin` (mixed into both `RestApiModelSerializerTemplate` and the `_wrap_custom_serializer` wrapper) post-processes `to_representation` to emit a sibling `"<fk>_label"` string next to every FK in the output — the FK value itself stays the raw PK (non-breaking), the label carries the human text. The label comes from `resolve_fk_label`, which reads the target's opt-in `lex_fk_label_field` and falls back to `str(obj)`.
+
+**Why a regression matters:** the frontend chip shows `<fk>_label` while keeping the PK for navigation/hover. If the mixin stops injecting, or overwrites the FK value, or leaks labels for permission-/visibility-filtered FKs, the grid either reverts to raw ids or exposes data a row's permissions denied. The mixin must respect deny-all (`{}` stays `{}`), skip FKs absent from the representation, never clobber an explicitly-declared label, and compose with the `pk_is_id` post-pass via MRO.
+
+**Models:** none for the helper scenarios (`SimpleTestCase` + lightweight stubs); 12.47 uses a real `WideItem`-style model through `_wrap_custom_serializer` to prove the mixin lands in the wrapped class's MRO.
+
+**Scenario range:** 12.40 – 12.47. **Test file:** `lex/test_project/tests/serializers/test_12i_fk_label.py`. **Type:** U. **Status:** ✅ Complete (Session 87 — June 30), 8 pass. Scenarios: 12.40 None relation → None; 12.41 no hint → `str(obj)`; 12.42 declared `lex_fk_label_field` wins over `__str__`; 12.43 null label-field value → `str(obj)`; 12.44 sibling `fund_label` added while FK value stays the PK + non-FK cols untouched; 12.45 visibility-filtered-out FK gets no label; 12.46 null FK → null label; 12.47 custom serializer gets the mixin via `_wrap_custom_serializer`.
+
 ### 10e. Schema introspection — `create_field_info` + structure-tree pruning 
 
 **Gap:** `ModelStructureObtainView.py` (102 stmts, 21.54% baseline) and `model_info/Fields.py` (67 stmts, 22.35% baseline) drive every frontend form + nav menu. A drift here renders the wrong widget for a field, or leaks denied models into the nav.
@@ -1775,6 +1785,18 @@ Plus Scenario 8.2 in `test_8a_sync_fallback.py` was inverted: `should_use_celery
 | 10.31c | `DRF_FIELD2TYPE_NAME` covers Integer / Decimal / Char / PrimaryKeyRelated / JSON + `DEFAULT_TYPE_NAME == "string"` | Drift canary on the DRF-only fallback branch dictionary |
 
 **Status:**  Implemented (Session 65). 10 pass in 0.007s. `SimpleTestCase`-only — model_container / model._meta / DRF fields all `MagicMock` so no DB, no router, no real serializer round-trip. See `lex/test_project/tests/api_layer/test_10i_fields_view_and_list_ui.py` and progress/session-log.md Session 65.
+
+---
+
+### 10o. `/fields/` FK display hints + per-field format spec (Session 87 — June 30) ✅
+
+**What it tests:** the two frontend-redesign Phase-1 additions to the `/fields/` metadata the React column builder reads. `create_field_info`'s FK branch now advertises `fk_label_field` (the target's opt-in `lex_fk_label_field`, the human label column for the chip) and `fk_preview` (whether the target registers a `preview` serializer for the hover card, via the new `_target_has_preview_serializer` helper). `Fields.get` attaches `info["format"]` (currency/percent/decimals descriptor) for any column declared in the model's `lex_field_formats`.
+
+**Why a regression matters:** dropping `fk_label_field`/`fk_preview` silently reverts FK chips to raw PK integers and kills the hover card — the headline UX problem the redesign fixes. Dropping `format` makes currency/percent columns render as bare numbers. The **non-breaking** invariant is the load-bearing part: a model that opts into neither must produce byte-identical `/fields/` output, so the FK branch keeps the exact `ftype == ForeignKey` identity check (an `isinstance` would pull `OneToOneField` subclasses in) and undeclared columns carry no `format` key.
+
+**Models:** `SchemaLabeledFKTarget` (declares `lex_fk_label_field="label"` + `api_serializers={"preview": …}`) + `SchemaLabeledItem` (FK → it) for the opt-in path; existing `SchemaItem.target → SchemaFKTarget` for the bare-target default. FK-hint tests drive `create_field_info` with **real** Django FK fields (mirroring 10e) so the production identity check is exercised exactly.
+
+**Scenario range:** 10.70 – 10.74. **Test file:** `lex/test_project/tests/api_layer/test_10o_fields_fk_and_format.py`. **Type:** U. **Status:** ✅ Complete (Session 87 — June 30), 5 pass. Scenarios: 10.70 declared label + preview → both hints present + existing `target` preserved; 10.71 bare target → `fk_label_field` None / `fk_preview` False; 10.72 `_target_has_preview_serializer` three branches; 10.73 declared `lex_field_formats` entry surfaces verbatim under `info["format"]`; 10.74 undeclared column omits the `format` key entirely.
 
 ---
 
