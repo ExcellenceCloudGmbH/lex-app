@@ -119,6 +119,7 @@ class Fields(APIView):
     def get(self, request, *args, **kwargs):
         container = kwargs["model_container"]
         model = container.model_class
+        field_formats = getattr(model, "lex_field_formats", {}) or {}
         serializer_name = request.query_params.get("serializer", "default")
         serializers_map = (
             container.get_serializers_map()
@@ -199,6 +200,10 @@ class Fields(APIView):
                         info["target"] = drf_field.queryset.model._meta.model_name
                     except Exception:
                         pass
+
+            fmt = field_formats.get(info["name"])
+            if fmt:
+                info["format"] = fmt
 
             fields_info.append(info)
 
