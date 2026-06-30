@@ -489,7 +489,7 @@ class LexModel(LifecycleModel):
     # Per-field display format specs surfaced in ``/fields/`` metadata, e.g.
     # {"revenue": {"format": "currency", "currency": "EUR", "decimals": 2}}.
     # Frontend builds an AG-Grid valueFormatter from these (hybrid defaults).
-    lex_field_formats = {}
+    lex_field_formats = {}  # READ-ONLY declaration; override per-subclass as a new dict literal, never mutate in place.
 
     created_at = models.DateTimeField(null=True, blank=True, editable=False)
     edited_at = models.DateTimeField(null=True, blank=True, editable=False)

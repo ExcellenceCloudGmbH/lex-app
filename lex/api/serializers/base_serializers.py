@@ -613,58 +613,7 @@ class LexSerializer(serializers.ModelSerializer):
         return representation
 
 
-# --- UPDATED BASE TEMPLATE ---
-class RestApiModelSerializerTemplate(LexSerializer):
-    """
-    The base template for all auto-generated and wrapped serializers.
-    It inherits the new nested permission structure from LexSerializer.
-    """
-    short_description = serializers.SerializerMethodField()
-
-    def get_short_description(self, obj):
-        return str(obj)
-
-    def to_representation(self, instance):
-        representation = super().to_representation(instance)
-        # Respect deny-all (LexSerializer returns {} when permission denies).
-        if isinstance(representation, dict) and representation:
-            self._inject_fk_labels(representation, instance)
-        return representation
-
-    def _inject_fk_labels(self, representation, instance):
-        """Add a sibling ``"<fk>_label"`` string for every FK present in the
-        representation. The FK value itself is left untouched (stays the PK),
-        so filter/sort/edit/group/SSRM are unaffected. Skips FKs that were
-        removed by visibility filtering (only adds a label when the FK key is
-        still present) and never overwrites an explicitly declared label.
-        """
-        meta = getattr(getattr(self, "Meta", None), "model", None)
-        model = meta if meta is not None else type(instance)
-        for field in model._meta.concrete_fields:
-            if not isinstance(field, ForeignKey):
-                continue
-            fk_name = field.name
-            if fk_name not in representation:
-                continue
-            label_key = f"{fk_name}_label"
-            if label_key in representation:
-                continue
-            representation[label_key] = resolve_fk_label(getattr(instance, fk_name, None))
-
-    class Meta:
-        model = None
-        fields = "__all__"
-        hide_actions_column = False
-        # Use our custom list serializer for all list views.
-        list_serializer_class = FilteredListSerializer
-
-
-class RestApiModelViewSetTemplate(viewsets.ModelViewSet):
-    queryset = None
-    serializer_class = None
-
-
-# --- HELPER FUNCTIONS (Unchanged) ---
+# --- FK LABEL HELPER ---
 
 
 def resolve_fk_label(related_obj):
@@ -683,6 +632,67 @@ def resolve_fk_label(related_obj):
         if value is not None:
             return str(value)
     return str(related_obj)
+
+
+class _FkLabelInjectionMixin:
+    """Adds a sibling ``"<fk>_label"`` string next to each FK primary key in
+    the serialized output (the FK value itself stays the PK). Mixed into both
+    the auto-generated base template and developer-supplied custom serializers
+    (via ``_wrap_custom_serializer``) so FK chips render consistently across
+    both serializer paths.
+    """
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        if isinstance(representation, dict) and representation:
+            self._inject_fk_labels(representation, instance)
+        return representation
+
+    def _inject_fk_labels(self, representation, instance):
+        meta = getattr(getattr(self, "Meta", None), "model", None)
+        # Fallback to type(instance) only when Meta.model is unset (e.g. the
+        # bare base template). Normal auto/wrapped serializers always set it.
+        model = meta if meta is not None else type(instance)
+        for field in model._meta.concrete_fields:
+            if not isinstance(field, ForeignKey):
+                continue
+            fk_name = field.name
+            if fk_name not in representation:
+                continue
+            label_key = f"{fk_name}_label"
+            if label_key in representation:
+                continue
+            # NOTE (perf): getattr lazy-loads the relation if it wasn't
+            # select_related()'d. The list/SSRM endpoint should select_related
+            # FK columns it serializes (Phase-3 follow-up) to avoid N+1.
+            representation[label_key] = resolve_fk_label(getattr(instance, fk_name, None))
+
+
+# --- UPDATED BASE TEMPLATE ---
+class RestApiModelSerializerTemplate(_FkLabelInjectionMixin, LexSerializer):
+    """
+    The base template for all auto-generated and wrapped serializers.
+    It inherits the new nested permission structure from LexSerializer.
+    FK label injection is provided by _FkLabelInjectionMixin.
+    """
+    short_description = serializers.SerializerMethodField()
+
+    def get_short_description(self, obj):
+        return str(obj)
+
+    class Meta:
+        model = None
+        fields = "__all__"
+        hide_actions_column = False
+        # Use our custom list serializer for all list views.
+        list_serializer_class = FilteredListSerializer
+
+
+class RestApiModelViewSetTemplate(viewsets.ModelViewSet):
+    queryset = None
+    serializer_class = None
+
+
+# --- HELPER FUNCTIONS ---
 
 
 def model2serializer(model, fields=None, name_suffix=""):
@@ -775,7 +785,7 @@ def _wrap_custom_serializer(custom_cls, model_class):
     # models whose PK attname is e.g. ``history_id`` (see comment above).
     if pk_is_id:
         attrs["id"] = serializers.ReadOnlyField()
-    base_classes = (LexSerializer, custom_cls)
+    base_classes = (_FkLabelInjectionMixin, LexSerializer, custom_cls)
     wrapped_cls = type(
         f"{custom_cls.__name__}WithInternalFields", base_classes, attrs
     )

@@ -4,9 +4,10 @@ Intent: FK cells must be able to show a human label (the target model's
 declared ``lex_fk_label_field``) instead of a bare PK, while the FK value
 itself stays the PK. A regression here means FK chips render blank or fall
 back to opaque ids, which is exactly the UX the redesign removes.
-Cluster 12i — scenarios 12.40–12.46. Type: U.
+Cluster 12i — scenarios 12.40–12.47. Type: U.
 Covers: lex/api/serializers/base_serializers.py (resolve_fk_label,
-        RestApiModelSerializerTemplate._inject_fk_labels, to_representation),
+        _FkLabelInjectionMixin, RestApiModelSerializerTemplate,
+        _wrap_custom_serializer),
         lex/core/models/LexModel.py (lex_fk_label_field, lex_field_formats).
 Run: python -m lex pytest lex/test_project/tests/serializers/test_12i_fk_label.py -v
 """
@@ -19,11 +20,15 @@ from unittest.mock import MagicMock
 import pytest
 from django.db.models import ForeignKey, IntegerField
 from django.test import SimpleTestCase
+from rest_framework import serializers
 
 from lex.api.serializers.base_serializers import (
     RestApiModelSerializerTemplate,
+    _FkLabelInjectionMixin,
+    _wrap_custom_serializer,
     resolve_fk_label,
 )
+from lex.test_project.tests.serializers.models import WideItem
 
 pytestmark = pytest.mark.serializers
 
@@ -148,6 +153,10 @@ class TestCluster12i_InjectFkLabels(SimpleTestCase):
 
     def test_no_label_when_fk_absent_from_representation(self):
         """Scenario 12.45: a filtered-out FK gets no label (respects visibility)."""
+        # ``instance.fund`` is intentionally present-but-unread: the loop
+        # hits ``continue`` because ``"fund"`` isn't in ``rep`` (it was
+        # removed by permission filtering). Proves visibility-filtered FKs
+        # get no label even when the related object exists on the instance.
         instance = SimpleNamespace(fund=SimpleNamespace())
         carrier = SimpleNamespace(
             Meta=SimpleNamespace(
@@ -179,4 +188,32 @@ class TestCluster12i_InjectFkLabels(SimpleTestCase):
         self.assertIsNone(
             rep["fund_label"],
             "Scenario 12.46: null relation must yield null label",
+        )
+
+
+# ─── Cluster 12i — Task 3: custom-serializer path ───────────────────────────
+
+class TestCluster12i_CustomSerializerMixinInheritance(SimpleTestCase):
+    """Cluster 12i: _wrap_custom_serializer must inject _FkLabelInjectionMixin."""
+
+    def test_wrapped_custom_serializer_has_fk_label_mixin_in_mro(self):
+        """Scenario 12.47: custom serializers get FK label injection via the mixin.
+
+        Wraps a trivial hand-written serializer through ``_wrap_custom_serializer``
+        using a real model (``WideItem``, which has a simple integer PK and a FK
+        ``related`` field) and asserts that the resulting class has
+        ``_FkLabelInjectionMixin`` in its MRO. This proves both serializer paths
+        (auto-generated and developer-supplied) produce FK labels consistently.
+        """
+
+        class CustomWideItemSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = WideItem
+                fields = "__all__"
+
+        wrapped = _wrap_custom_serializer(CustomWideItemSerializer, WideItem)
+        self.assertIn(
+            _FkLabelInjectionMixin,
+            wrapped.__mro__,
+            "custom serializers must inherit FK label injection",
         )
