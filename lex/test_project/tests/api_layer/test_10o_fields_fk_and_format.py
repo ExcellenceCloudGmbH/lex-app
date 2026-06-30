@@ -18,35 +18,20 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from django.db.models import FloatField, ForeignKey
+from django.db.models import FloatField
 from django.test import SimpleTestCase
-from rest_framework import serializers as drf_serializers
 
 from lex.api.views.model_info.Fields import (
     Fields,
     _target_has_preview_serializer,
     create_field_info,
 )
+from lex.test_project.tests.api_layer.models import (
+    SchemaItem,
+    SchemaLabeledItem,
+)
 
 pytestmark = pytest.mark.api_layer
-
-
-# --------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------- #
-
-
-def _fake_fk_field(target):
-    """Build a minimal ForeignKey-like mock pointing at *target*."""
-    f = MagicMock(spec=ForeignKey)
-    f.name = "fund"
-    f.verbose_name = "fund"
-    f.editable = True
-    f.null = False
-    f.primary_key = False
-    f.get_default = MagicMock(return_value=None)
-    f.remote_field = SimpleNamespace(model=target, limit_choices_to=None)
-    return f
 
 
 # --------------------------------------------------------------------- #
@@ -55,7 +40,16 @@ def _fake_fk_field(target):
 
 
 class TestCluster10o_FkDisplayHints(SimpleTestCase):
-    """Cluster 10o: FK field info exposes fk_label_field + fk_preview (scenarios 10.70–10.72)."""
+    """Cluster 10o: FK field info exposes fk_label_field + fk_preview (scenarios 10.70–10.72).
+
+    These drive ``create_field_info`` with REAL Django ``ForeignKey`` fields
+    (mirroring cluster 10e) rather than mocks, so the production
+    ``type(field) == ForeignKey`` branch check is exercised exactly as it runs
+    in production — a ``MagicMock(spec=ForeignKey)`` would not satisfy that
+    identity check and would have forced the production code to widen to
+    ``isinstance`` (which also pulls OneToOneField subclasses into the FK
+    branch). No DB rows are created; only field introspection is used.
+    """
 
     # 10.70 -----------------------------------------------------------
     def test_10_70_fk_exposes_declared_label_field_and_preview_true(self) -> None:
@@ -68,15 +62,10 @@ class TestCluster10o_FkDisplayHints(SimpleTestCase):
         A regression that drops these keys silently reverts FK chips to raw
         PK integers — the main UX problem the redesign fixes.
         """
-        target = SimpleNamespace(
-            _meta=SimpleNamespace(model_name="fund"),
-            lex_fk_label_field="name",
-            api_serializers={"preview": object()},
-        )
-        info = create_field_info(_fake_fk_field(target))
+        info = create_field_info(SchemaLabeledItem._meta.get_field("fund"))
         self.assertEqual(
             info["fk_label_field"],
-            "name",
+            "label",
             "lex_fk_label_field must surface as fk_label_field in /fields/ response",
         )
         self.assertTrue(
@@ -85,7 +74,7 @@ class TestCluster10o_FkDisplayHints(SimpleTestCase):
         )
         self.assertEqual(
             info["target"],
-            "fund",
+            "schemalabeledfktarget",
             "Existing 'target' key must still be present after adding FK hints",
         )
 
@@ -97,9 +86,10 @@ class TestCluster10o_FkDisplayHints(SimpleTestCase):
         neither lex_fk_label_field nor api_serializers must produce exactly
         fk_label_field=None and fk_preview=False. Drift here would either
         KeyError or silently enable the hover card for every FK.
+        ``SchemaItem.target`` points at ``SchemaFKTarget``, which declares
+        neither hint.
         """
-        target = SimpleNamespace(_meta=SimpleNamespace(model_name="fund"))
-        info = create_field_info(_fake_fk_field(target))
+        info = create_field_info(SchemaItem._meta.get_field("target"))
         self.assertIsNone(
             info["fk_label_field"],
             "A target without lex_fk_label_field must yield fk_label_field=None",

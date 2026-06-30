@@ -83,6 +83,51 @@ class SchemaItem(LexModel):
         return self.name
 
 
+class _SchemaPreviewSerializer:
+    """Stand-in 'preview' serializer registered by :class:`SchemaLabeledFKTarget`.
+    ``_target_has_preview_serializer`` only checks for the ``'preview'`` key, so
+    the value just needs to be a registered entry — this keeps the model honest
+    without dragging in DRF serializer machinery for a pure-introspection test."""
+
+
+@_permissive
+class SchemaLabeledFKTarget(LexModel):
+    """FK target that DECLARES ``lex_fk_label_field`` and a ``'preview'``
+    serializer, so 10.70 can prove ``create_field_info`` surfaces both hints
+    off a real FK field (not a mock)."""
+
+    label = models.CharField(max_length=64)
+
+    lex_fk_label_field = "label"
+    api_serializers = {"preview": _SchemaPreviewSerializer}
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.label
+
+
+@_permissive
+class SchemaLabeledItem(LexModel):
+    """Holds a FK to :class:`SchemaLabeledFKTarget` so the FK-hint branch of
+    ``create_field_info`` can be exercised against a real Django field."""
+
+    name = models.CharField(max_length=200)
+    fund = models.ForeignKey(
+        SchemaLabeledFKTarget,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="items",
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 class SchemaHiddenItem(LexModel):
     """``permission_list`` returns False — used by 10.14 to prove that
     ``delete_restricted_nodes_from_model_structure`` prunes denied
@@ -129,7 +174,15 @@ class ApiLayerCalc(CalculationModel):
         return None
 
 
-ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
+ALL_MODELS = [
+    ApiSimpleItem,
+    SchemaFKTarget,
+    SchemaItem,
+    SchemaLabeledFKTarget,
+    SchemaLabeledItem,
+    SchemaHiddenItem,
+    ApiLayerCalc,
+]
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"

@@ -75,7 +75,7 @@ def create_field_info(field):
     ftype = type(field)
 
     additional_info = {}
-    if isinstance(field, ForeignKey):
+    if ftype == ForeignKey:
         target_model = field.remote_field.model
         additional_info['target'] = target_model._meta.model_name
         additional_info['limit_choices_to'] = field.remote_field.limit_choices_to
