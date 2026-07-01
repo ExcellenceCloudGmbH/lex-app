@@ -664,6 +664,22 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8ab — Nested fan-out join is worker-safe: `allow_join_result` wrap (Session 88 — July 1)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.129 – 8.138 |
+| Type | U |
+| Files covered | `lex/core/tasks/CeleryTaskDispatcher.py` — `_handle_task_results` now wraps `rs.join(propagate=False)` in `allow_join_result()` (import added to the lazy `from celery.result import ResultSet, allow_join_result`). A **nested** calc fanning out from inside a Celery worker (`dispatch_calculation_groups` → `_dispatch_single_group` → `_handle_task_results`) previously hit an unwrapped `ResultSet.join()`, which Celery hard-forbids inside a task ("Never call result.get() within a task!"). The old `is_celery_worker_process()` guard masked it by running nested calcs inline; removing that guard (batch 7q — nested fan-out now dispatches by default) exposed the crash. Prod repro: `InvestmentPosting` (5072 models, 2 tasks) crashed on the assertion, fell back to complete-sync, re-committed persisted rows → duplicate-key violation. Fix mirrors `WaitForTasks.wait_for_completion`, which already blocks under `allow_join_result` |
+| Test file | `lex/test_project/tests/celery_async/test_8ab_dispatcher_join_worker_safe.py` |
+| Test classes | `TestCluster08ab_HandleResultsJoinWorkerSafe` (8.129 in-worker join no longer raises — the exact crash regression; 8.130 worker join-block flag restored after return; 8.131 non-worker path unaffected; 8.132 worker-safe + failed group still retried; 8.133 worker-safe + join raises → complete sync; 8.134 worker-safe + raising status check still queues group; 8.135 `allow_join_result` import required); `TestCluster08ab_NestedDispatchWorkerSafe` (8.136 no context ⇒ implicit `WaitForTasks` + safe join — the production path; 8.137 explicit `WaitForTasks` reused + safe join; 8.138 explicit `FireAndForget` reused + safe join) |
+| Fixtures | none — deterministic broker-free repro: `celery._state._set_task_join_will_block(True)` simulates a worker, a fake `ResultSet` (patched only on `celery.result.ResultSet`) whose `.join` calls the **real** `celery.result.assert_will_not_block()`, with the **real** `allow_join_result` left in place so the wrap is genuinely exercised. `calc_and_save.delay` / FF / WFT lazy imports mocked as in batch 8l |
+| Tests landed | **10 pass / 0 fail** (8.129–8.138). Regression: full `celery_async` cluster + `test_7q_worker_default_dispatch.py` = 143 pass / 4 skip / 12 subtests |
+| Coverage gain | `CeleryTaskDispatcher._handle_task_results` — the `allow_join_result`-wrapped join branch and its worker-context behaviour, plus the end-to-end nested `dispatch_calculation_groups` path under a simulated worker (previously only exercised outside a worker, where the missing wrap never triggered) |
+| Status | ✅ Complete — source fix + paired tests + plan sync in one change. Allocated `8ab` (next free letter after `8aa`); 8.129 picks up after cluster-8 scenario max 8.128 |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)

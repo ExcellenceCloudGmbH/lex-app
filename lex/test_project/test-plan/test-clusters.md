@@ -708,6 +708,27 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 ---
 
+### Cluster 8ab — Nested fan-out join is worker-safe (`allow_join_result`)
+
+**Gap:** the framework lets a calculation dispatch *nested* fan-out work — a calc already running inside a Celery worker can partition its own models and dispatch them as child tasks via `CeleryTaskDispatcher.dispatch_calculation_groups`, then block on the children in `_handle_task_results` via `ResultSet.join()`. Celery **hard-forbids** `result.get()` / `ResultSet.join()` from inside a worker ("Never call result.get() within a task!") unless wrapped in `allow_join_result()`. The join was unwrapped; an `is_celery_worker_process()` guard *masked* it by forcing nested calcs to run inline. Removing that guard (cluster 7q — so nested fan-out dispatches by default, as customers expect) exposed the unwrapped join: a real nested `InvestmentPosting` run (5072 models, 2 tasks) crashed with that assertion, fell back to the complete-sync ladder, and re-committed already-persisted rows → duplicate-key violation. The fix wraps `rs.join(propagate=False)` in `allow_join_result()`, mirroring `WaitForTasks.wait_for_completion`, which already blocks under the same guard. These scenarios reproduce the crash deterministically **without a broker**: Celery's real `allow_join_result()` toggles the thread-local `task_join_will_block` flag and `assert_will_not_block()` (called at the top of the real `ResultSet.join`) raises the production error whenever that flag is set — so we set the flag to simulate "inside a worker", give a fake `ResultSet` a `.join` that calls the real `assert_will_not_block()`, and keep the real `allow_join_result` so the wrap is genuinely under test.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.129 | In-worker join no longer raises | flag set (simulated worker) + fake join calls the real `assert_will_not_block()`: `_handle_task_results` completes, the join runs, and the block-flag is cleared *during* the join — the exact production-crash regression |
+| 8.130 | Worker flag restored after return | `allow_join_result` is a proper CM: the join-block flag is True again after the call, so a later real `.get()` in the same worker task is still correctly forbidden (the guard is not permanently disabled) |
+| 8.131 | Non-worker path unaffected | flag False (top-level dispatch): all-success → join runs once, no group routed to sync, flag stays False — the wrap is transparent to the ordinary path |
+| 8.132 | Worker-safe + failed group still retried | simulated worker + one `.failed()` True: no crash AND the failed task's mapped group (only) goes to `calc_and_save_sync` |
+| 8.133 | Worker-safe + join raises → complete sync | simulated worker + a genuine `join` failure (backend unreachable): every mapped group is flattened into one complete-sync fallback call |
+| 8.134 | Worker-safe + raising status check | simulated worker + `task.failed()` raises: no crash AND the group is assumed failed and queued for sync retry (never silently dropped) |
+| 8.135 | `allow_join_result` import required | a `celery.result` exposing `ResultSet` but not `allow_join_result` → the lazy import fails loudly as a chained `CeleryDispatchError` (guards against a regression that drops the import) |
+| 8.136 | No context ⇒ implicit `WaitForTasks`, safe join | end-to-end `dispatch_calculation_groups` inside a worker, no explicit context: opens an implicit `WaitForTasks()` (same behaviour as before) and the join completes with the block-flag cleared — the production fan-out path |
+| 8.137 | Explicit `WaitForTasks` reused, safe join | end-to-end inside a worker with an active `WaitForTasks`: no new WFT instantiated (nullcontext, no double-join) and the join stays worker-safe |
+| 8.138 | Explicit `FireAndForget` reused, safe join | end-to-end inside a worker with an active `FireAndForget`: no implicit WFT (fire-and-forget preserved) and the join stays worker-safe |
+
+**Scenario range:** 8.129 – 8.138. **Test file:** `lex/test_project/tests/celery_async/test_8ab_dispatcher_join_worker_safe.py`. **Type:** U. **Status:** ✅ Complete (Session 88 — July 1). Allocated `8ab` (next free letter after `8aa`); 8.129 picks up after cluster-8 scenario max 8.128. Source: `lex/core/tasks/CeleryTaskDispatcher.py` (`_handle_task_results` join wrap; `dispatch_calculation_groups` nested-in-worker path). 10 U scenarios pass locally (broker-/DB-free).
+
+---
+
 ## 9. Signals & WebSocket
 
 **What it tests:** `ActiveCalculationStateStore` tracking, `WebSocketNotifier` broadcasts, `CacheManager` cleanup, and `update_calculation_status` signal.
