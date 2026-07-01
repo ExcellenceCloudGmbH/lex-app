@@ -664,6 +664,38 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 
 ---
 
+### Batch 8z — Initial-data seed calculations run on the dedicated calculation pool (backfilled)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.121 – 8.124 |
+| Type | E |
+| Files covered | `lex/lex_app/tests/ProcessAdminTestCase.py` — `_save_seed_instance`: a seeded `CalculationModel` armed `IN_PROGRESS` is persisted with `calculate_hook` deferred, then submitted to `lex/core/models/CalculationModel.py`'s `_calculation_executor` (`lex-calc`) pool — mirroring the live `One.update` request path — instead of running inline on the bootstrap/loader thread. Unlike the request path (fire-and-return-202), the loader blocks on the future because initial-data actions are ordered |
+| Test file | `lex/test_project/tests/celery_async/test_8z_initial_data_calc_executor.py` |
+| Test classes | `TestCluster08z_InitialDataCalcExecutor` (8.121 seeded calc runs on a `lex-calc` worker, `submit` once, row → SUCCESS; 8.122 loader blocks on each future ⇒ plan order `[slow, fast]` preserved; 8.123 non-trigger seed never touches the pool, stays `NOT_CALCULATED`; 8.124 a pool-thread failure re-raises as `CalculationModelException` to the loader, row → ERROR) |
+| Fixtures | reuses `celery_async/models.py` `CelerySyncCalc`; drives the real loader via `setUpCloudStorage`, stubbing only the `get_test_data` file-IO boundary |
+| Tests landed | **4 pass / 0 fail** (8.121–8.124) |
+| Coverage gain | `lex/lex_app/tests/ProcessAdminTestCase.py` — `_save_seed_instance` offload path |
+| Status | ✅ Complete — plan rows backfilled in the 8ab change (the batch shipped without a plan row; recorded retroactively for plan consistency) |
+
+---
+
+### Batch 8ab — Initial-data seed calculations add no per-calculation slowdown vs the request path (Session 87 — June 29)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.129 – 8.131 |
+| Type | E |
+| Files covered | `lex/lex_app/tests/ProcessAdminTestCase.py` — `_save_seed_instance` (the seed-loader offload from 8z), exercising the real `lex/core/models/CalculationModel.py` `_calculation_executor` (`lex-calc`, `max_workers=10`) pool. Guards the "no slowdown" contract: the seed path must not regress to running the calc inline on the bootstrap thread (which would serialize seeding, double the work, and re-introduce the "server not ready during heavy calculations" stall, commit bde8dde) |
+| Test file | `lex/test_project/tests/celery_async/test_8ab_initial_data_no_slowdown.py` |
+| Test classes | `TestCluster08ab_InitialDataNoSlowdown` (8.129 a parked seed calc occupies one pool worker while an independent submission runs concurrently on a *different* `lex-calc` worker ⇒ pool concurrency budget preserved, not serialized to one lane; 8.130 the seed calc body executes EXACTLY once, on a `lex-calc` thread, never inline ⇒ no double-run; 8.131 the seed path's wall-clock over bare pool execution of the same body stays < 0.25s, a bound below the 0.30s `SLEEP` so a duplicate-/inline-run regression that adds ~one full `SLEEP` is caught) |
+| Fixtures | reuses `celery_async/models.py` `CelerySyncCalc`; drives the real loader via `setUpCloudStorage`, stubbing only `get_test_data`; `calculate` is patched per-scenario to park on a barrier / count invocations / sleep a fixed duration. Pool and ordering machinery run for real |
+| Tests landed | **3 pass / 0 fail** (8.129–8.131); stable across 4 repeat runs (timing scenarios use barriers + a margin below `SLEEP`, not absolute durations). Regression: full `celery_async` cluster = 134 pass / 4 skip / 12 subtests |
+| Coverage gain | `lex/lex_app/tests/ProcessAdminTestCase.py` — concurrency-preservation, exactly-once, and dispatch-overhead surfaces of `_save_seed_instance` not exercised by 8z |
+| Status | ✅ Complete (Session 87 — June 29) — paired tests + plan sync in one change. Allocated `8ab` (next free letter after `8aa`; `8.129` picks up after cluster max `8.128`) |
+
+---
+
 ## Cluster 9 — Signals & WebSocket (existing 9a)
 
 ### Batch 9b — Consumers (excluding usage-blocked ones)

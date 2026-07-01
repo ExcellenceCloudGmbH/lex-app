@@ -708,6 +708,28 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 ---
 
+### Sub-cluster 8z — initial-data seed calculations run on the dedicated calculation pool
+
+**Gap:** a seeded `CalculationModel` armed `IN_PROGRESS` turns `save()` into a calculation trigger. The live request path (`One.update`) never runs that calculation on the request/ASGI thread — it persists `IN_PROGRESS` with the hook deferred and submits `calculate_hook` to `_calculation_executor` (the `lex-calc` pool). The initial-data loader historically ran the seeded calculation *inline* on the bootstrap thread that drove `setUpCloudStorage` / `setUp`, the exact "calculation hogs the triggering thread" asymmetry the request path was built to avoid: a slow seeded calc stalls startup instead of running as a pooled job. The fix (`ProcessAdminTestCase._save_seed_instance`) mirrors `One.update` — defer the hook, commit `IN_PROGRESS`, submit to `_calculation_executor` — but, unlike the fire-and-forget request path, the loader **blocks on the future** before returning, because initial-data actions are ordered and a later action may use an earlier calculation's result.
+
+**Scenario range:** 8.121 – 8.124. **Test file:** `lex/test_project/tests/celery_async/test_8z_initial_data_calc_executor.py`. **Type:** E. **Status:** ✅ Complete (plan rows backfilled in the 8ab change). Source: `lex/lex_app/tests/ProcessAdminTestCase.py` (`_save_seed_instance`), exercising the real `lex/core/models/CalculationModel.py` `calculate_hook` / `execute_calculation_sync`. 8.121 seeded calc runs on a `lex-calc` worker (`submit` once, row → SUCCESS); 8.122 loader blocks on each future ⇒ plan order `[slow, fast]` preserved; 8.123 non-trigger seed never touches the pool (stays `NOT_CALCULATED`); 8.124 a pool-thread failure re-raises as `CalculationModelException` to the loader (row → ERROR). 4 pass / 0 fail locally.
+
+---
+
+### Sub-cluster 8ab — initial-data seed calculations add no per-calculation slowdown vs the request path
+
+**Gap:** 8z pins *that* the seed calc runs on the pool, blocks in order, skips non-triggers, and propagates failures. It does not prove the "no slowdown" contract: that offloading to the pool keeps the pool's **concurrency budget** (seeding one calc must not monopolize the 10-worker pool), runs the body **exactly once** (no inline duplicate that doubles the work), and adds **negligible dispatch overhead** versus running the same body bare on the pool. The regression these guard against is a seed loader that quietly reverts to running the calculation inline on the bootstrap thread — serializing seeding onto one lane, doubling work if the offload is also kept, and re-introducing the "server not ready during heavy calculations" stall (commit bde8dde) the pool offload removed.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.129 | Pool concurrency preserved | a parked seed calc occupies one `lex-calc` worker while an independent submission to the same `_calculation_executor` runs to completion concurrently on a *different* `lex-calc` worker — the pool is not serialized to one lane (driven on a background thread + barrier, so the loader's block-on-future doesn't freeze the asserting thread) |
+| 8.130 | Body runs exactly once, on the pool | the seeded `calculate` body is invoked exactly once, on a `lex-calc` thread, never inline on the loader thread — two invocations would mean the calc runs inline *and* on the pool (double work) |
+| 8.131 | Dispatch overhead negligible | the seed path's wall-clock over bare pool execution of the same fixed-duration body stays under a 0.25s budget — a bound below the 0.30s `SLEEP`, so a duplicate-/inline-run regression that adds ~one full `SLEEP` is caught while the legitimate few-ms persist overhead passes |
+
+**Scenario range:** 8.129 – 8.131. **Test file:** `lex/test_project/tests/celery_async/test_8ab_initial_data_no_slowdown.py`. **Type:** E. **Status:** ✅ Complete (Session 87 — June 29). Allocated `8ab` (next free letter after `8aa`; 8.129 picks up after cluster max 8.128). Source: `lex/lex_app/tests/ProcessAdminTestCase.py` (`_save_seed_instance`), exercising the real `_calculation_executor` pool. 3 pass / 0 fail; stable across 4 repeat runs.
+
+---
+
 ## 9. Signals & WebSocket
 
 **What it tests:** `ActiveCalculationStateStore` tracking, `WebSocketNotifier` broadcasts, `CacheManager` cleanup, and `update_calculation_status` signal.
