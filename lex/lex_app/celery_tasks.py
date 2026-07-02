@@ -662,6 +662,33 @@ def lex_shared_task(_func=None, **task_opts):
                 if model_context:
                     kwargs.pop('model_context')
 
+                # Cooperative cancellation net for DISPATCHED runs (mirrors
+                # calc_and_save): if this calculation's cancelled marker is
+                # already set in the cluster cancel index, self-abort before
+                # running anything. This is what keeps nested dispatch
+                # abort-safe (Report 1 — abort→resume): cancel()'s revoke is
+                # in-memory, so after a server+worker restart the broker
+                # redelivers the still-unacked task — but the Redis marker
+                # written by cancel() survives the restart, and this check
+                # makes the redelivered task land CANCELLED instead of
+                # silently resuming. Only applies when a dispatched
+                # ``context`` is present (a real worker execution); direct
+                # synchronous calls carry no context kwarg and skip it. A
+                # silent no-op without Redis — and without Redis there is no
+                # broker to redeliver in the first place.
+                if context and context.get("calculation_id"):
+                    from lex.core.cancellation import cluster_cancel_index
+                    from lex.core.models.CalculationModel import (
+                        CalculationCancelled,
+                    )
+
+                    if cluster_cancel_index.is_cancelled(
+                        context.get("calculation_id")
+                    ):
+                        raise CalculationCancelled(
+                            "Calculation cancelled before task start"
+                        )
+
                 # Only enter CeleryCalculationContext when we actually have
                 # context to set (i.e. running inside a Celery worker).
                 # In synchronous mode the operation_context already exists
