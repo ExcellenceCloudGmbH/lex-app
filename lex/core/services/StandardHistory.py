@@ -28,8 +28,23 @@ class CachedHistoryDescriptor(simple_history_manager_module.HistoryDescriptor):
     producing the exact same manager subclass each time.
     """
 
-    def __init__(self, model, manager=simple_history_manager_module.HistoryManager, queryset=simple_history_manager_module.HistoricalQuerySet):
-        super().__init__(model, manager=manager, queryset=queryset)
+    def __init__(
+        self,
+        model,
+        manager=simple_history_manager_module.HistoryManager,
+        queryset=simple_history_manager_module.HistoricalQuerySet,
+    ):
+        try:
+            super().__init__(model, manager=manager, queryset=queryset)
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            super().__init__(model)
+            self.manager_class = manager
+            self.queryset_class = queryset
+        else:
+            self.manager_class = getattr(self, "manager_class", manager)
+            self.queryset_class = getattr(self, "queryset_class", queryset)
         self._resolved_manager_class = self.manager_class.from_queryset(
             self.queryset_class
         )

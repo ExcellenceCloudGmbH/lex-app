@@ -193,8 +193,8 @@ class TestCluster08h_DelayRoundTrip(E2ETestCase):
         Then:  Celery executes the wrapped task body inline → the body
                returns successfully → Celery invokes the real
                ``CallbackTask.on_success`` → ``_persist_status_fields``
-               runs a direct ``.update(is_calculated="SUCCESS")`` → the
-               audit seam fires with ``audit_status="success"``. The
+               saves a freshly loaded row with ``is_calculated="SUCCESS"`` →
+               the audit seam fires with ``audit_status="success"``. The
                DB row now carries SUCCESS.
 
         This is the single-task path a customer hits on every

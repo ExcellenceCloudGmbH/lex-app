@@ -27,7 +27,7 @@ def _normalize_value(value):
 class Command(BaseCommand):
     help = (
         "Normalize boolean-like `is_calculated` values on CalculationModel subclasses "
-        "to SUCCESS/ERROR."
+        "to SUCCESS/NOT_CALCULATED."
     )
 
     def add_arguments(self, parser):
@@ -70,7 +70,7 @@ class Command(BaseCommand):
 
             updates = []
             checked = 0
-            queryset = model._default_manager.all().only(model._meta.pk.name, "is_calculated")
+            queryset = model._default_manager.all()
             for obj in queryset.iterator(chunk_size=chunk_size):
                 checked += 1
                 normalized = _normalize_value(getattr(obj, "is_calculated", None))
@@ -83,7 +83,9 @@ class Command(BaseCommand):
 
             if updates and not dry_run:
                 with transaction.atomic():
-                    model._default_manager.bulk_update(updates, ["is_calculated"], batch_size=chunk_size)
+                    for obj in updates:
+                        obj._history_change_reason = "Normalize is_calculated value"
+                        obj.save(skip_hooks=True, update_fields=["is_calculated"])
 
             updated_count = len(updates)
             summary["updated_total"] += updated_count

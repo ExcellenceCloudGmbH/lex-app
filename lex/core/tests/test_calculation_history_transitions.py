@@ -214,6 +214,78 @@ class CalculationHistoryTransitionsTest(TransactionTestCase):
             [CalculationModel.IN_PROGRESS, CalculationModel.SUCCESS],
         )
 
+    def test_celery_callback_success_creates_terminal_history_row(self):
+        from lex.lex_app.celery_tasks import CallbackTask
+
+        self.obj.name = "fresh-live-value"
+        self.obj.is_calculated = CalculationModel.IN_PROGRESS
+        self.obj.save(skip_hooks=True)
+
+        existing_ids = set(
+            self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
+                "history_id", flat=True
+            )
+        )
+
+        stale_task_snapshot = CalculationHistoryTestModel(
+            id=self.obj.pk,
+            name="stale-task-value",
+            computed=999,
+            should_fail=True,
+        )
+
+        persisted = CallbackTask()._persist_status_fields(
+            stale_task_snapshot,
+            {"is_calculated": CalculationModel.SUCCESS},
+        )
+
+        self.assertTrue(persisted)
+        self.obj.refresh_from_db()
+        self.assertEqual(self.obj.is_calculated, CalculationModel.SUCCESS)
+        self.assertEqual(self.obj.name, "fresh-live-value")
+        self.assertEqual(stale_task_snapshot.is_calculated, CalculationModel.SUCCESS)
+
+        new_rows = self._history_rows_since(existing_ids)
+        self.assertEqual(len(new_rows), 1)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.SUCCESS)
+        self.assertEqual(new_rows[0].name, "fresh-live-value")
+
+    def test_recovery_terminal_status_creates_history_row(self):
+        from lex.lex_app.celery_recovery.supervisor import _finalize_calculation_rows
+
+        self.obj.is_calculated = CalculationModel.IN_PROGRESS
+        self.obj.save(skip_hooks=True)
+
+        existing_ids = set(
+            self.HistoryModel.objects.filter(id=self.obj.pk).values_list(
+                "history_id", flat=True
+            )
+        )
+
+        stale_task_snapshot = CalculationHistoryTestModel(
+            id=self.obj.pk,
+            name="stale-task-value",
+        )
+
+        with patch("lex.core.signals.update_calculation_status") as status_spy:
+            _finalize_calculation_rows(
+                {"args": ([stale_task_snapshot],)},
+                CalculationModel.ABORTED,
+                "worker heartbeat expired",
+            )
+
+        status_spy.assert_called_once()
+        self.obj.refresh_from_db()
+        self.assertEqual(self.obj.is_calculated, CalculationModel.ABORTED)
+
+        new_rows = self._history_rows_since(existing_ids)
+        self.assertEqual(len(new_rows), 1)
+        self.assertEqual(new_rows[0].is_calculated, CalculationModel.ABORTED)
+        self.assertEqual(
+            new_rows[0].history_change_reason,
+            "Celery recovery: ABORTED",
+        )
+
     def test_atomic_calculation_error_keeps_single_in_progress_and_error_history_rows(self):
         existing_ids = set(
             self.HistoryModel.objects.filter(id=self.obj.pk).values_list(

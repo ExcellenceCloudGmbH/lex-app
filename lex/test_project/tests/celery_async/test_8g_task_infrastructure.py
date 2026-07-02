@@ -86,8 +86,8 @@ class TestCluster08g_CallbackTask(E2ETestCase):
     These callbacks run on the **caller side** after the Celery worker
     finishes.  The test invokes them directly against a real persisted
     ``CeleryCalc`` — no broker needed — and asserts the row is updated
-    via a direct queryset ``.update()`` (not a full model save, so
-    stale snapshots can't overwrite unrelated columns) and that
+    through a fresh-row save (so stale snapshots can't overwrite unrelated
+    columns, while history signals still fire) and that
     ``ensure_terminal_calculation_audit`` is invoked with the right
     ``audit_status``.
     """
@@ -114,9 +114,9 @@ class TestCluster08g_CallbackTask(E2ETestCase):
         Given: a persisted ``CeleryCalc`` in IN_PROGRESS.
         When:  ``CallbackTask.on_success`` is invoked with the row as args[0].
         Then:  the DB row carries ``is_calculated = "SUCCESS"`` afterwards,
-               proving ``_persist_status_fields`` performed a direct
-               queryset ``.update(is_calculated="SUCCESS")`` without
-               rewriting any other column from the (possibly stale) snapshot.
+               proving ``_persist_status_fields`` saved only callback-managed
+               fields from a fresh row without rewriting unrelated columns from
+               the (possibly stale) task snapshot.
         """
         audit_spy = self._spy_audit()
 

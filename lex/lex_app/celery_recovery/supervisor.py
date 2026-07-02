@@ -183,12 +183,28 @@ def _finalize_calculation_rows(payload: Dict[str, Any], target_status: str, reas
 
     for instance in _extract_calculation_models(payload.get("args")):
         try:
-            model_class = instance.__class__
-            model_class._default_manager.filter(
-                pk=instance.pk, is_calculated=CalculationModel.IN_PROGRESS
-            ).update(is_calculated=target_status, error_message=reason)
-            instance.is_calculated = target_status
-            update_calculation_status(instance, exception_details=reason)
+            update_values = {"is_calculated": target_status}
+            if hasattr(instance, "error_message"):
+                update_values["error_message"] = reason
+            elif hasattr(instance, "calculation_error_message"):
+                update_values["calculation_error_message"] = reason
+
+            persisted = CalculationModel.persist_status_fields_with_history(
+                instance,
+                update_values,
+                history_change_reason=f"Celery recovery: {target_status}",
+                resync_missing=False,
+                require_in_progress=True,
+            )
+            if persisted:
+                update_calculation_status(instance, exception_details=reason)
+            else:
+                logger.info(
+                    "Celery recovery: skipped finalizing %s as %s; no "
+                    "matching IN_PROGRESS row was found.",
+                    instance,
+                    target_status,
+                )
         except Exception:
             logger.warning(
                 "Celery recovery: failed to finalize row %s as %s",
