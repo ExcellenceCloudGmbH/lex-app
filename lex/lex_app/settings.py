@@ -535,12 +535,21 @@ celery_active = CELERY_ACTIVE
 # budget. When the budget is exceeded the supervisor writes a FAILURE to the
 # result backend so the parent's AsyncResult.get() raises.
 #
-# Master switch: LEX_TASK_RECOVERY_ENABLED=false disables every signal handler,
-# the heartbeat thread, and the beat-driven supervisor sweep. Use it for local
-# dev and CI where no real Redis-backed Celery is running.
+# Master switch: LEX_TASK_RECOVERY_ENABLED disables every signal handler, the
+# heartbeat thread, and the beat-driven supervisor sweep when off.
+#
+# Default is OFF. Recovery leaves a stuck IN_PROGRESS row untouched at startup
+# (the liveness-aware sweep skips rows a tracked recovery task owns), on the
+# assumption that a recovery-supervisor pod is running to requeue/resume them.
+# When that pod is not running (local dev, CI, and any deployment that has not
+# provisioned it) the row is orphaned IN_PROGRESS forever. Defaulting OFF keeps
+# the startup sweep in its blind-abort mode so a stuck row is reset on restart.
+# Deployments that DO run the supervisor pod opt in with
+# LEX_TASK_RECOVERY_ENABLED=true (the recovery-supervisor manifest already sets
+# it explicitly). An explicit env var overrides in either direction.
 # ---------------------------------------------------------------------------
 LEX_TASK_RECOVERY_ENABLED = (
-    os.getenv("LEX_TASK_RECOVERY_ENABLED", "true").lower() == "true"
+    os.getenv("LEX_TASK_RECOVERY_ENABLED", "false").lower() == "true"
 )
 LEX_TASK_HEARTBEAT_INTERVAL = int(os.getenv("LEX_TASK_HEARTBEAT_INTERVAL", "5"))
 LEX_TASK_HB_TTL_MULTIPLIER = int(os.getenv("LEX_TASK_HB_TTL_MULTIPLIER", "3"))

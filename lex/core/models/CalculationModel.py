@@ -1263,7 +1263,20 @@ class CalculationModel(LexModel):
                 # Always dispatch. If an explicit async context is active we
                 # reuse it; otherwise we open our own WaitForTasks and block on
                 # the child task. A nested calculation inside a worker therefore
-                # dispatches (and blocks) by default rather than running inline.
+                # dispatches (and blocks) by default rather than running inline,
+                # so nested calcs parallelise across workers.
+                #
+                # Abort-safety (Report 1 — abort→resume): a dispatched nested
+                # task creates a broker message that outlives an abort, and the
+                # broker redelivers it after a restart. That is handled by the
+                # cluster cancel index, NOT by running inline: cancel() persists
+                # a Redis "cancelled" marker for the calculation_id
+                # (mark_cancelled, survives restarts unlike the in-memory
+                # revoke), and every dispatched task — calc_and_save and the
+                # @lex_shared_task wrapper alike — checks that marker at task
+                # start and self-aborts with CalculationCancelled, so a
+                # redelivered child lands CANCELLED instead of silently
+                # resuming.
                 if has_explicit_async_context:
                     task_result = self.dispatch_calculation_task()
                     task_dispatched = True

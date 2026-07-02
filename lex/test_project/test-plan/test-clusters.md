@@ -209,6 +209,20 @@ every beat-driven feature on a `USE_TZ=False` deployment.
 
 ---
 
+### 1w. `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart
+
+**What it tests:** the recovery master switch defaults to **off**, so the startup sweep (`_handle_calculation_model_reset`) stays in blind-abort mode and a stuck `IN_PROGRESS` calculation is reset to `ABORTED` on the next server restart when no recovery-supervisor pod is running (local dev, CI, un-provisioned deploys). The liveness-aware sweep otherwise skips rows a *tracked* recovery task owns — but that ownership record lingers in Redis across a restart, so without a running supervisor the row is orphaned `IN_PROGRESS` forever. The flag gates only the recovery registry/heartbeat/supervisor + the sweep skip-set; it never touches calculation dispatch, so a calculation that dispatches sub-calculations is unaffected either way.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.184 | Env unset ⟹ off | with `LEX_TASK_RECOVERY_ENABLED` absent, `settings.LEX_TASK_RECOVERY_ENABLED is False` — the startup sweep blind-aborts stuck rows on restart |
+| 1.185 | Explicit `=true` opts in | `LEX_TASK_RECOVERY_ENABLED=true` ⟹ `True`, so a deployment running the supervisor pod keeps its dead-worker requeue behaviour |
+| 1.186 | Explicit off + case-insensitive | `=false` ⟹ `False`; `=TRUE` ⟹ `True` (the `.lower() == "true"` parse is casing-tolerant) |
+
+**Scenario range:** 1.184 – 1.186. **Test file:** `lex/test_project/tests/init/test_1w_recovery_default_deployment_target.py`. **Type:** U. **Status:** ✅ Complete (Session 90 — July 1). Source: `lex/lex_app/settings.py` (`LEX_TASK_RECOVERY_ENABLED` default `true` → `false`). Nested-dispatch untouched — 7j/7q/8ab all pass.
+
+---
+
 ## 2. CRUD via REST API
 
 **What it tests:** The full CRUD lifecycle **as a customer performs it** — through authenticated HTTP requests to the REST API. This is how the frontend, integrations, and API clients actually talk to the framework.
@@ -603,7 +617,13 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 **Gap:** A real production calc (`InvestmentPosting`, 65 568 models across 50 clusters) ran *synchronously* instead of dispatching to Celery. Root cause: an `is_celery_worker_process()` worker-detection guard (added commit `40d17b3`, 2026-03-29) made nested fan-out **opt-in** — a calculation already executing inside a Celery worker would collapse its nested work to an inline synchronous run unless the caller opened an explicit async context. This silently serialised large combinatorial calcs onto a single worker slot. The guard was removed in **both** dispatch paths so the default is "always dispatch": `CalculatedModelMixin._dispatch_model_processing` (fan-out) now dispatches whenever `CELERY_ACTIVE` + `.delay` exist, and `CalculationModel.calculate_hook` (single-instance) opens its own `WaitForTasks` when no async context is active (reusing an outer scope when present). When no context is active the dispatcher blocks on the children — correctness/ordering preserved at the cost of holding the worker slot, per the explicit "don't worry about blocking" decision. `is_celery_worker_process()` itself is retained for diagnostics/logging (still asserted correct by 8.6).
 
-**Scenario range:** 7.196 – 7.201. **Test file:** `lex/test_project/tests/calculations/test_7q_worker_default_dispatch.py`. **Type:** E. **Status:** ✅ Complete (Session 86 — June 29). Covers `lex/core/mixins/CalculatedModelMixin.py` (`_dispatch_model_processing`) and `lex/core/models/CalculationModel.py` (`calculate_hook` dispatch branch). 7.196–7.198 drive the mixin (inside-worker, no-context / WaitForTasks / FireAndForget — all fan out to `CeleryTaskDispatcher`, never `calc_and_save_sync`); 7.199–7.201 drive `CalculationModel` (no-context ⇒ own `WaitForTasks` blocks; outer `WaitForTasks` ⇒ drains on scope exit; `FireAndForget` ⇒ never blocks). 6 pass / 0 fail. Companion stale-test updates: `test_calculation_wait_contexts.py`, `test_calculated_model_mixin.py`, and 8.6 message in `test_8b_dispatch_context.py`.
+**Scenario range:** 7.196 – 7.201. **Test file:** `lex/test_project/tests/calculations/test_7q_worker_default_dispatch.py`. **Type:** E. **Status:** ✅ Complete (Session 86 — June 29). Covers `lex/core/mixins/CalculatedModelMixin.py` (`_dispatch_model_processing`) and `lex/core/models/CalculationModel.py` (`calculate_hook` dispatch branch). 7.196–7.198 drive the mixin (inside-worker, no-context / WaitForTasks / FireAndForget — all fan out to `CeleryTaskDispatcher`, never `calc_and_save_sync`); 7.199–7.201 drive `CalculationModel` (outer `WaitForTasks` ⇒ drains on scope exit; `FireAndForget` ⇒ never blocks). 6 pass / 0 fail. Companion stale-test updates: `test_calculation_wait_contexts.py`, `test_calculated_model_mixin.py`, and 8.6 message in `test_8b_dispatch_context.py`. **Session 91 note:** Session 89 briefly flipped scenario 7.199 to inline (an abort-safety guard, draft cluster 7r) — that was withdrawn before commit per the developer's explicit requirement that nested calcs dispatch and parallelise. Always-dispatch is the pinned default on BOTH paths; the abort→resume hole is closed by the cluster cancel marker instead (see 8ad).
+
+---
+
+### 7r. (withdrawn — Session 91) Per-instance inline-inside-worker guard
+
+**Withdrawn before commit.** Session 89 drafted this batch (scenarios 7.202–7.204) to restore an `is_celery_worker_process()` inline guard on the per-instance `CalculationModel.calculate_hook` path as the Report 1 (abort→resume) fix. Live verification showed it broke the framework's core parallelism contract: a nested calc inside a worker (e.g. a project's `CalculateNAV` inside another calculation) ran inline on the parent's worker instead of dispatching to a free one, and only an explicit `WaitForTasks` restored dispatch. Per the developer's explicit requirement ("calculation can dispatch calculations"), the guard, the 7.199 flip, and this batch's test file were withdrawn; always-dispatch (7q) is the pinned default on both paths. Report 1 abort-safety is provided by the restart-surviving cluster cancel marker instead — see **cluster 8ad**. Letter 7r stays reserved for this record; scenarios 7.202–7.204 were never landed and the next cluster-7 batch may reuse them.
 
 ---
 
@@ -726,6 +746,28 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 | 8.138 | Explicit `FireAndForget` reused, safe join | end-to-end inside a worker with an active `FireAndForget`: no implicit WFT (fire-and-forget preserved) and the join stays worker-safe |
 
 **Scenario range:** 8.129 – 8.138. **Test file:** `lex/test_project/tests/celery_async/test_8ab_dispatcher_join_worker_safe.py`. **Type:** U. **Status:** ✅ Complete (Session 88 — July 1). Allocated `8ab` (next free letter after `8aa`); 8.129 picks up after cluster-8 scenario max 8.128. Source: `lex/core/tasks/CeleryTaskDispatcher.py` (`_handle_task_results` join wrap; `dispatch_calculation_groups` nested-in-worker path). 10 U scenarios pass locally (broker-/DB-free).
+
+---
+
+### Cluster 8ac — Complete-sync fallback is idempotent (Report 2 duplicate-key fix)
+
+**Gap:** when the Celery fan-out setup crashes part-way, `CeleryTaskDispatcher.dispatch_calculation_groups` falls back to running every model inline via `calc_and_save_sync(all_models)`. Production Report 2 (local, `celery --concurrency 3` + 14 workers): `connection to server at "localhost" port 5432 failed: FATAL: sorry, too many clients already` → this fallback fired → `duplicate key value violates unique constraint "defining_fields_EndBalance"` (558 models). Mechanism: `_prepare_models_for_processing` dedup-resolves every model against the DB at T0 (before dispatch) and resets pks that had no existing row for a fresh INSERT. During fan-out a sibling child task commits row X; a later group trips the connection storm; the complete-sync fallback then blind-`save()`s the T0-prepared sibling whose pk is still null → a second INSERT collides with X. Unlike the normal (`_prepare_models_for_processing`) and streaming (`calc_and_save_streaming`) paths, the legacy `calc_and_save_sync` did **not** re-resolve before save — the idempotency gap. **Fix (Option A, chosen over restoring the mixin inline guard so 7q's parallel fan-out is preserved):** `calc_and_save_sync` now calls `delete_models_with_same_defining_fields()` immediately before save, mirroring `calc_and_save_streaming` — 1 existing row → returns it (UPDATE), 0 → pk already reset (INSERT). The resolver is itself idempotent, so re-preparing an as-yet-uncommitted model is a no-op. One edit fixes all four fallback call sites (`CeleryTaskDispatcher.py:147, 229, 378, 412`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.139 | Fallback UPDATEs a sibling's committed row | existing (US, A) row + fresh (US, A) instance (pk reset at T0) → `calc_and_save_sync` re-resolves → no IntegrityError, exactly 1 (US, A) row, same pk as the committed one (UPDATE not INSERT), name set by `calculate()` |
+| 8.140 | Fallback INSERTs a fresh model | no (EU, B) row + fresh (EU, B) instance → INSERTs exactly one row, name set — the re-resolve is a no-op when nothing exists |
+| 8.141 | End-to-end complete fallback, no duplicate key | existing (US, A) row + group `[(US,A),(EU,B)]`; `_dispatch_single_group` raises a simulated connection storm → `dispatch_calculation_groups` runs the complete-sync fallback over all models → NO duplicate-key IntegrityError; (US, A) UPDATEd (same pk), (EU, B) INSERTed, one row each |
+
+**Scenario range:** 8.139 – 8.141. **Test file:** `lex/test_project/tests/celery_async/test_8ac_sync_fallback_idempotent.py`. **Type:** I (real DB — `CombinatorialCalc.defining_fields=[region,category]` yields a real UNIQUE constraint). **Status:** ✅ Complete (Session 89 — July 1). Allocated `8ac` (next free letter after `8ab`); 8.139 picks up after cluster-8 scenario max 8.138. Source: `lex/core/mixins/CalculatedModelMixin.py` (`calc_and_save_sync` re-resolve-before-save), `lex/core/tasks/CeleryTaskDispatcher.py` (complete-sync fallback path). 3 pass / 0 fail.
+
+---
+
+### Cluster 8ad — Dispatched @lex_shared_task self-aborts on the cluster cancel marker (Report 1 fix, dispatch preserved)
+
+**Gap:** nested calculations DISPATCH by default (7q) — they must parallelise across workers, never collapse inline. That leaves the Report 1 abort→resume hole: a dispatched nested task is a broker message that outlives an abort (local cancellation is an in-memory revoke), so after a server+worker restart the broker redelivers the still-unacked task and the "cancelled" calculation silently resumes. The framework already had the right mechanism: `cancel()` persists a Redis "cancelled" marker per calculation_id (`cluster_cancel_index.mark_cancelled`, survives restarts), and `calc_and_save` checks it at task start. But a **decorated** calculate method (`@lex_shared_task`, e.g. a project's `CalculateNAV.calculate`) dispatches directly via `func.delay` and never consulted the marker — the uncovered hole. **Fix:** the generic `lex_shared_task` wrapper now performs the same cooperative check at task start — a dispatched execution (a `context` kwarg carrying a calculation_id) whose calc is marked cancelled raises `CalculationCancelled` before running anything, landing CANCELLED instead of resuming. Direct synchronous calls carry no context and never touch the cancel index (zero Redis dependency in sync mode; without Redis there is no broker to redeliver anyway).
+
+**Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
 ---
 

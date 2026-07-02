@@ -942,7 +942,24 @@ def calc_and_save_sync(models, *args):
                 continue
             
             logger.debug(f"Processing model {i + 1}/{model_count} of type {model.__class__.__name__}")
-            
+
+            # Re-resolve the model against the DB immediately before writing so
+            # this sync path is IDEMPOTENT. This function is the fallback that
+            # runs when a Celery fan-out fails part-way (e.g. a connection storm
+            # under high --concurrency): by then some sibling child tasks may
+            # have ALREADY committed their rows. The upstream stage-2 prepare
+            # (_prepare_models_for_processing) resolved duplicates BEFORE
+            # dispatch, so a model whose row a child has since committed still
+            # carries a null pk here and a blind save() would INSERT a second
+            # row -> "duplicate key defining_fields_<Model>". Calling
+            # delete_models_with_same_defining_fields() again re-resolves at
+            # fallback time: 1 existing row -> returns it (save UPDATEs); 0 ->
+            # pk already reset (save INSERTs). The resolver is itself
+            # idempotent, so re-preparing an as-yet-uncommitted model is a
+            # no-op. Mirrors calc_and_save_streaming, which already resolves
+            # per model before save.
+            prepared = model.delete_models_with_same_defining_fields()
+
             # Calculate and save the model
             try:
                 # Push the child model onto the model_context stack so that
@@ -951,26 +968,26 @@ def calc_and_save_sync(models, *args):
                 from lex.core.models.CalculationModel import calculation_execution_context
                 with calculation_execution_context():
                     try:
-                        model.lex_func()(*args)
+                        prepared.lex_func()(*args)
                         logger.debug(f"Calculation completed for model {i + 1}")
                     except Exception as calc_error:
                         raise CalculatedModelError(
                             f"Calculation failed for model {i + 1}: {str(calc_error)}",
-                            model_class=model.__class__.__name__,
+                            model_class=prepared.__class__.__name__,
                             model_index=i,
                             total_models=model_count
                         ) from calc_error
 
                     # Save the model
-                    model.save()
+                    prepared.save()
                 logger.debug(f"Successfully saved model {i + 1}")
-                
+
             except CalculatedModelError:
                 raise
             except Exception as save_error:
                 raise CalculatedModelError(
                     f"Save failed for model {i + 1}: {save_error}",
-                    model_class=model.__class__.__name__,
+                    model_class=prepared.__class__.__name__,
                     model_index=i,
                     total_models=model_count,
                 ) from save_error
