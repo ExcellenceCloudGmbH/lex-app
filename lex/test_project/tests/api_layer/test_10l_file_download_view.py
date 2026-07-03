@@ -4,13 +4,13 @@ Sub-cluster 10l — `FileDownloadView` storage-type dispatch.
 Targets `lex/api/views/file_operations/FileDownload.py` (33.33% baseline,
 ~20 missed lines). This APIView is the **single GET endpoint** the
 React file widget hits when a user clicks a download link on a
-`FileField` column. A regression in **any** of its four branches —
-missing-pk, LOCAL filesystem, GCS public-URL, SharePoint binary — is
+`FileField` column. A regression in **any** of its branches —
+missing-pk, LOCAL filesystem, cloud public-URL, SharePoint binary — is
 customer-visible the moment they click a download:
 
 1. Wrong pk handling → "File not found" toast on rows the user can
    actually see (data is there, lookup is wrong).
-2. Wrong `STORAGE_TYPE` dispatch → a customer deployed on GCS gets a
+2. Wrong `STORAGE_TYPE` dispatch → a customer deployed on cloud storage gets a
    filesystem `FileResponse` (or vice versa), which either streams
    `None.path` (AttributeError 500) or returns an unsigned URL the
    browser can't reach.
@@ -186,13 +186,11 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         self.assertIsInstance(response, FileResponse)
 
     def test_10_54_unknown_storage_type_falls_through_to_local(self):
-        """Any value that is not SHAREPOINT / GCS lands in the LOCAL else.
+        """Any value that is not SHAREPOINT / GCS / AZURE_BLOB lands in LOCAL.
 
-        Pinned so a future "STORAGE_TYPE=AZURE_BLOB" deploy that
-        forgot to add a branch fails loudly at the request boundary
-        (file path lookup against an Azure URL → FileNotFoundError →
-        404 JsonResponse) instead of silently dispatching to GCS
-        because the elif chain happened to fall through.
+        Pinned so a future unsupported provider fails loudly at the
+        request boundary instead of silently dispatching to another
+        cloud branch because the elif chain happened to fall through.
         """
         instance = SimpleNamespace(document=SimpleNamespace(path="/tmp/y.bin"))
         view = _build_view()
@@ -200,7 +198,7 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         kwargs = _build_kwargs(instance=instance)
 
         fake_fp = MagicMock()
-        with patch.dict("os.environ", {"STORAGE_TYPE": "AZURE_BLOB"}, clear=False), \
+        with patch.dict("os.environ", {"STORAGE_TYPE": "S3"}, clear=False), \
              patch("lex.api.views.file_operations.FileDownload.open",
                    return_value=fake_fp, create=True) as mock_open:
             response = view.get(request, **kwargs)
@@ -319,14 +317,14 @@ class TestCluster10l_SharePointStorage(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 10.52 — GCS branch
+# 10.52 / 10.55 — cloud storage URL branches
 # ---------------------------------------------------------------------------
 
 
 class TestCluster10l_GCSStorage(SimpleTestCase):
-    """10.52: GCS returns a JSON envelope with the signed/public URL.
+    """10.52 + 10.55: cloud storage returns a signed/public URL envelope.
 
-    The browser downloads directly from GCS — the API never streams the
+    The browser downloads directly from cloud storage — the API never streams the
     bytes through Django. A regression that returned `FileResponse`
     instead (e.g. someone reused the LOCAL branch by mistake) would
     burn server bandwidth + memory on every download and also break
@@ -359,4 +357,28 @@ class TestCluster10l_GCSStorage(SimpleTestCase):
         )
         self.assertIn(b"download_url", response.content)
 
+    def test_10_55_azure_blob_returns_download_url_json(self):
+        file_obj = SimpleNamespace(
+            url="https://lexstore.blob.core.windows.net/uploads/file.pdf?signed"
+        )
+        instance = SimpleNamespace(document=file_obj)
+        view = _build_view()
+        request = _build_request()
+        kwargs = _build_kwargs(instance=instance)
+
+        with patch.dict("os.environ", {"STORAGE_TYPE": "AZURE_BLOB"}, clear=False):
+            response = view.get(request, **kwargs)
+
+        self.assertIsInstance(
+            response,
+            JsonResponse,
+            "AZURE_BLOB branch must match GCS semantics: the browser fetches "
+            "the signed Blob URL directly instead of streaming through Django.",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            b"https://lexstore.blob.core.windows.net/uploads/file.pdf?signed",
+            response.content,
+        )
+        self.assertIn(b"download_url", response.content)
 

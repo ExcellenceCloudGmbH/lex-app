@@ -51,8 +51,8 @@ class FileDownloadView(APIView):
             bytesio_object = BytesIO(binary_file.content)
             return FileResponse(bytesio_object)
 
-        elif storage_type == "GCS":
-            # Cloud storage usually just needs the public/signed URL
+        elif storage_type in ("GCS", "AZURE_BLOB"):
+            # Cloud storage usually just needs the public/signed URL.
             return JsonResponse({"download_url": file_obj.url})
 
         else:

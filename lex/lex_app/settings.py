@@ -172,6 +172,21 @@ if os.getenv("STORAGE_TYPE") == "GCS":
     )
     MEDIA_ROOT = "uploads/"
 
+if os.getenv("STORAGE_TYPE") == "AZURE_BLOB":
+    STORAGES = {
+        "default": {
+            "BACKEND": "lex.utilities.utils.azure_blob_utils.Media",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+        },
+    }
+    AZURE_ACCOUNT_NAME = os.getenv("AZURE_ACCOUNT_NAME")
+    AZURE_ACCOUNT_KEY = os.getenv("AZURE_ACCOUNT_KEY")
+    AZURE_CONTAINER = os.getenv("AZURE_CONTAINER", "uploads")
+    AZURE_SSL = os.getenv("AZURE_SSL", "true").lower() != "false"
+    MEDIA_ROOT = "uploads/"
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
@@ -404,6 +419,18 @@ DATABASES = {
         "HOST": os.getenv("DATABASE_DOMAIN", "envvar_not_existing"),
         "PORT": "5432",
         "OPTIONS": {"sslmode": "disable"},
+        "TEST": {
+            "NAME": os.getenv("DATABASE_NAME", "envvar_not_existing"),
+        },
+    },
+    "AZURE": {
+        "ENGINE": "django.db.backends.postgresql_psycopg2",
+        "NAME": os.getenv("DATABASE_NAME", "envvar_not_existing"),
+        "USER": db_username,
+        "PASSWORD": os.getenv("POSTGRES_PASSWORD", "envvar_not_existing"),
+        "HOST": os.getenv("DATABASE_DOMAIN", "envvar_not_existing"),
+        "PORT": "5432",
+        "OPTIONS": {"sslmode": os.getenv("POSTGRES_SSLMODE", "require")},
         "TEST": {
             "NAME": os.getenv("DATABASE_NAME", "envvar_not_existing"),
         },
