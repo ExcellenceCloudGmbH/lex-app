@@ -107,6 +107,10 @@ jobs:
           pip install --upgrade pip setuptools wheel
           pip install --prefer-binary -r requirements.txt
           pip install -e .
+          # requirements.txt does not declare PyYAML explicitly (it currently
+          # only arrives transitively via other deps); install it directly so
+          # the test-plan aggregates steps below can rely on `import yaml`.
+          pip install pyyaml
 
       # ── 1. Discover mode from the linked issue ─────────────────
       # Copilot's coding agent does NOT reliably emit "Fixes #N" in the
@@ -208,6 +212,12 @@ jobs:
             --files-json files.json \
             --body-file body.txt \
             --linked-issue "${{ steps.mode.outputs.issue }}" | tee shape.out
+
+      - name: Test-plan dashboard freshness
+        run: python .github/scripts/test_plan_aggregates.py check
+
+      - name: Test-plan allocation consistency
+        run: python .github/scripts/test_plan_aggregates.py validate
 
       - name: On shape failure, label + comment
         # Scope to the shape step only. Previously this used a bare
