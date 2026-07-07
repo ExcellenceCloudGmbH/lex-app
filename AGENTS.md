@@ -48,7 +48,7 @@ work must mirror what the cloud agent does.
 **Tests are derived from intent (docs), never by mirroring the implementation you just wrote.**
 Writing a test that asserts whatever the code happens to do locks in bugs — this is the single most
 common failure here (see the Golden Rule in
-[`lex/test_project/test-plan/test-clusters.md`](lex/test_project/test-plan/test-clusters.md)).
+[`lex/test_project/test-plan/testing-philosophy.md`](lex/test_project/test-plan/testing-philosophy.md)).
 
 Where the tests go and how they're named is **strict** — do not improvise:
 
@@ -69,11 +69,11 @@ Where the tests go and how they're named is **strict** — do not improvise:
 - **Allocation:** map **each surface** to its owning cluster by *what the surface is*, not where the
   source line lives (a REST surface belongs to the API cluster even if the code sits on a model) —
   often more than one cluster, and surfaces in different clusters become separate batches. Take the
-  **next free letter** for each cluster and continue scenario IDs from its current max. The
-  authoritative source is
-  [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md) — **read it to allocate;
-  never guess the letter.** If you can't confidently place a surface, or it genuinely can't be
-  exercised in the test environment, **stop and ask** — never silently omit it and still call the
+  **next free letter** for each cluster (first lowercase letter absent from `letters:`) and continue
+  scenario IDs from `max_scenario + 1`. The authoritative source is the target cluster's
+  [`clusters/NN-<slug>/allocation.yaml`](lex/test_project/test-plan/clusters/) — **read it to
+  allocate; never guess the letter.** If you can't confidently place a surface, or it genuinely can't
+  be exercised in the test environment, **stop and ask** — never silently omit it and still call the
   change tested.
 - **Names:** file `test_<NN><letter>_<short>.py`, class `TestCluster<NN><letter>_<Description>`,
   module-level `pytestmark = pytest.mark.<cluster_slug>`, methods `test_<NN>_<NN>_<behaviour>` with a
@@ -89,17 +89,19 @@ finishing, not optional cleanup. This is the **same checklist the cloud Copilot 
 every PR** (`.github/scripts/copilot_assemble_prompt.py` → "Required deliverables"); local work
 matches it so the two paths don't drift:
 
-1. **Append a row to [`session-log.md`](lex/test_project/test-plan/progress/session-log.md)** — the
-   universal per-PR record ("the Copilot test-bot writes here as part of every PR"). Append-only,
-   bottom row, never re-order.
-2. **Update the cluster status / scenario range** in
-   [`test-clusters.md`](lex/test_project/test-plan/test-clusters.md) for each touched (sub-)cluster,
-   and bump [`dashboard.md`](lex/test_project/test-plan/progress/dashboard.md).
-3. **If the work maps to a planned batch**, append/update the batch row in
-   [`test-writing-plan.md`](lex/test_project/test-plan/test-writing-plan.md): scenario range, type
+1. **Add a NEW file under [`progress/sessions/`](lex/test_project/test-plan/progress/sessions/)**
+   named `YYYY-MM-DD-<slug>.md` — the universal per-PR record. Never a counter; slug = batch id or
+   branch name. Front-matter: `date`, `clusters`, `tests_added`, `suite_tally`. Body: short prose
+   leading with the batch — link it in the cluster's `batches.md`, never restate it.
+2. **Edit the per-cluster shards** under
+   [`clusters/NN-<slug>/`](lex/test_project/test-plan/clusters/) for each touched (sub-)cluster: bump
+   `max_scenario` + add the letter entry in `allocation.yaml`, extend `cluster.md`'s scenario table
+   when you defined new scenarios. Then regenerate the dashboard: `python
+   .github/scripts/test_plan_aggregates.py build` (commit `progress/dashboard.md`; never hand-edit).
+3. **Append the batch block** to the cluster's `clusters/NN-<slug>/batches.md`: scenario range, type
    (U/I/E), files covered, test file path, test classes, fixtures, status.
 4. **Run the tests** (`python -m lex pytest <path>`) and record real results (`N pass / 0 fail`,
-   coverage gain) in the rows above.
+   coverage gain) in `allocation.yaml`/`batches.md` above.
 5. **If a test surfaced broken framework behaviour**, record it in
    [`known-bugs.md`](lex/test_project/test-plan/known-bugs.md) (assert the *correct* behaviour, mark
    `@unittest.expectedFailure` / `@pytest.mark.xfail(strict=True)`, add a `BUG-NNN` row) — **never
@@ -147,8 +149,9 @@ If the developer says **no**, leave the commits as they are and continue.
 | Topic | Where |
 | --- | --- |
 | Testing rules (read before writing any test) | [`.github/instructions/testing.instructions.md`](.github/instructions/testing.instructions.md) |
-| Authoritative test-plan (clusters, allocation, Golden Rule, bug tracker) | [`lex/test_project/test-plan/`](lex/test_project/test-plan/) |
-| Test conventions (naming, run commands, quality gates) | [`lex/test_project/test-plan/progress/conventions.md`](lex/test_project/test-plan/progress/conventions.md) |
+| Authoritative test-plan (sharded per-cluster `clusters/NN-<slug>/`, allocation, bug tracker) | [`lex/test_project/test-plan/`](lex/test_project/test-plan/) |
+| Golden Rule + testing philosophy | [`lex/test_project/test-plan/testing-philosophy.md`](lex/test_project/test-plan/testing-philosophy.md) |
+| Test conventions (naming, run commands, quality gates, surface rule) | [`lex/test_project/test-plan/progress/conventions.md`](lex/test_project/test-plan/progress/conventions.md) |
 | Framework conventions & feature docs | [`docs/`](docs/) |
 | Session history & CI/CD architecture | [`CLAUDE.md`](CLAUDE.md), [`docs/ci-cd/`](docs/ci-cd/) |
 | Claude Code skill for cluster tests | [`.claude/skills/lex-testing/SKILL.md`](.claude/skills/lex-testing/SKILL.md) |

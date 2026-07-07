@@ -3,7 +3,7 @@
 > **Back to:** [Progress index](../progress.md) | [Test Plan Index](../index.md)
 > **Audience:** anyone authoring a new test (human or Copilot) — the stable rules that don't change per session.
 
-This file owns the methodology, naming, and quality gates. The high-churn per-cluster status lives in [`dashboard.md`](dashboard.md); the per-session narrative lives in [`session-log.md`](session-log.md).
+This file owns the methodology, naming, and quality gates. The high-churn per-cluster status lives in the generated [`dashboard.md`](dashboard.md) (rebuild it with `python .github/scripts/test_plan_aggregates.py build` — never hand-edit); the per-session narrative lives as one file per session under [`sessions/`](sessions/).
 
 ---
 
@@ -11,7 +11,7 @@ This file owns the methodology, naming, and quality gates. The high-churn per-cl
 
 ### Rule: Work in Cluster Order
 
-Clusters are ordered by the user journey (see [test-clusters.md](../test-clusters.md#ordering-the-user-journey)). We implement them **in order** because each cluster builds on the one before it:
+Clusters are ordered by the user journey (see [testing-philosophy.md → Ordering](../testing-philosophy.md#ordering-the-user-journey)). We implement them **in order** because each cluster builds on the one before it:
 
 ```
 1. Initial Data → 2. CRUD → 3. Validation → 4. Permissions → 5. History → ...
@@ -25,7 +25,7 @@ Don't start Cluster N+1 until Cluster N is  or . This keeps work focused and pro
 
 ### Rule: Test Intent, Never Overfit to Source Code
 
-> Canonical statement (philosophy + red flags) lives in **[test-clusters.md → Testing Philosophy](../test-clusters.md#testing-philosophy)**. Read it once before writing any test.
+> Canonical statement (philosophy + red flags) lives in **[testing-philosophy.md → Testing Philosophy](../testing-philosophy.md#testing-philosophy)**. Read it once before writing any test.
 >
 > Operational corollary for this file: when a test exposes a bug, mark it `@unittest.expectedFailure`, add the bug to the [Known Bugs Tracker](../known-bugs.md), and continue — see the next rule.
 
@@ -41,6 +41,20 @@ When a test exposes a framework bug:
 `@pytest.mark.xfail(strict=True)` is an acceptable equivalent for tests
 authored after the pytest cutover, but existing `@unittest.expectedFailure`
 markers are not bulk-converted.
+
+## Where to Write What (single home per fact)
+
+| Fact | Its ONLY home |
+|---|---|
+| Scenario intent + definition | `clusters/NN-<slug>/cluster.md` |
+| Batch write-up (files, classes, fixtures, results) | `clusters/NN-<slug>/batches.md` |
+| Allocation state (letters, max scenario, status, counts) | `clusters/NN-<slug>/allocation.yaml` |
+| Session narrative | one NEW file in `progress/sessions/` — link the batch, never restate it |
+| Bug ledger | `known-bugs.md` |
+| Dashboard | ⚙ generated — run `python .github/scripts/test_plan_aggregates.py build` |
+
+Everything else links. If you are about to write the same fact in a second place, stop
+and link instead.
 
 ---
 
@@ -192,7 +206,7 @@ coverage report
 
 A cluster is ** Complete** when:
 
-1. ✅ Every scenario from [test-clusters.md](../test-clusters.md) has a corresponding test method
+1. ✅ Every scenario from the cluster's [`clusters/NN-<slug>/cluster.md`](../clusters/) has a corresponding test method
 2. ✅ All tests either **pass** or are marked `@unittest.expectedFailure` (or `@pytest.mark.xfail(strict=True)`) with a tracked bug reference
 3. ✅ Tests use the canonical customer code path (no `skip_hooks`, no `calculate_hook()` in E2E tests)
 4. ✅ Tests run in CI without flakiness (3 consecutive green runs)
@@ -218,4 +232,4 @@ release, all must hold:
 
 ---
 
-> **Back to:** [Progress index](../progress.md) | **See also:** [Test Clusters](../test-clusters.md) | [Dashboard](dashboard.md) | [Session Log](session-log.md)
+> **Back to:** [Progress index](../progress.md) | **See also:** [Testing Philosophy](../testing-philosophy.md) | [Clusters](../clusters/) | [Dashboard](dashboard.md) | [Session Fragments](sessions/)
