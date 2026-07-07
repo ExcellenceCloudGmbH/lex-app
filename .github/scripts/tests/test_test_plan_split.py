@@ -10,6 +10,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from test_plan_split import (  # noqa: E402
     extract_facts,
+    run,
     seed_allocation,
     split_clusters_md,
     split_sessions_md,
@@ -129,3 +130,34 @@ class TestFacts:
         assert ("1", "a") in facts.letters            # 1a heading
         assert "BUG-004" in facts.bugs
         assert "2026-04-19" in facts.dates
+
+
+class TestRun:
+    def _write_monoliths(self, plan_dir, sessions_md):
+        (plan_dir / "progress").mkdir(parents=True)
+        (plan_dir / "test-clusters.md").write_text(CLUSTERS_MD)
+        (plan_dir / "test-writing-plan.md").write_text(WRITING_PLAN_MD)
+        (plan_dir / "progress" / "session-log.md").write_text(sessions_md)
+        (plan_dir / "progress" / "dashboard.md").write_text("# dash\n")
+
+    def test_lossy_input_hard_fails_and_writes_nothing(self, tmp_path):
+        # A malformed row (bad date cell) fails SESSION_ROW_RE, so its unique
+        # facts (BUG-999, 2026-05-05 inside the prose) never reach the planned
+        # tree — run() must return 1 and write NOTHING even with apply=True.
+        lossy = SESSIONS_MD + "| 2026 | 3 | BUG-999 surfaced on 2026-05-05. | 1 | 1 | 1 |\n"
+        plan = tmp_path / "plan"
+        self._write_monoliths(plan, lossy)
+        assert run(plan, apply=True) == 1
+        assert not (plan / "clusters").exists()
+        assert not (plan / "testing-philosophy.md").exists()
+        assert not (plan / "progress" / "sessions").exists()
+
+    def test_clean_input_applies(self, tmp_path):
+        plan = tmp_path / "plan"
+        self._write_monoliths(plan, SESSIONS_MD)
+        assert run(plan, apply=True) == 0
+        assert (plan / "clusters" / "01-init" / "allocation.yaml").is_file()
+        assert (plan / "clusters" / "01-init" / "cluster.md").is_file()
+        assert (plan / "testing-philosophy.md").is_file()
+        frags = list((plan / "progress" / "sessions").glob("*.md"))
+        assert len(frags) == 2

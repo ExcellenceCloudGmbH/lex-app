@@ -111,6 +111,7 @@ def seed_allocation(number: int, slug: str, title: str, sources: str) -> dict:
         if int(m.group(1)) != number:
             continue
         letter, rest = m.group(2), m.group(3)
+        # 200-char window: tuned against observed batch-heading formats (✅ sits on or just after the heading line), not a general rule.
         done = "✅" in rest or "✅" in sources[m.start(): m.start() + 200]
         letters.setdefault(
             letter,
@@ -188,6 +189,7 @@ def run(plan_dir: Path, apply: bool) -> int:
         slug = CLUSTER_SLUGS.get(num)
         if slug is None:
             print(f"WARNING: cluster {num} has no known slug — review manually")
+            # non-fatal here: the fact audit below hard-fails if this skip drops content.
             continue
         d = plan_dir / "clusters" / f"{num:02d}-{slug}"
         planned[d / "cluster.md"] = body
