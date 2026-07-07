@@ -115,4 +115,4 @@ Our old tests optimized for **green checkmarks**. The new tests optimize for **d
 
 ---
 
-> **Back to:** [Test Plan Index](index.md) | **Next:** [Test Clusters](test-clusters.md)
+> **Back to:** [Test Plan Index](index.md) | **Next:** [Testing Philosophy](testing-philosophy.md) · [Clusters](clusters/)

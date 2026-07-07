@@ -20,7 +20,7 @@ The new approach tests the framework **the way a customer uses it**: create mode
 >
 > The source code is an **incomplete story**. It has bugs, shortcuts, and workarounds. Tests must derive their expectations from **documented intent** and **reasonable customer expectations** — not from reading the current implementation.
 >
-> If the code does the wrong thing, the test should fail. That failure is the test doing its job. See [full rules in test-clusters.md](test-clusters.md#testing-philosophy).
+> If the code does the wrong thing, the test should fail. That failure is the test doing its job. See [full rules in testing-philosophy.md](testing-philosophy.md#the-rules).
 
 ---
 

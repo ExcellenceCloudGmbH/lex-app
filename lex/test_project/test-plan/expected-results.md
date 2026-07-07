@@ -82,4 +82,4 @@ Each phase delivers a working, CI-gated test suite for its clusters before movin
 
 ---
 
-> **Back to:** [Test Plan Index](index.md) | **Next:** [Test Clusters](test-clusters.md)
+> **Back to:** [Test Plan Index](index.md) | **Next:** [Testing Philosophy](testing-philosophy.md) · [Clusters](clusters/)

@@ -9,7 +9,7 @@
 > **Goal:** turn every file in that list into one or more sub-cluster batches with concrete scenario IDs, test-class targets, fixtures, and an execution order.
 > **Naming:** new sub-clusters extend existing clusters with the next free letter (e.g. cluster 6 already has 6a–6f → next is **6g**). Scenario IDs continue from the cluster's current max. Cluster numbers themselves are **never renumbered** — that would invalidate report/progress tracking.
 > **Test types:** **U** = `SimpleTestCase` (no DB), **I** = `TestCase` (per-test transaction), **E** = REST through `APIClient`.
-> **Back to:** [Index](index.md) · [Clusters](test-clusters.md) · [Cleanup plan](cleanup-and-coverage-plan.md)
+> **Back to:** [Index](index.md) · [Testing Philosophy](../testing-philosophy.md) · [Cleanup plan](cleanup-and-coverage-plan.md)
 
 ---
 
