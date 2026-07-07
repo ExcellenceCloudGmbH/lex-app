@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 186
+max_scenario: 194
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -175,7 +175,7 @@ letters:
       on behind the pooling proxy → `InvalidCursorName` on every `.iterator()`; now set per
   u:
     title: Fast ASGI health/readiness probes
-    scenarios: 1.171-1.178
+    scenarios: 1.171-1.175
     status: complete
     tests:
       pass: 5
@@ -203,3 +203,14 @@ letters:
       xfail: 0
     note: scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck
       `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi
+  x:
+    title: Health exposes encrypted runtime metadata for the Instance Controller
+    scenarios: 1.187-1.194
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: 'scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision
+      fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py;
+      moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC.'

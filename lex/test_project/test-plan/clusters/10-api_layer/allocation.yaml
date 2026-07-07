@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 69
+max_scenario: 71
 letters:
   a:
     title: ''
@@ -53,14 +53,15 @@ letters:
     note: 10.15–10.16b
   g:
     title: Calculation-log tree, clean, init, PDF
-    scenarios: 10.15-10.19
+    scenarios: 10.17-10.19,10.70-10.71
     status: complete
     tests:
       pass: 0
       skip: 0
       xfail: 0
-    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
-      recorded
+    note: 'counts folded into cluster top-line in pre-migration dashboard. On-disk file is
+      test_10g_one_endpoint_lifecycle.py; 10.15–10.16 renumbered to 10.70–10.71 on 2026-07-07
+      (BUG-023) — they collided with letter 10f (global search), which owns 10.15–10.16.'
   h:
     title: File operations & SharePoint
     scenarios: ''

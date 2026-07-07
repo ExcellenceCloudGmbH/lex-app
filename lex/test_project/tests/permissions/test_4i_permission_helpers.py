@@ -257,14 +257,14 @@ class TestCluster04i_KeycloakFallback(SimpleTestCase):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 4.31 — allow_all_except_sensitive (default sensitive set)
+# 4.71 — allow_all_except_sensitive (default sensitive set)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 class TestCluster04i_AllowAllExceptSensitive(SimpleTestCase):
-    """Scenario 4.31 — sensitive-field exclusion shortcut."""
+    """Scenario 4.71 — sensitive-field exclusion shortcut."""
 
-    def test_4_31_default_sensitive_set_excludes_pii(self) -> None:
+    def test_4_71_default_sensitive_set_excludes_pii(self) -> None:
         """No argument → uses the documented PII default set."""
         item = ProtectedItem(name="x")
         result = item.allow_all_except_sensitive(_uc())
@@ -274,7 +274,7 @@ class TestCluster04i_AllowAllExceptSensitive(SimpleTestCase):
         for sensitive in ("password", "ssn", "credit_card", "bank_account"):
             self.assertIn(sensitive, result.excluded_fields)
 
-    def test_4_31_custom_sensitive_list_overrides_default(self) -> None:
+    def test_4_71_custom_sensitive_list_overrides_default(self) -> None:
         """Explicit ``sensitive_fields`` replaces the default set entirely."""
         item = ProtectedItem(name="x")
         result = item.allow_all_except_sensitive(_uc(), {"my_secret"})
@@ -282,14 +282,14 @@ class TestCluster04i_AllowAllExceptSensitive(SimpleTestCase):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 4.32 — allow_public_fields / allow_basic_fields
+# 4.72 — allow_public_fields / allow_basic_fields
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 class TestCluster04i_AllowPublicAndBasicFields(SimpleTestCase):
-    """Scenario 4.32 — ``allow_public_fields`` / ``allow_basic_fields`` return a documented allowlist."""
+    """Scenario 4.72 — ``allow_public_fields`` / ``allow_basic_fields`` return a documented allowlist."""
 
-    def test_4_32_public_fields_returns_documented_allowlist(self) -> None:
+    def test_4_72_public_fields_returns_documented_allowlist(self) -> None:
         item = ProtectedItem(name="x")
         result = item.allow_public_fields(_uc())
         self.assertTrue(result.allowed)
@@ -300,7 +300,7 @@ class TestCluster04i_AllowPublicAndBasicFields(SimpleTestCase):
              "created_at", "edited_at", "updated_at"},
         )
 
-    def test_4_32_basic_fields_returns_documented_allowlist(self) -> None:
+    def test_4_72_basic_fields_returns_documented_allowlist(self) -> None:
         item = ProtectedItem(name="x")
         result = item.allow_basic_fields(_uc())
         self.assertTrue(result.allowed)
@@ -310,12 +310,12 @@ class TestCluster04i_AllowPublicAndBasicFields(SimpleTestCase):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 4.33 — Helper composition: chaining produces the documented short-circuit
+# 4.73 — Helper composition: chaining produces the documented short-circuit
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 class TestCluster04i_HelperCompositionContract(SimpleTestCase):
-    """Scenario 4.33 — helper return-shape contract that makes ``or``-chaining safe.
+    """Scenario 4.73 — helper return-shape contract that makes ``or``-chaining safe.
 
     The whole point of the convenience helpers is that they compose
     cleanly in the documented one-liner:
@@ -333,7 +333,7 @@ class TestCluster04i_HelperCompositionContract(SimpleTestCase):
     scenario locks that contract down in one place.
     """
 
-    def test_4_33_intermediate_helpers_return_none_or_permission_result(self) -> None:
+    def test_4_73_intermediate_helpers_return_none_or_permission_result(self) -> None:
         item = ProtectedItem(name="x")
         # Each intermediate helper called with a context that does NOT
         # satisfy it must return ``None``, never a denied result.
@@ -343,7 +343,7 @@ class TestCluster04i_HelperCompositionContract(SimpleTestCase):
         ok = item.allow_all_if_superuser(_uc(is_superuser=True))
         self.assertIsInstance(ok, PermissionResult)
 
-    def test_4_33_documented_chain_short_circuits_at_first_match(self) -> None:
+    def test_4_73_documented_chain_short_circuits_at_first_match(self) -> None:
         """The documented chain stops at the first helper that returns truthy.
 
         We assert behaviour of the actual ``or``-chain because the
@@ -364,12 +364,12 @@ class TestCluster04i_HelperCompositionContract(SimpleTestCase):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 4.34 — Legacy can_*(request) compatibility adapters
+# 4.74 — Legacy can_*(request) compatibility adapters
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 class TestCluster04i_LegacyCanMethods(E2ETestCase):
-    """Scenario 4.34 — legacy ``can_read`` / ``can_edit`` / ``can_export`` /
+    """Scenario 4.74 — legacy ``can_read`` / ``can_edit`` / ``can_export`` /
     ``can_create`` / ``can_delete`` / ``can_list`` adapters call the
     matching new permission method and reduce its result to the
     legacy return shape.
@@ -396,7 +396,7 @@ class TestCluster04i_LegacyCanMethods(E2ETestCase):
         request.user = user
         return request
 
-    def test_4_34_can_read_returns_set_of_allowed_fields(self) -> None:
+    def test_4_74_can_read_returns_set_of_allowed_fields(self) -> None:
         """``can_read`` returns ``Set[str]`` matching ``permission_read``'s ``allow_fields``."""
         # FieldLevelItem.permission_read returns
         # ``allow_fields({"id", "public_name"})`` for non-superusers.
@@ -410,19 +410,19 @@ class TestCluster04i_LegacyCanMethods(E2ETestCase):
         self.assertIn("pii_ssn", admin_fields)
         self.assertIn("sensitive_salary", admin_fields)
 
-    def test_4_34_can_create_returns_bool_from_permission_create(self) -> None:
+    def test_4_74_can_create_returns_bool_from_permission_create(self) -> None:
         """``can_create`` returns the predicate's ``bool`` directly."""
         item = ProtectedItem(name="x")
         # ProtectedItem.permission_create denies non-superusers.
         self.assertFalse(item.can_create(self._request(self.user)))
         self.assertTrue(item.can_create(self._request(self.admin)))
 
-    def test_4_34_can_delete_returns_bool_from_permission_delete(self) -> None:
+    def test_4_74_can_delete_returns_bool_from_permission_delete(self) -> None:
         item = ProtectedItem(name="x")
         self.assertFalse(item.can_delete(self._request(self.user)))
         self.assertTrue(item.can_delete(self._request(self.admin)))
 
-    def test_4_34_can_list_returns_bool_from_permission_list(self) -> None:
+    def test_4_74_can_list_returns_bool_from_permission_list(self) -> None:
         item = ProtectedItem(name="x")
         # FieldLevelItem.permission_list returns True for everyone.
         self.assertTrue(item.can_list(self._request(self.user)))

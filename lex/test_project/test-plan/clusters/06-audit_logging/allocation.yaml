@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 113
+max_scenario: 116
 letters:
   a:
     title: ''
@@ -81,14 +81,15 @@ letters:
       recorded
   i:
     title: Serialisers & handlers (incl. bug-§1 LexLogger surface)
-    scenarios: 6.50-6.53
+    scenarios: 6.50,6.114-6.116
     status: complete
     tests:
       pass: 0
       skip: 0
       xfail: 0
-    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
-      recorded
+    note: 'counts folded into cluster top-line in pre-migration dashboard. 6.51–6.53 renumbered to 6.114–6.116
+      on 2026-07-07 (BUG-023) — they collided with letter 6e, which legitimately owns 6.51–6.53
+      (bulk-delete audit); 6.50 kept.'
   j:
     title: ''
     scenarios: ''

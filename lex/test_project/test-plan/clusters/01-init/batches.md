@@ -94,6 +94,20 @@
 
 ---
 
+### Batch 1x — Health exposes encrypted runtime metadata for the Instance Controller ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.187 – 1.194 |
+| Type | U + I |
+| Files covered | `lex/lex_app/runtime_health.py`, `lex/lex_app/fast_health.py`, `lex/lex_app/views.py` |
+| Test file | `lex/test_project/tests/init/test_1x_runtime_health_metadata.py` |
+| Test classes | `TestCluster01x_RuntimeHealthMetadata` (1.187 missing key → legacy payload, 1.188 deployed pod adds encrypted runtime token, 1.189 token is ciphertext not plaintext, 1.190 wrong key can't decrypt, 1.191 encryption failure never breaks health, 1.192 Django health route uses runtime payload, 1.193 fast ASGI health route uses runtime payload, 1.194 missing COMMIT_SHA marked unknown) |
+| Fixtures | none — Fernet round-trip + `patch.dict` env seams |
+| Status | ✅ Complete. **Renumbered 2026-07-07 (BUG-023):** this file previously shared letter `1u` and IDs 1.171–1.175 with `test_1u_fast_health_asgi.py`; moved to fresh letter `x` + fresh IDs 1.187–1.194 (old 1.171→1.187 … 1.178→1.194). No logic change. |
+
+---
+
 ### Batch 1v — `TIME_ZONE`↔`USE_TZ` coupling for `django_celery_beat` DatabaseScheduler ✅
 
 | Property | Value |

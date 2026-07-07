@@ -10,16 +10,16 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 21 | 186 | 88 | 0 | 0 |
+| 1. Init — Project Bootstrap | 22 | 194 | 88 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
-| 4. Permissions | 13 | 70 | 18 | 2 | 0 |
+| 4. Permissions | 13 | 74 | 18 | 2 | 0 |
 | 5. History & Bitemporal | 11 | 97 | 10 | 6 | 2 |
-| 6. Audit Logging | 16 | 113 | 19 | 3 | 0 |
+| 6. Audit Logging | 16 | 116 | 19 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
 | 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
-| 10. API Layer | 13 | 69 | 21 | 0 | 0 |
+| 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 6 | 35 | 3 | 0 | 0 |
 | 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
@@ -48,9 +48,10 @@
 | 1q | Migration file completeness gate | 1.147 | complete | 1 | 0 | 0 | scenario 1.147; `lex makemigrations ... --check --dry-run` must stay clean for framework apps |
 | 1s | Log-noise cleanup + lex-namespace debug control (EXC-1787) |  | complete | 10 | 0 | 0 | scenarios 1.159–1.168; urllib3 InsecureRequestWarning gate + `LEX_LOG_LEVEL` lex-only DEBUG + console-handler level + blanket `LEX_SUPPRESS_WARNINGS` filter |
 | 1t | `DISABLE_SERVER_SIDE_CURSORS` placement (production cursor crash) | 1.169-1.170 | complete | 2 | 0 | 0 | scenarios 1.169–1.170; flag was module-level (ignored by Django) so server-side cursors stayed on behind the pooling proxy → `InvalidCursorName` on every `.iterator()`; now set per |
-| 1u | Fast ASGI health/readiness probes | 1.171-1.178 | complete | 5 | 0 | 0 | scenarios 1.171–1.175; `/health` short-circuits to static liveness, `/readiness` gates on DB readiness, non-probe HTTP falls through to Django |
+| 1u | Fast ASGI health/readiness probes | 1.171-1.175 | complete | 5 | 0 | 0 | scenarios 1.171–1.175; `/health` short-circuits to static liveness, `/readiness` gates on DB readiness, non-probe HTTP falls through to Django |
 | 1v | `TIME_ZONE`↔`USE_TZ` coupling — `django_celery_beat` DatabaseScheduler correctness |  | complete | 5 | 0 | 0 | scenarios 1.179–1.183; `TIME_ZONE="UTC"` when `USE_TZ=False` so beat's naive-as-UTC read is correct for the recovery `IntervalSchedule` AND future-edit `ClockedSchedule` (was off b |
 | 1w | `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart | 1.184-1.186 | complete | 3 | 0 | 0 | scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi |
+| 1x | Health exposes encrypted runtime metadata for the Instance Controller | 1.187-1.194 | complete | 0 | 0 | 0 | scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py; moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC. |
 
 ## 2. CRUD via REST API (`crud_api`)
 
@@ -90,7 +91,7 @@
 | 4f |  | 4.19-4.26 | complete | 8 | 0 | 0 | 4.19–4.26 |
 | 4g |  | 4.31-4.39 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4h |  | 4.40 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 4i |  | 4.27-4.34 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 4i |  | 4.27-4.30,4.71-4.74 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard. 4.31–4.34 renumbered to 4.71–4.74 on 2026-07-07 (BUG-023) — they collided with letter 4g, which legitimately owns 4.31–4.39. |
 | 4j | Middleware & bearer-token authentication |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4k | Permission views |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4l | User API endpoint *(blocked — see §6 decision #2)* |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -124,7 +125,7 @@
 | 6f |  | 6.61-6.63 | complete | 3 | 0 | 0 | pins `RETRYABLE_SQLSTATE_CODES` + `MAX_UPDATE_RETRIES` |
 | 6g | Models & enums | 6.71-6.73 | complete | 3 | 0 | 0 | create/delete/edit all denied (incl. `AuditLogStatus` |
 | 6h | Mixins & utils |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 6i | Serialisers & handlers (incl. bug-§1 LexLogger surface) | 6.50-6.53 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 6i | Serialisers & handlers (incl. bug-§1 LexLogger surface) | 6.50,6.114-6.116 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard. 6.51–6.53 renumbered to 6.114–6.116 on 2026-07-07 (BUG-023) — they collided with letter 6e, which legitimately owns 6.51–6.53 (bulk-delete audit); 6.50 kept. |
 | 6j |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 6k |  | 6.96-6.108 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 6l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
@@ -195,7 +196,7 @@
 | 10c |  | 10.7 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 10e |  | 10.11-10.14 | complete | 4 | 0 | 0 | BUG-015 documented in-test — CharField w/o default reports `required=False` |
 | 10f |  | 10.15-10.16 | complete | 4 | 0 | 0 | 10.15–10.16b |
-| 10g | Calculation-log tree, clean, init, PDF | 10.15-10.19 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 10g | Calculation-log tree, clean, init, PDF | 10.17-10.19,10.70-10.71 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard. On-disk file is test_10g_one_endpoint_lifecycle.py; 10.15–10.16 renumbered to 10.70–10.71 on 2026-07-07 (BUG-023) — they collided with letter 10f (global search), which owns 10.15–10.16. |
 | 10h | File operations & SharePoint |  | complete | 7 | 0 | 0 | scenarios 10.17–10.23; `requests` patched |
 | 10i |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 10j |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
