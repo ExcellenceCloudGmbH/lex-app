@@ -162,6 +162,65 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
+### Batch 1u — Fast ASGI health/readiness probes ✅
+
+**Gap:** PR #615 added a lightweight ASGI health/readiness layer so Kubernetes
+liveness can return `200` without touching Django/DB, while readiness only
+returns `200` once the database is reachable. A regression here either restarts
+healthy pods (`/health` stops being cheap/static) or sends WebSocket/API traffic
+to a pod before it can serve (`/readiness` lies ready).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.171 | Health/readiness path helpers are disjoint | `/health` and `/api/health` are fast liveness only; `/readiness` and `/api/readiness` are DB-aware readiness only |
+| 1.172 | Fast health ASGI app drains request body and returns static payload | multi-message request body is consumed; response is `200` with `{"status": "Healthy :)"}` and no-store headers |
+| 1.173 | Readiness reflects DB availability | patched DB-ready seam returns `200 {"status":"ready"}`; DB-unavailable returns `503 {"status":"not-ready","reason":"database-unavailable"}` |
+| 1.174 | Top-level ASGI app short-circuits probe paths | `/health` and `/readiness` call their lightweight ASGI apps and do not invoke Django |
+| 1.175 | Non-probe HTTP delegates to Django | arbitrary application paths bypass health shortcuts and reach `django_asgi_app` |
+
+**Scenario range:** 1.171 – 1.175. **Test file:** `lex/test_project/tests/init/test_1u_fast_health_asgi.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). Sources: `lex/lex_app/fast_health.py`, `lex/lex_app/asgi.py`.
+
+### 1v. `TIME_ZONE`↔`USE_TZ` coupling — `django_celery_beat` DatabaseScheduler correctness
+
+`django_celery_beat`'s `DatabaseScheduler` reads naive datetimes through
+`celery.utils.time.maybe_make_aware`, which **hardcodes naive == UTC**
+(`ModelEntry.is_due` and `clocked.__init__`). The framework runs two beat
+schedules through it: the recovery sweep (an `IntervalSchedule`) and future
+history edits (a one-off `ClockedSchedule` fired at `History.valid_from`, see
+`bitemporal_signals._schedule_future_activation`). Under `USE_TZ=False` (the
+deliberate GCP/default production setting) Django stores **naive Berlin
+wall-clock**, so if `TIME_ZONE` were a non-UTC zone beat would misread every
+stored timestamp by the UTC offset — the interval sweep never becomes due and
+clocked activations fire 1–2h late (DST-dependent). `settings.py` therefore
+pins `TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"`: under `USE_TZ=False`
+the naive frame Django writes **is** real UTC; under `USE_TZ=True` datetimes
+are tz-aware so the display zone stays free. Decoupling the two silently breaks
+every beat-driven feature on a `USE_TZ=False` deployment.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.179 | `USE_TZ=False` forces UTC | when `settings.USE_TZ` is False, `settings.TIME_ZONE == "UTC"` so beat's naive-as-UTC read is correct; under `USE_TZ=True` a display zone is still configured |
+| 1.180 | Django's naive frame matches beat's assumption | under `USE_TZ=False`, `timezone.now()` is naive and within seconds of real UTC, so a stored timestamp round-trips through `maybe_make_aware` unchanged |
+| 1.181 | Recovery `IntervalSchedule` is due in the live frame | replicating `ModelEntry.is_due` (`maybe_make_aware(last_run_at).astimezone(app.timezone)`): just-ran → not due with `next ≤ interval`; 3×-overdue → due (the original stuck-sweep symptom) |
+| 1.182 | Future-edit `ClockedSchedule` fires at `valid_from` | `clocked(now+30s)` is ~30s away (not hours) and not due; a past target is due immediately — the exact path future history edits take under Celery |
+| 1.183 | Non-UTC naive storage is misread by the offset (regression rationale) | the same instant stored naive-UTC round-trips exactly through beat's reader, while naive-Berlin is misread by ≥3600s — the skew the coupling eliminates |
+
+**Scenario range:** 1.179 – 1.183. **Test file:** `lex/test_project/tests/init/test_1v_scheduler_tz_invariant.py`. **Type:** U. **Status:** ✅ Complete (Session 84 — June 26). Source: `lex/lex_app/settings.py` (USE_TZ↔TIME_ZONE coupling); guards the `django_celery_beat` `is_due` path it must keep correct.
+
+---
+
+### 1w. `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart
+
+**What it tests:** the recovery master switch defaults to **off**, so the startup sweep (`_handle_calculation_model_reset`) stays in blind-abort mode and a stuck `IN_PROGRESS` calculation is reset to `ABORTED` on the next server restart when no recovery-supervisor pod is running (local dev, CI, un-provisioned deploys). The liveness-aware sweep otherwise skips rows a *tracked* recovery task owns — but that ownership record lingers in Redis across a restart, so without a running supervisor the row is orphaned `IN_PROGRESS` forever. The flag gates only the recovery registry/heartbeat/supervisor + the sweep skip-set; it never touches calculation dispatch, so a calculation that dispatches sub-calculations is unaffected either way.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.184 | Env unset ⟹ off | with `LEX_TASK_RECOVERY_ENABLED` absent, `settings.LEX_TASK_RECOVERY_ENABLED is False` — the startup sweep blind-aborts stuck rows on restart |
+| 1.185 | Explicit `=true` opts in | `LEX_TASK_RECOVERY_ENABLED=true` ⟹ `True`, so a deployment running the supervisor pod keeps its dead-worker requeue behaviour |
+| 1.186 | Explicit off + case-insensitive | `=false` ⟹ `False`; `=TRUE` ⟹ `True` (the `.lower() == "true"` parse is casing-tolerant) |
+
+**Scenario range:** 1.184 – 1.186. **Test file:** `lex/test_project/tests/init/test_1w_recovery_default_deployment_target.py`. **Type:** U. **Status:** ✅ Complete (Session 90 — July 1). Source: `lex/lex_app/settings.py` (`LEX_TASK_RECOVERY_ENABLED` default `true` → `false`). Nested-dispatch untouched — 7j/7q/8ab all pass.
+
 ### Batch 1u — `setup-with-ai` MCP mode parity ✅
 
 `lex/tools/setup_with_ai.py` owned the first-touch Lex MCP configuration flow, but its UI and POST validation had drifted behind both `lex ai-dashboard` and the current `lex-mcp-local` server registry: only `forward` and `backward` were rendered or accepted, so choosing `edit`, `review`, `mvp_generator`, or `mvp_completion` during initial setup silently collapsed back to `forward`. The setup form now shares the authoritative mode list, normalizes unknown values safely, renders every supported mode card, and forwards the chosen mode through both the unified `lex_mcp.server --mode ...` path and the legacy wrapper fallback.
@@ -262,6 +321,12 @@ that pin a custom URL.
 
 **Scenario range:** 2.93 – 2.96. **Test file:** `lex/test_project/tests/crud_api/test_2i_cancel_endpoint.py`. **Type:** E. **Status:** ✅ Complete (Session 66 — June 1).
 
+### 2j. Instance API-key extraction and matching ✅
+
+**Gap:** PR #615 ("feat(calculations): expose active release warnings") introduced two helpers in `lex/api/utils/api_key_requests.py` that allow the framework to authenticate machine-to-machine requests using a shared secret stored in `LEX_API_KEY`: `get_raw_api_key()` extracts the raw key from a `KeyParser` or falls back to the `Authorization: ApiKey <token>` header; `is_instance_api_key_request()` compares the extracted key to the env var. If either helper regresses — e.g. header fallback stops working, or the env-var comparison becomes case-insensitive — silent auth bypasses or auth failures will appear in production without any framework-level guard.
+
+**Scenario range:** 2.97 – 2.107. **Test file:** `lex/test_project/tests/crud_api/test_2j_instance_api_key.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/api/utils/api_key_requests.py`.
+
 ---
 
 ## 3. Validation Hooks
@@ -274,6 +339,8 @@ that pin a custom URL.
 - `PreValidatedItem` — raises exception in `pre_validation()` for specific values
 - `PostValidatedItem` — raises exception in `post_validation()` for specific values
 - `HookOrderItem` — records hook execution order in a class-level list
+- `_ConditionalHooksBase` (abstract) → `LeanConditionalItem` / `FullConditionalItem` — identical conditional-hook declarations (legacy `when=`/`when_any=` + `condition=` objects incl. chained) differing only in `lex_lean_initial_state`, for lean-vs-full parity (3f)
+- `LeanExtraFieldItem` — lean model that consults `has_changed()` imperatively and declares the field via `lex_initial_state_extra_fields` (3f escape hatch)
 
 **Test scenarios:**
 
@@ -287,6 +354,32 @@ that pin a custom URL.
 | 3.6 | Hook execution order on update | BEFORE_UPDATE → BEFORE_SAVE → (save) → AFTER_SAVE → AFTER_UPDATE |
 | 3.7 | Validation recursion guard | `_validation_in_progress` prevents infinite recursion |
 | 3.8 | Rollback restores field values | After `post_validation` failure, DB record matches pre-save snapshot |
+| 3.9 | Snapshot released after success | After a successful save (create/update), the pre-validation rollback buffer is not pinned on the instance |
+| 3.10 | Snapshot release keeps rollback intact | A `post_validation` failure on a later update still rolls back, even though the buffer is freed after each successful save |
+| 3.11 | Lean is the default; opt-out keeps full snapshot | Class default `lex_lean_initial_state=True`; a model that explicitly sets it `False` still holds untracked fields in `_initial_state` |
+| 3.12 | Lean snapshot shape | Lean snapshot keys == exactly the change-detected fields (`edited_at` + hook-clause fields) |
+| 3.13 | Lean snapshot drops untracked | Fields no hook consults (`name`, `note`) are absent from the lean snapshot |
+| 3.14 | Lean `edited_at` auto-stamp | Lean update still auto-stamps `edited_at` (framework `has_changed('edited_at')` dependency intact) |
+| 3.15 | Lean explicit `edited_at` respected | An explicitly-set `edited_at` is not overwritten on a lean update |
+| 3.16 | Legacy `when=` fires (lean) | `when='status'` hook fires on a status change |
+| 3.17 | Legacy `when=` silent (lean) | `when='status'` hook does not fire when status is unchanged |
+| 3.18 | Legacy `when_any=` fires (lean) | `when_any=['a','b']` fires when `b` changes |
+| 3.19 | `WhenFieldHasChanged` fires (lean) | `condition=WhenFieldHasChanged('amount')` fires on amount change |
+| 3.20 | `WhenFieldValueWas` fires (lean) | `condition=WhenFieldValueWas('status','draft')` fires when prior status was draft |
+| 3.21 | `WhenFieldValueChangesTo` fires (lean) | `condition=WhenFieldValueChangesTo('status','paid')` fires on draft→paid |
+| 3.22 | Chained condition fires (lean) | `WhenFieldHasChanged('amount') & WhenFieldValueIs('status','paid')` fires when both limbs hold |
+| 3.23 | Chained condition silent (lean) | Chained condition does not fire when only one limb holds |
+| 3.24 | Lean-vs-full hook parity | Identical mutation fires an identical set of hooks on lean and full models |
+| 3.25 | `has_changed` True tracked (lean) | `has_changed` is True for a changed tracked field |
+| 3.26 | `has_changed` False untracked (lean) | `has_changed` reports False for a changed untracked field (documented trade-off) |
+| 3.27 | `initial_value` tracked (lean) | `initial_value` returns the pre-change value for a tracked field |
+| 3.28 | Extra-fields escape hatch | `lex_initial_state_extra_fields` keeps an imperatively-queried field tracked |
+| 3.29 | Post-save re-baseline is lean | The on-commit re-baseline re-narrows the snapshot; a stale change is not re-reported |
+| 3.30 | `refresh_from_db` re-baseline is lean | `refresh_from_db` rebuilds a lean snapshot and resets `has_changed` |
+| 3.31 | Create-path hooks unaffected | Lean create still stamps `created_at` / `created_by` (no change-detection involved) |
+| 3.32 | Lean snapshot is smaller | Lean `_initial_state` holds strictly fewer keys than the full snapshot |
+
+**Sub-clusters:** 3a `pre_validation` (3.1–3.2) · 3b `post_validation` (3.3–3.4) · 3c hook ordering (3.5–3.6) · 3d recursion guard (3.7) · 3e snapshot lifecycle (3.8–3.10) · **3f lean `_initial_state` default-on / opt-out (3.11–3.32)** — covers `lex/core/models/LexModel.py`, Type E, ✅ Complete (22 pass / 0 fail).
 
 ---
 
@@ -319,6 +412,14 @@ that pin a custom URL.
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
 | 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
 | 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
+
+---
+
+### 4m. `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass ✅
+
+**Gap:** PR #615 added a short-circuit to `ApiKeyAwareLoginRequiredMiddleware.check_login_required` so that requests authenticated with the instance API key (`is_instance_api_key_request`) bypass the OAuth2 login redirect, the same way DRF API-key requests already did. Without a regression gate, a refactor of the `or` chain (e.g. swapping evaluation order, mis-importing `is_instance_api_key_request`, or accidentally removing the branch) would silently revert all machine-to-machine requests to a login redirect with no framework-level signal.
+
+**Scenario range:** 4.66 – 4.70. **Test file:** `lex/test_project/tests/permissions/test_4m_api_key_middleware.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/authentication/middleware.py`.
 
 ---
 
@@ -534,6 +635,28 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 
 ---
 
+### 7m. `CalculationSignals.update_calculation_status` + `One.py` `model_name` propagation ✅
+
+**Gap:** PR #615 threaded `model_name=instance._meta.object_name` through two call sites: `update_calculation_status` in `CalculationSignals.py` now passes it to `mark_in_progress` on the IN_PROGRESS branch, and `One.update()` in `One.py` does the same in the early-registration block when `calculate=true`. The `ActiveCalculationStateStore` uses `model_name` to partition active-calculation lookups; if the propagation silently regresses (e.g. the kwarg is dropped or passed as `None`), the store records calculations under the wrong key and the active-release endpoint returns stale or missing data.
+
+**Scenario range:** 7.188 – 7.195. **Test file:** `lex/test_project/tests/calculations/test_7m_calc_signals.py`. **Type:** U + E. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/core/signals/CalculationSignals.py`, `lex/api/views/model_entries/One.py`.
+
+---
+
+### 7q. Nested fan-out dispatches by default from inside a worker ✅
+
+**Gap:** A real production calc (`InvestmentPosting`, 65 568 models across 50 clusters) ran *synchronously* instead of dispatching to Celery. Root cause: an `is_celery_worker_process()` worker-detection guard (added commit `40d17b3`, 2026-03-29) made nested fan-out **opt-in** — a calculation already executing inside a Celery worker would collapse its nested work to an inline synchronous run unless the caller opened an explicit async context. This silently serialised large combinatorial calcs onto a single worker slot. The guard was removed in **both** dispatch paths so the default is "always dispatch": `CalculatedModelMixin._dispatch_model_processing` (fan-out) now dispatches whenever `CELERY_ACTIVE` + `.delay` exist, and `CalculationModel.calculate_hook` (single-instance) opens its own `WaitForTasks` when no async context is active (reusing an outer scope when present). When no context is active the dispatcher blocks on the children — correctness/ordering preserved at the cost of holding the worker slot, per the explicit "don't worry about blocking" decision. `is_celery_worker_process()` itself is retained for diagnostics/logging (still asserted correct by 8.6).
+
+**Scenario range:** 7.196 – 7.201. **Test file:** `lex/test_project/tests/calculations/test_7q_worker_default_dispatch.py`. **Type:** E. **Status:** ✅ Complete (Session 86 — June 29). Covers `lex/core/mixins/CalculatedModelMixin.py` (`_dispatch_model_processing`) and `lex/core/models/CalculationModel.py` (`calculate_hook` dispatch branch). 7.196–7.198 drive the mixin (inside-worker, no-context / WaitForTasks / FireAndForget — all fan out to `CeleryTaskDispatcher`, never `calc_and_save_sync`); 7.199–7.201 drive `CalculationModel` (outer `WaitForTasks` ⇒ drains on scope exit; `FireAndForget` ⇒ never blocks). 6 pass / 0 fail. Companion stale-test updates: `test_calculation_wait_contexts.py`, `test_calculated_model_mixin.py`, and 8.6 message in `test_8b_dispatch_context.py`. **Session 91 note:** Session 89 briefly flipped scenario 7.199 to inline (an abort-safety guard, draft cluster 7r) — that was withdrawn before commit per the developer's explicit requirement that nested calcs dispatch and parallelise. Always-dispatch is the pinned default on BOTH paths; the abort→resume hole is closed by the cluster cancel marker instead (see 8ad).
+
+---
+
+### 7r. (withdrawn — Session 91) Per-instance inline-inside-worker guard
+
+**Withdrawn before commit.** Session 89 drafted this batch (scenarios 7.202–7.204) to restore an `is_celery_worker_process()` inline guard on the per-instance `CalculationModel.calculate_hook` path as the Report 1 (abort→resume) fix. Live verification showed it broke the framework's core parallelism contract: a nested calc inside a worker (e.g. a project's `CalculateNAV` inside another calculation) ran inline on the parent's worker instead of dispatching to a free one, and only an explicit `WaitForTasks` restored dispatch. Per the developer's explicit requirement ("calculation can dispatch calculations"), the guard, the 7.199 flip, and this batch's test file were withdrawn; always-dispatch (7q) is the pinned default on both paths. Report 1 abort-safety is provided by the restart-surviving cluster cancel marker instead — see **cluster 8ad**. Letter 7r stays reserved for this record; scenarios 7.202–7.204 were never landed and the next cluster-7 batch may reuse them.
+
+---
+
 ## 8. Celery & Async
 
 **What it tests:** Task dispatch to Celery, sync fallback when Celery is unavailable, `FireAndForget` / `WaitForTasks` context managers, and nested calculation dispatch.
@@ -609,6 +732,72 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 **Why a mix of U and I:** the ownership lookup `tracked_calculation_record_ids()` (registry → `{(label_lower, pk)}`, alive-or-expired, degrades to empty) is pure logic driven against a mocked registry (U). The sweep's actual abort/skip decision — the half that protects live calculations — is exercised against real persisted `CalculationModel` rows driven straight through `_handle_calculation_model_reset` with the ownership set injected, asserting both the row's terminal state and whether an aborted-audit was written (I, `E2ETestCase`).
 
 **Scenario range:** 8.103 – 8.115. **Test file:** `lex/test_project/tests/celery_async/test_8x_startup_reset_recovery_handoff.py`. **Type:** U (+ I for the real-row sweep). **Status:** ✅ Complete. Covers `lex/lex_app/celery_recovery/supervisor.py` (`tracked_calculation_record_ids`) and `lex/process_admin/utils/model_registration.py` (`_handle_calculation_model_reset` skip-if-owned filter + the `register_models` compute-once threading, gated so no registry read happens outside startup). 6 U scenarios pass locally; the 7 I (real-row) scenarios pass their assertions — only the shared `TransactionTestCase` teardown-flush errors in the borrowed local venv, identically to the pre-existing E2E suite (a DB-provisioning gap, not a code issue); they gate normally on the CI Postgres.
+
+### Sub-cluster 8y — embedded-beat recovery driver (admin-visible schedule, queue isolation)
+
+**Gap:** worker recovery shipped with a single cluster driver — the always-on `recovery-supervisor` pod looping `scan_and_recover()` in-process. Operators wanted the *scheduler tooling of Celery beat* — a DB-driven schedule visible and editable in the Django admin (`django_celery_beat` `PeriodicTask` rows via `DatabaseScheduler`) — **without** giving up the property that makes the supervisor correct on this cluster, where workers are a KEDA ScaledJob scale-to-0. Vanilla beat is wrong here: beat only *enqueues* the sweep; a worker must dequeue it, and with scale-to-0 workers that is a chicken-and-egg loop (to detect a dead worker, beat needs a worker to run the sweep), forces a KEDA cold-start every interval, and pollutes the very Redis list KEDA scales on. The chosen driver is an **embedded-beat, self-consuming pod**: `celery worker -B -Q recovery --concurrency 1 --scheduler django_celery_beat.schedulers:DatabaseScheduler` — the same singleton pod fires the existing `sweep_dead_workers` task onto a dedicated `recovery` queue it consumes *itself*, so the scan runs in-process (no worker needed to *detect* deaths), and `_requeue` re-dispatches recovered work to the calc's main queue, which raises `listLength` and drives KEDA 0→N. The recovery pod subscribes to **only** `-Q recovery`, so recovered work always flows outward and never loops back (the non-circular property).
+
+**Why pure U:** every make-or-break property of this driver is a wiring invariant that fails *silently*, and each is exercisable without a broker, Redis, or Celery itself: the beat-schedule dict naming the registered sweep task, the `frozenset` of heartbeat-untracked task names, the sweep's target queue vs. the main default queue (settings reads), `_requeue`'s queue selection (fake app records `send_task`), and the argv `beat_main` hands `app.worker_main` (mocked on the one canonical app from `supervisor._get_app()`).
+
+**Scenario range:** 8.116 – 8.122. **Test file:** `lex/test_project/tests/celery_async/test_8y_beat_recovery_driver.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 11). Covers `lex/lex_app/settings.py` (`CELERY_BEAT_SCHEDULE`), `lex/lex_app/celery_recovery/entrypoint.py` (`beat_main`), and `lex/lex_app/celery_recovery/supervisor.py` (`_requeue` routing — pinned). 8.116 schedule names the registered sweep; 8.117 sweep excluded from heartbeat tracking; 8.118 sweep routed to the dedicated `recovery` queue; 8.119 that queue is distinct from the main default queue; 8.120 `_requeue` targets the payload's main queue, never `recovery`; 8.121 missing-queue fallback is the default main queue; 8.122 `beat_main` launches `worker -B -Q recovery --scheduler DatabaseScheduler`. 7 pass / 0 fail locally (0.09s). Infra (chart `celery_beat_recovery.yaml` + `workers.recoveryDriver` selector) lives in `LEX_TERRAFORM_MODULES` on a matching branch.
+
+---
+
+### Sub-cluster 8aa — post-task warm shutdown honours the idle-shutdown master switch
+
+**Gap:** `LEX_WORKER_IDLE_SHUTDOWN_ENABLED` is the single master switch meant to turn off *all* worker self-termination. `lex/lex_app/celery.py` has three self-termination paths: the `task_postrun` post-task warm shutdown (`shutdown_worker_after_task_completion`, for KEDA ScaledJob workers that should exit after their one task), the `task_revoked` cancel fast-path, and the `worker_ready` idle watchdog. The revoke path and the watchdog both early-return on `not _idle_shutdown_enabled()`, but the `task_postrun` handler only checked `_is_non_local_deployment_target()` and `task is None` — it ignored the switch. The embedded-beat recovery pod (`celery_beat_recovery.yaml`) sets the switch to `false` because it runs `celery worker -B` and is idle by design between sweeps; with the guard missing it warm-shut-down after its first `sweep_dead_workers` and crash-looped, taking beat with it (observed in prod: sweep succeeds, then `worker: Warm shutdown` / `beat: Shutting down`). The fix adds the same `_idle_shutdown_enabled()` guard so the switch disables every path, matching the promise in the chart comment (`celery_beat_recovery.yaml:81-90`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.125 | Master switch off ⇒ no post-task shutdown | non-local target + `_idle_shutdown_enabled()` False: `task_postrun` sends no warm-shutdown broadcast, so the recovery-beat pod survives between sweeps |
+| 8.126 | Switch on + non-local ⇒ broadcast still fires | the KEDA scale-to-zero path is preserved: the warm shutdown is broadcast to the completing worker with `completed_task_id` excluded from the idle check |
+| 8.127 | Local deployment target ⇒ never broadcasts | dev/local runs never self-terminate, regardless of the switch |
+| 8.128 | `task=None` ⇒ safe no-op | the defensive path returns without raising and broadcasts nothing |
+
+**Scenario range:** 8.125 – 8.128. **Test file:** `lex/test_project/tests/celery_async/test_8aa_postrun_shutdown_guard.py`. **Type:** U. **Status:** ✅ Complete (Session 85 — June 26). Allocated `8aa` because `8y` (recovery driver) and `8z` (initial-data executor) were both already taken. Source: `lex/lex_app/celery.py` (`shutdown_worker_after_task_completion`). 4 U scenarios pass locally (broker-free, signal handler driven directly with mocked deployment-target / switch / `control.broadcast`).
+
+---
+
+### Cluster 8ab — Nested fan-out join is worker-safe (`allow_join_result`)
+
+**Gap:** the framework lets a calculation dispatch *nested* fan-out work — a calc already running inside a Celery worker can partition its own models and dispatch them as child tasks via `CeleryTaskDispatcher.dispatch_calculation_groups`, then block on the children in `_handle_task_results` via `ResultSet.join()`. Celery **hard-forbids** `result.get()` / `ResultSet.join()` from inside a worker ("Never call result.get() within a task!") unless wrapped in `allow_join_result()`. The join was unwrapped; an `is_celery_worker_process()` guard *masked* it by forcing nested calcs to run inline. Removing that guard (cluster 7q — so nested fan-out dispatches by default, as customers expect) exposed the unwrapped join: a real nested `InvestmentPosting` run (5072 models, 2 tasks) crashed with that assertion, fell back to the complete-sync ladder, and re-committed already-persisted rows → duplicate-key violation. The fix wraps `rs.join(propagate=False)` in `allow_join_result()`, mirroring `WaitForTasks.wait_for_completion`, which already blocks under the same guard. These scenarios reproduce the crash deterministically **without a broker**: Celery's real `allow_join_result()` toggles the thread-local `task_join_will_block` flag and `assert_will_not_block()` (called at the top of the real `ResultSet.join`) raises the production error whenever that flag is set — so we set the flag to simulate "inside a worker", give a fake `ResultSet` a `.join` that calls the real `assert_will_not_block()`, and keep the real `allow_join_result` so the wrap is genuinely under test.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.129 | In-worker join no longer raises | flag set (simulated worker) + fake join calls the real `assert_will_not_block()`: `_handle_task_results` completes, the join runs, and the block-flag is cleared *during* the join — the exact production-crash regression |
+| 8.130 | Worker flag restored after return | `allow_join_result` is a proper CM: the join-block flag is True again after the call, so a later real `.get()` in the same worker task is still correctly forbidden (the guard is not permanently disabled) |
+| 8.131 | Non-worker path unaffected | flag False (top-level dispatch): all-success → join runs once, no group routed to sync, flag stays False — the wrap is transparent to the ordinary path |
+| 8.132 | Worker-safe + failed group still retried | simulated worker + one `.failed()` True: no crash AND the failed task's mapped group (only) goes to `calc_and_save_sync` |
+| 8.133 | Worker-safe + join raises → complete sync | simulated worker + a genuine `join` failure (backend unreachable): every mapped group is flattened into one complete-sync fallback call |
+| 8.134 | Worker-safe + raising status check | simulated worker + `task.failed()` raises: no crash AND the group is assumed failed and queued for sync retry (never silently dropped) |
+| 8.135 | `allow_join_result` import required | a `celery.result` exposing `ResultSet` but not `allow_join_result` → the lazy import fails loudly as a chained `CeleryDispatchError` (guards against a regression that drops the import) |
+| 8.136 | No context ⇒ implicit `WaitForTasks`, safe join | end-to-end `dispatch_calculation_groups` inside a worker, no explicit context: opens an implicit `WaitForTasks()` (same behaviour as before) and the join completes with the block-flag cleared — the production fan-out path |
+| 8.137 | Explicit `WaitForTasks` reused, safe join | end-to-end inside a worker with an active `WaitForTasks`: no new WFT instantiated (nullcontext, no double-join) and the join stays worker-safe |
+| 8.138 | Explicit `FireAndForget` reused, safe join | end-to-end inside a worker with an active `FireAndForget`: no implicit WFT (fire-and-forget preserved) and the join stays worker-safe |
+
+**Scenario range:** 8.129 – 8.138. **Test file:** `lex/test_project/tests/celery_async/test_8ab_dispatcher_join_worker_safe.py`. **Type:** U. **Status:** ✅ Complete (Session 88 — July 1). Allocated `8ab` (next free letter after `8aa`); 8.129 picks up after cluster-8 scenario max 8.128. Source: `lex/core/tasks/CeleryTaskDispatcher.py` (`_handle_task_results` join wrap; `dispatch_calculation_groups` nested-in-worker path). 10 U scenarios pass locally (broker-/DB-free).
+
+---
+
+### Cluster 8ac — Complete-sync fallback is idempotent (Report 2 duplicate-key fix)
+
+**Gap:** when the Celery fan-out setup crashes part-way, `CeleryTaskDispatcher.dispatch_calculation_groups` falls back to running every model inline via `calc_and_save_sync(all_models)`. Production Report 2 (local, `celery --concurrency 3` + 14 workers): `connection to server at "localhost" port 5432 failed: FATAL: sorry, too many clients already` → this fallback fired → `duplicate key value violates unique constraint "defining_fields_EndBalance"` (558 models). Mechanism: `_prepare_models_for_processing` dedup-resolves every model against the DB at T0 (before dispatch) and resets pks that had no existing row for a fresh INSERT. During fan-out a sibling child task commits row X; a later group trips the connection storm; the complete-sync fallback then blind-`save()`s the T0-prepared sibling whose pk is still null → a second INSERT collides with X. Unlike the normal (`_prepare_models_for_processing`) and streaming (`calc_and_save_streaming`) paths, the legacy `calc_and_save_sync` did **not** re-resolve before save — the idempotency gap. **Fix (Option A, chosen over restoring the mixin inline guard so 7q's parallel fan-out is preserved):** `calc_and_save_sync` now calls `delete_models_with_same_defining_fields()` immediately before save, mirroring `calc_and_save_streaming` — 1 existing row → returns it (UPDATE), 0 → pk already reset (INSERT). The resolver is itself idempotent, so re-preparing an as-yet-uncommitted model is a no-op. One edit fixes all four fallback call sites (`CeleryTaskDispatcher.py:147, 229, 378, 412`).
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 8.139 | Fallback UPDATEs a sibling's committed row | existing (US, A) row + fresh (US, A) instance (pk reset at T0) → `calc_and_save_sync` re-resolves → no IntegrityError, exactly 1 (US, A) row, same pk as the committed one (UPDATE not INSERT), name set by `calculate()` |
+| 8.140 | Fallback INSERTs a fresh model | no (EU, B) row + fresh (EU, B) instance → INSERTs exactly one row, name set — the re-resolve is a no-op when nothing exists |
+| 8.141 | End-to-end complete fallback, no duplicate key | existing (US, A) row + group `[(US,A),(EU,B)]`; `_dispatch_single_group` raises a simulated connection storm → `dispatch_calculation_groups` runs the complete-sync fallback over all models → NO duplicate-key IntegrityError; (US, A) UPDATEd (same pk), (EU, B) INSERTed, one row each |
+
+**Scenario range:** 8.139 – 8.141. **Test file:** `lex/test_project/tests/celery_async/test_8ac_sync_fallback_idempotent.py`. **Type:** I (real DB — `CombinatorialCalc.defining_fields=[region,category]` yields a real UNIQUE constraint). **Status:** ✅ Complete (Session 89 — July 1). Allocated `8ac` (next free letter after `8ab`); 8.139 picks up after cluster-8 scenario max 8.138. Source: `lex/core/mixins/CalculatedModelMixin.py` (`calc_and_save_sync` re-resolve-before-save), `lex/core/tasks/CeleryTaskDispatcher.py` (complete-sync fallback path). 3 pass / 0 fail.
+
+---
+
+### Cluster 8ad — Dispatched @lex_shared_task self-aborts on the cluster cancel marker (Report 1 fix, dispatch preserved)
+
+**Gap:** nested calculations DISPATCH by default (7q) — they must parallelise across workers, never collapse inline. That leaves the Report 1 abort→resume hole: a dispatched nested task is a broker message that outlives an abort (local cancellation is an in-memory revoke), so after a server+worker restart the broker redelivers the still-unacked task and the "cancelled" calculation silently resumes. The framework already had the right mechanism: `cancel()` persists a Redis "cancelled" marker per calculation_id (`cluster_cancel_index.mark_cancelled`, survives restarts), and `calc_and_save` checks it at task start. But a **decorated** calculate method (`@lex_shared_task`, e.g. a project's `CalculateNAV.calculate`) dispatches directly via `func.delay` and never consulted the marker — the uncovered hole. **Fix:** the generic `lex_shared_task` wrapper now performs the same cooperative check at task start — a dispatched execution (a `context` kwarg carrying a calculation_id) whose calc is marked cancelled raises `CalculationCancelled` before running anything, landing CANCELLED instead of resuming. Direct synchronous calls carry no context and never touch the cancel index (zero Redis dependency in sync mode; without Redis there is no broker to redeliver anyway).
+
+**Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
 ---
 
@@ -1278,6 +1467,32 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 9.36 | Bulk DELETE (`Many` endpoint) emits `deleted` | bulk path broadcasts too |
 
 **Status:** Complete — 8 pass / 0 fail locally (Postgres test DB available).
+
+### 9f — Core health/calculation/log WebSocket consumers ✅
+
+**Gap:** PR #615 touched the core WebSocket consumer files that the frontend uses
+for public backend health, calculation notifications, and live calculation logs.
+These are long-lived sockets, so regressions leak active consumer references,
+stop shutdown cleanup, or silently break the JSON envelopes frontend listeners
+dispatch on.
+
+**Covers:** `lex/api/consumers/BackendHealthConsumer.py`,
+`lex/api/consumers/CalculationsConsumer.py`,
+`lex/api/consumers/CalculationLogConsumer.py`.
+
+**Shape:** U (`SimpleTestCase`) with mocked channel layer and socket boundary.
+No broker, Redis, or database required.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 9.37 | Backend health socket accepts and returns Healthy payload | `connect()` accepts and tracks the consumer; `receive()` sends `{"status": "Healthy :)"}` |
+| 9.38 | Backend health disconnect untracks connection | disconnect removes the consumer from the process-global active set |
+| 9.39 | Calculations socket joins group and forwards events | joins `calculations`; forwards `calculation_id` events and `calculation_notification` payloads in the frontend contract shape |
+| 9.40 | Calculations disconnect leaves group | discards `test-channel` from `calculations` and untracks the consumer |
+| 9.41 | Calculation-log socket groups by record prefix and streams logs | `calculationId="record-..."` joins group `record`; sends `calculation_log_real_time` envelope with `logs` |
+| 9.42 | Shutdown `disconnect_all` closes tracked consumers | all three classes call `disconnect(None)` on a snapshot of active consumers |
+
+**Scenario range:** 9.37 – 9.42. **Test file:** `lex/test_project/tests/signals_ws/test_9f_core_consumers.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked because PR #615 wires it in `authenticated_websocket_urlpatterns()`.
 
 ### 7g — `CalculatedModel.create()` pipeline (end-to-end) 
 

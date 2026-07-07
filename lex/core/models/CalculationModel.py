@@ -327,6 +327,100 @@ class CalculationModel(LexModel):
             return persisted_state is not None
         return persisted_state == state
 
+    @classmethod
+    def persist_status_fields_with_history(
+        cls,
+        model_instance,
+        update_values,
+        *,
+        history_change_reason=None,
+        resync_missing=True,
+        require_in_progress=False,
+    ):
+        """
+        Persist calculation status fields through ``save()`` so history is kept.
+
+        Celery callbacks receive model instances serialized at task-dispatch time.
+        Those objects may be stale, so this method reloads and locks the current
+        database row, applies only callback-managed fields, and saves that fresh
+        instance. This preserves the stale-snapshot protection of queryset
+        ``update()`` while still emitting the post-save signals used by
+        django-simple-history and bitemporal meta-history.
+        """
+        if model_instance is None or getattr(model_instance, "pk", None) is None:
+            return False
+
+        model_class = model_instance.__class__
+        update_values = dict(update_values or {})
+        if not update_values:
+            return False
+
+        def load_locked_instance():
+            queryset = model_class._default_manager.select_for_update().filter(
+                pk=model_instance.pk
+            )
+            if require_in_progress:
+                queryset = queryset.filter(is_calculated=cls.IN_PROGRESS)
+            return queryset.first()
+
+        with transaction.atomic():
+            fresh_instance = load_locked_instance()
+
+            if (
+                fresh_instance is None
+                and resync_missing
+                and hasattr(model_class, "history")
+            ):
+                try:
+                    from lex.process_admin.utils.bitemporal_sync import (
+                        BitemporalSynchronizer,
+                    )
+
+                    BitemporalSynchronizer.sync_record_for_model(
+                        model_class,
+                        model_instance.pk,
+                    )
+                    fresh_instance = load_locked_instance()
+                except Exception as sync_error:
+                    logger.warning(
+                        "Failed to resync main-table row before persisting "
+                        "calculation status for %s(%s): %s",
+                        model_class.__name__,
+                        model_instance.pk,
+                        sync_error,
+                        exc_info=True,
+                    )
+
+            if fresh_instance is None:
+                return False
+
+            for field_name, value in update_values.items():
+                setattr(fresh_instance, field_name, value)
+
+            if history_change_reason:
+                fresh_instance._history_change_reason = str(
+                    history_change_reason
+                )[:100]
+
+            fresh_instance.save(
+                skip_hooks=True,
+                update_fields=list(update_values.keys()),
+            )
+
+            for field_name in update_values:
+                setattr(model_instance, field_name, getattr(fresh_instance, field_name))
+
+        status = update_values.get("is_calculated")
+        if status in {
+            cls.SUCCESS,
+            cls.ERROR,
+            cls.ABORTED,
+            cls.CANCELLED,
+        }:
+            cls._register_terminal_state_persistence(model_instance)
+
+        return True
+
     @staticmethod
     def persist_error_state(calc_objs):
         persisted_objects = []
@@ -1231,6 +1325,7 @@ class CalculationModel(LexModel):
                     record_id=record_id,
                     calculation_id=calc_id,
                     record=str(self),
+                    model_name=self._meta.object_name,
                     model_label=self._meta.label_lower,
                     record_pk=self.pk,
                 )
@@ -1252,7 +1347,6 @@ class CalculationModel(LexModel):
                 from lex.lex_app.celery_tasks import (
                     FireAndForget,
                     WaitForTasks,
-                    is_celery_worker_process,
                 )
 
                 has_explicit_async_context = (
@@ -1260,15 +1354,26 @@ class CalculationModel(LexModel):
                     or WaitForTasks.get_current_context() is not None
                 )
 
+                # Always dispatch. If an explicit async context is active we
+                # reuse it; otherwise we open our own WaitForTasks and block on
+                # the child task. A nested calculation inside a worker therefore
+                # dispatches (and blocks) by default rather than running inline,
+                # so nested calcs parallelise across workers.
+                #
+                # Abort-safety (Report 1 — abort→resume): a dispatched nested
+                # task creates a broker message that outlives an abort, and the
+                # broker redelivers it after a restart. That is handled by the
+                # cluster cancel index, NOT by running inline: cancel() persists
+                # a Redis "cancelled" marker for the calculation_id
+                # (mark_cancelled, survives restarts unlike the in-memory
+                # revoke), and every dispatched task — calc_and_save and the
+                # @lex_shared_task wrapper alike — checks that marker at task
+                # start and self-aborts with CalculationCancelled, so a
+                # redelivered child lands CANCELLED instead of silently
+                # resuming.
                 if has_explicit_async_context:
                     task_result = self.dispatch_calculation_task()
                     task_dispatched = True
-                elif is_celery_worker_process():
-                    logger.info(
-                        "Executing nested calculation for %s synchronously inside Celery worker",
-                        self,
-                    )
-                    self.execute_calculation_sync()
                 else:
                     with WaitForTasks():
                         task_result = self.dispatch_calculation_task()

@@ -179,6 +179,7 @@ if os.getenv("STORAGE_TYPE") == "GCS":
 SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY", default="pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
 )
+QUACKBACK_WIDGET_SECRET = os.getenv("QUACKBACK_WIDGET_SECRET", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 if os.getenv("LEX_ENVIRONMENT_TAG", "envvar_not_existing") == "dev":
@@ -534,12 +535,21 @@ celery_active = CELERY_ACTIVE
 # budget. When the budget is exceeded the supervisor writes a FAILURE to the
 # result backend so the parent's AsyncResult.get() raises.
 #
-# Master switch: LEX_TASK_RECOVERY_ENABLED=false disables every signal handler,
-# the heartbeat thread, and the beat-driven supervisor sweep. Use it for local
-# dev and CI where no real Redis-backed Celery is running.
+# Master switch: LEX_TASK_RECOVERY_ENABLED disables every signal handler, the
+# heartbeat thread, and the beat-driven supervisor sweep when off.
+#
+# Default is OFF. Recovery leaves a stuck IN_PROGRESS row untouched at startup
+# (the liveness-aware sweep skips rows a tracked recovery task owns), on the
+# assumption that a recovery-supervisor pod is running to requeue/resume them.
+# When that pod is not running (local dev, CI, and any deployment that has not
+# provisioned it) the row is orphaned IN_PROGRESS forever. Defaulting OFF keeps
+# the startup sweep in its blind-abort mode so a stuck row is reset on restart.
+# Deployments that DO run the supervisor pod opt in with
+# LEX_TASK_RECOVERY_ENABLED=true (the recovery-supervisor manifest already sets
+# it explicitly). An explicit env var overrides in either direction.
 # ---------------------------------------------------------------------------
 LEX_TASK_RECOVERY_ENABLED = (
-    os.getenv("LEX_TASK_RECOVERY_ENABLED", "true").lower() == "true"
+    os.getenv("LEX_TASK_RECOVERY_ENABLED", "false").lower() == "true"
 )
 LEX_TASK_HEARTBEAT_INTERVAL = int(os.getenv("LEX_TASK_HEARTBEAT_INTERVAL", "5"))
 LEX_TASK_HB_TTL_MULTIPLIER = int(os.getenv("LEX_TASK_HB_TTL_MULTIPLIER", "3"))
@@ -581,9 +591,16 @@ if LEX_TASK_RECOVERY_ENABLED:
     CELERY_BEAT_SCHEDULE = {
         **(globals().get("CELERY_BEAT_SCHEDULE") or {}),
         "lex-celery-recovery-sweep": {
-            "task": "lex.lex_app.celery_recovery.tasks.sweep_dead_workers",
+            "task": "lex.lex_app.celery_recovery.supervisor.sweep_dead_workers",
             "schedule": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
-            "options": {"expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL)},
+            # Route to a dedicated queue consumed ONLY by the recovery pod
+            # (celery worker -B -Q recovery). Keeps the sweep off the main
+            # KEDA-watched queue so it never inflates the worker scaling signal
+            # nor gets eaten by a scaled-up real worker. expires bounds backlog.
+            "options": {
+                "queue": "recovery",
+                "expires": float(LEX_TASK_SUPERVISOR_SCAN_INTERVAL),
+            },
         },
     }
 
@@ -732,7 +749,20 @@ USE_L10N = True
 USE_TZ = True if DATABASE_DEPLOYMENT_TARGET not in ("default", "GCP") else False
 
 # TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
-TIME_ZONE = "Europe/Berlin"
+#
+# TIME_ZONE is coupled to USE_TZ on purpose. django_celery_beat's scheduler
+# (DatabaseScheduler, used for both the recovery sweep IntervalSchedule and the
+# future-edit ClockedSchedule) interprets *naive* datetimes as UTC — see
+# celery.utils.time.maybe_make_aware, called unconditionally in
+# django_celery_beat.schedulers.ModelEntry.is_due and clockedschedule.clocked.
+# When USE_TZ is False we store naive datetimes (e.g. PeriodicTask.last_run_at,
+# History.valid_from). If TIME_ZONE were a non-UTC zone the stored naive value
+# would be local wall-clock while beat reads it as UTC, so is_due() is off by the
+# UTC offset (the interval sweep never becomes due; clocked activations fire
+# hours late). Forcing UTC here makes the naive-as-UTC assumption correct.
+# When USE_TZ is True, datetimes are tz-aware and the display zone is free to be
+# Europe/Berlin without affecting scheduling.
+TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/

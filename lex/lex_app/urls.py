@@ -36,6 +36,8 @@ urlpatterns = [
     path("api/health", views.HealthCheck.as_view(), name="api_health_view"),
     path("api/active-calculations", ActiveCalculations.as_view(), name="active-calculations"),
     path("api/user/", CurrentUser.as_view(), name="current-user"),
+    path("api/quackback-widget-token", views.quackback_widget_token),
+    path("api/quackback-widget-token/", views.quackback_widget_token, name="quackback-widget-token"),
     path(admin_route, adminSite.urls),
     path(process_admin_route, processAdminSite.urls),
     # path("oidc/", include("mozilla_django_oidc.urls")),

@@ -214,6 +214,12 @@ class CallbackTask(Task):
                 if error_message and hasattr(model_instance, 'error_message'):
                     model_instance.error_message = error_message
                     update_values["error_message"] = error_message
+                elif error_message and hasattr(
+                    model_instance,
+                    'calculation_error_message',
+                ):
+                    model_instance.calculation_error_message = error_message
+                    update_values["calculation_error_message"] = error_message
                 if task_id and hasattr(model_instance, 'task_id'):
                     model_instance.task_id = task_id
                     update_values["task_id"] = task_id
@@ -276,34 +282,27 @@ class CallbackTask(Task):
             update_values: Dict[str, Any],
     ) -> bool:
         """
-        Persist callback-managed status fields without saving the full model.
+        Persist callback-managed status fields while preserving history.
 
         Celery task arguments may reference a stale model snapshot or even a row
         that was removed and rebuilt by the bitemporal synchronization flow.
-        Using a direct queryset update avoids rewriting unrelated fields from the
-        stale snapshot and lets us handle a missing row gracefully.
+        Reloading the row before saving avoids rewriting unrelated stale fields,
+        while still emitting history/meta-history signals for terminal status.
         """
         model_class = model_instance.__class__
-        updated_rows = model_class._default_manager.filter(pk=model_instance.pk).update(**update_values)
-        if updated_rows:
+        status = update_values.get("is_calculated")
+        history_change_reason = (
+            f"Calculation finished with status {status}"
+            if status
+            else "Calculation status callback"
+        )
+        persisted = CalculationModel.persist_status_fields_with_history(
+            model_instance,
+            update_values,
+            history_change_reason=history_change_reason,
+        )
+        if persisted:
             return True
-
-        if hasattr(model_class, "history"):
-            try:
-                from lex.process_admin.utils.bitemporal_sync import BitemporalSynchronizer
-
-                BitemporalSynchronizer.sync_record_for_model(model_class, model_instance.pk)
-                updated_rows = model_class._default_manager.filter(pk=model_instance.pk).update(**update_values)
-                if updated_rows:
-                    return True
-            except Exception as sync_error:
-                logger.warning(
-                    "Failed to resync main-table row before persisting callback status for %s(%s): %s",
-                    model_class.__name__,
-                    model_instance.pk,
-                    sync_error,
-                    exc_info=True,
-                )
 
         logger.warning(
             "Skipping callback status persistence for %s(%s); no active row found.",
@@ -661,6 +660,33 @@ def lex_shared_task(_func=None, **task_opts):
                     kwargs.pop('context')
                 if model_context:
                     kwargs.pop('model_context')
+
+                # Cooperative cancellation net for DISPATCHED runs (mirrors
+                # calc_and_save): if this calculation's cancelled marker is
+                # already set in the cluster cancel index, self-abort before
+                # running anything. This is what keeps nested dispatch
+                # abort-safe (Report 1 — abort→resume): cancel()'s revoke is
+                # in-memory, so after a server+worker restart the broker
+                # redelivers the still-unacked task — but the Redis marker
+                # written by cancel() survives the restart, and this check
+                # makes the redelivered task land CANCELLED instead of
+                # silently resuming. Only applies when a dispatched
+                # ``context`` is present (a real worker execution); direct
+                # synchronous calls carry no context kwarg and skip it. A
+                # silent no-op without Redis — and without Redis there is no
+                # broker to redeliver in the first place.
+                if context and context.get("calculation_id"):
+                    from lex.core.cancellation import cluster_cancel_index
+                    from lex.core.models.CalculationModel import (
+                        CalculationCancelled,
+                    )
+
+                    if cluster_cancel_index.is_cancelled(
+                        context.get("calculation_id")
+                    ):
+                        raise CalculationCancelled(
+                            "Calculation cancelled before task start"
+                        )
 
                 # Only enter CeleryCalculationContext when we actually have
                 # context to set (i.e. running inside a Celery worker).

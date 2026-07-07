@@ -4,11 +4,13 @@ from pathlib import Path
 
 from django.http import HttpResponse
 from django.utils._os import safe_join
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.static import serve as static_serve
 from lex.lex_app import settings
 
 
+@ensure_csrf_cookie
 @xframe_options_exempt
 def serve_react(request, path, document_root=None):
     path = posixpath.normpath(path).lstrip("/")

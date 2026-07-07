@@ -301,7 +301,7 @@ class CeleryTaskDispatcher:
         try:
             # Import here to avoid circular imports
             try:
-                from celery.result import ResultSet
+                from celery.result import ResultSet, allow_join_result
             except ImportError as import_error:
                 raise CeleryDispatchError(
                     f"Failed to import Celery ResultSet: {str(import_error)}",
@@ -319,9 +319,15 @@ class CeleryTaskDispatcher:
 
                 logger.debug(f"Waiting for {total_tasks} Celery tasks to complete...")
 
-                # Wait for all tasks to complete, but handle individual failures
-
-                rs.join(propagate=False)
+                # Wait for all tasks to complete, but handle individual failures.
+                # ``allow_join_result`` is REQUIRED: this fan-out dispatch may run
+                # inside a Celery worker (a nested calculation dispatching its own
+                # groups), and Celery hard-forbids ``result.get()`` / ``ResultSet.join()``
+                # inside a task ("Never call result.get() within a task!") unless the
+                # call is explicitly wrapped. This mirrors WaitForTasks.wait_for_completion,
+                # which already blocks under allow_join_result for the same reason.
+                with allow_join_result():
+                    rs.join(propagate=False)
                 # Check each task result for failures
                 for task_index, task_result in enumerate(task_results):
                     task_id = getattr(task_result, 'id', f'unknown_{task_index}')
