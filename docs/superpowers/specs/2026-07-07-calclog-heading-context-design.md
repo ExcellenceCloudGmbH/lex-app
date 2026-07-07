@@ -13,10 +13,14 @@ titled sections that nest log output without needing a backing object:
 
 ```python
 with model_logging_context("Data preparation"):
-    CalculationLog.log("Loading input files...")
+    LexLogger().add_heading("Inputs", 2).add_text("Loading input files...").log()
     with model_logging_context("Validation"):
-        CalculationLog.log("Checking schemas...")
+        LexLogger().add_list(["schema ok", "types ok"]).log()
 ```
+
+Projects log through the `LexLogger` builder, never `CalculationLog.log()` directly —
+`LexLogger.log()` flushes into `CalculationLog.log()`, so headings apply to it without any
+change to the builder. References to `CalculationLog.log()` below describe that internal sink.
 
 ## Decisions (user-confirmed)
 
