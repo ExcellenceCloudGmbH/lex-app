@@ -63,3 +63,13 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Scenario range:** 6.109 – 6.113. **Test file:** `lex/test_project/tests/audit_logging/test_6p_cache_buffer_cap.py`. **Type:** U. **Status:** ✅ Complete (Session 77 — June 8). Scenarios: 6.109 buffer never exceeds the cap; 6.110 trim starts on a clean line boundary; 6.111 newest retained / oldest dropped; 6.112 under-cap buffer left untouched; 6.113 `set()` uses the configured `CACHE_TIMEOUT`.
 
 ---
+
+### 6q. Root-calculation detection ignores heading frames ✅
+
+**What it tests:** `_is_root_calculation` (`audit_logging/utils/calculation_audit.py`) decides which instance owns the top-level AuditLog by comparing it to the model context stack. The heading-context feature (`model_logging_context("...")` → `LogHeading` frames, batch 15g) puts non-model frames on that stack, so root detection now resolves via `get_root_model()`/`get_current_model()` which skip heading frames.
+
+**Why a regression matters:** if a presentation-only heading demotes the root calculation, its terminal audit status handling breaks; if a heading hides nesting, a child calculation gets treated as the root.
+
+**Scenario range:** 6.117 – 6.118. **Test file:** `lex/test_project/tests/audit_logging/test_6q_root_detection_with_headings.py`. **Type:** U. **Status:** ✅ Complete. Scenarios: 6.117 headings around/above the root never demote it; 6.118 a model nested below a heading stays non-root.
+
+---
