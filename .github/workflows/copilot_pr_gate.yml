@@ -214,10 +214,25 @@ jobs:
             --linked-issue "${{ steps.mode.outputs.issue }}" | tee shape.out
 
       - name: Test-plan dashboard freshness
-        run: python .github/scripts/test_plan_aggregates.py check
+        id: plan_fresh
+        run: python .github/scripts/test_plan_aggregates.py check | tee plan_fresh.out
 
       - name: Test-plan allocation consistency
-        run: python .github/scripts/test_plan_aggregates.py validate
+        id: plan_alloc
+        run: python .github/scripts/test_plan_aggregates.py validate | tee plan_alloc.out
+
+      - name: On test-plan gate failure, label + comment
+        # Same pattern as the shape handler below: scoped to these two
+        # steps so unrelated failures don't produce a misleading comment.
+        if: failure() && (steps.plan_fresh.outcome == 'failure' || steps.plan_alloc.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          BODY="Test-plan consistency gate failed:\n\n$(cat plan_fresh.out plan_alloc.out 2>/dev/null)"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          gh pr edit    "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "copilot:invalid"
+          exit 1
 
       - name: On shape failure, label + comment
         # Scope to the shape step only. Previously this used a bare
