@@ -70,7 +70,7 @@ re-creates the problem inside the shards.
 
 ```
 lex/test_project/test-plan/
-├── index.md                        # exec summary + ⚙generated cluster table (small)
+├── index.md                        # exec summary + hand-maintained cluster table (small)
 ├── testing-philosophy.md           # Golden Rule + rules + red flags + journey ordering
 │                                   #   (extracted from test-clusters.md preamble)
 ├── why-the-shift.md                # unchanged
@@ -78,6 +78,8 @@ lex/test_project/test-plan/
 ├── cleanup-and-coverage-plan.md    # unchanged
 ├── known-bugs.md                   # unchanged this round (see §8 Deferred)
 ├── clusters/
+│   ├── README.md                   # allocation conventions + LATER backlog + pending
+│   │                               #   decisions (absorbed from test-writing-plan.md §§5–9)
 │   ├── 01-init/
 │   │   ├── cluster.md              # intent + scenario definitions (prose only)
 │   │   ├── batches.md              # batch/allocation history (the ONLY batch write-up)
@@ -128,6 +130,8 @@ The prose is a summary + link — per principle 1 it never restates the batch ta
 cluster: 7
 slug: calculations
 title: Calculation State Machine
+test_dirs: [calculations, calculation_logging]   # test folders this cluster owns
+                                                 # (optional; defaults to [slug])
 max_scenario: 199            # highest scenario ID ever allocated; never decreases
 letters:                     # never renumbered, never reused; planned batches live here too
   a:
@@ -164,13 +168,18 @@ One stdlib-only script (same style as `docs_mirror.py`), living with the other C
 scripts so the gate and its unit tests share the established harness:
 
 - **`.github/scripts/test_plan_aggregates.py`**
-  - `build` — reads every `clusters/*/allocation.yaml`; writes `progress/dashboard.md`
-    and the cluster table in `index.md` (between `<!-- generated: -->` markers).
+  - `build` — reads every `clusters/*/allocation.yaml`; writes `progress/dashboard.md`.
   - `check` — rebuilds to a temp copy and fails on diff (the CI freshness gate).
+  - `validate` — allocation consistency against the test tree: every non-exempt test
+    folder claimed by exactly one cluster's `test_dirs`; every `test_<N><letter>_*.py`
+    letter present in that cluster's YAML; every `Scenario N.M` docstring ID ≤
+    `max_scenario` and unique across the cluster's files.
 
 Dashboard rows are derived **only** from the YAML (title, scenario range, counts,
-status, note) — one source, zero parsing of prose. Agents run `build` as part of the
-Definition of Done; the gate runs `check`.
+status, note) — one source, zero parsing of prose. `index.md`'s cluster table stays
+**hand-maintained**: its What-It-Tests / Key-Risk columns are prose, and the table only
+changes when a cluster is created (rare → no contention, no growth). Agents run `build`
+as part of the Definition of Done; the gate runs `check` + `validate`.
 
 ---
 
@@ -181,7 +190,8 @@ Definition of Done; the gate runs `check`.
 | `lex-testing` skill | Step 1 reads `index.md` + `testing-philosophy.md` + target `clusters/NN-<slug>/`; Step 3 allocates from `allocation.yaml`; Step 7 DoD = cluster-shard edits + new session fragment + `test_plan_aggregates.py build`. Drop instructions to read the monoliths. |
 | `.github/instructions/testing.instructions.md` | Same path/workflow updates. |
 | `copilot_assemble_prompt.py` | Prompt points Copilot at the **target cluster directory** (+ `testing-philosophy.md`) instead of the two monoliths → smaller, better-focused cloud prompts. Required-deliverables list rewritten to the new DoD. |
-| `copilot_validate_pr_shape.py` | New checks: (1) test-file changes under `lex/test_project/tests/<slug>/` require edits under `clusters/NN-<slug>/`; (2) ≥1 **added** file under `progress/sessions/`; (3) allocation consistency (§4: IDs ≤ `max_scenario`, no duplicate IDs repo-wide, no reused letters, filename letter present in YAML); (4) `test_plan_aggregates.py check` passes. Existing bug-repro checks (known-bugs row, xfail-strip probe) unchanged. Drop the must-touch-monolith checks. |
+| `copilot_validate_pr_shape.py` | New checks: (1) added test files under `lex/test_project/tests/<slug>/` require an edit under the owning `clusters/NN-*/` dir (slug resolved via `allocation.yaml` `test_dirs`, so the script gains a `--plan-dir` arg); (2) ≥1 **added** file under `progress/sessions/` (the gate's `files.json` already carries per-file `status`). Drop the must-touch-monolith checks. Existing bug-repro checks (known-bugs row, xfail-strip probe) unchanged. |
+| `copilot_pr_gate.yml` | Two new steps after the shape check: `test_plan_aggregates.py check` (freshness) and `test_plan_aggregates.py validate` (allocation consistency, §5). |
 | Cross-links | `index.md`, `progress.md`, `conventions.md`, `docs/ci-cd/copilot-test-bot.md`, pointer stubs. |
 
 ---
