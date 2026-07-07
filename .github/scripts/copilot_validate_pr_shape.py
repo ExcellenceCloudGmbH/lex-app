@@ -2,6 +2,14 @@
 
 Used by ``copilot_pr_gate.yml`` to apply the per-mode contract from
 ``docs/superpowers/specs/2026-05-13-copilot-test-bot-design.md`` §7.
+
+The test-plan is a sharded layout: ``clusters/NN-<slug>/{allocation.yaml,
+batches.md}``, session fragments under ``progress/sessions/YYYY-MM-DD-<slug>.md``,
+and a generated ``progress/dashboard.md``. Every PR must (1) add a new test
+file, (2) edit the cluster shard that claims the test file's folder (resolved
+via each cluster's ``allocation.yaml`` ``test_dirs``), (3) add a new session
+fragment, and (4) leave the retired monoliths (``test-clusters.md``,
+``test-writing-plan.md``, ``progress/session-log.md``) untouched.
 """
 
 from __future__ import annotations
@@ -12,6 +20,8 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import yaml
 
 VALID_MODES = ("regression", "bug-repro", "fix-and-test")
 
@@ -31,12 +41,34 @@ MAX_FIX_AND_TEST_SOURCE_LINES = 50
 SOURCE_CHANGES_HEADING = "### Source changes"
 FIXES_LINK_RE = re.compile(r"(?im)^Fixes\s+#\d+\s*$")
 
+RETIRED_MONOLITHS = (
+    "lex/test_project/test-plan/test-clusters.md",
+    "lex/test_project/test-plan/test-writing-plan.md",
+    "lex/test_project/test-plan/progress/session-log.md",
+)
+SESSION_FRAGMENT_RE = re.compile(
+    r"^lex/test_project/test-plan/progress/sessions/\d{4}-\d{2}-\d{2}-[A-Za-z0-9._-]+\.md$"
+)
+CLUSTER_SHARD_PREFIX = "lex/test_project/test-plan/clusters/"
+
+
+def _slug_to_shard_dir(plan_dir: Path) -> dict[str, str]:
+    """Map every claimed test-dir slug -> its clusters/NN-<slug>/ dir name,
+    by reading allocation.yaml files (test_dirs aliases included)."""
+    out: dict[str, str] = {}
+    for yml in sorted((plan_dir / "clusters").glob("*/allocation.yaml")):
+        data = yaml.safe_load(yml.read_text())
+        for d in data.get("test_dirs") or [data["slug"]]:
+            out[d] = yml.parent.name
+    return out
+
 
 @dataclass
 class PRFile:
     path: str
     additions: int
     deletions: int
+    status: str = ""
 
     @property
     def delta(self) -> int:
@@ -63,6 +95,7 @@ def validate_pr_shape(
     files: list[PRFile],
     pr_body: str,
     linked_issue: int | None = None,
+    plan_dir: Path | None = None,
 ) -> ValidationResult:
     """Validate a Copilot PR's file set, naming, and body markers.
 
@@ -75,9 +108,15 @@ def validate_pr_shape(
     so requiring the text would reject otherwise-valid PRs. When
     ``linked_issue`` is ``None`` (e.g. local/manual validation with no
     resolved link) the body must still carry ``Fixes #N``.
+
+    ``plan_dir`` — root of the sharded test-plan (defaults to
+    ``lex/test_project/test-plan``). Used to resolve each new test file's
+    owning cluster shard via ``clusters/*/allocation.yaml``'s ``test_dirs``.
     """
     if mode not in VALID_MODES:
         raise ValueError(f"unknown mode {mode!r}; valid: {VALID_MODES}")
+
+    plan_dir = plan_dir or Path("lex/test_project/test-plan")
 
     errors: list[str] = []
     paths = [f.path for f in files]
@@ -99,13 +138,38 @@ def validate_pr_shape(
         else:
             errors.append("no new test file under `lex/test_project/tests/<cluster>/`")
 
-    # 2. test-clusters.md modified.
-    if "lex/test_project/test-plan/test-clusters.md" not in paths:
-        errors.append("`lex/test_project/test-plan/test-clusters.md` was not modified")
+    # 2. Each added test file's cluster shard was edited.
+    shard_by_slug = _slug_to_shard_dir(plan_dir)
+    for p in test_files:
+        slug = p.split("/")[3]  # lex/test_project/tests/<slug>/...
+        shard = shard_by_slug.get(slug)
+        if shard is None:
+            errors.append(
+                f"test folder {slug!r} is not claimed by any cluster's "
+                "allocation.yaml (test_dirs)"
+            )
+        elif not any(x.startswith(f"{CLUSTER_SHARD_PREFIX}{shard}/") for x in paths):
+            errors.append(
+                f"`{CLUSTER_SHARD_PREFIX}{shard}/` was not updated for new test `{p}` "
+                "(allocation.yaml + batches.md at minimum)"
+            )
 
-    # 3. Session log appended.
-    if "lex/test_project/test-plan/progress/session-log.md" not in paths:
-        errors.append("`lex/test_project/test-plan/progress/session-log.md` was not appended")
+    # 3. At least one NEW session fragment.
+    fragments = [
+        f for f in files
+        if SESSION_FRAGMENT_RE.match(f.path) and f.status == "added"
+    ]
+    if not fragments:
+        errors.append(
+            "no new session fragment added under "
+            "`lex/test_project/test-plan/progress/sessions/` "
+            "(named YYYY-MM-DD-<slug>.md)"
+        )
+
+    # 3b. Retired monoliths are frozen.
+    for p in paths:
+        if p in RETIRED_MONOLITHS:
+            errors.append(f"`{p}` is retired (pointer stub) — edit the sharded plan instead")
 
     # 4. Mode-B / Mode-C: known-bugs.md row added.
     if mode in ("bug-repro", "fix-and-test"):
@@ -180,16 +244,26 @@ def _cli() -> int:
              "PR's closing-issue link. When set, the body's `Fixes #N` line "
              "is not required.",
     )
+    parser.add_argument(
+        "--plan-dir", type=Path, default=Path("lex/test_project/test-plan"),
+        help="Root of the sharded test-plan (default: lex/test_project/test-plan).",
+    )
     args = parser.parse_args()
 
     raw = json.loads(args.files_json.read_text())
     files = [
-        PRFile(path=r["path"], additions=int(r.get("additions", 0)), deletions=int(r.get("deletions", 0)))
+        PRFile(
+            path=r["path"],
+            additions=int(r.get("additions", 0)),
+            deletions=int(r.get("deletions", 0)),
+            status=r.get("status", ""),
+        )
         for r in raw
     ]
     body = args.body_file.read_text()
     result = validate_pr_shape(
-        mode=args.mode, files=files, pr_body=body, linked_issue=args.linked_issue
+        mode=args.mode, files=files, pr_body=body, linked_issue=args.linked_issue,
+        plan_dir=args.plan_dir,
     )
     if result.ok:
         print("OK")
