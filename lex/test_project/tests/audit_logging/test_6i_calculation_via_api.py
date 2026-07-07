@@ -326,8 +326,8 @@ class TestCluster06i_AtomicCalcViaAPI(_CalcAuditViaAPIMixin, E2ETestCase):
         successful transaction."""
         self._run_success_scenario()
 
-    def test_6_51_atomic_calc_failure_writes_audit(self) -> None:
-        """Scenario 6.51: PATCH ?calculate=true on an atomic calc whose
+    def test_6_114_atomic_calc_failure_writes_audit(self) -> None:
+        """Scenario 6.114: PATCH ?calculate=true on an atomic calc whose
         ``calculate()`` raises → failure AuditLog with traceback.
 
         This is the most-asked-about contract for the audit
@@ -360,14 +360,14 @@ class TestCluster06i_NonAtomicCalcViaAPI(_CalcAuditViaAPIMixin, E2ETestCase):
     model_cls = AuditNonAtomicCalc
     url_name = AUDIT_NONATOMIC
 
-    def test_6_52_non_atomic_calc_success_writes_audit(self) -> None:
-        """Scenario 6.52: Non-atomic calc, success path. No outer
+    def test_6_115_non_atomic_calc_success_writes_audit(self) -> None:
+        """Scenario 6.115: Non-atomic calc, success path. No outer
         atomic block, so the audit rows commit incrementally — the
         customer-visible result is identical to 6.50."""
         self._run_success_scenario()
 
-    def test_6_53_non_atomic_calc_failure_writes_audit(self) -> None:
-        """Scenario 6.53: Non-atomic calc, failure path.
+    def test_6_116_non_atomic_calc_failure_writes_audit(self) -> None:
+        """Scenario 6.116: Non-atomic calc, failure path.
 
         With ``is_atomic = False`` there is no outer transaction to
         roll back, so any audit row the framework wrote before the

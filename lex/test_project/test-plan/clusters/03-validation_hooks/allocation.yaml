@@ -1,0 +1,65 @@
+cluster: 3
+slug: validation_hooks
+title: Validation Hooks
+max_scenario: 32
+letters:
+  a:
+    title: ''
+    scenarios: 3.1-3.2
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: ''
+    scenarios: 3.3-3.8
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: ''
+    scenarios: 3.5-3.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: ''
+    scenarios: '3.7'
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: Pre-validation snapshot lifecycle (v1→v2 calculate-all memory fix)
+    scenarios: 3.9-3.10
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  f:
+    title: Default-on lean `_initial_state` (last full-field snapshot removed; hooks preserved)
+    scenarios: 3.11-3.32
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded

@@ -1,0 +1,133 @@
+cluster: 4
+slug: permissions
+title: Permissions
+max_scenario: 74
+letters:
+  a:
+    title: ''
+    scenarios: 4.1-4.9
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: ''
+    scenarios: 4.4-4.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: ''
+    scenarios: 4.7-4.12
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: ''
+    scenarios: 4.10-4.11
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: ''
+    scenarios: 4.13-4.41
+    status: complete
+    tests:
+      pass: 5
+      skip: 2
+      xfail: 0
+    note: 2 skipped — 4.14/4.15 AuditLog DB-filter path deferred; 4.41 pins detail-GET read-deny
+  f:
+    title: ''
+    scenarios: 4.19-4.26
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: 4.19–4.26
+  g:
+    title: ''
+    scenarios: 4.31-4.39
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  h:
+    title: ''
+    scenarios: '4.40'
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  i:
+    title: ''
+    scenarios: 4.27-4.30,4.71-4.74
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: 'counts folded into cluster top-line in pre-migration dashboard. 4.31–4.34 renumbered to 4.71–4.74
+      on 2026-07-07 (BUG-023) — they collided with letter 4g, which legitimately owns 4.31–4.39.'
+  j:
+    title: Middleware & bearer-token authentication
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  k:
+    title: Permission views
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  l:
+    title: 'User API endpoint *(blocked — see §6 decision #2)*'
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  m:
+    title: '`ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass'
+    scenarios: 4.66-4.70
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit
+      order + subclass contract

@@ -17,19 +17,25 @@ from copilot_assemble_prompt import IssueInput, Mode, assemble_prompt  # noqa: E
 
 @pytest.fixture
 def fake_test_plan(tmp_path: Path) -> Path:
-    """Build a minimal test-plan/ tree with the four files the assembler reads."""
+    """Build a minimal test-plan/ tree matching the sharded layout the assembler reads."""
     plan = tmp_path / "test-plan"
-    (plan / "progress").mkdir(parents=True)
+    (plan / "progress" / "sessions").mkdir(parents=True)
+    (plan / "clusters" / "07-calculations").mkdir(parents=True)
     (plan / "index.md").write_text(
         "# Index\n\n## Golden Rule\n\nTest what the framework is **trying** to achieve, "
         "not what the current code happens to do.\n"
     )
-    (plan / "test-clusters.md").write_text("# Clusters\n\nCluster 7 — calculation state machine.\n")
-    (plan / "test-writing-plan.md").write_text(
-        "# Writing plan\n\nFile naming: `tests/<cluster>/test_<Nx>_<slug>.py`.\n"
+    (plan / "testing-philosophy.md").write_text(
+        "# Testing Philosophy\n\nGolden Rule and full rules live here.\n"
+    )
+    (plan / "clusters" / "07-calculations" / "allocation.yaml").write_text(
+        "cluster: 7\nslug: calculations\ntitle: Calculation State Machine\n"
+        "max_scenario: 204\nletters:\n  g:\n    title: 'example'\n"
+        "    scenarios: '7.1-7.5'\n    status: complete\n"
+        "    tests:\n      pass: 1\n      skip: 0\n      xfail: 0\n    note: ''\n"
     )
     (plan / "progress" / "conventions.md").write_text(
-        "# Conventions\n\nAppend rows to `progress/session-log.md`.\n"
+        "# Conventions\n\nAppend a new session fragment under `progress/sessions/`.\n"
     )
     return plan
 
@@ -122,19 +128,19 @@ def test_blank_reproducer_rejected_for_fix_and_test(fake_test_plan: Path) -> Non
 def test_assembled_prompt_does_not_inline_large_test_plan_files(fake_test_plan: Path) -> None:
     """Regression: production failed 2026-05-21 with `GraphQL: Body is too long`
     because the assembler inlined test-clusters.md (~160KB) directly into the
-    issue body. The fix is to reference those files by path; Copilot reads
-    them from the repo. Pin the new contract: their contents must NOT appear
-    in the output, but their paths MUST."""
-    # Pad both big files past 64KB so this test catches a regression even on a
-    # small repo. If the assembler ever re-inlines them, the size guard would
-    # fire first; this test pins the design intent independently.
-    (fake_test_plan / "test-clusters.md").write_text("CLUSTERS_SENTINEL\n" + ("x" * 70_000))
-    (fake_test_plan / "test-writing-plan.md").write_text("WRITING_PLAN_SENTINEL\n" + ("y" * 70_000))
+    issue body. The fix is to reference per-cluster shard files by path; Copilot
+    reads them from the repo. Pin the new contract: shard file contents must NOT
+    appear in the output, but the shard directory path MUST."""
+    # Pad the allocation.yaml past 64KB so this test catches a regression even on
+    # a small repo. If the assembler ever inlines shard contents, the size guard
+    # would fire first; this test pins the design intent independently.
+    (fake_test_plan / "clusters" / "07-calculations" / "allocation.yaml").write_text(
+        "ALLOCATION_SENTINEL\n" + ("x" * 70_000)
+    )
     out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
-    assert "CLUSTERS_SENTINEL" not in out
-    assert "WRITING_PLAN_SENTINEL" not in out
-    assert "lex/test_project/test-plan/test-clusters.md" in out
-    assert "lex/test_project/test-plan/test-writing-plan.md" in out
+    assert "ALLOCATION_SENTINEL" not in out
+    assert "clusters/<NN>-<slug>/" in out
+    assert "allocation.yaml" in out
 
 
 def test_assembled_prompt_fits_under_github_issue_body_cap(fake_test_plan: Path) -> None:
@@ -155,19 +161,42 @@ def test_size_guard_raises_when_conventions_exceeds_cap(fake_test_plan: Path) ->
         assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
 
 
-def test_missing_test_clusters_file_raises(fake_test_plan: Path) -> None:
-    """The pointer pattern doesn't read test-clusters.md, but its existence is
-    still a precondition — a missing file would leave Copilot with a dead
-    pointer. Verify the existence check fires."""
-    (fake_test_plan / "test-clusters.md").unlink()
-    with pytest.raises(FileNotFoundError, match="test-clusters.md"):
+def test_missing_testing_philosophy_file_raises(fake_test_plan: Path) -> None:
+    """The pointer pattern doesn't inline testing-philosophy.md, but its
+    existence is still a precondition — a missing file would leave Copilot
+    with a dead pointer. Verify the existence check fires."""
+    (fake_test_plan / "testing-philosophy.md").unlink()
+    with pytest.raises(FileNotFoundError, match="testing-philosophy.md"):
         assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
 
 
-def test_missing_test_writing_plan_file_raises(fake_test_plan: Path) -> None:
-    (fake_test_plan / "test-writing-plan.md").unlink()
-    with pytest.raises(FileNotFoundError, match="test-writing-plan.md"):
+def test_missing_clusters_dir_raises(fake_test_plan: Path) -> None:
+    """The sharded plan requires the clusters/ directory to exist — a missing
+    directory would leave Copilot with nowhere to read cluster shards from."""
+    import shutil
+
+    shutil.rmtree(fake_test_plan / "clusters")
+    with pytest.raises(FileNotFoundError, match="clusters"):
         assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+
+
+def test_missing_sessions_dir_raises(fake_test_plan: Path) -> None:
+    """progress/sessions/ must exist so the deliverables instruction to add a
+    new session fragment there points at a real directory."""
+    (fake_test_plan / "progress" / "sessions").rmdir()
+    with pytest.raises(FileNotFoundError, match="progress/sessions"):
+        assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+
+
+def test_assembled_prompt_warns_off_retired_monolith_files(fake_test_plan: Path) -> None:
+    """The plan is sharded and the two old monolith files (test-clusters.md,
+    test-writing-plan.md) are retired pointer stubs that the PR gate rejects
+    edits to. The prompt must steer Copilot toward the per-cluster shard tree
+    and explicitly warn it off editing the retired stubs."""
+    out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
+    assert "clusters/<NN>-<slug>/" in out
+    assert "allocation.yaml" in out
+    assert "retired pointer stubs" in out
 
 
 def test_assembled_prompt_teaches_multi_cluster_decomposition(fake_test_plan: Path) -> None:
@@ -222,13 +251,14 @@ def test_assembled_prompt_includes_research_first_block(fake_test_plan: Path) ->
 
 def test_assembled_prompt_lists_full_done_doc_set(fake_test_plan: Path) -> None:
     """Definition-of-Done parity with the local AGENTS.md rules: the deliverables
-    must name the universal session-log row, the dashboard status bump, AND the
-    test-writing-plan batch row — so the cloud and local paths update the same
-    docs and don't drift."""
+    must name the new session fragment under progress/sessions/, the dashboard
+    regeneration command, AND the per-cluster allocation.yaml/batches.md update —
+    so the cloud and local paths update the same docs and don't drift."""
     out = assemble_prompt(_basic_issue(Mode.REGRESSION), test_plan_dir=fake_test_plan)
-    assert "progress/session-log.md" in out
+    assert "progress/sessions/" in out
     assert "progress/dashboard.md" in out
-    assert "test-writing-plan.md" in out
+    assert "allocation.yaml" in out
+    assert "batches.md" in out
 
 
 def test_bug_repro_and_fix_and_test_constrained_to_single_file(fake_test_plan: Path) -> None:

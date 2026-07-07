@@ -49,6 +49,39 @@ DJANGO_ENV = {
 }
 
 
+# ── Selector parsing (shared with plan_showcase_matrix.py) ──────────
+def parse_selectors(only: str | None) -> dict[str, str | None]:
+    """Parse a ``--only`` cluster selector into an ordered mapping.
+
+    The grammar is a comma-separated list where each entry is either
+    ``<cluster_key>`` (run the whole cluster) or
+    ``<cluster_key>:<test_suffix>`` (run a single test inside it — the
+    suffix is the dotted ``<module>.<TestClass>.<method>`` tail).
+
+    Returns an insertion-ordered ``{key: test_suffix_or_None}`` dict
+    preserving the caller's order. Blank entries are skipped. When
+    ``only`` is falsy the default selector set — every cluster in
+    ``CLUSTERS`` declaration order, each with no suffix — is returned.
+
+    This is the single source of truth for the selector grammar; both
+    the runner and ``plan_showcase_matrix.py`` import it so the two can
+    never drift.
+    """
+    if not only or not only.strip():
+        return {c.key: None for c in CLUSTERS}
+    selectors: dict[str, str | None] = {}
+    for raw in only.split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if ":" in entry:
+            key, suffix = entry.split(":", 1)
+            selectors[key.strip()] = suffix.strip() or None
+        else:
+            selectors[entry] = None
+    return selectors
+
+
 # ── Output parsing ──────────────────────────────────────────────────
 # Pytest summary line examples (category order varies by version and by
 # what categories are non-zero):
@@ -338,11 +371,12 @@ def _per_cluster_coverage_from_contexts(
     return out
 
 
-def _overall_coverage_pct() -> float | None:
+def _overall_coverage_pct(coverage_data: str = ".coverage") -> float | None:
     try:
         out = subprocess.run(
             ["coverage", "report", "--rcfile=.coveragerc"],
             capture_output=True, text=True, cwd=REPO_ROOT, check=False,
+            env={**os.environ, "COVERAGE_FILE": coverage_data},
         )
     except FileNotFoundError:
         return None
@@ -357,6 +391,7 @@ def _run_cluster(
     quiet: bool,
     keepdb: bool,
     test_suffix: str | None = None,
+    cov_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run one cluster's tests.
 
@@ -390,7 +425,7 @@ def _run_cluster(
         target = f"{base_path}/{module}.py::{rest}" if rest else f"{base_path}/{module}.py"
     else:
         target = base_path
-    env = {**os.environ, **DJANGO_ENV}
+    env = {**os.environ, **DJANGO_ENV, **(cov_env or {})}
 
     cmd = [
         "coverage", "run", "-a",
@@ -539,35 +574,39 @@ def main(argv: list[str]) -> int:
     p.add_argument("--keepdb", action="store_true",
                    help="Reuse the test database across clusters — "
                         "big speed-up on local runs (don't use in CI).")
+    p.add_argument("--coverage-data", default=".coverage",
+                   help="Path to the coverage data file. Exported to the "
+                        "test subprocess as COVERAGE_FILE and used by the "
+                        "coverage erase step, so parallel single-cluster "
+                        "runs can each write a distinct ``.coverage.<key>`` "
+                        "file that a downstream ``coverage combine`` merges. "
+                        "Default ``.coverage`` (today's behaviour).")
     args = p.parse_args(argv)
 
-    # Parse --only: each entry is "<key>" or "<key>:<test_suffix>".
-    # ``selectors`` preserves the caller's order and maps key → suffix (or None).
-    selectors: dict[str, str | None]
+    # Parse --only into an ordered {key: suffix} mapping via the shared
+    # grammar (see parse_selectors). Then filter CLUSTERS to just the
+    # selected keys, preserving CLUSTERS declaration order for a stable
+    # report regardless of the order the caller listed them in.
+    selectors = parse_selectors(args.only)
     if args.only:
-        selectors = {}
-        for raw in args.only.split(","):
-            entry = raw.strip()
-            if not entry:
-                continue
-            if ":" in entry:
-                key, suffix = entry.split(":", 1)
-                selectors[key.strip()] = suffix.strip() or None
-            else:
-                selectors[entry] = None
-        # Preserve CLUSTERS declaration order for a stable report.
         clusters = tuple(c for c in CLUSTERS if c.key in selectors)
         missing = set(selectors) - {c.key for c in clusters}
         if missing:
             print(f"::warning::Unknown cluster keys in --only: "
                   f"{', '.join(sorted(missing))}", file=sys.stderr)
     else:
-        selectors = {c.key: None for c in CLUSTERS}
         clusters = CLUSTERS
+
+    # Coverage data file: exported so `coverage run -a` and `coverage
+    # erase` both target the parameterised path. In single-cluster
+    # matrix mode the caller passes e.g. `--coverage-data .coverage.init`
+    # so per-runner artifacts never collide on download.
+    cov_env = {"COVERAGE_FILE": args.coverage_data}
 
     # Clean slate so `coverage run -a` accumulates only our runs.
     if shutil.which("coverage"):
-        subprocess.run(["coverage", "erase"], cwd=REPO_ROOT, check=False)
+        subprocess.run(["coverage", "erase"], cwd=REPO_ROOT, check=False,
+                       env={**os.environ, **cov_env})
 
     results = []
     for c in clusters:
@@ -576,6 +615,7 @@ def main(argv: list[str]) -> int:
             quiet=args.quiet,
             keepdb=args.keepdb,
             test_suffix=selectors.get(c.key),
+            cov_env=cov_env,
         )
         results.append({
             "key": c.key,
@@ -595,11 +635,24 @@ def main(argv: list[str]) -> int:
     # project-wide coverage on every cluster row, computed once from
     # the combined .coverage file. It's honest: "here is how much
     # of the framework this release exercised in total".
-    overall_pct = _overall_coverage_pct()
-    print("\n── Project-wide coverage (same on every cluster row) ──",
-          flush=True)
-    print(f"  · framework-wide: {overall_pct}%" if overall_pct is not None
-          else "  · framework-wide: — (no coverage data)", flush=True)
+    # Partial mode: when the caller parameterises the coverage data file
+    # (the matrix job passes ``--coverage-data .coverage.<key>``), this is
+    # a single-cluster partial run. A single partial's ``.coverage.<key>``
+    # holds only that cluster's trace, so a project-wide percentage from it
+    # is meaningless — leave ``coverage_pct = None`` on every row and on
+    # ``overall`` and let ``aggregate_showcase_manifests.py`` recompute the
+    # real project-wide number after ``coverage combine``.
+    partial_mode = args.coverage_data != ".coverage"
+    if partial_mode:
+        overall_pct = None
+        print("\n── Partial run: per-cluster coverage deferred to aggregate ──",
+              flush=True)
+    else:
+        overall_pct = _overall_coverage_pct(args.coverage_data)
+        print("\n── Project-wide coverage (same on every cluster row) ──",
+              flush=True)
+        print(f"  · framework-wide: {overall_pct}%" if overall_pct is not None
+              else "  · framework-wide: — (no coverage data)", flush=True)
     for r in results:
         r["coverage_pct"] = overall_pct
 
@@ -614,7 +667,7 @@ def main(argv: list[str]) -> int:
         "wall_s":   round(sum(r["wall_s"] for r in results), 2),
         "clusters_total":   len(results),
         "clusters_passing": sum(1 for r in results if r["outcome"] == "success"),
-        "coverage_pct":     _overall_coverage_pct(),
+        "coverage_pct":     overall_pct,
         "outcome": "success" if all(r["outcome"] == "success" for r in results) else "failure",
     }
 

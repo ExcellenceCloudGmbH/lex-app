@@ -10,8 +10,16 @@ name: Showcase Tests (Business View)
 #       pass or fail.
 #    4. A final gating step that fails the job if any cluster failed.
 #
+#  Parallelised (Plan A): a `plan` job expands the cluster selector into
+#  a matrix, a `showcase` job runs ONE runner per cluster (each with its
+#  own Postgres + Redis), and an `aggregate` job merges the per-cluster
+#  partial manifests + coverage, builds the ONE report, sends the ONE
+#  email, and is the gate. The report/email/coverage-artifact behaviour
+#  is identical to the previous single-job design — only the execution
+#  fans out.
+#
 #  Callable as a reusable workflow (`workflow_call`) from
-#  `pip_publish.yml` so a PyPI release is gated on this job AND
+#  `pip_publish.yml` so a PyPI release is gated on this workflow AND
 #  emits the email unconditionally.
 #
 #  Required secrets (Settings → Secrets → Actions):
@@ -92,20 +100,67 @@ on:
     outputs:
       overall_ok:
         description: "true if every cluster passed, else false"
-        value: ${{ jobs.showcase.outputs.overall_ok }}
+        value: ${{ jobs.aggregate.outputs.overall_ok }}
       clusters_passing:
         description: "e.g. '2/2'"
-        value: ${{ jobs.showcase.outputs.clusters_passing }}
+        value: ${{ jobs.aggregate.outputs.clusters_passing }}
 jobs:
-  showcase:
-    name: Run cluster showcase & send report
+  # ── Job 1: plan — expand the selector into a per-cluster matrix ─────
+  #  Runs in seconds. Refuses an empty selector (same guard as before —
+  #  the showcase must be a deliberately curated list, never an implicit
+  #  "run everything"). Emits both:
+  #    * matrix     — the {key, test_suffix} objects for the fan-out;
+  #    * expected   — the CSV of cluster keys the aggregate job requires
+  #                   to be present, so a lost partial fails the gate.
+  plan:
+    name: Plan cluster matrix
     runs-on: ubuntu-latest
     outputs:
-      overall_ok: ${{ steps.manifest.outputs.overall_ok }}
-      clusters_passing: ${{ steps.manifest.outputs.clusters_passing }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      expected: ${{ steps.plan.outputs.expected }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.12.0
+      - name: Compute matrix
+        id: plan
+        env:
+          SHOWCASE_CLUSTERS: ${{ inputs.clusters }}
+        run: |
+          if [[ -z "$SHOWCASE_CLUSTERS" ]]; then
+            echo "::error::No cluster subset provided (inputs.clusters is empty). Refusing to run the full suite implicitly."
+            exit 1
+          fi
+          echo "Planning selector: $SHOWCASE_CLUSTERS"
+          MATRIX=$(python .github/scripts/plan_showcase_matrix.py "$SHOWCASE_CLUSTERS")
+          echo "matrix=$MATRIX"
+          EXPECTED=$(python -c "import json,sys; print(','.join(e['key'] for e in json.loads(sys.argv[1])))" "$MATRIX")
+          if [[ -z "$EXPECTED" ]]; then
+            echo "::error::Selector expanded to zero clusters (all keys unknown?): $SHOWCASE_CLUSTERS"
+            exit 1
+          fi
+          echo "matrix=$MATRIX"   >> "$GITHUB_OUTPUT"
+          echo "expected=$EXPECTED" >> "$GITHUB_OUTPUT"
+
+  # ── Job 2: showcase — one runner per cluster ───────────────────────
+  #  fail-fast:false so a single red cluster does NOT cancel its peers
+  #  (the emailed report must list every cluster). continue-on-error:true
+  #  so a failing cluster never fails THIS job — the aggregate job is the
+  #  sole gate. Each matrix entry gets its own Postgres + Redis services
+  #  (services are static per-job, so both are provisioned on every entry;
+  #  only celery_async needs Redis, ~5s cost elsewhere — see plan risks).
+  showcase:
+    name: Run cluster ${{ matrix.cluster.key }}
+    needs: plan
+    runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [3.12.0]
+        cluster: ${{ fromJson(needs.plan.outputs.matrix) }}
     services:
       postgres:
         image: postgres:latest
@@ -140,12 +195,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12.0
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: 3.12.0
       - name: Cache pip
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -162,18 +217,17 @@ jobs:
           pip install --upgrade pip setuptools wheel
           pip install --prefer-binary -r requirements.txt
           pip install -e .
-          pip install "coverage>=7.4" "weasyprint>=61" \
-                      "cairosvg>=2.7" "sendgrid>=6.11"
+          pip install "coverage>=7.4"
       # Preserved from the retired django_tests.yml — persists the pip
       # cache so a re-run of this workflow (or a sibling workflow in
       # the same release) doesn't re-download everything.
       - name: Save pip cache
         if: always()
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-      # ── Run the selected clusters per-cluster, producing a manifest ─
+      # ── Run this ONE cluster, producing a partial manifest ──────────
       - name: Run cluster showcase suite
         id: run_suite
         continue-on-error: true
@@ -199,35 +253,97 @@ jobs:
           OIDC_RP_CLIENT_ID: ${{ secrets.OIDC_RP_CLIENT_ID }}
           OIDC_RP_CLIENT_SECRET: ${{ secrets.OIDC_RP_CLIENT_SECRET }}
           OIDC_RP_CLIENT_UUID: ${{ secrets.OIDC_RP_CLIENT_UUID }}
-          # The cluster subset (and optionally per-cluster single-test
-          # selectors) is supplied by the caller. We intentionally refuse
-          # to fall back to "run every cluster" implicitly — the showcase
-          # must be a deliberately curated list.
-          SHOWCASE_CLUSTERS: ${{ inputs.clusters }}
+          # One cluster per matrix entry. The suffix (single-test
+          # selector) is carried through verbatim so the selector grammar
+          # is identical to the sequential design.
+          CLUSTER_KEY: ${{ matrix.cluster.key }}
+          CLUSTER_SUFFIX: ${{ matrix.cluster.test_suffix }}
         run: |
-          if [[ -z "$SHOWCASE_CLUSTERS" ]]; then
-            echo "::error::No cluster subset provided (inputs.clusters is empty). Refusing to run the full suite implicitly."
-            exit 1
-          fi
-          echo "Running selector: $SHOWCASE_CLUSTERS"
-          python .github/scripts/run_showcase_suite.py \
-            --only "$SHOWCASE_CLUSTERS" \
-            --out manifest.json
-      # ── Preserved from the retired django_tests.yml ───────────────
-      # After the suite runs, `.coverage` holds the combined trace.
-      # Print the per-file report to stdout (informational — visible
-      # in the CI log) and emit coverage.xml for the artifact upload.
-      # No minimum-coverage gate is enforced; the only gate is
-      # test pass/fail (see "Fail job if any cluster failed" below).
-      - name: Coverage report (informational)
-        if: always()
-        run: |
-          if [[ -f .coverage ]]; then
-            coverage report --rcfile=.coveragerc || true
-            coverage xml --rcfile=.coveragerc -o coverage.xml || true
+          if [[ -n "$CLUSTER_SUFFIX" ]]; then
+            SELECTOR="${CLUSTER_KEY}:${CLUSTER_SUFFIX}"
           else
-            echo "::warning::.coverage not found — skipping coverage report/xml"
+            SELECTOR="${CLUSTER_KEY}"
           fi
+          echo "Running selector: $SELECTOR"
+          python .github/scripts/run_showcase_suite.py \
+            --only "$SELECTOR" \
+            --out manifest.partial.json \
+            --coverage-data ".coverage.${CLUSTER_KEY}"
+      # Rename the coverage data file so download-artifact keeps a stable,
+      # collision-free name per cluster (artifact name is per-key anyway).
+      - name: Upload partial manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-partial-${{ matrix.cluster.key }}
+          path: manifest.partial.json
+          if-no-files-found: warn
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-data-${{ matrix.cluster.key }}
+          path: .coverage.${{ matrix.cluster.key }}
+          if-no-files-found: warn
+          include-hidden-files: true
+
+  # ── Job 3: aggregate — merge, report, email, gate ──────────────────
+  #  needs the whole matrix; runs even if clusters failed (`if: always()`)
+  #  so the email ALWAYS fires. Merges the partials in CLUSTERS order,
+  #  combines coverage, builds the ONE report, sends the ONE email, then
+  #  gates: this job (and therefore the reusable workflow) succeeds iff
+  #  every cluster passed. A lost partial is a hard error (--expected).
+  aggregate:
+    name: Aggregate, report & send
+    needs: [plan, showcase]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      overall_ok: ${{ steps.manifest.outputs.overall_ok }}
+      clusters_passing: ${{ steps.manifest.outputs.clusters_passing }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.12.0
+      # weasyprint/cairosvg need cairo + pango at the C level to render
+      # the PDF — same system deps the previous single job installed.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcairo2-dev pkg-config \
+            libpango-1.0-0 libpangoft2-1.0-0
+      - name: Install aggregator + report toolchain
+        run: |
+          pip install --upgrade pip
+          pip install "coverage>=7.4" "weasyprint>=61" \
+                      "cairosvg>=2.7" "sendgrid>=6.11"
+      - name: Download partial manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-partial-*
+          path: ./partials
+      - name: Download coverage data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-data-*
+          path: ./coverage-data
+      # ── Merge partials + combine coverage into one manifest.json ────
+      - name: Aggregate partial manifests
+        env:
+          EXPECTED_CLUSTERS: ${{ needs.plan.outputs.expected }}
+        run: |
+          python .github/scripts/aggregate_showcase_manifests.py \
+            --partials ./partials \
+            --coverage-glob './coverage-data/**/.coverage.*' \
+            --expected "$EXPECTED_CLUSTERS" \
+            --out manifest.json
+      # ── Coverage artifact — same name as before, downstream unchanged ─
+      #  coverage.xml is produced by the aggregator's `coverage combine`
+      #  step (written to the repo root).
       - name: Upload coverage XML
         if: always()
         uses: actions/upload-artifact@v4

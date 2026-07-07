@@ -10,9 +10,9 @@ The metadata is encrypted with the per-instance ``LEX_API_KEY`` shared by the
 pod and IC. The public health contract stays stable: callers can still rely on
 ``{"status": "Healthy :)"}``, and probes ignore the optional ``runtime`` token.
 
-Cluster 1u — scenarios 1.171 – 1.178. Type: U + I.
+Cluster 1x — scenarios 1.187 – 1.194. Type: U + I.
 Covers: lex/lex_app/runtime_health.py, fast_health.py, views.py.
-Run: python -m lex pytest lex/test_project/tests/init/test_1u_runtime_health_metadata.py -v
+Run: python -m lex pytest lex/test_project/tests/init/test_1x_runtime_health_metadata.py -v
 """
 
 from __future__ import annotations
@@ -45,13 +45,13 @@ def _decrypt_runtime(token: str, api_key: str = _API_KEY) -> dict[str, str]:
     return json.loads(Fernet(key).decrypt(token.encode("ascii")).decode("utf-8"))
 
 
-class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
-    """Cluster 1u: encrypted health runtime metadata."""
+class TestCluster01x_RuntimeHealthMetadata(SimpleTestCase):
+    """Cluster 1x: encrypted health runtime metadata."""
 
-    # -- 1.171 ---------------------------------------------------------
-    def test_1_171_health_without_key_keeps_legacy_payload(self) -> None:
+    # -- 1.187 ---------------------------------------------------------
+    def test_1_187_health_without_key_keeps_legacy_payload(self) -> None:
         """
-        Scenario 1.171: missing LEX_API_KEY returns legacy health only.
+        Scenario 1.187: missing LEX_API_KEY returns legacy health only.
         Given: no per-instance API key in the environment
         When: the health payload is built
         Then: the response contains exactly the stable status contract and no
@@ -67,10 +67,10 @@ class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
             "an encrypted token would be undecryptable by IC.",
         )
 
-    # -- 1.172 ---------------------------------------------------------
-    def test_1_172_health_with_key_adds_encrypted_runtime_token(self) -> None:
+    # -- 1.188 ---------------------------------------------------------
+    def test_1_188_health_with_key_adds_encrypted_runtime_token(self) -> None:
         """
-        Scenario 1.172: deployed pod health includes encrypted runtime metadata.
+        Scenario 1.188: deployed pod health includes encrypted runtime metadata.
         Given: LEX_API_KEY and COMMIT_SHA are present in the running pod env
         When: the health payload is built
         Then: status remains public and runtime decrypts to lex-app version,
@@ -111,10 +111,10 @@ class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
             "this as a build-file attestation.",
         )
 
-    # -- 1.173 ---------------------------------------------------------
-    def test_1_173_runtime_token_is_encrypted_not_plaintext(self) -> None:
+    # -- 1.189 ---------------------------------------------------------
+    def test_1_189_runtime_token_is_encrypted_not_plaintext(self) -> None:
         """
-        Scenario 1.173: runtime values are not readable from the health body.
+        Scenario 1.189: runtime values are not readable from the health body.
         Given: an arbitrary runtime metadata dict
         When: it is encrypted for health
         Then: the token contains neither the commit SHA nor lex-app version in
@@ -144,10 +144,10 @@ class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
             "per-instance API key.",
         )
 
-    # -- 1.174 ---------------------------------------------------------
-    def test_1_174_wrong_api_key_cannot_decrypt_runtime_token(self) -> None:
+    # -- 1.190 ---------------------------------------------------------
+    def test_1_190_wrong_api_key_cannot_decrypt_runtime_token(self) -> None:
         """
-        Scenario 1.174: runtime token is bound to the per-instance API key.
+        Scenario 1.190: runtime token is bound to the per-instance API key.
         Given: metadata encrypted with one LEX_API_KEY
         When: another key attempts to decrypt it
         Then: decryption fails, so one instance cannot read another instance's
@@ -161,10 +161,10 @@ class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
         ):
             _decrypt_runtime(token, api_key="different-instance-key")
 
-    # -- 1.175 ---------------------------------------------------------
-    def test_1_175_encryption_failure_never_breaks_health(self) -> None:
+    # -- 1.191 ---------------------------------------------------------
+    def test_1_191_encryption_failure_never_breaks_health(self) -> None:
         """
-        Scenario 1.175: health degrades to status-only if encryption fails.
+        Scenario 1.191: health degrades to status-only if encryption fails.
         Given: a deployed-looking environment but encryption raises
         When: health payload is built
         Then: it still returns the legacy Healthy status and omits runtime,
@@ -181,10 +181,10 @@ class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
             "metadata must never endanger liveness.",
         )
 
-    # -- 1.176 ---------------------------------------------------------
-    def test_1_176_django_health_route_uses_runtime_payload(self) -> None:
+    # -- 1.192 ---------------------------------------------------------
+    def test_1_192_django_health_route_uses_runtime_payload(self) -> None:
         """
-        Scenario 1.176: Django /api/health route returns encrypted runtime.
+        Scenario 1.192: Django /api/health route returns encrypted runtime.
         Given: a deployed-looking environment
         When: a Django test client calls /api/health
         Then: the JSON response includes the stable status and decryptable
@@ -202,10 +202,10 @@ class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
             "Django health must use the same runtime payload as fast ASGI health.",
         )
 
-    # -- 1.177 ---------------------------------------------------------
-    def test_1_177_fast_asgi_health_route_uses_runtime_payload(self) -> None:
+    # -- 1.193 ---------------------------------------------------------
+    def test_1_193_fast_asgi_health_route_uses_runtime_payload(self) -> None:
         """
-        Scenario 1.177: fast ASGI /api/health route returns encrypted runtime.
+        Scenario 1.193: fast ASGI /api/health route returns encrypted runtime.
         Given: the production ASGI fast-health path and deployed env vars
         When: the ASGI app handles /api/health without entering Django
         Then: the body contains stable status plus decryptable runtime metadata.
@@ -233,10 +233,10 @@ class TestCluster01u_RuntimeHealthMetadata(SimpleTestCase):
             "Fast health is what production ASGI serves; it must include runtime metadata.",
         )
 
-    # -- 1.178 ---------------------------------------------------------
-    def test_1_178_missing_commit_sha_is_marked_unknown(self) -> None:
+    # -- 1.194 ---------------------------------------------------------
+    def test_1_194_missing_commit_sha_is_marked_unknown(self) -> None:
         """
-        Scenario 1.178: absent COMMIT_SHA is explicit in decrypted metadata.
+        Scenario 1.194: absent COMMIT_SHA is explicit in decrypted metadata.
         Given: LEX_API_KEY is present but COMMIT_SHA is empty
         When: the runtime token is decrypted
         Then: the commit SHA is blank and source is ``unknown`` so IC can render

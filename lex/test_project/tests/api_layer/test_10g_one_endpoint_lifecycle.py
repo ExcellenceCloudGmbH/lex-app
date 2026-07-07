@@ -35,10 +35,10 @@ class TestCluster10g_OneEndpointLifecycle(E2ETestCase):
 
     e2e_models = ALL_MODELS
 
-    # -- 10.15 ---------------------------------------------------------
-    def test_10_15_get_then_patch_then_get_round_trip(self) -> None:
+    # -- 10.70 ---------------------------------------------------------
+    def test_10_70_get_then_patch_then_get_round_trip(self) -> None:
         """
-        Scenario 10.15: GET → PATCH(name) → GET sees the change.
+        Scenario 10.70: GET → PATCH(name) → GET sees the change.
 
         Pins the customer's mental model: 'I read a row, I change one
         field, I read it back and the change is there'. The intermediate
@@ -68,10 +68,10 @@ class TestCluster10g_OneEndpointLifecycle(E2ETestCase):
         get2 = self.client.get(self.url_detail(API_SIMPLE, item.pk))
         self.assertEqual(get2.data.get("name"), "r10-15-renamed")
 
-    # -- 10.16 ---------------------------------------------------------
-    def test_10_16_patch_with_same_value_is_safe(self) -> None:
+    # -- 10.71 ---------------------------------------------------------
+    def test_10_71_patch_with_same_value_is_safe(self) -> None:
         """
-        Scenario 10.16: PATCH with the same value already in the DB
+        Scenario 10.71: PATCH with the same value already in the DB
         must succeed (200) and leave the row unchanged. The frontend
         often re-PATCHes the whole edited form including unchanged
         fields; this must not be an error.

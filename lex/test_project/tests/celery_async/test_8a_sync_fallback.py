@@ -61,7 +61,7 @@ class TestCluster08a_SyncFallback(E2ETestCase):
 
         The framework no longer requires the user to decorate ``calculate()``
         with ``@lex_shared_task`` — undecorated calculations are dispatched
-        via the generic ``calc_and_save`` task (see Scenario 8.5).
+        via the generic ``calc_and_save`` task (see scenario-8.5).
         """
         with patch.dict(os.environ, {"CELERY_ACTIVE": "true"}, clear=False):
             calc = CelerySyncCalc(name="s8-2")
