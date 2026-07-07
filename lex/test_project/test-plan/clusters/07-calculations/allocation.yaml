@@ -3,7 +3,6 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-- calculation_logging
 max_scenario: 204
 letters:
   a:

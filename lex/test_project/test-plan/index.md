@@ -83,7 +83,7 @@ lex/test_project/
     ├── calculations/          # Cluster 7 — Calculation state machine
     │   ├── models.py
     │   └── test_7a_atomic.py, test_7b_non_atomic.py, ...
-    ├── calculation_logging/   # Cluster 7 (logging surface)
+    ├── calculation_logging/   # Cluster 15 — Calculation logging surface
     ├── celery_async/          # Cluster 8 — Celery & async
     ├── signals_ws/            # Cluster 9 — Signals & WebSocket
     ├── api_layer/             # Cluster 10 — API layer
@@ -122,6 +122,7 @@ group list lives in `lex_test_config.yaml` at the repo root.
 | 12 | [Serializer Contract](test-clusters.md#12-serializer-contract) | JSON shape the API hands the frontend — field visibility, type round-trip (Decimal / DateTime / FK), `lex_reserved_scopes`, AuditLog payload filtering | Silent UI breakage when a serializer change drops a key, loses decimal precision, or strips a timezone |
 | 13 | [Export Endpoint](test-clusters.md#13-export-endpoint) | Real `POST /api/<model>/export` — legacy path, AG Grid flat/grouped, row selection, FK display names, field masking | "Export to Excel" returning wrong columns, broken groupings, or FKs rendered as integer pks instead of readable names |
 | 14 | [AG Grid Query Endpoint](test-clusters.md#14-ag-grid-query-endpoint) | `GET/POST /api/model_entries/<model>/list` — query-param filters, AG Grid filterModel / sortModel, grouping, aggregation, pivot | Silent query mistranslation (wrong rows, empty results, wrong sort order) in every grid the user opens |
+| 15 | Calculation Logging Surface | `LexLogger` builder + `model_logging_context` → `CalculationLog` rows: content shape, parent/child hierarchy, silent children, three-level chains, combinatorial fan-out, `.save()`-boundary preservation | Lost or misattributed calculation logs, collapsed child log rows |
 
 > **Ordering rationale:** Clusters follow the customer journey — setup → data management → data quality → access control → compliance → processing → scaling → real-time → external API. [Read more](test-clusters.md#ordering-the-user-journey)
 

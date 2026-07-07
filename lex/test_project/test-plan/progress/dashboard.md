@@ -24,6 +24,7 @@
 | 12. Serializer Contract | 6 | 35 | 3 | 0 | 0 |
 | 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
+| 15. Calculation Logging Surface | 6 | 21 | 0 | 0 | 0 |
 
 ## 1. Init — Project Bootstrap (`init`)
 
@@ -248,3 +249,14 @@
 | 14d | Edge cases |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14e | Secondary filter / sort branches (April 21) | 14.21-14.25 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14h |  | 14.30-14.33 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+
+## 15. Calculation Logging Surface (`calculation_logging`)
+
+| Batch | Title | Scenarios | Status | Pass | Skip | Xfail | Note |
+|---|---|---|---|---|---|---|---|
+| 15a | LexLogger builder API and content shape | 15.1-15.6 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
+| 15b | Single-parent hierarchy, loud children | 15.7-15.10 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
+| 15c | Silent children + mixed-siblings regression gate | 15.11-15.13 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
+| 15d | Three-level chain (root → middle → grandchild) | 15.14-15.15 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
+| 15e | CalculatedModelMixin combinatorial pipeline | 15.16-15.18 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
+| 15f | Hierarchy preservation across the .save() boundary | 15.19-15.21 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion; three scenarios (15.19-15.21) marked @unittest.expectedFailure pending the execute_calculation_sync fix |
