@@ -1,7 +1,8 @@
 """Assemble the Copilot-task issue body from test-plan docs + the source issue.
 
-Read at runtime by ``copilot_test_bot.yml``. Reads four files from
-``lex/test_project/test-plan/`` so docs edits propagate without YAML churn.
+Read at runtime by ``copilot_test_bot.yml``. Reads from
+``lex/test_project/test-plan/`` (index.md, progress/conventions.md, and the
+per-cluster shard tree) so docs edits propagate without YAML churn.
 """
 
 from __future__ import annotations
@@ -33,8 +34,9 @@ class IssueInput:
 
 # GitHub caps issue bodies at 65,536 bytes. Stay well under so a slow drift in
 # conventions.md or the Golden Rule paragraph doesn't suddenly tip us over at
-# `gh issue create` time. The big files (test-clusters.md, test-writing-plan.md)
-# are referenced by path, not inlined — Copilot reads them from the repo.
+# `gh issue create` time. The per-cluster shard files (cluster.md, batches.md,
+# allocation.yaml under clusters/<NN>-<slug>/) are referenced by path, not
+# inlined — Copilot reads them from the repo.
 _MAX_BODY_BYTES = 60_000
 
 _GOLDEN_RULE_ANCHOR = "## Golden Rule"
@@ -68,22 +70,23 @@ def assemble_prompt(issue: IssueInput, *, test_plan_dir: Path) -> str:
     """Build the markdown body for the Copilot-task issue.
 
     Section order is load-bearing: Golden Rule first (anti-overfitting discipline
-    before everything else), then conventions, clusters, writing-plan, then the
-    mode block, then the issue itself.
+    before everything else), then conventions, cluster catalogue, allocation
+    rules, then the mode block, then the issue itself.
     """
     if issue.mode in (Mode.BUG_REPRO, Mode.FIX_AND_TEST) and not issue.reproducer.strip():
         raise ValueError(f"reproducer is required for mode {issue.mode.value}")
 
     index_md = _read(test_plan_dir / "index.md")
     conventions_md = _read(test_plan_dir / "progress" / "conventions.md")
-    # test-clusters.md and test-writing-plan.md are referenced by path, not
-    # inlined (they're too large for GitHub's 64KB issue body cap — clusters
-    # alone is ~160KB). We still _verify they exist_ so a typo or a moved file
-    # blows up here at prompt-assembly time, not later when Copilot follows a
-    # dead link from the issue body.
-    for required in ("test-clusters.md", "test-writing-plan.md"):
+    # The plan is sharded: cluster.md/batches.md/allocation.yaml live per-cluster
+    # under clusters/<NN>-<slug>/, referenced by path, not inlined (they're too
+    # large in aggregate for GitHub's 64KB issue body cap). We still _verify the
+    # top-level shard locations exist_ so a typo or a moved directory blows up
+    # here at prompt-assembly time, not later when Copilot follows a dead link
+    # from the issue body.
+    for required in ("testing-philosophy.md", "clusters", "progress/sessions"):
         if not (test_plan_dir / required).exists():
-            raise FileNotFoundError(f"required test-plan file missing: {test_plan_dir / required}")
+            raise FileNotFoundError(f"required test-plan path missing: {test_plan_dir / required}")
 
     # Pull the Golden Rule paragraph out of index.md so it's front-loaded.
     if _GOLDEN_RULE_ANCHOR in index_md:
@@ -127,13 +130,11 @@ The Golden Rule above tells you *not* to mirror the implementation. This tells y
 
 ## Cluster catalogue
 
-**Read `lex/test_project/test-plan/test-clusters.md` in this repo before picking a cluster.** That file owns every cluster's scope, scenarios, and status. The cluster routing rules below depend on it.
+**The plan is sharded: read `lex/test_project/test-plan/clusters/<NN>-<slug>/` for your target cluster** — `cluster.md` owns scope + scenarios, `batches.md` owns batch history, `allocation.yaml` owns the machine allocation state. `lex/test_project/test-plan/index.md` has the cluster table; `testing-philosophy.md` has the rules. Do NOT read or edit `test-clusters.md` / `test-writing-plan.md` — they are retired pointer stubs and the gate rejects edits to them.
 
----
+## Allocation rules (file naming, scenario IDs, letters)
 
-## Writing-plan rules (file naming, scenario IDs, sub-clusters)
-
-**Read `lex/test_project/test-plan/test-writing-plan.md` in this repo before creating the test file.** That file owns file naming, scenario IDs, and sub-cluster allocation rules.
+**Allocate from `clusters/<NN>-<slug>/allocation.yaml`:** your scenario range starts at `max_scenario + 1`; your sub-cluster letter is the next lowercase letter not present in `letters:`. Bump `max_scenario` and add your letter entry (title, scenarios, status, tests counts, note) in the same PR — the gate cross-checks your test files against the YAML. Cross-cluster conventions (LATER backlog, pending decisions) live in `clusters/README.md`.
 
 ---
 
@@ -184,27 +185,26 @@ The Golden Rule above tells you *not* to mirror the implementation. This tells y
 
 ## Cluster routing for each new test file (apply in order, first match wins)
 
-**Folder naming:** cluster folders under `lex/test_project/tests/` are named with the cluster's **descriptive slug**, not `cluster_N/`. Existing folders include `init/`, `crud_api/`, `validation_hooks/`, `permissions/`, `history/`, `audit_logging/`, `calculations/`, `calculation_logging/`, `celery_async/`, `signals_ws/`, `api_layer/`, `serializers/`, `queries/`, `exports/`, `journeys/`, `stress/`. Each cluster folder has its own `models.py` — **do not** create a central `models/` directory.
+**Folder naming:** cluster folders under `lex/test_project/tests/` are named with the cluster's **descriptive slug**, not `cluster_N/`. Existing folders include `init/`, `crud_api/`, `validation_hooks/`, `permissions/`, `history/`, `audit_logging/`, `calculations/`, `celery_async/`, `signals_ws/`, `api_layer/`, `serializers/`, `queries/`, `exports/`, `journeys/`, `stress/`, `calculation_logging/`. Each cluster folder has its own `models.py` — **do not** create a central `models/` directory.
 
 For each test file you create (primary + each secondary):
 
-1. Hint names an **existing cluster letter** (e.g. `7g`) → use that cluster's folder. If the letter is taken, advance to the next free letter per `test-writing-plan.md`.
+1. Hint names an **existing cluster letter** (e.g. `7g`) → use that cluster's folder. If the letter is taken, advance to the next free letter per that cluster's `allocation.yaml`.
 2. Hint names just a **cluster number** (e.g. `7`) → use that cluster's folder; allocate the next free sub-cluster letter inside it.
 3. Secondary cluster (chosen by you, not in the hint) → allocate the next free sub-cluster letter inside that cluster.
 4. Hint is **`others`** or **blank** AND no existing cluster fits → place under `lex/test_project/tests/others/` (create if missing) with generic numbering. This is the normal fallback.
-5. Hint is **`new`** → create a new cluster (rare). Pick the next free cluster number, choose a descriptive slug for the folder name, add a `test-clusters.md` entry, register in `.github/scripts/showcase_clusters.py`, update default selectors in `pip_publish.yml` + `showcase_tests.yml`. Prefer `others/` over a new cluster unless the feature is a genuinely new surface area.
+5. Hint is **`new`** → create a new cluster (rare). Pick the next free cluster number, choose a descriptive slug for the folder name, create the `clusters/NN-<slug>/` trio (cluster.md + batches.md + allocation.yaml) and add the index.md table row, register in `.github/scripts/showcase_clusters.py`, update default selectors in `pip_publish.yml` + `showcase_tests.yml`. Prefer `others/` over a new cluster unless the feature is a genuinely new surface area.
 
 ---
 
 ## Required deliverables in the PR
 
 - One or more new test files under `lex/test_project/tests/<slug>/test_<Nx>_<short>.py` — one per cluster involved (regression mode may have several; bug-repro and fix-and-test have exactly one).
-- `lex/test_project/test-plan/test-clusters.md` updated (status / scenario range for **each** touched (sub-)cluster).
-- One new row appended to the bottom of `lex/test_project/test-plan/progress/session-log.md` summarising all touched clusters in this PR.
-- Bump the matching per-cluster status row in `lex/test_project/test-plan/progress/dashboard.md`.
-- If your work corresponds to a planned batch in `lex/test_project/test-plan/test-writing-plan.md`, append/update that batch row (scenario range, files covered, test classes, fixtures, status) so the allocation tracker stays consistent.
+- For **each** touched cluster `NN-<slug>` under `lex/test_project/test-plan/clusters/`: `allocation.yaml` updated (letter entry + `max_scenario`), `batches.md` batch block appended, and `cluster.md` scenario table extended if you defined new scenarios.
+- One **new** session fragment `lex/test_project/test-plan/progress/sessions/YYYY-MM-DD-<slug>.md` (front-matter: date/clusters/tests_added/suite_tally; body: short prose linking the batch — never restate the batch table).
+- Regenerate the dashboard: run `python .github/scripts/test_plan_aggregates.py build` and commit `progress/dashboard.md` — never hand-edit it.
 - Mode B/C only: one new BUG-NNN row in `lex/test_project/test-plan/known-bugs.md`.
-- New-cluster placement only: register the new cluster in `.github/scripts/showcase_clusters.py` and update default selectors in `pip_publish.yml` + `showcase_tests.yml`.
+- New-cluster placement only: create `clusters/NN-<slug>/` (cluster.md + batches.md + allocation.yaml), add the index.md table row, register in `.github/scripts/showcase_clusters.py`, update default selectors in `pip_publish.yml` + `showcase_tests.yml`.
 - Touch nothing outside the allowed file set, except the source fix in mode `fix-and-test`.
 
 End the PR body with the exact line: `Fixes #{issue.number}` so the gate workflow can find this issue.
