@@ -1,0 +1,183 @@
+cluster: 7
+slug: calculations
+title: Calculation State Machine
+test_dirs:
+- calculations
+- calculation_logging
+max_scenario: 204
+letters:
+  a:
+    title: ''
+    scenarios: 7.1-7.13
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: ''
+    scenarios: 7.3-7.4
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: ''
+    scenarios: 7.5-7.8
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: ''
+    scenarios: 7.10-7.11
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: Persistence internals + two-phase `save()`
+    scenarios: 7.112-7.118
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  f:
+    title: ''
+    scenarios: 7.16-7.22
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  g:
+    title: ''
+    scenarios: 7.25-7.30
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: drove `CalculatedModelMixin` 33.74% → 64.75% (`CombinatorialCalc` fixture added April 23
+  h:
+    title: ''
+    scenarios: '7.31'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: async branch 7g never reached; broker-free
+  i:
+    title: ''
+    scenarios: 7.32-7.47
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  j:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  k:
+    title: Exceptions, restrictions & XLSX field
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 21
+      skip: 0
+      xfail: 0
+    note: scenarios 7.122–7.142
+  l:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  m:
+    title: '`CalculationSignals.update_calculation_status` + `One.py` `model_name` propagation'
+    scenarios: 7.188-7.193
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: 'scenarios 7.188–7.195; `update_calculation_status` IN_PROGRESS passes `model_name=instance._meta.object_name`
+      to store; `One.update()` early-registration block does the same; pins '
+  n:
+    title: Calculation cancellation — state machine + recursive cancel
+    scenarios: 7.166-7.175
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: scenarios 7.166–7.173; pins `CalculationModel.cancel()` happy path + sync-not-cancellable +
+      recursive descendant revoke (mocks `_revoke_celery_task`
+  o:
+    title: Any error aborts calculated batches
+    scenarios: 7.176-7.177
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: scenario 7.176; unhandled FK integrity errors abort `CalculatedModelMixin.create()` immediately
+      (no silent continuation to later rows
+  p:
+    title: Sync-mode streaming combinatorial expansion (OOM fix)
+    scenarios: 7.178-7.187
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: scenarios 7.178–7.187; depth-first generator yields one model at a time (O(depth) vs O(N)) so
+      sync calcs (CELERY_ACTIVE=False) stop OOM-ing the web pod; byte-identical ordered outp
+  q:
+    title: Nested fan-out dispatches by default from inside a worker
+    scenarios: 7.196-7.201
+    status: rolled-back
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: scenarios 7.196–7.201; removed the `is_celery_worker_process()` inline guard from both dispatch
+      paths (`CalculatedModelMixin._dispatch_model_processing`, `CalculationModel.calculat
+  r:
+    title: (withdrawn — Session 91) Per-instance inline-inside-worker guard
+    scenarios: ''
+    status: rolled-back
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: before commit — the Session 89 inline guard broke nested-dispatch parallelism (a nested `CalculateNAV`
+      ran inline on the parent's worker unless the caller opened an explicit `WaitF
