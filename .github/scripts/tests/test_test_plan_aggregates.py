@@ -121,3 +121,39 @@ class TestBuildCheck:
         first = (plan / "progress" / "dashboard.md").read_text()
         build_dashboard(plan)
         assert (plan / "progress" / "dashboard.md").read_text() == first
+
+
+class TestValidate:
+    def test_clean_tree_passes(self, tmp_path):
+        plan, tests = make_plan(tmp_path)
+        assert validate_allocations(plan, tests) == []
+
+    def test_unclaimed_test_dir(self, tmp_path):
+        plan, tests = make_plan(tmp_path)
+        (tests / "mystery").mkdir()
+        errs = validate_allocations(plan, tests)
+        assert any("mystery" in e for e in errs)
+
+    def test_letter_not_in_yaml(self, tmp_path):
+        plan, tests = make_plan(tmp_path)
+        (tests / "init" / "test_1z_rogue.py").write_text('"""Scenario 1.2: x."""\n')
+        errs = validate_allocations(plan, tests)
+        assert any("1z" in e for e in errs)
+
+    def test_scenario_above_max(self, tmp_path):
+        plan, tests = make_plan(tmp_path)
+        (tests / "init" / "test_1a_more.py").write_text('"""Scenario 1.99: over."""\n')
+        errs = validate_allocations(plan, tests)
+        assert any("1.99" in e for e in errs)
+
+    def test_duplicate_scenario_across_files(self, tmp_path):
+        plan, tests = make_plan(tmp_path)
+        (tests / "init" / "test_1a_dupe.py").write_text('"""Scenario 1.1: dupe."""\n')
+        errs = validate_allocations(plan, tests)
+        assert any("1.1" in e and "duplicate" in e.lower() for e in errs)
+
+    def test_wrong_cluster_number_in_folder(self, tmp_path):
+        plan, tests = make_plan(tmp_path)
+        (tests / "init" / "test_7a_misplaced.py").write_text('"""Scenario 7.2: x."""\n')
+        errs = validate_allocations(plan, tests)
+        assert any("test_7a_misplaced" in e for e in errs)

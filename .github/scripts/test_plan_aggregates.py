@@ -185,5 +185,99 @@ def check_dashboard(plan_dir: Path) -> list[str]:
     return []
 
 
-def validate_allocations(plan_dir: Path, tests_dir: Path) -> list[str]:  # Task 2
-    raise NotImplementedError
+def validate_allocations(plan_dir: Path, tests_dir: Path) -> list[str]:
+    """Cross-check allocation.yaml claims against the test tree.
+
+    Rules (spec §4/§5): every non-exempt test folder is claimed by exactly one
+    cluster's test_dirs; every test_<N><letter>_*.py carries the owning cluster's
+    number and a letter present in YAML; every `Scenario N.M` docstring ID for the
+    owning cluster is <= max_scenario and unique across the cluster's files.
+    """
+    errors: list[str] = []
+    clusters = load_clusters(plan_dir)
+
+    owner_by_dir: dict[str, Cluster] = {}
+    for c in clusters:
+        for d in c.test_dirs:
+            if d in owner_by_dir:
+                errors.append(
+                    f"test dir {d!r} claimed by clusters "
+                    f"{owner_by_dir[d].number} and {c.number}"
+                )
+            owner_by_dir[d] = c
+
+    on_disk = {
+        p.name for p in tests_dir.iterdir()
+        if p.is_dir() and p.name not in EXEMPT_TEST_DIRS
+        and not p.name.startswith(("_", "."))
+    }
+    for name in sorted(on_disk - set(owner_by_dir)):
+        errors.append(
+            f"test dir {name!r} has no owning cluster — add it to a cluster's "
+            "test_dirs in allocation.yaml (or to EXEMPT_TEST_DIRS if deliberate)"
+        )
+
+    for c in clusters:
+        seen: dict[str, Path] = {}  # scenario id -> first file
+        yaml_letters = {l.letter for l in c.letters}
+        for d in c.test_dirs:
+            folder = tests_dir / d
+            if not folder.is_dir():
+                errors.append(f"cluster {c.number}: test dir {d!r} does not exist")
+                continue
+            for f in sorted(folder.glob("test_*.py")):
+                m = LETTER_FILE_RE.match(f.name)
+                if m:
+                    if int(m.group("num")) != c.number:
+                        errors.append(
+                            f"{f}: filename cluster {m.group('num')} but folder "
+                            f"{d!r} belongs to cluster {c.number}"
+                        )
+                    elif m.group("letter") not in yaml_letters:
+                        errors.append(
+                            f"{f}: letter {m.group('num')}{m.group('letter')} not "
+                            f"declared in {c.path / 'allocation.yaml'}"
+                        )
+                text = f.read_text(errors="replace")
+                for sm in SCENARIO_RE.finditer(text):
+                    if int(sm.group("num")) != c.number:
+                        continue  # cross-references to other clusters are prose
+                    sid = f"{sm.group('num')}.{sm.group('sid')}"
+                    base = int(re.match(r"\d+", sm.group("sid")).group())
+                    if base > c.max_scenario:
+                        errors.append(
+                            f"{f}: scenario {sid} exceeds max_scenario="
+                            f"{c.max_scenario} in {c.path / 'allocation.yaml'}"
+                        )
+                    prev = seen.get(sid)
+                    if prev is not None and prev != f:
+                        errors.append(
+                            f"duplicate scenario {sid}: {prev} and {f}"
+                        )
+                    seen.setdefault(sid, f)
+    return errors
+
+
+def _cli() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("build", "check", "validate"))
+    parser.add_argument("--plan-dir", type=Path, default=DEFAULT_PLAN_DIR)
+    parser.add_argument("--tests-dir", type=Path, default=DEFAULT_TESTS_DIR)
+    args = parser.parse_args()
+    if args.command == "build":
+        build_dashboard(args.plan_dir)
+        print(f"wrote {args.plan_dir / 'progress' / 'dashboard.md'}")
+        return 0
+    problems = (
+        check_dashboard(args.plan_dir)
+        if args.command == "check"
+        else validate_allocations(args.plan_dir, args.tests_dir)
+    )
+    for p in problems:
+        print(f"- {p}")
+    print("OK" if not problems else f"{len(problems)} problem(s)")
+    return 0 if not problems else 1
+
+
+if __name__ == "__main__":
+    sys.exit(_cli())
