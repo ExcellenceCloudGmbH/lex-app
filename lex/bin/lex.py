@@ -14,6 +14,7 @@ import click
 import uvicorn
 from lex.tools.ai_dashboard import launch_ai_dashboard
 from lex.tools.ai_faq import launch_ai_faq
+from lex.tools.ai_issue_report import create_ai_issue_report
 from lex.tools.project_root import find_project_root, resolve_llm_working_directory
 from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
@@ -1089,6 +1090,55 @@ def ai_dashboard(project_root):
         raise click.ClickException(str(exc)) from exc
 
 
+@lex.command(name="ai_issue_report", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path, dir_okay=False, writable=True),
+    help="Output zip path (default: <project>/.lex-ai-reports/ai_issue_report_<timestamp>.zip)",
+)
+@click.option(
+    "--artifact-mode",
+    type=click.Choice(["auto", "off", "strict"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Raw artifact capture mode: auto (best-effort), off, strict (require at least one file).",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Skip the confirmation prompt about raw secret inclusion.",
+)
+def ai_issue_report(project_root, output, artifact_mode, yes):
+    """Generate a raw AI issue report bundle for support triage.
+
+    Captures Copilot and MCP-related artifacts as raw files without parsing so
+    no details are dropped during triage.
+    """
+    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+
+    if not yes:
+        click.echo("WARNING: report can include raw secrets and private conversation artifacts.")
+        click.confirm("Continue and generate the raw issue report?", abort=True)
+
+    try:
+        result = create_ai_issue_report(
+            project_root=root,
+            output=output,
+            artifact_mode=str(artifact_mode).lower(),
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"AI issue report written: {result.archive_path}")
+    click.echo(f"Captured files: {result.copied_files}")
+    if result.missing_sources:
+        click.echo(f"Missing sources: {len(result.missing_sources)}")
+    if result.collection_errors:
+        click.echo(f"Collection errors: {len(result.collection_errors)}")
+
+
 def _collect_setup_with_ai_credentials(
     *,
     github_token: str | None,
@@ -1133,7 +1183,7 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard"}
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai_issue_report"}
 )
 
 

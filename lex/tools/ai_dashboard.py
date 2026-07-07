@@ -43,6 +43,8 @@ from lex.tools.setup_with_ai import (
     GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY,
     GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY,
     LEX_MCP_LOCAL_SERVER_NAME,
+    MCP_MODE_CARD_DEFS as MODE_CARD_DEFS,
+    SUPPORTED_MCP_MODES,
     _atomic_write_text,
     _ensure_github_copilot_state_table,
     _load_github_copilot_mcp_servers_cache,
@@ -52,6 +54,7 @@ from lex.tools.setup_with_ai import (
     _is_process_running,
     _write_github_copilot_state_value,
     get_installed_lex_mcp_local_version,
+    normalize_mcp_mode,
     resolve_github_copilot_mcp_config_path,
     resolve_github_copilot_state_db_path,
     update_env_file,
@@ -64,60 +67,6 @@ from lex.tools.verify_ai_assets import verify_ai_assets
 
 MODE_OVERRIDE_DIR = Path.home() / ".lex-mcp"
 MODE_OVERRIDE_FILE = MODE_OVERRIDE_DIR / "mode-override"
-
-SUPPORTED_MCP_MODES: tuple[str, ...] = (
-    "forward",
-    "backward",
-    "edit",
-    "review",
-    "mvp_generator",
-    "mvp_completion",
-)
-
-MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
-    {
-        "value": "forward",
-        "title": "New Project",
-        "desc": "Full planning and implementation flow from scratch.",
-        "tone": "forward",
-        "icon": "&#x1F680;",
-    },
-    {
-        "value": "backward",
-        "title": "Documentation",
-        "desc": "Reverse-map an existing codebase and generate docs.",
-        "tone": "backward",
-        "icon": "&#x1F4D6;",
-    },
-    {
-        "value": "edit",
-        "title": "Edit",
-        "desc": "Targeted code modifications in an existing project.",
-        "tone": "edit",
-        "icon": "&#x270F;&#xFE0F;",
-    },
-    {
-        "value": "review",
-        "title": "Review",
-        "desc": "Audit, validate, and improve quality before merge.",
-        "tone": "review",
-        "icon": "&#x1F50D;",
-    },
-    {
-        "value": "mvp_generator",
-        "title": "MVP Generator",
-        "desc": "Generate a lean, production-minded MVP baseline.",
-        "tone": "mvp",
-        "icon": "&#x1F4A1;",
-    },
-    {
-        "value": "mvp_completion",
-        "title": "MVP Completion",
-        "desc": "Finalize and polish an MVP to production readiness.",
-        "tone": "mvp_completion",
-        "icon": "&#x2705;",
-    },
-)
 
 
 # ---------------------------------------------------------------------------
@@ -233,14 +182,14 @@ def _read_mode_from_mcp_json(
         if isinstance(args, list):
             for i, arg in enumerate(args):
                 if arg == "--mode" and i + 1 < len(args):
-                    val = str(args[i + 1]).strip().lower()
-                    if val in SUPPORTED_MCP_MODES:
+                    val = normalize_mcp_mode(args[i + 1], default="")
+                    if val:
                         return val
         # Fall back to the env block.
         env_block = server_def.get("env", {})
         if isinstance(env_block, dict):
-            val = str(env_block.get("LEX_MCP_MODE", "")).strip().lower()
-            if val in SUPPORTED_MCP_MODES:
+            val = normalize_mcp_mode(env_block.get("LEX_MCP_MODE", ""), default="")
+            if val:
                 return val
     return None
 
@@ -265,7 +214,7 @@ def _render_mode_cards(mode: str) -> str:
         cards.append(
             f'<label class="mode-card {card["tone"]}{sel_class}" data-mode="{value}">'
             f'<input type="radio" name="mcp_mode_select" value="{value}" {checked}>'
-            f'<div class="mode-icon" aria-hidden="true">{card["icon"]}</div>'
+            f'<div class="mode-icon" aria-hidden="true">{card["icon_html"]}</div>'
             f'<div class="mode-title">{html.escape(card["title"])}</div>'
             f'<p class="mode-desc">{html.escape(card["desc"])}</p>'
             f'<div class="mode-check">'
@@ -434,9 +383,7 @@ def _read_dashboard_state(
     override = _read_override_file()
     override_mode = None
     if override and isinstance(override, dict):
-        candidate = str(override.get("mode", "")).strip().lower()
-        if candidate in SUPPORTED_MCP_MODES:
-            override_mode = candidate
+        override_mode = normalize_mcp_mode(override.get("mode", ""), default="") or None
     persisted_mode = (
         _read_dotenv_value(env_file_path, "LEX_MCP_MODE")
         or _read_mode_from_mcp_json(mcp_config_path)
@@ -488,7 +435,10 @@ def _handle_save(
     successes: list[str] = []
     errors: list[str] = []
 
-    new_mode = form_data.get("mcp_mode", [""])[0].strip().lower()
+    new_mode = normalize_mcp_mode(
+        form_data.get("mcp_mode", [""])[0],
+        default="",
+    )
     new_github_token = form_data.get("github_token", [""])[0].strip()
     new_remote_key = form_data.get("remote_mcp_api_key", [""])[0].strip()
     new_remote_url = form_data.get("remote_mcp_url", [""])[0].strip()
@@ -504,9 +454,7 @@ def _handle_save(
     override = _read_override_file()
     override_mode = None
     if override and isinstance(override, dict):
-        candidate = str(override.get("mode", "")).strip().lower()
-        if candidate in SUPPORTED_MCP_MODES:
-            override_mode = candidate
+        override_mode = normalize_mcp_mode(override.get("mode", ""), default="") or None
     state_is_stale = bool(
         override_mode
         and (

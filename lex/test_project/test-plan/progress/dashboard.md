@@ -21,6 +21,9 @@
 | 1q. Migration file completeness release gate (Session 70 — June 2) | 1 | 1 | 1 | 0 | 0 | ✅ Complete — scenario 1.147; `lex makemigrations ... --check --dry-run` must stay clean for framework apps |
 | 1s. Log-noise cleanup + lex-namespace debug control — EXC-1787 (Session 75 — June 8) | 10 | 10 | 10 | 0 | 0 | ✅ Complete — scenarios 1.159–1.168; urllib3 InsecureRequestWarning gate + `LEX_LOG_LEVEL` lex-only DEBUG + console-handler level + blanket `LEX_SUPPRESS_WARNINGS` filter |
 | 1t. `DISABLE_SERVER_SIDE_CURSORS` placement — production cursor crash (Session 78 — June 9) | 2 | 2 | 2 | 0 | 0 | ✅ Complete — scenarios 1.169–1.170; flag was module-level (ignored by Django) so server-side cursors stayed on behind the pooling proxy → `InvalidCursorName` on every `.iterator()`; now set per-Postgres-alias |
+| 1u. `setup-with-ai` MCP mode parity (Session 80 — July 1) | 5 | 5 | 5 | 0 | 0 | ✅ Complete — scenarios 1.171–1.175; initial setup now renders and accepts the full lex-mcp-local mode set, and both unified + legacy MCP server args carry the selected mode |
+| 1v. `ai-faq` hosted-page launcher (Session 81 — July 5) | 3 | 3 | 3 | 0 | 0 | ✅ Complete — scenarios 1.176–1.178; `lex ai-faq` now opens the hosted FAQ URL directly (with `LEX_AI_FAQ_URL` override) and reports manual fallback instructions if browser auto-open fails |
+| 1w. `ai_issue_report` raw artifact bundle (Session 82 — July 5) | 3 | 3 | 3 | 0 | 0 | ✅ Complete — scenarios 1.179–1.181; new `lex ai_issue_report` command captures raw Copilot/MCP artifacts into a support zip without pre-parsing, with strict-mode guard when nothing is captured |
 | 7k. Core exceptions + `ModelModificationRestriction` ABC + XLSXField spotter (coverage-driven — May 12) | 21 | 21 | 21 | 0 | 0 |  Complete — scenarios 7.122–7.142 |
 | 2. CRUD via REST API | 23 | 23 | 23 | 0 | 0 |  Complete (Many bulk-write reconciled to DELETE-only; BUG-004 removed per product decision; BUG-005 fixed; 2.1 = CRUD showcase) |
 | 2i. Cancel-calculation REST endpoint (Session 67 — June 1) | 4 | 4 | 4 | 0 | 0 | ✅ Complete — scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored) |
@@ -75,7 +78,7 @@
 | 12f. Serializer write paths — M2M & nested FK (planned — April 21) | 3 | 3 | 3 | 0 | 0 |  Complete — 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23) |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **583** | **583** | **562** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **588** | **588** | **567** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet

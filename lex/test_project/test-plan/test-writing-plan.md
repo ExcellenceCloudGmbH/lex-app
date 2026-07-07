@@ -98,6 +98,48 @@
 | Coverage gain | negligible (settings is import-time; pins a config-placement contract) |
 | Status | ✅ Complete (Session 78 — June 9) |
 
+### Batch 1u — `setup-with-ai` MCP mode parity ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.171 – 1.175 |
+| Type | U |
+| Files covered | `lex/tools/setup_with_ai.py`, `lex/tools/ai_dashboard.py` (shared mode registry + setup form rendering/validation + unified/legacy MCP arg forwarding) |
+| Test file | `lex/test_project/tests/init/test_1u_setup_with_ai_mcp_modes.py` |
+| Test classes | `TestCluster01u_SetupWithAiMcpModes` (1.171 supported-mode round-trip, 1.172 safe fallback, 1.173 unified `--mode` args, 1.174 legacy wrapper positional mode, 1.175 full setup-form mode-card rendering) |
+| Fixtures | none (pure-Python; `_has_unified_mcp_entry_point` / `resolve_wrapper_script_path` patched at import site) |
+| Tests landed | **5 pass / 0 fail in 0.26s** |
+| Coverage gain | modest but high-value; pins the first-touch MCP mode contract across setup + dashboard |
+| Status | ✅ Complete (Session 80 — July 1) |
+
+### Batch 1v — `ai-faq` hosted-page launcher ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.176 – 1.178 |
+| Type | U |
+| Files covered | `lex/tools/ai_faq.py` (`launch_ai_faq` now opens the hosted FAQ URL directly; no in-process localhost HTTP server) |
+| Test file | `lex/test_project/tests/init/test_1v_ai_faq_command.py` |
+| Test classes | `TestCluster01v_AiFaqHostedUrlLauncher` (1.176 default hosted URL, 1.177 `LEX_AI_FAQ_URL` override, 1.178 manual fallback message when browser auto-open fails) |
+| Fixtures | none (`webbrowser.open` + environment patched) |
+| Tests landed | **3 pass / 0 fail** |
+| Coverage gain | small but high-value; pins operator-visible FAQ launch target |
+| Status | ✅ Complete (Session 81 — July 5) |
+
+### Batch 1w — `ai_issue_report` raw artifact bundle ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.179 – 1.181 |
+| Type | U |
+| Files covered | `lex/bin/lex.py`, `lex/tools/ai_issue_report.py` (new `ai_issue_report` command + raw Copilot/MCP artifact zip export, no pre-parse normalization) |
+| Test file | `lex/test_project/tests/init/test_1w_ai_issue_report.py` |
+| Test classes | `TestCluster01w_AiIssueReportRawArtifacts` (1.179 off-mode shell report, 1.180 raw byte-preserving capture + inventory, 1.181 strict-mode no-artifact failure gate) |
+| Fixtures | none (`TemporaryDirectory`, synthetic artifact files, helper patching) |
+| Tests landed | **3 pass / 0 fail** |
+| Coverage gain | modest but high-value; pins support-visible raw bundle contract and strict-mode guard |
+| Status | ✅ Complete (Session 82 — July 5) |
+
 ---
 
 ## Cluster 2 — CRUD via REST API (existing 2a–2e)

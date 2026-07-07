@@ -162,6 +162,36 @@ a blanket `LEX_SUPPRESS_WARNINGS` gate (default on) quiets these, with an opt-ou
 
 **Scenario range:** 1.169 – 1.170. **Test file:** `lex/test_project/tests/init/test_1t_disable_server_side_cursors.py`. **Type:** U. **Status:** ✅ Complete (Session 78 — June 9). Source: `lex/lex_app/settings.py`.
 
+### Batch 1u — `setup-with-ai` MCP mode parity ✅
+
+`lex/tools/setup_with_ai.py` owned the first-touch Lex MCP configuration flow, but its UI and POST validation had drifted behind both `lex ai-dashboard` and the current `lex-mcp-local` server registry: only `forward` and `backward` were rendered or accepted, so choosing `edit`, `review`, `mvp_generator`, or `mvp_completion` during initial setup silently collapsed back to `forward`. The setup form now shares the authoritative mode list, normalizes unknown values safely, renders every supported mode card, and forwards the chosen mode through both the unified `lex_mcp.server --mode ...` path and the legacy wrapper fallback.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.171 | Supported modes round-trip | every current lex-mcp-local mode name is accepted verbatim by `normalize_mcp_mode()` |
+| 1.172 | Unknown modes fall back safely | blank / malformed / stale values normalize to the documented default `forward` |
+| 1.173 | Unified server args carry the mode | `resolve_mcp_server_args()` emits `['-m', 'lex_mcp.server', '--mode', <mode>]` when the unified entry point is available |
+| 1.174 | Legacy wrapper args still carry the mode | the fallback wrapper command keeps the selected mode as the positional wrapper argument |
+| 1.175 | Setup form renders every supported mode | `_build_setup_form_html()` includes a selectable card + radio input for each supported mode and keeps the hidden payload default aligned with `forward` |
+
+**Scenario range:** 1.171 – 1.175. **Test file:** `lex/test_project/tests/init/test_1u_setup_with_ai_mcp_modes.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — July 1). Source: `lex/tools/setup_with_ai.py`, `lex/tools/ai_dashboard.py`.
+
+### Batch 1v — `ai-faq` hosted-page launcher ✅
+
+`lex ai-faq` previously started an in-process localhost HTTP server and blocked
+while serving embedded HTML. That made FAQ updates tightly coupled to package
+code changes and local rebuild cycles. The launcher now opens a hosted static
+FAQ page directly, with an optional `LEX_AI_FAQ_URL` override for deployments
+that pin a custom URL.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.176 | Default hosted URL launch | `launch_ai_faq()` opens `DEFAULT_FAQ_PAGE_URL` and reports the URL |
+| 1.177 | Environment override respected | setting `LEX_AI_FAQ_URL` changes the opened URL target |
+| 1.178 | Browser-open fallback guidance | when `webbrowser.open(...)` returns `False`, the launcher reports manual-open instructions |
+
+**Scenario range:** 1.176 – 1.178. **Test file:** `lex/test_project/tests/init/test_1v_ai_faq_command.py`. **Type:** U. **Status:** ✅ Complete (Session 81 — July 5). Source: `lex/tools/ai_faq.py`.
+
 ---
 
 ## 2. CRUD via REST API
@@ -1380,13 +1410,27 @@ Direct handler coverage of lines 170–340 would need a full history fixture (al
 | 1.102 | Generated `.run.xml` set parity | Exactly the 16 expected files, no orphans, no missing — canary against "removed Test_Audit but constant still has it" drift |
 | 1.103 | Every `.run.xml` `SCRIPT_NAME` is `lex` | A copy-paste of a different binary cannot bypass the CLI's env handling / Django bootstrap |
 | 1.104 | First-token of every `.run.xml` `PARAMETERS` resolves | Either explicit `@lex.command(...)` Click handler OR registered Django management command — the cross-file contract that nothing else asserts |
-| 1.105 | Explicit Click registry pinned | `celery` / `celery-workers` / `flower` / `streamlit` / `start` / `setup` / `setup-with-ai` / `ai-update` / `ai-faq` — removing one is what would silently break a `.run.xml` |
+| 1.105 | Explicit Click registry pinned | `celery` / `celery-workers` / `flower` / `streamlit` / `start` / `setup` / `setup-with-ai` / `ai-update` / `ai-faq` / `ai_issue_report` — removing one is what would silently break a `.run.xml` |
 | 1.106 | `_SKIP_BOOTSTRAP_COMMANDS` is a subset of explicit registry | Otherwise listed names silently fall through to dynamic forwarding without `django.setup()` |
 | 1.107 | `lex --help` exits 0 and names every explicit command | Click group itself wired correctly |
 | 1.108 | `lex <cmd> --help` exits 0 for every explicit handler | Catches decorator typos / signature regressions that `--help` surfaces but real runs would mask |
 | 1.109 | Every Django-side subcommand referenced by a `.run.xml` is registered | `init` / `migrate` / `makemigrations` / `flush` / `test` / `create_db` resolve through Django's command loader — otherwise dynamic forwarding produces a less-helpful error |
 
 **Status:**  Complete — 8 pass / 0 fail in 0.020s. See progress.md Session 40.
+
+### 1w. `ai_issue_report` raw-artifact bundle contract 
+
+**Gap (July 5):** support triage needed a single operator command that gathers raw Copilot/MCP artifacts without parser-side normalization so no detail is lost. Existing AI setup commands (`setup-with-ai`, `ai-dashboard`, `ai-faq`) covered configuration and UX, but no command produced a portable support bundle.
+
+**Shape:** `SimpleTestCase` only — filesystem-local ZIP assertions, no DB/network, deterministic archive checks.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.179 | `artifact_mode=off` emits report shell | `manifest.json` + `inventory.json` are present and `copied_files == 0` |
+| 1.180 | `artifact_mode=auto` preserves raw bytes | captured source file lands in `raw/...` byte-for-byte and inventory records archive path + size |
+| 1.181 | `artifact_mode=strict` requires at least one captured artifact | raises when no artifact source yields any file |
+
+**Status:** ✅ Complete — 3 pass / 0 fail. See progress.md Session 82.
 
 ### 5g. History `valid_to` chaining contract  — implemented
 

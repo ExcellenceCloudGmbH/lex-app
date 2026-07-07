@@ -26,6 +26,72 @@ DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
 DEFAULT_LEX_MCP_MODE = "forward"
+SUPPORTED_MCP_MODES: tuple[str, ...] = (
+    "forward",
+    "backward",
+    "edit",
+    "review",
+    "mvp_generator",
+    "mvp_completion",
+)
+MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
+    {
+        "value": "forward",
+        "title": "New Project",
+        "desc": "Full planning and implementation flow from scratch.",
+        "tone": "forward",
+        "icon_html": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<line x1="12" y1="5" x2="12" y2="19"/>'
+            '<polyline points="19 12 12 19 5 12"/>'
+            '</svg>'
+        ),
+    },
+    {
+        "value": "backward",
+        "title": "Documentation",
+        "desc": "Reverse-map an existing codebase and generate docs.",
+        "tone": "backward",
+        "icon_html": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="#283067" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+            '<polyline points="14 2 14 8 20 8"/>'
+            '<line x1="16" y1="13" x2="8" y2="13"/>'
+            '<line x1="16" y1="17" x2="8" y2="17"/>'
+            '</svg>'
+        ),
+    },
+    {
+        "value": "edit",
+        "title": "Edit",
+        "desc": "Targeted code modifications in an existing project.",
+        "tone": "edit",
+        "icon_html": "&#x270F;&#xFE0F;",
+    },
+    {
+        "value": "review",
+        "title": "Review",
+        "desc": "Audit, validate, and improve quality before merge.",
+        "tone": "review",
+        "icon_html": "&#x1F50D;",
+    },
+    {
+        "value": "mvp_generator",
+        "title": "MVP Generator",
+        "desc": "Generate a lean, production-minded MVP baseline.",
+        "tone": "mvp",
+        "icon_html": "&#x1F4A1;",
+    },
+    {
+        "value": "mvp_completion",
+        "title": "MVP Completion",
+        "desc": "Finalize and polish an MVP to production readiness.",
+        "tone": "mvp_completion",
+        "icon_html": "&#x2705;",
+    },
+)
 GITHUB_TOKEN_URL = "https://github.com/settings/tokens/new?description=Full+Classic+PAT&scopes=repo,workflow,admin:org,admin:repo_hook,user,project,admin:enterprise,read:enterprise,manage_runners:enterprise,read:audit_log,write:network_configurations,manage_billing:copilot"
 GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
 GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY = "mcp-servers-cache"
@@ -108,6 +174,17 @@ class SetupWithAIMCPProbeResult:
     prompts: tuple[dict[str, Any], ...] = ()
     resources: tuple[dict[str, Any], ...] = ()
     resource_templates: tuple[dict[str, Any], ...] = ()
+
+
+def normalize_mcp_mode(
+    mode: str | None,
+    *,
+    default: str = DEFAULT_LEX_MCP_MODE,
+) -> str:
+    candidate = str(mode or "").strip().lower()
+    if candidate in SUPPORTED_MCP_MODES:
+        return candidate
+    return default
 
 
 def build_lex_mcp_local_install_command(
@@ -376,13 +453,14 @@ def build_ai_env_values(
     remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
     mcp_mode: str = DEFAULT_LEX_MCP_MODE,
 ) -> dict[str, str]:
+    normalized_mode = normalize_mcp_mode(mcp_mode)
     return {
         "REMOTE_MCP_TRANSPORT": DEFAULT_REMOTE_MCP_TRANSPORT,
         "REMOTE_MCP_URL": remote_mcp_url,
         "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
         "REMOTE_MCP_API_KEY": remote_mcp_api_key,
         "GITHUB_TOKEN": github_token,
-        "LEX_MCP_MODE": mcp_mode,
+        "LEX_MCP_MODE": normalized_mode,
         "LEX_MCP_ANALYTICS_BACKEND": "remote",
     }
 
@@ -563,10 +641,11 @@ def resolve_mcp_server_args(
     * Otherwise falls back to the legacy wrapper script path:
       ``["<path/to/wrapper_mcp.py>"]``.
     """
+    normalized_mode = normalize_mcp_mode(mcp_mode)
     if _has_unified_mcp_entry_point(python_executable):
-        return ["-m", "lex_mcp.server", "--mode", mcp_mode]
+        return ["-m", "lex_mcp.server", "--mode", normalized_mode]
     wrapper_path = resolve_wrapper_script_path(python_executable)
-    return [str(wrapper_path)]
+    return [str(wrapper_path), normalized_mode]
 
 
 def build_mcp_server_definition(
@@ -1278,9 +1357,9 @@ def launch_setup_with_ai_form(
 
             github_token = form_data.get("github_token", [""])[0].strip()
             remote_mcp_api_key = form_data.get("remote_mcp_api_key", [""])[0].strip()
-            mcp_mode = form_data.get("mcp_mode", ["forward"])[0].strip().lower()
-            if mcp_mode not in ("forward", "backward"):
-                mcp_mode = "forward"
+            mcp_mode = normalize_mcp_mode(
+                form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
+            )
 
             if not github_token or not remote_mcp_api_key:
                 body = _build_setup_form_html(
@@ -1802,6 +1881,25 @@ def _build_setup_form_html(
         error_block = (
             f'<div class="error">{html.escape(error_message)}</div>'
         )
+    selected_mode = DEFAULT_LEX_MCP_MODE
+    mode_cards = "".join(
+        (
+            f'<label class="mode-card {card["tone"]}'
+            f'{" selected" if card["value"] == selected_mode else ""}" '
+            f'data-mode="{card["value"]}">'
+            f'<input type="radio" name="mcp_mode_select" value="{card["value"]}" '
+            f'{"checked" if card["value"] == selected_mode else ""}>'
+            f'<div class="mode-icon">{card["icon_html"]}</div>'
+            f'<div class="mode-title">{html.escape(card["title"])}</div>'
+            f'<p class="mode-desc">{html.escape(card["desc"])}</p>'
+            '<div class="mode-check">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" '
+            'stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+            '</div>'
+            '</label>'
+        )
+        for card in MCP_MODE_CARD_DEFS
+    )
 
 
 
@@ -1982,7 +2080,7 @@ def _build_setup_form_html(
       }}
       .mode-toggle {{
         display: grid;
-        grid-template-columns: 1fr 1fr;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 1rem;
       }}
       .mode-card {{
@@ -2025,6 +2123,18 @@ def _build_setup_form_html(
       .mode-card.backward .mode-icon {{
         background: rgba(40, 48, 103, 0.08);
       }}
+            .mode-card.edit .mode-icon {{
+                background: rgba(16, 185, 129, 0.12);
+            }}
+            .mode-card.review .mode-icon {{
+                background: rgba(234, 179, 8, 0.14);
+            }}
+            .mode-card.mvp .mode-icon {{
+                background: rgba(244, 114, 182, 0.12);
+            }}
+            .mode-card.mvp_completion .mode-icon {{
+                background: rgba(34, 197, 94, 0.12);
+            }}
       .mode-card .mode-title {{
         font-size: 1.05rem;
         font-weight: 700;
@@ -2114,6 +2224,16 @@ def _build_setup_form_html(
           grid-template-columns: 1fr;
         }}
         .mode-toggle {{
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }}
+                .hero {{
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 1rem;
+                }}
+            }}
+            @media (max-width: 640px) {{
+                .mode-toggle {{
           grid-template-columns: 1fr;
         }}
         .hero {{
@@ -2142,28 +2262,7 @@ def _build_setup_form_html(
           <p class="eyebrow">Workflow mode</p>
           <h2>What would you like to do?</h2>
           <div class="mode-toggle" id="modeToggle">
-            <label class="mode-card forward selected" data-mode="forward">
-              <input type="radio" name="mcp_mode_select" value="forward" checked>
-              <div class="mode-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-              </div>
-              <div class="mode-title">Create new project</div>
-              <p class="mode-desc">Start a new LEX App project with AI-assisted planning, implementation, and documentation.</p>
-              <div class="mode-check">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-            </label>
-            <label class="mode-card backward" data-mode="backward">
-              <input type="radio" name="mcp_mode_select" value="backward">
-              <div class="mode-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#283067" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-              </div>
-              <div class="mode-title">Document existing project</div>
-              <p class="mode-desc">Generate documentation and canonical context files for a project that already exists.</p>
-              <div class="mode-check">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-            </label>
+                        {mode_cards}
           </div>
         </article>
 
@@ -2190,7 +2289,7 @@ def _build_setup_form_html(
           {error_block}
           <form method="post" action="/submit">
             <input type="hidden" name="state" value="{html.escape(state)}">
-            <input type="hidden" name="mcp_mode" id="mcpModeInput" value="forward">
+                        <input type="hidden" name="mcp_mode" id="mcpModeInput" value="{html.escape(selected_mode)}">
 
             <label>
               GitHub token

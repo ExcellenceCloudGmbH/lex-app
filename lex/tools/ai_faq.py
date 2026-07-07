@@ -1,48 +1,27 @@
-"""Open a local browser page with LEX AI frequently-asked questions."""
+"""Open the hosted LEX AI frequently asked questions page."""
 
 from __future__ import annotations
 
 import html
-import threading
+import os
 import webbrowser
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
+
+
+DEFAULT_FAQ_PAGE_URL = "https://excellencecloudgmbh.github.io/lex-ai-faq-pages/"
 
 
 def launch_ai_faq(
     reporter: Callable[[str], None] | None = None,
     timeout_seconds: int = 900,
 ) -> None:
-    """Serve the FAQ page on localhost and open the user's browser."""
+    """Open the hosted FAQ page in the user's browser."""
 
-    closed = threading.Event()
+    _ = timeout_seconds  # kept for backward compatibility with older call sites
     report = reporter or (lambda message: None)
 
-    class _FAQHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            if self.path not in {"", "/"}:
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-
-            body = _build_faq_html()
-            encoded = body.encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
-
-        def log_message(self, format: str, *args) -> None:  # noqa: A002
-            return
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _FAQHandler)
-    server.daemon_threads = True
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
-
-    faq_url = f"http://127.0.0.1:{server.server_port}/"
-    report(f"LEX AI FAQ is available at: {faq_url}")
+    faq_url = (os.getenv("LEX_AI_FAQ_URL") or DEFAULT_FAQ_PAGE_URL).strip()
+    report(f"Opening LEX AI FAQ: {faq_url}")
     try:
         opened = webbrowser.open(faq_url, new=1, autoraise=True)
         if not opened:
@@ -53,16 +32,6 @@ def launch_ai_faq(
     except Exception as exc:
         report(f"Automatic browser launch failed: {exc}")
         report("Paste the FAQ URL into any browser to continue.")
-
-    report("Press Ctrl+C to stop the FAQ server.")
-    try:
-        closed.wait(timeout=timeout_seconds)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.shutdown()
-        server.server_close()
-        server_thread.join(timeout=5)
 
 
 # --------------- HTML builder ---------------
