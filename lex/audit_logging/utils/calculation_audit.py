@@ -43,8 +43,19 @@ def _is_root_calculation(instance, *, model_context=None) -> bool:
     if resolved_model_context is None:
         return True
 
-    root_model = getattr(resolved_model_context, "get_root", lambda: None)()
-    current_model = getattr(resolved_model_context, "current", None)
+    # Skip LogHeading frames — a section heading on the stack must not make a
+    # root calculation look nested. Fall back to the raw frame accessors for
+    # context objects that don't provide the model-skipping helpers.
+    root_model = getattr(
+        resolved_model_context,
+        "get_root_model",
+        getattr(resolved_model_context, "get_root", lambda: None),
+    )()
+    current_model = getattr(resolved_model_context, "get_current_model", None)
+    if callable(current_model):
+        current_model = current_model()
+    else:
+        current_model = getattr(resolved_model_context, "current", None)
 
     if root_model is None:
         return True

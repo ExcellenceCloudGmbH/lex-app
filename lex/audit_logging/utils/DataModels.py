@@ -30,6 +30,11 @@ class ContextInfo:
     content_type: Optional[ContentType] = None
     parent_content_type: Optional[ContentType] = None
     root_record: Optional[str] = None
+    # Snapshot of the model context stack (model instances and LogHeading
+    # frames) taken at log time. Persistence may run deferred via
+    # transaction.on_commit, after the with-blocks have already exited — the
+    # snapshot preserves the heading chain for that case.
+    frames: Optional[List] = None
 
 
 @dataclass
