@@ -1,6 +1,6 @@
 ---
 name: lex-testing
-description: Use when writing or modifying tests for the lex-app framework, or when changing framework source under lex/ (which requires paired cluster tests in the same change). Allocates the correct cluster/letter/scenario from the test-plan, scaffolds the test, and keeps test-writing-plan.md and known-bugs.md in sync. Mirrors the cloud Copilot coverage-gate paradigm.
+description: Use when writing or modifying tests for the lex-app framework, or when changing framework source under lex/ (which requires paired cluster tests in the same change). Allocates the correct cluster/letter/scenario from the test-plan, scaffolds the test, and keeps the per-cluster plan shards (allocation.yaml/batches.md) and known-bugs.md in sync. Mirrors the cloud Copilot coverage-gate paradigm.
 ---
 
 # LEX cluster testing
@@ -57,12 +57,16 @@ code is genuinely buggy, that is the test doing its job — record it (Step 7), 
 
 ## Step 1 — Read the test-plan (always, before allocating)
 
-Read these before doing anything else; if any is missing, **stop and tell the user** — do not guess:
+The plan is **sharded** — one folder per cluster under `clusters/NN-<slug>/`. Read these before
+doing anything else; if any is missing, **stop and tell the user** — do not guess:
 
-1. [`lex/test_project/test-plan/index.md`](../../../lex/test_project/test-plan/index.md) — overview.
-2. [`lex/test_project/test-plan/test-clusters.md`](../../../lex/test_project/test-plan/test-clusters.md) — cluster→topic mapping.
-3. [`lex/test_project/test-plan/test-writing-plan.md`](../../../lex/test_project/test-plan/test-writing-plan.md) — current batch state, in-flight clusters, allocation rules.
+1. [`lex/test_project/test-plan/index.md`](../../../lex/test_project/test-plan/index.md) — overview + the cluster table (cluster→topic mapping).
+2. [`lex/test_project/test-plan/testing-philosophy.md`](../../../lex/test_project/test-plan/testing-philosophy.md) — the Golden Rule, philosophy, red flags.
+3. The target cluster's trio under [`clusters/NN-<slug>/`](../../../lex/test_project/test-plan/clusters/) — `cluster.md` (scope + scenarios), `batches.md` (batch history), `allocation.yaml` (machine allocation state: letters, max scenario, status).
 4. [`lex/test_project/test-plan/known-bugs.md`](../../../lex/test_project/test-plan/known-bugs.md) — bug-recording workflow.
+
+The retired monolith paths (`test-clusters.md`, `test-writing-plan.md`) are now pointer stubs — the
+PR gate rejects edits to them; **never read or edit them for allocation**.
 
 ## Step 2 — Enumerate behaviour surfaces, then map each to its cluster
 
@@ -96,7 +100,8 @@ spans clusters: one that adds a state transition *and* a new REST endpoint *and*
 side-effect has surfaces in three domains. Map by **what the surface is**, not where the source line
 lives — a REST surface belongs to the API-layer cluster even if the code sits on a model; a
 persisted side-effect belongs to the cluster owning that record type. Surfaces in different clusters
-become separate batches (Step 3 onward, run per cluster). Use `test-clusters.md`; common mappings:
+become separate batches (Step 3 onward, run per cluster). Use the cluster table in
+[`index.md`](../../../lex/test_project/test-plan/index.md) and the per-cluster `cluster.md`; common mappings:
 
 | Source area | Cluster |
 | --- | --- |
@@ -104,6 +109,7 @@ become separate batches (Step 3 onward, run per cluster). Use `test-clusters.md`
 | `lex/lex_app/LexModel.py`, ORM models, permissions | 3, 4 |
 | Audit logging | 6 |
 | Calculation models, calculation flow | 7 |
+| Calculation logging (`LexLogger`, `CalculationLog`) | 15 |
 | Celery / async / workers | 8 |
 | WebSocket consumers | 9 |
 | Serializers, REST | 2, 12 |
@@ -116,12 +122,12 @@ with a documented reason (or ask), **never** silently omit it and still call the
 
 ## Step 3 — Allocate the next free letter and scenario range
 
-From `test-writing-plan.md`:
+Read the target cluster's `clusters/NN-<slug>/allocation.yaml`:
 
-1. List every batch already documented for the target cluster (e.g. 1a … 1o, 1p).
-2. Next free letter = next alphabetical letter after the highest in use. **Letters are never renumbered.**
-3. Find the cluster's current max scenario ID; the new batch starts at `max + 1`.
-4. Check "Pending decisions" and in-flight Tier-A clusters — if the source file is already slotted in an in-flight batch, **stop and tell the user**. Do not duplicate.
+1. **Next free letter** = the first lowercase letter absent from `letters:`. **Letters are never renumbered.**
+2. Your **scenario range starts at `max_scenario + 1`**.
+3. **In-flight check** = letters with `status: planned` or `in-flight` and their rows in the cluster's `batches.md`. If the source file is already slotted in an in-flight batch, **stop and tell the user**. Do not duplicate.
+4. Cross-cluster conventions (LATER backlog, pending decisions) live in `clusters/README.md`.
 
 ## Step 4 — Determine the test type letter
 
@@ -204,17 +210,23 @@ is only half the job. This mirrors the **cloud Copilot agent's required delivera
 (`.github/scripts/copilot_assemble_prompt.py`) so both paths stay consistent — do all of this in the
 **same change**, not as optional follow-up:
 
-1. **Append a row to `progress/session-log.md`** — the universal per-PR record (its header: "the
-   Copilot test-bot writes here as part of every PR"). Append-only, bottom row, never re-order.
+1. **Edit the per-cluster shards** under `clusters/NN-<slug>/`, for **each** touched cluster:
+   - `allocation.yaml` — add your letter entry (title, scenarios, status, tests counts, note) and
+     bump `max_scenario`. Letters are never renumbered.
+   - `batches.md` — append the batch block, matching the shape of the most recent batch (scenario
+     range, type U/I/E, files covered, test file path, test classes, fixtures, status).
+   - `cluster.md` — extend the scenario table **only when you defined new scenarios**.
 
-2. **Update the cluster status / scenario range** in `test-clusters.md` for each touched
-   (sub-)cluster, and bump the matching row in `progress/dashboard.md`.
+2. **Add ONE NEW session fragment** under `progress/sessions/` named `YYYY-MM-DD-<slug>.md` (slug =
+   batch id or branch name, never a counter). Front-matter: `date`, `clusters`, `tests_added`,
+   `suite_tally`. Body: short prose leading with the batch touched — **link** the batch in
+   `clusters/NN-<slug>/batches.md`, never restate it. Adding a file never conflicts with another PR.
 
-3. **If the work maps to a planned batch, append/update the batch row** in `test-writing-plan.md`,
-   matching the most recent batch's table shape (scenario range, type U/I/E, files covered, test
-   file path, test classes, fixtures, status). After you run the suite (Step 8), record the **real**
-   results (`N pass / 0 fail`, measured coverage gain) in the rows above and flip *Status* to
-   ✅ Complete. Don't leave `pending` placeholders in a finished change.
+3. **Regenerate the dashboard:** after you run the suite (Step 8) and record the **real** results
+   (`N pass / 0 fail`, measured coverage gain) in `allocation.yaml`/`batches.md`, run
+   `python .github/scripts/test_plan_aggregates.py build` and commit the regenerated
+   `progress/dashboard.md`. **Never hand-edit** the dashboard. Don't leave `pending` placeholders in
+   a finished change.
 
 4. **If a test exposes a real framework bug, record it — don't weaken the test.** Per the
    `known-bugs.md` workflow: assert the *correct* behaviour, mark the test
@@ -242,9 +254,11 @@ Done. Next:
   test by mirroring the implementation.
 - Put a feature test in the legacy `lex/tests/unit/`, `integration/`, or `e2e/` trees — cluster
   tests go in `lex/test_project/tests/<cluster_slug>/`.
-- Pick a cluster letter without reading `test-writing-plan.md` first.
+- Pick a cluster letter without reading the target cluster's `allocation.yaml` first.
 - Skip the Step 5 confirmation.
 - Invent new clusters or renumber existing ones.
 - Write tests for a source file already slotted in an in-flight batch.
-- Finish without bringing `test-writing-plan.md` into sync with the tests on disk.
+- Finish without bringing the per-cluster shards (`allocation.yaml` / `batches.md`) into sync with the tests on disk.
+- Edit the retired stubs `test-clusters.md` / `test-writing-plan.md`, or the retired `progress/session-log.md` — the gate rejects them.
+- Hand-edit `progress/dashboard.md` — it is generated; regenerate via `test_plan_aggregates.py build`.
 - Soften an assertion to hide a real bug — record it in `known-bugs.md` instead.

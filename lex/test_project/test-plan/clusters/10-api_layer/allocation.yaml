@@ -1,0 +1,129 @@
+cluster: 10
+slug: api_layer
+title: API Layer
+max_scenario: 71
+letters:
+  a:
+    title: ''
+    scenarios: 10.1-10.10
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: ''
+    scenarios: '10.6'
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: ''
+    scenarios: '10.7'
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: ''
+    scenarios: 10.11-10.14
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: BUG-015 documented in-test — CharField w/o default reports `required=False`
+  f:
+    title: ''
+    scenarios: 10.15-10.16
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: 10.15–10.16b
+  g:
+    title: Calculation-log tree, clean, init, PDF
+    scenarios: 10.17-10.19,10.70-10.71
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: 'counts folded into cluster top-line in pre-migration dashboard. On-disk file is
+      test_10g_one_endpoint_lifecycle.py; 10.15–10.16 renumbered to 10.70–10.71 on 2026-07-07
+      (BUG-023) — they collided with letter 10f (global search), which owns 10.15–10.16.'
+  h:
+    title: File operations & SharePoint
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: scenarios 10.17–10.23; `requests` patched
+  i:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  j:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  k:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  l:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  m:
+    title: Calculation-log tree pagination + N+1 fix
+    scenarios: 10.61-10.66
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: 'scenarios 10.61–10.66; `CalculationLogTreeView` now paginates (limit/offset) and resolves child
+      ids in one query (`assertNumQueries(3)` pins N+1 gone) instead of loading every row '
+  n:
+    title: ''
+    scenarios: 10.67-10.69
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded

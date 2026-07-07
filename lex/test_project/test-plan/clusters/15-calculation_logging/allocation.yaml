@@ -1,0 +1,60 @@
+cluster: 15
+slug: calculation_logging
+title: Calculation Logging Surface
+max_scenario: 21
+letters:
+  a:
+    title: LexLogger builder API and content shape
+    scenarios: 15.1-15.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  b:
+    title: Single-parent hierarchy, loud children
+    scenarios: 15.7-15.10
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  c:
+    title: Silent children + mixed-siblings regression gate
+    scenarios: 15.11-15.13
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  d:
+    title: Three-level chain (root → middle → grandchild)
+    scenarios: 15.14-15.15
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  e:
+    title: CalculatedModelMixin combinatorial pipeline
+    scenarios: 15.16-15.18
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  f:
+    title: Hierarchy preservation across the .save() boundary
+    scenarios: 15.19-15.21
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion; three scenarios (15.19-15.21)
+      marked @unittest.expectedFailure pending the execute_calculation_sync fix

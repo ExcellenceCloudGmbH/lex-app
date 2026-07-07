@@ -23,8 +23,8 @@ File an issue describing a behaviour or bug, label it with a `copilot:<mode>` la
 
 | Mode | Label | What Copilot does | Auto-merge? | Source changes? |
 |---|---|---|---|---|
-| **regression** | `copilot:regression` | Writes a **passing** test for the described behaviour | yes (green CI) | none |
-| **bug-repro** | `copilot:bug-repro` | Writes an `@expectedFailure` test that reproduces a bug; appends a row to `known-bugs.md` | yes (green CI) | none |
+| **regression** | `copilot:regression` | Writes a **passing** test for the described behaviour, syncs the cluster shards + a new session fragment | yes (green CI) | none |
+| **bug-repro** | `copilot:bug-repro` | Writes an `@expectedFailure` test that reproduces a bug; adds a row to `known-bugs.md` | yes (green CI) | none |
 | **fix-and-test** | `copilot:fix-and-test` | Writes a failing test, appends a `known-bugs.md` row, then makes the smallest source change that makes it pass | **no — human review** | ≤ 50 lines, listed in PR body |
 
 ---
@@ -47,9 +47,9 @@ If validation fails (e.g. blank reproducer in `bug-repro`), the workflow labels 
 
 The hint resolution rule, applied in order:
 
-1. **Existing letter** (`7g`, `12e`) → use it; if taken, advance to the next free letter.
+1. **Existing letter** (`7g`, `12e`) → use it; if taken, advance to the next free letter (first lowercase letter absent from `letters:` in the cluster's `allocation.yaml`).
 2. **Number only** (`7`) → allocate the next free sub-cluster letter inside it.
-3. **`new`** → create a brand-new cluster; pick the next free number; register in `test-clusters.md`, `showcase_clusters.py`, and the `pip_publish.yml` + `showcase_tests.yml` default selectors.
+3. **`new`** → create a brand-new cluster; pick the next free number; create the `clusters/NN-<slug>/` trio (`cluster.md` + `batches.md` + `allocation.yaml`), add the `index.md` table row, and register in `showcase_clusters.py` + the `pip_publish.yml` / `showcase_tests.yml` default selectors.
 4. **`others` or blank** AND no existing cluster fits → place under `lex/test_project/tests/others/`.
 
 Copilot writes a one-sentence justification in the PR description: *"Placed under cluster Nx because …"*.
@@ -58,11 +58,13 @@ Copilot writes a one-sentence justification in the PR description: *"Placed unde
 
 ## PR-gate checks
 
-`copilot_pr_gate.yml` runs three checks on every PR Copilot opens; failure on any one of them blocks merge:
+`copilot_pr_gate.yml` runs these checks on every PR Copilot opens; failure on any one of them blocks merge:
 
 1. **Mode discovery** — the PR body must contain `Fixes #N`; the linked issue must have exactly one `copilot:<mode>` label.
-2. **PR-shape contract** (`copilot_validate_pr_shape.py`) — file set, naming, body markers; per-mode required artifacts (see §7 of [the design spec](../superpowers/specs/2026-05-13-copilot-test-bot-design.md)).
-3. **Run the new test** — modes A/C must pass; mode B is re-run with `@expectedFailure` stripped on a temp copy and must FAIL (otherwise the claimed bug is not reproducible).
+2. **PR-shape contract** (`copilot_validate_pr_shape.py`) — file set, naming, body markers; per-mode required artifacts (see §7 of [the design spec](../superpowers/specs/2026-05-13-copilot-test-bot-design.md)). The required deliverables, per touched cluster `NN-<slug>`: `allocation.yaml` (letter entry + `max_scenario`) and `batches.md` (batch block) edited, `cluster.md` extended when new scenarios are defined; one NEW session fragment `progress/sessions/YYYY-MM-DD-<slug>.md`; a regenerated `progress/dashboard.md`; the retired monolith stubs (`test-clusters.md`, `test-writing-plan.md`, `progress/session-log.md`) left untouched.
+3. **Test-plan dashboard freshness** — the committed `progress/dashboard.md` must match a fresh `python .github/scripts/test_plan_aggregates.py build` (no hand-edits, no stale dashboard).
+4. **Test-plan allocation consistency** — the new test files are cross-checked against each touched cluster's `allocation.yaml` (letters and scenario ranges must line up).
+5. **Run the new test** — modes A/C must pass; mode B is re-run with `@expectedFailure` stripped on a temp copy and must FAIL (otherwise the claimed bug is not reproducible).
 
 Branch protection separately requires `showcase_tests / Run cluster showcase & send report` — the gate workflow does not invoke that itself.
 
@@ -102,7 +104,7 @@ Default is **off** — flip `COPILOT_AUTO_PUBLISH_ENABLED` to `"true"` only afte
 | Copilot's PR labeled `copilot:invalid` | PR-shape check failed — see the PR comment for the list | Re-trigger by closing the PR and re-adding the mode label to the original issue, OR fix manually |
 | Mode-B PR blocked: "test passed without @expectedFailure" | The bug being claimed is no longer reproducible | Close the issue (the bug may already be fixed) or re-file as `copilot:regression` |
 | `showcase_tests` red on auto-merge PR | New test depends on a missing fixture or surfaces a flake | PR sits open; same triage as any human-authored PR |
-| Two Copilot runs append `progress/session-log.md` simultaneously | Append-only conflict | Second run retries cleanly after the first lands |
+| Two Copilot runs land session fragments simultaneously | Each run adds its own `progress/sessions/YYYY-MM-DD-<slug>.md` | No conflict — distinct files; regenerate the dashboard on each |
 
 ---
 
@@ -114,11 +116,11 @@ Each workflow listens to a different GitHub event (`issues: labeled`, `pull_requ
 
 ### Why assemble the prompt at runtime?
 
-`copilot_assemble_prompt.py` reads four files from `lex/test_project/test-plan/` every run. When the test-plan rules evolve, edit the test-plan docs — the next workflow run sees the new wording automatically. No prompt-versioning to maintain in YAML.
+`copilot_assemble_prompt.py` reads the test-plan from `lex/test_project/test-plan/` every run — it inlines `index.md` + `progress/conventions.md` and points the agent at the sharded `clusters/NN-<slug>/`, `testing-philosophy.md`, and `progress/sessions/` by path. When the test-plan rules evolve, edit the test-plan docs — the next workflow run sees the new wording automatically. No prompt-versioning to maintain in YAML.
 
-### Why split `progress.md`?
+### Why shard the test-plan?
 
-The original `progress.md` mixed a high-churn dashboard table + Known Bugs Tracker with stable methodology + run instructions. Every session edit was a merge-conflict candidate, and the Copilot PR-shape check could not enforce "append one row" mechanically. The split (`progress/conventions.md`, `progress/dashboard.md`, `progress/session-log.md`) mirrors the volatility — each PR touches the smallest file.
+The original `progress.md` mixed a high-churn dashboard table + Known Bugs Tracker with stable methodology + run instructions, and a monolithic `test-clusters.md` / `test-writing-plan.md` carried every cluster's scope and allocation in one file — so every session edit was a merge-conflict candidate and the PR-shape check could not enforce "append one row" mechanically. The current layout shards per cluster (`clusters/NN-<slug>/` owns scope/batches/allocation), keeps stable rules in `progress/conventions.md`, generates `progress/dashboard.md`, and explodes the session log into one file per session under `progress/sessions/`. Each PR touches only its own cluster shard + a new fragment, so PRs never collide.
 
 ### Why does mode B strip the decorator and assert failure?
 
