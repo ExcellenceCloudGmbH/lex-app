@@ -39,7 +39,9 @@ class IssueInput:
 # inlined — Copilot reads them from the repo.
 _MAX_BODY_BYTES = 60_000
 
-_GOLDEN_RULE_ANCHOR = "## Golden Rule"
+# NB: the anchor must match index.md byte-for-byte — it sits inside a
+# blockquote as an h3. A mismatch silently inlines ALL of index.md.
+_GOLDEN_RULE_ANCHOR = "> ### ⚠️ The Golden Rule"
 
 _MODE_BLOCKS: dict[Mode, str] = {
     Mode.REGRESSION: """
