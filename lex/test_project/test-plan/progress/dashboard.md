@@ -15,7 +15,7 @@
 | 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
 | 5. History & Bitemporal | 11 | 97 | 10 | 6 | 2 |
-| 6. Audit Logging | 16 | 116 | 19 | 3 | 0 |
+| 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
 | 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
@@ -24,7 +24,7 @@
 | 12. Serializer Contract | 6 | 35 | 3 | 0 | 0 |
 | 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
-| 15. Calculation Logging Surface | 6 | 21 | 0 | 0 | 0 |
+| 15. Calculation Logging Surface | 7 | 31 | 10 | 0 | 0 |
 
 ## 1. Init — Project Bootstrap (`init`)
 
@@ -133,6 +133,7 @@
 | 6n |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 6o |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 6p | Calculation-log cache backfill buffer cap |  | complete | 5 | 0 | 0 | scenarios 6.109–6.113; bounds `CacheManager.store_message` to a 256 KB tail (+ applies `CACHE_TIMEOUT`) so opening a long calc log can't OOM the backend |
+| 6q | Root-calculation detection ignores heading frames | 6.117-6.118 | complete | 2 | 0 | 0 | heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation` must skip them via get_root_model()/get_current_model() |
 
 ## 7. Calculation State Machine (`calculations`)
 
@@ -261,3 +262,4 @@
 | 15d | Three-level chain (root → middle → grandchild) | 15.14-15.15 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
 | 15e | CalculatedModelMixin combinatorial pipeline | 15.16-15.18 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
 | 15f | Hierarchy preservation across the .save() boundary | 15.19-15.21 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion; three scenarios (15.19-15.21) marked @unittest.expectedFailure pending the execute_calculation_sync fix |
+| 15g | Object-less heading frames (TOC nodes) in the log tree | 15.22-15.31 | complete | 10 | 0 | 0 | model_logging_context("...") heading frames — lazy row creation, heading chains, node reuse, routing/root records skip headings, __str__ tree titles |

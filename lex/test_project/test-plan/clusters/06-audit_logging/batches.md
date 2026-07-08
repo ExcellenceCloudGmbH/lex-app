@@ -64,3 +64,21 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Note | Backend OOM fix (session 77): the live-log backfill buffer was an unbounded `get`+concat+`set` per line. Now capped to a ~256 KB tail (`MAX_CACHE_MESSAGE_CHARS`), trimmed to a clean line boundary, written with `CACHE_TIMEOUT`. Full log still persists in `CalculationLog`; only the recent-history backfill is bounded. |
 
 ---
+
+---
+
+### Batch 6q — Root-calculation detection ignores heading frames ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.117 – 6.118 |
+| Type | U |
+| Files covered | `audit_logging/utils/calculation_audit.py` (`_is_root_calculation` heading-frame transparency) |
+| Test file | `lex/test_project/tests/audit_logging/test_6q_root_detection_with_headings.py` |
+| Test classes | `TestCluster06q_RootDetectionWithHeadings` |
+| Fixtures | none (unsaved instances with explicit pks; explicit `model_context=` kwarg — no contextvar, no DB) |
+| Est. tests | 2 |
+| Coverage gain | measured with batch 15g |
+| Prereqs | none |
+| Status | ✅ Complete — 2 pass / 0 fail |
+| Note | Companion to batch 15g (`feat/calclog-heading-context`): `LogHeading` frames on the model context stack are presentation-only, so root detection resolves via `get_root_model()`/`get_current_model()` — a heading wrapped around (or inside) the root calculation must not demote it, and a heading between root and child must not hide the nesting. |

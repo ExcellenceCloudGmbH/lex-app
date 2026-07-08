@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 116
+max_scenario: 118
 letters:
   a:
     title: ''
@@ -155,3 +155,13 @@ letters:
       xfail: 0
     note: scenarios 6.109–6.113; bounds `CacheManager.store_message` to a 256 KB tail (+ applies `CACHE_TIMEOUT`)
       so opening a long calc log can't OOM the backend
+  q:
+    title: Root-calculation detection ignores heading frames
+    scenarios: 6.117-6.118
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation`
+      must skip them via get_root_model()/get_current_model()
