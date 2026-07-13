@@ -10,11 +10,10 @@ shifted by the viewer's UTC offset — the customer-reported "edited at 13:43
 but shows 11:43" (Berlin, UTC+2). Targets with ``USE_TZ=True`` serialize
 ``…+02:00`` and render correctly, which is why only some instances show it.
 
-These tests assert the CORRECT contract — every serialized datetime carries an
-explicit UTC offset — and are ``xfail(strict=True)`` until BUG-025 is fixed
-(e.g. render naive-UTC values with an explicit ``Z``, or revisit the
-``USE_TZ`` coupling). When the fix lands, the markers drop and these become
-live regression gates.
+These tests assert the contract — every serialized datetime carries an
+explicit UTC offset. BUG-025 is fixed by rendering naive-UTC values with an
+explicit ``Z`` (settings.py sets ``REST_FRAMEWORK["DATETIME_FORMAT"]`` when
+``USE_TZ`` is False), so these run as live regression gates.
 
 Cluster 12g — scenarios 12.36–12.38. Type: E.
 Covers: lex/core/models/LexModel.py (lex_datetime_now / edited_at, created_at),
@@ -72,10 +71,6 @@ class TestCluster12g_DatetimeTimezoneAmbiguity(E2ETestCase):
         item.save()
         return item
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BUG-025: naive-UTC edited_at serialized without a timezone designator",
-    )
     def test_12_36_edited_at_serializes_with_utc_offset(self) -> None:
         """
         Scenario 12.36: edited_at in an API detail response is unambiguous.
@@ -91,10 +86,6 @@ class TestCluster12g_DatetimeTimezoneAmbiguity(E2ETestCase):
         )
         self.assert_tz_designator(resp.data.get("edited_at"), "edited_at")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BUG-025: naive-UTC created_at serialized without a timezone designator",
-    )
     def test_12_37_created_at_serializes_with_utc_offset(self) -> None:
         """
         Scenario 12.37: created_at in an API detail response is unambiguous.
@@ -110,10 +101,6 @@ class TestCluster12g_DatetimeTimezoneAmbiguity(E2ETestCase):
         )
         self.assert_tz_designator(resp.data.get("created_at"), "created_at")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BUG-025: naive-UTC CalculationLog.timestamp serialized without a timezone designator",
-    )
     def test_12_38_calculation_log_timestamp_serializes_with_utc_offset(self) -> None:
         """
         Scenario 12.38: CalculationLog.timestamp is unambiguous when serialized.

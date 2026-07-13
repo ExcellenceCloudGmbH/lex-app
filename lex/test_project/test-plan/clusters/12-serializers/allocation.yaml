@@ -63,12 +63,12 @@ letters:
       xfail: 0
     note: 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23
   g:
-    title: Datetime timezone ambiguity (BUG-025)
+    title: Datetime timezone ambiguity (BUG-025, fixed)
     scenarios: 12.36-12.38
     status: complete
     tests:
-      pass: 0
+      pass: 3
       skip: 0
-      xfail: 3
-    note: xfail(strict) — serialized edited_at/created_at/CalculationLog.timestamp carry no
-      timezone designator on USE_TZ=False targets; markers drop when BUG-025 is fixed
+      xfail: 0
+    note: live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for
+      naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT)
