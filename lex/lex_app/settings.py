@@ -764,6 +764,20 @@ USE_TZ = True if DATABASE_DEPLOYMENT_TARGET not in ("default", "GCP") else False
 # Europe/Berlin without affecting scheduling.
 TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"
 
+# BUG-025: when USE_TZ is False every stored datetime is NAIVE UTC (the
+# TIME_ZONE coupling above guarantees it), but DRF's default ISO-8601
+# rendering emits naive values without a timezone designator
+# ("2026-07-13T11:43:00"). Browsers parse a naive ISO string as LOCAL time,
+# so every timestamp displays shifted by the viewer's UTC offset (a Berlin
+# user sees 11:43 for a 13:43 edit). Rendering with an explicit 'Z' labels
+# the value as what it really is; DRF's ISO-8601 input parsing already
+# accepts 'Z', so write paths round-trip unchanged (aware inputs are
+# normalized back to naive UTC by DRF's enforce_timezone). When USE_TZ is
+# True DRF keeps its default rendering with real offsets ("…+02:00") and
+# needs no help.
+if not USE_TZ:
+    REST_FRAMEWORK["DATETIME_FORMAT"] = "%Y-%m-%dT%H:%M:%S.%fZ"
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
 

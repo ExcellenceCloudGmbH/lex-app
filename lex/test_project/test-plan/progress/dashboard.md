@@ -21,7 +21,7 @@
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 6 | 35 | 3 | 0 | 0 |
+| 12. Serializer Contract | 7 | 38 | 6 | 0 | 0 |
 | 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 7 | 31 | 10 | 0 | 0 |
@@ -230,6 +230,7 @@
 | 12d | AuditLog payload filtering | 12.23-12.25 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 12e | Serializer factory contract | 12.26-12.35 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 12f |  | 12.29-12.31 | complete | 3 | 0 | 0 | 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23 |
+| 12g | Datetime timezone ambiguity (BUG-025, fixed) | 12.36-12.38 | complete | 3 | 0 | 0 | live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT) |
 
 ## 13. Export Endpoint (`exports`)
 

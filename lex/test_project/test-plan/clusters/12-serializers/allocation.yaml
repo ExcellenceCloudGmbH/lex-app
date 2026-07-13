@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 35
+max_scenario: 38
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -62,3 +62,13 @@ letters:
       skip: 0
       xfail: 0
     note: 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23
+  g:
+    title: Datetime timezone ambiguity (BUG-025, fixed)
+    scenarios: 12.36-12.38
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for
+      naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT)
