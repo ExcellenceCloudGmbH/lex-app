@@ -91,7 +91,7 @@
 | 12i. FK label injection — `"<fk>_label"` sibling (Session 87 — June 30) | 8 | 8 | 8 | 0 | 0 | ✅ Complete — scenarios 12.40–12.47; frontend-redesign Phase 1. `_FkLabelInjectionMixin` emits a sibling `"<fk>_label"` next to each FK PK (value stays the PK) via `resolve_fk_label` (target's `lex_fk_label_field` → else `str(obj)`); applied to both `RestApiModelSerializerTemplate` and the `_wrap_custom_serializer` path; respects deny-all + visibility-filtered FKs + explicit label overrides |
 | 13. Export Endpoint | 12 | 12 | 12 | 0 | 0 |  Complete — 13a–13d (BUG-014 fixed) |
 | 14. AG Grid Query Endpoint | 25 | 25 | 24 | 0 | 0 |  Complete — 14a–14e (BUG-016 deferred, 1 skip) |
-| **Total** | **583** | **583** | **562** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
+| **Total** | **660** | **660** | **639** | **3** | **9** | Per-session narrative (what each session added, scenario renumberings, deferrals) lives in [`session-log.md`](session-log.md) — the single chronological record. |
 
 **Status legend:**
 -  Not started — no tests written yet
