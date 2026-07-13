@@ -103,3 +103,11 @@ cluster-2 models are too shallow; we need a model with one of every
 - ❌ **History chaining.** Cluster 5. Here we only assert a history row, when serialized, produces the right JSON shape.
 
 ---
+
+### 12g. Datetime timezone ambiguity (BUG-025) ✅ (xfail strict)
+
+**What it tests:** the timezone-unambiguity contract of every REST-serialized datetime. On `USE_TZ=False` deployment targets (`default`, `GCP`) the framework stores naive UTC (`lex_datetime_now`, `auto_now_add`) and DRF serializes it with no `Z`/offset, so browsers parse the string as local time and every timestamp renders shifted by the viewer's UTC offset (customer: "edited at 13:43, shows 11:43").
+
+**Why a regression matters:** `edited_at` and calculation-log times are audit-relevant, customer-facing values; a silent 2-hour shift undermines trust in the whole audit trail.
+
+**Scenario range:** 12.36 – 12.38. **Test file:** `lex/test_project/tests/serializers/test_12g_datetime_tz_ambiguity.py`. **Type:** E. **Status:** ✅ Complete — all three `xfail(strict=True)` until BUG-025 is fixed. Scenarios: 12.36 `edited_at` carries a timezone designator; 12.37 `created_at` likewise; 12.38 `CalculationLog.timestamp` likewise.
