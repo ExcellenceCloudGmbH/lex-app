@@ -111,3 +111,11 @@ cluster-2 models are too shallow; we need a model with one of every
 **Why a regression matters:** `edited_at` and calculation-log times are audit-relevant, customer-facing values; a silent 2-hour shift undermines trust in the whole audit trail.
 
 **Scenario range:** 12.36 – 12.38. **Test file:** `lex/test_project/tests/serializers/test_12g_datetime_tz_ambiguity.py`. **Type:** E. **Status:** ✅ Complete — BUG-025 fixed in the same change (explicit `Z` rendering on `USE_TZ=False` targets); all three run as live regression gates. Scenarios: 12.36 `edited_at` carries a timezone designator; 12.37 `created_at` likewise; 12.38 `CalculationLog.timestamp` likewise.
+
+### 12h. Clearing a FileField through the REST update path ✅
+
+**What it tests:** the three file-field write semantics — an explicit empty multipart value clears the stored file, omitting the key keeps it, uploading replaces it. Before this batch removal was impossible through the API: DRF's stock FileField rejects `""` and omit means keep, so the admin frontend's cleared-file saves silently preserved the old file (customer report 2026-07-13: "removed file gets added again").
+
+**Why a regression matters:** users must be able to remove attachments; a removal that silently un-does itself corrupts the record's document trail.
+
+**Scenario range:** 12.39 – 12.41. **Test file:** `lex/test_project/tests/serializers/test_12h_filefield_clear.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.39 empty value clears; 12.40 omit keeps; 12.41 upload replaces.

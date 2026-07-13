@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 38
+max_scenario: 41
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -72,3 +72,13 @@ letters:
       xfail: 0
     note: live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for
       naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT)
+  h:
+    title: Clearing a FileField through the REST update path
+    scenarios: 12.39-12.41
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: LexClearableFileField/-ImageField — an explicit empty multipart value clears the stored
+      file (omit still keeps, upload still replaces); frontend twin F9 batch 9d sends the marker
