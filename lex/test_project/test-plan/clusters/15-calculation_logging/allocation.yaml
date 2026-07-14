@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 31
+max_scenario: 34
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -68,3 +68,17 @@ letters:
       xfail: 0
     note: model_logging_context("...") heading frames — lazy row creation, heading chains, node
       reuse, routing/root records skip headings, __str__ tree titles
+  h:
+    title: PDF export renders like the log view
+    scenarios: 15.32-15.34
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: customer report 2026-07-14 — the Download-PDF of a calculation log lost markdown structure.
+      DownloadMarkdownPdf now renders via WeasyPrint (already a declared dep; xhtml2pdf kept as runtime
+      fallback) with a GitHub-style stylesheet mirroring the frontend log view, and the markdown extras
+      match the log view's parser surface (tables, fenced code, strike; dropped code-friendly which
+      silently disabled __bold__). Contract pinned; anything the log view renders appears rendered in
+      the PDF — never as raw markdown syntax
