@@ -21,7 +21,7 @@
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 8 | 41 | 9 | 0 | 0 |
+| 12. Serializer Contract | 9 | 45 | 13 | 0 | 0 |
 | 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 7 | 31 | 10 | 0 | 0 |
@@ -233,6 +233,7 @@
 | 12f |  | 12.29-12.31 | complete | 3 | 0 | 0 | 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23 |
 | 12g | Datetime timezone ambiguity (BUG-025, fixed) | 12.36-12.38 | complete | 3 | 0 | 0 | live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT) |
 | 12h | Clearing a FileField through the REST update path | 12.39-12.41 | complete | 3 | 0 | 0 | LexClearableFileField/-ImageField — an explicit empty multipart value clears the stored file (omit still keeps, upload still replaces); frontend twin F9 batch 9d sends the marker |
+| 12i | Foreign-key display names in the read contract (BUG-F-003 backend fix) | 12.42-12.45 | complete | 4 | 0 | 0 | additive companion `<fk>__short_description` = str(related) emitted alongside the raw FK id on both list and detail paths; list resolves names in one batched pk__in query per FK (mirrors ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of frontend BUG-F-003 (FK columns rendered as bare ids) |
 
 ## 13. Export Endpoint (`exports`)
 

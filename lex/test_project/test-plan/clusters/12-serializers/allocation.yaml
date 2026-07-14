@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 41
+max_scenario: 45
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -82,3 +82,16 @@ letters:
       xfail: 0
     note: LexClearableFileField/-ImageField — an explicit empty multipart value clears the stored
       file (omit still keeps, upload still replaces); frontend twin F9 batch 9d sends the marker
+  i:
+    title: Foreign-key display names in the read contract (BUG-F-003 backend fix)
+    scenarios: 12.42-12.45
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: additive companion `<fk>__short_description` = str(related) emitted alongside the raw FK id
+      on both list and detail paths; list resolves names in one batched pk__in query per FK (mirrors
+      ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so
+      filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of
+      frontend BUG-F-003 (FK columns rendered as bare ids)
