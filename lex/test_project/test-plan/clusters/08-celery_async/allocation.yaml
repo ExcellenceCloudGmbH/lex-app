@@ -1,7 +1,7 @@
 cluster: 8
 slug: celery_async
 title: Celery & Async
-max_scenario: 144
+max_scenario: 146
 letters:
   a:
     title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)

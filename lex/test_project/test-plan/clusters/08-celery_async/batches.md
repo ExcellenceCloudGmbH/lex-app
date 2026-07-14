@@ -178,3 +178,19 @@
 | Status | ✅ Complete — source fix + paired tests + plan sync in one change. Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Companion: Batch 7r withdrawn (inline guard + 7.199 flip + test file removed), 7q restored to committed assertions |
 
 ---
+
+### Batch 8ae — Stale queued calc task survives the startup reset: BUG-026 reproduction with real workers (2026-07-14)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.145 – 8.146 |
+| Type | E (E2ETestCase + real Redis broker + real in-process Celery worker via `start_worker`; opt-in via `LEX_RUN_REDIS_CELERY_TESTS`, provided by the showcase CI Redis service — real workers spawn in CI on every release, clean skip without the flag) |
+| Files covered | `lex/process_admin/utils/model_registration.py` (`_handle_calculation_model_reset` — resets the DB row but neither purges the queued broker message nor sets the cluster cancel marker for the abandoned calculation_id), `lex/lex_app/celery_tasks.py` (`calc_and_save` + `lex_shared_task` wrapper task-start marker checks — the net that WOULD stop the stale task if the sweep marked it), `lex/core/cancellation/cluster_cancel_index.py`. Customer repro (2026-07-14, `PlanningRun` "SD 2026"): update dispatched while workers were down → message parked on Redis; server restart → sweep flips IN_PROGRESS→ABORTED, reopening One.py's duplicate guard; re-click dispatches a second task with a fresh calculation_id; worker boot drains BOTH → non-idempotent `update()` runs twice → duplicate `Sponsor` children → `MultipleObjectsReturned` in the new run |
+| Test file | `lex/test_project/tests/celery_async/test_8ae_stale_queue_survives_startup_reset.py` |
+| Test classes | `TestCluster08ae_StaleQueueSurvivesStartupReset` (8.145 control: one dispatch → real worker → exactly one execution + one child row + SUCCESS, proving the CI worker-spawning harness; 8.146 `xfail(strict=True)` BUG-026: enqueue with no worker → real startup sweep (`CALLED_FROM_START_COMMAND`, empty tracked set) → re-enqueue with fresh calculation_id → worker boots and drains both → asserts exactly ONE execution / one child / new run succeeds; currently 2 executions with 2 distinct calculation_ids + `MultipleObjectsReturned`) |
+| Fixtures | new `NonIdempotentCalc` + `NonIdempotentChild` (celery_async/models.py) mirroring the customer's `PlanningRun`/`Sponsor` (create children then `objects.get(...)`); dispatched instances carry `_calculation_hook_in_progress=True` exactly as `calculate_hook` pickles them (without it, `model.save()` in the worker re-enters the hook and double-executes within ONE task — a harness artefact that would mask the real stale-queue duplication); the repro enables the real cancel index (settings CELERY_ACTIVE/broker URL + `reset_client_cache`) so it flips green when the sweep starts marking abandoned calculations cancelled |
+| Tests landed | 1 pass (8.145) / 1 xfail-strict (8.146, BUG-026). Verified against a live Redis: repro shows `Executions seen: ['nonidempotentcalc_1_update_<uuid1>', 'nonidempotentcalc_1_update_<uuid2>']` — the production log's two `planningrun_2_update_<uuid>` ids, step for step |
+| Coverage gain | the startup-sweep ↔ broker-queue ↔ cancel-marker interaction, previously untested end-to-end; first cluster test that drives a dispatched pickle round-trip of a real model through a real worker |
+| Status | ⚠️ Reproduction landed — BUG-026 open. Fix direction: the sweep should `mark_cancelled(calculation_id)` for every row it aborts; the existing 8ad/`calc_and_save` task-start checks then make the stale message land CANCELLED. Allocated `8ae` (next free letter after `8ad`); 8.145 picks up after cluster-8 scenario max 8.144 |
+
+---
