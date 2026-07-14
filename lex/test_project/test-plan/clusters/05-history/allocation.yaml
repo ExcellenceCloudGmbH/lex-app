@@ -1,7 +1,7 @@
 cluster: 5
 slug: history
 title: History & Bitemporal
-max_scenario: 101
+max_scenario: 103
 letters:
   a:
     title: ''
@@ -110,10 +110,10 @@ letters:
       `HistSimpleItem`
   m:
     title: Edit-time correctness + as_of time-travel round trip
-    scenarios: 5.98-5.101
+    scenarios: 5.98-5.103
     status: complete
     tests:
-      pass: 3
+      pass: 5
       skip: 0
       xfail: 1
     note: end-to-end edited_at → Z serialization → parse_as_of_datetime → get_queryset_as_of chain;

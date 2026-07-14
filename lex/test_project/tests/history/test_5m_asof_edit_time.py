@@ -191,3 +191,92 @@ class TestCluster05m_AsOfEditTime(E2ETestCase):
             [s["snapshot"]["name"] for s in before_edit], ["v1"],
             "Strictly before the edit, the system must know only v1.",
         )
+
+
+class TestCluster05m_ListEndpointAsOf(E2ETestCase):
+    """Cluster 5m (cont.): the LIST endpoint's ?as_of= valid-time travel.
+
+    This is the exact surface the frontend grid uses
+    (``/api/model_entries/<model>/list?as_of=...``) — customer report
+    2026-07-14: stepping back 1 min / 10 min / 1 h from an 11:22 edit never
+    showed the pre-edit state. Root cause of the symptom: the client sent
+    naive LOCAL wall-clock, and the API contract interprets naive datetimes
+    as UTC (``parse_as_of_datetime``) — in Berlin summer every anchor less
+    than 2 h back still lands AFTER the edit in UTC. These scenarios pin the
+    backend side: with correct UTC anchors the endpoint time-travels
+    correctly, and naive values are interpreted as UTC by contract.
+    """
+
+    e2e_models = ALL_MODELS
+
+    def _create_and_edit(self):
+        item = HistSimpleItem.objects.create(name="v1")
+        _time.sleep(0.05)
+        t_before_edit = lex_datetime_now()
+        _time.sleep(0.05)
+        item.name = "v2"
+        item.save()
+        return item, t_before_edit
+
+    def _list_names(self, as_of: str) -> list:
+        url = self.url_list(HIST_SIMPLE) + f"?as_of={as_of}"
+        resp = self.client.get(url)
+        self.assertEqual(
+            resp.status_code, status.HTTP_200_OK,
+            f"list?as_of GET failed: {resp.status_code}",
+        )
+        rows = resp.data["results"] if isinstance(resp.data, dict) and "results" in resp.data else resp.data
+        return [row["name"] for row in rows]
+
+    def test_5_102_list_as_of_before_edit_shows_pre_edit_values(self) -> None:
+        """
+        Scenario 5.102: the list endpoint at a pre-edit UTC anchor returns the
+        record with its pre-edit values; at now it returns the edited values.
+        Given: v1 created, then edited to v2
+        When: GET list?as_of=<UTC between create and edit, Z format>
+        Then: the row shows name='v1'; with as_of=<now> it shows 'v2'
+        """
+        item, t_before_edit = self._create_and_edit()
+
+        self.assertEqual(
+            self._list_names(t_before_edit.isoformat() + "Z"), ["v1"],
+            "The list endpoint must show the pre-edit values at a pre-edit "
+            "UTC anchor — this is the grid's time-travel surface.",
+        )
+        self.assertEqual(
+            self._list_names(lex_datetime_now().isoformat() + "Z"), ["v2"],
+            "The list endpoint must show the current values at a present anchor.",
+        )
+
+    def test_5_103_naive_as_of_is_interpreted_as_utc_by_contract(self) -> None:
+        """
+        Scenario 5.103: a NAIVE as_of value means UTC — not the caller's local
+        wall clock. This is the documented parse contract, and the exact trap
+        behind the customer report: a Berlin client sending naive local time
+        lands 2h in the future of the intended instant, so "1 minute before
+        my edit" still shows the post-edit state.
+        Given: v1 created, then edited to v2
+        When: GET list?as_of=<naive pre-edit UTC value, no Z>
+        Then: identical result to the explicit-Z form (pre-edit values) —
+              proving naive == UTC, so clients MUST send UTC (or an offset)
+        """
+        item, t_before_edit = self._create_and_edit()
+
+        naive = t_before_edit.isoformat()  # no Z, no offset — naive on purpose
+        self.assertEqual(
+            self._list_names(naive), ["v1"],
+            "A naive as_of must be read as UTC (parse contract). If this "
+            "fails, the parse layer drifted and every naive client anchor "
+            "time-travels to the wrong instant.",
+        )
+        # And the same instant expressed with an explicit +02:00 offset (a
+        # Berlin client converting correctly) must land identically.
+        import datetime as _dt
+        berlin = t_before_edit.replace(tzinfo=_dt.timezone.utc).astimezone(
+            _dt.timezone(_dt.timedelta(hours=2))
+        )
+        self.assertEqual(
+            self._list_names(berlin.isoformat().replace("+", "%2B")), ["v1"],
+            "An offset-aware local-time anchor denoting the same instant "
+            "must time-travel to the same snapshot.",
+        )

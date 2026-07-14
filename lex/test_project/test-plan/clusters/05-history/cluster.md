@@ -44,4 +44,4 @@
 
 **Why a regression matters:** `as_of` answers "what did this record look like before the edit?" — audit-grade functionality customers explicitly rely on.
 
-**Scenario range:** 5.98 – 5.101. **Test file:** `lex/test_project/tests/history/test_5m_asof_edit_time.py`. **Type:** E. **Status:** ✅ Complete — 3 pass; 5.101 `xfail(strict)` pins **BUG-026** (`edited_at` vs history-window clock-read gap; anchoring `as_of` at a record's own `edited_at` misses the edit).
+**Scenario range:** 5.98 – 5.103. **Test file:** `lex/test_project/tests/history/test_5m_asof_edit_time.py`. **Type:** E. **Status:** ✅ Complete — 5 pass; 5.101 `xfail(strict)` pins **BUG-026** (`edited_at` vs history-window clock-read gap; anchoring `as_of` at a record's own `edited_at` misses the edit).
