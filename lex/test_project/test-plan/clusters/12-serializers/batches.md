@@ -37,3 +37,21 @@
 | Prereqs | none |
 | Status | ✅ Complete — 3 pass / 0 fail |
 | Note | Customer report 2026-07-13: a file removed in the edit form reappeared after save. Multipart updates had no way to express removal (omit = keep, DRF rejects `""` as "not a file"), so the admin frontend's dropped-null payload silently kept the old file. Model file fields (incl. `PDFField`/`XLSXField` via MRO lookup) now map to clearable variants: explicit empty value → clear (`allow_blank = True` so DRF's HTML-input handling doesn't rewrite `""` into "omitted"); required (`blank=False`) files reject the clear. 12.39 empty value clears; 12.40 omit keeps; 12.41 upload replaces. Frontend twin: process-admin-general-client F9 batch 9d (provider sends the `''` marker for cleared stored files). Ship both halves together. |
+
+---
+
+### Batch 12i — Foreign-key display names in the read contract ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.42 – 12.45 |
+| Type | E |
+| Files covered | `api/serializers/base_serializers.py` (`FilteredListSerializer._batch_add_fk_display_names`, `LexSerializer._add_fk_display_names_single`, `_get_fk_display_fields`/`_resolve_fk_names` helpers) |
+| Test file | `lex/test_project/tests/serializers/test_12i_fk_display_names.py` |
+| Test classes | `TestCluster12i_ForeignKeyDisplayNames` |
+| Fixtures | reuse cluster-12 `WideItem` (nullable FK `related` → `RelatedItem`, custom `__str__`) |
+| Est. tests | 4 |
+| Coverage gain | FK read-contract enrichment (list + detail parity, batch N-safety) |
+| Prereqs | none |
+| Status | ✅ Complete — 4 pass / 0 fail |
+| Note | Resolves the **backend root cause of frontend BUG-F-003** (FK columns render as bare ids like `79`). Every serialized row now carries an **additive** companion key `<fk>__short_description` = `str(related)` (the model author's `__str__`/`short_description` — the documented customization point) alongside the untouched raw id, so filtering/editing on the id are unaffected. The list path resolves the whole page's names in **one `pk__in` query per FK** (mirrors `ModelExport._apply_foreign_key_display_names`); the detail path resolves per-instance (one query, fine) so list-row shape ⊆ detail shape (the 12c invariant holds). Null FK → null companion (stable row shape). Permission-hidden FK columns get no companion (the key is emitted only when the raw column survived visibility filtering). Frontend twin: the grid/detail render the companion instead of the raw id (F3/F9.6). |
