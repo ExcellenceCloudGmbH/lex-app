@@ -14,7 +14,7 @@
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
-| 5. History & Bitemporal | 11 | 97 | 10 | 6 | 2 |
+| 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
 | 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
@@ -112,6 +112,7 @@
 | 5j |  | 5.75-5.76 | complete | 2 | 0 | 0 | 5.75 full snapshot, 5.76 `history_user` stamped |
 | 5k |  | 5.81-5.87 | complete | 0 | 3 | 1 | auto-skip — MetaHistorical* not wired; prod registration covered in unit tests |
 | 5l |  | 5.91-5.97 | planned | 0 | 0 | 0 | save side of the future-activation handoff (worker side = 8.43); scenarios 5.91–5.97, reuses `HistSimpleItem` |
+| 5m | Edit-time correctness + as_of time-travel round trip | 5.98-5.103 | complete | 5 | 0 | 1 | end-to-end edited_at → Z serialization → parse_as_of_datetime → get_queryset_as_of chain; 5.101 xfail(strict) pins BUG-026 (edited_at vs valid_from/sys_from clock-read gap) |
 
 ## 6. Audit Logging (`audit_logging`)
 
