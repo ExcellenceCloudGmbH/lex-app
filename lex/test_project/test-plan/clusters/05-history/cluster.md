@@ -37,3 +37,11 @@
 > * **Time-travel helpers `get_queryset_as_of(...)` uncovered.** Both branches (main-model → valid time; history-model → system time) — see **5i** scenarios 5.72–5.73.
 
 ---
+
+### 5m. Edit-time correctness + as_of time-travel round trip ✅ (BUG-026 gate)
+
+**What it tests:** the full timestamp chain a client depends on when time-traveling: the edit stamps `edited_at` (naive UTC), the API serializes it with an explicit `Z` (BUG-025 fix), `parse_as_of_datetime` normalizes the query value back to naive UTC, and `get_queryset_as_of` compares it against the `valid_from`/`sys_from` windows. A shift anywhere returns plausible wrong data instead of an error.
+
+**Why a regression matters:** `as_of` answers "what did this record look like before the edit?" — audit-grade functionality customers explicitly rely on.
+
+**Scenario range:** 5.98 – 5.101. **Test file:** `lex/test_project/tests/history/test_5m_asof_edit_time.py`. **Type:** E. **Status:** ✅ Complete — 3 pass; 5.101 `xfail(strict)` pins **BUG-026** (`edited_at` vs history-window clock-read gap; anchoring `as_of` at a record's own `edited_at` misses the edit).

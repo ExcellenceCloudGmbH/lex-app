@@ -29,3 +29,21 @@
 | Prereqs | 5e + 4j |
 
 ---
+
+---
+
+### Batch 5m — Edit-time correctness + as_of time-travel round trip ✅ (1 xfail gates BUG-026)
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 5.98 – 5.101 |
+| Type | E |
+| Files covered | `api/utils/temporal.py` (`parse_as_of_datetime`), `core/services/Bitemporal.py` (`get_queryset_as_of`), `api/views/model_entries/History.py` (`?as_of` branch), `core/models/LexModel.py` (`lex_datetime_now` / `edited_at`) |
+| Test file | `lex/test_project/tests/history/test_5m_asof_edit_time.py` |
+| Test classes | `TestCluster05m_AsOfEditTime` |
+| Fixtures | reuses `HistSimpleItem` |
+| Est. tests | 4 |
+| Coverage gain | pins the full timestamp chain end to end (stamp → serialize → parse → compare) |
+| Prereqs | BUG-025 fix (Z-serialized datetimes) |
+| Status | ✅ Complete — 3 pass / 1 xfail(strict) |
+| Note | Customer concern 2026-07-14 ("we rely on the as_of mechanism"). 5.98 edited_at is the true edit instant and its serialized form denotes the same instant; 5.99 as_of before the edit returns exactly the pre-edit snapshot (values included); 5.100 as_of now knows both versions, latest current; 5.101 (xfail strict, **BUG-026**) anchoring as_of on the record's own serialized edited_at must land on the post-edit side — fails today because `edited_at` and `valid_from`/`sys_from` come from separate clock reads (~ms gap). Fix design + the `_history_date` trap are documented in the BUG-026 row. |
