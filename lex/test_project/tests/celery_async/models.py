@@ -83,7 +83,74 @@ except Exception:  # pragma: no cover
     CELERY_DECORATOR_AVAILABLE = False
 
 
-ALL_MODELS = [CelerySyncCalc, CeleryCalc]
+@_permissive
+class NonIdempotentChild(models.Model):
+    """Child row created by :class:`NonIdempotentCalc` — one per plan+name.
+
+    Mirrors the customer's ``Sponsor`` model: the parent calc creates its
+    children, then later looks one up with ``objects.get(plan=…, name=…)``.
+    A duplicated calculation run creates the row twice and that ``get()``
+    raises ``MultipleObjectsReturned`` — the visible symptom of the
+    stale-queue double-execution bug (cluster 8ae).
+    """
+
+    plan = models.ForeignKey(
+        "lex_app.NonIdempotentCalc",
+        on_delete=models.CASCADE,
+        related_name="children",
+    )
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+@_permissive
+class NonIdempotentCalc(CalculationModel):
+    """A calc whose body is deliberately NOT idempotent (cluster 8ae).
+
+    Mirrors the customer's ``PlanningRun.update``: each execution creates
+    child rows, then reads one back with ``objects.get(...)``. Running the
+    body twice for the same logical calculation therefore raises
+    ``MultipleObjectsReturned`` — exactly the production failure a stale
+    queued broker message causes after a startup reset.
+
+    ``executions`` is a class-level, in-process record of every run
+    (calculation_id per execution). It works because the cluster-8ae
+    worker is an in-process ``start_worker`` thread sharing this module.
+    """
+
+    name = models.CharField(max_length=200)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    executions: list = []
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.api.utils import operation_context
+
+        try:
+            calc_id = (operation_context.get() or {}).get("calculation_id", "")
+        except Exception:
+            calc_id = ""
+        type(self).executions.append(calc_id)
+
+        # Non-idempotent child creation + the customer's lookup pattern.
+        NonIdempotentChild.objects.create(plan=self, name="sponsor-a")
+        NonIdempotentChild.objects.get(plan=self, name="sponsor-a")
+
+
+ALL_MODELS = [CelerySyncCalc, CeleryCalc, NonIdempotentCalc, NonIdempotentChild]
 
 CELERY_SYNC = "celerysynccalc"
 CELERY = "celerycalc"

@@ -17,7 +17,7 @@
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
-| 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
+| 8. Celery & Async | 14 | 146 | 80 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
