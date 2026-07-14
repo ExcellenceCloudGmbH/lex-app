@@ -283,6 +283,23 @@ class EditScopedItem(LexModel):
         return True
 
 
+class AttachmentItem(LexModel):
+    """File-bearing model for the clearable-file-field scenarios (12h).
+
+    ``document`` mirrors the common project shape: ``blank=True``,
+    ``null=False`` — Django stores the empty value as ``""``.
+    """
+
+    name = models.CharField(max_length=100)
+    document = models.FileField(upload_to="test_uploads/", blank=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 ALL_MODELS = [
     RelatedItem,
     WideItem,
@@ -290,6 +307,7 @@ ALL_MODELS = [
     TagItem,
     TaggableItem,
     EditScopedItem,
+    AttachmentItem,
 ]
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
@@ -299,4 +317,5 @@ PROTECTED_WIDE = "protectedwideitem"
 TAG = "tagitem"
 TAGGABLE = "taggableitem"
 EDIT_SCOPED = "editscopeditem"
+ATTACHMENT = "attachmentitem"
 

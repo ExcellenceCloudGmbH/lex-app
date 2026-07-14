@@ -433,19 +433,30 @@ def pytest_cmd(ctx):
     # DiscoverRunner.run_tests() does:
     #   1. setup_test_environment() — installs the test client, RequestFactory
     #      patches, deprecation-warning filter etc.
-    #   2. DiscoverRunner.setup_databases() — creates the ``test_<dbname>``
-    #      database (or `test_<NAME>` from the settings TEST overrides), runs
-    #      migrations, and re-points ``connection.settings_dict["NAME"]``
-    #      so any TestCase / TransactionTestCase / SimpleTestCase subclass
-    #      that touches the ORM hits the test DB, not the production one.
+    #   2. DiscoverRunner.setup_databases() — runs migrations and re-points
+    #      ``connection.settings_dict["NAME"]`` so any TestCase /
+    #      TransactionTestCase / SimpleTestCase subclass that touches the ORM
+    #      hits the configured test DB.
     # Without this, every unittest.TestCase-derived test errors at setUp with
     # `database "<prod name>" does not exist` because Django's runner machinery
     # never ran.
+    #
+    # ``keepdb=True`` on purpose: the K8S/GCP/DOCKER settings set
+    # ``TEST["NAME"] == DATABASE_NAME`` (the instance's own DB), so on a
+    # deployed instance the "test DB" already exists — keepdb reuses it and
+    # runs migrations against it (no DROP/CREATE), matching the pre-cutover
+    # behaviour where pytest ran directly against the live/clone DB. This needs
+    # no CREATEDB / database-ownership privilege on the app role. In CI, where
+    # the DB is missing, setup_databases still CREATEs it (the CI Postgres user
+    # is a superuser). With ``keepdb=False`` Django instead force-drops and
+    # recreates ``DATABASE_NAME`` on every run, which requires CREATEDB +
+    # ownership the Terraform-provisioned app role does not have (and would be
+    # dropping the instance's own database) — see rc184 regression / af2a6ea.
     from django.test.runner import DiscoverRunner
     from django.test.utils import setup_test_environment, teardown_test_environment
 
     setup_test_environment()
-    _db_runner = DiscoverRunner(verbosity=1, interactive=False, keepdb=False)
+    _db_runner = DiscoverRunner(verbosity=1, interactive=False, keepdb=True)
     # Limit test-DB creation to the `default` alias. Django's own
     # ``manage.py test`` path inspects every collected ``TestCase`` for
     # its ``databases`` attribute (defaults to ``{"default"}``) and

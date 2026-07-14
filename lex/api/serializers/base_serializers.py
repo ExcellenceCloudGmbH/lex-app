@@ -83,6 +83,38 @@ class FilteredListSerializer(serializers.ListSerializer):
         return [r for r in (self.child.to_representation(item) for item in iterable) if r]
 
 
+class LexClearableFileField(serializers.FileField):
+    """FileField that accepts an empty string as an explicit "clear" marker.
+
+    Multipart updates have no way to express file removal otherwise: omitting
+    the key means "keep the current file" (DRF semantics), and DRF's stock
+    FileField rejects ``""`` as "not a file". An empty string maps to Django's
+    empty value for FileField storage, clearing the reference regardless of
+    the column's null-ability. Clearing a required (``blank=False``) file is
+    rejected the same way omitting it on create would be.
+
+    Note: without ``allow_blank`` DRF's ``Field.get_value`` rewrites ``""``
+    from HTML/multipart input into "field omitted" (or ``None`` when
+    ``allow_null=True``) before validation ever runs, so the clear marker
+    would silently degrade to keep-semantics. ``allow_blank = True`` makes
+    ``get_value`` pass the empty string through to ``to_internal_value``.
+    """
+
+    # Let '' survive DRF's HTML-input empty-value rewriting (see docstring).
+    allow_blank = True
+
+    def to_internal_value(self, data):
+        if data == "" or data is None:
+            if self.required:
+                self.fail("required")
+            return ""
+        return super().to_internal_value(data)
+
+
+class LexClearableImageField(LexClearableFileField, serializers.ImageField):
+    """Image variant of :class:`LexClearableFileField` (same clear semantics)."""
+
+
 # --- UPDATED PERMISSION-AWARE BASE SERIALIZER ---
 class LexSerializer(serializers.ModelSerializer):
     """
@@ -91,6 +123,15 @@ class LexSerializer(serializers.ModelSerializer):
     """
     # Define a new field to hold the scopes for each record.
     lex_reserved_scopes = serializers.SerializerMethodField()
+
+    # Map model file fields (and subclasses like PDFField / XLSXField — DRF's
+    # ClassLookupDict walks the MRO) to the clearable variants so multipart
+    # updates can remove a stored file by sending an empty value.
+    serializer_field_mapping = {
+        **serializers.ModelSerializer.serializer_field_mapping,
+        models.FileField: LexClearableFileField,
+        models.ImageField: LexClearableImageField,
+    }
 
     # ------------------------------------------------------------------
     # Per-serializer caches (populated once, reused across all records)
