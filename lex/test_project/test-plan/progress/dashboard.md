@@ -24,7 +24,7 @@
 | 12. Serializer Contract | 9 | 45 | 13 | 0 | 0 |
 | 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
-| 15. Calculation Logging Surface | 7 | 31 | 10 | 0 | 0 |
+| 15. Calculation Logging Surface | 8 | 34 | 13 | 0 | 0 |
 
 ## 1. Init — Project Bootstrap (`init`)
 
@@ -267,3 +267,4 @@
 | 15e | CalculatedModelMixin combinatorial pipeline | 15.16-15.18 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion |
 | 15f | Hierarchy preservation across the .save() boundary | 15.19-15.21 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion; three scenarios (15.19-15.21) marked @unittest.expectedFailure pending the execute_calculation_sync fix |
 | 15g | Object-less heading frames (TOC nodes) in the log tree | 15.22-15.31 | complete | 10 | 0 | 0 | model_logging_context("...") heading frames — lazy row creation, heading chains, node reuse, routing/root records skip headings, __str__ tree titles |
+| 15h | PDF export renders like the log view | 15.32-15.34 | complete | 3 | 0 | 0 | customer report 2026-07-14 — the Download-PDF of a calculation log lost markdown structure. DownloadMarkdownPdf now renders via WeasyPrint (already a declared dep; xhtml2pdf kept as runtime fallback) with a GitHub-style stylesheet mirroring the frontend log view, and the markdown extras match the log view's parser surface (tables, fenced code, strike; dropped code-friendly which silently disabled __bold__). Contract pinned; anything the log view renders appears rendered in the PDF — never as raw markdown syntax |
