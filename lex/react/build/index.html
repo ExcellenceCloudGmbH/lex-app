@@ -30,8 +30,105 @@
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
     <title id="window-title">Process Admin Client</title>
-    <script type="module" crossorigin src="/assets/index-CKNybHCu.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-isLX8XQ_.css">
+    <script>
+      /* Lift the Quackback feedback launcher off the bottom-right corner so
+         it doesn't cover the edit drawer's footer actions (Delete sits
+         exactly under the default position). The SDK's DOM is opaque
+         (generated names / possible shadow root), so instead of guessing
+         selectors, watch body for injected elements and raise any SMALL
+         fixed-position bubble parked in that corner. MUI portals (drawers,
+         modals) also mount on body but are excluded by the Mui class check
+         and the size guard. */
+      (function () {
+        var LIFT = '88px'
+        // Launchers we've matched, so a sidebar-side flip can re-place them
+        // live (after moving left they no longer match the corner heuristic).
+        var launchers = []
+
+        function sidebarSide() {
+          try {
+            return localStorage.getItem('lex.sidebar-side') === 'right' ? 'right' : 'left'
+          } catch (e) {
+            return 'left'
+          }
+        }
+
+        /* Place a matched launcher in the corner OPPOSITE the sidebar, lifted
+           off the very bottom so it clears the edit-drawer footer actions.
+           Sidebar left (default) -> bubble bottom-RIGHT; sidebar right ->
+           bubble bottom-LEFT. Both corners are pinned EXPLICITLY (with the
+           other set to auto) so every flip visibly moves it. */
+        function place(c) {
+          try {
+            c.style.setProperty('transition', 'left 0.3s ease, right 0.3s ease', 'important')
+            c.style.setProperty('bottom', LIFT, 'important')
+            if (sidebarSide() === 'right') {
+              c.style.setProperty('left', '16px', 'important')
+              c.style.setProperty('right', 'auto', 'important')
+            } else {
+              c.style.setProperty('right', '16px', 'important')
+              c.style.setProperty('left', 'auto', 'important')
+            }
+          } catch (e) {
+            /* never break the app over widget cosmetics */
+          }
+        }
+
+        function liftIfLauncher(el) {
+          try {
+            if (!el || el.nodeType !== 1) return
+            if (el.id === 'root' || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return
+            if (typeof el.className === 'string' && el.className.indexOf('Mui') !== -1) return
+            var candidates = [el]
+            if (el.querySelectorAll) {
+              candidates = candidates.concat(
+                Array.prototype.slice.call(el.querySelectorAll('iframe, div, button')),
+              )
+            }
+            candidates.forEach(function (c) {
+              if (launchers.indexOf(c) !== -1) return
+              if (typeof c.className === 'string' && c.className.indexOf('Mui') !== -1) return
+              var cs = window.getComputedStyle(c)
+              if (cs.position !== 'fixed') return
+              var rect = c.getBoundingClientRect()
+              // Small bubble parked at the bottom-right corner.
+              if (rect.width === 0 || rect.width > 180 || rect.height > 180) return
+              if (window.innerHeight - rect.bottom > 60) return
+              if (window.innerWidth - rect.right > 120) return
+              launchers.push(c)
+              place(c)
+            })
+          } catch (e) {
+            /* never break the app over widget cosmetics */
+          }
+        }
+        function scan() {
+          Array.prototype.forEach.call(document.body.children, liftIfLauncher)
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+          new MutationObserver(function (mutations) {
+            mutations.forEach(function (m) {
+              Array.prototype.forEach.call(m.addedNodes, function (n) {
+                // Widgets often style themselves a tick after insertion.
+                setTimeout(function () {
+                  liftIfLauncher(n)
+                }, 300)
+              })
+            })
+          }).observe(document.body, { childList: true })
+          // Catch anything injected before the observer attached.
+          setTimeout(scan, 1500)
+          setTimeout(scan, 4000)
+        })
+        // Re-place live when the app flips the sidebar side (event fired by
+        // src/components/CustomSidebar/useSidebarSide.ts).
+        window.addEventListener('lex:sidebar-side-changed', function () {
+          launchers.forEach(place)
+        })
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-ERs9gjKT.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-D2gIUd9e.css">
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
