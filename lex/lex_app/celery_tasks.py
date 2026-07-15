@@ -129,6 +129,42 @@ class CallbackTask(Task):
     with special handling for the initial_data_upload task.
     """
 
+    def apply_async(self, args=None, kwargs=None, task_id=None, **options):
+        """Dispatch, then claim the task in the recovery registry.
+
+        Every async dispatch in the framework goes through this base class
+        (``lex_shared_task`` sets ``base=CallbackTask``), so this is the single
+        choke point where a task can be claimed at DISPATCH time — before any
+        worker exists. Without the claim, a task whose worker pod never got
+        scheduled (full cluster, node-group max) is invisible to the recovery
+        registry, and the startup reset blind-aborts its healthy, queued
+        calculation row (incident 2026-07-14, instance 1410).
+
+        The claim happens strictly AFTER ``super().apply_async`` returns: a
+        failed dispatch must not leave a claim for a message that never
+        reached the broker. Best-effort — a claim failure never fails the
+        dispatch itself.
+        """
+        result = super().apply_async(args=args, kwargs=kwargs, task_id=task_id, **options)
+        try:
+            from lex.lex_app.celery_recovery.heartbeat import _UNTRACKED_TASK_NAMES
+            from lex.lex_app.celery_recovery import registry as recovery_registry
+
+            if self.name not in _UNTRACKED_TASK_NAMES:
+                recovery_registry.claim_dispatched(
+                    task_id=result.id,
+                    name=self.name,
+                    args=args,
+                    kwargs=kwargs,
+                    queue=options.get("queue"),
+                )
+        except Exception:
+            logger.warning(
+                "Celery recovery: dispatch claim failed for %s", getattr(result, "id", None),
+                exc_info=True,
+            )
+        return result
+
     def on_success(self, retval: Any, task_id: str, args: Tuple, kwargs: Dict) -> None:
         """Handle successful task completion."""
         try:

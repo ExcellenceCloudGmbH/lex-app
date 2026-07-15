@@ -428,6 +428,23 @@ class ModelRegistration:
                 ensure_terminal_calculation_audit,
             )
 
+            from lex.core.models.LexModel import lex_datetime_now
+
+            # Age-gate (defense-in-depth for the 2026-07-14 incident class):
+            # when the recovery registry is unreadable — Redis evicted or
+            # flushed, exactly the moments this sweep tends to run — every
+            # row looks untracked and the sweep degrades to a blind abort.
+            # A recently-started calculation is far more likely to be queued
+            # or running than orphaned, so young rows are spared regardless
+            # of tracking. 0 disables the gate (legacy behavior).
+            try:
+                min_age_seconds = float(
+                    os.getenv("LEX_STARTUP_ABORT_MIN_AGE_SECONDS", "1800")
+                )
+            except (TypeError, ValueError):
+                min_age_seconds = 1800.0
+            now = lex_datetime_now()
+
             stuck = list(
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
             )
@@ -438,6 +455,20 @@ class ModelRegistration:
                     # would, via the terminal-outcome guard, block that resume
                     # and permanently lose recoverable calculation state.
                     continue
+                if min_age_seconds > 0:
+                    stamp = getattr(instance, "edited_at", None) or getattr(
+                        instance, "created_at", None
+                    )
+                    if stamp is not None and (now - stamp).total_seconds() < min_age_seconds:
+                        logger.info(
+                            "Startup reset: sparing young IN_PROGRESS row %s "
+                            "(%.0fs old < %.0fs gate) — likely queued or "
+                            "running with tracking unavailable.",
+                            instance,
+                            (now - stamp).total_seconds(),
+                            min_age_seconds,
+                        )
+                        continue
                 instance.is_calculated = CalculationModel.ABORTED
                 instance._history_change_reason = (
                     "Startup reset: calculation was still IN_PROGRESS"

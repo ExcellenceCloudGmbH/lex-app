@@ -178,3 +178,21 @@
 | Status | ✅ Complete — source fix + paired tests + plan sync in one change. Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Companion: Batch 7r withdrawn (inline guard + 7.199 flip + test file removed), 7q restored to committed assertions |
 
 ---
+
+---
+
+### Batch 8z — Dispatch-time claims, queue-verified recovery, age-gated startup reset, boot watchdog ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.145 – 8.156 |
+| Type | U (+ one E sweep class) |
+| Files covered | `lex_app/celery_recovery/registry.py` (`claim_dispatched`, `task_id_in_queue`, `status` field), `lex_app/celery_recovery/supervisor.py` (dispatched lane, `LEX_TASK_DISPATCH_GRACE_SECONDS`), `lex_app/celery_tasks.py` (`CallbackTask.apply_async` claim choke point), `process_admin/utils/model_registration.py` (`LEX_STARTUP_ABORT_MIN_AGE_SECONDS` age-gate), `lex_app/celery.py` (boot watchdog, `LEX_WORKER_BOOT_TIMEOUT_SECONDS`) |
+| Test file | `lex/test_project/tests/celery_async/test_8z_dispatch_claim_and_boot_guard.py` |
+| Test classes | `TestCluster08z_DispatchClaim`, `TestCluster08z_SupervisorDispatchedLane`, `TestCluster08z_StartupAgeGate`, `TestCluster08z_BootWatchdog` |
+| Fixtures | reuses `CelerySyncCalc`; mocked redis clients per the 8v/8w pattern |
+| Est. tests | 12 |
+| Coverage gain | dispatch-to-start ownership gap + degraded-broker self-termination |
+| Prereqs | 8w/8x semantics (extended, not changed: tracked→skip is untouched) |
+| Status | ✅ Complete — 12 pass / 0 fail |
+| Note | Incident 2026-07-14 (instance 1410): a healthy calculation whose worker pod was still Pending was blind-aborted by a recovery-beat restart, because registry ownership began only at `task_prerun`. Ownership now starts at dispatch (`status="dispatched"`, `claimed_at`, no heartbeat — the broker message is the liveness story). The supervisor never requeues a claim that is (or might be) still queued — a same-task-id double dispatch is impossible by construction — and recovers only verifiably vanished messages (Redis flushed/evicted), the exact incident remediation that used to strand work. Startup reset spares untracked rows younger than the age-gate (default 1800s; 0 = legacy) so blind-abort degradation can't race a scheduling backlog. Boot watchdog (armed on `worker_init`, default 300s) terminates workers that boot into an unreachable broker and never fire `worker_ready`. **Deliberate 8x edit:** its `_run_sweep` pins ownership semantics with the age-gate disabled (`LEX_STARTUP_ABORT_MIN_AGE_SECONDS=0`); the gate has its own scenario 8.155. |
