@@ -141,3 +141,12 @@
 **Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
 ---
+
+
+### 8c. On-demand recovery-beat scale metric ✅
+
+**What it tests:** `active_recovery_count()` / `RecoveryScaleMetric` — the metric a KEDA `metrics-api` trigger polls to run the recovery-beat pod on demand (one replica while calculation work is in flight, zero when idle). The count is the **union** of the cross-process recovery registry (Redis) and the in-process, DB-reconciled active-calculation store, and fails safe upward so a metric error keeps the sweeper up.
+
+**Why a regression matters:** if the metric reads zero while work still needs watching, KEDA scales the sweeper away from a calculation that may yet need recovering.
+
+**Scenario range:** 8.157 – 8.159. **Test file:** `lex/test_project/tests/celery_async/test_8c_recovery_scale_metric.py`. **Type:** U. **Status:** ✅ 3 pass. Scenarios: 8.157 metric is the union (max) of both signals; 8.158 zero only when both are empty; 8.159 the view reports a positive count on error.

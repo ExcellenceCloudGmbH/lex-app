@@ -1,7 +1,7 @@
 cluster: 8
 slug: celery_async
 title: Celery & Async
-max_scenario: 144
+max_scenario: 159
 letters:
   a:
     title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
@@ -137,3 +137,14 @@ letters:
       xfail: 0
     note: 'scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat`
       driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it '
+  c:
+    title: On-demand recovery-beat scale metric
+    scenarios: 8.157-8.159
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: KEDA scale signal for making recovery-beat on-demand — active_recovery_count() unions the
+      recovery registry (redis) with the DB-reconciled active-calc store; fails safe upward. Scenarios
+      start at 8.157 to stack cleanly above the dispatch-claim batch (8z, 8.145-156, PR #653)
