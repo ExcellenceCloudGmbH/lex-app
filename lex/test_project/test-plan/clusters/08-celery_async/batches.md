@@ -178,3 +178,22 @@
 | Status | ✅ Complete — source fix + paired tests + plan sync in one change. Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Companion: Batch 7r withdrawn (inline guard + 7.199 flip + test file removed), 7q restored to committed assertions |
 
 ---
+
+
+---
+
+### Batch 8c — On-demand recovery-beat scale metric ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.157 – 8.159 |
+| Type | U |
+| Files covered | `lex/api/views/calculations/RecoveryScaleMetric.py` (`active_recovery_count`, `RecoveryScaleMetric` view), `lex/lex_app/urls.py` (`api/recovery-scale-metric` route) |
+| Test file | `lex/test_project/tests/celery_async/test_8c_recovery_scale_metric.py` |
+| Test classes | `TestCluster08c_RecoveryScaleMetric` |
+| Fixtures | none (registry + active-store mocked) |
+| Est. tests | 3 |
+| Coverage gain | scale-signal path for the on-demand recovery-beat pod |
+| Prereqs | none |
+| Status | ✅ Complete — 3 pass / 0 fail |
+| Note | Lex-app half of making the recovery-beat pod **on-demand**: KEDA polls `api/recovery-scale-metric` (a `metrics-api` trigger) and runs the pod at one replica while `count > 0`, scaling to zero when idle. `count = max(registry cardinality, active-calc store size)` — the registry (Redis, cross-process, dispatch→terminal) and the DB-reconciled in-process store, unioned so neither alone can scale the sweeper off live work; any error fails safe to a positive count. Scenarios start at 8.157 to sit above the dispatch-claim batch (8z, 8.145–156, PR #653) so the two branches don't collide on scenario ids. **Infra companion (LEX_TERRAFORM_MODULES):** convert `celery_beat_recovery.yaml` to a KEDA ScaledObject (min 0 / max 1) with a `metrics-api` trigger on this endpoint. **Sequencing:** the recovery-beat also drives bitemporal future-activation clocked schedules today — those must move to the planned global scheduler before (or with) this, or future activations won't fire while the pod is scaled to zero. |
