@@ -1,7 +1,7 @@
 cluster: 8
 slug: celery_async
 title: Celery & Async
-max_scenario: 144
+max_scenario: 156
 letters:
   a:
     title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
@@ -137,3 +137,15 @@ letters:
       xfail: 0
     note: 'scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat`
       driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it '
+  z:
+    title: Dispatch-time claims, queue-verified recovery, age-gated startup reset, boot watchdog
+    scenarios: 8.145-8.156
+    status: complete
+    tests:
+      pass: 12
+      skip: 0
+      xfail: 0
+    note: incident 2026-07-14 hardening — ownership starts at dispatch (CallbackTask.apply_async →
+      claim_dispatched, NX), supervisor leaves queued claims alone and only requeues verifiably
+      vanished messages, startup reset spares young untracked rows, boot watchdog reaps workers
+      that never become ready; 8x's _run_sweep now pins ownership with the age-gate disabled

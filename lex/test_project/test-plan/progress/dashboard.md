@@ -17,7 +17,7 @@
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
-| 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
+| 8. Celery & Async | 15 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
@@ -177,6 +177,7 @@
 | 8w | Worker-recovery terminal-outcome guard: no ERROR→SUCCESS resurrection | 8.90-8.102 | complete | 8 | 5 | 0 | scenarios 8.90–8.102; `scan_and_recover` consults the result backend (ready `AsyncResult`) + the calc rows (every row out of `IN_PROGRESS`) before requeueing a dead task, deregiste |
 | 8x | Liveness-aware startup reset: recovery hand-off (no live-calc abort) | 8.103-8.115 | complete | 6 | 7 | 0 | scenarios 8.103–8.115; the boot-time `IN_PROGRESS → ABORTED` sweep now defers to the recovery registry — a row owned by a tracked task (alive **or** expired-but-tracked) is left `I |
 | 8y | Embedded-beat recovery driver: schedule wiring, queue isolation, entrypoint | 8.116-8.122 | complete | 7 | 0 | 0 | scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat` driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it  |
+| 8z | Dispatch-time claims, queue-verified recovery, age-gated startup reset, boot watchdog | 8.145-8.156 | complete | 12 | 0 | 0 | incident 2026-07-14 hardening — ownership starts at dispatch (CallbackTask.apply_async → claim_dispatched, NX), supervisor leaves queued claims alone and only requeues verifiably vanished messages, startup reset spares young untracked rows, boot watchdog reaps workers that never become ready; 8x's _run_sweep now pins ownership with the age-gate disabled |
 
 ## 9. Signals & WebSocket (`signals_ws`)
 

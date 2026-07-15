@@ -141,3 +141,11 @@
 **Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
 ---
+
+### 8z. Dispatch-time claims, queue-verified recovery, age-gated startup reset, boot watchdog ✅
+
+**What it tests:** the four hardening pieces from the 2026-07-14 instance-1410 incident. Recovery ownership begins at dispatch (`CallbackTask.apply_async` → `registry.claim_dispatched`, NX, no heartbeat), so dispatched-but-not-yet-started calculations are visible to the startup reset and the supervisor. The supervisor's dispatched lane treats the broker queue as the liveness signal: still-queued (or unreadable) → wait; verifiably vanished → same-task-id requeue under the normal budget. The startup reset spares young untracked rows (`LEX_STARTUP_ABORT_MIN_AGE_SECONDS`). The boot watchdog (`worker_init`, `LEX_WORKER_BOOT_TIMEOUT_SECONDS`) reaps workers that never become ready.
+
+**Why a regression matters:** each gap independently strands or destroys healthy work during infra turbulence — the incident aborted a live customer calculation and left 15 zombie worker jobs.
+
+**Scenario range:** 8.145 – 8.156. **Test file:** `lex/test_project/tests/celery_async/test_8z_dispatch_claim_and_boot_guard.py`. **Type:** U (+ E sweep). **Status:** ✅ Complete — 12 pass.

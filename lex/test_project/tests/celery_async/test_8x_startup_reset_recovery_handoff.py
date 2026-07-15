@@ -195,7 +195,14 @@ class TestCluster08x_StartupSweepDefersToOwnership(E2ETestCase):
         return {(CelerySyncCalc._meta.label_lower, r.pk) for r in rows}
 
     def _run_sweep(self, tracked_record_ids):
-        with mock.patch.dict(os.environ, {"CALLED_FROM_START_COMMAND": "1"}):
+        # These scenarios pin the OWNERSHIP semantics (tracked → skip,
+        # untracked → abort). The age-gate added with batch 8z would spare
+        # every freshly-created test row regardless of ownership, so it is
+        # disabled here; the gate has its own scenario (8.155).
+        with mock.patch.dict(os.environ, {
+            "CALLED_FROM_START_COMMAND": "1",
+            "LEX_STARTUP_ABORT_MIN_AGE_SECONDS": "0",
+        }):
             ModelRegistration._handle_calculation_model_reset(
                 CelerySyncCalc, tracked_record_ids=tracked_record_ids,
             )

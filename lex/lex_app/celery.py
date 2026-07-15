@@ -9,7 +9,13 @@ from typing import Optional
 
 from celery import Celery
 from celery.app.control import Control
-from celery.signals import task_postrun, task_revoked, worker_ready, worker_shutting_down
+from celery.signals import (
+    task_postrun,
+    task_revoked,
+    worker_init,
+    worker_ready,
+    worker_shutting_down,
+)
 from celery.worker import state as worker_state
 from celery.worker.control import Panel
 from django.apps import apps
@@ -259,10 +265,69 @@ def _idle_watchdog_loop(
         sleep(poll_interval)
 
 
+def _boot_timeout_seconds() -> float:
+    """Grace for a booting worker to become ready (broker connected).
+
+    A worker that starts while the broker is unreachable — Redis evicted or
+    flushed, the 2026-07-14 incident — loops in connection-retry BEFORE
+    ``worker_ready`` fires, so the idle watchdog (armed on ``worker_ready``)
+    never starts and the pod idles forever. This boot watchdog is armed on
+    ``worker_init`` instead: if the worker has not become ready within the
+    timeout, it is warm-shut so KEDA/the Job can replace it. ``0`` disables.
+    """
+    try:
+        return float(os.getenv("LEX_WORKER_BOOT_TIMEOUT_SECONDS", "300"))
+    except (TypeError, ValueError):
+        return 300.0
+
+
+_worker_became_ready = threading.Event()
+_boot_timer = None
+
+
+def _boot_watchdog_fire():
+    """Boot timeout elapsed without worker_ready: terminate the worker.
+
+    Uses the same warm-shutdown primitive as the idle paths — a worker that
+    never became ready has no active/reserved tasks, so the idle check passes
+    and a graceful SIGTERM is scheduled.
+    """
+    if _worker_became_ready.is_set():
+        return
+    logger.warning(
+        "boot watchdog: worker not ready after %ss (broker unreachable?); "
+        "requesting warm shutdown",
+        _boot_timeout_seconds(),
+    )
+    _warm_shutdown_if_idle()
+
+
+@worker_init.connect
+def arm_boot_watchdog(sender=None, **extra):
+    """Arm the never-became-ready watchdog as early as the process allows."""
+    global _boot_timer
+    if not _is_non_local_deployment_target() or not _idle_shutdown_enabled():
+        return
+    timeout = _boot_timeout_seconds()
+    if timeout <= 0:
+        return
+    if _boot_timer is not None:
+        return
+    _worker_became_ready.clear()
+    _boot_timer = threading.Timer(timeout, _boot_watchdog_fire)
+    _boot_timer.daemon = True
+    _boot_timer.start()
+
+
 @worker_ready.connect
 def start_idle_watchdog(sender=None, **extra):
     """Start the single idle-watchdog daemon thread on worker startup."""
     global _watchdog_thread
+    # The worker became ready: disarm the boot watchdog before anything else
+    # (from here on, the idle watchdog owns liveness).
+    _worker_became_ready.set()
+    if _boot_timer is not None:
+        _boot_timer.cancel()
     if not _is_non_local_deployment_target() or not _idle_shutdown_enabled():
         return
     if _watchdog_thread is not None and _watchdog_thread.is_alive():
