@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 194
+max_scenario: 196
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -81,6 +81,17 @@ letters:
       skip: 0
       xfail: 0
     note: '`requests.get` patched, network-free'
+  i:
+    title: URL routing — recovery-scale-metric route registration
+    scenarios: 1.195-1.196
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: 'scenarios 1.195–1.196; pins the ``recovery-scale-metric`` named route in
+      ``urls.py``: reverse resolves to /api/recovery-scale-metric and resolve()
+      maps back to RecoveryScaleMetric. Coverage task for PR #654.'
   j:
     title: ''
     scenarios: ''
