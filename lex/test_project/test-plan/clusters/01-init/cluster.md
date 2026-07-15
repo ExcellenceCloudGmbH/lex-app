@@ -147,3 +147,18 @@ every beat-driven feature on a `USE_TZ=False` deployment.
 **Scenario range:** 1.184 – 1.186. **Test file:** `lex/test_project/tests/init/test_1w_recovery_default_deployment_target.py`. **Type:** U. **Status:** ✅ Complete (Session 90 — July 1). Source: `lex/lex_app/settings.py` (`LEX_TASK_RECOVERY_ENABLED` default `true` → `false`). Nested-dispatch untouched — 7j/7q/8ab all pass.
 
 ---
+
+### 1i. URL routing — recovery-scale-metric route registration ✅
+
+**What it tests:** the `recovery-scale-metric` named route in `lex/lex_app/urls.py` that registers the KEDA metrics-api polling endpoint. A regression that renames or removes the route would break the on-demand scale signal — KEDA would fail to poll the metric and may scale the recovery-beat pod incorrectly.
+
+**Why a regression matters:** the on-demand recovery-beat feature depends on KEDA being able to poll this exact URL. The URL naming and view wiring must match what the KEDA `metrics-api` trigger is configured to call.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.195 | Named route reverses | `reverse("recovery-scale-metric")` returns a path containing `/api/recovery-scale-metric` |
+| 1.196 | Path resolves to correct view | `resolve("/api/recovery-scale-metric")` maps to `RecoveryScaleMetric` view class |
+
+**Scenario range:** 1.195 – 1.196. **Test file:** `lex/test_project/tests/init/test_1i_recovery_scale_metric_url.py`. **Type:** U. **Status:** ✅ 2 pass. Companion: batch 8c covers the view logic.
+
+---

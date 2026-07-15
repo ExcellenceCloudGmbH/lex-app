@@ -139,3 +139,21 @@
 | Status | ✅ Complete (Session 90 — July 1). Default OFF keeps the startup sweep in blind-abort mode so a stuck `IN_PROGRESS` row is reset on restart when no recovery-supervisor pod runs (local/CI/un-provisioned deploys); prod opts back in explicitly. Verified nested-dispatch untouched: 7j/7q/8ab all pass. Pre-existing unrelated `test_15d` logging-chain failures reproduce identically with the old `=true` default. |
 
 ---
+
+### Batch 1i — URL routing for the recovery-beat scale metric ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.195 – 1.196 |
+| Type | U |
+| Files covered | `lex/lex_app/urls.py` (`recovery-scale-metric` named route) |
+| Test file | `lex/test_project/tests/init/test_1i_recovery_scale_metric_url.py` |
+| Test classes | `TestCluster01i_RecoveryScaleMetricUrl` |
+| Fixtures | none — pure URL resolver |
+| Est. tests | 2 |
+| Coverage gain | `urls.py` route registration for the KEDA scale-metric endpoint |
+| Prereqs | PR #654 (feat/recovery-beat-ondemand-metric) |
+| Status | ✅ Complete — 2 pass / 0 fail |
+| Note | Coverage task for PR #654. Pins that `reverse("recovery-scale-metric")` returns `/api/recovery-scale-metric` (forward) and `resolve("/api/recovery-scale-metric")` maps to `RecoveryScaleMetric` (reverse). Scenarios start at 1.195 to sit above the 1x batch (1.187–1.194). Companion: batch 8c in `clusters/08-celery_async/batches.md` covers the view logic (active_recovery_count + RecoveryScaleMetric.get). |
+
+---
