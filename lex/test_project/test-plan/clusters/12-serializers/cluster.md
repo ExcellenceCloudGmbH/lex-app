@@ -119,3 +119,12 @@ cluster-2 models are too shallow; we need a model with one of every
 **Why a regression matters:** users must be able to remove attachments; a removal that silently un-does itself corrupts the record's document trail.
 
 **Scenario range:** 12.39 – 12.41. **Test file:** `lex/test_project/tests/serializers/test_12h_filefield_clear.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.39 empty value clears; 12.40 omit keeps; 12.41 upload replaces.
+
+
+### 12j. Local naive-convention datetimes (LEX_TIME_ZONE) ✅
+
+**What it tests:** the datetime chain under a restored pre-rc212 Berlin naive convention (`LEX_TIME_ZONE`): serialized values carry real, DST-aware offsets; `as_of` anchors normalize into the same convention the ORM compares against; and the UTC default keeps the 12g 'Z' contract unchanged.
+
+**Why a regression matters:** mislabeling naive Berlin wall-clock as 'Z' re-creates the customer-visible time shift (BUG-025 class); a convention-mismatched `as_of` silently time-travels to the wrong snapshot.
+
+**Scenario range:** 12.46 – 12.48. **Test file:** `lex/test_project/tests/serializers/test_12j_local_convention_datetimes.py`. **Type:** U. **Status:** ✅ 3 pass.

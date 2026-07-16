@@ -37,4 +37,9 @@ def parse_as_of_datetime(raw_value: str | None) -> Optional[datetime]:
     if settings.USE_TZ:
         return parsed_utc
 
-    return timezone.make_naive(parsed_utc, dt_timezone.utc)
+    # Naive storage: the ORM compares against naive values whose meaning is
+    # the TIME_ZONE convention (UTC by default; Europe/Berlin on instances
+    # that restored the pre-rc212 local convention via LEX_TIME_ZONE). The
+    # parsed instant must be expressed in that same convention or every
+    # comparison shifts by the UTC offset.
+    return timezone.make_naive(parsed_utc, timezone.get_default_timezone())

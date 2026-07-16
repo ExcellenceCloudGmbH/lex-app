@@ -6,6 +6,18 @@ from rest_framework import serializers
 class CalculationLogDefaultSerializer(serializers.ModelSerializer):
     calculation_record = serializers.SerializerMethodField()
 
+    # Same timezone-aware datetime rendering as LexSerializer, so log
+    # timestamps stay truthful when an instance runs a non-UTC naive
+    # convention (LEX_TIME_ZONE).
+    from django.db import models as _models
+
+    from lex.api.serializers.base_serializers import LexAwareDateTimeField as _LexAwareDT
+
+    serializer_field_mapping = {
+        **serializers.ModelSerializer.serializer_field_mapping,
+        _models.DateTimeField: _LexAwareDT,
+    }
+
     class Meta:
         model = CalculationLog
         fields = [

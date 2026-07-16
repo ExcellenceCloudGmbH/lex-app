@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 45
+max_scenario: 48
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -95,3 +95,14 @@ letters:
       ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so
       filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of
       frontend BUG-F-003 (FK columns rendered as bare ids)
+  j:
+    title: Local naive-convention datetimes (LEX_TIME_ZONE)
+    scenarios: 12.46-12.48
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: env-gated restore of the pre-rc212 Berlin naive convention (f622c9c fallout, customer
+      ticket 2026-07-16) — DST-aware offset rendering via LexAwareDateTimeField, as_of parsing
+      normalized to the instance convention; UTC default byte-identical (12g/5m gates green)
