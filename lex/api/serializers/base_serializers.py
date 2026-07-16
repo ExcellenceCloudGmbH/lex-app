@@ -5,6 +5,7 @@ from django.apps import apps
 from django.db import models
 from django.db.models import Model, ForeignKey
 from django.db.models.fields import DateTimeField, DateField, TimeField
+from django.utils import timezone
 from lex.api.utils.helpers import can_read_with_default_permission_scope
 from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.core.models.LexModel import LexModel, UserContext
@@ -207,6 +208,36 @@ def _resolve_fk_names(remote_model, referenced_pks) -> dict:
     return names
 
 
+class LexAwareDateTimeField(serializers.DateTimeField):
+    """DateTimeField that labels naive values with the instance's real offset.
+
+    Under ``USE_TZ=False`` the framework stores NAIVE datetimes whose meaning
+    is defined by ``TIME_ZONE`` (the PostgreSQL connection timezone). When that
+    convention is UTC, the static ``DATETIME_FORMAT`` suffix ('Z') in settings
+    labels values correctly and this field falls through to the default. When
+    an instance restores the pre-rc212 local convention
+    (``LEX_TIME_ZONE=Europe/Berlin``), a static suffix cannot be truthful —
+    the offset is +01:00 or +02:00 depending on DST — so this field attaches
+    the zone per value and emits a full ISO string with the correct offset.
+    Clients then render the intended wall-clock time in any timezone.
+    """
+
+    def to_representation(self, value):
+        from django.conf import settings as dj_settings
+
+        if (
+            value is not None
+            and not getattr(dj_settings, "USE_TZ", False)
+            and dj_settings.TIME_ZONE != "UTC"
+            and timezone.is_naive(value)
+        ):
+            import zoneinfo
+
+            aware = value.replace(tzinfo=zoneinfo.ZoneInfo(dj_settings.TIME_ZONE))
+            return aware.isoformat()
+        return super().to_representation(value)
+
+
 class LexClearableFileField(serializers.FileField):
     """FileField that accepts an empty string as an explicit "clear" marker.
 
@@ -255,6 +286,7 @@ class LexSerializer(serializers.ModelSerializer):
         **serializers.ModelSerializer.serializer_field_mapping,
         models.FileField: LexClearableFileField,
         models.ImageField: LexClearableImageField,
+        models.DateTimeField: LexAwareDateTimeField,
     }
 
     # ------------------------------------------------------------------

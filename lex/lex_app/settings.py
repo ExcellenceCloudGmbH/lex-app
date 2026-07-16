@@ -762,7 +762,14 @@ USE_TZ = True if DATABASE_DEPLOYMENT_TARGET not in ("default", "GCP") else False
 # hours late). Forcing UTC here makes the naive-as-UTC assumption correct.
 # When USE_TZ is True, datetimes are tz-aware and the display zone is free to be
 # Europe/Berlin without affecting scheduling.
-TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"
+# LEX_TIME_ZONE restores per-instance control now that the beat constraint is
+# being retired (recovery moves to the always-on supervisor and future-edit
+# activations to the global scheduler — neither reads naive datetimes as UTC).
+# Instances that predate v2.0.0rc212 stored naive datetimes as Europe/Berlin
+# wall-clock; pinning them back via LEX_TIME_ZONE=Europe/Berlin restores that
+# original convention. ONLY set it once the instance is beat-free AND rows
+# written in the UTC era have been rebased (see `lex rebase_datetimes`).
+TIME_ZONE = os.getenv("LEX_TIME_ZONE") or ("Europe/Berlin" if USE_TZ else "UTC")
 
 # BUG-025: when USE_TZ is False every stored datetime is NAIVE UTC (the
 # TIME_ZONE coupling above guarantees it), but DRF's default ISO-8601
@@ -775,7 +782,10 @@ TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"
 # normalized back to naive UTC by DRF's enforce_timezone). When USE_TZ is
 # True DRF keeps its default rendering with real offsets ("…+02:00") and
 # needs no help.
-if not USE_TZ:
+# The static 'Z' suffix is only truthful when the naive convention IS UTC.
+# Under a non-UTC LEX_TIME_ZONE the DST-aware offset is attached per value by
+# LexAwareDateTimeField (base_serializers) instead.
+if not USE_TZ and TIME_ZONE == "UTC":
     REST_FRAMEWORK["DATETIME_FORMAT"] = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 # Static files (CSS, JavaScript, Images)

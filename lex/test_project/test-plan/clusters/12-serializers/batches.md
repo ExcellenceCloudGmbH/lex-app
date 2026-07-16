@@ -55,3 +55,22 @@
 | Prereqs | none |
 | Status | ✅ Complete — 4 pass / 0 fail |
 | Note | Resolves the **backend root cause of frontend BUG-F-003** (FK columns render as bare ids like `79`). Every serialized row now carries an **additive** companion key `<fk>__short_description` = `str(related)` (the model author's `__str__`/`short_description` — the documented customization point) alongside the untouched raw id, so filtering/editing on the id are unaffected. The list path resolves the whole page's names in **one `pk__in` query per FK** (mirrors `ModelExport._apply_foreign_key_display_names`); the detail path resolves per-instance (one query, fine) so list-row shape ⊆ detail shape (the 12c invariant holds). Null FK → null companion (stable row shape). Permission-hidden FK columns get no companion (the key is emitted only when the raw column survived visibility filtering). Frontend twin: the grid/detail render the companion instead of the raw id (F3/F9.6). |
+
+
+---
+
+### Batch 12j — Local naive-convention datetimes (LEX_TIME_ZONE) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.46 – 12.48 |
+| Type | U |
+| Files covered | `lex_app/settings.py` (`LEX_TIME_ZONE` override, conditional 'Z'), `api/serializers/base_serializers.py` (`LexAwareDateTimeField` + mapping), `audit_logging/serializers/CalculationLogSerializer.py` (mapping), `api/utils/temporal.py` (`parse_as_of_datetime` convention) |
+| Test file | `lex/test_project/tests/serializers/test_12j_local_convention_datetimes.py` |
+| Test classes | `TestCluster12j_LocalConventionDatetimes` |
+| Fixtures | none (override_settings) |
+| Est. tests | 3 |
+| Coverage gain | the whole naive-convention chain under a non-UTC TIME_ZONE |
+| Prereqs | 12g (the UTC 'Z' contract these scenarios must not regress) |
+| Status | ✅ Complete — 3 pass / 0 fail |
+| Note | Customer ticket 2026-07-16: v2.0.0rc212 (f622c9c, #635) flipped the naive convention Berlin→UTC on `default`/GCP targets — the PostgreSQL connection timezone — silently reinterpreting all pre-existing data (equality filters on `output_date` broke; ±1/2h shifts on read). With celery-beat being retired the constraint behind #635 disappears, so instances can restore the original convention via `LEX_TIME_ZONE=Europe/Berlin` — **default unchanged (UTC)** until an instance flips deliberately. 12.46 DST-aware per-value offsets (+01:00 winter / +02:00 summer — a static 'Z' would mislabel); 12.47 UTC default keeps the 12g 'Z' contract byte-identical + both framework serializers wired to the field; 12.48 `as_of` anchors normalize to the instance's convention so time-travel never shifts. Regression: serializers+history+audit_logging+crud_api = 277 pass / 0 fail. |
