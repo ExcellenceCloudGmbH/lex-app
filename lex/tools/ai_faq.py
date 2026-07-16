@@ -115,15 +115,16 @@ def _build_faq_html() -> str:
     <style>
       :root {{
         color-scheme: light;
-        --bg: #f0f4f8;
-        --card: #ffffff;
-        --text: #1a1a2e;
-        --muted: #5a6278;
-        --line: #d0d7e2;
-        --blue: #283067;
-        --blue-strong: #1b2050;
-        --teal: #24b6bb;
-        --error: #c0392b;
+        /* LEX Design System tokens (lex.lex_app.design_system.lex_tokens) */
+        --bg: {lex_tokens.BG};
+        --card: {lex_tokens.SURFACE};
+        --text: {lex_tokens.INK};
+        --muted: {lex_tokens.MUTED};
+        --line: {lex_tokens.BORDER};
+        --blue: {lex_tokens.NAVY};
+        --blue-strong: {lex_tokens.NAVY_DEEP};
+        --teal: {lex_tokens.TEAL};
+        --error: {lex_tokens.ERROR};
       }}
       * {{
         box-sizing: border-box;
@@ -339,7 +340,7 @@ def _build_faq_html() -> str:
         box-shadow: 0 2px 8px rgba(36, 182, 187, 0.12);
       }}
       .pb-tab.active {{
-        background: linear-gradient(135deg, #24b6bb 0%, #1a9a9e 100%);
+        background: {lex_tokens.CTA_GRADIENT};
         border-color: var(--teal);
         box-shadow: 0 3px 12px rgba(36, 182, 187, 0.25);
       }}
@@ -475,7 +476,7 @@ def _build_faq_html() -> str:
         box-shadow: 0 2px 8px rgba(36, 182, 187, 0.12);
       }}
       .flow-tab.active {{
-        background: linear-gradient(135deg, #24b6bb 0%, #1a9a9e 100%);
+        background: {lex_tokens.CTA_GRADIENT};
         border-color: var(--teal);
         box-shadow: 0 3px 12px rgba(36, 182, 187, 0.25);
       }}

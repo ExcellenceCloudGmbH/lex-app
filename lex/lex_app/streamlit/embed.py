@@ -118,6 +118,7 @@ def lex_view(
     redirect_after_update: Optional[str] = None,
     flow: Optional[Dict[str, str]] = None,
     serializer: Optional[str] = None,
+    theme: str = "light",
     on_create: bool = False,
     on_update: bool = False,
     on_delete: bool = False,
@@ -197,6 +198,12 @@ def lex_view(
         the React side wires the AG Grid ``onSelectionChanged`` callback
         only when explicitly requested (it is opt-in because driving
         Streamlit re-runs on every grid click is expensive).
+    theme : str
+        Host colour scheme forwarded to the embedded app — ``"light"``
+        (default) or ``"dark"``.  Sent as the ``?theme=`` query parameter
+        (boot fallback) and re-announced over the host→iframe ``theme``
+        postMessage in bidirectional mode.  See the *Theme handshake*
+        section of ``lex_view callbacks.md``.
     extra_params : dict, optional
         Arbitrary extra query parameters forwarded to the React app.
     base_url : str, optional
@@ -276,6 +283,12 @@ def lex_view(
     # Serializer override (per docs/features/access-and-ui/lex_view callbacks.md)
     if serializer:
         params["serializer"] = [serializer]
+
+    # Theme handshake (host → iframe): boot fallback via query param; the
+    # custom-component shim additionally posts a `theme` message on load.
+    if theme not in ("light", "dark"):
+        raise ValueError(f"lex_view(theme=...) must be 'light' or 'dark', got {theme!r}")
+    params["theme"] = [theme]
 
     # Event opt-in flags forwarded to the React bridge. The React side
     # only attaches handlers / emits events for the flags it sees here,

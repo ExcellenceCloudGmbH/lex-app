@@ -65,10 +65,40 @@
     // ── Constants ────────────────────────────────────────────────────
     const PROTOCOL_VERSION = 1;
     const SOURCE_TAG = "lex-app";
+    const HOST_SOURCE_TAG = "lex-app-host";
 
     let _expectedOrigin = null;
     let _lastEventId = null;
     let _rendered = false;
+
+    // ── Outbound: Streamlit host → lex-app (theme handshake) ────────
+    // The host's colour scheme rides the iframe URL as `?theme=` (boot
+    // fallback read by the React app) and is re-announced here as a
+    // postMessage after the iframe loads, so late listeners and future
+    // in-session theme changes stay in sync. See the "Theme handshake"
+    // section of `lex_view callbacks.md`.
+    function postThemeToFrame(frame) {
+      let mode = "light";
+      let childOrigin = null;
+      try {
+        const url = new URL(frame.dataset.url, window.location.href);
+        const fromUrl = url.searchParams.get("theme");
+        if (fromUrl === "dark" || fromUrl === "light") mode = fromUrl;
+        childOrigin = url.origin;
+      } catch (e) {
+        /* relative/opaque URL — keep defaults */
+      }
+      if (!frame.contentWindow || !childOrigin) return; // never post with "*"
+      frame.contentWindow.postMessage(
+        {
+          source: HOST_SOURCE_TAG,
+          version: PROTOCOL_VERSION,
+          type: "theme",
+          payload: { mode },
+        },
+        childOrigin
+      );
+    }
 
     // ── Lifecycle: render ────────────────────────────────────────────
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (ev) => {
@@ -88,6 +118,8 @@
         frame.src = url;
         frame.dataset.url = url;
         _rendered = true;
+        // Announce the host theme once the embedded app is loaded.
+        frame.addEventListener("load", () => postThemeToFrame(frame), { once: true });
       }
 
       Streamlit.setFrameHeight(height);
