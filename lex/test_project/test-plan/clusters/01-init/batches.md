@@ -139,3 +139,22 @@
 | Status | ✅ Complete (Session 90 — July 1). Default OFF keeps the startup sweep in blind-abort mode so a stuck `IN_PROGRESS` row is reset on restart when no recovery-supervisor pod runs (local/CI/un-provisioned deploys); prod opts back in explicitly. Verified nested-dispatch untouched: 7j/7q/8ab all pass. Pre-existing unrelated `test_15d` logging-chain failures reproduce identically with the old `=true` default. |
 
 ---
+
+---
+
+### Batch 1i — `rebase_incident_datetimes` maintenance command ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.195 – 1.197 |
+| Type | E |
+| Files covered | `lex/lex_app/management/commands/rebase_incident_datetimes.py` (new) |
+| Test file | `lex/test_project/tests/init/test_1i_rebase_incident_datetimes.py` |
+| Test model | `lex/test_project/tests/init/models.py` → `IncidentDatetimeItem` (user `event_at` + managed `created_at`/`edited_at`) |
+| Test classes | `TestCluster01i_RebaseIncidentDatetimes` (1.195 `--apply` re-anchors in-window value & spares `created_at`; 1.196 dry-run writes nothing; 1.197 pre-incident row untouched) |
+| Fixtures | none — seeds rows via `.update()` to stamp `created_at`/`event_at` directly |
+| Tests landed | **3 pass / 0 fail** |
+| Coverage gain | incident data-migration command (dry-run/apply, per-instance cutoff, app-stamped exclusion, ambiguous-row reporting) |
+| Status | ✅ Complete — ships with the `USE_TZ=True` cutover. Corrects only user-entered datetimes written after the rc212 TIME_ZONE flip (f622c9c); framework-managed timestamps and pre-incident rows are provably left alone. PostgreSQL-only (uses `AT TIME ZONE`); not idempotent (run once per instance). |
+
+---

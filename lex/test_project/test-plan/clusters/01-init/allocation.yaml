@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 194
+max_scenario: 197
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -214,3 +214,14 @@ letters:
     note: 'scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision
       fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py;
       moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC.'
+  i:
+    title: rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident
+    scenarios: 1.195-1.197
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: management command that surgically re-anchors user-entered datetimes mis-stored after the
+      rc212 TIME_ZONE flip (f622c9c); dry-run by default, per-instance --cutoff window, excludes
+      app-stamped created_at/edited_at and pre-incident rows. Ships with the USE_TZ=True cutover.
