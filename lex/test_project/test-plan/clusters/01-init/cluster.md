@@ -147,3 +147,20 @@ every beat-driven feature on a `USE_TZ=False` deployment.
 **Scenario range:** 1.184 – 1.186. **Test file:** `lex/test_project/tests/init/test_1w_recovery_default_deployment_target.py`. **Type:** U. **Status:** ✅ Complete (Session 90 — July 1). Source: `lex/lex_app/settings.py` (`LEX_TASK_RECOVERY_ENABLED` default `true` → `false`). Nested-dispatch untouched — 7j/7q/8ab all pass.
 
 ---
+
+### 1y. Streamlit auth proxy — iframe re-auth breakout (refused-to-connect fix)
+
+**What it tests:** the Streamlit dashboard is embedded in an `<iframe>`. When the auth proxy (`lex/proxy.py`) has no valid identity it must re-authenticate — but Keycloak's login page is served with `X-Frame-Options: SAMEORIGIN` / `Content-Security-Policy: frame-ancestors 'self'` and cannot render inside a frame, so redirecting the iframe to the IdP makes the browser show "auth.&lt;host&gt; refused to connect". The proxy detects a framed document load (`Sec-Fetch-Dest: iframe`/`frame`) and breaks out to a top-level login instead, while leaving the ordinary top-level redirect and the API 401 untouched.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.195 | iframe → breakout, not IdP redirect | an unauthenticated `Sec-Fetch-Dest: iframe` document load returns a 401 HTML breakout (auto top-nav + `postMessage` + `target="_top"` link to the absolute `/auth/login`), never a `RedirectResponse` into the IdP |
+| 1.196 | `<frame>` breaks out too | `Sec-Fetch-Dest: frame` is treated the same as `iframe` — both are framed contexts |
+| 1.197 | top-level HTML still redirects | `Sec-Fetch-Dest: document` with `Accept: text/html` still redirects to `/auth/login` (a top-level page can render the IdP) |
+| 1.198 | missing `Sec-Fetch-*` keeps redirect | a client that omits `Sec-Fetch-*` falls back to the pre-existing redirect (breakout only fires on a positively-identified frame) |
+| 1.199 | non-HTML → 401 JSON | an XHR/API request (`Accept: application/json`) gets `{"error": "Authentication required"}` at 401, not a redirect or HTML |
+| 1.200 | detector is case-insensitive + scoped | `_is_iframe_document_request` matches `iframe`/`FRAME`; `document` and a missing header are not framed |
+
+**Scenario range:** 1.195 – 1.200. **Test file:** `lex/test_project/tests/init/test_1y_proxy_iframe_breakout.py`. **Type:** U. **Status:** ✅ Complete (2026-07-21). Source: `lex/proxy.py` (`_unauthenticated_response`, `_is_iframe_document_request`). Follow-up (separate change): give the embedded `auth_token` path a refresh token so the proxy renews silently instead of forcing re-login at the 4h SSO cap.
+
+---

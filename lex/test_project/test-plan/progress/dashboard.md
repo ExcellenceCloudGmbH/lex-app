@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 22 | 194 | 88 | 0 | 0 |
+| 1. Init — Project Bootstrap | 23 | 200 | 94 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -52,6 +52,7 @@
 | 1v | `TIME_ZONE`↔`USE_TZ` coupling — `django_celery_beat` DatabaseScheduler correctness |  | complete | 5 | 0 | 0 | scenarios 1.179–1.183; `TIME_ZONE="UTC"` when `USE_TZ=False` so beat's naive-as-UTC read is correct for the recovery `IntervalSchedule` AND future-edit `ClockedSchedule` (was off b |
 | 1w | `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart | 1.184-1.186 | complete | 3 | 0 | 0 | scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi |
 | 1x | Health exposes encrypted runtime metadata for the Instance Controller | 1.187-1.194 | complete | 0 | 0 | 0 | scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py; moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC. |
+| 1y | Streamlit auth proxy — iframe re-auth breakout (refused-to-connect fix) | 1.195-1.200 | complete | 6 | 0 | 0 | scenarios 1.195–1.200; unauthenticated iframe/frame document loads break out to a top-level login instead of redirecting the frame to Keycloak (login page sets frame-ancestors 'self' → "refused to connect"); top-level redirect + API 401 unchanged. Covers lex/proxy.py `_unauthenticated_response` / `_is_iframe_document_request`. |
 
 ## 2. CRUD via REST API (`crud_api`)
 

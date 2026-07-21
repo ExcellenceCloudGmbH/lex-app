@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 194
+max_scenario: 200
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -214,3 +214,15 @@ letters:
     note: 'scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision
       fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py;
       moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC.'
+  y:
+    title: Streamlit auth proxy — iframe re-auth breakout (refused-to-connect fix)
+    scenarios: 1.195-1.200
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: scenarios 1.195–1.200; unauthenticated iframe/frame document loads break out to a top-level
+      login instead of redirecting the frame to Keycloak (login page sets frame-ancestors 'self' →
+      "refused to connect"); top-level redirect + API 401 unchanged. Covers lex/proxy.py
+      `_unauthenticated_response` / `_is_iframe_document_request`.

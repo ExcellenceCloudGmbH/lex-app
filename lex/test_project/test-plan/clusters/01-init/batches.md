@@ -139,3 +139,19 @@
 | Status | ✅ Complete (Session 90 — July 1). Default OFF keeps the startup sweep in blind-abort mode so a stuck `IN_PROGRESS` row is reset on restart when no recovery-supervisor pod runs (local/CI/un-provisioned deploys); prod opts back in explicitly. Verified nested-dispatch untouched: 7j/7q/8ab all pass. Pre-existing unrelated `test_15d` logging-chain failures reproduce identically with the old `=true` default. |
 
 ---
+
+### Batch 1y — Streamlit auth proxy: iframe re-auth breakout (refused-to-connect fix) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.195 – 1.200 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_unauthenticated_response`, `_is_iframe_document_request`) |
+| Test file | `lex/test_project/tests/init/test_1y_proxy_iframe_breakout.py` |
+| Test classes | `TestCluster01y_ProxyIframeBreakout` (1.195 iframe → 401 frame-breakout not IdP redirect, 1.196 `<frame>` also breaks out, 1.197 top-level HTML still redirects to `/auth/login`, 1.198 no `Sec-Fetch-*` keeps redirect, 1.199 non-HTML → 401 JSON, 1.200 `_is_iframe_document_request` case-insensitive + scoped) |
+| Fixtures | none — minimal ASGI `Request` builder + `patch.object(proxy, "PUBLIC_URL", "")` |
+| Tests landed | **6 pass / 0 fail** (`python -m lex pytest`) |
+| Coverage gain | proxy deny-branch routing: `Sec-Fetch-Dest: iframe`/`frame` document loads break out to a top-level login instead of redirecting the frame into Keycloak's un-frameable login page (`frame-ancestors 'self'` → "refused to connect"); the top-level redirect and API-401 paths stay unchanged |
+| Status | ✅ Complete (2026-07-21). Root cause: the embedded `auth_token` session is stored with no refresh token (`refresh_token: None`), so it dies at the 4h Keycloak SSO cap and the deny branch then redirected the iframe document to the IdP. Follow-up (separate change): give the embed path a refresh token for silent renewal. |
+
+---
