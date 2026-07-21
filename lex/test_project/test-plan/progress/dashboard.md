@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 22 | 194 | 88 | 0 | 0 |
+| 1. Init — Project Bootstrap | 23 | 200 | 94 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -21,8 +21,8 @@
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 9 | 45 | 13 | 0 | 0 |
-| 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
+| 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
+| 13. Export Endpoint | 6 | 36 | 6 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 8 | 34 | 13 | 0 | 0 |
 
@@ -38,6 +38,7 @@
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |
+| 1i | rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident | 1.195-1.200 | complete | 6 | 0 | 0 | management command that surgically re-anchors user-entered datetimes mis-stored after the rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until) (--cutoff required, no global default — too-early corrupts good data; --until defaults to now), excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197 late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag. Ships with the USE_TZ=True cutover. |
 | 1j |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1k |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
@@ -234,6 +235,7 @@
 | 12g | Datetime timezone ambiguity (BUG-025, fixed) | 12.36-12.38 | complete | 3 | 0 | 0 | live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT) |
 | 12h | Clearing a FileField through the REST update path | 12.39-12.41 | complete | 3 | 0 | 0 | LexClearableFileField/-ImageField — an explicit empty multipart value clears the stored file (omit still keeps, upload still replaces); frontend twin F9 batch 9d sends the marker |
 | 12i | Foreign-key display names in the read contract (BUG-F-003 backend fix) | 12.42-12.45 | complete | 4 | 0 | 0 | additive companion `<fk>__short_description` = str(related) emitted alongside the raw FK id on both list and detail paths; list resolves names in one batched pk__in query per FK (mirrors ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of frontend BUG-F-003 (FK columns rendered as bare ids) |
+| 12j | Datetime write→read round trip under the aware-UTC convention | 12.46-12.48 | complete | 3 | 0 | 0 | live regression gates for the USE_TZ=True cutover — a client that sends an explicit instant (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone; summer round trip, year-end midnight across the winter offset, and a truthful designated instant. Frontend twin datetimeConventionRoundTrip.test.ts. |
 
 ## 13. Export Endpoint (`exports`)
 
@@ -244,6 +246,7 @@
 | 13c | AG Grid export path — grouped & selected | 13.9 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13d | Auth & edge cases | 13.11-13.12 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13e |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
+| 13f | _to_excel_naive — timezone stripping for the legacy Excel path | 13.31-13.36 | complete | 6 | 0 | 0 | 5 pure-unit (SimpleTestCase) + 1 E2E (E2ETestCase); covers _to_excel_naive added in fix/timezone-aware-utc (PR |
 
 ## 14. AG Grid Query Endpoint (`queries`)
 

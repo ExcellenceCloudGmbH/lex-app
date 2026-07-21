@@ -3,9 +3,9 @@
 Intent: customers rely on ``?as_of`` to reconstruct what a record looked like
 before an edit, and on ``edited_at`` to know when the edit happened. Those two
 contracts must agree to the microsecond and survive the timezone chain end to
-end: the edit stamps naive UTC (``lex_datetime_now``), the API serializes it
-with an explicit ``Z`` (BUG-025 fix), ``parse_as_of_datetime`` reads ``Z``
-back to naive UTC, and ``get_queryset_as_of`` compares it against the
+end: the edit stamps aware UTC (``lex_datetime_now`` under ``USE_TZ=True``), the
+API serializes it with a real offset, ``parse_as_of_datetime`` normalizes any
+anchor to UTC, and ``get_queryset_as_of`` compares it against the
 ``sys_from``/``valid_from`` windows stamped by the same clock. A shift
 anywhere in that chain (the BUG-025 class of failure) silently time-travels to
 the wrong snapshot — worse than an error, it returns plausible wrong data.
@@ -25,6 +25,8 @@ import time as _time
 from datetime import datetime, timezone as dt_timezone
 
 import pytest
+from django.conf import settings
+from django.utils import timezone as dj_tz
 from rest_framework import status
 
 from lex.core.models.LexModel import lex_datetime_now
@@ -36,9 +38,13 @@ pytestmark = pytest.mark.history
 
 
 def _parse_serialized_utc(rendered: str) -> datetime:
-    """Parse an API datetime string back to the naive-UTC storage clock."""
-    parsed = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
-    return parsed.astimezone(dt_timezone.utc).replace(tzinfo=None)
+    """Parse an API datetime string to the same convention the ORM stores.
+
+    Under ``USE_TZ=True`` the stored value is aware UTC; under ``USE_TZ=False``
+    it is naive UTC. Return a value directly comparable to the field either way.
+    """
+    parsed = datetime.fromisoformat(rendered.replace("Z", "+00:00")).astimezone(dt_timezone.utc)
+    return parsed if settings.USE_TZ else parsed.replace(tzinfo=None)
 
 
 class TestCluster05m_AsOfEditTime(E2ETestCase):
@@ -262,7 +268,14 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
         """
         item, t_before_edit = self._create_and_edit()
 
-        naive = t_before_edit.isoformat()  # no Z, no offset — naive on purpose
+        # Build a genuinely naive string (no Z, no offset). Under USE_TZ=True
+        # lex_datetime_now() is aware, so strip the tzinfo to test the "naive
+        # anchor is read as UTC" contract rather than accidentally sending +00:00.
+        t_naive = (
+            t_before_edit if dj_tz.is_naive(t_before_edit)
+            else dj_tz.make_naive(t_before_edit, dt_timezone.utc)
+        )
+        naive = t_naive.isoformat()  # no Z, no offset — naive on purpose
         self.assertEqual(
             self._list_names(naive), ["v1"],
             "A naive as_of must be read as UTC (parse contract). If this "

@@ -77,7 +77,18 @@ clusters):
 | 13.11 | Unauthenticated POST | 401 / 403; no ``.xlsx`` bytes |
 | 13.12 | Per-object ``permission_export`` (non-uniform) | ``_compute_uniform_export_mask`` returns ``None``; slow per-row mask runs; each row's columns are masked according to that row's own permission result |
 
-**What is explicitly NOT tested here:**
+### 13f. `_to_excel_naive` — timezone stripping for the legacy Excel path
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 13.31 | Empty DataFrame | `_to_excel_naive` returns it unchanged; no exception raised |
+| 13.32 | Non-datetime columns (int / float / str) | All cell values pass through unchanged |
+| 13.33 | Object column with naive datetime | Value unchanged; `tzinfo` remains `None` |
+| 13.34 | Object column with UTC-aware Python datetime | Converted to display-tz wall-clock; `tzinfo` stripped (10:00 UTC → 12:00 Berlin CEST) |
+| 13.35 | `DatetimeTZDtype` pandas column | Column dtype becomes timezone-naive; summer + winter offsets both correct |
+| 13.36 | Legacy export endpoint with injected tz-aware DataFrame | HTTP 200 + valid xlsx; `xlsxwriter` `ValueError` ("does not support datetimes with timezones") does not fire |
+
+---
 
 - ❌ **Excel formatting cosmetics** (column widths, cell colours,
   freeze panes beyond the default). Those are xlsxwriter's job.

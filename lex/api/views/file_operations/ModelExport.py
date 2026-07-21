@@ -12,8 +12,10 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import parse_qs
 
 import pandas as pd
+from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist
 from django.db.models import Q
+from django.utils import timezone as _dj_tz
 from django.db.models import QuerySet
 from django.http import FileResponse, JsonResponse
 from lex.api.filters import UserReadRestrictionFilterBackend, ForeignKeyFilterBackend
@@ -30,6 +32,30 @@ AG_GROUP_HIERARCHY_COLUMN = "__ag_group_hierarchy_label"
 AG_GROUP_HIERARCHY_DEPTH_COLUMN = "__ag_group_hierarchy_depth"
 
 logger = logging.getLogger(__name__)
+
+
+def _to_excel_naive(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Make datetime cells timezone-naive for Excel.
+
+    Under ``USE_TZ=True`` the ORM yields timezone-aware (UTC) datetimes, and
+    ``xlsxwriter`` refuses them (``Excel does not support datetimes with
+    timezones``). Convert any aware value to its wall-clock in the configured
+    display zone (``settings.TIME_ZONE``) so the workbook shows the same instant
+    the API serves. A no-op under ``USE_TZ=False`` (values are already naive).
+    """
+    def _strip(value):
+        if isinstance(value, _dt.datetime) and value.tzinfo is not None:
+            return _dj_tz.localtime(value).replace(tzinfo=None)
+        return value
+
+    for col in df.columns:
+        series = df[col]
+        if isinstance(series.dtype, pd.DatetimeTZDtype):
+            df[col] = series.dt.tz_convert(settings.TIME_ZONE).dt.tz_localize(None)
+        elif series.dtype == object:
+            df[col] = series.map(_strip)
+    return df
+
 
 # Streaming export tunables. Kept conservative so the process stays well
 # within a 2 GB RAM / 0.1 CPU production envelope.
@@ -1787,6 +1813,8 @@ class ModelExportView(GenericAPIView):
         # Excel limits worksheet names to 31 chars and disallows []:*?/\
         sheet_name = re.sub(r'[\[\]:*?/\\]', '_', model.__name__)[:31]
 
+        # Excel has no timezone type; strip tz from aware (USE_TZ=True) datetimes.
+        df = _to_excel_naive(df)
         df.to_excel(writer, sheet_name=sheet_name, merge_cells=False, freeze_panes=(1, 1), index=True)
 
         worksheet = writer.sheets.get(sheet_name)
