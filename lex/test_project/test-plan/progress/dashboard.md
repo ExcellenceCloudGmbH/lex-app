@@ -22,7 +22,7 @@
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
-| 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
+| 13. Export Endpoint | 6 | 36 | 6 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 8 | 34 | 13 | 0 | 0 |
 
@@ -246,6 +246,7 @@
 | 13c | AG Grid export path — grouped & selected | 13.9 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13d | Auth & edge cases | 13.11-13.12 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13e |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
+| 13f | _to_excel_naive — timezone stripping for the legacy Excel path | 13.31-13.36 | complete | 6 | 0 | 0 | 5 pure-unit (SimpleTestCase) + 1 E2E (E2ETestCase); covers _to_excel_naive added in fix/timezone-aware-utc (PR |
 
 ## 14. AG Grid Query Endpoint (`queries`)
 

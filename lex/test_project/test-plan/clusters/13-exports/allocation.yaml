@@ -1,7 +1,7 @@
 cluster: 13
 slug: exports
 title: Export Endpoint
-max_scenario: 30
+max_scenario: 36
 letters:
   a:
     title: Legacy (non-AG) export path
@@ -52,3 +52,13 @@ letters:
       skip: 0
       xfail: 0
     note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  f:
+    title: _to_excel_naive — timezone stripping for the legacy Excel path
+    scenarios: 13.31-13.36
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: 5 pure-unit (SimpleTestCase) + 1 E2E (E2ETestCase); covers _to_excel_naive
+      added in fix/timezone-aware-utc (PR #661)
