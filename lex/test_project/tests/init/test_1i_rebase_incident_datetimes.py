@@ -8,7 +8,7 @@ uncorrected or, worse, shifts already-correct app-stamped timestamps — so thes
 scenarios pin the three guarantees: it corrects in-window user datetimes, never
 touches managed ``created_at``, and never touches pre-incident rows.
 
-Cluster 1i — scenarios 1.195–1.197. Type: E.
+Cluster 1i — scenarios 1.195–1.198. Type: E.
 Covers: lex/lex_app/management/commands/rebase_incident_datetimes.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1i_rebase_incident_datetimes.py -v
 """
@@ -27,9 +27,11 @@ from .models import ALL_MODELS, IncidentDatetimeItem
 
 pytestmark = pytest.mark.init
 
-CUTOFF = "2026-06-26T00:00:00+00:00"                      # rc212 upgrade instant
-IN_WINDOW = datetime(2026, 7, 20, 10, 0, 0, tzinfo=dt_timezone.utc)   # created >= cutoff
-PRE_WINDOW = datetime(2026, 6, 1, 10, 0, 0, tzinfo=dt_timezone.utc)   # created < cutoff
+CUTOFF = "2026-06-26T00:00:00+00:00"     # this instance's rc212 upgrade (window start)
+UNTIL = "2026-08-01T00:00:00+00:00"      # this instance's aware-UTC fix (window end)
+IN_WINDOW = datetime(2026, 7, 20, 10, 0, 0, tzinfo=dt_timezone.utc)  # created in [cutoff, until)
+PRE_WINDOW = datetime(2026, 6, 1, 10, 0, 0, tzinfo=dt_timezone.utc)  # created < cutoff (pre-upgrade)
+POST_FIX = datetime(2026, 8, 15, 10, 0, 0, tzinfo=dt_timezone.utc)   # created >= until (post-fix)
 # A Berlin user meant 11:00 (=09:00Z) but the incident stored the wall-clock as UTC:
 CORRUPTED = datetime(2026, 7, 20, 11, 0, 0, tzinfo=dt_timezone.utc)   # 11:00Z (wrong)
 CORRECTED = datetime(2026, 7, 20, 9, 0, 0, tzinfo=dt_timezone.utc)    # 09:00Z (Berlin summer)
@@ -51,7 +53,7 @@ class TestCluster01i_RebaseIncidentDatetimes(E2ETestCase):
 
     def _run(self, apply):
         args = ["rebase_incident_datetimes", "--models", "lex_app.IncidentDatetimeItem",
-                "--source-zone", "Europe/Berlin", "--cutoff", CUTOFF]
+                "--source-zone", "Europe/Berlin", "--cutoff", CUTOFF, "--until", UNTIL]
         if apply:
             args.append("--apply")
         out = StringIO()
@@ -100,10 +102,12 @@ class TestCluster01i_RebaseIncidentDatetimes(E2ETestCase):
             "Dry-run must clearly announce that nothing was written.",
         )
 
-    def test_1_197_pre_incident_rows_are_left_untouched(self) -> None:
+    def test_1_197_pre_upgrade_rows_are_left_untouched(self) -> None:
         """
-        Scenario 1.197: a row created before the cutoff is outside the incident
-        window and must not be re-anchored (its instant was already correct).
+        Scenario 1.197: a row created before THIS instance's upgrade (< cutoff)
+        was written under the correct Berlin anchoring and must not be shifted.
+        This is the late-upgrader safety: an instance that upgraded weeks after
+        the global release must not have its correct pre-upgrade rows corrupted.
         Given: a row whose created_at predates the cutoff
         When: the command runs with --apply
         Then: event_at is unchanged
@@ -113,6 +117,25 @@ class TestCluster01i_RebaseIncidentDatetimes(E2ETestCase):
         item.refresh_from_db()
         self.assertEqual(
             item.event_at, CORRUPTED,
-            "A pre-incident row must be left untouched, but event_at moved to "
-            f"{item.event_at}.",
+            "A pre-upgrade row must be left untouched, but event_at moved to "
+            f"{item.event_at} — the cutoff over-corrected correct data.",
+        )
+
+    def test_1_198_post_fix_rows_are_left_untouched(self) -> None:
+        """
+        Scenario 1.198: a row created on/after this instance's aware-UTC fix
+        (>= until) was written correctly and must not be re-shifted.
+        Guards against re-running the migration after the fix is live: the
+        window is [cutoff, until), so post-fix correct rows stay untouched.
+        Given: a row whose created_at is on/after --until
+        When: the command runs with --apply
+        Then: event_at is unchanged
+        """
+        item = self._seed(POST_FIX)
+        self._run(apply=True)
+        item.refresh_from_db()
+        self.assertEqual(
+            item.event_at, CORRUPTED,
+            "A post-fix row must be left untouched, but event_at moved to "
+            f"{item.event_at} — the window's upper bound was not honored.",
         )

@@ -146,15 +146,15 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.195 – 1.197 |
+| Scenario range | 1.195 – 1.198 |
 | Type | E |
 | Files covered | `lex/lex_app/management/commands/rebase_incident_datetimes.py` (new) |
 | Test file | `lex/test_project/tests/init/test_1i_rebase_incident_datetimes.py` |
 | Test model | `lex/test_project/tests/init/models.py` → `IncidentDatetimeItem` (user `event_at` + managed `created_at`/`edited_at`) |
-| Test classes | `TestCluster01i_RebaseIncidentDatetimes` (1.195 `--apply` re-anchors in-window value & spares `created_at`; 1.196 dry-run writes nothing; 1.197 pre-incident row untouched) |
+| Test classes | `TestCluster01i_RebaseIncidentDatetimes` (1.195 `--apply` re-anchors in-window value & spares `created_at`; 1.196 dry-run writes nothing; 1.197 **pre-upgrade** row untouched — late-upgrader safety; 1.198 **post-fix** row untouched — window upper bound) |
 | Fixtures | none — seeds rows via `.update()` to stamp `created_at`/`event_at` directly |
-| Tests landed | **3 pass / 0 fail** |
-| Coverage gain | incident data-migration command (dry-run/apply, per-instance cutoff, app-stamped exclusion, ambiguous-row reporting) |
-| Status | ✅ Complete — ships with the `USE_TZ=True` cutover. Corrects only user-entered datetimes written after the rc212 TIME_ZONE flip (f622c9c); framework-managed timestamps and pre-incident rows are provably left alone. PostgreSQL-only (uses `AT TIME ZONE`); not idempotent (run once per instance). |
+| Tests landed | **4 pass / 0 fail** |
+| Coverage gain | incident data-migration command (dry-run/apply, per-instance `[--cutoff, --until)` window, app-stamped exclusion, ambiguous-row reporting) |
+| Status | ✅ Complete — ships with the `USE_TZ=True` cutover. Corrects only user-entered datetimes created in the **per-instance** window `[--cutoff, --until)` — `--cutoff` (that instance's rc212 upgrade) is **required**, no global default, because too-early over-corrects correct pre-upgrade rows; `--until` (that instance's aware-UTC fix, default now) stops post-fix correct rows being re-shifted. Framework-managed timestamps and out-of-window rows are provably left alone. PostgreSQL-only (`AT TIME ZONE`); not idempotent (run once per instance). |
 
 ---

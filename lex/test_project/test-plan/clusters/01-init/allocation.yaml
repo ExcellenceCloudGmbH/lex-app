@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 197
+max_scenario: 198
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -216,12 +216,14 @@ letters:
       moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC.'
   i:
     title: rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident
-    scenarios: 1.195-1.197
+    scenarios: 1.195-1.198
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: management command that surgically re-anchors user-entered datetimes mis-stored after the
-      rc212 TIME_ZONE flip (f622c9c); dry-run by default, per-instance --cutoff window, excludes
-      app-stamped created_at/edited_at and pre-incident rows. Ships with the USE_TZ=True cutover.
+      rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until)
+      (--cutoff required, no global default — too-early corrupts good data; --until defaults to now),
+      excludes app-stamped created_at/edited_at. 1.197 pins the late-upgrader safety (pre-upgrade rows
+      untouched), 1.198 the post-fix bound. Ships with the USE_TZ=True cutover.
