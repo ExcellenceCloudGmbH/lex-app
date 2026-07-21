@@ -33,8 +33,13 @@ IN_WINDOW = datetime(2026, 7, 20, 10, 0, 0, tzinfo=dt_timezone.utc)  # created i
 PRE_WINDOW = datetime(2026, 6, 1, 10, 0, 0, tzinfo=dt_timezone.utc)  # created < cutoff (pre-upgrade)
 POST_FIX = datetime(2026, 8, 15, 10, 0, 0, tzinfo=dt_timezone.utc)   # created >= until (post-fix)
 # A Berlin user meant 11:00 (=09:00Z) but the incident stored the wall-clock as UTC:
-CORRUPTED = datetime(2026, 7, 20, 11, 0, 0, tzinfo=dt_timezone.utc)   # 11:00Z (wrong)
-CORRECTED = datetime(2026, 7, 20, 9, 0, 0, tzinfo=dt_timezone.utc)    # 09:00Z (Berlin summer)
+CORRUPTED = datetime(2026, 7, 20, 11, 0, 0, tzinfo=dt_timezone.utc)   # 11:00Z (wrong, summer)
+CORRECTED = datetime(2026, 7, 20, 9, 0, 0, tzinfo=dt_timezone.utc)    # 09:00Z (Berlin summer −2h)
+# A WINTER value proves the correction is DST-aware (−1h, not a fixed −2h):
+WINTER_CORRUPTED = datetime(2026, 1, 15, 11, 0, 0, tzinfo=dt_timezone.utc)  # 11:00Z (winter)
+WINTER_CORRECTED = datetime(2026, 1, 15, 10, 0, 0, tzinfo=dt_timezone.utc)  # 10:00Z (Berlin winter −1h)
+# Wall-clock digits in the fall-back overlap (25 Oct 2026 02:30 occurs twice):
+DST_OVERLAP = datetime(2026, 10, 25, 2, 30, 0, tzinfo=dt_timezone.utc)
 
 
 class TestCluster01i_RebaseIncidentDatetimes(E2ETestCase):
@@ -138,4 +143,38 @@ class TestCluster01i_RebaseIncidentDatetimes(E2ETestCase):
             item.event_at, CORRUPTED,
             "A post-fix row must be left untouched, but event_at moved to "
             f"{item.event_at} — the window's upper bound was not honored.",
+        )
+
+    def test_1_199_correction_is_dst_aware_winter_shifts_one_hour(self) -> None:
+        """
+        Scenario 1.199: the correction uses each value's OWN date, so a winter
+        value shifts −1h (not the summer −2h) — proving it is not a fixed offset.
+        Given: an in-window row whose event_at is a WINTER 11:00Z
+        When: the command runs with --apply
+        Then: event_at becomes 10:00Z (Berlin winter = UTC+1), not 09:00Z
+        """
+        item = self._seed(IN_WINDOW, event_at=WINTER_CORRUPTED)
+        self._run(apply=True)
+        item.refresh_from_db()
+        self.assertEqual(
+            item.event_at, WINTER_CORRECTED,
+            f"Winter value should shift −1h to 10:00Z (DST-aware), got "
+            f"{item.event_at} — the correction used a fixed offset.",
+        )
+
+    def test_1_200_dst_transition_values_are_flagged(self) -> None:
+        """
+        Scenario 1.200: a value whose wall-clock falls in a DST-transition window
+        (the fall-back overlap) is reported for manual review — its instant is
+        ambiguous and cannot be recovered with certainty.
+        Given: an in-window row whose event_at is 25 Oct 2026 02:30 (overlap)
+        When: the command runs (dry-run)
+        Then: the output flags it as a DST-transition value to verify
+        """
+        self._seed(IN_WINDOW, event_at=DST_OVERLAP)
+        output = self._run(apply=False)
+        self.assertIn(
+            "DST-transition", output,
+            "A value in the fall-back overlap must be flagged for review; "
+            f"output was:\n{output}",
         )

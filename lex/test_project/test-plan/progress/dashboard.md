@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 23 | 198 | 92 | 0 | 0 |
+| 1. Init — Project Bootstrap | 23 | 200 | 94 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -38,7 +38,7 @@
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |
-| 1i | rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident | 1.195-1.198 | complete | 4 | 0 | 0 | management command that surgically re-anchors user-entered datetimes mis-stored after the rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until) (--cutoff required, no global default — too-early corrupts good data; --until defaults to now), excludes app-stamped created_at/edited_at. 1.197 pins the late-upgrader safety (pre-upgrade rows untouched), 1.198 the post-fix bound. Ships with the USE_TZ=True cutover. |
+| 1i | rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident | 1.195-1.200 | complete | 6 | 0 | 0 | management command that surgically re-anchors user-entered datetimes mis-stored after the rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until) (--cutoff required, no global default — too-early corrupts good data; --until defaults to now), excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197 late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag. Ships with the USE_TZ=True cutover. |
 | 1j |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1k |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |

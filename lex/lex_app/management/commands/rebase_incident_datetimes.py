@@ -49,8 +49,17 @@ For an affected column the stored instant's UTC wall-clock digits are the
 
     col := (col AT TIME ZONE 'UTC') AT TIME ZONE <source-zone>
 
-DST-correct via the IANA zone. Example (Berlin summer): ``11:00Z`` → digits
-``11:00`` → interpret as Berlin → ``09:00Z``.
+DST-correct via the IANA zone: the offset applied is the one in force **on each
+value's own date** — ``11:00`` in July → ``09:00Z`` (−2h), ``11:00`` in January
+→ ``10:00Z`` (−1h), ``datetime(y,12,31)`` midnight → prev-day ``23:00Z`` (−1h).
+It is not a fixed offset.
+
+The only exception is the ~2 hours per year at the DST transitions themselves —
+the spring-forward gap (a local time that never occurred) and the fall-back
+overlap (one that occurred twice). There the wall-clock has no unique instant, so
+the re-anchoring is a best-effort guess. Those values are **counted and reported**
+(``N DST-transition (verify)``) so an operator can check them by hand; they are
+still corrected (a best-effort instant beats the definitely-wrong stored one).
 
 Safety
 ------
@@ -87,6 +96,30 @@ EXCLUDED_APP_LABELS = {
     "oauth2_authcodeflow", "simple_history", "django_celery_beat",
     "django_celery_results", "legacy_data", "audit_logging",
 }
+
+
+def _dst_ambiguous(naive_dt: datetime, zone: ZoneInfo) -> bool:
+    """True if a wall-clock has no unique instant in ``zone``.
+
+    Two cases, the ~2 hours per year where re-anchoring cannot be certain:
+    * **fall-back overlap** — the local time occurs twice (two offsets), so
+      ``fold=0`` and ``fold=1`` disagree;
+    * **spring-forward gap** — the local time never occurs, so a UTC round trip
+      does not return the same wall-clock.
+    ``AT TIME ZONE`` still produces a deterministic instant for these, but it may
+    not match what the user meant — so they are flagged for manual review.
+    """
+    off0 = naive_dt.replace(tzinfo=zone, fold=0).utcoffset()
+    off1 = naive_dt.replace(tzinfo=zone, fold=1).utcoffset()
+    if off0 != off1:
+        return True  # fall-back overlap
+    roundtrip = (
+        naive_dt.replace(tzinfo=zone)
+        .astimezone(dt_timezone.utc)
+        .astimezone(zone)
+        .replace(tzinfo=None)
+    )
+    return roundtrip != naive_dt  # spring-forward gap
 
 
 class Command(BaseCommand):
@@ -158,7 +191,8 @@ class Command(BaseCommand):
             f"window=[{cutoff.isoformat()}, {until.isoformat()})"
         ))
 
-        total_fixed = total_ambiguous = 0
+        total_fixed = total_ambiguous = total_dst = 0
+        zone = ZoneInfo(source_zone)
         for model, fields in targets:
             created_col = model._meta.get_field("created_at").column
             edited_col = model._meta.get_field("edited_at").column
@@ -166,13 +200,18 @@ class Command(BaseCommand):
             for field in fields:
                 col = field.column
                 in_window, ambiguous = self._counts(table, col, created_col, edited_col, cutoff, until)
+                dst = self._dst_suspect_count(table, col, created_col, cutoff, until, zone) if in_window else 0
                 total_fixed += in_window
                 total_ambiguous += ambiguous
+                total_dst += dst
                 if in_window or ambiguous:
-                    self.stdout.write(
+                    line = (
                         f"  {model._meta.label}.{field.name}: {in_window} in-window, "
                         f"{ambiguous} ambiguous (created<cutoff, edited in window)"
                     )
+                    if dst:
+                        line += f", {dst} DST-transition (verify)"
+                    self.stdout.write(line)
                     for before, after in self._samples(table, col, created_col, source_zone, cutoff, until):
                         self.stdout.write(f"      {before}  ->  {after}")
                 if apply and in_window:
@@ -183,6 +222,11 @@ class Command(BaseCommand):
             f"{total_fixed} row-field value(s) in the incident window; "
             f"{total_ambiguous} ambiguous flagged for manual review."
         )
+        if total_dst:
+            summary += (
+                f" {total_dst} fell in a DST-transition window (corrected "
+                "best-effort — the wall-clock is ambiguous there; verify)."
+            )
         if apply:
             self.stdout.write(self.style.SUCCESS(f"Applied. {summary}"))
         else:
@@ -242,6 +286,27 @@ class Command(BaseCommand):
             )
             ambiguous = cur.fetchone()[0]
         return in_window, ambiguous
+
+    def _dst_suspect_count(self, table, col, created_col, cutoff, until, zone):
+        """Count in-window values whose wall-clock lands in a DST-transition
+        window (spring gap / fall overlap) for ``zone`` — flagged for review.
+
+        Coarse SQL pre-filter on local hours 1–3 (where zones transition), then
+        an exact per-value check; keeps the Python scan tiny.
+        """
+        suspects = 0
+        with connection.cursor() as cur:
+            cur.execute(
+                f'SELECT ("{col}" AT TIME ZONE \'UTC\') FROM "{table}" '
+                f'WHERE "{col}" IS NOT NULL AND "{created_col}" >= %s '
+                f'AND "{created_col}" < %s '
+                f'AND EXTRACT(HOUR FROM ("{col}" AT TIME ZONE \'UTC\')) IN (1, 2, 3)',
+                [cutoff, until],
+            )
+            for (naive_digits,) in cur.fetchall():
+                if naive_digits is not None and _dst_ambiguous(naive_digits, zone):
+                    suspects += 1
+        return suspects
 
     def _samples(self, table, col, created_col, source_zone, cutoff, until, limit=3):
         with connection.cursor() as cur:
