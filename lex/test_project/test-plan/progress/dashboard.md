@@ -22,7 +22,7 @@
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
-| 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
+| 13. Export Endpoint | 6 | 33 | 3 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 8 | 34 | 13 | 0 | 0 |
 
@@ -246,6 +246,7 @@
 | 13c | AG Grid export path — grouped & selected | 13.9 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13d | Auth & edge cases | 13.11-13.12 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13e |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
+| 13f | Export renders datetimes in the requester's browser timezone | 13.31-13.33 | complete | 3 | 0 | 0 | Excel has no tz type, so aware-UTC datetimes must be baked as a local wall-clock at export time. Both write paths render in the requester's zone (frontend sends `timezone` on the export request) — legacy pandas (_to_excel_naive) and streaming/fast (_normalize_cell_value) — falling back to settings.TIME_ZONE for absent/invalid. Ships with the USE_TZ=True cutover. |
 
 ## 14. AG Grid Query Endpoint (`queries`)
 
