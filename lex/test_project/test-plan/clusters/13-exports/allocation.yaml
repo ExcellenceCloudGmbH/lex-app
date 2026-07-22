@@ -1,54 +1,59 @@
 cluster: 13
 slug: exports
 title: Export Endpoint
-max_scenario: 30
+max_scenario: 31
 letters:
   a:
     title: Legacy (non-AG) export path
     scenarios: 13.1-13.4
     status: complete
     tests:
-      pass: 0
+      pass: 5
       skip: 0
       xfail: 0
-    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
-      recorded
+    note: scenarios 13.1–13.4 exercised by `test_13a_legacy_export.py` (5 pass)
   b:
     title: AG Grid export path — flat
     scenarios: 13.5-13.10
     status: complete
     tests:
-      pass: 0
+      pass: 5
       skip: 0
       xfail: 0
-    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
-      recorded
+    note: scenarios 13.5–13.10 exercised by `test_13b_ag_grid_export.py` (5 pass)
   c:
     title: AG Grid export path — grouped & selected
     scenarios: '13.9'
     status: complete
     tests:
-      pass: 0
+      pass: 1
       skip: 0
       xfail: 0
-    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
-      recorded
+    note: scenario 13.9 exercised by `test_13c_grouped_selected.py` (1 pass)
   d:
     title: Auth & edge cases
     scenarios: 13.11-13.12
     status: complete
     tests:
-      pass: 0
+      pass: 2
       skip: 0
       xfail: 0
-    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
-      recorded
+    note: scenarios 13.11–13.12 exercised by `test_13d_auth_edge.py` (2 pass)
   e:
-    title: ''
-    scenarios: ''
+    title: Streaming fast paths
+    scenarios: 13.13-13.21
     status: complete
     tests:
-      pass: 0
+      pass: 8
       skip: 0
       xfail: 0
-    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+    note: scenarios 13.13–13.21 exercised by `test_13e_streaming_fast_export.py`; 13.17 intentionally absent because BUG-018 makes the documented user-driven `endRow` cap unreachable from the public path
+  f:
+    title: Pandas fallback — aware datetimes
+    scenarios: '13.31'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: AG export forced onto the pandas fallback path; aware UTC datetimes must localize to the active display timezone before ``to_excel``

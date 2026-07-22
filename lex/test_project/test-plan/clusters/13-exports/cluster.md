@@ -77,6 +77,12 @@ clusters):
 | 13.11 | Unauthenticated POST | 401 / 403; no ``.xlsx`` bytes |
 | 13.12 | Per-object ``permission_export`` (non-uniform) | ``_compute_uniform_export_mask`` returns ``None``; slow per-row mask runs; each row's columns are masked according to that row's own permission result |
 
+### 13f. Pandas fallback — aware datetimes
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 13.31 | AG export falls back to pandas with an aware ``DateTimeField`` | Export still returns ``200``; ``xlsxwriter`` never sees a timezone-aware cell; the workbook stores the same instant as a naive value in the active display timezone rather than the raw UTC wall-clock |
+
 **What is explicitly NOT tested here:**
 
 - ❌ **Excel formatting cosmetics** (column widths, cell colours,

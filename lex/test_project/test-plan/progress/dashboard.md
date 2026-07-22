@@ -22,7 +22,7 @@
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
-| 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
+| 13. Export Endpoint | 6 | 31 | 22 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 8 | 34 | 13 | 0 | 0 |
 
@@ -241,11 +241,12 @@
 
 | Batch | Title | Scenarios | Status | Pass | Skip | Xfail | Note |
 |---|---|---|---|---|---|---|---|
-| 13a | Legacy (non-AG) export path | 13.1-13.4 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 13b | AG Grid export path — flat | 13.5-13.10 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 13c | AG Grid export path — grouped & selected | 13.9 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 13d | Auth & edge cases | 13.11-13.12 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 13e |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
+| 13a | Legacy (non-AG) export path | 13.1-13.4 | complete | 5 | 0 | 0 | scenarios 13.1–13.4 exercised by `test_13a_legacy_export.py` (5 pass) |
+| 13b | AG Grid export path — flat | 13.5-13.10 | complete | 5 | 0 | 0 | scenarios 13.5–13.10 exercised by `test_13b_ag_grid_export.py` (5 pass) |
+| 13c | AG Grid export path — grouped & selected | 13.9 | complete | 1 | 0 | 0 | scenario 13.9 exercised by `test_13c_grouped_selected.py` (1 pass) |
+| 13d | Auth & edge cases | 13.11-13.12 | complete | 2 | 0 | 0 | scenarios 13.11–13.12 exercised by `test_13d_auth_edge.py` (2 pass) |
+| 13e | Streaming fast paths | 13.13-13.21 | complete | 8 | 0 | 0 | scenarios 13.13–13.21 exercised by `test_13e_streaming_fast_export.py`; 13.17 intentionally absent because BUG-018 makes the documented user-driven `endRow` cap unreachable from the public path |
+| 13f | Pandas fallback — aware datetimes | 13.31 | complete | 1 | 0 | 0 | AG export forced onto the pandas fallback path; aware UTC datetimes must localize to the active display timezone before ``to_excel`` |
 
 ## 14. AG Grid Query Endpoint (`queries`)
 
