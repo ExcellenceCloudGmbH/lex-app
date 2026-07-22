@@ -55,3 +55,21 @@
 | Prereqs | none |
 | Status | ✅ Complete — 4 pass / 0 fail |
 | Note | Resolves the **backend root cause of frontend BUG-F-003** (FK columns render as bare ids like `79`). Every serialized row now carries an **additive** companion key `<fk>__short_description` = `str(related)` (the model author's `__str__`/`short_description` — the documented customization point) alongside the untouched raw id, so filtering/editing on the id are unaffected. The list path resolves the whole page's names in **one `pk__in` query per FK** (mirrors `ModelExport._apply_foreign_key_display_names`); the detail path resolves per-instance (one query, fine) so list-row shape ⊆ detail shape (the 12c invariant holds). Null FK → null companion (stable row shape). Permission-hidden FK columns get no companion (the key is emitted only when the raw column survived visibility filtering). Frontend twin: the grid/detail render the companion instead of the raw id (F3/F9.6). |
+
+---
+
+### Batch 12j — Datetime round trip under the aware-UTC convention ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.46 – 12.48 |
+| Type | E |
+| Files covered | `lex/lex_app/settings.py` (`USE_TZ=True`/`TIME_ZONE="UTC"`), `lex/api/serializers/base_serializers.py` (DateTimeField round-trip) |
+| Test file | `lex/test_project/tests/serializers/test_12j_datetime_roundtrip_convention.py` |
+| Test classes | `TestCluster12j_DatetimeRoundTripConvention` (12.46 summer instant → Berlin viewer sees 11:00; 12.47 year-end midnight stays Dec 31 across the winter offset; 12.48 served value is a truthful designated instant) |
+| Fixtures | reuse cluster-12 `WideItem` (`created_at_ts` user DateTimeField) |
+| Tests landed | **3 pass / 0 fail** |
+| Coverage gain | end-to-end datetime round trip under `USE_TZ=True` (the convention the incident broke) |
+| Status | ✅ Complete — live regression gates for the cutover. A client sending an explicit instant (fixed frontend `toISOString`) gets that exact moment back for any viewer zone. Complements 12g (BUG-025 designator gate). Frontend twin: `datetimeConventionRoundTrip.test.ts`. |
+
+---

@@ -746,37 +746,32 @@ USE_I18N = True
 
 USE_L10N = True
 
-USE_TZ = True if DATABASE_DEPLOYMENT_TARGET not in ("default", "GCP") else False
+# Timezone-aware UTC is the framework datetime convention (ADR:
+# docs/releases/tz-decision-usetz-true.md). Every datetime is stored as a true
+# UTC instant and each client renders it in the viewer's own zone. Columns are
+# already `timestamptz` (Django's PostgreSQL backend uses `timestamp with time
+# zone` regardless of USE_TZ), so this needs no column-type migration; only the
+# instant-correcting `rebase_incident_datetimes` management command re-anchors
+# the window of user-entered values written while the connection zone was
+# mistakenly UTC (see the command's docstring and the ADR).
+USE_TZ = True
 
-# TODO: does this fix the "Unauthorized: /api/model_tree/"-issue which occurs after some time??
-#
-# TIME_ZONE is coupled to USE_TZ on purpose. django_celery_beat's scheduler
-# (DatabaseScheduler, used for both the recovery sweep IntervalSchedule and the
-# future-edit ClockedSchedule) interprets *naive* datetimes as UTC — see
-# celery.utils.time.maybe_make_aware, called unconditionally in
-# django_celery_beat.schedulers.ModelEntry.is_due and clockedschedule.clocked.
-# When USE_TZ is False we store naive datetimes (e.g. PeriodicTask.last_run_at,
-# History.valid_from). If TIME_ZONE were a non-UTC zone the stored naive value
-# would be local wall-clock while beat reads it as UTC, so is_due() is off by the
-# UTC offset (the interval sweep never becomes due; clocked activations fire
-# hours late). Forcing UTC here makes the naive-as-UTC assumption correct.
-# When USE_TZ is True, datetimes are tz-aware and the display zone is free to be
-# Europe/Berlin without affecting scheduling.
-TIME_ZONE = "Europe/Berlin" if USE_TZ else "UTC"
+# Display / naive-input zone. Storage is ALWAYS UTC under USE_TZ=True, so this
+# never changes what's stored — it sets (a) how the server renders datetimes
+# (admin, PDFs, timezone.localtime, DRF's wire offset) and (b) how a naive input
+# with no offset is interpreted. Defaults to Europe/Berlin — the framework's
+# historical zone and the majority of deployments — and is overridable per
+# instance via LEX_TIME_ZONE. With the Berlin default a Berlin instance is
+# correct with the CURRENT frontend (a naive pick is read as Berlin -> the right
+# instant); instances elsewhere set LEX_TIME_ZONE and/or ship the frontend
+# offset-send so non-Berlin data entry is correct too. (Previously coupled to
+# USE_TZ for django_celery_beat, which has since been retired.)
+TIME_ZONE = os.getenv("LEX_TIME_ZONE", "Europe/Berlin")
 
-# BUG-025: when USE_TZ is False every stored datetime is NAIVE UTC (the
-# TIME_ZONE coupling above guarantees it), but DRF's default ISO-8601
-# rendering emits naive values without a timezone designator
-# ("2026-07-13T11:43:00"). Browsers parse a naive ISO string as LOCAL time,
-# so every timestamp displays shifted by the viewer's UTC offset (a Berlin
-# user sees 11:43 for a 13:43 edit). Rendering with an explicit 'Z' labels
-# the value as what it really is; DRF's ISO-8601 input parsing already
-# accepts 'Z', so write paths round-trip unchanged (aware inputs are
-# normalized back to naive UTC by DRF's enforce_timezone). When USE_TZ is
-# True DRF keeps its default rendering with real offsets ("…+02:00") and
-# needs no help.
-if not USE_TZ:
-    REST_FRAMEWORK["DATETIME_FORMAT"] = "%Y-%m-%dT%H:%M:%S.%fZ"
+# NOTE: the former BUG-025 workaround (a DATETIME_FORMAT that appended an
+# explicit 'Z' to naive-UTC values) is intentionally removed. Under USE_TZ=True
+# aware datetimes serialize with a real offset natively, so no override is
+# needed.
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
