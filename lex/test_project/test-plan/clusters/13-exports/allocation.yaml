@@ -1,7 +1,7 @@
 cluster: 13
 slug: exports
 title: Export Endpoint
-max_scenario: 30
+max_scenario: 33
 letters:
   a:
     title: Legacy (non-AG) export path
@@ -52,3 +52,15 @@ letters:
       skip: 0
       xfail: 0
     note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  f:
+    title: Export renders datetimes in the requester's browser timezone
+    scenarios: 13.31-13.33
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: Excel has no tz type, so aware-UTC datetimes must be baked as a local wall-clock at export
+      time. Both write paths render in the requester's zone (frontend sends `timezone` on the export
+      request) — legacy pandas (_to_excel_naive) and streaming/fast (_normalize_cell_value) — falling
+      back to settings.TIME_ZONE for absent/invalid. Ships with the USE_TZ=True cutover.
