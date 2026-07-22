@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 23 | 200 | 94 | 0 | 0 |
+| 1. Init — Project Bootstrap | 24 | 202 | 96 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -47,6 +47,7 @@
 | 1o | Lazy imports + sync-exclusion + history-config helpers |  | complete | 15 | 0 | 0 | scenarios 1.110–1.124 |
 | 1p | Settings / config / URLs / top-level views |  | complete | 22 | 0 | 0 | scenarios 1.125–1.146 |
 | 1q | Migration file completeness gate | 1.147 | complete | 1 | 0 | 0 | scenario 1.147; `lex makemigrations ... --check --dry-run` must stay clean for framework apps |
+| 1r | Fetched datetimes come back in the DB-session display zone (Berlin) | 1.201-1.202 | complete | 2 | 0 | 0 | DATABASES['default']['TIME_ZONE'] = TIME_ZONE runs the Postgres session in Berlin, so a fetched DateTimeField returns aware in the display zone (11:00+02:00) not UTC — str()/.date()/.hour and model __str__ render local with no per-field/per-model changes; storage + instant unchanged. Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw SQL is unaffected (history+serializers+init+exports 385 pass with it live). |
 | 1s | Log-noise cleanup + lex-namespace debug control (EXC-1787) |  | complete | 10 | 0 | 0 | scenarios 1.159–1.168; urllib3 InsecureRequestWarning gate + `LEX_LOG_LEVEL` lex-only DEBUG + console-handler level + blanket `LEX_SUPPRESS_WARNINGS` filter |
 | 1t | `DISABLE_SERVER_SIDE_CURSORS` placement (production cursor crash) | 1.169-1.170 | complete | 2 | 0 | 0 | scenarios 1.169–1.170; flag was module-level (ignored by Django) so server-side cursors stayed on behind the pooling proxy → `InvalidCursorName` on every `.iterator()`; now set per |
 | 1u | Fast ASGI health/readiness probes | 1.171-1.175 | complete | 5 | 0 | 0 | scenarios 1.171–1.175; `/health` short-circuits to static liveness, `/readiness` gates on DB readiness, non-probe HTTP falls through to Django |

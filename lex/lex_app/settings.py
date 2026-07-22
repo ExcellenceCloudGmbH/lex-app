@@ -773,6 +773,17 @@ TIME_ZONE = os.getenv("LEX_TIME_ZONE", "Europe/Berlin")
 # aware datetimes serialize with a real offset natively, so no override is
 # needed.
 
+# Run the PostgreSQL connection session in TIME_ZONE so fetched `timestamptz`
+# values come back as aware datetimes in the display zone (Berlin) instead of
+# UTC. This makes str()/repr, `.date()`/`.hour`, and model `__str__` render local
+# with NO per-field or per-model changes — storage stays UTC and the instant is
+# unchanged (23:30Z reads back as 00:30+01:00 == the original instant). Django's
+# date/time-part lookups already inject an explicit `AT TIME ZONE`, so they are
+# unaffected. Postgres-only: the session zone is what makes psycopg render
+# timestamptz locally; SQLite works in UTC under USE_TZ and is left unset.
+if "postgresql" in DATABASES["default"].get("ENGINE", ""):
+    DATABASES["default"]["TIME_ZONE"] = TIME_ZONE
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/
 

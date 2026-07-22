@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 200
+max_scenario: 202
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -229,3 +229,16 @@ letters:
       date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197
       late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag.
       Ships with the USE_TZ=True cutover.
+  r:
+    title: Fetched datetimes come back in the DB-session display zone (Berlin)
+    scenarios: 1.201-1.202
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: DATABASES['default']['TIME_ZONE'] = TIME_ZONE runs the Postgres session in Berlin, so a
+      fetched DateTimeField returns aware in the display zone (11:00+02:00) not UTC — str()/.date()/.hour
+      and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
+      Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
+      SQL is unaffected (history+serializers+init+exports 385 pass with it live).
