@@ -1,7 +1,7 @@
 # Adopting timezone-aware UTC as the datetime foundation
 
 > **lex-app · Architecture Decision Record**
-> **Decision:** `USE_TZ = True`, `TIME_ZONE = "UTC"` · **Status:** Accepted
+> **Decision:** `USE_TZ = True`, `TIME_ZONE = os.getenv("LEX_TIME_ZONE", "Europe/Berlin")` · **Status:** Accepted
 > **Evidence:** live DB + DRF + git history, verified 2026-07-20
 
 The framework will store, reason about, and serve every timestamp as a true UTC
@@ -13,7 +13,18 @@ it beats every alternative we considered.
 
 ## The decision
 
-**Set `USE_TZ = True` and `TIME_ZONE = "UTC"`.**
+**Set `USE_TZ = True` and `TIME_ZONE = os.getenv("LEX_TIME_ZONE", "Europe/Berlin")`.**
+
+Storage is **always UTC** under `USE_TZ=True`, so `TIME_ZONE` never changes what
+is stored — it only sets the server-side display zone and how a naive input is
+interpreted. Defaulting it to `Europe/Berlin` (the framework's historical zone,
+overridable per instance via `LEX_TIME_ZONE`) has a decisive practical benefit:
+a Berlin instance is **correct with the current, unchanged frontend** — a naive
+`11:00` pick is read as Berlin, stored as the right instant, and served with a
+real offset so every browser renders it correctly. `TIME_ZONE="UTC"` would need
+the frontend to send explicit offsets first, so it would stay broken until that
+ships. The frontend offset-send is still worth doing (it makes *non-Berlin* data
+entry correct too), but it is no longer a prerequisite for correctness.
 
 Datetimes become timezone-aware UTC instants everywhere: the ORM returns aware
 objects, the API serves an explicit offset, and each client renders in the
@@ -88,8 +99,9 @@ comes back as the instant it was anchored to. That means:
   change at the storage layer.
 - **Existing rows keep their instant.** Reading an old value under `USE_TZ=True`
   returns the same moment, now as an aware UTC datetime.
-- **The connection is pinned to UTC** (`TIME_ZONE="UTC"`), so bare/legacy values
-  are read as UTC — which is what they already are.
+- **Storage stays UTC regardless of `TIME_ZONE`.** Under `USE_TZ=True` the ORM
+  converts to UTC before writing and returns aware UTC on read, so the existing
+  instants are read back unchanged whether `TIME_ZONE` is `UTC` or `Europe/Berlin`.
 
 > 🧭 **What about already-wrong rows?** A small window of *user-entered* dates
 > written after the rc212 upgrade were anchored to the wrong zone and are off by
@@ -261,8 +273,9 @@ requirement — *any user, any region, correct instant* — except this one.
 
 ## 8. What shipping it looks like
 
-- **Backend:** `USE_TZ=True`, `TIME_ZONE="UTC"`, delete the BUG-025 `Z` hack,
-  sweep the four stray `datetime.now()` call sites → `lex_datetime_now()`.
+- **Backend:** `USE_TZ=True`, `TIME_ZONE=os.getenv("LEX_TIME_ZONE", "Europe/Berlin")`,
+  delete the BUG-025 `Z` hack, sweep the four stray `datetime.now()` call sites
+  → `lex_datetime_now()`.
 - **Frontend:** `dateParser` → `toISOString()` on write; leave the local-render
   on read; keep `DateField` values as plain date strings.
 - **Schema, rolling:** convert civil `DateTimeField`s (`output_date`, effective

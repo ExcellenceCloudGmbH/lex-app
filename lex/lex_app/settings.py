@@ -756,12 +756,17 @@ USE_L10N = True
 # mistakenly UTC (see the command's docstring and the ADR).
 USE_TZ = True
 
-# Canonical server zone. Storage is UTC; the display zone is the client's
-# concern. This was previously coupled to USE_TZ (pinned to UTC on the
-# default/GCP targets) because django_celery_beat's DatabaseScheduler reads
-# naive datetimes as UTC — beat has since been retired, so that constraint no
-# longer applies and we adopt the correct aware-UTC convention framework-wide.
-TIME_ZONE = "UTC"
+# Display / naive-input zone. Storage is ALWAYS UTC under USE_TZ=True, so this
+# never changes what's stored — it sets (a) how the server renders datetimes
+# (admin, PDFs, timezone.localtime, DRF's wire offset) and (b) how a naive input
+# with no offset is interpreted. Defaults to Europe/Berlin — the framework's
+# historical zone and the majority of deployments — and is overridable per
+# instance via LEX_TIME_ZONE. With the Berlin default a Berlin instance is
+# correct with the CURRENT frontend (a naive pick is read as Berlin -> the right
+# instant); instances elsewhere set LEX_TIME_ZONE and/or ship the frontend
+# offset-send so non-Berlin data entry is correct too. (Previously coupled to
+# USE_TZ for django_celery_beat, which has since been retired.)
+TIME_ZONE = os.getenv("LEX_TIME_ZONE", "Europe/Berlin")
 
 # NOTE: the former BUG-025 workaround (a DATETIME_FORMAT that appended an
 # explicit 'Z' to naive-UTC values) is intentionally removed. Under USE_TZ=True
