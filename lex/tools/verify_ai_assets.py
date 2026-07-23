@@ -38,7 +38,10 @@ This module exposes :func:`verify_ai_assets`, which:
 3. Restores any file under the project root that is missing or whose contents
    have drifted from the canonical copy (byte-for-byte comparison).
 
-User-added files in the destination are never deleted.
+User-added files in the destination are preserved except in mode-managed
+subdirectories (currently ``.github/agents``, ``.github/instructions``, and
+``.github/prompts``), which are mirrored exactly so stale mode assets are
+removed during mode switches.
 """
 
 from __future__ import annotations
@@ -71,6 +74,10 @@ DEFAULT_MCP_MODE = MCP_MODE_FORWARD
 MCP_MODE_PACKAGE: dict[str, str] = {
     MCP_MODE_FORWARD: "lex_mcp_local",
     MCP_MODE_BACKWARD: "lex_mcp_reverse",
+    "edit": "lex_mcp_edit",
+    "review": "lex_mcp_review",
+    "mvp_generator": "lex_mcp_mvp",
+    "mvp_completion": "lex_mcp_mvp_completion",
 }
 
 # Directories shipped inside each mode's package that must mirror to project
@@ -96,13 +103,18 @@ class DirectoryVerificationResult:
     source_directory: Path | None
     destination_directory: Path
     restored_files: tuple[Path, ...] = ()
+    removed_files: tuple[Path, ...] = ()
     missing_files: tuple[Path, ...] = ()
     modified_files: tuple[Path, ...] = ()
     skipped_reason: str | None = None
 
     @property
     def ok(self) -> bool:
-        return self.skipped_reason is None and not self.restored_files
+        return (
+            self.skipped_reason is None
+            and not self.restored_files
+            and not self.removed_files
+        )
 
 
 @dataclass(frozen=True)
@@ -117,6 +129,10 @@ class VerifyAIAssetsResult:
     @property
     def restored_files(self) -> tuple[Path, ...]:
         return tuple(p for d in self.directories for p in d.restored_files)
+
+    @property
+    def removed_files(self) -> tuple[Path, ...]:
+        return tuple(p for d in self.directories for p in d.removed_files)
 
     @property
     def ok(self) -> bool:
@@ -381,6 +397,59 @@ def _restore_file(source_file: Path, destination_file: Path) -> None:
         ) from exc
 
 
+def _prune_managed_files(
+    source_directory: Path,
+    destination_directory: Path,
+    *,
+    managed_relative_dirs: tuple[str, ...],
+) -> tuple[Path, ...]:
+    """Delete stale files in managed subdirectories that are absent in source.
+
+    This is used for mode-scoped AI assets (for example ``.github/agents``),
+    where leaving old files in place causes mixed-mode tool surfaces.
+    """
+    removed: list[Path] = []
+
+    for relative_dir in managed_relative_dirs:
+        source_root = source_directory / relative_dir
+        destination_root = destination_directory / relative_dir
+
+        if not destination_root.exists():
+            continue
+
+        source_relative_files: set[Path] = set()
+        if source_root.is_dir():
+            for source_file in _iter_source_files(source_root):
+                source_relative_files.add(source_file.relative_to(source_directory))
+
+        for current_root, _dirs, files in os.walk(destination_root):
+            current_root_path = Path(current_root)
+            for file_name in files:
+                destination_file = current_root_path / file_name
+                destination_relative = destination_file.relative_to(destination_directory)
+                if destination_relative in source_relative_files:
+                    continue
+                try:
+                    destination_file.unlink()
+                    removed.append(destination_relative)
+                except OSError as exc:
+                    raise SetupWithAIError(
+                        f"Could not remove stale mode asset {destination_file}: {exc}"
+                    ) from exc
+
+        # Best-effort cleanup of empty directories left behind.
+        for current_root, _dirs, _files in os.walk(destination_root, topdown=False):
+            current_root_path = Path(current_root)
+            if current_root_path == destination_root:
+                continue
+            try:
+                current_root_path.rmdir()
+            except OSError:
+                continue
+
+    return tuple(removed)
+
+
 def verify_directory(
     project_root: Path,
     source_directory: Path | None,
@@ -388,6 +457,7 @@ def verify_directory(
     *,
     skipped_reason: str | None = None,
     display_name: str | None = None,
+    prune_extra_relative_dirs: tuple[str, ...] = (),
 ) -> DirectoryVerificationResult:
     """Verify (and restore) every file inside *source_directory* under *project_root*."""
     destination_directory = Path(project_root).resolve() / directory_name
@@ -431,14 +501,31 @@ def verify_directory(
         _restore_file(source_file, destination_file)
         restored.append(relative_path)
 
+    removed = ()
+    if prune_extra_relative_dirs:
+        removed = _prune_managed_files(
+            source_directory,
+            destination_directory,
+            managed_relative_dirs=prune_extra_relative_dirs,
+        )
+
     return DirectoryVerificationResult(
         directory_name=label,
         source_directory=source_directory,
         destination_directory=destination_directory,
         restored_files=tuple(restored),
+        removed_files=removed,
         missing_files=tuple(missing),
         modified_files=tuple(modified),
     )
+
+# Subdirectories in ``.github`` that are mode-owned. During mode switch, these
+# must be mirrored exactly to avoid carrying stale assets from the previous mode.
+MODE_MANAGED_GITHUB_SUBDIRS: tuple[str, ...] = (
+    "agents",
+    "instructions",
+    "prompts",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +547,9 @@ def verify_ai_assets(
     env: Mapping[str, str] | None = None,
     docs_directory_names: tuple[str, ...] = LEX_APP_EMBEDDED_DIRECTORY_NAMES,
     mode_directory_names: tuple[str, ...] = MCP_MODE_DIRECTORIES,
+    align_mcp_mode: bool = False,
+    mcp_config_path: Path | None = None,
+    mode_align_source_tool: str = "lex-ai-verify",
 ) -> VerifyAIAssetsResult:
     """Verify every asset directory required by the active MCP mode.
 
@@ -473,8 +563,61 @@ def verify_ai_assets(
     python_executable:
         Interpreter used to locate installed packages. Defaults to the active
         virtual environment's interpreter.
+    align_mcp_mode:
+        When *True*, treat ``<project_root>/.env``'s ``LEX_MCP_MODE`` as the
+        source of truth. If the persisted MCP runtime view (override file or
+        ``mcp.json``) disagrees, invoke the equivalent of the in-server
+        ``switch_to_mode`` MCP tool to align them before verifying assets.
+        Disabled by default to preserve the lightweight pre-flight behaviour.
+    mcp_config_path:
+        Path to the IDE ``mcp.json`` used for mode alignment. When *None*,
+        the GitHub Copilot config is auto-resolved.
     """
     project_root_resolved = Path(project_root).resolve()
+
+    # ── Optional: align MCP runtime mode with project .env ────────────────
+    # Treat the project's .env ``LEX_MCP_MODE`` as the source of truth. If
+    # the runtime (override file or mcp.json) disagrees, run the
+    # ``switch_to_mode`` primitives so the running MCP server is told to
+    # adopt the .env mode before we restore assets for it.
+    if align_mcp_mode and mode != "all":
+        try:
+            from lex.tools.mcp_mode_invoke import invoke_switch_to_mode
+            from lex.tools.setup_with_ai import (
+                resolve_github_copilot_mcp_config_path,
+            )
+
+            env_mode = _read_env_file_value(
+                project_root_resolved / ".env", "LEX_MCP_MODE"
+            )
+            env_mode = (env_mode or "").strip().lower() or None
+            if env_mode and env_mode in MCP_MODE_PACKAGE:
+                resolved_mcp_path = (
+                    Path(mcp_config_path).resolve()
+                    if mcp_config_path is not None
+                    else resolve_github_copilot_mcp_config_path()
+                )
+                runtime_mode = (
+                    _read_override_mode()
+                    or _read_mode_from_mcp_json(resolved_mcp_path)
+                    or _resolve_mode_from_mcp_json_files(project_root_resolved)
+                )
+                if runtime_mode != env_mode:
+                    invoke_switch_to_mode(
+                        env_mode,
+                        project_root=project_root_resolved,
+                        mcp_config_path=resolved_mcp_path,
+                        source_tool=mode_align_source_tool,
+                        reason="aligning runtime mode with project .env",
+                    )
+                if mode is None:
+                    mode = env_mode
+        except Exception:
+            # Best-effort — alignment failures must never block verification.
+            # If the Copilot mcp.json path cannot be resolved, the mode
+            # cannot be aligned, but we can still verify assets for
+            # whatever mode resolve_active_mcp_mode picks up.
+            pass
 
     if mode == "all":
         active_mode, mode_source = "all", "cli"
@@ -526,6 +669,11 @@ def verify_ai_assets(
                     source,
                     directory_name,
                     display_name=display_name,
+                    prune_extra_relative_dirs=(
+                        MODE_MANAGED_GITHUB_SUBDIRS
+                        if directory_name == ".github" and active_mode != "all"
+                        else ()
+                    ),
                 )
             )
 

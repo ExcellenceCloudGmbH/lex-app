@@ -26,6 +26,72 @@ DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
 DEFAULT_LEX_MCP_MODE = "forward"
+SUPPORTED_MCP_MODES: tuple[str, ...] = (
+    "forward",
+    "backward",
+    "edit",
+    "review",
+    "mvp_generator",
+    "mvp_completion",
+)
+MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
+    {
+        "value": "forward",
+        "title": "New Project",
+        "desc": "Full planning and implementation flow from scratch.",
+        "tone": "forward",
+        "icon_html": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<line x1="12" y1="5" x2="12" y2="19"/>'
+            '<polyline points="19 12 12 19 5 12"/>'
+            '</svg>'
+        ),
+    },
+    {
+        "value": "backward",
+        "title": "Documentation",
+        "desc": "Reverse-map an existing codebase and generate docs.",
+        "tone": "backward",
+        "icon_html": (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="#283067" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+            '<polyline points="14 2 14 8 20 8"/>'
+            '<line x1="16" y1="13" x2="8" y2="13"/>'
+            '<line x1="16" y1="17" x2="8" y2="17"/>'
+            '</svg>'
+        ),
+    },
+    {
+        "value": "edit",
+        "title": "Edit",
+        "desc": "Targeted code modifications in an existing project.",
+        "tone": "edit",
+        "icon_html": "&#x270F;&#xFE0F;",
+    },
+    {
+        "value": "review",
+        "title": "Review",
+        "desc": "Audit, validate, and improve quality before merge.",
+        "tone": "review",
+        "icon_html": "&#x1F50D;",
+    },
+    {
+        "value": "mvp_generator",
+        "title": "MVP Generator",
+        "desc": "Generate a lean, production-minded MVP baseline.",
+        "tone": "mvp",
+        "icon_html": "&#x1F4A1;",
+    },
+    {
+        "value": "mvp_completion",
+        "title": "MVP Completion",
+        "desc": "Finalize and polish an MVP to production readiness.",
+        "tone": "mvp_completion",
+        "icon_html": "&#x2705;",
+    },
+)
 GITHUB_TOKEN_URL = "https://github.com/settings/tokens/new?description=Full+Classic+PAT&scopes=repo,workflow,admin:org,admin:repo_hook,user,project,admin:enterprise,read:enterprise,manage_runners:enterprise,read:audit_log,write:network_configurations,manage_billing:copilot"
 GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
 GITHUB_COPILOT_MCP_SERVERS_CACHE_KEY = "mcp-servers-cache"
@@ -46,8 +112,6 @@ LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
 )
 _SAFE_UNQUOTED_ENV_VALUE_RE = re.compile(r"^[A-Za-z0-9._:/@+-]*$")
 LEGACY_GITHUB_TOKEN_ENV_NAMES = ("COPILOT_GITHUB_TOKEN",)
-LEGACY_GEMINI_ENV_NAMES = ("GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS")
-LEGACY_GEMINI_MCP_ENV_KEYS = frozenset({"GEMINI_API_KEY", "GEMINI_MODEL", "GIT_GEMINI_MAX_REPAIR_ATTEMPTS"})
 
 # Minimum lex-mcp-local version that ships the unified lex_mcp.server entry
 # point and backward-mode support.
@@ -56,18 +120,6 @@ MINIMUM_DUAL_MODE_VERSION = "1.0.0"
 
 class SetupWithAIError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class SetupWithAIUpdateResult:
-    version: str
-    env_keys_removed: tuple[str, ...] = ()
-    mcp_env_keys_removed: tuple[str, ...] = ()
-    env_file_path: Path | None = None
-    mcp_config_path: Path | None = None
-    package_upgraded: bool = False
-    artifact_directories_copied: tuple[Path, ...] = ()
-    server_restarted: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +160,17 @@ class SetupWithAIMCPProbeResult:
     prompts: tuple[dict[str, Any], ...] = ()
     resources: tuple[dict[str, Any], ...] = ()
     resource_templates: tuple[dict[str, Any], ...] = ()
+
+
+def normalize_mcp_mode(
+    mode: str | None,
+    *,
+    default: str = DEFAULT_LEX_MCP_MODE,
+) -> str:
+    candidate = str(mode or "").strip().lower()
+    if candidate in SUPPORTED_MCP_MODES:
+        return candidate
+    return default
 
 
 def build_lex_mcp_local_install_command(
@@ -376,13 +439,14 @@ def build_ai_env_values(
     remote_mcp_url: str = DEFAULT_REMOTE_MCP_URL,
     mcp_mode: str = DEFAULT_LEX_MCP_MODE,
 ) -> dict[str, str]:
+    normalized_mode = normalize_mcp_mode(mcp_mode)
     return {
         "REMOTE_MCP_TRANSPORT": DEFAULT_REMOTE_MCP_TRANSPORT,
         "REMOTE_MCP_URL": remote_mcp_url,
         "LEX_MCP_PRODUCTION": DEFAULT_LEX_MCP_PRODUCTION,
         "REMOTE_MCP_API_KEY": remote_mcp_api_key,
         "GITHUB_TOKEN": github_token,
-        "LEX_MCP_MODE": mcp_mode,
+        "LEX_MCP_MODE": normalized_mode,
         "LEX_MCP_ANALYTICS_BACKEND": "remote",
     }
 
@@ -563,10 +627,11 @@ def resolve_mcp_server_args(
     * Otherwise falls back to the legacy wrapper script path:
       ``["<path/to/wrapper_mcp.py>"]``.
     """
+    normalized_mode = normalize_mcp_mode(mcp_mode)
     if _has_unified_mcp_entry_point(python_executable):
-        return ["-m", "lex_mcp.server", "--mode", mcp_mode]
+        return ["-m", "lex_mcp.server", "--mode", normalized_mode]
     wrapper_path = resolve_wrapper_script_path(python_executable)
-    return [str(wrapper_path)]
+    return [str(wrapper_path), normalized_mode]
 
 
 def build_mcp_server_definition(
@@ -1278,9 +1343,9 @@ def launch_setup_with_ai_form(
 
             github_token = form_data.get("github_token", [""])[0].strip()
             remote_mcp_api_key = form_data.get("remote_mcp_api_key", [""])[0].strip()
-            mcp_mode = form_data.get("mcp_mode", ["forward"])[0].strip().lower()
-            if mcp_mode not in ("forward", "backward"):
-                mcp_mode = "forward"
+            mcp_mode = normalize_mcp_mode(
+                form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
+            )
 
             if not github_token or not remote_mcp_api_key:
                 body = _build_setup_form_html(
@@ -1346,116 +1411,11 @@ def launch_setup_with_ai_form(
 
 
 # ---------------------------------------------------------------------------
-# ai-update: versioned, incremental migration of an existing LEX AI setup
+# ai-update: the actual migration steps and public entry point live in
+# ``lex_mcp.ai_update`` (shipped by lex-mcp-local) so new steps can ship
+# without a lex-app release. This module still exposes ``_read_dotenv_value``
+# because ai_dashboard / verify_ai_assets and other lex-app callers rely on it.
 # ---------------------------------------------------------------------------
-
-def remove_env_keys(env_file_path: Path, keys_to_remove: set[str]) -> tuple[str, ...]:
-    """Remove matching lines from a dotenv file. Returns the keys actually removed."""
-    if not env_file_path.exists():
-        return ()
-
-    existing_lines = env_file_path.read_text(encoding="utf-8").splitlines()
-    output_lines: list[str] = []
-    removed: list[str] = []
-
-    for line in existing_lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key, _ = stripped.split("=", 1)
-            if key in keys_to_remove:
-                removed.append(key)
-                continue
-        output_lines.append(line)
-
-    if removed:
-        content = "\n".join(output_lines)
-        if content:
-            content += "\n"
-        _atomic_write_text(env_file_path, content)
-
-    return tuple(removed)
-
-
-def remove_mcp_server_env_keys(
-    mcp_config_path: Path,
-    keys_to_remove: set[str],
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-) -> tuple[str, ...]:
-    """Remove env keys from a specific server entry inside an mcp.json file.
-
-    Returns the keys actually removed.
-    """
-    if not mcp_config_path.exists():
-        return ()
-
-    try:
-        config = json.loads(mcp_config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return ()
-
-    if not isinstance(config, dict):
-        return ()
-
-    servers = config.get("servers", {})
-    if not isinstance(servers, dict):
-        return ()
-
-    server_def = servers.get(server_name)
-    if not isinstance(server_def, dict):
-        return ()
-
-    env_block = server_def.get("env")
-    if not isinstance(env_block, dict):
-        return ()
-
-    removed: list[str] = []
-    for key in keys_to_remove:
-        if key in env_block:
-            del env_block[key]
-            removed.append(key)
-
-    if removed:
-        _atomic_write_text(mcp_config_path, json.dumps(config, indent=2) + "\n")
-
-    return tuple(removed)
-
-
-def apply_ai_update_0_2_1(
-    project_root: Path,
-    *,
-    mcp_config_path: Path | None = None,
-    env: Mapping[str, str] | None = None,
-    home: Path | None = None,
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-) -> SetupWithAIUpdateResult:
-    """Migrate an existing LEX AI setup from 0.2.0 to 0.2.1.
-
-    * Removes ``GEMINI_API_KEY``, ``GEMINI_MODEL`` and
-      ``GIT_GEMINI_MAX_REPAIR_ATTEMPTS`` from the project ``.env``.
-    * Removes the same keys from the server's ``env`` block inside
-      GitHub Copilot's ``mcp.json``.
-    """
-    env_file_path = (Path(project_root) / ".env").resolve()
-    copilot_mcp_path = (
-        resolve_github_copilot_mcp_config_path(env=env, home=home)
-        if mcp_config_path is None
-        else Path(mcp_config_path)
-    ).resolve()
-
-    env_keys_removed = remove_env_keys(env_file_path, set(LEGACY_GEMINI_ENV_NAMES))
-    mcp_keys_removed = remove_mcp_server_env_keys(
-        copilot_mcp_path,
-        LEGACY_GEMINI_MCP_ENV_KEYS,
-        server_name=server_name,
-    )
-
-    return SetupWithAIUpdateResult(
-        version="0.2.1",
-        env_keys_removed=env_keys_removed,
-        mcp_env_keys_removed=mcp_keys_removed,
-        env_file_path=env_file_path,
-        mcp_config_path=copilot_mcp_path,
-    )
 
 
 def _read_dotenv_value(env_file_path: Path, key: str) -> str | None:
@@ -1476,320 +1436,6 @@ def _read_dotenv_value(env_file_path: Path, key: str) -> str | None:
     return None
 
 
-def _stop_lex_mcp_local_server(
-    mcp_config_path: Path,
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-    timeout_seconds: float = 5.0,
-) -> bool:
-    """Stop a running lex-mcp-local server. Returns True if a process was stopped."""
-    pid_file_path, _log_file_path = _resolve_lex_mcp_local_runtime_paths(
-        mcp_config_path,
-        server_name=server_name,
-    )
-
-    pid = _read_pid_file(pid_file_path)
-    if pid is None or not _is_process_running(pid):
-        return False
-
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        return False
-
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if not _is_process_running(pid):
-            break
-        time.sleep(0.1)
-    else:
-        # Force-kill if still alive after timeout.
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-
-    if pid_file_path.exists():
-        try:
-            pid_file_path.unlink()
-        except OSError:
-            pass
-
-    return True
-
-
-def apply_ai_update_0_2_2(
-    project_root: Path,
-    *,
-    mcp_config_path: Path | None = None,
-    env: Mapping[str, str] | None = None,
-    home: Path | None = None,
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-    runner: Callable[..., Any] = subprocess.run,
-) -> SetupWithAIUpdateResult:
-    """Refresh all LEX AI artifacts.
-
-    Run on every ``lex ai-update`` invocation (not just once):
-    * Upgrades the ``lex-mcp-local`` pip package to the latest published version.
-    * Re-copies ALL embedded directories from the upgraded ``lex-mcp-local``
-      package (see ``LEX_MCP_LOCAL_EMBEDDED_DIRECTORY_NAMES``) into the project
-      root so they stay in sync with each release.
-    * Re-copies ALL embedded directories from the ``lex-app`` package (see
-      ``LEX_APP_EMBEDDED_DIRECTORY_NAMES``) into the project root.
-    * Stops the running MCP server so it picks up the new code on next launch.
-    """
-    env_file_path = (Path(project_root) / ".env").resolve()
-    copilot_mcp_path = (
-        resolve_github_copilot_mcp_config_path(env=env, home=home)
-        if mcp_config_path is None
-        else Path(mcp_config_path)
-    ).resolve()
-
-    python_executable = resolve_active_python_executable(project_root, env=env)
-
-    remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
-    if not remote_mcp_api_key:
-        raise SetupWithAIError(
-            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local. Please run lex setup-with-ai to set your .env file."
-        )
-
-    install_lex_mcp_local(python_executable, remote_mcp_api_key, runner=runner, upgrade=True)
-
-    wrapper_script_path = resolve_wrapper_script_path(python_executable)
-    copied: list[Path] = list(
-        copy_lex_mcp_local_directories(project_root, wrapper_script_path)
-    )
-
-    lex_package_root = resolve_lex_app_package_root(python_executable)
-    for dir_name in LEX_APP_EMBEDDED_DIRECTORY_NAMES:
-        if dir_name == "docs":
-            dest = copy_lex_app_docs_directory(project_root, lex_package_root)
-        else:
-            src = (lex_package_root / dir_name) if lex_package_root else None
-            dest = _copy_directory_into_project_root(project_root, src if src and src.is_dir() else None)
-        if dest is not None:
-            copied.append(dest)
-
-    server_stopped = _stop_lex_mcp_local_server(
-        copilot_mcp_path, server_name=server_name,
-    )
-
-    return SetupWithAIUpdateResult(
-        version="0.2.2",
-        env_file_path=env_file_path,
-        mcp_config_path=copilot_mcp_path,
-        package_upgraded=True,
-        artifact_directories_copied=tuple(copied),
-        server_restarted=server_stopped,
-    )
-
-
-def _update_mcp_server_to_unified_entry(
-    mcp_config_path: Path,
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-    mode: str = DEFAULT_LEX_MCP_MODE,
-) -> bool:
-    """Migrate an mcp.json server entry from ``wrapper_mcp.py`` to ``lex_mcp.server``.
-
-    Returns ``True`` if the config was modified.
-    """
-    if not mcp_config_path.exists():
-        return False
-    try:
-        config = json.loads(mcp_config_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False
-    if not isinstance(config, dict):
-        return False
-    servers = config.get("servers", {})
-    if not isinstance(servers, dict):
-        return False
-    server_def = servers.get(server_name)
-    if not isinstance(server_def, dict):
-        return False
-
-    args = server_def.get("args", [])
-    if isinstance(args, list) and "-m" in args and "lex_mcp.server" in args:
-        return False  # already migrated
-
-    server_def["args"] = ["-m", "lex_mcp.server", "--mode", mode]
-
-    env_block = server_def.get("env", {})
-    if isinstance(env_block, dict):
-        env_block["LEX_MCP_MODE"] = mode
-        server_def["env"] = env_block
-
-    _atomic_write_text(mcp_config_path, json.dumps(config, indent=2) + "\n")
-    return True
-
-
-def apply_ai_update_1_0_0(
-    project_root: Path,
-    *,
-    mcp_config_path: Path | None = None,
-    env: Mapping[str, str] | None = None,
-    home: Path | None = None,
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-    runner: Callable[..., Any] = subprocess.run,
-) -> SetupWithAIUpdateResult:
-    """Migrate to the unified ``lex_mcp.server`` entry point (1.0.0).
-
-    * Upgrades ``lex-mcp-local`` to the latest published version.
-    * Updates the mcp.json server entry to use
-      ``python -m lex_mcp.server --mode <mode>`` instead of the legacy
-      ``wrapper_mcp.py`` script path.
-    * Ensures ``LEX_MCP_MODE`` is present in ``.env`` (defaults to
-      ``forward``).
-    * Re-copies all embedded directories from both packages.
-    * Stops the running MCP server so the new entry point is used on
-      next launch.
-    """
-    env_file_path = (Path(project_root) / ".env").resolve()
-    copilot_mcp_path = (
-        resolve_github_copilot_mcp_config_path(env=env, home=home)
-        if mcp_config_path is None
-        else Path(mcp_config_path)
-    ).resolve()
-
-    python_executable = resolve_active_python_executable(project_root, env=env)
-
-    remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
-    if not remote_mcp_api_key:
-        raise SetupWithAIError(
-            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local. Please run lex setup-with-ai to set your .env file."
-        )
-
-    install_lex_mcp_local(
-        python_executable, remote_mcp_api_key, runner=runner, upgrade=True,
-    )
-
-    # Resolve mode: prefer existing .env value, fall back to default.
-    mcp_mode = _read_dotenv_value(env_file_path, "LEX_MCP_MODE") or DEFAULT_LEX_MCP_MODE
-
-    # Migrate mcp.json from wrapper_mcp.py → lex_mcp.server, but only
-    # if the unified entry point is actually installed.
-    if _has_unified_mcp_entry_point(python_executable):
-        _update_mcp_server_to_unified_entry(
-            copilot_mcp_path, server_name=server_name, mode=mcp_mode,
-        )
-
-    # Ensure LEX_MCP_MODE is written to .env.
-    if not _read_dotenv_value(env_file_path, "LEX_MCP_MODE"):
-        update_env_file(env_file_path, {"LEX_MCP_MODE": mcp_mode})
-
-    # Re-copy embedded directories.
-    wrapper_script_path = resolve_wrapper_script_path(python_executable)
-    copied: list[Path] = list(
-        copy_lex_mcp_local_directories(project_root, wrapper_script_path)
-    )
-    lex_package_root = resolve_lex_app_package_root(python_executable)
-    for dir_name in LEX_APP_EMBEDDED_DIRECTORY_NAMES:
-        if dir_name == "docs":
-            dest = copy_lex_app_docs_directory(project_root, lex_package_root)
-        else:
-            src = (lex_package_root / dir_name) if lex_package_root else None
-            dest = _copy_directory_into_project_root(
-                project_root, src if src and src.is_dir() else None,
-            )
-        if dest is not None:
-            copied.append(dest)
-
-    server_stopped = _stop_lex_mcp_local_server(
-        copilot_mcp_path, server_name=server_name,
-    )
-
-    return SetupWithAIUpdateResult(
-        version="1.0.0",
-        env_file_path=env_file_path,
-        mcp_config_path=copilot_mcp_path,
-        package_upgraded=True,
-        artifact_directories_copied=tuple(copied),
-        server_restarted=server_stopped,
-    )
-
-
-def apply_ai_update_1_0_1(
-    project_root: Path,
-    *,
-    mcp_config_path: Path | None = None,
-    env: Mapping[str, str] | None = None,
-    home: Path | None = None,
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-    runner: Callable[..., Any] = subprocess.run,
-) -> SetupWithAIUpdateResult:
-    """Update the ``lex-mcp-local`` package code to the latest version (1.0.1).
-
-    This is a code-only update:
-    * Upgrades ``lex-mcp-local`` to the latest published version.
-    * Stops the running MCP server so the new code is used on next launch.
-
-    No environment variables, mcp.json structure, or embedded directories
-    are changed.
-    """
-    env_file_path = (Path(project_root) / ".env").resolve()
-    copilot_mcp_path = (
-        resolve_github_copilot_mcp_config_path(env=env, home=home)
-        if mcp_config_path is None
-        else Path(mcp_config_path)
-    ).resolve()
-
-    python_executable = resolve_active_python_executable(project_root, env=env)
-
-    remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
-    if not remote_mcp_api_key:
-        raise SetupWithAIError(
-            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local. Please run lex setup-with-ai to set your .env file."
-        )
-
-    install_lex_mcp_local(
-        python_executable, remote_mcp_api_key, runner=runner, upgrade=True,
-    )
-
-    server_stopped = _stop_lex_mcp_local_server(
-        copilot_mcp_path, server_name=server_name,
-    )
-
-    return SetupWithAIUpdateResult(
-        version="1.0.1",
-        env_file_path=env_file_path,
-        mcp_config_path=copilot_mcp_path,
-        package_upgraded=True,
-        server_restarted=server_stopped,
-    )
-
-
-# Ordered list of (target_version, migration_function) pairs.
-# Each function accepts (project_root, **kwargs) and returns a
-# SetupWithAIUpdateResult.  ``apply_ai_update`` runs them in sequence.
-_AI_UPDATE_STEPS: list[tuple[str, Callable[..., SetupWithAIUpdateResult]]] = [
-    ("0.2.1", apply_ai_update_0_2_1),
-    ("0.2.2", apply_ai_update_0_2_2),
-    ("1.0.0", apply_ai_update_1_0_0),
-    ("1.0.1", apply_ai_update_1_0_1),
-]
-
-
-def apply_ai_update(
-    project_root: Path,
-    *,
-    mcp_config_path: Path | None = None,
-    env: Mapping[str, str] | None = None,
-    home: Path | None = None,
-    server_name: str = LEX_MCP_LOCAL_SERVER_NAME,
-) -> list[SetupWithAIUpdateResult]:
-    """Run every registered AI-setup migration step and return results."""
-    results: list[SetupWithAIUpdateResult] = []
-    for _version, step_fn in _AI_UPDATE_STEPS:
-        result = step_fn(
-            project_root,
-            mcp_config_path=mcp_config_path,
-            env=env,
-            home=home,
-            server_name=server_name,
-        )
-        results.append(result)
-    return results
-
-
 def _build_setup_form_html(
     *,
     state: str,
@@ -1802,6 +1448,25 @@ def _build_setup_form_html(
         error_block = (
             f'<div class="error">{html.escape(error_message)}</div>'
         )
+    selected_mode = DEFAULT_LEX_MCP_MODE
+    mode_cards = "".join(
+        (
+            f'<label class="mode-card {card["tone"]}'
+            f'{" selected" if card["value"] == selected_mode else ""}" '
+            f'data-mode="{card["value"]}">'
+            f'<input type="radio" name="mcp_mode_select" value="{card["value"]}" '
+            f'{"checked" if card["value"] == selected_mode else ""}>'
+            f'<div class="mode-icon">{card["icon_html"]}</div>'
+            f'<div class="mode-title">{html.escape(card["title"])}</div>'
+            f'<p class="mode-desc">{html.escape(card["desc"])}</p>'
+            '<div class="mode-check">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" '
+            'stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+            '</div>'
+            '</label>'
+        )
+        for card in MCP_MODE_CARD_DEFS
+    )
 
 
 
@@ -1982,7 +1647,7 @@ def _build_setup_form_html(
       }}
       .mode-toggle {{
         display: grid;
-        grid-template-columns: 1fr 1fr;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 1rem;
       }}
       .mode-card {{
@@ -2025,6 +1690,18 @@ def _build_setup_form_html(
       .mode-card.backward .mode-icon {{
         background: rgba(40, 48, 103, 0.08);
       }}
+            .mode-card.edit .mode-icon {{
+                background: rgba(16, 185, 129, 0.12);
+            }}
+            .mode-card.review .mode-icon {{
+                background: rgba(234, 179, 8, 0.14);
+            }}
+            .mode-card.mvp .mode-icon {{
+                background: rgba(244, 114, 182, 0.12);
+            }}
+            .mode-card.mvp_completion .mode-icon {{
+                background: rgba(34, 197, 94, 0.12);
+            }}
       .mode-card .mode-title {{
         font-size: 1.05rem;
         font-weight: 700;
@@ -2114,6 +1791,16 @@ def _build_setup_form_html(
           grid-template-columns: 1fr;
         }}
         .mode-toggle {{
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }}
+                .hero {{
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 1rem;
+                }}
+            }}
+            @media (max-width: 640px) {{
+                .mode-toggle {{
           grid-template-columns: 1fr;
         }}
         .hero {{
@@ -2142,28 +1829,7 @@ def _build_setup_form_html(
           <p class="eyebrow">Workflow mode</p>
           <h2>What would you like to do?</h2>
           <div class="mode-toggle" id="modeToggle">
-            <label class="mode-card forward selected" data-mode="forward">
-              <input type="radio" name="mcp_mode_select" value="forward" checked>
-              <div class="mode-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-              </div>
-              <div class="mode-title">Create new project</div>
-              <p class="mode-desc">Start a new LEX App project with AI-assisted planning, implementation, and documentation.</p>
-              <div class="mode-check">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-            </label>
-            <label class="mode-card backward" data-mode="backward">
-              <input type="radio" name="mcp_mode_select" value="backward">
-              <div class="mode-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#283067" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-              </div>
-              <div class="mode-title">Document existing project</div>
-              <p class="mode-desc">Generate documentation and canonical context files for a project that already exists.</p>
-              <div class="mode-check">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-            </label>
+                        {mode_cards}
           </div>
         </article>
 
@@ -2190,7 +1856,7 @@ def _build_setup_form_html(
           {error_block}
           <form method="post" action="/submit">
             <input type="hidden" name="state" value="{html.escape(state)}">
-            <input type="hidden" name="mcp_mode" id="mcpModeInput" value="forward">
+                        <input type="hidden" name="mcp_mode" id="mcpModeInput" value="{html.escape(selected_mode)}">
 
             <label>
               GitHub token

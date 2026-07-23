@@ -505,6 +505,54 @@ with tempfile.TemporaryDirectory() as tmpdir:
         ".env updated to backward",
     )
 
+    # 9g.1  Switch to edit
+    form_edit = {**form, "mcp_mode": ["edit"]}
+    s, e = _handle_save(form_edit, root, env_path, mcp_path)
+    check(
+        any("Mode changed to edit" in x for x in s),
+        "backward→edit switch works",
+    )
+    check(
+        _read_dotenv_value(env_path, "LEX_MCP_MODE") == "edit",
+        ".env updated to edit",
+    )
+
+    # 9g.2  Switch to review
+    form_review = {**form, "mcp_mode": ["review"]}
+    s, e = _handle_save(form_review, root, env_path, mcp_path)
+    check(
+        any("Mode changed to review" in x for x in s),
+        "edit→review switch works",
+    )
+    check(
+        _read_dotenv_value(env_path, "LEX_MCP_MODE") == "review",
+        ".env updated to review",
+    )
+
+    # 9g.3  Switch to mvp_generator
+    form_mvp = {**form, "mcp_mode": ["mvp_generator"]}
+    s, e = _handle_save(form_mvp, root, env_path, mcp_path)
+    check(
+        any("Mode changed to mvp_generator" in x for x in s),
+        "review→mvp_generator switch works",
+    )
+    check(
+        _read_dotenv_value(env_path, "LEX_MCP_MODE") == "mvp_generator",
+        ".env updated to mvp_generator",
+    )
+
+    # 9g.4  Switch to mvp_completion
+    form_mvp_completion = {**form, "mcp_mode": ["mvp_completion"]}
+    s, e = _handle_save(form_mvp_completion, root, env_path, mcp_path)
+    check(
+        any("Mode changed to mvp_completion" in x for x in s),
+        "mvp_generator→mvp_completion switch works",
+    )
+    check(
+        _read_dotenv_value(env_path, "LEX_MCP_MODE") == "mvp_completion",
+        ".env updated to mvp_completion",
+    )
+
     # 9h  Empty/invalid mode in form → no mode change, no crash
     form_empty = {**form, "mcp_mode": [""]}
     s, e = _handle_save(form_empty, root, env_path, mcp_path)
