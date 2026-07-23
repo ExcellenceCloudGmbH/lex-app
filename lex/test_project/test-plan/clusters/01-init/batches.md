@@ -193,3 +193,17 @@
 | Status | ✅ Complete — clear VS Code/PyCharm sessions generate their native format; unknown or conflicting sessions generate both; existing VS Code entries survive regeneration. See [2026-07-23 session](../../progress/sessions/2026-07-23-ide-run-configs.md). |
 
 ---
+
+### Batch 1z — verify_ai_assets mode resolution + AI-tools compatibility shims ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.211 – 1.229 |
+| Type | U |
+| Files covered | `lex/tools/verify_ai_assets.py`, `lex/tools/ai_dashboard.py`, `lex/tools/ai_faq.py` |
+| Test file | `lex/test_project/tests/init/test_1z_verify_ai_assets_and_shims.py` |
+| Test classes | `TestCluster01z_ReadEnvFileValue` (1.211–1.215), `TestCluster01z_ResolveActiveMcpMode` (1.216–1.220), `TestCluster01z_ReadModeFromMcpJson` (1.221–1.223), `TestCluster01z_VerifyDirectory` (1.224–1.225), `TestCluster01z_AiShimContracts` (1.226–1.229) |
+| Fixtures | `tempfile.TemporaryDirectory`; `unittest.mock.patch.dict("sys.modules", ...)` to mock `lex_mcp` for shim tests |
+| Tests landed | **19 pass / 0 fail** (direct pytest) |
+| Coverage gain | `verify_ai_assets._read_env_file_value`, `resolve_active_mcp_mode`, `_read_mode_from_mcp_json`, `verify_directory`, `DirectoryVerificationResult.ok`; `ai_dashboard` + `ai_faq` shim ImportError + delegation contracts |
+| Status | ✅ Complete — Coverage-task #673 for PR #672. |

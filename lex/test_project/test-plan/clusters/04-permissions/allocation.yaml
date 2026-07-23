@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 74
+max_scenario: 82
 letters:
   a:
     title: ''
@@ -131,3 +131,14 @@ letters:
       xfail: 0
     note: scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit
       order + subclass contract
+  n:
+    title: '`PermissionResult` value-object contract (factory methods + get_fields resolver)'
+    scenarios: 4.75-4.82
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: scenarios 4.75–4.82; allow_all/allow_fields/allow_all_except/deny/deny_all factory methods,
+      get_fields resolver (denied=empty, specific fields, excluded fields, all fields), __str__ output.
+      Pure U tests; no DB. Coverage-task #673 for PR #672 (LexModel.py).
