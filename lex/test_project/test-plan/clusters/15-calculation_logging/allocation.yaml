@@ -1,0 +1,84 @@
+cluster: 15
+slug: calculation_logging
+title: Calculation Logging Surface
+max_scenario: 34
+letters:
+  a:
+    title: LexLogger builder API and content shape
+    scenarios: 15.1-15.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  b:
+    title: Single-parent hierarchy, loud children
+    scenarios: 15.7-15.10
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  c:
+    title: Silent children + mixed-siblings regression gate
+    scenarios: 15.11-15.13
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  d:
+    title: Three-level chain (root → middle → grandchild)
+    scenarios: 15.14-15.15
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  e:
+    title: CalculatedModelMixin combinatorial pipeline
+    scenarios: 15.16-15.18
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion
+  f:
+    title: Hierarchy preservation across the .save() boundary
+    scenarios: 15.19-15.21
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts not yet measured — imported at cluster-15 promotion; three scenarios (15.19-15.21)
+      marked @unittest.expectedFailure pending the execute_calculation_sync fix
+  g:
+    title: Object-less heading frames (TOC nodes) in the log tree
+    scenarios: 15.22-15.31
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: model_logging_context("...") heading frames — lazy row creation, heading chains, node
+      reuse, routing/root records skip headings, __str__ tree titles
+  h:
+    title: PDF export renders like the log view
+    scenarios: 15.32-15.34
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: customer report 2026-07-14 — the Download-PDF of a calculation log lost markdown structure.
+      DownloadMarkdownPdf now renders via WeasyPrint (already a declared dep; xhtml2pdf kept as runtime
+      fallback) with a GitHub-style stylesheet mirroring the frontend log view, and the markdown extras
+      match the log view's parser surface (tables, fenced code, strike; dropped code-friendly which
+      silently disabled __bold__). Contract pinned; anything the log view renders appears rendered in
+      the PDF — never as raw markdown syntax

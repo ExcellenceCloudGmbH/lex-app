@@ -1,0 +1,167 @@
+cluster: 6
+slug: audit_logging
+title: Audit Logging
+max_scenario: 118
+letters:
+  a:
+    title: ''
+    scenarios: 6.1-6.4
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: ''
+    scenarios: 6.5-6.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: ''
+    scenarios: 6.7-6.9
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: ''
+    scenarios: 6.41-6.48
+    status: complete
+    tests:
+      pass: 6
+      skip: 2
+      xfail: 0
+    note: 6.41–6.46 (6.47/6.48 skipped — need failure-injection / signal-spy fixture
+  e:
+    title: ''
+    scenarios: 6.51-6.53
+    status: complete
+    tests:
+      pass: 2
+      skip: 1
+      xfail: 0
+    note: 6.51/6.53 (6.52 partial-success skipped — needs per-row deny / DB-error fixture
+  f:
+    title: ''
+    scenarios: 6.61-6.63
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: pins `RETRYABLE_SQLSTATE_CODES` + `MAX_UPDATE_RETRIES`
+  g:
+    title: Models & enums
+    scenarios: 6.71-6.73
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: create/delete/edit all denied (incl. `AuditLogStatus`
+  h:
+    title: Mixins & utils
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  i:
+    title: Serialisers & handlers (incl. bug-§1 LexLogger surface)
+    scenarios: 6.50,6.114-6.116
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: 'counts folded into cluster top-line in pre-migration dashboard. 6.51–6.53 renumbered to 6.114–6.116
+      on 2026-07-07 (BUG-023) — they collided with letter 6e, which legitimately owns 6.51–6.53
+      (bulk-delete audit); 6.50 kept.'
+  j:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  k:
+    title: ''
+    scenarios: 6.96-6.108
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  l:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  m:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  n:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  o:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  p:
+    title: Calculation-log cache backfill buffer cap
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: scenarios 6.109–6.113; bounds `CacheManager.store_message` to a 256 KB tail (+ applies `CACHE_TIMEOUT`)
+      so opening a long calc log can't OOM the backend
+  q:
+    title: Root-calculation detection ignores heading frames
+    scenarios: 6.117-6.118
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation`
+      must skip them via get_root_model()/get_current_model()

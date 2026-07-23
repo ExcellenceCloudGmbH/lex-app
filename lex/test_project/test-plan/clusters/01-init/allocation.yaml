@@ -1,0 +1,244 @@
+cluster: 1
+slug: init
+title: Init — Project Bootstrap
+max_scenario: 202
+letters:
+  a:
+    title: '`lex setup` — scaffolding'
+    scenarios: 1.1-1.5
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: '`lex Init` — first-run initialization'
+    scenarios: 1.6-1.16
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: '`INITIAL_DATA` loading (part of `lex Init`)'
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: ''
+    scenarios: 1.23-1.30
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: ''
+    scenarios: 1.30-1.43
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  f:
+    title: ''
+    scenarios: 1.8-1.15
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  g:
+    title: ''
+    scenarios: 1.44-1.46
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: '`_make_sync_manager()` fixture, no Keycloak/DB'
+  h:
+    title: ''
+    scenarios: 1.47-1.50
+    status: complete
+    tests:
+      pass: 15
+      skip: 0
+      xfail: 0
+    note: '`requests.get` patched, network-free'
+  j:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  k:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  l:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  m:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  n:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  o:
+    title: Lazy imports + sync-exclusion + history-config helpers
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 15
+      skip: 0
+      xfail: 0
+    note: scenarios 1.110–1.124
+  p:
+    title: Settings / config / URLs / top-level views
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 22
+      skip: 0
+      xfail: 0
+    note: scenarios 1.125–1.146
+  q:
+    title: Migration file completeness gate
+    scenarios: '1.147'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: scenario 1.147; `lex makemigrations ... --check --dry-run` must stay clean for framework apps
+  s:
+    title: Log-noise cleanup + lex-namespace debug control (EXC-1787)
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: scenarios 1.159–1.168; urllib3 InsecureRequestWarning gate + `LEX_LOG_LEVEL` lex-only DEBUG
+      + console-handler level + blanket `LEX_SUPPRESS_WARNINGS` filter
+  t:
+    title: '`DISABLE_SERVER_SIDE_CURSORS` placement (production cursor crash)'
+    scenarios: 1.169-1.170
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: scenarios 1.169–1.170; flag was module-level (ignored by Django) so server-side cursors stayed
+      on behind the pooling proxy → `InvalidCursorName` on every `.iterator()`; now set per
+  u:
+    title: Fast ASGI health/readiness probes
+    scenarios: 1.171-1.175
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: scenarios 1.171–1.175; `/health` short-circuits to static liveness, `/readiness` gates on DB
+      readiness, non-probe HTTP falls through to Django
+  v:
+    title: '`TIME_ZONE`↔`USE_TZ` coupling — `django_celery_beat` DatabaseScheduler correctness'
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: scenarios 1.179–1.183; `TIME_ZONE="UTC"` when `USE_TZ=False` so beat's naive-as-UTC read is
+      correct for the recovery `IntervalSchedule` AND future-edit `ClockedSchedule` (was off b
+  w:
+    title: '`LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart'
+    scenarios: 1.184-1.186
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck
+      `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi
+  x:
+    title: Health exposes encrypted runtime metadata for the Instance Controller
+    scenarios: 1.187-1.194
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: 'scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision
+      fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py;
+      moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC.'
+  i:
+    title: rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident
+    scenarios: 1.195-1.200
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: management command that surgically re-anchors user-entered datetimes mis-stored after the
+      rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until)
+      (--cutoff required, no global default — too-early corrupts good data; --until defaults to now),
+      excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own
+      date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197
+      late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag.
+      Ships with the USE_TZ=True cutover.
+  r:
+    title: Fetched datetimes come back in the DB-session display zone (Berlin)
+    scenarios: 1.201-1.202
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: DATABASES['default']['TIME_ZONE'] = TIME_ZONE runs the Postgres session in Berlin, so a
+      fetched DateTimeField returns aware in the display zone (11:00+02:00) not UTC — str()/.date()/.hour
+      and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
+      Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
+      SQL is unaffected (history+serializers+init+exports 385 pass with it live).

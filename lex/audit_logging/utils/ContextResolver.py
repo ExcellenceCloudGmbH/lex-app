@@ -11,7 +11,7 @@ import logging
 from lex.audit_logging.mixins.AuditLogMixin import _safe_get_content_type
 from lex.api.utils import operation_context
 from lex.audit_logging.utils.DataModels import ContextInfo, ContextResolutionError
-from lex.audit_logging.utils.ModelContext import _model_context
+from lex.audit_logging.utils.ModelContext import _model_context, LogHeading
 
 logger = logging.getLogger(__name__)
 
@@ -75,25 +75,50 @@ class ContextResolver:
             
             # Extract model context using new ModelContext structure
             model_ctx = _model_context.get()['model_context']
-            
-            # Determine current and parent models using direct property access
-            current_model = model_ctx.current
-            parent_model = model_ctx.parent
+
+            # Snapshot the stack: persistence may run deferred (on_commit)
+            # after the with-blocks have exited, so the heading chain must be
+            # captured now.
+            frames = list(model_ctx._stack)
+            current_frame = frames[-1] if frames else None
+
+            # Node identity: current_model/content_type describe the actual
+            # top frame — None when the top frame is a LogHeading (the current
+            # log node is then the heading node itself).
+            current_model = None if isinstance(current_frame, LogHeading) else current_frame
+            # Parent for persistence: the nearest real model below the top —
+            # the base node any heading chain hangs off.
+            parent_model = None
+            for frame in reversed(frames[:-1]):
+                if not isinstance(frame, LogHeading):
+                    parent_model = frame
+                    break
             current_record = None
             parent_record = None
             content_type = None
             parent_content_type = None
-            root = model_ctx.get_root()
             root_record = None
-            
+
+            # Routing (Redis cache keys + WebSocket groups) is keyed by real
+            # model records — headings only shape the tree, so skip them.
+            routing_model = model_ctx.get_current_model()
+            root = model_ctx.get_root_model()
+
             # Process current model if it exists
             if current_model:
                 try:
                     content_type = _safe_get_content_type(current_model)
-                    current_record = f"{current_model._meta.model_name}_{current_model.pk}"
                 except Exception as e:
                     logger.warning(
                         f"Error resolving ContentType for current model: {e}",
+                        extra={'calculation_id': calculation_id}
+                    )
+            if routing_model:
+                try:
+                    current_record = f"{routing_model._meta.model_name}_{routing_model.pk}"
+                except Exception as e:
+                    logger.warning(
+                        f"Error resolving record for routing model: {e}",
                         extra={'calculation_id': calculation_id}
                     )
             if root:
@@ -126,7 +151,8 @@ class ContextResolver:
                 parent_record=parent_record,
                 content_type=content_type,
                 parent_content_type=parent_content_type,
-                root_record=root_record
+                root_record=root_record,
+                frames=frames
             )
             
             logger.debug(

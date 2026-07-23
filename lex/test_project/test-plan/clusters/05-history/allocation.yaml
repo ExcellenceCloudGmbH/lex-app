@@ -1,0 +1,120 @@
+cluster: 5
+slug: history
+title: History & Bitemporal
+max_scenario: 103
+letters:
+  a:
+    title: ''
+    scenarios: 5.1-5.10
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: ''
+    scenarios: 5.6-5.8
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: ''
+    scenarios: '5.9'
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: Service layer
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  f:
+    title: History REST endpoint
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  g:
+    title: ''
+    scenarios: '5.61'
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: 5.61/5.61b close 5.4's unasserted half
+  h:
+    title: ''
+    scenarios: 5.62-5.66
+    status: complete
+    tests:
+      pass: 4
+      skip: 1
+      xfail: 1
+    note: 5.66 xfail — public `suspend_bitemporal()` CM not yet exposed; 5.67 deferred — needs fixture
+  i:
+    title: ''
+    scenarios: 5.71-5.74
+    status: complete
+    tests:
+      pass: 2
+      skip: 2
+      xfail: 0
+    note: 5.73/5.74 auto-skip — MetaHistorical* not wired on test fixture; prod path in integration tests
+  j:
+    title: ''
+    scenarios: 5.75-5.76
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: 5.75 full snapshot, 5.76 `history_user` stamped
+  k:
+    title: ''
+    scenarios: 5.81-5.87
+    status: complete
+    tests:
+      pass: 0
+      skip: 3
+      xfail: 1
+    note: auto-skip — MetaHistorical* not wired; prod registration covered in unit tests
+  l:
+    title: ''
+    scenarios: 5.91-5.97
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: save side of the future-activation handoff (worker side = 8.43); scenarios 5.91–5.97, reuses
+      `HistSimpleItem`
+  m:
+    title: Edit-time correctness + as_of time-travel round trip
+    scenarios: 5.98-5.103
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 1
+    note: end-to-end edited_at → Z serialization → parse_as_of_datetime → get_queryset_as_of chain;
+      5.101 xfail(strict) pins BUG-026 (edited_at vs valid_from/sys_from clock-read gap)

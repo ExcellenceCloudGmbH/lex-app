@@ -1,0 +1,104 @@
+cluster: 2
+slug: crud_api
+title: CRUD via REST API
+max_scenario: 107
+letters:
+  a:
+    title: Create (POST)
+    scenarios: 2.1-2.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: Read (GET)
+    scenarios: 2.8-2.12
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: Update (PATCH / PUT)
+    scenarios: 2.13-2.18
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: Delete (DELETE)
+    scenarios: 2.19-2.22
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: Bulk operations (Many endpoint)
+    scenarios: 2.23-2.25
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  f:
+    title: Model-entry mixins & serialisers
+    scenarios: 2.7-2.29
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  g:
+    title: One / Many / List + filter backends
+    scenarios: 2.30-2.37
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  h:
+    title: Structure / fields / lex-API endpoints
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  i:
+    title: Cancel-calculation REST endpoint
+    scenarios: 2.93-2.96
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored
+  j:
+    title: Instance API-key extraction and matching
+    scenarios: 2.97-2.107
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge
+      cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key

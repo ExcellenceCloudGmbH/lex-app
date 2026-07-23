@@ -1,0 +1,64 @@
+cluster: 9
+slug: signals_ws
+title: Signals & WebSocket
+max_scenario: 42
+letters:
+  a:
+    title: ''
+    scenarios: 9.1-9.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: Consumers (excluding usage-blocked ones)
+    scenarios: ''
+    status: planned
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: ''
+    scenarios: 9.4-9.5
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  e:
+    title: Generic CRUD mutation broadcast (live list refresh — June 3)
+    scenarios: 9.29-9.36
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: scenarios 9.29–9.36; plain CRUD now emits a `model_data_update` `record_mutation` so open lists
+      refresh without manual reload
+  f:
+    title: 'Core health/calculation/log WebSocket consumers (coverage task #620)'
+    scenarios: 9.37-9.42
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: scenarios 9.37–9.42; public backend-health socket, calculations group fan-out, per-record calculation-log
+      stream, and shutdown `disconnect_all` tracking

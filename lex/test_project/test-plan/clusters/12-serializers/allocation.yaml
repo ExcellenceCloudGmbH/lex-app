@@ -1,0 +1,109 @@
+cluster: 12
+slug: serializers
+title: Serializer Contract
+max_scenario: 48
+letters:
+  a:
+    title: Read contract — field visibility & framework-managed fields
+    scenarios: 12.1-12.8
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: Type round-trip — what goes in comes back out
+    scenarios: 12.9-12.19
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  c:
+    title: List & Many read contract
+    scenarios: 12.20-12.22
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  d:
+    title: AuditLog payload filtering
+    scenarios: 12.23-12.25
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  e:
+    title: Serializer factory contract
+    scenarios: 12.26-12.35
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  f:
+    title: ''
+    scenarios: 12.29-12.31
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: 12.29–12.31 (`TagItem`/`TaggableItem`/`EditScopedItem` fixtures added April 23
+  g:
+    title: Datetime timezone ambiguity (BUG-025, fixed)
+    scenarios: 12.36-12.38
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for
+      naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT)
+  h:
+    title: Clearing a FileField through the REST update path
+    scenarios: 12.39-12.41
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: LexClearableFileField/-ImageField — an explicit empty multipart value clears the stored
+      file (omit still keeps, upload still replaces); frontend twin F9 batch 9d sends the marker
+  i:
+    title: Foreign-key display names in the read contract (BUG-F-003 backend fix)
+    scenarios: 12.42-12.45
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: additive companion `<fk>__short_description` = str(related) emitted alongside the raw FK id
+      on both list and detail paths; list resolves names in one batched pk__in query per FK (mirrors
+      ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so
+      filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of
+      frontend BUG-F-003 (FK columns rendered as bare ids)
+  j:
+    title: Datetime write→read round trip under the aware-UTC convention
+    scenarios: 12.46-12.48
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: live regression gates for the USE_TZ=True cutover — a client that sends an explicit instant
+      (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone;
+      summer round trip, year-end midnight across the winter offset, and a truthful designated instant.
+      Frontend twin datetimeConventionRoundTrip.test.ts.

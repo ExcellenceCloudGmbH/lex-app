@@ -3,6 +3,28 @@ from contextlib import contextmanager
 from typing import Optional, Any, List, Dict
 
 
+class LogHeading:
+    """
+    Object-less frame on the model context stack.
+
+    Represents a table-of-contents style section heading in the calculation
+    log tree: ``with model_logging_context("Data preparation"):`` groups all
+    nested log output under a titled node without requiring a backing model
+    instance. Plain Python object so it survives the deepcopy used when the
+    model context is shipped to Celery workers.
+    """
+
+    def __init__(self, title: str):
+        self.title = title
+        # pk of the persisted CalculationLog row for this frame — cached by
+        # CalculationLog._persist_message after lazy creation so repeated log
+        # calls inside the block don't re-run the get_or_create lookup.
+        self.node_id: Optional[int] = None
+
+    def __repr__(self) -> str:
+        return f"LogHeading({self.title!r})"
+
+
 class ModelContext:
     """
     A class-based model context manager that correctly handles nested contexts.
@@ -28,6 +50,20 @@ class ModelContext:
 
     def get_root(self) -> Optional[Any]:
         return self._stack[0] if self._stack else None
+
+    def get_root_model(self) -> Optional[Any]:
+        """First real model frame from the bottom of the stack, skipping LogHeading frames."""
+        for frame in self._stack:
+            if not isinstance(frame, LogHeading):
+                return frame
+        return None
+
+    def get_current_model(self) -> Optional[Any]:
+        """Nearest real model frame from the top of the stack, skipping LogHeading frames."""
+        for frame in reversed(self._stack):
+            if not isinstance(frame, LogHeading):
+                return frame
+        return None
 
 
     @property
@@ -100,9 +136,20 @@ def model_logging_context(instance: Any):
     This context manager correctly handles arbitrary levels of nesting by creating
     a new context stack for the nested block, ensuring the full context hierarchy
     is always preserved.
+
+    A plain string is accepted as a table-of-contents style section heading:
+    ``with model_logging_context("Data preparation"):`` groups all log output
+    inside the block under a titled, object-less node in the calculation log
+    tree. Headings nest freely with model instances and with each other.
     """
-    if instance is not None and not hasattr(instance, '_meta'):
-        raise TypeError(f"Expected Django model instance, got {type(instance)}")
+    if isinstance(instance, str):
+        instance = LogHeading(instance)
+    elif (
+        instance is not None
+        and not isinstance(instance, LogHeading)
+        and not hasattr(instance, '_meta')
+    ):
+        raise TypeError(f"Expected Django model instance or heading string, got {type(instance)}")
     context = _model_context.get()['model_context']
     context.push(instance)
     try:

@@ -71,6 +71,54 @@ def _get_capabilities(model_class: type) -> dict:
     return caps
 
 
+# --- FOREIGN-KEY DISPLAY-NAME HELPERS ---
+# The list/detail serializers emit a foreign key as its raw primary-key id
+# (DRF's default for ``fields = "__all__"``). That id is what filtering and
+# editing need, so it stays untouched — but a grid rendering a bare "79" in a
+# "Fund" column is useless to a customer. These helpers add an *additive*
+# companion key ``<fk>__short_description`` carrying ``str(related)`` (the model
+# author's ``__str__``/short_description — the documented customization point),
+# mirroring the resolution ModelExport already does for exported files
+# (``_apply_foreign_key_display_names``). Purely additive: the raw id column is
+# never replaced, so nothing that reads the id breaks.
+
+# Cache: model_class -> [(fk_field_name, remote_model), …] for single-valued
+# relations only. Reverse relations and many-to-many are excluded (DRF doesn't
+# emit reverse rels under these names, and an M2M value is a list, not one id —
+# ModelExport leaves those unresolved too).
+_fk_display_fields_cache: dict = {}
+
+
+def _get_fk_display_fields(model) -> list:
+    """Return cached ``[(field_name, remote_model), …]`` for a model's
+    single-valued foreign keys (FK / OneToOne). Best-effort — an unresolvable
+    model yields an empty list rather than raising."""
+    cached = _fk_display_fields_cache.get(model)
+    if cached is not None:
+        return cached
+    fields = []
+    try:
+        # Lazy import: avoids a settings-time circular import between the
+        # serializer layer and process_admin.models (which pulls in core models).
+        from lex.process_admin.models.utils import get_relation_fields
+        for field in get_relation_fields(model):
+            if getattr(field, "many_to_many", False):
+                continue
+            remote_model = getattr(getattr(field, "remote_field", None), "model", None)
+            name = getattr(field, "name", None)
+            if remote_model is not None and isinstance(name, str) and name:
+                fields.append((name, remote_model))
+    except Exception:
+        fields = []
+    _fk_display_fields_cache[model] = fields
+    return fields
+
+
+def _fk_display_key(field_name: str) -> str:
+    """Companion key carrying the resolved display name for a FK column."""
+    return f"{field_name}__{SHORT_DESCR_NAME}"
+
+
 # --- NEW FILTERING LIST SERIALIZER ---
 class FilteredListSerializer(serializers.ListSerializer):
     """
@@ -80,7 +128,115 @@ class FilteredListSerializer(serializers.ListSerializer):
 
     def to_representation(self, data):
         iterable = data.all() if isinstance(data, models.Manager) else data
-        return [r for r in (self.child.to_representation(item) for item in iterable) if r]
+        child = self.child
+        # Suppress the child's per-instance FK name resolution while building
+        # the list — we resolve names in a single batched query per FK below
+        # (one query per FK field, not one per row) to stay N-safe.
+        prev_skip = getattr(child, "_skip_fk_display_names", False)
+        child._skip_fk_display_names = True
+        try:
+            representations = [
+                r for r in (child.to_representation(item) for item in iterable) if r
+            ]
+        finally:
+            child._skip_fk_display_names = prev_skip
+        self._batch_add_fk_display_names(representations)
+        return representations
+
+    def _batch_add_fk_display_names(self, representations: list) -> None:
+        """Add ``<fk>__short_description`` to every row, resolving each FK's
+        display names in ONE ``pk__in`` query (mirrors
+        ``ModelExport._apply_foreign_key_display_names``). Best-effort: on any
+        failure the raw ids are left in place rather than breaking the response.
+        The key is emitted whenever the raw FK column is present (``None`` when
+        the FK is null) so the list row shape stays stable row-to-row."""
+        if not representations:
+            return
+        try:
+            model = getattr(getattr(self.child, "Meta", None), "model", None)
+            if model is None:
+                return
+            for field_name, remote_model in _get_fk_display_fields(model):
+                display_key = _fk_display_key(field_name)
+                # Collect only the pks actually present on this page.
+                referenced_pks = set()
+                column_present = False
+                for rep in representations:
+                    if field_name not in rep:
+                        continue
+                    column_present = True
+                    val = rep.get(field_name)
+                    if val is not None and not isinstance(val, (list, tuple, set, dict)):
+                        referenced_pks.add(val)
+                if not column_present:
+                    continue
+
+                names = _resolve_fk_names(remote_model, referenced_pks)
+                for rep in representations:
+                    if field_name not in rep:
+                        continue
+                    val = rep.get(field_name)
+                    if val is None or isinstance(val, (list, tuple, set, dict)):
+                        rep[display_key] = None
+                    else:
+                        rep[display_key] = names.get(val, names.get(str(val)))
+        except Exception:
+            pass
+
+
+def _resolve_fk_names(remote_model, referenced_pks) -> dict:
+    """Build ``{pk: str(obj), str(pk): str(obj)}`` for the referenced pks with a
+    single query (mirrors ModelExport). Falls back to a bounded scan only if the
+    pks are of mixed/incoercible types."""
+    names: dict = {}
+    if not referenced_pks:
+        return names
+    try:
+        related_iter = remote_model.objects.filter(pk__in=referenced_pks).iterator(
+            chunk_size=2000
+        )
+        for item in related_iter:
+            readable = str(item)
+            names[item.pk] = readable
+            names[str(item.pk)] = readable
+    except (TypeError, ValueError):
+        for item in remote_model.objects.all().iterator(chunk_size=2000):
+            readable = str(item)
+            names[item.pk] = readable
+            names[str(item.pk)] = readable
+    return names
+
+
+class LexClearableFileField(serializers.FileField):
+    """FileField that accepts an empty string as an explicit "clear" marker.
+
+    Multipart updates have no way to express file removal otherwise: omitting
+    the key means "keep the current file" (DRF semantics), and DRF's stock
+    FileField rejects ``""`` as "not a file". An empty string maps to Django's
+    empty value for FileField storage, clearing the reference regardless of
+    the column's null-ability. Clearing a required (``blank=False``) file is
+    rejected the same way omitting it on create would be.
+
+    Note: without ``allow_blank`` DRF's ``Field.get_value`` rewrites ``""``
+    from HTML/multipart input into "field omitted" (or ``None`` when
+    ``allow_null=True``) before validation ever runs, so the clear marker
+    would silently degrade to keep-semantics. ``allow_blank = True`` makes
+    ``get_value`` pass the empty string through to ``to_internal_value``.
+    """
+
+    # Let '' survive DRF's HTML-input empty-value rewriting (see docstring).
+    allow_blank = True
+
+    def to_internal_value(self, data):
+        if data == "" or data is None:
+            if self.required:
+                self.fail("required")
+            return ""
+        return super().to_internal_value(data)
+
+
+class LexClearableImageField(LexClearableFileField, serializers.ImageField):
+    """Image variant of :class:`LexClearableFileField` (same clear semantics)."""
 
 
 # --- UPDATED PERMISSION-AWARE BASE SERIALIZER ---
@@ -91,6 +247,15 @@ class LexSerializer(serializers.ModelSerializer):
     """
     # Define a new field to hold the scopes for each record.
     lex_reserved_scopes = serializers.SerializerMethodField()
+
+    # Map model file fields (and subclasses like PDFField / XLSXField — DRF's
+    # ClassLookupDict walks the MRO) to the clearable variants so multipart
+    # updates can remove a stored file by sending an empty value.
+    serializer_field_mapping = {
+        **serializers.ModelSerializer.serializer_field_mapping,
+        models.FileField: LexClearableFileField,
+        models.ImageField: LexClearableImageField,
+    }
 
     # ------------------------------------------------------------------
     # Per-serializer caches (populated once, reused across all records)
@@ -610,7 +775,35 @@ class LexSerializer(serializers.ModelSerializer):
         except Exception:
             pass
 
+        # Add FK display-name companions (<fk>__short_description) for the
+        # detail / single-object path. During list serialization this is
+        # suppressed (FilteredListSerializer batches it in one query per FK);
+        # for a single object one query per FK is fine.
+        if not getattr(self, "_skip_fk_display_names", False):
+            self._add_fk_display_names_single(representation)
+
         return representation
+
+    def _add_fk_display_names_single(self, representation: dict) -> None:
+        """Per-instance twin of ``FilteredListSerializer._batch_add_fk_display_names``.
+        Emits ``<fk>__short_description`` for each single-valued FK present in the
+        representation so the detail shape matches the list shape. Best-effort."""
+        try:
+            model = getattr(getattr(self, "Meta", None), "model", None)
+            if model is None:
+                return
+            for field_name, remote_model in _get_fk_display_fields(model):
+                if field_name not in representation:
+                    continue
+                display_key = _fk_display_key(field_name)
+                val = representation.get(field_name)
+                if val is None or isinstance(val, (list, tuple, set, dict)):
+                    representation[display_key] = None
+                    continue
+                names = _resolve_fk_names(remote_model, {val})
+                representation[display_key] = names.get(val, names.get(str(val)))
+        except Exception:
+            pass
 
 
 # --- UPDATED BASE TEMPLATE ---

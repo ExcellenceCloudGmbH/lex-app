@@ -1,0 +1,139 @@
+cluster: 8
+slug: celery_async
+title: Celery & Async
+max_scenario: 144
+letters:
+  a:
+    title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
+    scenarios: 8.1-8.5
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  b:
+    title: ''
+    scenarios: 8.5-8.6
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
+      recorded
+  g:
+    title: Task infrastructure — `lex/lex_app/celery_tasks.py`
+    scenarios: 8.7-8.15
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: Redis-free (`celery_tasks.py`
+  h:
+    title: Dispatcher & local scheduler
+    scenarios: 8.16-8.21
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45%
+  i:
+    title: '`celery.py` app config'
+    scenarios: 8.22-8.30
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: 8.22–8.30 (priority/nesting/filters/no-op/propagation
+  j:
+    title: ''
+    scenarios: 8.31-8.44
+    status: complete
+    tests:
+      pass: 14
+      skip: 0
+      xfail: 0
+    note: task bodies at `celery_tasks.py` 696–957; broker-free
+  k:
+    title: ''
+    scenarios: 8.45-8.48
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: 8.45/8.46 env-gated (`LEX_RUN_REDIS_CELERY_TESTS=true`); wired into `celery_redis_broker_example.yml`
+  l:
+    title: ''
+    scenarios: ''
+    status: complete
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+  m:
+    title: ''
+    scenarios: 8.49-8.50
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: scenarios 8.49/8.50; every root calc now uses Celery when `CELERY_ACTIVE=true`, regardless of
+      `@lex_shared_task`
+  u:
+    title: Cancellation-aware `CallbackTask` failure mapping
+    scenarios: 8.73-8.77
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: 'scenarios 8.73–8.77; `_is_cancellation_exception` maps `TaskRevokedError` / `SoftTimeLimitExceeded`
+      / `WorkerLostError` / `Terminated` / `CalculationCancelled` → `CANCELLED`; 8.77 '
+  v:
+    title: Cluster-wide cascade cancellation — Redis cancel index
+    scenarios: 8.78-8.89
+    status: complete
+    tests:
+      pass: 12
+      skip: 0
+      xfail: 0
+    note: scenarios 8.78–8.89; best-effort Redis tree index (HASH keyed by `calculation_id`) written through
+      at `ActiveCalculationStateStore.set_task_id`/`clear` so `cancel()` discovers + re
+  w:
+    title: 'Worker-recovery terminal-outcome guard: no ERROR→SUCCESS resurrection'
+    scenarios: 8.90-8.102
+    status: complete
+    tests:
+      pass: 8
+      skip: 5
+      xfail: 0
+    note: scenarios 8.90–8.102; `scan_and_recover` consults the result backend (ready `AsyncResult`) +
+      the calc rows (every row out of `IN_PROGRESS`) before requeueing a dead task, deregiste
+  x:
+    title: 'Liveness-aware startup reset: recovery hand-off (no live-calc abort)'
+    scenarios: 8.103-8.115
+    status: complete
+    tests:
+      pass: 6
+      skip: 7
+      xfail: 0
+    note: scenarios 8.103–8.115; the boot-time `IN_PROGRESS → ABORTED` sweep now defers to the recovery
+      registry — a row owned by a tracked task (alive **or** expired-but-tracked) is left `I
+  y:
+    title: 'Embedded-beat recovery driver: schedule wiring, queue isolation, entrypoint'
+    scenarios: 8.116-8.122
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: 'scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat`
+      driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it '
