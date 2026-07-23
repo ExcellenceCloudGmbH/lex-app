@@ -15,6 +15,8 @@
 #   - NPM_MARMELAB_TOKEN   (for the private @marmelab npm registry)
 #   - FRONTEND_REPO_TOKEN  (PAT with read access to the frontend repo,
 #                           or use secrets.GITHUB_TOKEN if same org + SSO)
+#   - LEX_PACKAGES_TOKEN   (read:packages for @excellencecloudgmbh/* on
+#                           GitHub Packages; falls back to FRONTEND_REPO_TOKEN)
 # ──────────────────────────────────────────────────────────────────────
 
 name: Frontend Build
@@ -104,6 +106,14 @@ jobs:
           cache: yarn
           cache-dependency-path: frontend/yarn.lock
 
+      - name: Configure GitHub Packages auth (LEX Design System)
+        # The frontend consumes @excellencecloudgmbh/* from GitHub Packages.
+        # Uses LEX_PACKAGES_TOKEN when configured, falling back to
+        # FRONTEND_REPO_TOKEN (works when that PAT has read:packages).
+        run: echo "//npm.pkg.github.com/:_authToken=${LEX_PACKAGES_TOKEN}" >> ~/.npmrc
+        env:
+          LEX_PACKAGES_TOKEN: ${{ secrets.LEX_PACKAGES_TOKEN || secrets.FRONTEND_REPO_TOKEN }}
+
       - name: Install Node dependencies
         run: yarn install --frozen-lockfile
         working-directory: frontend
@@ -152,6 +162,14 @@ jobs:
           node-version: 22
           cache: yarn
           cache-dependency-path: frontend/yarn.lock
+
+      - name: Configure GitHub Packages auth (LEX Design System)
+        # The frontend consumes @excellencecloudgmbh/* from GitHub Packages.
+        # Uses LEX_PACKAGES_TOKEN when configured, falling back to
+        # FRONTEND_REPO_TOKEN (works when that PAT has read:packages).
+        run: echo "//npm.pkg.github.com/:_authToken=${LEX_PACKAGES_TOKEN}" >> ~/.npmrc
+        env:
+          LEX_PACKAGES_TOKEN: ${{ secrets.LEX_PACKAGES_TOKEN || secrets.FRONTEND_REPO_TOKEN }}
 
       - name: Install Node dependencies
         run: yarn install --frozen-lockfile
@@ -220,6 +238,14 @@ jobs:
           cache: yarn
           cache-dependency-path: frontend/yarn.lock
 
+      - name: Configure GitHub Packages auth (LEX Design System)
+        # The frontend consumes @excellencecloudgmbh/* from GitHub Packages.
+        # Uses LEX_PACKAGES_TOKEN when configured, falling back to
+        # FRONTEND_REPO_TOKEN (works when that PAT has read:packages).
+        run: echo "//npm.pkg.github.com/:_authToken=${LEX_PACKAGES_TOKEN}" >> ~/.npmrc
+        env:
+          LEX_PACKAGES_TOKEN: ${{ secrets.LEX_PACKAGES_TOKEN || secrets.FRONTEND_REPO_TOKEN }}
+
       - name: Install Node dependencies
         run: yarn install --frozen-lockfile
         working-directory: frontend
@@ -241,11 +267,26 @@ jobs:
           echo "✅ lex/react/build updated:"
           ls -la lex/react/build/
 
+      - name: Refresh vendored lex_tokens.py (LEX Design System)
+        # The Python token export ships inside the @excellencecloudgmbh/lex-tokens
+        # npm package the frontend just installed — keep the vendored host copy
+        # (lex/lex_app/design_system/lex_tokens.py) in lockstep with the bundle.
+        run: |
+          SRC=frontend/node_modules/@excellencecloudgmbh/lex-tokens/dist/python/lex_tokens.py
+          if [ -f "$SRC" ]; then
+            cp "$SRC" lex/lex_app/design_system/lex_tokens.py
+            VERSION=$(node -p "require('./frontend/node_modules/@excellencecloudgmbh/lex-tokens/package.json').version")
+            sed -i "s/^Vendored from: .*/Vendored from: @excellencecloudgmbh\/lex-tokens@${VERSION}/" lex/lex_app/design_system/__init__.py || true
+            echo "lex_tokens.py refreshed from lex-tokens@${VERSION}"
+          else
+            echo "lex-tokens python export not found in frontend deps — skipping refresh"
+          fi
+
       - name: Commit updated bundle
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add lex/react/build/
+          git add lex/react/build/ lex/lex_app/design_system/
           # Only commit if there are actual changes
           if git diff --cached --quiet; then
             echo "No changes to bundle — skipping commit"

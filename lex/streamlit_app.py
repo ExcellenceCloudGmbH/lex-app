@@ -9,6 +9,8 @@ from typing import Optional, Dict
 import jwt
 import requests
 import streamlit as st
+
+from lex.lex_app.design_system import lex_tokens
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 logger = logging.getLogger(__name__)
@@ -420,7 +422,8 @@ def render_logout_link() -> None:
             display:inline-block;
             padding:0.45rem 0.8rem;
             border-radius:0.5rem;
-            border:1px solid rgba(49,51,63,0.25);
+            border:1px solid {lex_tokens.BORDER};
+            color:{lex_tokens.NAVY};
             text-decoration:none;
             font-weight:600;
         ">Logout</a>

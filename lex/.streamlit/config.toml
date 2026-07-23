@@ -1,6 +1,9 @@
 [theme]
-primaryColor="#08BCC2"
-backgroundColor="#F5F5F5"
-secondaryBackgroundColor="#E0E0E0"
-textColor="#2D4262"
+# Values come from the LEX Design System tokens — the single source of truth
+# shared with the React apps (see lex/lex_app/design_system/lex_tokens.py).
+# TOML cannot import Python, so each value carries its token name here.
+primaryColor="#14B4B4"             # lex_tokens.TEAL (action accent)
+backgroundColor="#F2F5F8"          # lex_tokens.BG (canvas)
+secondaryBackgroundColor="#FFFFFF" # lex_tokens.SURFACE (cards/sidebar)
+textColor="#282e38"                # lex_tokens.INK (body text, AA on BG/SURFACE)
 font="sans serif"
