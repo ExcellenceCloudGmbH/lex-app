@@ -117,10 +117,22 @@ def ensure_env_file(project_root: str, content: str = DEFAULT_ENV):
     return str(p), True
 
 def generate_configs(project_root: str):
-    from generate_pycharm_configs import generate_pycharm_configs
-    generate_pycharm_configs(project_root)
+    from generate_pycharm_configs import generate_run_configs
+
+    generated_ide_configs = generate_run_configs(project_root)
     (Path(project_root) / Path("migrations")).mkdir(exist_ok=True, parents=True)
     (Path(project_root) / Path("migrations") / Path("__init__.py")).touch(exist_ok=True)
+    return generated_ide_configs
+
+
+def _echo_generated_config_paths(project_root: str, generated_ide_configs):
+    if "pycharm" in generated_ide_configs:
+        click.echo(f".run: {os.path.join(project_root, '.run')} (updated)")
+    if "vscode" in generated_ide_configs:
+        click.echo(
+            ".vscode/launch.json: "
+            f"{os.path.join(project_root, '.vscode', 'launch.json')} (updated)"
+        )
 
 # ---------- Lazy Django bootstrap and dynamic forwarding ----------
 
@@ -734,9 +746,9 @@ def start(ctx):
 def setup(project_root):
     root = find_project_root(project_root or os.getcwd())
     env_path, created = ensure_env_file(root)
-    generate_configs(root)
+    generated_ide_configs = generate_configs(root)
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
-    click.echo(f".run: {os.path.join(root, '.run')} (updated)")
+    _echo_generated_config_paths(root, generated_ide_configs)
 
 
 @lex.command(name="setup-with-ai", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -772,9 +784,9 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
     python_executable = resolve_active_python_executable(root)
 
     env_path, created = ensure_env_file(root.as_posix())
-    generate_configs(root.as_posix())
+    generated_ide_configs = generate_configs(root.as_posix())
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
-    click.echo(f".run: {os.path.join(root.as_posix(), '.run')} (updated)")
+    _echo_generated_config_paths(root.as_posix(), generated_ide_configs)
 
     credentials = _collect_setup_with_ai_credentials(
         github_token=github_token,
