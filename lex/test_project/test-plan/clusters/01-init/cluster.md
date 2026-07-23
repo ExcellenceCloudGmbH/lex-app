@@ -147,3 +147,31 @@ every beat-driven feature on a `USE_TZ=False` deployment.
 **Scenario range:** 1.184 – 1.186. **Test file:** `lex/test_project/tests/init/test_1w_recovery_default_deployment_target.py`. **Type:** U. **Status:** ✅ Complete (Session 90 — July 1). Source: `lex/lex_app/settings.py` (`LEX_TASK_RECOVERY_ENABLED` default `true` → `false`). Nested-dispatch untouched — 7j/7q/8ab all pass.
 
 ---
+
+### 1y. IDE-aware setup run configurations
+
+`lex setup` generates runnable project commands for the IDE that invoked it.
+VS Code integrated terminals are identified from `TERM_PROGRAM`/`VSCODE_*`
+markers; PyCharm and compatible JetBrains terminals are identified from their
+host/terminal markers. No marker is universal, and inherited markers can
+conflict, so ambiguous environments deliberately generate both `.run/*.run.xml`
+and `.vscode/launch.json`.
+
+The VS Code launch set runs `python -m lex` through `debugpy`, uses the workspace
+root as `cwd`, loads `.env`, carries the command-specific environment, and maps
+PyCharm's Celery worker-count macro to a VS Code `promptString`. Generated
+entries are namespaced with `LEX:` and merged into existing JSON/JSONC so setup
+does not remove user launch configurations.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 1.203 | VS Code marker | only `.vscode/launch.json` is newly generated and reported |
+| 1.204 | PyCharm marker | only `.run/*.run.xml` is newly generated and reported |
+| 1.205 | No IDE marker | both IDE formats are generated as the safe fallback |
+| 1.206 | Conflicting IDE markers | detection does not guess; both formats are generated |
+| 1.207 | Cross-IDE parity | all ten commands retain module, args, env, cwd, `.env`, terminal, and worker prompt semantics |
+| 1.208 | Existing JSONC launch file | custom configurations and inputs survive the LEX merge |
+| 1.209 | Repeated setup | launch JSON is byte-identical with no duplicate configurations or prompts |
+| 1.210 | Standalone generator | auto-detection is reused and the console wrapper exits successfully |
+
+**Scenario range:** 1.203 – 1.210. **Test file:** `lex/test_project/tests/init/test_1y_ide_run_configs.py`. **Type:** U. **Status:** ✅ Complete (July 23). Sources: `generate_pycharm_configs.py`, `lex/bin/lex.py`, `pyproject.toml`.
