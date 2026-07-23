@@ -27,7 +27,7 @@ A regression in either surface would either silently run the wrong AI mode
 or give developers an unhelpful "no module" error that doesn't mention the
 remediation step.
 
-Cluster 1z — scenarios 1.211–1.225. Type: U.
+Cluster 1z — scenarios 1.211–1.229. Type: U.
 Covers:
   lex/tools/verify_ai_assets.py
     (_read_env_file_value, resolve_active_mcp_mode, _read_mode_from_mcp_json,
