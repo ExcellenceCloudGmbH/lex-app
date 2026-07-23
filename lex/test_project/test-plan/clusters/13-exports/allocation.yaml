@@ -1,7 +1,7 @@
 cluster: 13
 slug: exports
 title: Export Endpoint
-max_scenario: 33
+max_scenario: 37
 letters:
   a:
     title: Legacy (non-AG) export path
@@ -64,3 +64,16 @@ letters:
       time. Both write paths render in the requester's zone (frontend sends `timezone` on the export
       request) — legacy pandas (_to_excel_naive) and streaming/fast (_normalize_cell_value) — falling
       back to settings.TIME_ZONE for absent/invalid. Ships with the USE_TZ=True cutover.
+  g:
+    title: Report-file Excel boundary renders and re-reads the display zone
+    scenarios: 13.34-13.37
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: XLSXField.create_excel_file_from_dfs crashed on the aware datetimes USE_TZ=True introduced
+      ("Excel does not support datetimes with timezones"). _excel_display_naive renders aware values
+      as settings.TIME_ZONE wall-clock and strips tzinfo -- data columns, object columns, (multi)index
+      and column headers. Round-trip proven — a cell read back from the file re-assigned to a LexModel
+      DateTimeField restores the exact original instant via the 3g invariant.

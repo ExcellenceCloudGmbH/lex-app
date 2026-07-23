@@ -47,7 +47,13 @@
 | 3.30 | `refresh_from_db` re-baseline is lean | `refresh_from_db` rebuilds a lean snapshot and resets `has_changed` |
 | 3.31 | Create-path hooks unaffected | Lean create still stamps `created_at` / `created_by` (no change-detection involved) |
 | 3.32 | Lean snapshot is smaller | Lean `_initial_state` holds strictly fewer keys than the full snapshot |
+| 3.33 | Naive ctor kwarg becomes aware | A naive datetime passed to the constructor is aware immediately, interpreted in the default timezone |
+| 3.34 | DST offsets respected on set | Attribute assignment carries the seasonally correct offset (summer +02:00 / winter +01:00 on Berlin) |
+| 3.35 | Aware values pass through | An already-aware assignment keeps its instant and its own zone — no silent re-zoning |
+| 3.36 | Non-datetimes pass through | None / `date` / string reach the field untouched; parsing stays Django's job |
+| 3.37 | Save→refetch keeps the instant | The descriptor changes *when* a value becomes aware, never *what* is stored |
+| 3.38 | Deferred field still lazy | `.only()` still defers the field; access lazy-loads the aware stored instant (data-descriptor guard) |
 
-**Sub-clusters:** 3a `pre_validation` (3.1–3.2) · 3b `post_validation` (3.3–3.4) · 3c hook ordering (3.5–3.6) · 3d recursion guard (3.7) · 3e snapshot lifecycle (3.8–3.10) · **3f lean `_initial_state` default-on / opt-out (3.11–3.32)** — covers `lex/core/models/LexModel.py`, Type E, ✅ Complete (22 pass / 0 fail).
+**Sub-clusters:** 3a `pre_validation` (3.1–3.2) · 3b `post_validation` (3.3–3.4) · 3c hook ordering (3.5–3.6) · 3d recursion guard (3.7) · 3e snapshot lifecycle (3.8–3.10) · **3f lean `_initial_state` default-on / opt-out (3.11–3.32)** — covers `lex/core/models/LexModel.py`, Type E, ✅ Complete (22 pass / 0 fail) · **3g DateTimeField aware-on-assignment invariant (3.33–3.38)** — covers `lex/core/models/LexModel.py` (`AwareDateTimeDescriptor`), Type I, ✅ Complete (6 pass / 0 fail).
 
 ---

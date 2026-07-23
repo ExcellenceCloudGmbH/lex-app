@@ -12,7 +12,7 @@
 |---|---|---|---|---|---|
 | 1. Init — Project Bootstrap | 24 | 202 | 96 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
-| 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
+| 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
@@ -22,7 +22,7 @@
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
-| 13. Export Endpoint | 6 | 33 | 3 | 0 | 0 |
+| 13. Export Endpoint | 7 | 37 | 7 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 8 | 34 | 13 | 0 | 0 |
 
@@ -80,6 +80,7 @@
 | 3d |  | 3.7 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 3e | Pre-validation snapshot lifecycle (v1→v2 calculate-all memory fix) | 3.9-3.10 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 3f | Default-on lean `_initial_state` (last full-field snapshot removed; hooks preserved) | 3.11-3.32 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 3g | DateTimeField aware-on-assignment invariant (AwareDateTimeDescriptor) | 3.33-3.38 | complete | 6 | 0 | 0 | Under USE_TZ=True Django only normalizes at the DB boundary, so in-memory assignments stay naive while fetches are aware -- the mix crashes downstream pandas/xirr comparisons. The descriptor makes every DateTimeField assignment aware immediately (default-tz, the save-time interpretation), instant unchanged. Includes the deferred-loading (data-descriptor) regression guard. Ships with the USE_TZ=True cutover. |
 
 ## 4. Permissions (`permissions`)
 
@@ -248,6 +249,7 @@
 | 13d | Auth & edge cases | 13.11-13.12 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13e |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 13f | Export renders datetimes in the requester's browser timezone | 13.31-13.33 | complete | 3 | 0 | 0 | Excel has no tz type, so aware-UTC datetimes must be baked as a local wall-clock at export time. Both write paths render in the requester's zone (frontend sends `timezone` on the export request) — legacy pandas (_to_excel_naive) and streaming/fast (_normalize_cell_value) — falling back to settings.TIME_ZONE for absent/invalid. Ships with the USE_TZ=True cutover. |
+| 13g | Report-file Excel boundary renders and re-reads the display zone | 13.34-13.37 | complete | 4 | 0 | 0 | XLSXField.create_excel_file_from_dfs crashed on the aware datetimes USE_TZ=True introduced ("Excel does not support datetimes with timezones"). _excel_display_naive renders aware values as settings.TIME_ZONE wall-clock and strips tzinfo -- data columns, object columns, (multi)index and column headers. Round-trip proven — a cell read back from the file re-assigned to a LexModel DateTimeField restores the exact original instant via the 3g invariant. |
 
 ## 14. AG Grid Query Endpoint (`queries`)
 
