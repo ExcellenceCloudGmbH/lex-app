@@ -137,9 +137,17 @@ def register(
             "queue": queue,
             "retries": retries,
         }
-        client.set(redis_keys.payload_key(task_id), _encode(payload), ex=_payload_ttl())
-        client.sadd(redis_keys.index_key(), task_id)
-        client.set(redis_keys.heartbeat_key(task_id), "1", ex=_heartbeat_ttl())
+        # Single round trip for the payload/index/heartbeat writes, and the
+        # SADD result tells us whether the id is NEW to the index — only then
+        # is it mirrored onto the in-flight LIST (KEDA scale signal), so a
+        # requeue re-register of a still-tracked id never double-counts.
+        pipe = client.pipeline()
+        pipe.set(redis_keys.payload_key(task_id), _encode(payload), ex=_payload_ttl())
+        pipe.sadd(redis_keys.index_key(), task_id)
+        pipe.set(redis_keys.heartbeat_key(task_id), "1", ex=_heartbeat_ttl())
+        results = pipe.execute()
+        if results[1]:  # SADD returned 1 → newly tracked
+            client.lpush(redis_keys.inflight_list_key(), task_id)
     except Exception:
         logger.warning("Celery recovery: register failed for %s", task_id, exc_info=True)
 
@@ -175,8 +183,38 @@ def deregister(task_id: str) -> None:
         client.srem(redis_keys.index_key(), task_id)
         client.delete(redis_keys.payload_key(task_id))
         client.delete(redis_keys.heartbeat_key(task_id))
+        # Drain every occurrence from the in-flight LIST mirror (count 0 =
+        # all) so the KEDA scale signal returns to zero with the index.
+        client.lrem(redis_keys.inflight_list_key(), 0, task_id)
     except Exception:
         logger.warning("Celery recovery: deregister failed for %s", task_id, exc_info=True)
+
+
+def reconcile_inflight_list() -> int:
+    """Rebuild the in-flight LIST mirror from current index-SET membership.
+
+    Rollout / crash safety: a pod that starts with a non-empty index — tasks
+    registered before the list existed (mid-cutover), or a leaked entry from
+    a crash between the SET and LIST writes — must expose the true amount of
+    in-flight work to KEDA. Called once at recovery-supervisor startup.
+
+    Returns the number of entries in the rebuilt list (0 on any failure —
+    best-effort like every registry operation).
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+    try:
+        members = list(client.smembers(redis_keys.index_key()) or [])
+        pipe = client.pipeline()
+        pipe.delete(redis_keys.inflight_list_key())
+        if members:
+            pipe.lpush(redis_keys.inflight_list_key(), *members)
+        pipe.execute()
+        return len(members)
+    except Exception:
+        logger.warning("Celery recovery: reconcile_inflight_list failed", exc_info=True)
+        return 0
 
 
 def list_tracked() -> List[str]:

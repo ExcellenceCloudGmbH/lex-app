@@ -1,7 +1,7 @@
 cluster: 8
 slug: celery_async
 title: Celery & Async
-max_scenario: 144
+max_scenario: 160
 letters:
   a:
     title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
@@ -137,3 +137,15 @@ letters:
       xfail: 0
     note: 'scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat`
       driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it '
+  d:
+    title: In-flight LIST mirror (recovery-pod scale signal)
+    scenarios: 8.157-8.160
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: parallel Redis LIST mirroring the recovery index SET so KEDA's native redis scaler
+      (LLEN) can scale the recovery pod 0<->1; SADD-guarded LPUSH (no requeue double-count),
+      LREM-all on deregister, startup reconcile. Scenarios start at 8.157 to stack above the
+      unmerged dispatch-claim batch (8z, 8.145-156, PR #653)

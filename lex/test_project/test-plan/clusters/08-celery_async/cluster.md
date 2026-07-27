@@ -141,3 +141,12 @@
 **Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
 ---
+
+
+### 8d. In-flight LIST mirror (recovery-pod scale signal) ✅
+
+**What it tests:** the parallel Redis LIST (`lex:recover:inflight`) that mirrors the recovery index SET so KEDA's native `redis` scaler can scale the recovery pod to zero when no calculation is in flight. Mirror-exactness at every transition: register (once, even across requeues), deregister (drain all), startup reconcile (rebuild from SET), and the sweep's terminal path returning the signal to zero.
+
+**Why a regression matters:** an under-counting mirror scales the recovery pod away from live work (a dead worker's task never recovers); an over-counting one keeps a pod running forever.
+
+**Scenario range:** 8.157 – 8.160. **Test file:** `lex/test_project/tests/celery_async/test_8d_inflight_list_mirror.py`. **Type:** U. **Status:** ✅ 4 pass.

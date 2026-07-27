@@ -178,3 +178,22 @@
 | Status | ✅ Complete — source fix + paired tests + plan sync in one change. Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Companion: Batch 7r withdrawn (inline guard + 7.199 flip + test file removed), 7q restored to committed assertions |
 
 ---
+
+
+---
+
+### Batch 8d — In-flight LIST mirror (recovery-pod scale signal) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.157 – 8.160 |
+| Type | U |
+| Files covered | `lex_app/celery_recovery/redis_keys.py` (`inflight_list_key`), `lex_app/celery_recovery/registry.py` (register/deregister mirror, `reconcile_inflight_list`), `lex_app/management/commands/run_recovery_supervisor.py` (startup reconcile) |
+| Test file | `lex/test_project/tests/celery_async/test_8d_inflight_list_mirror.py` |
+| Test classes | `TestCluster08d_InflightListMirror` |
+| Fixtures | `FakeRedis` (in-file: strings/sets/lists/pipeline — real LLEN/LREM semantics) |
+| Est. tests | 4 |
+| Coverage gain | scale-signal path for scaling the recovery pod to zero |
+| Prereqs | none (behaviourally inert until KEDA points at the list) |
+| Status | ✅ Complete — 4 pass / 0 fail |
+| Note | Lex-app half of scaling the recovery pod to zero (design locked as **Option A — parallel Redis list**, chosen over an HTTP metrics endpoint: KEDA's native `redis` scaler reads `LLEN`, reuses the existing worker TriggerAuthentication, and shares the work's failure domain — a leaked entry keeps recovery *up*, wasteful not unsafe). The registry maintains `<id>:lex:recover:inflight` as an exact mirror of the index SET: SADD-guarded LPUSH in `register()` (a requeue re-register never double-counts), LREM count-0 in `deregister()`, and a startup `reconcile_inflight_list()` in the supervisor command for mid-cutover/crash safety. 8.157 mirror-once across requeues; 8.158 deregister drains all occurrences; 8.159 reconcile rebuilds from the SET; 8.160 the sweep's give-up path drains the signal to zero. **Interaction note:** if the dispatch-claim batch (8z, PR #653) merges, `claim_dispatched()` must gain the same SADD-guarded LPUSH — one-line follow-up in whichever lands second. **Infra companion (blocked):** recovery pod → KEDA ScaledObject on `LLEN inflight`; blocked on relocating the bitemporal future-activation clock to the global scheduler. |

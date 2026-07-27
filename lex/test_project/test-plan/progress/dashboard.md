@@ -17,7 +17,7 @@
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
-| 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
+| 8. Celery & Async | 15 | 160 | 84 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
@@ -169,6 +169,7 @@
 |---|---|---|---|---|---|---|---|
 | 8a | a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26) | 8.1-8.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8b |  | 8.5-8.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 8d | In-flight LIST mirror (recovery-pod scale signal) | 8.157-8.160 | complete | 4 | 0 | 0 | parallel Redis LIST mirroring the recovery index SET so KEDA's native redis scaler (LLEN) can scale the recovery pod 0<->1; SADD-guarded LPUSH (no requeue double-count), LREM-all on deregister, startup reconcile. Scenarios start at 8.157 to stack above the unmerged dispatch-claim batch (8z, 8.145-156, PR |
 | 8g | Task infrastructure — `lex/lex_app/celery_tasks.py` | 8.7-8.15 | complete | 9 | 0 | 0 | Redis-free (`celery_tasks.py` |
 | 8h | Dispatcher & local scheduler | 8.16-8.21 | complete | 6 | 0 | 0 | 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45% |
 | 8i | `celery.py` app config | 8.22-8.30 | complete | 9 | 0 | 0 | 8.22–8.30 (priority/nesting/filters/no-op/propagation |
