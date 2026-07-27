@@ -22,8 +22,10 @@ unaffected.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import pickle
+import time
 from typing import Any, Dict, List, Optional
 
 from . import redis_keys
@@ -136,12 +138,109 @@ def register(
             "kwargs": kwargs,
             "queue": queue,
             "retries": retries,
+            # A worker is executing this task right now — the heartbeat is
+            # the liveness signal from here on (vs. "dispatched", where the
+            # message is still on the broker and no heartbeat exists yet).
+            "status": "running",
         }
         client.set(redis_keys.payload_key(task_id), _encode(payload), ex=_payload_ttl())
         client.sadd(redis_keys.index_key(), task_id)
         client.set(redis_keys.heartbeat_key(task_id), "1", ex=_heartbeat_ttl())
     except Exception:
         logger.warning("Celery recovery: register failed for %s", task_id, exc_info=True)
+
+
+def claim_dispatched(
+    task_id: str,
+    name: str,
+    args: Any,
+    kwargs: Any,
+    queue: Optional[str],
+) -> None:
+    """Claim ``task_id`` at DISPATCH time, before any worker exists.
+
+    Closes the dispatch-to-start ownership gap (incident 2026-07-14, instance
+    1410): a calculation row goes ``IN_PROGRESS`` when its task is dispatched,
+    but registration used to happen only in ``task_prerun`` — so a task whose
+    worker pod was still Pending was invisible to the recovery machinery and
+    the startup reset blind-aborted its healthy, merely-queued row.
+
+    The claim is a normal registry entry with ``status="dispatched"``,
+    ``claimed_at`` (epoch seconds) and **no heartbeat** — the message sitting
+    on the broker is its liveness story, which the supervisor verifies via
+    :func:`task_id_in_queue` instead of a heartbeat. ``task_prerun`` upgrades
+    the entry to ``status="running"`` when a worker picks the task up.
+
+    Written with ``SET NX``: if a payload already exists (the worker won the
+    race and registered first, or this is a supervisor requeue) the claim
+    never clobbers it. Best-effort no-op like every registry operation.
+    """
+    if not task_id:
+        return
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        payload = {
+            "name": name,
+            "args": args,
+            "kwargs": kwargs,
+            "queue": queue,
+            "retries": 0,
+            "status": "dispatched",
+            "claimed_at": time.time(),
+        }
+        # NX: never overwrite an existing payload (prerun/requeue owns it).
+        if client.set(
+            redis_keys.payload_key(task_id), _encode(payload),
+            ex=_payload_ttl(), nx=True,
+        ):
+            client.sadd(redis_keys.index_key(), task_id)
+        else:
+            # Payload exists — still make sure the id is indexed.
+            client.sadd(redis_keys.index_key(), task_id)
+    except Exception:
+        logger.warning(
+            "Celery recovery: claim_dispatched failed for %s", task_id, exc_info=True
+        )
+
+
+def task_id_in_queue(task_id: str, queue: str) -> Optional[bool]:
+    """Whether the broker queue still holds the message for ``task_id``.
+
+    Inspects the Redis list backing ``queue`` (Kombu's storage for
+    unconsumed messages) and matches the Celery message id in ``headers.id``
+    (protocol v2) or ``properties.correlation_id``. Used by the supervisor to
+    decide whether a long-dispatched-but-never-started task is merely waiting
+    for capacity (leave it alone) or has vanished from the broker entirely —
+    e.g. Redis was evicted or flushed — in which case a same-task-id requeue
+    is safe because no duplicate message can exist.
+
+    Returns ``True``/``False`` on a definitive scan, ``None`` when the queue
+    cannot be read — callers must treat ``None`` as "assume still queued"
+    (never double-dispatch on uncertainty).
+    """
+    if not task_id or not queue:
+        return None
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        for raw in client.lrange(queue, 0, -1) or []:
+            try:
+                message = json.loads(raw)
+            except Exception:
+                continue
+            headers = message.get("headers") or {}
+            properties = message.get("properties") or {}
+            if task_id in (headers.get("id"), properties.get("correlation_id")):
+                return True
+        return False
+    except Exception:
+        logger.warning(
+            "Celery recovery: queue inspection failed for %s", task_id, exc_info=True
+        )
+        return None
 
 
 def refresh_heartbeat(task_id: str) -> None:
