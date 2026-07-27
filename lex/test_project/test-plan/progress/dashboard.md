@@ -17,7 +17,7 @@
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
-| 8. Celery & Async | 15 | 156 | 92 | 12 | 0 |
+| 8. Celery & Async | 16 | 164 | 101 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
@@ -169,6 +169,7 @@
 |---|---|---|---|---|---|---|---|
 | 8a | a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26) | 8.1-8.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8b |  | 8.5-8.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 8d | In-flight LIST mirror (recovery-pod scale signal) | 8.157-8.164 | complete | 8 | 0 | 0 | parallel Redis LIST mirroring the recovery index SET so KEDA's native redis scaler (LLEN) can scale the recovery pod 0<->1; SADD-guarded LPUSH (no requeue double-count), LREM-all on deregister, reconcile at startup and after every sweep. Landed together with 8z, so claim_dispatched() carries the same SADD-guarded LPUSH and the signal rises at dispatch rather than at task start |
 | 8g | Task infrastructure — `lex/lex_app/celery_tasks.py` | 8.7-8.15 | complete | 9 | 0 | 0 | Redis-free (`celery_tasks.py` |
 | 8h | Dispatcher & local scheduler | 8.16-8.21 | complete | 6 | 0 | 0 | 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45% |
 | 8i | `celery.py` app config | 8.22-8.30 | complete | 9 | 0 | 0 | 8.22–8.30 (priority/nesting/filters/no-op/propagation |
@@ -180,7 +181,7 @@
 | 8v | Cluster-wide cascade cancellation — Redis cancel index | 8.78-8.89 | complete | 12 | 0 | 0 | scenarios 8.78–8.89; best-effort Redis tree index (HASH keyed by `calculation_id`) written through at `ActiveCalculationStateStore.set_task_id`/`clear` so `cancel()` discovers + re |
 | 8w | Worker-recovery terminal-outcome guard: no ERROR→SUCCESS resurrection | 8.90-8.102 | complete | 8 | 5 | 0 | scenarios 8.90–8.102; `scan_and_recover` consults the result backend (ready `AsyncResult`) + the calc rows (every row out of `IN_PROGRESS`) before requeueing a dead task, deregiste |
 | 8x | Liveness-aware startup reset: recovery hand-off (no live-calc abort) | 8.103-8.115 | complete | 6 | 7 | 0 | scenarios 8.103–8.115; the boot-time `IN_PROGRESS → ABORTED` sweep now defers to the recovery registry — a row owned by a tracked task (alive **or** expired-but-tracked) is left `I |
-| 8y | Embedded-beat recovery driver: schedule wiring, queue isolation, entrypoint | 8.116-8.122 | complete | 7 | 0 | 0 | scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat` driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it  |
+| 8y | Embedded-beat recovery driver: schedule wiring, queue isolation, entrypoint | 8.116-8.122 | complete | 8 | 0 | 0 | scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat` driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it  |
 | 8z | Dispatch-time claims, queue-verified recovery, age-gated startup reset, boot watchdog | 8.145-8.156 | complete | 12 | 0 | 0 | incident 2026-07-14 hardening — ownership starts at dispatch (CallbackTask.apply_async → claim_dispatched, NX), supervisor leaves queued claims alone and only requeues verifiably vanished messages, startup reset spares young untracked rows, boot watchdog reaps workers that never become ready; 8x's _run_sweep now pins ownership with the age-gate disabled |
 
 ## 9. Signals & WebSocket (`signals_ws`)

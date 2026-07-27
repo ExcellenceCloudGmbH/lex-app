@@ -196,3 +196,21 @@
 | Prereqs | 8w/8x semantics (extended, not changed: tracked→skip is untouched) |
 | Status | ✅ Complete — 12 pass / 0 fail |
 | Note | Incident 2026-07-14 (instance 1410): a healthy calculation whose worker pod was still Pending was blind-aborted by a recovery-beat restart, because registry ownership began only at `task_prerun`. Ownership now starts at dispatch (`status="dispatched"`, `claimed_at`, no heartbeat — the broker message is the liveness story). The supervisor never requeues a claim that is (or might be) still queued — a same-task-id double dispatch is impossible by construction — and recovers only verifiably vanished messages (Redis flushed/evicted), the exact incident remediation that used to strand work. Startup reset spares untracked rows younger than the age-gate (default 1800s; 0 = legacy) so blind-abort degradation can't race a scheduling backlog. Boot watchdog (armed on `worker_init`, default 300s) terminates workers that boot into an unreachable broker and never fire `worker_ready`. **Deliberate 8x edit:** its `_run_sweep` pins ownership semantics with the age-gate disabled (`LEX_STARTUP_ABORT_MIN_AGE_SECONDS=0`); the gate has its own scenario 8.155. |
+
+---
+
+### Batch 8d — In-flight LIST mirror (recovery-pod scale signal) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.157 – 8.164 |
+| Type | U |
+| Files covered | `lex_app/celery_recovery/redis_keys.py` (`inflight_list_key`), `lex_app/celery_recovery/registry.py` (register/deregister mirror, `reconcile_inflight_list`), `lex_app/management/commands/run_recovery_supervisor.py` (startup reconcile) |
+| Test file | `lex/test_project/tests/celery_async/test_8d_inflight_list_mirror.py` |
+| Test classes | `TestCluster08d_InflightListMirror` |
+| Fixtures | `FakeRedis` (in-file: strings/sets/lists/pipeline — real LLEN/LREM semantics) |
+| Est. tests | 8 |
+| Coverage gain | scale-signal path for scaling the recovery pod to zero |
+| Prereqs | none (behaviourally inert until KEDA points at the list) |
+| Status | ✅ Complete — 8 pass / 0 fail |
+| Note | Lex-app half of scaling the recovery pod to zero (design locked as **Option A — parallel Redis list**, chosen over an HTTP metrics endpoint: KEDA's native `redis` scaler reads `LLEN`, reuses the existing worker TriggerAuthentication, and shares the work's failure domain — a leaked entry keeps recovery *up*, wasteful not unsafe). The registry maintains `<id>:lex:recover:inflight` as an exact mirror of the index SET: SADD-guarded LPUSH in `register()` (a requeue re-register never double-counts), LREM count-0 in `deregister()`, and a startup `reconcile_inflight_list()` in the supervisor command for mid-cutover/crash safety. 8.157 mirror-once across requeues; 8.158 deregister drains all occurrences; 8.159 reconcile rebuilds from the SET; 8.160 the sweep's give-up path drains the signal to zero. **Interaction with 8z (resolved here):** 8z and 8d land together, so `claim_dispatched()` carries the same SADD-guarded LPUSH. The consequence is behavioural, not cosmetic — the scale signal now rises at *dispatch* instead of at task start, so the supervisor is up while the worker pod is still Pending, which is exactly the window incident 1410 left unguarded. 8.161 pins that reconcile cannot drop an id registered mid-pass (a `DEL`+rebuild would, and the list would undercount → KEDA scales the supervisor away mid-calculation); 8.162 collapses duplicates so `LLEN` stays an exact count; 8.163 pins that the loop reconciles after *every* sweep, since an on-demand pod outlives many calculations and startup-only reconciliation would let drift pin it up until restart. **Infra companion (blocked):** recovery pod → KEDA ScaledObject on `LLEN inflight`; blocked on relocating the bitemporal future-activation clock to the global scheduler. |

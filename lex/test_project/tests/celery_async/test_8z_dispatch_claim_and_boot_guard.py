@@ -147,7 +147,17 @@ class TestCluster08z_DispatchClaim(SimpleTestCase):
         with mock.patch.object(registry, "_get_client", return_value=client):
             registry.register("tid-1", "t", (), {}, None)
 
-        payload_write = client.set.call_args_list[0]
+        # register() batches the payload/index/heartbeat writes into a pipeline
+        # (the SADD result gates the in-flight LIST mirror), so the payload SET
+        # lands on the pipeline rather than the client. Read whichever surface
+        # carried it — this scenario is about the payload's *content*, not the
+        # number of round trips it took to write.
+        set_calls = (
+            client.set.call_args_list
+            + client.pipeline.return_value.set.call_args_list
+        )
+        self.assertTrue(set_calls, "register() must write the payload key.")
+        payload_write = set_calls[0]
         payload = registry._decode(payload_write[0][1])
         self.assertEqual(
             payload["status"], "running",

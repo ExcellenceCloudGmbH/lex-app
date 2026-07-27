@@ -149,3 +149,11 @@
 **Why a regression matters:** each gap independently strands or destroys healthy work during infra turbulence — the incident aborted a live customer calculation and left 15 zombie worker jobs.
 
 **Scenario range:** 8.145 – 8.156. **Test file:** `lex/test_project/tests/celery_async/test_8z_dispatch_claim_and_boot_guard.py`. **Type:** U (+ E sweep). **Status:** ✅ Complete — 12 pass.
+
+### 8d. In-flight LIST mirror (recovery-pod scale signal) ✅
+
+**What it tests:** the parallel Redis LIST (`lex:recover:inflight`) that mirrors the recovery index SET so KEDA's native `redis` scaler can scale the recovery pod to zero when no calculation is in flight. Mirror-exactness at every transition: register (once, even across requeues), deregister (drain all), startup reconcile (rebuild from SET), and the sweep's terminal path returning the signal to zero.
+
+**Why a regression matters:** an under-counting mirror scales the recovery pod away from live work (a dead worker's task never recovers); an over-counting one keeps a pod running forever.
+
+**Scenario range:** 8.157 – 8.164. **Test file:** `lex/test_project/tests/celery_async/test_8d_inflight_list_mirror.py`. **Type:** U. **Status:** ✅ 8 pass.

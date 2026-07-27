@@ -467,7 +467,15 @@ _stop = threading.Event()
 
 
 def run_forever(interval: Optional[int] = None) -> None:
-    """Always-on supervisor loop (for a dedicated recovery process)."""
+    """Supervisor loop for a dedicated recovery process.
+
+    Each pass sweeps for dead workers and then converges the in-flight LIST
+    mirror onto the index SET. That second step matters when the pod is run
+    on demand (KEDA ScaledObject on the list's length): the list is what
+    decides whether this pod keeps running, so a stale entry would pin it up
+    forever and a lost one would scale it away mid-calculation. Reconciling
+    only at startup would let either drift persist for the pod's whole life.
+    """
     interval = interval or _scan_interval()
     app = _get_app()
     logger.info("Celery recovery supervisor loop started (interval=%ss)", interval)
@@ -477,6 +485,10 @@ def run_forever(interval: Optional[int] = None) -> None:
             scan_and_recover(app)
         except Exception:
             logger.exception("Celery recovery: scan pass failed")
+        try:
+            registry.reconcile_inflight_list()
+        except Exception:
+            logger.exception("Celery recovery: in-flight list reconcile failed")
 
 
 def stop_forever() -> None:
