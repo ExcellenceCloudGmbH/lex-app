@@ -7,8 +7,8 @@ burning its reservation on every instance in the cluster.
 This makes it **on demand**: the pod exists while calculation work is in flight
 and scales back to zero when it isn't.
 
-Related reading: [README](README.md) for the recovery subsystem itself,
-[deep-dive](deep-dive.md) for the heartbeat/requeue mechanics.
+Related reading: [README](README.md) for the recovery subsystem itself — the
+heartbeat/requeue mechanics this builds on.
 
 ---
 

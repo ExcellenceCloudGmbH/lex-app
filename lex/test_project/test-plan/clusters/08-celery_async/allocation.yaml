@@ -112,7 +112,7 @@ letters:
     scenarios: 8.90-8.102
     status: complete
     tests:
-      pass: 10
+      pass: 8
       skip: 5
       xfail: 0
     note: scenarios 8.90–8.102; `scan_and_recover` consults the result backend (ready `AsyncResult`) +
@@ -132,7 +132,7 @@ letters:
     scenarios: 8.116-8.122
     status: complete
     tests:
-      pass: 10
+      pass: 7
       skip: 0
       xfail: 0
     note: 'scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat`
