@@ -933,16 +933,30 @@ class LexModel(LifecycleModel):
         """
         Return True when edited_by / edited_at updates should be suppressed.
 
-        Three distinct scenarios:
+        ``edited_at`` / ``edited_by`` record the last *user* edit. A calculation
+        is system-triggered work, so no save that belongs to a calculation — the
+        trigger, the terminal-state writes, or the calculate() body on any
+        dispatch path — may touch them. This must hold by construction, not via
+        a post-hoc revert: an interrupted calculation (e.g. a server restart
+        mid-run) never reaches the revert, and would otherwise leave a stale
+        stamp behind.
+
+        A save is calculation-owned in any of these cases:
+
         1. Bitemporal sync — ``skip_history_when_saving`` is *permanently* set
            (i.e. NOT via the transient ``_skip_history_for_current_save_only``
-           flag).  ``_is_history_only_skip`` distinguishes the two.
-        2. Child-record save inside a parent calculation — the ContextVar
-           ``_in_calculation_execution`` is True while the parent's user code
-           (``calculate()`` / ``update()``) is executing.
-        3. The CalculationModel itself being saved as part of a calculation
-           trigger (IN_PROGRESS transition) — the per-instance flag
-           ``_is_calculation_triggered_save`` is True.
+           flag). ``_is_history_only_skip`` distinguishes the two.
+        2. The calculation trigger save. Both entry points defer the
+           calculate_hook and carry ``_defer_calculate_hook``: the HTTP path
+           (``One.perform_update`` on a ``calculate=true`` request) and the
+           programmatic path (``CalculationModel.save`` phase-1 IN_PROGRESS
+           write, which also sets ``_is_calculation_triggered_save``). A
+           ``calculate=true`` request discards field edits, so such a save is
+           never a genuine user edit.
+        3. The calculate() body executing — the ContextVar
+           ``_in_calculation_execution`` is True while user calculation code
+           runs, on both the sync fallback and the Celery dispatch paths
+           (the ``lex_shared_task`` worker wrapper enters the same context).
         """
         if (
             getattr(self, 'skip_history_when_saving', False)
@@ -951,6 +965,9 @@ class LexModel(LifecycleModel):
             return True
 
         if getattr(self, '_is_calculation_triggered_save', False):
+            return True
+
+        if getattr(self, '_defer_calculate_hook', False):
             return True
 
         from lex.core.models.CalculationModel import _in_calculation_execution

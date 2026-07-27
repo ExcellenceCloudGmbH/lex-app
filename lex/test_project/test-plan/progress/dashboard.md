@@ -16,8 +16,8 @@
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
-| 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
-| 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
+| 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
+| 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
@@ -162,6 +162,7 @@
 | 7p | Sync-mode streaming combinatorial expansion (OOM fix) | 7.178-7.187 | complete | 10 | 0 | 0 | scenarios 7.178–7.187; depth-first generator yields one model at a time (O(depth) vs O(N)) so sync calcs (CELERY_ACTIVE=False) stop OOM-ing the web pod; byte-identical ordered outp |
 | 7q | Nested fan-out dispatches by default from inside a worker | 7.196-7.201 | rolled-back | 6 | 0 | 0 | scenarios 7.196–7.201; removed the `is_celery_worker_process()` inline guard from both dispatch paths (`CalculatedModelMixin._dispatch_model_processing`, `CalculationModel.calculat |
 | 7r | (withdrawn — Session 91) Per-instance inline-inside-worker guard |  | rolled-back | 0 | 0 | 0 | before commit — the Session 89 inline guard broke nested-dispatch parallelism (a nested `CalculateNAV` ran inline on the parent's worker unless the caller opened an explicit `WaitF |
+| 7s | Calculations must not move edited_at / edited_by (Celery-OFF + startup) | 7.205-7.221 | complete | 17 | 0 | 0 | Audit-column contract for the sync dispatch paths and the startup recovery sweep. Covers SUCCESS/ERROR/CANCELLED terminal states, child-record output rows, created_at immutability, IN_PROGRESS-at-restart -> ABORTED (7.211 both columns, 7.217 authorship via a distinct sentinel), and a recovery-tracked row. Includes three negative controls (real user edit stamps; a user edit after a calculation still stamps; an explicit edited_at override is honoured) that guard against a fix over-suppressing genuine edits. 17 pass, including the reported case driven through the real HTTP calculate=true endpoint (7.219 interrupted -> restart -> ABORTED leaves edited_at/edited_by unchanged; 7.220 the stamp is absent before any completion could revert it; 7.221 a genuine HTTP field edit still stamps). -- these paths were already correct; the batch pins them so the BUG-028 fix cannot regress them. |
 
 ## 8. Celery & Async (`celery_async`)
 
@@ -169,6 +170,7 @@
 |---|---|---|---|---|---|---|---|
 | 8a | a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26) | 8.1-8.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8b |  | 8.5-8.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 8c | Celery dispatch must not move edited_at / edited_by (BUG-028) | 8.145-8.153 | complete | 9 | 0 | 0 | The two Celery dispatch paths must be audit-indistinguishable. calc_and_save (undecorated) wraps calculation_execution_context(); the lex_shared_task wrapper does not, so a decorated calculate() stamps audit columns on every successful run -- BUG-028. 8.146/8.147/8.149/8.151 assert the correct behaviour; the lex_shared_task wrapper now enters calculation_execution_context(), so these pass as live regression gates (BUG-028 resolved). 8.148 passes because a failed calculation rolls its writes back (pinned so a future partial-commit change cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery task names; all three calculate methods share one module and would otherwise collide. |
 | 8g | Task infrastructure — `lex/lex_app/celery_tasks.py` | 8.7-8.15 | complete | 9 | 0 | 0 | Redis-free (`celery_tasks.py` |
 | 8h | Dispatcher & local scheduler | 8.16-8.21 | complete | 6 | 0 | 0 | 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45% |
 | 8i | `celery.py` app config | 8.22-8.30 | complete | 9 | 0 | 0 | 8.22–8.30 (priority/nesting/filters/no-op/propagation |

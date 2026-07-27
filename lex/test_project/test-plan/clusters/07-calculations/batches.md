@@ -143,3 +143,20 @@
 | Status | ❌ **Withdrawn before commit** (Session 91 — July 2). The Session 89 draft restored an `is_celery_worker_process()` inline guard on the per-instance `CalculationModel.calculate_hook` path as the Report 1 (abort→resume) fix. Live verification showed it broke the core parallelism contract: a nested calc inside a worker (e.g. a project's `CalculateNAV` inside another calculation) ran INLINE on the parent's worker instead of dispatching to a free one, and only an explicit `WaitForTasks` restored dispatch. Per the developer's explicit requirement ("calculation can dispatch calculations"), the guard, the 7q 7.199 flip, and `test_7r_nested_worker_inline_abort_safe.py` were all withdrawn; always-dispatch (7q) is the pinned default on both paths. Report 1 abort-safety is provided by the restart-surviving cluster cancel marker instead — see **Batch 8ad**. Letter 7r stays reserved for this record |
 
 ---
+
+### Batch 7s — Calculations must not move `edited_at` / `edited_by` (Celery-OFF + startup) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.205 – 7.221 |
+| Type | I/E |
+| Files covered | `lex/core/models/LexModel.py` (`_should_skip_edited_fields_update`, `update_edited_at`, `update_edited_by`), `lex/core/models/CalculationModel.py` (`execute_calculation_sync`), `lex/process_admin/utils/model_registration.py` (`_handle_calculation_model_reset`) |
+| Test file | `lex/test_project/tests/calculations/test_7s_calculation_audit_columns.py` |
+| Test classes | `TestCluster07s_CalculationAuditColumns` — 7.205/7.206 sync SUCCESS leaves `edited_at`/`edited_by`; 7.207 ERROR; 7.208 CANCELLED; 7.209 child rows written as calculation *output*; 7.210 `created_at` immutable; 7.211 IN_PROGRESS-at-restart → ABORTED (the startup sweep); 7.212 recovery-tracked row skipped; **7.213–7.215 negative controls** (a real user edit stamps; a user edit *after* a calculation stamps — suppression must not outlive its window; an explicit `edited_at` override is honoured); 7.216 repeated recalculation never accumulates stamps; **7.217** Celery-OFF, row already IN_PROGRESS in the DB, server start → ABORTED must not reattribute `edited_by` (distinct sentinel); **7.218–7.221 the real HTTP `calculate=true` endpoint** — 7.218 success keeps both, **7.219 the reported case** (interrupted by a server restart → ABORTED, no stale stamp), 7.220 the stamp is absent *before* any completion could revert it (proves the guard, not the revert), 7.221 negative control (a genuine HTTP field edit still stamps) |
+| Fixtures | `AuditColumnsChild`, `AuditColumnsCalc`, `AuditColumnsFailingCalc`, `AuditColumnsCancelCalc`, `AuditColumnsParentCalc` — added to `calculations/models.py`. Bodies mirror real project code (write a field, then `save()`). |
+| Tests landed | **17 pass / 0 fail** |
+| Coverage gain | the audit-column contract on every Celery-OFF calculation path — previously **zero** coverage anywhere in the suite |
+| Status | ✅ Complete — all 12 pass: these paths were already correct (the sync terminal saves and the startup sweep all use `skip_hooks=True`), **except** the HTTP `calculate=true` trigger save, which stamped `edited_at`/`edited_by` and only appeared clean because a completing run reverted it (7.219/7.220 pinned the reported interrupted-then-ABORTED case). Fixed under BUG-028 by suppressing the trigger save in the guard via `_defer_calculate_hook`. The negative controls are the load-bearing half: they ensure the BUG-028 fix cannot over-suppress and stop stamping genuine user edits. |
+| Note | Scenario 7.214 was originally specified as "a field edit sent alongside `calculate=true` still stamps". That turned out to rest on a false premise — a `calculate=true` request **silently discards** accompanying field changes (verified: the same edit without `calculate` applies normally), so `edited_at` correctly does not move. Retargeted to the stronger control above. The discarded-edit behaviour is a separate question, out of scope here. |
+
+---
