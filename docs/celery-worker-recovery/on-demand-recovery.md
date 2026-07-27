@@ -89,13 +89,14 @@ by the same code path. There is no second source of truth to drift.
 ```
 
 1. **Dispatch.** The backend marks the row `IN_PROGRESS` and publishes the task.
-   `CallbackTask.apply_async` claims it: payload written `SET NX`, id added to
-   the index, and — because the `SADD` reports it as newly indexed — pushed onto
-   the in-flight list. No heartbeat is written; there is no worker yet.
+   `CallbackTask.apply_async` claims it: payload written `SET NX`, then one Lua
+   script adds the id to the index and — because the `SADD` inside it reports the
+   id as newly indexed — pushes it onto the in-flight list. One script, so the
+   two cannot diverge (case 9). No heartbeat is written; there is no worker yet.
 2. **Worker start.** `task_prerun` upgrades the claim to `status="running"`,
    preserving the retry budget, and starts the heartbeat thread. The `SADD`
-   returns 0 this time (already indexed), so nothing is pushed again — the list
-   counts tasks, not events.
+   returns 0 this time (already indexed), so the script pushes nothing — the
+   list counts tasks, not events.
 3. **While running.** The supervisor sweeps every 10s. A live heartbeat means
    skip. A dead one means the worker died: requeue the same `task_id` within the
    retry budget, or finalize `ABORTED` once it is exhausted. After each sweep it
@@ -122,14 +123,14 @@ have stayed at zero for exactly the window that most needs watching.
 | # | Scenario | Outcome |
 |---|---|---|
 | 1 | Task dispatched, cluster full, worker `Pending` 20 min | ✅ Handled |
-| 2 | Supervisor pod itself cannot be scheduled | ⚠️ **Open risk** |
-| 3 | Redis restarts mid-calculation | ⚠️ **Open risk** |
+| 2 | Supervisor pod itself cannot be scheduled | ✅ Unlikely — watch item |
+| 3 | Redis restarts mid-calculation | ✅ No delta vs always-on |
 | 4 | Back-to-back calculations | ✅ Handled |
 | 5 | Worker dies while supervisor is at zero | ✅ Delayed, not lost |
 | 6 | Supervisor killed mid-requeue | ✅ Handled |
 | 7 | Two supervisors briefly overlap | ✅ Handled |
 | 8 | List entry leaks (pod pinned up) | ✅ Self-heals |
-| 9 | List entry lost (pod scaled away) | ⚠️ **Residual hole** |
+| 9 | List entry lost (pod scaled away) | ✅ Impossible by construction |
 | 10 | Worker `SIGKILL`ed after finishing, before postrun | ✅ Handled |
 | 11 | Instance uses bitemporal future activations | ⛔ **Do not enable** |
 | 12 | Calculation runs without Celery | ✅ Not applicable |
@@ -148,34 +149,49 @@ double-dispatch on uncertainty); message verifiably gone → requeue the same id
 The supervisor is up and idle for those 20 minutes. That is the intended cost —
 it is the guard.
 
-### 2. The supervisor pod cannot be scheduled ⚠️
+### 2. The supervisor pod cannot be scheduled
 
 **Given** the cluster is full — the same condition as case 1.
 **When** KEDA scales the supervisor 0→1.
-**Then** the pod may sit `Pending` too, and in-flight work is unguarded until
-capacity frees up.
+**Then** in principle the pod could sit `Pending` too, leaving in-flight work
+unguarded until capacity frees.
 
-This is a genuine regression versus always-on, where the pod already held a node.
-It bites precisely under the conditions of incident 1410. It is **not addressed**
-in the current change. The fix is a `priorityClassName` that lets the supervisor
-preempt a worker — it is one pod and it guards all the others, so it should
-outrank them. Worth doing before enabling this broadly.
+In practice the gap is small. The supervisor requests **128Mi / 50m**; a worker
+requests **1000m / 4000Mi**. The scheduling failures in incident 1410 were
+worker-sized pods not fitting — a pod twenty times smaller on CPU and thirty
+times smaller on memory fits in slack those cannot use.
 
-### 3. Redis restarts mid-calculation ⚠️
+Deliberately **not** pre-emptively fixed. The fix, if it turns out to be needed,
+is a `priorityClassName` letting the supervisor preempt a worker (one pod that
+guards all the others should outrank them) — but that needs a cluster-scoped
+PriorityClass in a second repo, so it is not worth paying for a risk that may
+not exist. Treat it as a **test observation**: if the supervisor is ever seen
+`Pending` during the trial, add it then.
+
+### 3. Redis restarts mid-calculation
 
 **Given** the per-instance Dragonfly restarts or is evicted.
-**Then** the index and the list are both gone. `LLEN` reads 0, and after the
+**Then** the index and the list are both gone, `LLEN` reads 0, and after the
 cooldown the supervisor scales itself down while calculations are still running.
-Their payloads are gone too, so they are unrecoverable regardless.
 
-Redis has no working persistence today: the chart sets `storage.enabled = false`
-and the mounted PVC is never wired to `--dir`/`--dbfilename`. The infra change
-adds `safe-to-evict` to make eviction less likely, which reduces the frequency
-but not the failure mode.
+That sounds like a regression, and it is worth being precise that it is not.
+With the registry wiped, `list_tracked()` returns empty and `scan_and_recover`
+iterates nothing — **an always-on supervisor recovers exactly as much as an
+absent one: nothing.** The payloads it would need are gone with everything else.
+Scale-to-zero changes the pod count, not the outcome. This is a pre-existing
+property of a recovery subsystem that keeps its state in Redis, not something
+running on demand introduces.
 
-Partial mitigation already in place: the startup reset spares untracked
+The tempting fix — turning on Dragonfly persistence — is worse than the problem.
+Restoring a broker snapshot resurrects queue messages that may already have been
+acked; with `task_acks_late=True` and `visibility_timeout=inf`, the ack is the
+only thing that removes a message, so a stale snapshot un-acks completed work and
+tasks re-execute. Duplicate calculation runs are a worse failure than a lost
+registry.
+
+The mitigation that does help already shipped: the startup reset spares untracked
 `IN_PROGRESS` rows younger than `LEX_STARTUP_ABORT_MIN_AGE_SECONDS` (1800), so a
-backend restart after a Redis wipe no longer blind-aborts recent work.
+backend restart after a Redis wipe no longer blind-aborts healthy work.
 
 ### 4. Back-to-back calculations
 
@@ -220,22 +236,27 @@ sweep, so the stale entry is dropped on the next pass. Reconciling only at
 startup would have let this persist for the pod's entire life, which for an
 on-demand pod can be days.
 
-### 9. A list entry is lost ⚠️
+### 9. A list entry is lost
 
-**Given** the reverse — `SADD` succeeds but the `LPUSH` does not — so a tracked
-task is missing from the signal.
-**Then** if it is the only in-flight task, `LLEN` stays 0 and the supervisor is
-never brought up. Nothing reconciles, because reconciliation runs *in* the
-supervisor.
+**Given** the reverse of case 8 — the index gains an id but the list does not —
+so a tracked task is missing from the signal.
+**Then** if it were the only in-flight task, `LLEN` would stay 0 and the
+supervisor would never come up. Nothing would reconcile it either, because
+reconciliation runs *in* the supervisor. Unlike case 8, this direction is
+genuinely unsafe, and unlike case 3 it *is* a delta: with an always-on pod a
+missing list entry is harmless.
 
-This is the one genuine hole. Two things bound it: the two writes are adjacent
-calls on the same connection, so the window is very small; and any *other*
-in-flight task brings the pod up, which then reconciles the missing entry back.
-It only bites for a lone task whose push failed. Closing it properly would mean
-reconciling from somewhere always-on — the backend — rather than only from the
-pod being scaled.
+**Closed by construction.** The two writes are a single Lua script
+(`registry._track`), so the index and its mirror cannot diverge — either both
+land or neither does, and "neither" is the ordinary best-effort degradation
+every registry operation already has when Redis is unreachable. The `SADD`
+result gates the `LPUSH` *inside* the script, so re-tracking an id already in
+flight still never double-counts.
 
-Note the asymmetry is deliberate everywhere else: `reconcile_inflight_list()`
+If a Redis without scripting is ever used, `_track` falls back to the
+non-atomic pair — a weaker guarantee than the script, but better than no signal.
+
+Note the asymmetry is deliberate everywhere else too: `reconcile_inflight_list()`
 converges entry-by-entry and re-checks `SISMEMBER` before removing, rather than
 doing `DEL` + rebuild, specifically so that a concurrent registration cannot be
 wiped. Over-counting keeps the pod up; under-counting scales it away. Every
@@ -309,5 +330,6 @@ KEDA: `pollingInterval` 15s, `cooldownPeriod` 300s, min 0 / max 1, trigger
    - kill a worker mid-calculation → the row recovers
    - completion → list drains → pod back to 0
    - start two calculations back-to-back → no flapping
-5. Before broadening: resolve case 2 (`priorityClassName`) and take a decision on
-   case 3 (Redis durability).
+5. While testing, watch for the one thing not designed around: the supervisor
+   pod itself sitting `Pending` (case 2). If it never happens, nothing further
+   is needed.

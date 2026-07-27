@@ -203,14 +203,14 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 8.157 – 8.164 |
+| Scenario range | 8.157 – 8.166 |
 | Type | U |
 | Files covered | `lex_app/celery_recovery/redis_keys.py` (`inflight_list_key`), `lex_app/celery_recovery/registry.py` (register/deregister mirror, `reconcile_inflight_list`), `lex_app/management/commands/run_recovery_supervisor.py` (startup reconcile) |
 | Test file | `lex/test_project/tests/celery_async/test_8d_inflight_list_mirror.py` |
 | Test classes | `TestCluster08d_InflightListMirror` |
 | Fixtures | `FakeRedis` (in-file: strings/sets/lists/pipeline — real LLEN/LREM semantics) |
-| Est. tests | 8 |
+| Est. tests | 10 |
 | Coverage gain | scale-signal path for scaling the recovery pod to zero |
 | Prereqs | none (behaviourally inert until KEDA points at the list) |
-| Status | ✅ Complete — 8 pass / 0 fail |
+| Status | ✅ Complete — 10 pass / 0 fail |
 | Note | Lex-app half of scaling the recovery pod to zero (design locked as **Option A — parallel Redis list**, chosen over an HTTP metrics endpoint: KEDA's native `redis` scaler reads `LLEN`, reuses the existing worker TriggerAuthentication, and shares the work's failure domain — a leaked entry keeps recovery *up*, wasteful not unsafe). The registry maintains `<id>:lex:recover:inflight` as an exact mirror of the index SET: SADD-guarded LPUSH in `register()` (a requeue re-register never double-counts), LREM count-0 in `deregister()`, and a startup `reconcile_inflight_list()` in the supervisor command for mid-cutover/crash safety. 8.157 mirror-once across requeues; 8.158 deregister drains all occurrences; 8.159 reconcile rebuilds from the SET; 8.160 the sweep's give-up path drains the signal to zero. **Interaction with 8z (resolved here):** 8z and 8d land together, so `claim_dispatched()` carries the same SADD-guarded LPUSH. The consequence is behavioural, not cosmetic — the scale signal now rises at *dispatch* instead of at task start, so the supervisor is up while the worker pod is still Pending, which is exactly the window incident 1410 left unguarded. 8.161 pins that reconcile cannot drop an id registered mid-pass (a `DEL`+rebuild would, and the list would undercount → KEDA scales the supervisor away mid-calculation); 8.162 collapses duplicates so `LLEN` stays an exact count; 8.163 pins that the loop reconciles after *every* sweep, since an on-demand pod outlives many calculations and startup-only reconciliation would let drift pin it up until restart. **Infra companion (blocked):** recovery pod → KEDA ScaledObject on `LLEN inflight`; blocked on relocating the bitemporal future-activation clock to the global scheduler. |

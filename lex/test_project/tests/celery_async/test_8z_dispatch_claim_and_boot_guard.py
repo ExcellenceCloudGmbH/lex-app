@@ -102,7 +102,12 @@ class TestCluster08z_DispatchClaim(SimpleTestCase):
             abs(payload["claimed_at"] - time.time()), 5,
             "claimed_at must be a fresh epoch stamp.",
         )
-        client.sadd.assert_called_once()
+        # Indexing (and its LIST mirror) happen inside one Lua script, so the
+        # id shows up as an EVAL rather than a bare SADD.
+        self.assertEqual(
+            client.eval.call_count + client.sadd.call_count, 1,
+            "The claim must index the id exactly once.",
+        )
         heartbeat_sets = [
             c for c in set_calls if c[0][0] == redis_keys.heartbeat_key("tid-1")
         ]
@@ -124,7 +129,11 @@ class TestCluster08z_DispatchClaim(SimpleTestCase):
         with mock.patch.object(registry, "_get_client", return_value=client):
             registry.claim_dispatched("tid-1", "calc_and_save", (), {}, None)
 
-        client.sadd.assert_called_once()
+        self.assertEqual(
+            client.eval.call_count + client.sadd.call_count, 1,
+            "A lost NX race must still index the id — the payload belongs to "
+            "whoever wrote it, but the task is in flight either way.",
+        )
         # Only one SET attempt (the NX one) — no unconditional overwrite.
         self.assertEqual(
             client.set.call_count, 1,

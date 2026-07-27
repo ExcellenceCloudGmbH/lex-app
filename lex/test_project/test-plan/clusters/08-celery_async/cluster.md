@@ -156,4 +156,4 @@
 
 **Why a regression matters:** an under-counting mirror scales the recovery pod away from live work (a dead worker's task never recovers); an over-counting one keeps a pod running forever.
 
-**Scenario range:** 8.157 – 8.164. **Test file:** `lex/test_project/tests/celery_async/test_8d_inflight_list_mirror.py`. **Type:** U. **Status:** ✅ 8 pass.
+**Scenario range:** 8.157 – 8.166. **Test file:** `lex/test_project/tests/celery_async/test_8d_inflight_list_mirror.py`. **Type:** U. **Status:** ✅ 10 pass.

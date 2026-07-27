@@ -10,7 +10,7 @@ deregister drains every occurrence, and a supervisor booting mid-cutover (or
 after a crash between the SET and LIST writes) rebuilds the list from the SET.
 The signal fails safe by construction — a leaked list entry keeps the recovery
 pod *up* (wasteful), never down (unsafe).
-Cluster 8d — scenarios 8.157–8.164. Type: U.
+Cluster 8d — scenarios 8.157–8.166. Type: U.
 Covers: lex/lex_app/celery_recovery/redis_keys.py (inflight_list_key),
         lex/lex_app/celery_recovery/registry.py (register/deregister mirror,
         reconcile_inflight_list),
@@ -99,6 +99,24 @@ class FakeRedis:
         target = self.lists.get(key, [])
         end = len(target) if end == -1 else end + 1
         return target[start:end]
+
+    # -- scripting ----------------------------------------------------
+    def eval(self, script, numkeys, *args):
+        """Execute the registry's one Lua script.
+
+        Not a Lua interpreter — it recognises the SADD-then-LPUSH tracking
+        script and reproduces its semantics atomically enough for a
+        single-threaded test. Anything else raises, which exercises the
+        registry's non-atomic fallback path.
+        """
+        if "SADD" in script and "LPUSH" in script:
+            index, inflight = args[0], args[1]
+            task_id = args[2]
+            if self.sadd(index, task_id):
+                self.lpush(inflight, task_id)
+                return 1
+            return 0
+        raise NotImplementedError("unrecognised script")
 
     # -- pipeline (sequential; good enough for these semantics) --------
     def pipeline(self):
@@ -256,6 +274,49 @@ class TestCluster08d_InflightListMirror(SimpleTestCase):
 
         registry.deregister("tid-1")
         self.assertEqual(self._llen(), 0, "Completion drains the signal.")
+
+    def test_8_165_index_and_mirror_cannot_diverge(self):
+        """
+        Scenario 8.165: indexing and mirroring happen in one atomic step.
+        Given: a registry whose Redis supports scripting
+        When: a task is tracked
+        Then: the write goes through a single EVAL, not a separate SADD and
+              LPUSH — an id indexed but not listed would leave that task
+              unguarded forever, because the recovery pod is only brought up
+              by the list and only the pod reconciles the list
+        """
+        # A bare mock, not the fake: this scenario is about what the registry
+        # *issues*, not what a Redis would do with it.
+        client = mock.MagicMock()
+        client.eval.return_value = 1
+        with mock.patch.object(registry, "_get_client", return_value=client):
+            registry.register("tid-1", "calc_and_save", (), {}, "celery")
+
+        client.eval.assert_called_once()
+        self.assertEqual(
+            client.sadd.call_count, 0,
+            "The index write must be inside the script, not a separate call.",
+        )
+        self.assertEqual(
+            client.lpush.call_count, 0,
+            "The mirror write must be inside the script too — as its own round "
+            "trip it can be lost while the SADD lands, leaving a task indexed "
+            "but invisible to KEDA and therefore unguarded.",
+        )
+
+    def test_8_166_tracking_falls_back_when_scripting_is_unavailable(self):
+        """
+        Scenario 8.166: a Redis without EVAL still gets a mirror.
+        Given: a client whose eval() raises (scripting disabled/unsupported)
+        When: a task is tracked
+        Then: the registry falls back to SADD + gated LPUSH — a weaker
+              guarantee than the script, but far better than no scale signal
+        """
+        with mock.patch.object(self.fake, "eval", side_effect=RuntimeError("no EVAL")):
+            registry.register("tid-1", "calc_and_save", (), {}, "celery")
+
+        self.assertIn("tid-1", self._index())
+        self.assertEqual(self._llen(), 1, "The fallback must still mirror the id.")
 
     def test_8_161_reconcile_keeps_ids_registered_mid_pass(self):
         """

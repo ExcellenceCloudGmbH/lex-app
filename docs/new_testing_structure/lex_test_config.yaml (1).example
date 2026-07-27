@@ -1,0 +1,57 @@
+# lex_test_config.yaml — Lex test-group configuration.
+#
+# This file is the single source of truth for:
+#   * where pytest collects tests from          (tests_entrypoint)
+#   * which logical groups exist                (groups[].name)
+#   * who should receive the report emails      (receivers / groups[].receivers)
+#   * where `python -m lex pytest --report` writes PDFs   (report.output_dir)
+#   * how report emails are sent                (email.*)
+#
+# A test belongs to a group when it carries the matching pytest marker,
+# e.g. @pytest.mark.<name>.
+#
+# `python -m lex pytest` reads this file to:
+#   1. Dynamically register every group name as a pytest marker (no pytest.ini needed).
+#   2. Validate that markers used in tests match a configured group.
+#   3. Aggregate pass/fail/skip counts per group for the optional PDF report.
+#   4. Optionally send one email per resolved recipient delivery when `python -m lex pytest --report-and-email` is used.
+#
+
+# Folder (relative to repo root) where pytest should collect tests.
+tests_entrypoint: Tests
+
+# Default recipients applied to every group.
+# These recipients always receive all configured group results.
+# Optional.
+receivers:
+  - name: "QA"
+    email: "qa@example.com"
+
+# Report generation settings — used when `python -m lex pytest --report` is invoked.
+report:
+  # Directory (relative to repo root) where PDF reports are written.
+  output_dir: reports
+
+# Optional email-delivery settings used by `python -m lex pytest --report-and-email`.
+# Each email gets the matching PDF report attached.
+email:
+  from_email: "noreply@example.com"
+  from_name: "Lex Reports"
+  reply_to: "noreply@example.com"
+  subject_prefix: "Lex test report"
+
+# Logical test groups. The `name` MUST be a valid pytest marker identifier
+# (lowercase, underscores). Apply with @pytest.mark.<name> on a test class
+# or function.
+groups:
+  - name: creation
+    description: "End-to-end creation flow: uploads → ranking → report generation."
+    # Per-group receivers are added on top of the global `receivers` list above.
+    # They do not replace or suppress the global receivers.
+    receivers:
+      - name: "Creation owner"
+        email: "creation-owner@example.com"
+
+  - name: smoke
+    description: "Fast, always-green checks safe to run on every commit."
+    # No `receivers:` here → only the top-level `receivers` are used.

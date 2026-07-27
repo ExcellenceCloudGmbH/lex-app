@@ -106,6 +106,47 @@ def _decode(raw: str) -> Dict[str, Any]:
     return pickle.loads(base64.b64decode(raw))
 
 
+# Add the id to the index and, only if it was not already there, mirror it onto
+# the in-flight LIST. One script so the two cannot diverge.
+_TRACK_LUA = """
+if redis.call('SADD', KEYS[1], ARGV[1]) == 1 then
+  redis.call('LPUSH', KEYS[2], ARGV[1])
+  return 1
+end
+return 0
+"""
+
+
+def _track(client, task_id: str) -> None:
+    """Index ``task_id`` and mirror it onto the in-flight LIST, atomically.
+
+    The LIST is the KEDA scale signal, so the two writes diverging in the
+    *losing* direction — indexed but not listed — means the recovery pod is
+    never brought up for that task and it goes unguarded. As separate round
+    trips that is a real, if narrow, window; as one Lua script it cannot
+    happen. Either both land or neither does, and "neither" is the ordinary
+    best-effort degradation every registry operation already has.
+
+    The ``SADD`` result gates the ``LPUSH`` so that re-tracking an id already
+    in flight — a supervisor requeue, or the dispatch-claim being upgraded to
+    running by ``task_prerun`` — never double-counts the signal.
+
+    Falls back to the non-atomic pair if scripting is unavailable, so a Redis
+    without EVAL still gets the (slightly weaker) mirror rather than none.
+    """
+    index = redis_keys.index_key()
+    inflight = redis_keys.inflight_list_key()
+    try:
+        client.eval(_TRACK_LUA, 2, index, inflight, task_id)
+        return
+    except Exception:
+        logger.debug(
+            "Celery recovery: EVAL unavailable; tracking %s non-atomically", task_id
+        )
+    if client.sadd(index, task_id):
+        client.lpush(inflight, task_id)
+
+
 def register(
     task_id: str,
     name: str,
@@ -143,17 +184,13 @@ def register(
             # message is still on the broker and no heartbeat exists yet).
             "status": "running",
         }
-        # Single round trip for the payload/index/heartbeat writes, and the
-        # SADD result tells us whether the id is NEW to the index — only then
-        # is it mirrored onto the in-flight LIST (KEDA scale signal), so a
-        # requeue re-register of a still-tracked id never double-counts.
+        # Single round trip for the payload and heartbeat writes; the index and
+        # its LIST mirror are written together by _track (see there for why).
         pipe = client.pipeline()
         pipe.set(redis_keys.payload_key(task_id), _encode(payload), ex=_payload_ttl())
-        pipe.sadd(redis_keys.index_key(), task_id)
         pipe.set(redis_keys.heartbeat_key(task_id), "1", ex=_heartbeat_ttl())
-        results = pipe.execute()
-        if results[1]:  # SADD returned 1 → newly tracked
-            client.lpush(redis_keys.inflight_list_key(), task_id)
+        pipe.execute()
+        _track(client, task_id)
     except Exception:
         logger.warning("Celery recovery: register failed for %s", task_id, exc_info=True)
 
@@ -204,16 +241,13 @@ def claim_dispatched(
             ex=_payload_ttl(), nx=True,
         )
         # Index either way — whoever wrote the payload, the id is in flight.
-        # The SADD result gates the LIST mirror exactly as in register(): only
-        # a newly indexed id is pushed, so the claim→prerun upgrade (which
-        # SADDs the same id a second time) never double-counts the KEDA signal.
         #
         # This is what makes the scale signal rise at *dispatch* rather than at
         # task start: the supervisor is brought up while the worker pod is
         # still Pending, which is precisely the window the 1410 incident left
-        # unguarded.
-        if client.sadd(redis_keys.index_key(), task_id):
-            client.lpush(redis_keys.inflight_list_key(), task_id)
+        # unguarded. The claim→running upgrade in register() re-tracks the same
+        # id, which _track's SADD gate turns into a no-op for the LIST.
+        _track(client, task_id)
     except Exception:
         logger.warning(
             "Celery recovery: claim_dispatched failed for %s", task_id, exc_info=True
