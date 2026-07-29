@@ -21,6 +21,11 @@ re-runs the task or finalizes it as a terminal failure.
 
 Code lives in `lex/lex_app/celery_recovery/`.
 
+> **New to this?** [primer.md](primer.md) explains the whole subsystem from
+> scratch — no Kubernetes, Redis or Celery knowledge assumed — plus the current
+> open problems and the options for fixing them, with links to the upstream
+> documentation for every concept it uses.
+
 ## Why heartbeats and not `visibility_timeout`
 
 Celery's Redis transport has its own redelivery mechanism (`visibility_timeout`):
