@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 210
+max_scenario: 216
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -252,3 +252,19 @@ letters:
       and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
       Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
+  z:
+    title: Migration-only processes skip history registration (deploy memory)
+    scenarios: 1.211-1.216
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      a new-instance deploy was OOM-killed applying migrations. Every tracked model gains a
+      Level 1 Historical<X> and a Level 2 Meta<Historical<X>>, so app startup builds 3x the
+      model classes - measured at exactly 3.0x classes and ~0.21 MiB/model, linear in model
+      count (scripts/benchmark_history_registration_memory.py). A process only applying
+      migration files never reads them, so registration is skipped. The guard is a positive
+      match on known-safe command lines only, because makemigrations must keep the history
+      models or autodetection writes table drops. Letter z is the last free single letter in cluster 1

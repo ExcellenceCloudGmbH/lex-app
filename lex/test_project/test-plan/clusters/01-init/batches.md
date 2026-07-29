@@ -193,3 +193,21 @@
 | Status | ✅ Complete — clear VS Code/PyCharm sessions generate their native format; unknown or conflicting sessions generate both; existing VS Code entries survive regeneration. See [2026-07-23 session](../../progress/sessions/2026-07-23-ide-run-configs.md). |
 
 ---
+
+---
+
+### Batch 1z — Migration-only history skip ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.211 – 1.216 |
+| Type | U |
+| Files covered | `lex/lex_app/simple_history_config.py` (`is_migration_only_process`), `lex/process_admin/utils/model_registration.py` (`register_models` guard) |
+| Test file | `lex/test_project/tests/init/test_1z_migration_only_history_skip.py` |
+| Test classes | `TestCluster01z_MigrationOnlyHistorySkip` |
+| Fixtures | `IncidentDatetimeItem` (existing) |
+| Est. tests | 6 |
+| Coverage gain | the startup path that decides whether history models are built |
+| Prereqs | none |
+| Status | ✅ Complete — 6 pass / 0 fail |
+| Note | Reported as "one migration is too big to deploy a new instance". The database is *empty*, so the cost is not row data — it is model classes. Each tracked model gets a Level 1 `Historical<X>` **and** a Level 2 `Meta<Historical<X>>`, both carrying the parent's full field set, and `generic_app_config.ready()` builds all of them unconditionally, including for a process that only applies migrations. `scripts/benchmark_history_registration_memory.py` measures it: **exactly 3.0x model classes** and ~0.21 MiB per model, linear from 50 to 400 models. The guard is deliberately a positive match on known-safe command lines — 1.212 is the scenario that must never regress, because `makemigrations` without the history models in the registry generates migrations that **drop the history tables**. Cluster 1 has now used every single letter `a`-`z`. |

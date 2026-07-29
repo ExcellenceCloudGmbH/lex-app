@@ -7,7 +7,10 @@ import nest_asyncio
 from asgiref.sync import sync_to_async
 from django.contrib import admin
 from django.db import models
-from lex.lex_app.simple_history_config import get_model_exclusion_reason
+from lex.lex_app.simple_history_config import (
+    get_model_exclusion_reason,
+    is_migration_only_process,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,23 @@ class ModelRegistration:
 
         if untracked_models is None:
             untracked_models = []
+
+        # A process that only applies migration files never uses the history
+        # models, but building them is the dominant cost of app startup: each
+        # tracked model gains a Level 1 ``Historical<X>`` and a Level 2
+        # ``Meta<Historical<X>>``, so the registry holds 3x the model classes,
+        # each with the parent's full field set. The migration executor then
+        # builds its own ProjectState over that same tripled set. On a large
+        # project the two together exhaust the container before the first table
+        # is created. ``migrate`` reads its state from the migration files, not
+        # from these classes, so skipping them here changes nothing it does.
+        if history_tracking_enabled and is_migration_only_process():
+            logger.info(
+                "Migration-only process: skipping history registration for %d models "
+                "(set LEX_SKIP_MIGRATE_HISTORY=false to disable)",
+                len(models),
+            )
+            history_tracking_enabled = False
 
         # Configure User model display name
         def get_username(self):
@@ -428,6 +448,23 @@ class ModelRegistration:
                 ensure_terminal_calculation_audit,
             )
 
+            from lex.core.models.LexModel import lex_datetime_now
+
+            # Age-gate (defense-in-depth for the 2026-07-14 incident class):
+            # when the recovery registry is unreadable — Redis evicted or
+            # flushed, exactly the moments this sweep tends to run — every
+            # row looks untracked and the sweep degrades to a blind abort.
+            # A recently-started calculation is far more likely to be queued
+            # or running than orphaned, so young rows are spared regardless
+            # of tracking. 0 disables the gate (legacy behavior).
+            try:
+                min_age_seconds = float(
+                    os.getenv("LEX_STARTUP_ABORT_MIN_AGE_SECONDS", "1800")
+                )
+            except (TypeError, ValueError):
+                min_age_seconds = 1800.0
+            now = lex_datetime_now()
+
             stuck = list(
                 model.objects.filter(is_calculated=CalculationModel.IN_PROGRESS)
             )
@@ -438,6 +475,20 @@ class ModelRegistration:
                     # would, via the terminal-outcome guard, block that resume
                     # and permanently lose recoverable calculation state.
                     continue
+                if min_age_seconds > 0:
+                    stamp = getattr(instance, "edited_at", None) or getattr(
+                        instance, "created_at", None
+                    )
+                    if stamp is not None and (now - stamp).total_seconds() < min_age_seconds:
+                        logger.info(
+                            "Startup reset: sparing young IN_PROGRESS row %s "
+                            "(%.0fs old < %.0fs gate) — likely queued or "
+                            "running with tracking unavailable.",
+                            instance,
+                            (now - stamp).total_seconds(),
+                            min_age_seconds,
+                        )
+                        continue
                 instance.is_calculated = CalculationModel.ABORTED
                 instance._history_change_reason = (
                     "Startup reset: calculation was still IN_PROGRESS"
