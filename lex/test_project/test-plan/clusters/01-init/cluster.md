@@ -182,4 +182,4 @@ does not remove user launch configurations.
 
 **Why a regression matters:** in one direction a large project cannot be deployed at all (the container is OOM-killed before the first table exists); in the other, `makemigrations` runs without the `Historical<X>` models in the registry, sees them as deleted, and writes migrations that drop the history tables.
 
-**Scenario range:** 1.211 – 1.216. **Test file:** `lex/test_project/tests/init/test_1z_migration_only_history_skip.py`. **Type:** U. **Status:** ✅ 6 pass.
+**Scenario range:** 1.211 – 1.217. **Test file:** `lex/test_project/tests/init/test_1z_migration_only_history_skip.py`. **Type:** U. **Status:** ✅ 7 pass.

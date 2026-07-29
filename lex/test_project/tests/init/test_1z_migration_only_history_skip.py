@@ -18,7 +18,7 @@ DROP the history tables -- silent, irreversible data loss. So the guard is a
 positive match on known-safe command lines and nothing else; anything it cannot
 positively identify must keep registering.
 
-Cluster 1z — scenarios 1.211–1.216. Type: U.
+Cluster 1z — scenarios 1.211–1.217. Type: U.
 Covers: lex/lex_app/simple_history_config.py (is_migration_only_process),
         lex/process_admin/utils/model_registration.py (register_models guard).
 Run: python -m lex pytest lex/test_project/tests/init/test_1z_migration_only_history_skip.py -v
@@ -88,9 +88,25 @@ class TestCluster01z_MigrationOnlyHistorySkip(SimpleTestCase):
             is_migration_only_process(["manage.py", "lex_migrate", "--no-makemigrations"]),
             "With generation explicitly off, there is nothing left to protect.",
         )
-        self.assertTrue(
+    def test_1_217_init_always_registers_even_with_generation_off(self):
+        """
+        Scenario 1.217: `lex init` is never migration-only, whatever its flags.
+        Given: the container startup line, `lex init --no-makemigrations`
+        When: the guard inspects it
+        Then: NOT migration-only. init applies migrations, but it also syncs
+              Keycloak resources by enumerating the live app registry
+              (get_all_django_models -> app_config.get_models()). Skipping
+              registration there would make every Historical<X> and
+              Meta<Historical<X>> invisible to that sync, silently stripping the
+              history models of their Keycloak resources and permissions.
+        """
+        self.assertFalse(
             is_migration_only_process(["lex", "init", "--no-makemigrations", "--no-bootstrap"]),
-            "The container startup line is the case this optimisation exists for.",
+            "init reads the registry for Keycloak sync; history must stay registered.",
+        )
+        self.assertFalse(
+            is_migration_only_process(["manage.py", "init"]),
+            "No form of init qualifies.",
         )
 
     def test_1_214_serving_process_is_never_migration_only(self):

@@ -222,7 +222,15 @@ _APPLY_ONLY_COMMANDS = {"migrate"}
 
 #: Commands that apply migrations but can also *generate* them first. Safe to
 #: skip registration only when generation is explicitly disabled.
-_CONDITIONAL_COMMANDS = {"lex_migrate", "init", "Init"}
+#:
+#: ``init`` is deliberately NOT here. It applies migrations, but it also syncs
+#: Keycloak resources and permissions by enumerating the live app registry
+#: (``get_all_django_models`` -> ``app_config.get_models()``). Skipping history
+#: registration there would make every ``Historical<X>`` and
+#: ``Meta<Historical<X>>`` invisible to that sync, so the history models would
+#: silently lose their Keycloak resources. History is load-bearing; nothing that
+#: reads the registry for anything other than applying migrations may skip it.
+_CONDITIONAL_COMMANDS = {"lex_migrate"}
 
 
 def is_migration_only_process(argv=None) -> bool:
@@ -235,6 +243,11 @@ def is_migration_only_process(argv=None) -> bool:
     as deleted models and writes migrations that **drop the history tables**.
     So a command that might generate migrations only qualifies when generation
     is explicitly switched off.
+
+    This never disables history *tracking*: it only avoids constructing the
+    history model classes in a short-lived process that applies migration files
+    and exits. History tables are created by the migrations themselves, and the
+    serving process registers everything as before.
 
     Set ``LEX_SKIP_MIGRATE_HISTORY=false`` to disable the optimisation entirely.
     """

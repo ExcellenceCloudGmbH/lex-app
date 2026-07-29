@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 216
+max_scenario: 217
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -229,7 +229,7 @@ letters:
     scenarios: 1.195-1.200
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: management command that surgically re-anchors user-entered datetimes mis-stored after the
@@ -254,10 +254,10 @@ letters:
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
   z:
     title: Migration-only processes skip history registration (deploy memory)
-    scenarios: 1.211-1.216
+    scenarios: 1.211-1.217
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: >-

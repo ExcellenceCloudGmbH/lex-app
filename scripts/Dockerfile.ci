@@ -1,0 +1,19 @@
+# Minimal CI runner — built locally, no Docker Hub pull needed for Python.
+# Uses the same uv-managed Python 3.12 that's already on your machine.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 python3.12-venv python3.12-dev \
+    python3-pip \
+    libpq-dev gcc git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Make python3.12 the default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+
+RUN python -m pip install --upgrade pip setuptools wheel --break-system-packages
+
+WORKDIR /app
