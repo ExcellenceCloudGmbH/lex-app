@@ -155,3 +155,21 @@
 | Status | ✅ Complete (2026-07-21). Root cause: the embedded `auth_token` session is stored with no refresh token (`refresh_token: None`), so it dies at the 4h Keycloak SSO cap and the deny branch then redirected the iframe document to the IdP. Follow-up (separate change): give the embed path a refresh token for silent renewal. |
 
 ---
+
+---
+
+### Batch 1z — Embedded Streamlit token renewal ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.201 – 1.206 |
+| Type | U |
+| Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView.post`, `_access_token_expiry`), `lex/proxy.py` (`_persist_jwt_to_session_if_needed`) |
+| Test file | `lex/test_project/tests/init/test_1z_embedded_token_renewal.py` |
+| Test classes | `TestCluster01z_EmbeddedTokenRenewal` |
+| Fixtures | none (fake session dicts + an in-memory token store) |
+| Est. tests | 6 |
+| Coverage gain | the renewal path of the embedded Streamlit auth flow |
+| Prereqs | batch 1y (the breakout response this reacts to) |
+| Status | ✅ Complete — 6 pass / 0 fail |
+| Note | 1y made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.204 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |

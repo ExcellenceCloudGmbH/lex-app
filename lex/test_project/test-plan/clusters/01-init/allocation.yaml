@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 200
+max_scenario: 206
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -226,3 +226,18 @@ letters:
       login instead of redirecting the frame to Keycloak (login page sets frame-ancestors 'self' →
       "refused to connect"); top-level redirect + API 401 unchanged. Covers lex/proxy.py
       `_unauthenticated_response` / `_is_iframe_document_request`.
+  z:
+    title: Embedded Streamlit token renewal (issuer expiry + proxy adoption)
+    scenarios: 1.201-1.206
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: follow-up to 1y — makes the expiry dead end avoidable instead of merely graceful.
+      StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only
+      returned by dead code that self-signed HS256 the RS256/JWKS proxy would reject) and 401s
+      instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly
+      newer auth_token rather than discarding it while the stored one is still valid, which
+      silently defeated any renewal. Deliberately no refresh token on the embedded path — it
+      would have to travel through the iframe URL
