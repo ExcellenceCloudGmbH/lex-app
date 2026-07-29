@@ -171,27 +171,28 @@ not exist. Treat it as a **test observation**: if the supervisor is ever seen
 ### 3. Redis restarts mid-calculation
 
 **Given** the per-instance Dragonfly restarts or is evicted.
-**Then** the index and the list are both gone, `LLEN` reads 0, and after the
-cooldown the supervisor scales itself down while calculations are still running.
+**Then** it depends on *how* it died. Dragonfly does persist to the mounted PVC,
+but only at shutdown — see [Redis durability](#redis-durability) for the detail
+and the loss paths.
 
-That sounds like a regression, and it is worth being precise that it is not.
-With the registry wiped, `list_tracked()` returns empty and `scan_and_recover`
-iterates nothing — **an always-on supervisor recovers exactly as much as an
-absent one: nothing.** The payloads it would need are gone with everything else.
-Scale-to-zero changes the pod count, not the outcome. This is a pre-existing
-property of a recovery subsystem that keeps its state in Redis, not something
-running on demand introduces.
+- **Graceful** (rollout, `kubectl delete`, drain, eviction): the shutdown hook
+  writes a snapshot and the new pod reloads it. Index and in-flight list both
+  survive; the supervisor is never scaled away by the restart.
+- **Abrupt** (kernel OOM kill, node loss): no snapshot is written, and the pod
+  reloads whatever the last graceful shutdown left — so the registry comes back
+  stale or empty. `LLEN` reads 0 and the supervisor scales itself down while
+  calculations are still running.
 
-The tempting fix — turning on Dragonfly persistence — is worse than the problem.
-Restoring a broker snapshot resurrects queue messages that may already have been
-acked; with `task_acks_late=True` and `visibility_timeout=inf`, the ack is the
-only thing that removes a message, so a stale snapshot un-acks completed work and
-tasks re-execute. Duplicate calculation runs are a worse failure than a lost
-registry.
+The second case sounds like a regression from running on demand, and it is worth
+being precise that it is not. With the registry gone, `list_tracked()` returns
+empty and `scan_and_recover` iterates nothing — **an always-on supervisor
+recovers exactly as much as an absent one: nothing.** The payloads it would need
+went with everything else. Scale-to-zero changes the pod count, not the outcome.
 
-The mitigation that does help already shipped: the startup reset spares untracked
-`IN_PROGRESS` rows younger than `LEX_STARTUP_ABORT_MIN_AGE_SECONDS` (1800), so a
-backend restart after a Redis wipe no longer blind-aborts healthy work.
+The mitigation that helps here already shipped: the startup reset spares
+untracked `IN_PROGRESS` rows younger than `LEX_STARTUP_ABORT_MIN_AGE_SECONDS`
+(1800), so a backend restart after a lost registry no longer blind-aborts healthy
+work.
 
 ### 4. Back-to-back calculations
 
@@ -288,6 +289,137 @@ and why it stays that way until the clock moves to the global scheduler.
 **Given** an instance running calculations synchronously in the backend.
 **Then** no task is dispatched, nothing is registered, and the supervisor stays
 at zero. Correct — there is no separate worker that can die.
+
+---
+
+## Redis durability
+
+> **Correction.** An earlier revision of this document, and the descriptions of
+> PRs #676 and LEX_TERRAFORM_MODULES#35, stated that the mounted PVC "is never
+> wired to `--dir`/`--dbfilename`" and that Redis is therefore volatile. **That
+> was wrong.** It was inferred from the absence of those flags in `infra.tf`
+> rather than checked. The wiring is implicit, and the corrected picture below
+> changes what the sensible options are.
+
+### What is actually true
+
+Verified from the image config and a clean chart render:
+
+```
+docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.1
+  WorkingDir : /data          <- --dir defaults to the cwd
+  Volumes    : {'/data': {}}
+chart render
+  args       : ['--alsologtostderr']       <- no --dir/--dbfilename/--snapshot_cron
+  resources  : {'limits': {}, 'requests': {}}   <- BestEffort
+  mounts     : [('external-data', '/data')]     <- the PVC
+```
+
+`--dir` defaults to the working directory, the working directory is `/data`, and
+`/data` is the PVC. So Dragonfly **does** persist, without anything in `infra.tf`
+asking it to. Cluster boot logs confirm it (`Searching for snapshot in directory:
+"/data"` → `Loading /data/dump-…-summary.dfs` → `num keys read: N`).
+
+What is *not* configured is `--snapshot_cron`. There is no periodic save. The
+only save is the shutdown hook.
+
+### Loss paths (measured in-cluster)
+
+| Death | Snapshot written? | Result |
+|---|---|---|
+| Graceful — rollout, delete, drain, eviction | yes | reloaded intact |
+| Abrupt — kernel OOM kill, node loss | **no** | reloads the **last graceful** snapshot, which may be the pod's entire lifetime old |
+| Rollout racing a restore | old pod's save discarded | new pod loads the stale snapshot while the old one still runs |
+
+The third case is a consequence of `storage.enabled = false` rendering a
+**Deployment** with a ReadWriteOnce PVC and the chart's default rolling update:
+two pods briefly share one volume.
+
+### Open problems
+
+1. **Stale restore after abrupt death is unbounded.** With no `snapshot_cron`,
+   the restore reaches back to the last graceful shutdown. A restored broker
+   queue re-delivers messages that were consumed and completed since — under
+   `task_acks_late=True` and `visibility_timeout=inf` the ack is the only thing
+   that removes a message, so the restore un-acks finished work and it runs
+   again. Shutdown-only persistence is the *worst* of the three positions: truly
+   volatile never resurrects anything, and periodic bounds the damage to one
+   interval.
+
+2. **The container is BestEffort.** No requests, no limits, so it is first to be
+   killed under node memory pressure — which is precisely the path that writes no
+   snapshot. `safe-to-evict: "false"` does not help: it constrains
+   cluster-autoscaler node selection, not the kernel OOM killer or node loss.
+
+3. **Snapshots accumulate unbounded** on a 1 GiB disk (152 files observed on one
+   production instance, back to Sept 2025). When the disk fills, the shutdown
+   save fails silently and *every* subsequent restart becomes the stale path.
+
+4. **The broker and the recovery registry share DB 1.** `registry._get_client()`
+   builds from `CELERY_BROKER_URL` (`…/1`); Channels is `/2`. Dragonfly
+   persistence is per instance, not per DB, so the two cannot be given opposite
+   policies — and they want opposite things. The registry wants durability; the
+   broker wants amnesia.
+
+5. **Nothing detects any of this.** A failed save, a full disk, or a stale
+   restore are all silent.
+
+### Options
+
+**A — Make it genuinely volatile** (`extraArgs: ["--dbfilename="]`).
+Matches what the recovery design already assumes; no restore can ever resurrect
+anything. Cost: the registry is lost on *every* restart, including graceful ones
+that survive today. This trades a working behaviour for predictability.
+
+**B — Make it properly durable** (`extraArgs: ["--snapshot_cron=…"]` + retention).
+Bounds staleness to one interval and lets the registry survive abrupt death, so
+recovery keeps working across a Redis crash. Cost: it makes the resurrection path
+*more* frequent — every abrupt death now replays up to one interval of consumed
+messages. Only acceptable once problem 1 is defended.
+
+**C — Defend the resurrection path, then choose freely.** The double-execution
+hazard is not really a persistence problem; it is a missing check at task start.
+A task that refuses to run when its calculation is already terminal makes a
+resurrected message harmless.
+[#648](https://github.com/ExcellenceCloudGmbH/lex-app/pull/648) already
+diagnoses half of this — the startup sweep aborts a row without setting
+`cluster_cancel_index.mark_cancelled`, so the cooperative checks in
+`calc_and_save` and the `lex_shared_task` wrapper find nothing. Its fix covers a
+resurrected message whose row was **aborted**. The gap it leaves is a message
+whose task **completed**: the row is `SUCCESS`, no cancel marker, and nothing at
+task start tests "already done".
+
+**D — Reduce how often the bad path is reached at all.** Independent of A–C and
+cheap:
+
+- give Dragonfly requests/limits so it leaves BestEffort (chart: `resources`);
+- stop two pods sharing one RWO volume — either the chart's StatefulSet path
+  (`storage.enabled = true`, which also means adopting its volumeClaimTemplate
+  instead of the external PVC) or a `Recreate` strategy, which the chart does not
+  expose;
+- bound snapshot retention, or grow the 1 GiB disk;
+- alert on save failure and disk usage.
+
+### Recommended sequencing
+
+1. **Now — D.** No design debate, no behaviour change, and it directly addresses
+   the paths that actually lose data. The BestEffort fix is the single highest
+   value line here.
+2. **Next — C.** Land #648's cancel-marker fix and extend the task-start guard to
+   terminal rows. This is the load-bearing change: it removes the coupling that
+   makes the persistence decision hard, and it fixes a real double-execution bug
+   on its own merits.
+3. **Then — B, deliberately.** With resurrection defused, periodic snapshots are
+   straightforwardly good: the registry survives crashes and recovery keeps
+   working. Pick the interval against how much replay you are willing to absorb.
+4. **Not — the status quo.** Shutdown-only persistence on a BestEffort container
+   with unbounded snapshots on a 1 GiB disk is not a choice anyone made; it is
+   what the defaults produced.
+
+Note for the on-demand design specifically: none of this changes the verdict on
+edge case 3. Whichever option is taken, an always-on supervisor and an absent one
+recover equally from a lost registry. Persistence changes how often the registry
+is lost, not who can act on it.
 
 ---
 
