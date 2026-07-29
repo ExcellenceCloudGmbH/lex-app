@@ -6,3 +6,6 @@ dist/*
 *.egg-info
 *.sqlite3
 lex/_version.py
+
+# superpowers brainstorm scratch (visual companion mockups)
+.superpowers/
