@@ -9,3 +9,6 @@ lex/_version.py
 
 # superpowers brainstorm scratch (visual companion mockups)
 .superpowers/
+
+# git worktrees (repo convention: .claude/worktrees/lex_<feature>)
+.claude/worktrees/
