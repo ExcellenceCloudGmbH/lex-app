@@ -291,3 +291,133 @@ class TestCluster1y_StreamlitContract:
         for key in sorted(per_mode):
             assert f"theme.light.{key}" in template, f"missing theme.light.{key}"
             assert f"theme.dark.{key}" in template, f"missing theme.dark.{key}"
+
+
+class TestCluster1y_ConfigWriter:
+    """The theme reaches Streamlit as valid config: TOML and CLI flags."""
+
+    # -- 1.210 --------------------------------------------------------
+    def test_1_210_global_only_keys_never_land_in_a_mode_block(self) -> None:
+        """Scenario 1.210: the 4 global-only keys appear at [theme] only.
+
+        Streamlit rejects unrecognised config options outright, so a chart
+        palette inside [theme.light] would break every dashboard rather than
+        just look wrong.
+        """
+        from lex.lex_app.streamlit.theme.config_writer import build_full_config
+        from lex.lex_app.streamlit.theme.mapping import GLOBAL_ONLY_KEYS
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        cfg = build_full_config(TOKENS)
+
+        for key in GLOBAL_ONLY_KEYS:
+            assert key in cfg["theme"], f"{key} missing from [theme]"
+            assert key not in cfg["theme"]["light"], f"{key} leaked into light"
+            assert key not in cfg["theme"]["dark"], f"{key} leaked into dark"
+
+    # -- 1.211 --------------------------------------------------------
+    def test_1_211_per_mode_values_differ_where_the_tokens_differ(self) -> None:
+        """Scenario 1.211: the mode blocks carry that mode's own surfaces,
+        while the brand accent stays constant across both."""
+        from lex.lex_app.streamlit.theme.config_writer import build_full_config
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        cfg = build_full_config(TOKENS)
+
+        assert cfg["theme"]["light"]["backgroundColor"] == "#ffffff"
+        assert cfg["theme"]["dark"]["backgroundColor"] == "#0d1117"
+        assert cfg["theme"]["light"]["primaryColor"] == "#14b4b4"
+        assert cfg["theme"]["dark"]["primaryColor"] == "#14b4b4"
+
+    # -- 1.212 --------------------------------------------------------
+    def test_1_212_dotted_keys_become_nested_sidebar_tables(self) -> None:
+        """Scenario 1.212: `sidebar.backgroundColor` is emitted as a nested
+        `sidebar` table, which is the shape Streamlit's TOML parser expects —
+        a literal dotted key would be read as an unknown option."""
+        from lex.lex_app.streamlit.theme.config_writer import build_full_config
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        cfg = build_full_config(TOKENS)
+
+        assert cfg["theme"]["light"]["sidebar"]["backgroundColor"] == "#283C50"
+        assert cfg["theme"]["dark"]["sidebar"]["backgroundColor"] == "#283C50"
+        # No literal dotted key survives anywhere.
+        for scope in (cfg["theme"], cfg["theme"]["light"], cfg["theme"]["dark"]):
+            assert not [k for k in scope if "." in k], f"dotted key left in {scope.keys()}"
+
+    # -- 1.213 --------------------------------------------------------
+    def test_1_213_rendered_toml_parses_and_round_trips(self) -> None:
+        """Scenario 1.213: the rendered text is valid TOML and preserves the
+        structure — not a string we merely hope Streamlit can read."""
+        import tomllib
+
+        from lex.lex_app.streamlit.theme.config_writer import (
+            build_full_config,
+            render_config_toml,
+        )
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        text = render_config_toml(build_full_config(TOKENS))
+        parsed = tomllib.loads(text)
+
+        assert parsed["theme"]["primaryColor"] == "#14b4b4"
+        assert parsed["theme"]["light"]["sidebar"]["backgroundColor"] == "#283C50"
+        assert parsed["theme"]["dark"]["backgroundColor"] == "#0d1117"
+        assert parsed["theme"]["chartCategoricalColors"][0] == "#14b4b4"
+        assert parsed["theme"]["linkUnderline"] is False
+
+    # -- 1.214 --------------------------------------------------------
+    def test_1_214_cli_flags_are_fully_qualified_and_streamlit_valid(self) -> None:
+        """Scenario 1.214: every emitted flag is `--theme.<path>=<value>` and
+        names a real Streamlit option. Flags are the primary delivery path
+        (a config file's location depends on the working directory), so a
+        malformed flag name would make Streamlit exit on startup.
+        """
+        from streamlit import config
+
+        from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        config.get_config_options()
+        template = config._config_options_template
+
+        flags = theme_cli_flags(TOKENS)
+        assert flags, "no flags emitted"
+
+        for flag in flags:
+            assert flag.startswith("--theme."), f"not a theme flag: {flag}"
+            assert "=" in flag, f"flag has no value: {flag}"
+            option = flag[2:].split("=", 1)[0]
+            assert option in template, f"{option} is not a Streamlit config option"
+
+    # -- 1.215 --------------------------------------------------------
+    def test_1_215_list_and_bool_values_are_cli_encoded(self) -> None:
+        """Scenario 1.215: chart palettes and booleans survive the flag
+        encoding as JSON, which is what Streamlit's parser accepts — a bare
+        Python `['#14b4b4']` or `False` would be mis-parsed."""
+        from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        flags = theme_cli_flags(TOKENS)
+        by_option = {f[2:].split("=", 1)[0]: f.split("=", 1)[1] for f in flags}
+
+        assert by_option["theme.chartCategoricalColors"].startswith("[")
+        assert '"#14b4b4"' in by_option["theme.chartCategoricalColors"]
+        assert by_option["theme.linkUnderline"] == "false"
+        assert by_option["theme.showWidgetBorder"] == "true"
+
+    # -- 1.216 --------------------------------------------------------
+    def test_1_216_write_config_creates_the_file(self, tmp_path) -> None:
+        """Scenario 1.216: `write_config` puts parseable TOML on disk at the
+        given path, creating parent directories."""
+        import tomllib
+
+        from lex.lex_app.streamlit.theme.config_writer import write_config
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        target = tmp_path / ".streamlit" / "config.toml"
+        write_config(target, TOKENS)
+
+        assert target.exists()
+        parsed = tomllib.loads(target.read_text(encoding="utf-8"))
+        assert parsed["theme"]["primaryColor"] == "#14b4b4"
