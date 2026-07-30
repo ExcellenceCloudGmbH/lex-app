@@ -432,8 +432,8 @@ class TestCluster1z_ConfigWriter:
         # Booleans: TOML-style lowercase literals, which Streamlit parses.
         assert by_option["theme.linkUnderline"] == "false"
         assert by_option["theme.showWidgetBorder"] == "true"
-        # Lists cannot be expressed on Streamlit's CLI at all — see 1.236c.
-        assert "theme.chartCategoricalColors" not in by_option
+        # Lists stay JSON: Streamlit json.loads them (see 1.236c).
+        assert by_option["theme.chartCategoricalColors"].startswith("[")
 
     # -- 1.224 --------------------------------------------------------
     def test_1_224_write_config_creates_the_file(self, tmp_path) -> None:
@@ -878,27 +878,91 @@ class TestCluster1z_ResolvedByStreamlit:
         from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
         from lex.lex_app.streamlit.theme.tokens import TOKENS
 
-        offenders = [f for f in theme_cli_flags(TOKENS) if '"' in f or "'" in f]
-        assert not offenders, f"flag values must be bare, got: {offenders[:3]}"
+        offenders = []
+        for flag in theme_cli_flags(TOKENS):
+            value = flag.split("=", 1)[1]
+            # JSON list values legitimately contain quotes (Streamlit json.loads
+            # them — see 1.236c). Every SCALAR value must be bare.
+            if value.startswith("["):
+                continue
+            if '"' in value or "'" in value:
+                offenders.append(flag)
+        assert not offenders, f"scalar flag values must be bare, got: {offenders[:3]}"
 
     # -- 1.236c -------------------------------------------------------
-    def test_1_236c_list_options_go_via_toml_not_flags(self) -> None:
-        """Scenario 1.236: Streamlit's CLI cannot express a list-valued option —
-        a bracketed value is stored as a plain string and a repeated flag keeps
-        only the last. So the chart palettes are deliberately omitted from the
-        flags and carried by the generated TOML instead. Asserted so the split
-        is a documented contract rather than an accident."""
-        from lex.lex_app.streamlit.theme.config_writer import (
-            build_full_config,
-            theme_cli_flags,
-        )
+    def test_1_236c_list_options_survive_as_json_with_the_required_length(self) -> None:
+        """Scenario 1.236: list options DO reach Streamlit via the CLI — it
+        ``json.loads`` them — so they must stay JSON while plain strings go bare.
+
+        I first concluded the CLI could not express lists at all, because
+        ``streamlit config show`` displays the value as a string. That was wrong:
+        ``_parse_and_populate_chart_colors`` parses it. Dropping them was a
+        self-inflicted regression, so this test pins the real behaviour.
+
+        It also pins the length rule: Streamlit requires EXACTLY 10 stops for the
+        sequential and diverging ramps and logs an error and falls back to its own
+        defaults otherwise — another silent-skip, like the quoted colours.
+        """
+        import json
+
+        from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
         from lex.lex_app.streamlit.theme.tokens import TOKENS
 
-        flags = theme_cli_flags(TOKENS)
-        assert not [f for f in flags if "chartCategoricalColors" in f]
-        assert not [f for f in flags if "chartSequentialColors" in f]
-        assert not [f for f in flags if "chartDivergingColors" in f]
+        by_option = {
+            f[2:].split("=", 1)[0]: f.split("=", 1)[1] for f in theme_cli_flags(TOKENS)
+        }
 
-        # …but they ARE in the file, so the theme is complete when it is used.
-        theme = build_full_config(TOKENS)["theme"]
-        assert theme["chartCategoricalColors"][0] == "#14b4b4"
+        categorical = json.loads(by_option["theme.chartCategoricalColors"])
+        assert categorical[0] == "#14b4b4"
+
+        for key in ("chartSequentialColors", "chartDivergingColors"):
+            stops = json.loads(by_option[f"theme.{key}"])
+            assert len(stops) == 10, (
+                f"{key} must have exactly 10 stops or Streamlit discards it "
+                f"and uses its own palette; got {len(stops)}"
+            )
+
+    # -- 1.236d -------------------------------------------------------
+    def test_1_236d_the_browser_receives_distinct_light_and_dark_themes(self) -> None:
+        """Scenario 1.236: the message Streamlit actually sends the browser
+        carries BOTH a light and a dark palette, and they differ.
+
+        This is the layer that decides whether Streamlit can offer its
+        auto-switching theme at all: the client builds its "Auto" theme from the
+        light and dark customs and follows ``prefers-color-scheme``. If the dark
+        block arrived empty or identical to light, mode switching would appear
+        broken no matter what the config said.
+        """
+        from streamlit import config
+        from streamlit.proto.NewSession_pb2 import NewSession
+        from streamlit.runtime.app_session import _populate_theme_msg
+
+        from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        config.get_config_options()
+        template = config._config_options_template
+        for flag in theme_cli_flags(TOKENS):
+            option, _, raw = flag[2:].partition("=")
+            option_type = template[option].type
+            if option_type is bool:
+                parsed = raw == "true"
+            elif option_type is int:
+                parsed = int(raw)
+            else:
+                parsed = raw
+            config._set_option(option, parsed, "cli")
+
+        msg = NewSession()
+        _populate_theme_msg(msg.custom_theme)
+        _populate_theme_msg(msg.custom_theme.light, "theme.light")
+        _populate_theme_msg(msg.custom_theme.dark, "theme.dark")
+        theme = msg.custom_theme
+
+        assert theme.light.background_color == "#ffffff"
+        assert theme.dark.background_color == "#0d1117"
+        assert theme.light.background_color != theme.dark.background_color
+        # The brand accent is deliberately constant across both.
+        assert theme.light.primary_color == theme.dark.primary_color == "#14b4b4"
+        # Ramps survived the length check rather than being dropped.
+        assert len(theme.chart_sequential_colors) == 10

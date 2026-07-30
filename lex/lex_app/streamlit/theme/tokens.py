@@ -53,8 +53,17 @@ TOKENS: dict = {
     "chart": {
         # Brand-first categorical ramp; distinguishable in both modes.
         "categorical": ["#14b4b4", "#283C50", "#f2a33c", "#7b61ff", "#e2544b", "#3c9f5a"],
-        "sequential": ["#e6f7f7", "#a6e3e3", "#5cc9c9", "#14b4b4", "#0d7a7a"],
-        "diverging": ["#e2544b", "#f0a9a4", "#f2f2f2", "#a6e3e3", "#14b4b4"],
+        # Streamlit requires EXACTLY 10 stops for the sequential and diverging
+        # ramps (app_session._parse_and_populate_chart_colors, required_length=10)
+        # and silently falls back to its own defaults otherwise.
+        "sequential": [
+            "#f0fbfb", "#d9f5f5", "#bfeded", "#a6e3e3", "#8ad9d9",
+            "#5cc9c9", "#2fbdbd", "#14b4b4", "#109696", "#0d7a7a",
+        ],
+        "diverging": [
+            "#c2382f", "#e2544b", "#ef8880", "#f7bdb8", "#fae4e2",
+            "#e0f4f4", "#a6e3e3", "#5cc9c9", "#14b4b4", "#0d7a7a",
+        ],
     },
     "modes": {
         "light": {

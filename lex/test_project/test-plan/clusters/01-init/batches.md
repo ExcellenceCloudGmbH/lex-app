@@ -189,7 +189,7 @@
 | Test file | `lex/test_project/tests/init/test_1y_streamlit_theme.py` |
 | Test classes | `TestCluster1y_Tokens`, `_Mapping`, `_StreamlitContract`, `_ConfigWriter`, `_Fonts`, `_LaunchFlags`, `_CommittedConfig` |
 | Fixtures | none (pure data transforms; `tmp_path` for the file write) |
-| Tests landed | **40 pass / 0 fail** |
+| Tests landed | **41 pass / 0 fail** |
 | Coverage gain | Streamlit theme parity phase 1 — token source of truth, native theme mapping, CLI + file delivery, drift guard |
 | Status | ✅ Complete — see the allocation note. Phase 1 of the design (`docs/superpowers/specs/2026-07-30-streamlit-theme-parity-design.md`); phases 2–4 (CSS layer, live host handshake, cross-repo tokens.json) are separate. |
 ### Batch 1y — IDE-aware setup run configurations ✅

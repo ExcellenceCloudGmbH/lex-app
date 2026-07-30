@@ -257,7 +257,7 @@ letters:
     scenarios: 1.211-1.236
     status: complete
     tests:
-      pass: 40
+      pass: 41
       skip: 0
       xfail: 0
     note: Streamlit pages now carry the real lex brand. Design tokens are vendored as pure Python
@@ -283,4 +283,6 @@ letters:
       quoted them, so every colour arrived as `"#14b4b4"` and Streamlit silently skipped it as
       invalid; the theme applied nowhere while every shape-level check passed. 1.236 now asserts
       the values Streamlit actually RESOLVES. Streamlit's CLI cannot express list options at all,
-      so the three chart palettes travel via the generated TOML only (1.236c).
+      lists ARE expressible on the CLI (Streamlit json.loads them) so they stay JSON while
+      scalars go bare, and the sequential/diverging ramps need EXACTLY 10 stops or Streamlit
+      discards them for its own defaults — another silent skip (1.236c/1.236d).

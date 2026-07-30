@@ -90,6 +90,11 @@ def _cli_value(value: object) -> str:
     """
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        # List options ARE expressible on the CLI: Streamlit json.loads the
+        # value (see app_session._parse_and_populate_chart_colors), so these
+        # must stay JSON — unlike plain strings, which must be bare.
+        return json.dumps(list(value))
     return str(value)
 
 
@@ -132,10 +137,10 @@ def write_config(path: str | Path, tokens: dict) -> Path:
 def theme_cli_flags(tokens: dict) -> list[str]:
     """Return `--theme.<path>=<value>` flags for `streamlit run`.
 
-    Emits the scalar keys for the base and both mode blocks, so the flags alone
-    theme a dashboard regardless of the working directory. List-valued options
-    (the chart palettes) are omitted because Streamlit's CLI cannot represent
-    them; they are carried by the generated TOML file.
+    Emits every key for the base and both mode blocks, so the flags alone theme a
+    dashboard regardless of the working directory. Value encoding differs from
+    TOML: plain strings go bare (a quoted colour is discarded as invalid) while
+    lists stay JSON, because Streamlit ``json.loads`` those.
     """
     flags: list[str] = []
 
@@ -143,12 +148,6 @@ def theme_cli_flags(tokens: dict) -> list[str]:
         for key, value in table.items():
             if isinstance(value, dict):
                 emit(f"{prefix}.{key}", value)
-            elif isinstance(value, (list, tuple)):
-                # Streamlit's CLI cannot express a list-valued config option: a
-                # bracketed value is stored as a plain string and a repeated flag
-                # just keeps the last one. These keys (the chart palettes) reach
-                # Streamlit through the generated TOML file instead.
-                continue
             else:
                 flags.append(f"--{prefix}.{key}={_cli_value(value)}")
 
