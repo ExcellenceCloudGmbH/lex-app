@@ -709,3 +709,101 @@ class TestCluster1z_StreamlitFloor:
             f"{'.'.join(map(str, self.MINIMUM))}; the theme keys this cluster "
             f"asserts on may not exist."
         )
+
+
+class TestCluster1z_LaunchPorts:
+    """`lex streamlit` must honour a caller-supplied port.
+
+    The hardcoded ports used to be appended AFTER the caller's arguments, so
+    ``lex streamlit run app.py --server.port 9000`` silently kept 8080 and the
+    command was unusable on any machine where 8080 was already taken — with no
+    documented way out. Same principle the theme flags already follow: an
+    explicit flag from the caller wins.
+
+    The two ports are coupled through the auth proxy. ``--server.port`` is where
+    Streamlit listens, which is the proxy's UPSTREAM; ``--browser.serverPort``
+    is the proxy's own port. Moving Streamlit without repointing UPSTREAM would
+    leave the proxy forwarding to a dead port, so these tests pin that too.
+    """
+
+    # -- 1.232 --------------------------------------------------------
+    def test_1_232_defaults_are_unchanged_when_nothing_is_supplied(self) -> None:
+        """Scenario 1.232: with no port arguments the previous behaviour is
+        preserved exactly — 8501 public, 8080 for Streamlit — so this fix is not
+        a behaviour change for existing deployments."""
+        from lex.bin.lex import _resolve_streamlit_ports
+
+        public, streamlit_port, flags, upstream = _resolve_streamlit_ports(
+            ["run", "dash.py"]
+        )
+
+        assert public == "8501"
+        assert streamlit_port == "8080"
+        assert flags == [
+            "--browser.serverPort",
+            "8501",
+            "--server.port",
+            "8080",
+        ]
+        assert upstream == "http://localhost:8080"
+
+    # -- 1.233 --------------------------------------------------------
+    def test_1_233_a_supplied_server_port_wins_and_moves_the_upstream(self) -> None:
+        """Scenario 1.233: `--server.port` is respected, is not re-appended (which
+        would have overridden it), and the proxy's UPSTREAM follows it."""
+        from lex.bin.lex import _resolve_streamlit_ports
+
+        public, streamlit_port, flags, upstream = _resolve_streamlit_ports(
+            ["run", "dash.py", "--server.port", "9000"]
+        )
+
+        assert streamlit_port == "9000"
+        assert "--server.port" not in flags, "we re-appended the port we were given"
+        assert upstream == "http://localhost:9000", "proxy would forward to a dead port"
+        # The untouched port still gets its default.
+        assert public == "8501"
+        assert flags == ["--browser.serverPort", "8501"]
+
+    # -- 1.233b -------------------------------------------------------
+    def test_1_233b_the_equals_form_is_recognised_too(self) -> None:
+        """Scenario 1.233: Streamlit accepts `--opt=value`, so the override
+        detection must not depend on the space-separated form."""
+        from lex.bin.lex import _resolve_streamlit_ports
+
+        _, streamlit_port, flags, upstream = _resolve_streamlit_ports(
+            ["run", "dash.py", "--server.port=9100"]
+        )
+
+        assert streamlit_port == "9100"
+        assert "--server.port" not in flags
+        assert upstream == "http://localhost:9100"
+
+    # -- 1.234 --------------------------------------------------------
+    def test_1_234_a_supplied_public_port_is_respected(self) -> None:
+        """Scenario 1.234: `--browser.serverPort` is what the proxy binds, so a
+        caller-supplied value must reach it and must not be re-appended."""
+        from lex.bin.lex import _resolve_streamlit_ports
+
+        public, streamlit_port, flags, upstream = _resolve_streamlit_ports(
+            ["run", "dash.py", "--browser.serverPort", "8899"]
+        )
+
+        assert public == "8899"
+        assert "--browser.serverPort" not in flags
+        # Streamlit's own port is independent and still defaulted.
+        assert streamlit_port == "8080"
+        assert upstream == "http://localhost:8080"
+
+    # -- 1.235 --------------------------------------------------------
+    def test_1_235_both_ports_can_be_supplied_together(self) -> None:
+        """Scenario 1.235: supplying both leaves nothing for us to append, and
+        the upstream tracks the supplied Streamlit port."""
+        from lex.bin.lex import _resolve_streamlit_ports
+
+        public, streamlit_port, flags, upstream = _resolve_streamlit_ports(
+            ["run", "dash.py", "--server.port=9200", "--browser.serverPort=9201"]
+        )
+
+        assert (public, streamlit_port) == ("9201", "9200")
+        assert flags == [], f"nothing should be appended, got {flags}"
+        assert upstream == "http://localhost:9200"

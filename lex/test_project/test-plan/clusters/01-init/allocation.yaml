@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 231
+max_scenario: 235
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -254,10 +254,10 @@ letters:
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
   z:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
-    scenarios: 1.211-1.231
+    scenarios: 1.211-1.235
     status: complete
     tests:
-      pass: 32
+      pass: 37
       skip: 0
       xfail: 0
     note: Streamlit pages now carry the real lex brand. Design tokens are vendored as pure Python
@@ -275,4 +275,8 @@ letters:
       (chart ramps + showSidebarBorder) are global-only with no per-mode twin, pinned by 1.217b since
       Streamlit rejects unrecognised options outright. A broken theme never blocks a launch (1.229).
       Verified against real Streamlit — flags and generated TOML both accepted, launch survives a
-      deliberately broken token module.
+      deliberately broken token module. Also fixes `lex streamlit` silently overriding a
+      caller-supplied port — the hardcoded ports were appended AFTER the caller's args, so a
+      custom port was ignored and the command was unusable wherever 8080 was already taken.
+      The proxy's UPSTREAM now follows `--server.port`, so it cannot forward to a dead port
+      (1.232-1.235).
