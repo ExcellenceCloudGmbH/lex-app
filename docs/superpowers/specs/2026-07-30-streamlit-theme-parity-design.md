@@ -233,7 +233,7 @@ live handshake  →  config.toml theme  →  Streamlit default
 
 | Failure | User-visible result | Guardrail |
 |---|---|---|
-| Streamlit upgrade changes internals | Missing shadow or flat button; page still brand-themed | Pinned version; 4 CSS rules only; a vanished `data-testid` makes the rule a no-op |
+| Streamlit upgrade changes internals | Missing shadow or flat button; page still brand-themed | Key-contract test (1.209) fails loudly on renamed keys; 4 CSS rules only; a vanished `data-testid` makes the rule a no-op |
 | Origin allowlist misconfigured | Correct brand, possibly wrong light/dark | Host logs a console warning when no `SET_THEME_CONFIG` announcement arrives within 3 s — visible instead of silent |
 | `tokens.json` not published yet | Nothing; vendored `tokens.py` is committed | Drift check runs in **warn** mode until phase 4 |
 | Customer injects own `<style>` | Their styling wins | Expected (cascade order); documented |
@@ -242,10 +242,25 @@ live handshake  →  config.toml theme  →  Streamlit default
 
 ### Two required changes this design depends on
 
-1. **Pin `streamlit`.** It is unpinned in `requirements.txt` today, so upgrades reach
-   customer installs silently. That is acceptable for config-only theming and not
-   acceptable once four CSS rules touch internals. Pin `~=1.58.0` and upgrade
-   deliberately, with the visual-regression suite as the gate.
+1. **Record a Streamlit FLOOR, not a ceiling (CORRECTED 2026-07-30).**
+   This originally called for `~=1.58.0`, reasoning that a silent upgrade could break the
+   CSS layer in customer installs. Checking the repo changed the recommendation: lex-app
+   deliberately pins almost nothing — **48 of 50 requirements are unpinned, there is not a
+   single version range in the file**, and the only two `==` pins
+   (`DjangoSharepointStorage==1.1.7`, `python-keycloak==3.9.1`) were added *reactively*
+   after a release actually broke. The house convention is to pin as a fix, not as
+   prophylaxis. A `<1.59` cap would also be the only capped dependency, and since lex-app
+   installs into customer projects it could cause real resolution conflicts for them.
+
+   So: `streamlit>=1.58`. The floor is a genuine correctness requirement — the theme needs
+   the modern surface (`[theme.light]`/`[theme.dark]`, `dataframeHeaderBackgroundColor`,
+   the `"<family>:<url>"` font form); on an older Streamlit most of the config is silently
+   ignored and the theme simply does not apply.
+
+   Upgrade risk is carried by **tests rather than a cap**: scenario 1.209 fails loudly if a
+   theme key is renamed, removed, or re-scoped, and the visual-regression suite covers the
+   CSS layer. That is consistent with the degradation ladder — the CSS failure mode is a
+   missing shadow, not a broken app.
 2. **Use the frontend's own font source — do NOT bundle (CORRECTED 2026-07-30).**
    This originally required vendoring the Inter woff2, reasoning that air-gapped customers
    would otherwise lose the typography. That premise was wrong. Verified: **no woff2 is

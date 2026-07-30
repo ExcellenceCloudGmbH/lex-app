@@ -637,3 +637,75 @@ class TestCluster1y_CommittedConfig:
         assert "#14b4b4" in text
         assert "#283C50" in text
         assert "family=Inter" in text
+
+
+class TestCluster1y_StreamlitFloor:
+    """The theme needs Streamlit's MODERN theme surface — recorded as a floor.
+
+    lex-app deliberately pins almost nothing (48 of 50 requirements unpinned, no
+    version ranges at all; the only two ``==`` pins were added reactively after a
+    release broke). So this is a floor, not a ceiling: it records the minimum
+    version whose theme config understands what we emit. On an older Streamlit
+    the ``[theme.light]``/``[theme.dark]`` blocks, ``dataframeHeaderBackground‑
+    Color`` and the ``"<family>:<url>"`` font form are simply not recognised, so
+    the theme silently does not apply.
+
+    Upgrade risk is carried by tests rather than a cap — scenario 1.209 fails
+    loudly if a key is renamed, removed, or re-scoped.
+    """
+
+    MINIMUM = (1, 58)
+
+    @staticmethod
+    def _requirements_path():
+        from pathlib import Path
+
+        import lex
+
+        # Repo layout: <root>/requirements.txt with the package at <root>/lex.
+        return Path(lex.__file__).resolve().parent.parent / "requirements.txt"
+
+    # -- 1.223 --------------------------------------------------------
+    def test_1_223_requirements_records_the_floor(self) -> None:
+        """Scenario 1.223: `requirements.txt` states the minimum Streamlit, so
+        an install that predates the modern theme surface fails at resolution
+        time instead of silently rendering an unthemed app."""
+        import pytest as _pytest
+
+        path = self._requirements_path()
+        if not path.exists():
+            _pytest.skip("requirements.txt is not shipped in an installed package")
+
+        entries = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        # Match the `streamlit` requirement itself, not `streamlit-keycloak-lex`.
+        streamlit_entries = [
+            e for e in entries if e.split("[")[0].split(">")[0].split("=")[0].strip() == "streamlit"
+        ]
+
+        assert len(streamlit_entries) == 1, f"expected one streamlit entry, got {streamlit_entries}"
+        entry = streamlit_entries[0]
+        assert ">=" in entry, (
+            f"streamlit requirement records no minimum version: {entry!r}. The theme "
+            f"needs >= {'.'.join(map(str, self.MINIMUM))} for the modern theme keys."
+        )
+        floor = entry.split(">=", 1)[1].strip()
+        parsed = tuple(int(part) for part in floor.split(".")[:2])
+        assert parsed >= self.MINIMUM, f"floor {floor} is below the required {self.MINIMUM}"
+
+    # -- 1.223b -------------------------------------------------------
+    def test_1_223b_installed_streamlit_meets_the_floor(self) -> None:
+        """Scenario 1.223: the Streamlit actually installed satisfies the floor,
+        so the rest of this cluster is asserting against a version whose theme
+        surface really exists."""
+        import streamlit
+
+        installed = tuple(int(part) for part in streamlit.__version__.split(".")[:2])
+        assert installed >= self.MINIMUM, (
+            f"installed Streamlit {streamlit.__version__} is below the floor "
+            f"{'.'.join(map(str, self.MINIMUM))}; the theme keys this cluster "
+            f"asserts on may not exist."
+        )
