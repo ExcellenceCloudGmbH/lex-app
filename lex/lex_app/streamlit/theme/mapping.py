@@ -23,6 +23,16 @@ GLOBAL_ONLY_KEYS: frozenset = frozenset(
 )
 
 
+def _font_ref(family: str, stylesheet_url: str, fallback: str) -> str:
+    """Build Streamlit's ``"<family>:<url>, <fallback>"`` font reference.
+
+    Streamlit splits on the FIRST colon to separate the family name from the
+    stylesheet URL, so the URL's own colons (``https:``, ``Inter:wght``) are
+    safe. Fallbacks follow as a comma-separated list.
+    """
+    return f"{family}:{stylesheet_url}, {fallback}"
+
+
 def build_streamlit_theme(tokens: dict, mode: str) -> dict:
     """Return the flat Streamlit theme mapping for ``mode``.
 
@@ -51,10 +61,13 @@ def build_streamlit_theme(tokens: dict, mode: str) -> dict:
         "linkUnderline": False,
         "showWidgetBorder": True,
         "showSidebarBorder": False,
-        # Typography
-        "font": font["body"],
-        "headingFont": font["heading"],
-        "codeFont": font["code"],
+        # Typography — Streamlit accepts "<family>:<stylesheet url>" plus a
+        # comma-separated fallback list. We reference the frontend's own
+        # Google Fonts stylesheet so both surfaces load (or fail to load) the
+        # same faces. See the design doc section 8.2.
+        "font": _font_ref(font["body"], font["stylesheet_url"], font["fallback"]),
+        "headingFont": _font_ref(font["heading"], font["stylesheet_url"], font["fallback"]),
+        "codeFont": _font_ref(font["code"], font["code_stylesheet_url"], "monospace"),
         # Shape
         "baseRadius": radius["base"],
         "buttonRadius": radius["control"],

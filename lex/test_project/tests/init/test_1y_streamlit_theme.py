@@ -82,9 +82,12 @@ class TestCluster1y_Mapping:
         assert theme["backgroundColor"] == "#ffffff"
         assert theme["sidebar.backgroundColor"] == "#283C50"
         assert theme["sidebar.textColor"] == "#dfe7ee"
-        assert theme["font"] == "Inter"
-        assert theme["headingFont"] == "Inter"
-        assert theme["codeFont"] == "Fira Code"
+        # Fonts are now stylesheet references ("<family>:<url>, <fallback>"),
+        # pointing at the same Google Fonts source the frontend uses — see the
+        # design doc section 8.2. The family still leads the value.
+        assert theme["font"].startswith("Inter:https://")
+        assert theme["headingFont"].startswith("Inter:https://")
+        assert theme["codeFont"].startswith("Fira Code:https://")
         assert theme["baseRadius"] == "12px"
         assert theme["buttonRadius"] == "10px"
         assert theme["dataframeHeaderBackgroundColor"] == "#F6F8FA"
@@ -136,6 +139,10 @@ class TestCluster1y_Mapping:
         passes every other test silently — precisely the drift class this
         batch exists to prevent. The set-equality assertion also means adding
         a new key to the mapping FORCES updating this contract.
+
+        Font keys are COMPOSED (family + stylesheet URL + fallback) rather than
+        copied from a single token, so they are asserted by family prefix; they
+        stay in the completeness check so no key escapes assertion.
         """
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -148,9 +155,6 @@ class TestCluster1y_Mapping:
             "textColor": ("$mode", "text"),
             "borderColor": ("$mode", "border"),
             "linkColor": ("$mode", "link"),
-            "font": ("font", "body"),
-            "headingFont": ("font", "heading"),
-            "codeFont": ("font", "code"),
             "baseRadius": ("radius", "base"),
             "buttonRadius": ("radius", "control"),
             "codeBackgroundColor": ("$mode", "code_background"),
@@ -172,14 +176,23 @@ class TestCluster1y_Mapping:
             "showWidgetBorder": True,
             "showSidebarBorder": False,
         }
+        # Composed values: derived from several tokens rather than copied from
+        # one, so they are asserted by prefix instead of equality. Kept in the
+        # completeness check below so a new key still cannot slip through
+        # unasserted.
+        composed = {
+            "font": ("font", "body"),
+            "headingFont": ("font", "heading"),
+            "codeFont": ("font", "code"),
+        }
 
         for mode in ("light", "dark"):
             theme = build_streamlit_theme(TOKENS, mode)
 
-            assert set(theme) == set(wiring) | set(literals), (
+            assert set(theme) == set(wiring) | set(literals) | set(composed), (
                 f"{mode}: emitted keys drifted from the wiring contract; "
-                f"unexpected={set(theme) - set(wiring) - set(literals)}, "
-                f"missing={(set(wiring) | set(literals)) - set(theme)}"
+                f"unexpected={set(theme) - set(wiring) - set(literals) - set(composed)}, "
+                f"missing={(set(wiring) | set(literals) | set(composed)) - set(theme)}"
             )
 
             for key, (section, leaf) in wiring.items():
@@ -191,6 +204,12 @@ class TestCluster1y_Mapping:
 
             for key, expected in literals.items():
                 assert theme[key] is expected, f"{mode}: {key} should be {expected!r}"
+
+            for key, (section, leaf) in composed.items():
+                family = TOKENS[section][leaf]
+                assert theme[key].startswith(f"{family}:"), (
+                    f"{mode}: {key} should lead with the family from {section}.{leaf}"
+                )
 
     # -- 1.208c -------------------------------------------------------
     def test_1_208c_declared_modes_match_the_token_modes(self) -> None:
@@ -421,3 +440,71 @@ class TestCluster1y_ConfigWriter:
         assert target.exists()
         parsed = tomllib.loads(target.read_text(encoding="utf-8"))
         assert parsed["theme"]["primaryColor"] == "#14b4b4"
+
+
+class TestCluster1y_Fonts:
+    """Fonts come from the SAME source the lex-app frontend uses.
+
+    The frontend loads Inter from Google Fonts. Streamlit is pointed at that
+    same stylesheet rather than a bundled copy, so the two surfaces agree in
+    both directions: with network access both render Inter, and in an
+    air-gapped deployment both fall back to system sans together. A bundled
+    font for Streamlit alone would make it diverge from the app it must match.
+    """
+
+    # -- 1.217 --------------------------------------------------------
+    def test_1_217_font_keys_reference_the_frontend_stylesheet(self) -> None:
+        """Scenario 1.217: the body/heading fonts carry Streamlit's
+        ``<name>:<url>`` stylesheet form, pointing at the same Google Fonts
+        URL the frontend uses."""
+        from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        theme = build_streamlit_theme(TOKENS, "light")
+
+        for key in ("font", "headingFont"):
+            value = theme[key]
+            assert value.startswith("Inter:https://"), f"{key} is not a stylesheet ref: {value}"
+            assert "fonts.googleapis.com/css2" in value, f"{key} lost the stylesheet URL"
+            assert "family=Inter" in value, f"{key} does not request Inter"
+
+    # -- 1.218 --------------------------------------------------------
+    def test_1_218_font_declares_a_system_fallback(self) -> None:
+        """Scenario 1.218: a fallback stack follows the webfont, so an
+        air-gapped browser renders system sans instead of Streamlit's default
+        face. Streamlit takes fallbacks as a comma-separated list."""
+        from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        theme = build_streamlit_theme(TOKENS, "light")
+
+        assert "," in theme["font"], "no fallback declared"
+        assert theme["font"].rstrip().endswith("sans-serif")
+
+    # -- 1.218b -------------------------------------------------------
+    def test_1_218b_font_url_matches_the_frontend_weights(self) -> None:
+        """Scenario 1.218: the requested weights match the frontend's own
+        request, so headings and body copy have the same faces available in
+        both surfaces. Frontend uses wght@300;400;500;600;700."""
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        url = TOKENS["font"]["stylesheet_url"]
+        for weight in ("300", "400", "500", "600", "700"):
+            assert weight in url, f"weight {weight} missing from the font URL"
+        assert "display=swap" in url, "display=swap keeps text visible while loading"
+
+    # -- 1.218c -------------------------------------------------------
+    def test_1_218c_no_bundled_font_asset_is_referenced(self) -> None:
+        """Scenario 1.218: nothing references a local font file. Bundling was
+        deliberately rejected (see the design's §8.2) — a vendored woff2 for
+        Streamlit alone would render Inter while an air-gapped frontend
+        rendered system sans."""
+        from lex.lex_app.streamlit.theme.config_writer import build_full_config
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        cfg = build_full_config(TOKENS)
+        rendered = repr(cfg)
+
+        assert ".woff" not in rendered
+        assert "fontFaces" not in cfg["theme"]
+        assert "static/" not in rendered

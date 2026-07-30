@@ -28,10 +28,22 @@ TOKENS: dict = {
         "body": "Inter",
         "heading": "Inter",
         "code": "Fira Code",
-        # NOT emitted into the native theme: Streamlit's `font` option takes a
-        # family name and appends its own system fallback stack. This records
-        # the intended chain for the CSS layer and for phase 3's handshake
-        # payload, and is asserted by scenario 1.212b so it cannot rot.
+        # The SAME stylesheet the lex-app frontend loads (see
+        # lex/react/build/assets/*.css). Pointing Streamlit at the frontend's
+        # own source is what keeps the two surfaces consistent: with network
+        # access both render Inter, and in an air-gapped deployment both fall
+        # back to `fallback` together. Bundling a woff2 for Streamlit alone was
+        # deliberately rejected — see the design doc, section 8.2.
+        "stylesheet_url": (
+            "https://fonts.googleapis.com/css2"
+            "?family=Inter:wght@300;400;500;600;700&display=swap"
+        ),
+        "code_stylesheet_url": (
+            "https://fonts.googleapis.com/css2"
+            "?family=Fira+Code:wght@400;500&display=swap"
+        ),
+        # Rendered after the webfont as a comma-separated fallback list, which
+        # is the form Streamlit's font options accept.
         "fallback": "-apple-system, Segoe UI, sans-serif",
     },
     "radius": {
