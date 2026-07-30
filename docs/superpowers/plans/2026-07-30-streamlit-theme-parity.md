@@ -50,7 +50,7 @@ DJANGO_SETTINGS_MODULE=lex_app.settings DATABASE_DEPLOYMENT_TARGET=default CELER
 
 # PHASE 1 — Native theme from tokens (independently shippable)
 
-## Task 1: Vendored token module
+## Task 1: Vendored token module  ✅ landed
 
 **Files:**
 - Create: `lex/lex_app/streamlit/theme/__init__.py`
@@ -218,7 +218,7 @@ git commit -m "feat(streamlit-theme): vendor LEX design tokens as a pure Python 
 
 ---
 
-## Task 2: Token → Streamlit key mapping
+## Task 2: Token → Streamlit key mapping  ✅ landed
 
 **Files:**
 - Create: `lex/lex_app/streamlit/theme/mapping.py`
@@ -381,7 +381,7 @@ git commit -m "feat(streamlit-theme): pure token -> Streamlit theme-key mapping"
 
 ---
 
-## Task 3: Key-existence contract test
+## Task 3: Key-existence contract test  ✅ landed
 
 This is the cheapest guard in the design: it turns "a Streamlit upgrade renamed a theme key" from silently-lost styling into a failed unit test.
 
@@ -441,7 +441,7 @@ git commit -m "test(streamlit-theme): contract-test every mapped key against ins
 
 ---
 
-## Task 4: Config writer — TOML + CLI flags
+## Task 4: Config writer — TOML + CLI flags  ✅ landed
 
 **Files:**
 - Create: `lex/lex_app/streamlit/theme/config_writer.py`
@@ -614,7 +614,14 @@ git commit -m "feat(streamlit-theme): render theme as CLI flags (primary) + TOML
 
 ---
 
-## Task 5: Bundle Inter and register it via fontFaces
+## Task 5: Fonts — point at the frontend's own stylesheet  ✅ landed
+
+> **SUPERSEDED TITLE.** This task originally read "Bundle Inter and register it via
+> fontFaces". That was abandoned: no woff2 is vendored in lex-app and the frontend
+> itself loads Inter from Google Fonts, so bundling for Streamlit alone would have made
+> Streamlit *more* correct than the app it must match — they would visibly diverge in an
+> air-gapped deployment. Implemented instead via Streamlit's native `"<family>:<url>"`
+> font form pointing at the frontend's own stylesheet. See the design doc §8.2.
 
 Air-gapped and egress-restricted customer environments must not silently fall back to system sans.
 
@@ -730,7 +737,7 @@ git commit -m "feat(streamlit-theme): bundle Inter and register it via fontFaces
 
 ---
 
-## Task 6: Wire the flags into the `lex streamlit` command
+## Task 6: Wire the flags into the `lex streamlit` command  ✅ landed
 
 **Files:**
 - Modify: `lex/bin/lex.py:341`
@@ -825,7 +832,7 @@ git commit -m "feat(streamlit-theme): pass theme flags on every lex streamlit la
 
 ---
 
-## Task 7: Replace the stale config file and sync the plan shards
+## Task 7: Replace the stale config file and sync the plan shards  ✅ landed
 
 **Files:**
 - Modify: `lex/.streamlit/config.toml`
@@ -952,7 +959,7 @@ git commit -m "feat(streamlit-theme): regenerate config.toml from tokens; sync p
 
 # PHASE 2 — CSS layer for what has no token
 
-## Task 8: Pin Streamlit
+## Task 8: Pin Streamlit  ✅ landed
 
 Phase 2 adds four CSS rules that touch Streamlit's rendered DOM. An unpinned dependency makes that unsafe.
 
@@ -1025,7 +1032,19 @@ git commit -m "build: pin streamlit ~=1.58.0 ahead of the theme CSS layer"
 
 ---
 
-## Task 9: The four CSS rules
+## ~~Task 9: The four CSS rules ~~ (DROPPED)
+
+> **STATUS 2026-07-30 — DROPPED, not implemented.** Tasks 9-12 built the CSS layer.
+> That layer was deliberately abandoned after implementation revealed two things: the
+> native theme surface already covers the sidebar and dataframe header (so CSS would add
+> only two gradients, a shadow and a logo), and there is no *public* hook for automatic
+> injection — the `runpy` shim planned in Task 10 would break Streamlit's AST magic
+> transform, silently stopping bare-expression rendering in every customer dashboard, while
+> the only magic-preserving alternative patches the private `ScriptRunner._run_script`.
+> Trading that risk for four cosmetic touches is a bad trade. See the design doc §7 for the
+> full reasoning. The shipped theme therefore has **zero** dependency on Streamlit
+> internals. Revisit deliberately if the elevation/gradients are later judged to matter.
+
 
 **Files:**
 - Create: `lex/lex_app/streamlit/theme/overrides.css`
@@ -1079,7 +1098,19 @@ git commit -m "feat(streamlit-theme): add the four non-tokenisable CSS rules"
 
 ---
 
-## Task 10: Automatic CSS injection that preserves Streamlit magic
+## ~~Task 10: Automatic CSS injection that preserves Streamlit magic ~~ (DROPPED)
+
+> **STATUS 2026-07-30 — DROPPED, not implemented.** Tasks 9-12 built the CSS layer.
+> That layer was deliberately abandoned after implementation revealed two things: the
+> native theme surface already covers the sidebar and dataframe header (so CSS would add
+> only two gradients, a shadow and a logo), and there is no *public* hook for automatic
+> injection — the `runpy` shim planned in Task 10 would break Streamlit's AST magic
+> transform, silently stopping bare-expression rendering in every customer dashboard, while
+> the only magic-preserving alternative patches the private `ScriptRunner._run_script`.
+> Trading that risk for four cosmetic touches is a bad trade. See the design doc §7 for the
+> full reasoning. The shipped theme therefore has **zero** dependency on Streamlit
+> internals. Revisit deliberately if the elevation/gradients are later judged to matter.
+
 
 **Read the deviation note at the top of this plan before starting.**
 
@@ -1265,7 +1296,19 @@ git commit -m "feat(streamlit-theme): inject the CSS layer automatically, preser
 
 ---
 
-## Task 11: DOM regression test — selectors match, magic still works
+## ~~Task 11: DOM regression test — selectors match, magic still works ~~ (DROPPED)
+
+> **STATUS 2026-07-30 — DROPPED, not implemented.** Tasks 9-12 built the CSS layer.
+> That layer was deliberately abandoned after implementation revealed two things: the
+> native theme surface already covers the sidebar and dataframe header (so CSS would add
+> only two gradients, a shadow and a logo), and there is no *public* hook for automatic
+> injection — the `runpy` shim planned in Task 10 would break Streamlit's AST magic
+> transform, silently stopping bare-expression rendering in every customer dashboard, while
+> the only magic-preserving alternative patches the private `ScriptRunner._run_script`.
+> Trading that risk for four cosmetic touches is a bad trade. See the design doc §7 for the
+> full reasoning. The shipped theme therefore has **zero** dependency on Streamlit
+> internals. Revisit deliberately if the elevation/gradients are later judged to matter.
+
 
 This is what keeps Task 9's four rules honest. Without it the pin is the only protection.
 
@@ -1397,7 +1440,19 @@ git commit -m "test(streamlit-theme): DOM regression — selectors match, magic 
 
 ---
 
-## Task 12: Update the plan shards for Phase 2
+## ~~Task 12: Update the plan shards for Phase 2 ~~ (DROPPED)
+
+> **STATUS 2026-07-30 — DROPPED, not implemented.** Tasks 9-12 built the CSS layer.
+> That layer was deliberately abandoned after implementation revealed two things: the
+> native theme surface already covers the sidebar and dataframe header (so CSS would add
+> only two gradients, a shadow and a logo), and there is no *public* hook for automatic
+> injection — the `runpy` shim planned in Task 10 would break Streamlit's AST magic
+> transform, silently stopping bare-expression rendering in every customer dashboard, while
+> the only magic-preserving alternative patches the private `ScriptRunner._run_script`.
+> Trading that risk for four cosmetic touches is a bad trade. See the design doc §7 for the
+> full reasoning. The shipped theme therefore has **zero** dependency on Streamlit
+> internals. Revisit deliberately if the elevation/gradients are later judged to matter.
+
 
 **Files:**
 - Modify: `lex/test_project/test-plan/clusters/01-init/allocation.yaml`

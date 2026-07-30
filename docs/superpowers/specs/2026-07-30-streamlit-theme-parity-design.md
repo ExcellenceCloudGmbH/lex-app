@@ -209,19 +209,42 @@ upgrade-fragile part of the design into the most resilient.
 Every key above also receives a `[theme.dark]` twin from the dark token set, plus
 `[theme.light.sidebar]` / `[theme.dark.sidebar]` where a sidebar-specific value exists.
 
-## 7. What the CSS layer owns
+## 7. The CSS layer — DEFERRED, not shipped (DECIDED 2026-07-30)
 
-Exhaustive list — these four have no native token:
+The design originally included a small CSS layer for the four things with no native token:
 
 1. Card/container **elevation** (Streamlit has no shadow token)
 2. The **gradient CTA** (native `primaryColor` is a flat fill)
 3. The sidebar **navy gradient** (native `sidebar.backgroundColor` is a flat fill)
 4. The sidebar **logo lockup**
 
-All four are scoped to `data-testid` hooks (`stSidebar`, `stMetric`, `stDataFrame`, …),
-which Streamlit treats as semi-public and which are markedly more stable than Emotion
-class hashes. This list is the complete fragile surface of the design and should not grow
-without a deliberate decision.
+**This layer was deliberately NOT built.** Two findings during implementation removed its
+justification and raised its cost:
+
+**It buys much less than assumed.** The layer was scoped while we believed the navy
+sidebar and the dataframe header needed CSS. They do not — Streamlit 1.58 exposes
+`sidebar.backgroundColor`, `dataframeHeaderBackgroundColor` and ~120 other keys through
+the *public* config API, all delivered in phase 1. What CSS would add is reduced to four
+cosmetic touches: two gradients, one shadow, one logo.
+
+**It costs more than assumed.** Delivering CSS automatically (the chosen no-escape-hatch
+contract) has no public hook. The planned mechanism — a CLI shim that `runpy`s the
+customer's script — is **actively harmful**: Streamlit applies its AST "magic" transform
+to the file *it* compiles, so a wrapper would apply magic to the wrapper and every
+dashboard relying on bare-expression display (`df` alone on a line) would silently stop
+rendering those outputs. The only alternative that preserves magic is patching the private
+`ScriptRunner._run_script`, which would put an unguarded private Streamlit method in the
+customer launch path — a second internals dependency on top of the `data-testid` selectors,
+for four cosmetic items.
+
+Trading a silent, catastrophic regression risk (or a private-method dependency) against
+two gradients and a shadow is not a good trade. The native theme is the whole shipped
+surface, which means **this design currently has NO dependency on Streamlit internals at
+all** — the reason the floor in §8.1 needs no ceiling.
+
+If a themed dashboard is later judged to visibly need the elevation or gradients, the
+`ScriptRunner` patch route can be revisited deliberately, with feature-detection, a no-op
+fallback, and a test pinning the patch target. It should not be adopted by default.
 
 ## 8. Failure modes
 
@@ -293,7 +316,7 @@ styling into a failed unit test.
 | Layer | Test | Owner |
 |---|---|---|
 | `mapping.py`, `config_writer.py` | Pure data transforms: light+dark completeness, every token consumed, valid TOML, key-existence contract | Backend cluster owning the Streamlit surface (cluster 1 holds `test_1r_lex_view_embed_helper` today); allocate via the **lex-testing** skill |
-| `overrides.css` | Visual regression: reference dashboard rendered headless in light + dark, screenshot-compared | Frontend cluster **F12 `embed_streamlit`** |
+| ~~`overrides.css`~~ | **N/A — CSS layer dropped (§7).** With nothing targeting Streamlit's DOM, 1.209 alone catches breaking upgrades. A screenshot suite stays worthwhile as F12 work but is no longer load-bearing | Frontend cluster **F12 `embed_streamlit`** (optional) |
 | Layer 4 handshake | E2E: embed a Streamlit page, toggle dark in lex-app, assert the iframe re-themed **without a reload** and dashboard state survived | Frontend cluster **F12** |
 
 The visual-regression suite is what keeps the four CSS rules honest across Streamlit
@@ -304,14 +327,21 @@ upgrades; without it, the pin is the only protection.
 | Phase | Deliverable | Risk | Independently shippable |
 |---|---|---|---|
 | 1 | Vendored tokens + `mapping.py` + `config_writer.py` + generated `config.toml` (light + dark) | Very low — no CSS, no handshake | **Yes** — removes the `#08BCC2` drift immediately |
-| 2 | CLI shim + `overrides.css` (the 4 rules) + visual regression + Streamlit pin | Low | Yes |
+| 2 | Streamlit floor (`>=1.58`). **CSS layer dropped — see §7** | Very low — no internals touched | Yes |
 | 3 | Live handshake: origin allowlist, host bridge, E2E | Medium — verify the allowlist end-to-end first | Yes |
 | 4 | `tokens.json` in the design system; drift check warn → **fail** | Cross-repo dependency | Yes |
 
 Phase 1 delivers most of the visible win at very low risk and does not depend on the
-design-system repo. Phase 3 is the first phase that must prove the origin allowlist works
-in a real deployment; that verification should happen at the *start* of the phase, since a
-negative result forces a fallback to reload-on-toggle.
+design-system repo. Phase 2 shrank to the version floor once the CSS layer was dropped
+(§7), so phases 1–2 together ship the complete theme with **zero** reliance on Streamlit
+internals. Phase 3 is the first phase that must prove the origin allowlist works in a real
+deployment; that verification should happen at the *start* of the phase, since a negative
+result forces a fallback to reload-on-toggle.
+
+Note that dropping the CSS layer also removes the original need for a visual-regression
+suite as an upgrade gate: with nothing targeting Streamlit's DOM, the key-contract test
+(1.209) is sufficient to catch a breaking upgrade. A screenshot suite remains worthwhile as
+frontend cluster F12 work, but it is no longer load-bearing here.
 
 **Scope of the first implementation plan: phases 1 and 2 only.** Those are confined to
 lex-app and are enough to close the visible brand gap. Phase 3 (live handshake) touches the
