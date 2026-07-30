@@ -198,7 +198,7 @@ upgrade-fragile part of the design into the most resilient.
 | text primary | `textColor` |
 | hairline border | `borderColor`, `showWidgetBorder` |
 | navy `#283C50` / `#dfe7ee` / teal | `sidebar.backgroundColor` / `sidebar.textColor` / `sidebar.primaryColor` |
-| Inter (bundled woff2) | `fontFaces`, `font`, `headingFont` |
+| Inter, via the frontend's own Google Fonts stylesheet | `font`, `headingFont` (Streamlit's `"<name>:<url>"` form) |
 | Fira Code | `codeFont` |
 | card radius 12 / control radius 10 | `baseRadius` / `buttonRadius` |
 | grid header `#F6F8FA`, hairline | `dataframeHeaderBackgroundColor`, `dataframeBorderColor` |
@@ -237,7 +237,7 @@ live handshake  →  config.toml theme  →  Streamlit default
 | Origin allowlist misconfigured | Correct brand, possibly wrong light/dark | Host logs a console warning when no `SET_THEME_CONFIG` announcement arrives within 3 s — visible instead of silent |
 | `tokens.json` not published yet | Nothing; vendored `tokens.py` is committed | Drift check runs in **warn** mode until phase 4 |
 | Customer injects own `<style>` | Their styling wins | Expected (cascade order); documented |
-| Font file unreachable | System sans fallback | **Bundle the woff2 in the package; never CDN it** |
+| Font stylesheet unreachable (air-gapped) | System sans — **and the frontend falls back identically**, so the two stay consistent | Same source as the frontend by construction (§8.2) |
 | Theme toggled mid-script-run | Nothing breaks | Streamlit re-themes client-side only; no rerun triggered |
 
 ### Two required changes this design depends on
@@ -246,9 +246,27 @@ live handshake  →  config.toml theme  →  Streamlit default
    customer installs silently. That is acceptable for config-only theming and not
    acceptable once four CSS rules touch internals. Pin `~=1.58.0` and upgrade
    deliberately, with the visual-regression suite as the gate.
-2. **Bundle the Inter woff2.** Enterprise customer environments may be air-gapped or
-   egress-restricted; a CDN `fontFaces` URL would silently fall back to system sans and
-   undo the typography half of the parity.
+2. **Use the frontend's own font source — do NOT bundle (CORRECTED 2026-07-30).**
+   This originally required vendoring the Inter woff2, reasoning that air-gapped customers
+   would otherwise lose the typography. That premise was wrong. Verified: **no woff2 is
+   vendored anywhere in lex-app, and the frontend itself loads Inter from Google Fonts**
+   (`fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap`).
+
+   So an air-gapped frontend *already* falls back to system sans. Bundling for Streamlit
+   alone would make Streamlit **more** correct than the app it must match, and the two
+   would visibly diverge — Streamlit in Inter, the frontend in system sans. That is worse
+   parity, not better.
+
+   Streamlit's `theme.font` / `headingFont` / `codeFont` natively accept a
+   `"<name>:<url>"` CSS-stylesheet reference, so we point at the *same* stylesheet the
+   frontend uses. Parity then holds both ways: connected, both render Inter; air-gapped,
+   both fall back together. This needs no `fontFaces`, no `server.enableStaticServing`,
+   and no font file written into customer project directories — Streamlit only serves a
+   `static/` dir from the **app's** directory, which for a customer dashboard is theirs,
+   not ours.
+
+   Bundling Inter for **both** surfaces stays a legitimate future improvement (it would
+   drop an external dependency) but it is a cross-repo change, out of scope here.
 
 ## 9. Testing
 
