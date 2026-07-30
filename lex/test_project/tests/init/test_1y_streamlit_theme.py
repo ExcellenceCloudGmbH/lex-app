@@ -37,3 +37,30 @@ class TestCluster1y_Tokens:
         assert TOKENS["brand"]["primary"] == "#14b4b4"
         assert TOKENS["brand"]["sidebar_bg"] == "#283C50"
         assert TOKENS["brand"]["primary"] != "#08BCC2", "stale pre-2026-07 accent"
+
+    # -- 1.204 (companion) --------------------------------------------
+    def test_1_204b_tokens_hash_is_derived_from_the_tokens(self) -> None:
+        """Scenario 1.204: TOKENS_HASH is a real digest of TOKENS, not a
+        constant. Phase 4's CI drift check compares this value against the
+        design system's published tokens, so the canonicalisation (sorted-key
+        JSON, sha256) is load-bearing and must not change silently."""
+        import hashlib
+        import json
+
+        from lex.lex_app.streamlit.theme.tokens import TOKENS, TOKENS_HASH
+
+        assert len(TOKENS_HASH) == 64
+        assert set(TOKENS_HASH) <= set("0123456789abcdef")
+
+        expected = hashlib.sha256(
+            json.dumps(TOKENS, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        assert TOKENS_HASH == expected
+
+        # It must actually track the data: a mutated copy hashes differently.
+        mutated = json.loads(json.dumps(TOKENS))
+        mutated["brand"]["primary"] = "#000000"
+        mutated_hash = hashlib.sha256(
+            json.dumps(mutated, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        assert mutated_hash != TOKENS_HASH
