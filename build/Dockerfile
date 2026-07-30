@@ -3,7 +3,26 @@
 ARG PYTHON_BASE_IMAGE=python:3.12-slim-bookworm
 FROM ${PYTHON_BASE_IMAGE}
 
-ARG IMAGE_VERSION
+# Kept for manual/legacy builds: `docker build --build-arg IMAGE_VERSION=2.1.6`
+# still installs that PyPI release. CI passes LEX_APP_SPEC instead.
+# The empty default is load-bearing: the install step runs under `set -u`, so a
+# build passing only LEX_APP_SPEC would abort on an unbound variable.
+ARG IMAGE_VERSION=""
+
+# Full pip requirement for lex-app itself. Empty (the default) falls back to the
+# PyPI release named by IMAGE_VERSION. CI sets this to e.g.
+#   git+https://github.com/ExcellenceCloudGmbH/lex-app@<commit-sha>
+# to build an image straight from a branch or commit, with no PyPI publish.
+ARG LEX_APP_SPEC=""
+
+# Only used for git builds. lex/_version.py is stamped by the PyPI publish
+# workflow, so a git checkout still carries the "0.0.0.dev0" placeholder and
+# /health would report that for every branch build. Setting this rewrites the
+# file after install — which reaches /health because runtime_health.py imports
+# lex._version.__version__ directly rather than reading dist metadata (that is
+# frozen at install time and could not be corrected this way).
+ARG LEX_APP_VERSION_LABEL=""
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
@@ -80,4 +99,17 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "lex-app==${IMAGE_VERSION}"
+RUN set -eux; \
+    if [[ -z "${LEX_APP_SPEC}" && -z "${IMAGE_VERSION}" ]]; then \
+        echo "ERROR: pass LEX_APP_SPEC (git+https://...@sha) or IMAGE_VERSION (2.1.6)" >&2; \
+        exit 1; \
+    fi; \
+    SPEC="${LEX_APP_SPEC:-lex-app==${IMAGE_VERSION}}"; \
+    echo "Installing lex-app from: ${SPEC}"; \
+    pip install --no-cache-dir "${SPEC}"; \
+    \
+    if [[ -n "${LEX_APP_VERSION_LABEL}" ]]; then \
+        LEX_DIR="$(python -c 'import lex, os; print(os.path.dirname(lex.__file__))')"; \
+        printf '__version__ = "%s"\n' "${LEX_APP_VERSION_LABEL}" > "${LEX_DIR}/_version.py"; \
+        echo "Stamped lex._version.__version__ = ${LEX_APP_VERSION_LABEL}"; \
+    fi

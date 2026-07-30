@@ -13,14 +13,11 @@ import shutil
 
 import click
 import uvicorn
-from lex.tools.ai_dashboard import launch_ai_dashboard
-from lex.tools.ai_faq import launch_ai_faq
 from lex.tools.project_root import find_project_root, resolve_llm_working_directory
 from lex.tools.setup_with_ai import (
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
     SetupWithAIError,
-    apply_ai_update,
     bootstrap_github_copilot_mcp_server_for_pycharm,
     build_ai_env_values,
     configure_ai_integration,
@@ -30,6 +27,25 @@ from lex.tools.setup_with_ai import (
     resolve_active_python_executable,
 )
 from lex.tools.verify_ai_assets import verify_ai_assets
+
+
+def _require_lex_mcp(module_name: str):
+    """Import a submodule of ``lex_mcp`` or raise a Click error.
+
+    The AI commands (ai-dashboard, ai-faq, ai-update, ai-verify, ai-issue-report)
+    now live in the ``lex-mcp-local`` package. It is installed by
+    ``lex setup-with-ai``; if the user runs one of these commands before
+    running setup, we surface a clear, actionable error.
+    """
+    try:
+        import importlib
+
+        return importlib.import_module(f"lex_mcp.{module_name}")
+    except ImportError as exc:
+        raise click.ClickException(
+            "lex-mcp-local is not installed in the active environment. "
+            "Run `lex setup-with-ai` first to install it, then retry this command."
+        ) from exc
 
 # Defer Django imports and setup until needed (NOT at import time)
 _DJANGO_READY = False
@@ -102,10 +118,22 @@ def ensure_env_file(project_root: str, content: str = DEFAULT_ENV):
     return str(p), True
 
 def generate_configs(project_root: str):
-    from generate_pycharm_configs import generate_pycharm_configs
-    generate_pycharm_configs(project_root)
+    from generate_pycharm_configs import generate_run_configs
+
+    generated_ide_configs = generate_run_configs(project_root)
     (Path(project_root) / Path("migrations")).mkdir(exist_ok=True, parents=True)
     (Path(project_root) / Path("migrations") / Path("__init__.py")).touch(exist_ok=True)
+    return generated_ide_configs
+
+
+def _echo_generated_config_paths(project_root: str, generated_ide_configs):
+    if "pycharm" in generated_ide_configs:
+        click.echo(f".run: {os.path.join(project_root, '.run')} (updated)")
+    if "vscode" in generated_ide_configs:
+        click.echo(
+            ".vscode/launch.json: "
+            f"{os.path.join(project_root, '.vscode', 'launch.json')} (updated)"
+        )
 
 # ---------- Lazy Django bootstrap and dynamic forwarding ----------
 
@@ -748,9 +776,9 @@ def start(ctx):
 def setup(project_root):
     root = find_project_root(project_root or os.getcwd())
     env_path, created = ensure_env_file(root)
-    generate_configs(root)
+    generated_ide_configs = generate_configs(root)
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
-    click.echo(f".run: {os.path.join(root, '.run')} (updated)")
+    _echo_generated_config_paths(root, generated_ide_configs)
 
 
 @lex.command(name="setup-with-ai", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -786,9 +814,9 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
     python_executable = resolve_active_python_executable(root)
 
     env_path, created = ensure_env_file(root.as_posix())
-    generate_configs(root.as_posix())
+    generated_ide_configs = generate_configs(root.as_posix())
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
-    click.echo(f".run: {os.path.join(root.as_posix(), '.run')} (updated)")
+    _echo_generated_config_paths(root.as_posix(), generated_ide_configs)
 
     credentials = _collect_setup_with_ai_credentials(
         github_token=github_token,
@@ -958,9 +986,11 @@ def ai_update(project_root):
     """Apply incremental updates to an existing LEX AI setup."""
     root = Path(find_project_root(project_root or os.getcwd())).resolve()
 
+    ai_update_module = _require_lex_mcp("ai_update")
+
     click.echo("Applying LEX AI updates...")
     try:
-        results = apply_ai_update(project_root=root)
+        results = ai_update_module.apply_ai_update(project_root=root)
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -996,7 +1026,34 @@ def ai_update(project_root):
 @lex.command(name="ai-faq", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 def ai_faq():
     """Open the LEX AI FAQ page in your browser."""
-    launch_ai_faq(reporter=click.echo)
+    ai_faq_module = _require_lex_mcp("ai_faq")
+    ai_faq_module.launch_ai_faq(reporter=click.echo)
+
+
+def _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode):
+    """Verify (and silently restore) the LEX AI asset directories.
+
+    Walks the canonical ``.github`` directory shipped by the active MCP mode's
+    package (``lex_mcp_local`` for forward, ``lex_mcp_reverse`` for backward)
+    and the ``docs`` directory shipped by ``lex``, then rewrites any file under
+    the project root that is missing or whose contents have drifted. Existing
+    user-only files are left untouched, except mode-managed paths under
+    ``.github`` (agents/instructions/prompts), which are mirrored exactly to
+    prevent stale cross-mode AI assets.
+    """
+    ai_verify_module = _require_lex_mcp("ai_verify")
+
+    try:
+        ai_verify_module.run_ai_verify(
+            project_root=project_root,
+            mode=mode,
+            quiet=quiet,
+            silent=silent,
+            align_mcp_mode=align_mcp_mode,
+            reporter=click.echo,
+        )
+    except SetupWithAIError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @lex.command(name="ai-verify", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -1024,68 +1081,59 @@ def ai_faq():
     help="Print nothing on success. Implies --quiet. Intended for use as a fast pre-flight "
          "guard at the start of every MCP tool call.",
 )
-def ai_verify(project_root, mode, quiet, silent):
-    """Verify (and silently restore) the LEX AI asset directories.
+@click.option(
+    "--align-mcp-mode/--no-align-mcp-mode",
+    default=None,
+    help=(
+        "Treat the project .env LEX_MCP_MODE as the source of truth and "
+        "invoke the equivalent of the MCP `switch_to_mode` tool when the "
+        "running MCP server / mcp.json disagree. Enabled by default for "
+        "interactive runs; disabled under --silent to avoid restarting the "
+        "server in the middle of an MCP tool call."
+    ),
+)
+def ai_verify(project_root, mode, quiet, silent, align_mcp_mode):
+    _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode)
 
-    Walks the canonical ``.github`` directory shipped by the active MCP mode's
-    package (``lex_mcp_local`` for forward, ``lex_mcp_reverse`` for backward)
-    and the ``docs`` directory shipped by ``lex``, then rewrites any file under
-    the project root that is missing or whose contents have drifted. Existing
-    user-only files are left untouched.
-    """
-    # The directory passed via --project-root (or cwd) IS the LLM working
-    # directory. We verify assets in *that* directory literally; we do not
-    # walk up to a git toplevel / marker file (see resolve_llm_working_directory).
-    root = resolve_llm_working_directory(project_root)
-    quiet = quiet or silent
-    explicit_mode = None if mode == "auto" else mode.lower()
 
-    try:
-        result = verify_ai_assets(project_root=root, mode=explicit_mode)
-    except SetupWithAIError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    restored_total = len(result.restored_files)
-
-    if not quiet:
-        click.echo(f"Active MCP mode: {result.mode} (source: {result.mode_source})")
-
-    for directory_result in result.directories:
-        if directory_result.skipped_reason is not None:
-            if not quiet:
-                click.echo(
-                    f"[skip] {directory_result.directory_name}: "
-                    f"{directory_result.skipped_reason}"
-                )
-            continue
-
-        if not directory_result.restored_files:
-            if not quiet:
-                click.echo(f"[ok]   {directory_result.directory_name}: up to date.")
-            continue
-
-        if not quiet:
-            click.echo(
-                f"[fix]  {directory_result.directory_name}: "
-                f"restored {len(directory_result.restored_files)} file(s) "
-                f"({len(directory_result.missing_files)} missing, "
-                f"{len(directory_result.modified_files)} modified) "
-                f"into {directory_result.destination_directory}"
-            )
-            for relative_path in directory_result.restored_files:
-                click.echo(f"        - {relative_path}")
-
-    if restored_total == 0:
-        if not silent:
-            click.echo("AI assets verified: nothing to restore.")
-        return
-
-    # --silent must print NOTHING on success — including when files were
-    # restored.  The MCP wrapper invokes this as a pre-flight on every tool
-    # call; any stdout leak corrupts the stdio JSON-RPC stream and causes
-    # the IDE to time out.
-    if not silent:
-        click.echo(f"AI assets verified: restored {restored_total} file(s).")
+@lex.command(name="ai_verify", hidden=True, context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+@click.option(
+    "--mode",
+    "mode",
+    type=click.Choice(["auto", "forward", "backward", "all"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help=(
+        "Which MCP mode's assets to verify. 'auto' (default) detects the active "
+        "mode from --mode > override file > project .env > mcp.json > "
+        "process env > forward. 'all' verifies both forward and backward."
+    ),
+)
+@click.option(
+    "--quiet",
+    is_flag=True,
+    help="Suppress per-file output; only print a summary line (or nothing on success).",
+)
+@click.option(
+    "--silent",
+    is_flag=True,
+    help="Print nothing on success. Implies --quiet. Intended for use as a fast pre-flight "
+         "guard at the start of every MCP tool call.",
+)
+@click.option(
+    "--align-mcp-mode/--no-align-mcp-mode",
+    default=None,
+    help=(
+        "Treat the project .env LEX_MCP_MODE as the source of truth and "
+        "invoke the equivalent of the MCP `switch_to_mode` tool when the "
+        "running MCP server / mcp.json disagree. Enabled by default for "
+        "interactive runs; disabled under --silent to avoid restarting the "
+        "server in the middle of an MCP tool call."
+    ),
+)
+def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode):
+    _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode)
 
 
 @lex.command(name="ai-dashboard", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -1098,13 +1146,67 @@ def ai_dashboard(project_root):
     Press Ctrl+C to stop the dashboard server.
     """
     root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    ai_dashboard_module = _require_lex_mcp("ai_dashboard")
     try:
-        launch_ai_dashboard(
+        ai_dashboard_module.launch_ai_dashboard(
             project_root=root,
             reporter=click.echo,
         )
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+@lex.command(name="ai_issue_report", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path, dir_okay=False, writable=True),
+    help="Output zip path (default: <project>/.lex-ai-reports/ai_issue_report_<timestamp>.zip)",
+)
+@click.option(
+    "--artifact-mode",
+    type=click.Choice(["auto", "off", "strict"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Raw artifact capture mode: auto (best-effort), off, strict (require at least one file).",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Skip the confirmation prompt about raw secret inclusion.",
+)
+def ai_issue_report(project_root, output, artifact_mode, yes):
+    """Generate a raw AI issue report bundle for support triage.
+
+    Captures Copilot and MCP-related artifacts as raw files without parsing so
+    no details are dropped during triage.
+    """
+    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+
+    if not yes:
+        click.echo("WARNING: report can include raw secrets and private conversation artifacts.")
+        click.confirm("Continue and generate the raw issue report?", abort=True)
+
+    ai_issue_report_module = _require_lex_mcp("ai_issue_report")
+
+    try:
+        result = ai_issue_report_module.create_ai_issue_report(
+            project_root=root,
+            output=output,
+            artifact_mode=str(artifact_mode).lower(),
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"AI issue report written: {result.archive_path}")
+    click.echo(f"Captured files: {result.copied_files}")
+    if result.missing_sources:
+        click.echo(f"Missing sources: {len(result.missing_sources)}")
+    if result.collection_errors:
+        click.echo(f"Collection errors: {len(result.collection_errors)}")
+    if result.ticket_url:
+        click.echo(f"Quackback ticket: {result.ticket_url}")
 
 
 def _collect_setup_with_ai_credentials(
@@ -1151,8 +1253,26 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard"}
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai_issue_report"}
 )
+
+
+def _should_skip_django_bootstrap(command_name: str | None) -> bool:
+    """Return True when *command_name* is handled directly by Click.
+
+    Accept both hyphen and underscore spellings for the AI commands so the
+    pre-dispatch gate does not accidentally trigger Django bootstrap before
+    Click has a chance to route to the dedicated handler.
+    """
+    if command_name is None:
+        return False
+
+    normalized_names = {
+        command_name,
+        command_name.replace("_", "-"),
+        command_name.replace("-", "_"),
+    }
+    return any(name in _SKIP_BOOTSTRAP_COMMANDS for name in normalized_names)
 
 
 def main():
@@ -1166,7 +1286,7 @@ def main():
     if first_arg is None or first_arg in {"--help", "-h", "--version"}:
         return lex(prog_name="lex")
 
-    if first_arg in _SKIP_BOOTSTRAP_COMMANDS:
+    if _should_skip_django_bootstrap(first_arg):
         # These commands have dedicated Click handlers registered above.
         # Do NOT call _install_dynamic_commands() — that would trigger
         # django.setup() in the CLI process, causing every AppConfig.ready()

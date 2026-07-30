@@ -1,7 +1,7 @@
 ---
 date: 2026-07-30
-clusters: [1y]
-tests_added: "20 scenarios / 30 tests (1.203–1.222)"
+clusters: [1z]
+tests_added: "20 scenarios / 30 tests (1.211–1.230)"
 suite_tally: "init cluster 305 -> 307 pass / 13 skip / 0 fail"
 ---
 
@@ -24,7 +24,7 @@ colours, fonts, radii, chart ramps, per-mode surfaces) as pure Python,
 transcribed from the frontend's own design system with dated provenance
 comments. `mapping.py` is a pure function, `build_streamlit_theme(tokens,
 mode)`, that walks those tokens into the flat Streamlit key → value mapping
-for `"light"` or `"dark"`; the 1.209 contract tests read Streamlit's own
+for `"light"` or `"dark"`; the 1.217 contract tests read Streamlit's own
 config-option template directly, so a Streamlit upgrade that renames or
 re-scopes a key fails the suite instead of just silently no-oping in
 production.
@@ -49,20 +49,20 @@ same URL means both succeed together and both fall back together. Separately,
 4 of the ~120 keys (the three chart-colour ramps plus `showSidebarBorder`)
 exist ONLY at the top-level `[theme]` scope with no per-mode twin, because
 Streamlit rejects unrecognised config options outright rather than ignoring
-them — `GLOBAL_ONLY_KEYS` pins that set and 1.209b checks it against the
+them — `GLOBAL_ONLY_KEYS` pins that set and 1.217b checks it against the
 installed Streamlit's own template so an upgrade that changes it is caught
 before it breaks a launch.
 
 This session's own addition is the drift guard. Replacing the six wrong lines
 fixes today but does nothing to stop the exact same rot next time — a
 hand-edit, or a token change nobody regenerated for.
-`TestCluster1y_CommittedConfig` (1.222/1.222b) asserts the committed
+`TestCluster1y_CommittedConfig` (1.230/1.230b) asserts the committed
 `lex/.streamlit/config.toml` is byte-identical to
 `render_config_toml(build_full_config(TOKENS))`, plus a named check that the
 specific stale values (`#08BCC2`, `#F5F5F5`, `#E0E0E0`, `#2D4262`,
 `"sans serif"`) are gone, so a bad revert fails with a legible reason instead
 of a generic diff. Verified the guard actually bites before committing:
-hand-edited one colour in the regenerated file, watched 1.222 fail,
+hand-edited one colour in the regenerated file, watched 1.230 fail,
 regenerated, watched it go green again. Also launched real Streamlit 1.58
 against a copy of the generated file from a scratch directory to confirm
 clean startup — the file this guard protects is one Streamlit actually

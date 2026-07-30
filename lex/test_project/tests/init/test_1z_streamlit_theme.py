@@ -1,4 +1,4 @@
-"""Cluster 1y — Streamlit theme parity (scenarios 1.203–1.218).
+"""Cluster 1z — Streamlit theme parity (scenarios 1.211–1.226).
 
 Intent: Streamlit pages must carry the real lex brand. The theme is derived
 from vendored design tokens by pure functions, so the whole mapping is
@@ -11,12 +11,12 @@ import pytest
 pytestmark = pytest.mark.init
 
 
-class TestCluster1y_Tokens:
+class TestCluster1z_Tokens:
     """The vendored token module is well-formed and matches the frontend."""
 
-    # -- 1.203 --------------------------------------------------------
-    def test_1_203_light_and_dark_expose_identical_keys(self) -> None:
-        """Scenario 1.203: both modes define exactly the same token keys, so
+    # -- 1.211 --------------------------------------------------------
+    def test_1_211_light_and_dark_expose_identical_keys(self) -> None:
+        """Scenario 1.211: both modes define exactly the same token keys, so
         no mode can silently lack a colour the other has."""
         from lex.lex_app.streamlit.theme.tokens import TOKENS
 
@@ -27,9 +27,9 @@ class TestCluster1y_Tokens:
             f"only-light={set(light) - set(dark)}, only-dark={set(dark) - set(light)}"
         )
 
-    # -- 1.204 --------------------------------------------------------
-    def test_1_204_brand_values_match_the_frontend(self) -> None:
-        """Scenario 1.204: the brand accent and sidebar navy are the values the
+    # -- 1.212 --------------------------------------------------------
+    def test_1_212_brand_values_match_the_frontend(self) -> None:
+        """Scenario 1.212: the brand accent and sidebar navy are the values the
         frontend actually ships. Guards the exact drift this batch fixes —
         the old config said #08BCC2."""
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -38,9 +38,9 @@ class TestCluster1y_Tokens:
         assert TOKENS["brand"]["sidebar_bg"] == "#283C50"
         assert TOKENS["brand"]["primary"] != "#08BCC2", "stale pre-2026-07 accent"
 
-    # -- 1.204 (companion) --------------------------------------------
-    def test_1_204b_tokens_hash_is_derived_from_the_tokens(self) -> None:
-        """Scenario 1.204: TOKENS_HASH is a real digest of TOKENS, not a
+    # -- 1.212 (companion) --------------------------------------------
+    def test_1_212b_tokens_hash_is_derived_from_the_tokens(self) -> None:
+        """Scenario 1.212: TOKENS_HASH is a real digest of TOKENS, not a
         constant. Phase 4's CI drift check compares this value against the
         design system's published tokens, so the canonicalisation (sorted-key
         JSON, sha256) is load-bearing and must not change silently."""
@@ -66,12 +66,12 @@ class TestCluster1y_Tokens:
         assert mutated_hash != TOKENS_HASH
 
 
-class TestCluster1y_Mapping:
+class TestCluster1z_Mapping:
     """Tokens map onto Streamlit's native theme keys, per mode."""
 
-    # -- 1.205 --------------------------------------------------------
-    def test_1_205_light_mode_carries_brand_and_typography(self) -> None:
-        """Scenario 1.205: the mapped light theme uses the brand accent, the
+    # -- 1.213 --------------------------------------------------------
+    def test_1_213_light_mode_carries_brand_and_typography(self) -> None:
+        """Scenario 1.213: the mapped light theme uses the brand accent, the
         navy sidebar, Inter, and the lex radii."""
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -92,9 +92,9 @@ class TestCluster1y_Mapping:
         assert theme["buttonRadius"] == "10px"
         assert theme["dataframeHeaderBackgroundColor"] == "#F6F8FA"
 
-    # -- 1.206 --------------------------------------------------------
-    def test_1_206_dark_mode_swaps_surfaces_but_keeps_brand(self) -> None:
-        """Scenario 1.206: dark mode changes surfaces and text while the brand
+    # -- 1.214 --------------------------------------------------------
+    def test_1_214_dark_mode_swaps_surfaces_but_keeps_brand(self) -> None:
+        """Scenario 1.214: dark mode changes surfaces and text while the brand
         accent and the navy sidebar stay put — the sidebar is navy in BOTH
         modes in lex-app."""
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
@@ -107,9 +107,9 @@ class TestCluster1y_Mapping:
         assert dark["primaryColor"] == "#14b4b4"
         assert dark["sidebar.backgroundColor"] == "#283C50"
 
-    # -- 1.207 --------------------------------------------------------
-    def test_1_207_chart_palettes_are_mapped_as_lists(self) -> None:
-        """Scenario 1.207: chart ramps reach Streamlit so plots match the
+    # -- 1.215 --------------------------------------------------------
+    def test_1_215_chart_palettes_are_mapped_as_lists(self) -> None:
+        """Scenario 1.215: chart ramps reach Streamlit so plots match the
         brand instead of falling back to Streamlit's defaults."""
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -120,9 +120,9 @@ class TestCluster1y_Mapping:
         assert isinstance(theme["chartSequentialColors"], list)
         assert isinstance(theme["chartDivergingColors"], list)
 
-    # -- 1.208 --------------------------------------------------------
-    def test_1_208_unknown_mode_is_rejected(self) -> None:
-        """Scenario 1.208: a typo'd mode fails loudly instead of silently
+    # -- 1.216 --------------------------------------------------------
+    def test_1_216_unknown_mode_is_rejected(self) -> None:
+        """Scenario 1.216: a typo'd mode fails loudly instead of silently
         producing a half-built theme."""
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -130,11 +130,11 @@ class TestCluster1y_Mapping:
         with pytest.raises(ValueError, match="unknown mode"):
             build_streamlit_theme(TOKENS, "sepia")
 
-    # -- 1.208b -------------------------------------------------------
-    def test_1_208b_every_emitted_key_is_wired_to_the_right_token(self) -> None:
-        """Scenario 1.208: the COMPLETE key->token wiring, for both modes.
+    # -- 1.216b -------------------------------------------------------
+    def test_1_216b_every_emitted_key_is_wired_to_the_right_token(self) -> None:
+        """Scenario 1.216: the COMPLETE key->token wiring, for both modes.
 
-        1.205-1.207 spot-check the headline keys; this pins every one of them.
+        1.213-1.215 spot-check the headline keys; this pins every one of them.
         Without it a swapped pair (success<->warning, primary<->primary_hover)
         passes every other test silently — precisely the drift class this
         batch exists to prevent. The set-equality assertion also means adding
@@ -211,9 +211,9 @@ class TestCluster1y_Mapping:
                     f"{mode}: {key} should lead with the family from {section}.{leaf}"
                 )
 
-    # -- 1.208c -------------------------------------------------------
-    def test_1_208c_declared_modes_match_the_token_modes(self) -> None:
-        """Scenario 1.208: the module's mode tuple and the token file's mode
+    # -- 1.216c -------------------------------------------------------
+    def test_1_216c_declared_modes_match_the_token_modes(self) -> None:
+        """Scenario 1.216: the module's mode tuple and the token file's mode
         keys stay in sync. These are two sources of truth (later tasks iterate
         ``_MODES`` to emit per-mode config), so a mode added to only one side
         must fail here rather than surface as a KeyError much later."""
@@ -223,7 +223,7 @@ class TestCluster1y_Mapping:
         assert set(_MODES) == set(TOKENS["modes"])
 
 
-class TestCluster1y_StreamlitContract:
+class TestCluster1z_StreamlitContract:
     """Every key we emit must really exist in the installed Streamlit.
 
     These tests read Streamlit's own config-option template, so they fail the
@@ -242,9 +242,9 @@ class TestCluster1y_StreamlitContract:
         config.get_config_options()
         return config._config_options_template
 
-    # -- 1.209 --------------------------------------------------------
-    def test_1_209_every_emitted_key_exists_in_streamlit(self) -> None:
-        """Scenario 1.209: each mapped key resolves to a real
+    # -- 1.217 --------------------------------------------------------
+    def test_1_217_every_emitted_key_exists_in_streamlit(self) -> None:
+        """Scenario 1.217: each mapped key resolves to a real
         ``theme.<key>`` config option in the installed Streamlit."""
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -260,9 +260,9 @@ class TestCluster1y_StreamlitContract:
             f"mapping.py rather than deleting this assertion."
         )
 
-    # -- 1.209b -------------------------------------------------------
-    def test_1_209b_global_only_keys_are_declared_correctly(self) -> None:
-        """Scenario 1.209: the keys Streamlit accepts ONLY at ``[theme]``
+    # -- 1.217b -------------------------------------------------------
+    def test_1_217b_global_only_keys_are_declared_correctly(self) -> None:
+        """Scenario 1.217: the keys Streamlit accepts ONLY at ``[theme]``
         (no per-mode twin) are exactly the ones the module declares.
 
         The config writer routes keys by this set: a per-mode block containing
@@ -290,9 +290,9 @@ class TestCluster1y_StreamlitContract:
             f"{sorted(GLOBAL_ONLY_KEYS)}"
         )
 
-    # -- 1.209c -------------------------------------------------------
-    def test_1_209c_per_mode_keys_exist_in_both_mode_namespaces(self) -> None:
-        """Scenario 1.209: every non-global-only key exists under BOTH
+    # -- 1.217c -------------------------------------------------------
+    def test_1_217c_per_mode_keys_exist_in_both_mode_namespaces(self) -> None:
+        """Scenario 1.217: every non-global-only key exists under BOTH
         ``theme.light.`` and ``theme.dark.``, so neither mode block can carry
         a key the other rejects."""
         from lex.lex_app.streamlit.theme.mapping import (
@@ -312,12 +312,12 @@ class TestCluster1y_StreamlitContract:
             assert f"theme.dark.{key}" in template, f"missing theme.dark.{key}"
 
 
-class TestCluster1y_ConfigWriter:
+class TestCluster1z_ConfigWriter:
     """The theme reaches Streamlit as valid config: TOML and CLI flags."""
 
-    # -- 1.210 --------------------------------------------------------
-    def test_1_210_global_only_keys_never_land_in_a_mode_block(self) -> None:
-        """Scenario 1.210: the 4 global-only keys appear at [theme] only.
+    # -- 1.218 --------------------------------------------------------
+    def test_1_218_global_only_keys_never_land_in_a_mode_block(self) -> None:
+        """Scenario 1.218: the 4 global-only keys appear at [theme] only.
 
         Streamlit rejects unrecognised config options outright, so a chart
         palette inside [theme.light] would break every dashboard rather than
@@ -334,9 +334,9 @@ class TestCluster1y_ConfigWriter:
             assert key not in cfg["theme"]["light"], f"{key} leaked into light"
             assert key not in cfg["theme"]["dark"], f"{key} leaked into dark"
 
-    # -- 1.211 --------------------------------------------------------
-    def test_1_211_per_mode_values_differ_where_the_tokens_differ(self) -> None:
-        """Scenario 1.211: the mode blocks carry that mode's own surfaces,
+    # -- 1.219 --------------------------------------------------------
+    def test_1_219_per_mode_values_differ_where_the_tokens_differ(self) -> None:
+        """Scenario 1.219: the mode blocks carry that mode's own surfaces,
         while the brand accent stays constant across both."""
         from lex.lex_app.streamlit.theme.config_writer import build_full_config
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -348,9 +348,9 @@ class TestCluster1y_ConfigWriter:
         assert cfg["theme"]["light"]["primaryColor"] == "#14b4b4"
         assert cfg["theme"]["dark"]["primaryColor"] == "#14b4b4"
 
-    # -- 1.212 --------------------------------------------------------
-    def test_1_212_dotted_keys_become_nested_sidebar_tables(self) -> None:
-        """Scenario 1.212: `sidebar.backgroundColor` is emitted as a nested
+    # -- 1.220 --------------------------------------------------------
+    def test_1_220_dotted_keys_become_nested_sidebar_tables(self) -> None:
+        """Scenario 1.220: `sidebar.backgroundColor` is emitted as a nested
         `sidebar` table, which is the shape Streamlit's TOML parser expects —
         a literal dotted key would be read as an unknown option."""
         from lex.lex_app.streamlit.theme.config_writer import build_full_config
@@ -364,9 +364,9 @@ class TestCluster1y_ConfigWriter:
         for scope in (cfg["theme"], cfg["theme"]["light"], cfg["theme"]["dark"]):
             assert not [k for k in scope if "." in k], f"dotted key left in {scope.keys()}"
 
-    # -- 1.213 --------------------------------------------------------
-    def test_1_213_rendered_toml_parses_and_round_trips(self) -> None:
-        """Scenario 1.213: the rendered text is valid TOML and preserves the
+    # -- 1.221 --------------------------------------------------------
+    def test_1_221_rendered_toml_parses_and_round_trips(self) -> None:
+        """Scenario 1.221: the rendered text is valid TOML and preserves the
         structure — not a string we merely hope Streamlit can read."""
         import tomllib
 
@@ -385,9 +385,9 @@ class TestCluster1y_ConfigWriter:
         assert parsed["theme"]["chartCategoricalColors"][0] == "#14b4b4"
         assert parsed["theme"]["linkUnderline"] is False
 
-    # -- 1.214 --------------------------------------------------------
-    def test_1_214_cli_flags_are_fully_qualified_and_streamlit_valid(self) -> None:
-        """Scenario 1.214: every emitted flag is `--theme.<path>=<value>` and
+    # -- 1.222 --------------------------------------------------------
+    def test_1_222_cli_flags_are_fully_qualified_and_streamlit_valid(self) -> None:
+        """Scenario 1.222: every emitted flag is `--theme.<path>=<value>` and
         names a real Streamlit option. Flags are the primary delivery path
         (a config file's location depends on the working directory), so a
         malformed flag name would make Streamlit exit on startup.
@@ -409,9 +409,9 @@ class TestCluster1y_ConfigWriter:
             option = flag[2:].split("=", 1)[0]
             assert option in template, f"{option} is not a Streamlit config option"
 
-    # -- 1.215 --------------------------------------------------------
-    def test_1_215_list_and_bool_values_are_cli_encoded(self) -> None:
-        """Scenario 1.215: chart palettes and booleans survive the flag
+    # -- 1.223 --------------------------------------------------------
+    def test_1_223_list_and_bool_values_are_cli_encoded(self) -> None:
+        """Scenario 1.223: chart palettes and booleans survive the flag
         encoding as JSON, which is what Streamlit's parser accepts — a bare
         Python `['#14b4b4']` or `False` would be mis-parsed."""
         from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
@@ -425,9 +425,9 @@ class TestCluster1y_ConfigWriter:
         assert by_option["theme.linkUnderline"] == "false"
         assert by_option["theme.showWidgetBorder"] == "true"
 
-    # -- 1.216 --------------------------------------------------------
-    def test_1_216_write_config_creates_the_file(self, tmp_path) -> None:
-        """Scenario 1.216: `write_config` puts parseable TOML on disk at the
+    # -- 1.224 --------------------------------------------------------
+    def test_1_224_write_config_creates_the_file(self, tmp_path) -> None:
+        """Scenario 1.224: `write_config` puts parseable TOML on disk at the
         given path, creating parent directories."""
         import tomllib
 
@@ -442,7 +442,7 @@ class TestCluster1y_ConfigWriter:
         assert parsed["theme"]["primaryColor"] == "#14b4b4"
 
 
-class TestCluster1y_Fonts:
+class TestCluster1z_Fonts:
     """Fonts come from the SAME source the lex-app frontend uses.
 
     The frontend loads Inter from Google Fonts. Streamlit is pointed at that
@@ -452,9 +452,9 @@ class TestCluster1y_Fonts:
     font for Streamlit alone would make it diverge from the app it must match.
     """
 
-    # -- 1.217 --------------------------------------------------------
-    def test_1_217_font_keys_reference_the_frontend_stylesheet(self) -> None:
-        """Scenario 1.217: the body/heading fonts carry Streamlit's
+    # -- 1.225 --------------------------------------------------------
+    def test_1_225_font_keys_reference_the_frontend_stylesheet(self) -> None:
+        """Scenario 1.225: the body/heading fonts carry Streamlit's
         ``<name>:<url>`` stylesheet form, pointing at the same Google Fonts
         URL the frontend uses."""
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
@@ -468,9 +468,9 @@ class TestCluster1y_Fonts:
             assert "fonts.googleapis.com/css2" in value, f"{key} lost the stylesheet URL"
             assert "family=Inter" in value, f"{key} does not request Inter"
 
-    # -- 1.218 --------------------------------------------------------
-    def test_1_218_font_declares_a_system_fallback(self) -> None:
-        """Scenario 1.218: a fallback stack follows the webfont, so an
+    # -- 1.226 --------------------------------------------------------
+    def test_1_226_font_declares_a_system_fallback(self) -> None:
+        """Scenario 1.226: a fallback stack follows the webfont, so an
         air-gapped browser renders system sans instead of Streamlit's default
         face. Streamlit takes fallbacks as a comma-separated list."""
         from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
@@ -481,9 +481,9 @@ class TestCluster1y_Fonts:
         assert "," in theme["font"], "no fallback declared"
         assert theme["font"].rstrip().endswith("sans-serif")
 
-    # -- 1.218b -------------------------------------------------------
-    def test_1_218b_font_url_matches_the_frontend_weights(self) -> None:
-        """Scenario 1.218: the requested weights match the frontend's own
+    # -- 1.226b -------------------------------------------------------
+    def test_1_226b_font_url_matches_the_frontend_weights(self) -> None:
+        """Scenario 1.226: the requested weights match the frontend's own
         request, so headings and body copy have the same faces available in
         both surfaces. Frontend uses wght@300;400;500;600;700."""
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -493,9 +493,9 @@ class TestCluster1y_Fonts:
             assert weight in url, f"weight {weight} missing from the font URL"
         assert "display=swap" in url, "display=swap keeps text visible while loading"
 
-    # -- 1.218c -------------------------------------------------------
-    def test_1_218c_no_bundled_font_asset_is_referenced(self) -> None:
-        """Scenario 1.218: nothing references a local font file. Bundling was
+    # -- 1.226c -------------------------------------------------------
+    def test_1_226c_no_bundled_font_asset_is_referenced(self) -> None:
+        """Scenario 1.226: nothing references a local font file. Bundling was
         deliberately rejected (see the design's §8.2) — a vendored woff2 for
         Streamlit alone would render Inter while an air-gapped frontend
         rendered system sans."""
@@ -510,7 +510,7 @@ class TestCluster1y_Fonts:
         assert "static/" not in rendered
 
 
-class TestCluster1y_LaunchFlags:
+class TestCluster1z_LaunchFlags:
     """The theme reaches a `lex streamlit` launch as CLI flags.
 
     Flags are the primary delivery path: a `.streamlit/config.toml` resolves
@@ -518,9 +518,9 @@ class TestCluster1y_LaunchFlags:
     identically regardless of where the dashboard was started from.
     """
 
-    # -- 1.219 --------------------------------------------------------
-    def test_1_219_theme_flags_are_added_to_a_plain_launch(self) -> None:
-        """Scenario 1.219: a launch with no theme flags of its own receives
+    # -- 1.227 --------------------------------------------------------
+    def test_1_227_theme_flags_are_added_to_a_plain_launch(self) -> None:
+        """Scenario 1.227: a launch with no theme flags of its own receives
         the full generated set."""
         from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -531,9 +531,9 @@ class TestCluster1y_LaunchFlags:
         assert all(f.startswith("--theme.") for f in added)
         assert any(f.startswith("--theme.primaryColor=") for f in added)
 
-    # -- 1.220 --------------------------------------------------------
-    def test_1_220_an_explicit_user_flag_is_never_overridden(self) -> None:
-        """Scenario 1.220: a customer who sets `--theme.primaryColor` keeps
+    # -- 1.228 --------------------------------------------------------
+    def test_1_228_an_explicit_user_flag_is_never_overridden(self) -> None:
+        """Scenario 1.228: a customer who sets `--theme.primaryColor` keeps
         their value — we omit ours for that option rather than relying on
         Streamlit's precedence rules."""
         from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
@@ -548,9 +548,9 @@ class TestCluster1y_LaunchFlags:
         # Everything else is still themed.
         assert any(f.startswith("--theme.backgroundColor=") for f in added)
 
-    # -- 1.220b -------------------------------------------------------
-    def test_1_220b_user_flag_in_space_separated_form_is_respected(self) -> None:
-        """Scenario 1.220: Streamlit also accepts `--opt value`, so the
+    # -- 1.228b -------------------------------------------------------
+    def test_1_228b_user_flag_in_space_separated_form_is_respected(self) -> None:
+        """Scenario 1.228: Streamlit also accepts `--opt value`, so the
         override check must not depend on the `=` form."""
         from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -560,9 +560,9 @@ class TestCluster1y_LaunchFlags:
 
         assert not any(f.startswith("--theme.primaryColor=") for f in added)
 
-    # -- 1.220c -------------------------------------------------------
-    def test_1_220c_a_user_mode_block_flag_is_respected_precisely(self) -> None:
-        """Scenario 1.220: overriding `--theme.dark.backgroundColor` must
+    # -- 1.228c -------------------------------------------------------
+    def test_1_228c_a_user_mode_block_flag_is_respected_precisely(self) -> None:
+        """Scenario 1.228: overriding `--theme.dark.backgroundColor` must
         suppress only that flag, not the light one or the base."""
         from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
         from lex.lex_app.streamlit.theme.tokens import TOKENS
@@ -576,9 +576,9 @@ class TestCluster1y_LaunchFlags:
         assert "theme.light.backgroundColor" in options
         assert "theme.backgroundColor" in options
 
-    # -- 1.221 --------------------------------------------------------
-    def test_1_221_a_broken_theme_never_blocks_the_launch(self) -> None:
-        """Scenario 1.221: if the theme cannot be built, the CLI launches
+    # -- 1.229 --------------------------------------------------------
+    def test_1_229_a_broken_theme_never_blocks_the_launch(self) -> None:
+        """Scenario 1.229: if the theme cannot be built, the CLI launches
         Streamlit UNTHEMED rather than failing. The design's safety property is
         that every failure degrades one rung and never to broken."""
         from lex.bin.lex import _safe_theme_flags
@@ -587,7 +587,7 @@ class TestCluster1y_LaunchFlags:
         assert _safe_theme_flags(["run", "dash.py"], tokens={}) == []
 
 
-class TestCluster1y_CommittedConfig:
+class TestCluster1z_CommittedConfig:
     """The committed `.streamlit/config.toml` is generated, never hand-written.
 
     The whole batch exists because that file was maintained by hand and every
@@ -605,9 +605,9 @@ class TestCluster1y_CommittedConfig:
 
         return Path(lex.__file__).resolve().parent / ".streamlit" / "config.toml"
 
-    # -- 1.222 --------------------------------------------------------
-    def test_1_222_committed_config_matches_the_generator(self) -> None:
-        """Scenario 1.222: the file on disk is byte-identical to the generated
+    # -- 1.230 --------------------------------------------------------
+    def test_1_230_committed_config_matches_the_generator(self) -> None:
+        """Scenario 1.230: the file on disk is byte-identical to the generated
         output, so it cannot silently diverge from the tokens."""
         from lex.lex_app.streamlit.theme.config_writer import (
             build_full_config,
@@ -623,9 +623,9 @@ class TestCluster1y_CommittedConfig:
             "Regenerate it from the tokens rather than editing it directly."
         )
 
-    # -- 1.222b -------------------------------------------------------
-    def test_1_222b_the_stale_pre_2026_07_values_are_gone(self) -> None:
-        """Scenario 1.222: the specific wrong values that motivated this batch
+    # -- 1.230b -------------------------------------------------------
+    def test_1_230b_the_stale_pre_2026_07_values_are_gone(self) -> None:
+        """Scenario 1.230: the specific wrong values that motivated this batch
         are absent. A named guard, so a bad revert is obvious in the failure
         output rather than just 'files differ'."""
         text = self._committed_path().read_text(encoding="utf-8")
@@ -639,7 +639,7 @@ class TestCluster1y_CommittedConfig:
         assert "family=Inter" in text
 
 
-class TestCluster1y_StreamlitFloor:
+class TestCluster1z_StreamlitFloor:
     """The theme needs Streamlit's MODERN theme surface — recorded as a floor.
 
     lex-app deliberately pins almost nothing (48 of 50 requirements unpinned, no
@@ -650,7 +650,7 @@ class TestCluster1y_StreamlitFloor:
     Color`` and the ``"<family>:<url>"`` font form are simply not recognised, so
     the theme silently does not apply.
 
-    Upgrade risk is carried by tests rather than a cap — scenario 1.209 fails
+    Upgrade risk is carried by tests rather than a cap — scenario 1.217 fails
     loudly if a key is renamed, removed, or re-scoped.
     """
 
@@ -665,9 +665,9 @@ class TestCluster1y_StreamlitFloor:
         # Repo layout: <root>/requirements.txt with the package at <root>/lex.
         return Path(lex.__file__).resolve().parent.parent / "requirements.txt"
 
-    # -- 1.223 --------------------------------------------------------
-    def test_1_223_requirements_records_the_floor(self) -> None:
-        """Scenario 1.223: `requirements.txt` states the minimum Streamlit, so
+    # -- 1.231 --------------------------------------------------------
+    def test_1_231_requirements_records_the_floor(self) -> None:
+        """Scenario 1.231: `requirements.txt` states the minimum Streamlit, so
         an install that predates the modern theme surface fails at resolution
         time instead of silently rendering an unthemed app."""
         import pytest as _pytest
@@ -696,9 +696,9 @@ class TestCluster1y_StreamlitFloor:
         parsed = tuple(int(part) for part in floor.split(".")[:2])
         assert parsed >= self.MINIMUM, f"floor {floor} is below the required {self.MINIMUM}"
 
-    # -- 1.223b -------------------------------------------------------
-    def test_1_223b_installed_streamlit_meets_the_floor(self) -> None:
-        """Scenario 1.223: the Streamlit actually installed satisfies the floor,
+    # -- 1.231b -------------------------------------------------------
+    def test_1_231b_installed_streamlit_meets_the_floor(self) -> None:
+        """Scenario 1.231: the Streamlit actually installed satisfies the floor,
         so the rest of this cluster is asserting against a version whose theme
         surface really exists."""
         import streamlit

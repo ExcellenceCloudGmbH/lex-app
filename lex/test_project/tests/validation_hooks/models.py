@@ -252,6 +252,26 @@ class LeanExtraFieldItem(LexModel):
             type(self).hook_log.append("note_changed")
 
 
+@_permissive
+class StampedItem(LexModel):
+    """
+    Plain ``DateTimeField`` carrier for the aware-on-assignment invariant (3g).
+
+    Deliberately hook-free: the batch tests what ``AwareDateTimeDescriptor``
+    does to a *bare* datetime field the moment it is assigned, without any
+    lifecycle machinery in the way.
+    """
+
+    name = models.CharField(max_length=200)
+    happened_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 ALL_MODELS = [
     PreValidatedItem,
     PostValidatedItem,
@@ -259,4 +279,5 @@ ALL_MODELS = [
     LeanConditionalItem,
     FullConditionalItem,
     LeanExtraFieldItem,
+    StampedItem,
 ]

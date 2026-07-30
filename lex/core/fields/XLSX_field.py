@@ -1,10 +1,60 @@
+from datetime import datetime
 from io import BytesIO
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+from django.conf import settings
 from django.core.files import File
 from django.db.models import FileField
 from openpyxl.styles import Font, Border, Side
 from pandas.api.types import is_datetime64_any_dtype as is_datetime
+
+
+def _excel_display_naive(df):
+    """Return ``df`` with aware datetimes made Excel-writable.
+
+    Excel has no timezone concept, so ``to_excel`` raises on aware values —
+    which every DateTimeField now carries under USE_TZ=True. Render them as
+    the project display zone's wall clock (settings.TIME_ZONE) and strip the
+    tzinfo; naive values, dates and NaT pass through. Covers data columns,
+    object columns, the (multi)index and column headers, since report pivots
+    put datetimes in all four. Returns a shallow copy; the caller's frame is
+    left untouched.
+    """
+    zone = ZoneInfo(getattr(settings, "TIME_ZONE", "UTC") or "UTC")
+
+    def _cell(value):
+        if isinstance(value, datetime) and value.tzinfo is not None:
+            return value.astimezone(zone).replace(tzinfo=None)
+        return value
+
+    out = df.copy(deep=False)
+    for col in out.columns:
+        series = out[col]
+        if isinstance(series.dtype, pd.DatetimeTZDtype):
+            out[col] = series.dt.tz_convert(zone).dt.tz_localize(None)
+        elif series.dtype == object:
+            out[col] = series.map(_cell)
+
+    idx = out.index
+    if isinstance(idx, pd.DatetimeIndex):
+        if idx.tz is not None:
+            out.index = idx.tz_convert(zone).tz_localize(None)
+    elif isinstance(idx, pd.MultiIndex):
+        out.index = pd.MultiIndex.from_tuples(
+            [tuple(_cell(v) for v in entry) for entry in idx], names=idx.names
+        )
+    elif idx.dtype == object:
+        out.index = pd.Index([_cell(v) for v in idx], name=idx.name)
+
+    if isinstance(out.columns, pd.MultiIndex):
+        out.columns = pd.MultiIndex.from_tuples(
+            [tuple(_cell(v) for v in entry) for entry in out.columns],
+            names=out.columns.names,
+        )
+    else:
+        out.columns = [_cell(c) for c in out.columns]
+    return out
 
 
 class XLSXField(FileField):
@@ -69,6 +119,9 @@ class XLSXField(FileField):
         idx_length = 0
         for df, sheet_name in zip(data_frames, sheet_names):
             if df is not None:
+                # Excel cannot hold tz-aware datetimes; render them in the
+                # project display zone and strip the tzinfo before writing.
+                df = _excel_display_naive(df)
                 if len(df) == 0:
                     df = pd.concat([df, pd.DataFrame([{}])], ignore_index=True)
                 if index:

@@ -178,11 +178,11 @@
 
 ---
 
-### Batch 1y — Streamlit theme parity — tokens, native theme config, CLI wiring ✅
+### Batch 1z — Streamlit theme parity — tokens, native theme config, CLI wiring ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.203 – 1.223 |
+| Scenario range | 1.211 – 1.231 |
 | Type | U + I |
 | Files covered | `lex/lex_app/streamlit/theme/{tokens,mapping,config_writer}.py`, `lex/bin/lex.py` (`_safe_theme_flags`), `lex/.streamlit/config.toml` (generated) |
 | Phase 2 scope | Streamlit floor `>=1.58` only — the planned CSS layer was **dropped**; the native theme surface already covers the sidebar and dataframe header, and automatic CSS injection has no public hook (the `runpy` shim would break Streamlit's AST magic). Shipped theme therefore touches **no** Streamlit internals. See the design doc §7. |
@@ -192,5 +192,18 @@
 | Tests landed | **32 pass / 0 fail** |
 | Coverage gain | Streamlit theme parity phase 1 — token source of truth, native theme mapping, CLI + file delivery, drift guard |
 | Status | ✅ Complete — see the allocation note. Phase 1 of the design (`docs/superpowers/specs/2026-07-30-streamlit-theme-parity-design.md`); phases 2–4 (CSS layer, live host handshake, cross-repo tokens.json) are separate. |
+### Batch 1y — IDE-aware setup run configurations ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.203 – 1.210 |
+| Type | U |
+| Files covered | `generate_pycharm_configs.py`, `lex/bin/lex.py`, `pyproject.toml` |
+| Test file | `lex/test_project/tests/init/test_1y_ide_run_configs.py` |
+| Test classes | `TestCluster01y_IdeRunConfigurations` |
+| Fixtures | `tempfile.TemporaryDirectory`, Click `CliRunner`, controlled IDE environment markers; no database models |
+| Tests landed | **8 pass / 0 fail, 10 subtests pass**; setup regression (`1a` + `1m`) **13 pass / 0 fail, 9 subtests pass** |
+| Coverage gain | n/a — scaffolding module is outside configured `source = lex` and `lex/bin/lex.py` is explicitly omitted; tests pin IDE selection/fallback, VS Code parity, JSONC merge, idempotency, and setup output paths |
+| Status | ✅ Complete — clear VS Code/PyCharm sessions generate their native format; unknown or conflicting sessions generate both; existing VS Code entries survive regeneration. See [2026-07-23 session](../../progress/sessions/2026-07-23-ide-run-configs.md). |
 
 ---

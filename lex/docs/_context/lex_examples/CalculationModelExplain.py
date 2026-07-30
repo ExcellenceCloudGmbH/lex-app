@@ -1,6 +1,7 @@
-import logging
 import os
 import traceback
+from abc import abstractmethod
+import logging
 from copy import deepcopy
 
 from django.db import models
@@ -12,11 +13,12 @@ from django_lifecycle import (
     BEFORE_SAVE,
 )
 from django_lifecycle.conditions import WhenFieldValueIs
+from rest_framework.exceptions import APIException
+
+from lex.core.models.LexModel import LexModel
 from lex.api.utils import operation_context, OperationContext
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ContextResolver import ContextResolver
-from lex.core.models.LexModel import LexModel
-from rest_framework.exceptions import APIException
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +37,12 @@ class CalculationModel(LexModel):
     SUCCESS = "SUCCESS"
     NOT_CALCULATED = "NOT_CALCULATED"
     ABORTED = "ABORTED"
-    CANCELLED = "CANCELLED"
     STATUSES = [
         (IN_PROGRESS, "IN_PROGRESS"),
         (ERROR, "ERROR"),
         (SUCCESS, "SUCCESS"),
         (NOT_CALCULATED, "NOT_CALCULATED"),
         (ABORTED, "ABORTED"),
-        (CANCELLED, "CANCELLED"),
     ]
 
     is_calculated = models.CharField(
@@ -110,6 +110,7 @@ class CalculationModel(LexModel):
         Returns:
             bool: True if Celery should be used, False for synchronous execution
         """
+        from lex.lex_app import settings
 
         # Check if Celery is enabled in setting
         if not os.getenv("CELERY_ACTIVE", None) == 'true' or not hasattr(self.lex_func(), 'delay'):

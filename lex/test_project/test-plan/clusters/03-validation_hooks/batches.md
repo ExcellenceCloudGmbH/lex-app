@@ -33,3 +33,19 @@
 | Note | django-lifecycle's `_initial_state` is a second full-field copy per instance (set in `__init__`, re-captured after each save) — the ~2.17× per-row floor left after 3e. The framework's only dependency is `has_changed('edited_at')`; all other consumers are statically-discoverable hook clauses. The opt-in narrows the retained snapshot to `edited_at` + hook-clause fields + declared extras, built by filtering the full snapshot so tracked values stay byte-for-byte identical. Default **on** framework-wide — the narrowing is transparent because every consumer is either `has_changed('edited_at')` or a statically-discoverable hook clause; a model that queries `has_changed`/`initial_value` on an undeclared field lists it in `lex_initial_state_extra_fields` or sets `lex_lean_initial_state = False`. |
 
 ---
+
+### Batch 3g — DateTimeField aware-on-assignment invariant (`AwareDateTimeDescriptor`) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 3.33 – 3.38 |
+| Type | I |
+| Files covered | `lex/core/models/LexModel.py` (`AwareDateTimeDescriptor`, `_install_aware_datetime_descriptors`, `class_prepared` wiring) |
+| Test file | `lex/test_project/tests/validation_hooks/test_3g_aware_datetime_assignment.py` |
+| Test classes | `TestCluster03g_AwareDatetimeAssignment` (3.33 naive ctor kwarg → aware in default tz; 3.34 DST-correct offsets on attribute set — summer +02:00 / winter +01:00; 3.35 aware values pass through untouched (no re-zoning); 3.36 non-datetime values pass through — None / date / string; 3.37 save→refetch preserves the instant; 3.38 deferred `.only()` field still lazy-loads aware — the data-descriptor regression guard) |
+| Fixtures | `StampedItem` (hook-free `DateTimeField` carrier) — added to `validation_hooks/models.py` |
+| Tests landed | **6 pass / 0 fail** (full cluster 3: 39 pass / 0 fail) |
+| Coverage gain | the aware-on-assignment normalization on `LexModel` DateTimeFields |
+| Status | ✅ Complete — Under USE_TZ=True Django only normalizes datetimes at the DB boundary: fetched values are aware, in-memory assignments (fixture load, Excel parse, `datetime.now()`) stay naive until the next round trip. Mixing the two crashes downstream comparisons (`TypeError: Cannot compare tz-naive and tz-aware timestamps` in pandas sorts / xirr). The descriptor closes the gap at assignment using the exact save-time interpretation (default tz), so the stored instant never changes — the in-memory object simply agrees with its own future save. Ships with the `USE_TZ=True` cutover. |
+
+---

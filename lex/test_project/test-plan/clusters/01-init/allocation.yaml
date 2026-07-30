@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 223
+max_scenario: 231
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -214,6 +214,16 @@ letters:
     note: 'scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision
       fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py;
       moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC.'
+  y:
+    title: IDE-aware setup run configurations for PyCharm and VS Code
+    scenarios: 1.203-1.210
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: best-effort IDE marker detection; unknown/conflicting environments generate both formats;
+      VS Code launchers retain full PyCharm command/env/prompt parity and preserve user JSONC entries
   i:
     title: rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident
     scenarios: 1.195-1.200
@@ -242,9 +252,9 @@ letters:
       and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
       Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
-  y:
+  z:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
-    scenarios: 1.203-1.223
+    scenarios: 1.211-1.231
     status: complete
     tests:
       pass: 32
@@ -257,12 +267,12 @@ letters:
       flags (primary — a config.toml resolves relative to CWD, so only flags theme every launch
       identically) and a generated .streamlit/config.toml (fallback for a bare `streamlit run`). The
       committed config was hand-written with every value drifted (primaryColor `#08BCC2` vs the real
-      `#14b4b4`, grey sidebar vs navy, "sans serif" vs Inter, no dark mode); 1.222 makes that
+      `#14b4b4`, grey sidebar vs navy, "sans serif" vs Inter, no dark mode); 1.230 makes that
       unrepeatable by asserting the file is byte-identical to the generator. Fonts point at the
       frontend's OWN Google Fonts stylesheet via Streamlit's "<family>:<url>" form, so the two
       surfaces agree both connected (both Inter) and air-gapped (both fall back) — bundling a woff2
       for Streamlit alone was rejected because the frontend does not bundle one either. 4 keys
-      (chart ramps + showSidebarBorder) are global-only with no per-mode twin, pinned by 1.209b since
-      Streamlit rejects unrecognised options outright. A broken theme never blocks a launch (1.221).
+      (chart ramps + showSidebarBorder) are global-only with no per-mode twin, pinned by 1.217b since
+      Streamlit rejects unrecognised options outright. A broken theme never blocks a launch (1.229).
       Verified against real Streamlit — flags and generated TOML both accepted, launch survives a
       deliberately broken token module.
