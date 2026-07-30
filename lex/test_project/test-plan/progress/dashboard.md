@@ -10,10 +10,10 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 25 | 210 | 104 | 0 | 0 |
+| 1. Init — Project Bootstrap | 26 | 229 | 123 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 13 | 74 | 18 | 2 | 0 |
+| 4. Permissions | 14 | 82 | 26 | 2 | 0 |
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
@@ -55,6 +55,7 @@
 | 1w | `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart | 1.184-1.186 | complete | 3 | 0 | 0 | scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi |
 | 1x | Health exposes encrypted runtime metadata for the Instance Controller | 1.187-1.194 | complete | 0 | 0 | 0 | scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py; moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC. |
 | 1y | IDE-aware setup run configurations for PyCharm and VS Code | 1.203-1.210 | complete | 8 | 0 | 0 | best-effort IDE marker detection; unknown/conflicting environments generate both formats; VS Code launchers retain full PyCharm command/env/prompt parity and preserve user JSONC entries |
+| 1z | verify_ai_assets mode resolution + AI-tools compatibility shims | 1.211-1.229 | complete | 19 | 0 | 0 | pure-Python U tests; no DB or subprocess. Covers _read_env_file_value (5 scenarios), resolve_active_mcp_mode (5 scenarios), _read_mode_from_mcp_json (3 scenarios), verify_directory (2 scenarios), ai_dashboard shim raises-on-missing + delegates-on-present (2 scenarios), ai_faq shim same (2 scenarios). Coverage-task |
 
 ## 2. CRUD via REST API (`crud_api`)
 
@@ -100,6 +101,7 @@
 | 4k | Permission views |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4l | User API endpoint *(blocked — see §6 decision #2)* |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4m | `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass | 4.66-4.70 | complete | 5 | 0 | 0 | scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit order + subclass contract |
+| 4n | `PermissionResult` value-object contract (factory methods + get_fields resolver) | 4.75-4.82 | complete | 8 | 0 | 0 | scenarios 4.75–4.82; allow_all/allow_fields/allow_all_except/deny/deny_all factory methods, get_fields resolver (denied=empty, specific fields, excluded fields, all fields), __str__ output. Pure U tests; no DB. Coverage-task |
 
 ## 5. History & Bitemporal (`history`)
 

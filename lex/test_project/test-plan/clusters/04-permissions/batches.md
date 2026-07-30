@@ -49,3 +49,19 @@
 | Status | ✅ Complete (Session 80 — June 18) |
 
 ---
+
+### Batch 4n — `PermissionResult` value-object contract ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.75 – 4.82 |
+| Type | U |
+| Files covered | `lex/core/models/LexModel.py` (`PermissionResult` dataclass) |
+| Test file | `lex/test_project/tests/permissions/test_4n_permission_result.py` |
+| Test classes | `TestCluster04n_PermissionResult` (4.75–4.82 — allow_all factory sets allowed+null-fields, get_fields returns all; allow_fields limits to specified set + accepts list; allow_all_except excludes listed fields; deny sets allowed=False + empty get_fields; deny_all is alias; __str__ reflects state) |
+| Fixtures | none — pure Python, `SimpleTestCase`, no DB |
+| Tests landed | **8 pass / 0 fail** |
+| Coverage gain | `lex/core/models/LexModel.py` `PermissionResult` factory methods + `get_fields` resolver |
+| Status | ✅ Complete — Coverage-task #673 for PR #672 |
+
+---

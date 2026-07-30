@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 210
+max_scenario: 229
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -252,3 +252,15 @@ letters:
       and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
       Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
+  z:
+    title: verify_ai_assets mode resolution + AI-tools compatibility shims
+    scenarios: 1.211-1.229
+    status: complete
+    tests:
+      pass: 19
+      skip: 0
+      xfail: 0
+    note: pure-Python U tests; no DB or subprocess. Covers _read_env_file_value (5 scenarios), resolve_active_mcp_mode
+      (5 scenarios), _read_mode_from_mcp_json (3 scenarios), verify_directory (2 scenarios), ai_dashboard
+      shim raises-on-missing + delegates-on-present (2 scenarios), ai_faq shim same (2 scenarios). Coverage-task
+      #673 for PR #672.
