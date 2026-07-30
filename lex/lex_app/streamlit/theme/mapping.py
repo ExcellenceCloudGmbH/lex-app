@@ -14,6 +14,8 @@ def build_streamlit_theme(tokens: dict, mode: str) -> dict:
 
     Raises:
         ValueError: if ``mode`` is not "light" or "dark".
+        KeyError: if ``tokens`` is missing a section or leaf this mapping
+            reads (the caller passes the vendored ``TOKENS`` constant).
     """
     if mode not in _MODES:
         raise ValueError(f"unknown mode {mode!r}; expected one of {_MODES}")
@@ -22,16 +24,16 @@ def build_streamlit_theme(tokens: dict, mode: str) -> dict:
     font = tokens["font"]
     radius = tokens["radius"]
     chart = tokens["chart"]
-    m = tokens["modes"][mode]
+    mode_tokens = tokens["modes"][mode]
 
     return {
         # Brand + surfaces
         "primaryColor": brand["primary"],
-        "backgroundColor": m["background"],
-        "secondaryBackgroundColor": m["secondary_background"],
-        "textColor": m["text"],
-        "borderColor": m["border"],
-        "linkColor": m["link"],
+        "backgroundColor": mode_tokens["background"],
+        "secondaryBackgroundColor": mode_tokens["secondary_background"],
+        "textColor": mode_tokens["text"],
+        "borderColor": mode_tokens["border"],
+        "linkColor": mode_tokens["link"],
         "linkUnderline": False,
         "showWidgetBorder": True,
         "showSidebarBorder": False,
@@ -43,17 +45,17 @@ def build_streamlit_theme(tokens: dict, mode: str) -> dict:
         "baseRadius": radius["base"],
         "buttonRadius": radius["control"],
         # Code + data surfaces
-        "codeBackgroundColor": m["code_background"],
-        "dataframeHeaderBackgroundColor": m["dataframe_header_background"],
-        "dataframeBorderColor": m["border"],
+        "codeBackgroundColor": mode_tokens["code_background"],
+        "dataframeHeaderBackgroundColor": mode_tokens["dataframe_header_background"],
+        "dataframeBorderColor": mode_tokens["border"],
         # Charts
         "chartCategoricalColors": chart["categorical"],
         "chartSequentialColors": chart["sequential"],
         "chartDivergingColors": chart["diverging"],
         # Semantic ramps
-        "greenColor": m["success"],
-        "orangeColor": m["warning"],
-        "redColor": m["error"],
+        "greenColor": mode_tokens["success"],
+        "orangeColor": mode_tokens["warning"],
+        "redColor": mode_tokens["error"],
         # Sidebar — navy in BOTH modes, matching lex-app's sidenav
         "sidebar.backgroundColor": brand["sidebar_bg"],
         "sidebar.textColor": brand["sidebar_text"],

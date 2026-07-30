@@ -126,3 +126,79 @@ class TestCluster1y_Mapping:
 
         with pytest.raises(ValueError, match="unknown mode"):
             build_streamlit_theme(TOKENS, "sepia")
+
+    # -- 1.208b -------------------------------------------------------
+    def test_1_208b_every_emitted_key_is_wired_to_the_right_token(self) -> None:
+        """Scenario 1.208: the COMPLETE key->token wiring, for both modes.
+
+        1.205-1.207 spot-check the headline keys; this pins every one of them.
+        Without it a swapped pair (success<->warning, primary<->primary_hover)
+        passes every other test silently — precisely the drift class this
+        batch exists to prevent. The set-equality assertion also means adding
+        a new key to the mapping FORCES updating this contract.
+        """
+        from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        # (streamlit key -> path into TOKENS); "$mode" means the mode dict.
+        wiring = {
+            "primaryColor": ("brand", "primary"),
+            "backgroundColor": ("$mode", "background"),
+            "secondaryBackgroundColor": ("$mode", "secondary_background"),
+            "textColor": ("$mode", "text"),
+            "borderColor": ("$mode", "border"),
+            "linkColor": ("$mode", "link"),
+            "font": ("font", "body"),
+            "headingFont": ("font", "heading"),
+            "codeFont": ("font", "code"),
+            "baseRadius": ("radius", "base"),
+            "buttonRadius": ("radius", "control"),
+            "codeBackgroundColor": ("$mode", "code_background"),
+            "dataframeHeaderBackgroundColor": ("$mode", "dataframe_header_background"),
+            "dataframeBorderColor": ("$mode", "border"),
+            "chartCategoricalColors": ("chart", "categorical"),
+            "chartSequentialColors": ("chart", "sequential"),
+            "chartDivergingColors": ("chart", "diverging"),
+            "greenColor": ("$mode", "success"),
+            "orangeColor": ("$mode", "warning"),
+            "redColor": ("$mode", "error"),
+            "sidebar.backgroundColor": ("brand", "sidebar_bg"),
+            "sidebar.textColor": ("brand", "sidebar_text"),
+            "sidebar.primaryColor": ("brand", "primary"),
+            "sidebar.borderColor": ("brand", "sidebar_bg_end"),
+        }
+        literals = {
+            "linkUnderline": False,
+            "showWidgetBorder": True,
+            "showSidebarBorder": False,
+        }
+
+        for mode in ("light", "dark"):
+            theme = build_streamlit_theme(TOKENS, mode)
+
+            assert set(theme) == set(wiring) | set(literals), (
+                f"{mode}: emitted keys drifted from the wiring contract; "
+                f"unexpected={set(theme) - set(wiring) - set(literals)}, "
+                f"missing={(set(wiring) | set(literals)) - set(theme)}"
+            )
+
+            for key, (section, leaf) in wiring.items():
+                source = TOKENS["modes"][mode] if section == "$mode" else TOKENS[section]
+                origin = f"modes.{mode}" if section == "$mode" else section
+                assert theme[key] == source[leaf], (
+                    f"{mode}: {key} should be wired to {origin}.{leaf}"
+                )
+
+            for key, expected in literals.items():
+                assert theme[key] is expected, f"{mode}: {key} should be {expected!r}"
+
+    # -- 1.208c -------------------------------------------------------
+    def test_1_208c_declared_modes_match_the_token_modes(self) -> None:
+        """Scenario 1.208: the module's mode tuple and the token file's mode
+        keys stay in sync. These are two sources of truth (later tasks iterate
+        ``_MODES`` to emit per-mode config), so a mode added to only one side
+        must fail here rather than surface as a KeyError much later."""
+        from lex.lex_app.streamlit.theme.mapping import _MODES
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        assert set(_MODES) == set(TOKENS["modes"])
