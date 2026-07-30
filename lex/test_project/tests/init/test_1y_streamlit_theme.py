@@ -508,3 +508,80 @@ class TestCluster1y_Fonts:
         assert ".woff" not in rendered
         assert "fontFaces" not in cfg["theme"]
         assert "static/" not in rendered
+
+
+class TestCluster1y_LaunchFlags:
+    """The theme reaches a `lex streamlit` launch as CLI flags.
+
+    Flags are the primary delivery path: a `.streamlit/config.toml` resolves
+    relative to the working directory, so only flags theme every launch
+    identically regardless of where the dashboard was started from.
+    """
+
+    # -- 1.219 --------------------------------------------------------
+    def test_1_219_theme_flags_are_added_to_a_plain_launch(self) -> None:
+        """Scenario 1.219: a launch with no theme flags of its own receives
+        the full generated set."""
+        from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        added = compose_launch_flags(["run", "dash.py"], TOKENS)
+
+        assert added, "no theme flags composed"
+        assert all(f.startswith("--theme.") for f in added)
+        assert any(f.startswith("--theme.primaryColor=") for f in added)
+
+    # -- 1.220 --------------------------------------------------------
+    def test_1_220_an_explicit_user_flag_is_never_overridden(self) -> None:
+        """Scenario 1.220: a customer who sets `--theme.primaryColor` keeps
+        their value — we omit ours for that option rather than relying on
+        Streamlit's precedence rules."""
+        from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        user_args = ["run", "dash.py", "--theme.primaryColor=#ff0000"]
+        added = compose_launch_flags(user_args, TOKENS)
+
+        assert not any(f.startswith("--theme.primaryColor=") for f in added), (
+            "we clobbered the user's explicit primaryColor"
+        )
+        # Everything else is still themed.
+        assert any(f.startswith("--theme.backgroundColor=") for f in added)
+
+    # -- 1.220b -------------------------------------------------------
+    def test_1_220b_user_flag_in_space_separated_form_is_respected(self) -> None:
+        """Scenario 1.220: Streamlit also accepts `--opt value`, so the
+        override check must not depend on the `=` form."""
+        from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        user_args = ["run", "dash.py", "--theme.primaryColor", "#ff0000"]
+        added = compose_launch_flags(user_args, TOKENS)
+
+        assert not any(f.startswith("--theme.primaryColor=") for f in added)
+
+    # -- 1.220c -------------------------------------------------------
+    def test_1_220c_a_user_mode_block_flag_is_respected_precisely(self) -> None:
+        """Scenario 1.220: overriding `--theme.dark.backgroundColor` must
+        suppress only that flag, not the light one or the base."""
+        from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        added = compose_launch_flags(
+            ["run", "dash.py", "--theme.dark.backgroundColor=#000000"], TOKENS
+        )
+        options = {f[2:].split("=", 1)[0] for f in added}
+
+        assert "theme.dark.backgroundColor" not in options
+        assert "theme.light.backgroundColor" in options
+        assert "theme.backgroundColor" in options
+
+    # -- 1.221 --------------------------------------------------------
+    def test_1_221_a_broken_theme_never_blocks_the_launch(self) -> None:
+        """Scenario 1.221: if the theme cannot be built, the CLI launches
+        Streamlit UNTHEMED rather than failing. The design's safety property is
+        that every failure degrades one rung and never to broken."""
+        from lex.bin.lex import _safe_theme_flags
+
+        # A tokens dict missing every section is the worst realistic case.
+        assert _safe_theme_flags(["run", "dash.py"], tokens={}) == []

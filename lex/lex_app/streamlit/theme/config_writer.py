@@ -131,3 +131,25 @@ def theme_cli_flags(tokens: dict) -> list[str]:
 
     emit("theme", build_full_config(tokens)["theme"])
     return flags
+
+
+def compose_launch_flags(user_args: list[str], tokens: dict) -> list[str]:
+    """Return the theme flags to append to a `streamlit run` invocation.
+
+    Any `--theme.*` option the caller already specified is OMITTED, so an
+    explicit customer flag always wins. We suppress rather than reorder because
+    Streamlit's flag-precedence behaviour is not something we should depend on.
+
+    Recognises both `--opt=value` and `--opt value` forms.
+    """
+    user_options = set()
+    for arg in user_args:
+        if not arg.startswith("--"):
+            continue
+        user_options.add(arg[2:].split("=", 1)[0])
+
+    return [
+        flag
+        for flag in theme_cli_flags(tokens)
+        if flag[2:].split("=", 1)[0] not in user_options
+    ]

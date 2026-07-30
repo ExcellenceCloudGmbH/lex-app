@@ -1,6 +1,7 @@
 # lex/bin/lex.py
 import asyncio
 import io
+import logging
 import os
 import platform
 import subprocess
@@ -266,6 +267,28 @@ def flower(ctx):
 
     _run_celery_command(build_flower_command(settings, ctx.args))
 
+def _safe_theme_flags(streamlit_args, tokens=None):
+    """Theme flags for a Streamlit launch — never raises.
+
+    The LEX theme is a presentation concern: if it cannot be built, Streamlit
+    must still start (unthemed) rather than the command failing. Mirrors the
+    design's degradation ladder — live handshake -> config theme -> Streamlit
+    default, never to broken.
+    """
+    try:
+        from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        return compose_launch_flags(list(streamlit_args), TOKENS if tokens is None else tokens)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "LEX Streamlit theme could not be applied; launching with "
+            "Streamlit's default theme.",
+            exc_info=True,
+        )
+        return []
+
+
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
@@ -310,7 +333,14 @@ def streamlit(ctx):
     t = threading.Thread(target=run_uvicorn, daemon=True)
     t.start()
 
-    streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"])
+    # Theme flags first, then our fixed port settings. Any --theme.* the caller
+    # passed is already excluded by _safe_theme_flags, so a customer override
+    # survives.
+    streamlit_main(
+        streamlit_args
+        + _safe_theme_flags(streamlit_args)
+        + ["--browser.serverPort", "8501", "--server.port", "8080"]
+    )
 
 
 @lex.command(name="pytest", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
