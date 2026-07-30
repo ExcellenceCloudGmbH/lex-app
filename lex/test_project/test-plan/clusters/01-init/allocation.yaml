@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 202
+max_scenario: 222
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -242,3 +242,27 @@ letters:
       and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
       Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
+  y:
+    title: Streamlit theme parity — tokens, native theme config, CLI wiring
+    scenarios: 1.203-1.222
+    status: complete
+    tests:
+      pass: 30
+      skip: 0
+      xfail: 0
+    note: Streamlit pages now carry the real lex brand. Design tokens are vendored as pure Python
+      (tokens.py) and mapped onto Streamlit 1.58's native theme keys (mapping.py) — ~120 keys exist,
+      so the navy sidebar, dataframe header, chart palettes, radii and fonts are all reachable through
+      the PUBLIC config API rather than CSS. config_writer.py renders that one mapping two ways — CLI
+      flags (primary — a config.toml resolves relative to CWD, so only flags theme every launch
+      identically) and a generated .streamlit/config.toml (fallback for a bare `streamlit run`). The
+      committed config was hand-written with every value drifted (primaryColor `#08BCC2` vs the real
+      `#14b4b4`, grey sidebar vs navy, "sans serif" vs Inter, no dark mode); 1.222 makes that
+      unrepeatable by asserting the file is byte-identical to the generator. Fonts point at the
+      frontend's OWN Google Fonts stylesheet via Streamlit's "<family>:<url>" form, so the two
+      surfaces agree both connected (both Inter) and air-gapped (both fall back) — bundling a woff2
+      for Streamlit alone was rejected because the frontend does not bundle one either. 4 keys
+      (chart ramps + showSidebarBorder) are global-only with no per-mode twin, pinned by 1.209b since
+      Streamlit rejects unrecognised options outright. A broken theme never blocks a launch (1.221).
+      Verified against real Streamlit — flags and generated TOML both accepted, launch survives a
+      deliberately broken token module.

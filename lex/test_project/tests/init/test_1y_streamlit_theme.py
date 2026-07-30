@@ -585,3 +585,55 @@ class TestCluster1y_LaunchFlags:
 
         # A tokens dict missing every section is the worst realistic case.
         assert _safe_theme_flags(["run", "dash.py"], tokens={}) == []
+
+
+class TestCluster1y_CommittedConfig:
+    """The committed `.streamlit/config.toml` is generated, never hand-written.
+
+    The whole batch exists because that file was maintained by hand and every
+    value drifted from the frontend (it said `primaryColor="#08BCC2"` while the
+    frontend shipped `#14b4b4`). Replacing it once fixes today; this test is
+    what stops it rotting again — a hand-edit, or a token change nobody
+    regenerated for, fails here.
+    """
+
+    @staticmethod
+    def _committed_path():
+        from pathlib import Path
+
+        import lex
+
+        return Path(lex.__file__).resolve().parent / ".streamlit" / "config.toml"
+
+    # -- 1.222 --------------------------------------------------------
+    def test_1_222_committed_config_matches_the_generator(self) -> None:
+        """Scenario 1.222: the file on disk is byte-identical to the generated
+        output, so it cannot silently diverge from the tokens."""
+        from lex.lex_app.streamlit.theme.config_writer import (
+            build_full_config,
+            render_config_toml,
+        )
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        expected = render_config_toml(build_full_config(TOKENS))
+        actual = self._committed_path().read_text(encoding="utf-8")
+
+        assert actual == expected, (
+            "lex/.streamlit/config.toml is out of date or was hand-edited. "
+            "Regenerate it from the tokens rather than editing it directly."
+        )
+
+    # -- 1.222b -------------------------------------------------------
+    def test_1_222b_the_stale_pre_2026_07_values_are_gone(self) -> None:
+        """Scenario 1.222: the specific wrong values that motivated this batch
+        are absent. A named guard, so a bad revert is obvious in the failure
+        output rather than just 'files differ'."""
+        text = self._committed_path().read_text(encoding="utf-8")
+
+        for stale in ("#08BCC2", "#F5F5F5", "#E0E0E0", "#2D4262", '"sans serif"'):
+            assert stale not in text, f"stale pre-2026-07 theme value present: {stale}"
+
+        # And the real brand values ARE present.
+        assert "#14b4b4" in text
+        assert "#283C50" in text
+        assert "family=Inter" in text
