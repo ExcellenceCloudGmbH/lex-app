@@ -202,3 +202,87 @@ class TestCluster1y_Mapping:
         from lex.lex_app.streamlit.theme.tokens import TOKENS
 
         assert set(_MODES) == set(TOKENS["modes"])
+
+
+class TestCluster1y_StreamlitContract:
+    """Every key we emit must really exist in the installed Streamlit.
+
+    These tests read Streamlit's own config-option template, so they fail the
+    moment an upgrade renames, removes, or re-scopes a theme key — instead of
+    letting the styling silently stop applying.
+    """
+
+    @staticmethod
+    def _template() -> dict:
+        from streamlit import config
+
+        # Populate the template; it is built lazily on first access.
+        config.get_config_options()
+        return config._config_options_template
+
+    # -- 1.209 --------------------------------------------------------
+    def test_1_209_every_emitted_key_exists_in_streamlit(self) -> None:
+        """Scenario 1.209: each mapped key resolves to a real
+        ``theme.<key>`` config option in the installed Streamlit."""
+        from lex.lex_app.streamlit.theme.mapping import build_streamlit_theme
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        template = self._template()
+        emitted = build_streamlit_theme(TOKENS, "light")
+
+        unknown = sorted(k for k in emitted if f"theme.{k}" not in template)
+        assert not unknown, (
+            f"these keys do not exist in Streamlit's theme config: {unknown}. "
+            f"A Streamlit upgrade probably renamed or removed them — fix "
+            f"mapping.py rather than deleting this assertion."
+        )
+
+    # -- 1.209b -------------------------------------------------------
+    def test_1_209b_global_only_keys_are_declared_correctly(self) -> None:
+        """Scenario 1.209: the keys Streamlit accepts ONLY at ``[theme]``
+        (no per-mode twin) are exactly the ones the module declares.
+
+        The config writer routes keys by this set: a per-mode block containing
+        a global-only key would make Streamlit reject the config as an
+        unrecognised option. If an upgrade gives the chart palettes per-mode
+        support, this test tells us we may narrow the set.
+        """
+        from lex.lex_app.streamlit.theme.mapping import (
+            GLOBAL_ONLY_KEYS,
+            build_streamlit_theme,
+        )
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        template = self._template()
+        emitted = build_streamlit_theme(TOKENS, "light")
+
+        actually_global_only = {
+            k
+            for k in emitted
+            if f"theme.light.{k}" not in template or f"theme.dark.{k}" not in template
+        }
+        assert actually_global_only == set(GLOBAL_ONLY_KEYS), (
+            f"GLOBAL_ONLY_KEYS is out of date. Streamlit says global-only="
+            f"{sorted(actually_global_only)}, module declares="
+            f"{sorted(GLOBAL_ONLY_KEYS)}"
+        )
+
+    # -- 1.209c -------------------------------------------------------
+    def test_1_209c_per_mode_keys_exist_in_both_mode_namespaces(self) -> None:
+        """Scenario 1.209: every non-global-only key exists under BOTH
+        ``theme.light.`` and ``theme.dark.``, so neither mode block can carry
+        a key the other rejects."""
+        from lex.lex_app.streamlit.theme.mapping import (
+            GLOBAL_ONLY_KEYS,
+            build_streamlit_theme,
+        )
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        template = self._template()
+        emitted = build_streamlit_theme(TOKENS, "light")
+
+        for key in emitted:
+            if key in GLOBAL_ONLY_KEYS:
+                continue
+            assert f"theme.light.{key}" in template, f"missing theme.light.{key}"
+            assert f"theme.dark.{key}" in template, f"missing theme.dark.{key}"

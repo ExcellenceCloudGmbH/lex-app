@@ -8,6 +8,20 @@ from __future__ import annotations
 
 _MODES = ("light", "dark")
 
+# Theme keys Streamlit accepts ONLY at the top-level `[theme]` scope — they
+# have no `theme.light.*` / `theme.dark.*` twin. The config writer must not
+# place these inside a per-mode block: Streamlit rejects unrecognised config
+# options outright. Verified against the installed Streamlit by scenario
+# 1.209b, which fails if this set drifts from reality.
+GLOBAL_ONLY_KEYS: frozenset = frozenset(
+    {
+        "chartCategoricalColors",
+        "chartDivergingColors",
+        "chartSequentialColors",
+        "showSidebarBorder",
+    }
+)
+
 
 def build_streamlit_theme(tokens: dict, mode: str) -> dict:
     """Return the flat Streamlit theme mapping for ``mode``.
