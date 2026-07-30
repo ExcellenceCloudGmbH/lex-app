@@ -55,17 +55,18 @@ before it breaks a launch.
 
 This session's own addition is the drift guard. Replacing the six wrong lines
 fixes today but does nothing to stop the exact same rot next time — a
-hand-edit, or a token change nobody regenerated for. `TestCluster1y_
-CommittedConfig` (1.222/1.222b) asserts the committed
+hand-edit, or a token change nobody regenerated for.
+`TestCluster1y_CommittedConfig` (1.222/1.222b) asserts the committed
 `lex/.streamlit/config.toml` is byte-identical to
 `render_config_toml(build_full_config(TOKENS))`, plus a named check that the
-specific stale values (`#08BCC2`, `#F5F5F5`, `#E0E0E0`, `#2D4262`, `"sans
-serif"`) are gone, so a bad revert fails with a legible reason instead of a
-generic diff. Verified the guard actually bites before committing: hand-edited
-one colour in the regenerated file, watched 1.222 fail, regenerated, watched
-it go green again. Also launched real Streamlit 1.58 against a copy of the
-generated file from a scratch directory to confirm clean startup — the file
-this guard protects is one Streamlit actually accepts, not merely one that
+specific stale values (`#08BCC2`, `#F5F5F5`, `#E0E0E0`, `#2D4262`,
+`"sans serif"`) are gone, so a bad revert fails with a legible reason instead
+of a generic diff. Verified the guard actually bites before committing:
+hand-edited one colour in the regenerated file, watched 1.222 fail,
+regenerated, watched it go green again. Also launched real Streamlit 1.58
+against a copy of the generated file from a scratch directory to confirm
+clean startup — the file this guard protects is one Streamlit actually
+accepts, not merely one that
 happens to parse as TOML.
 
 This closes phase 1 of the design
