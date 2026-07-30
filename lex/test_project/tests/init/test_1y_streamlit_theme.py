@@ -210,6 +210,9 @@ class TestCluster1y_StreamlitContract:
     These tests read Streamlit's own config-option template, so they fail the
     moment an upgrade renames, removes, or re-scopes a theme key — instead of
     letting the styling silently stop applying.
+
+    Each test guards against a vacuous pass: an empty mapping must fail these
+    assertions loudly rather than satisfy them by having nothing to check.
     """
 
     @staticmethod
@@ -229,6 +232,7 @@ class TestCluster1y_StreamlitContract:
 
         template = self._template()
         emitted = build_streamlit_theme(TOKENS, "light")
+        assert emitted, "build_streamlit_theme returned no keys to validate"
 
         unknown = sorted(k for k in emitted if f"theme.{k}" not in template)
         assert not unknown, (
@@ -281,8 +285,9 @@ class TestCluster1y_StreamlitContract:
         template = self._template()
         emitted = build_streamlit_theme(TOKENS, "light")
 
-        for key in emitted:
-            if key in GLOBAL_ONLY_KEYS:
-                continue
+        per_mode = set(emitted) - set(GLOBAL_ONLY_KEYS)
+        assert per_mode, "no per-mode keys to validate"
+
+        for key in sorted(per_mode):
             assert f"theme.light.{key}" in template, f"missing theme.light.{key}"
             assert f"theme.dark.{key}" in template, f"missing theme.dark.{key}"
