@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 235
+max_scenario: 236
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -254,10 +254,10 @@ letters:
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
   z:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
-    scenarios: 1.211-1.235
+    scenarios: 1.211-1.236
     status: complete
     tests:
-      pass: 37
+      pass: 40
       skip: 0
       xfail: 0
     note: Streamlit pages now carry the real lex brand. Design tokens are vendored as pure Python
@@ -279,4 +279,8 @@ letters:
       caller-supplied port — the hardcoded ports were appended AFTER the caller's args, so a
       custom port was ignored and the command was unusable wherever 8080 was already taken.
       The proxy's UPSTREAM now follows `--server.port`, so it cannot forward to a dead port
-      (1.232-1.235).
+      (1.232-1.235). CLI flag values are emitted BARE — reusing the TOML encoder
+      quoted them, so every colour arrived as `"#14b4b4"` and Streamlit silently skipped it as
+      invalid; the theme applied nowhere while every shape-level check passed. 1.236 now asserts
+      the values Streamlit actually RESOLVES. Streamlit's CLI cannot express list options at all,
+      so the three chart palettes travel via the generated TOML only (1.236c).

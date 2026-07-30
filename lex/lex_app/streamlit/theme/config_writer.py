@@ -78,6 +78,21 @@ def _toml_value(value: object) -> str:
     return json.dumps(value)
 
 
+def _cli_value(value: object) -> str:
+    """Render a value for a ``--theme.<key>=VALUE`` flag.
+
+    Deliberately NOT ``_toml_value``. Streamlit takes a flag value verbatim, so a
+    JSON-quoted string arrives with its quotes still attached
+    (``"#14b4b4"`` rather than ``#14b4b4``) and is then rejected as an invalid
+    colour. Streamlit *silently skips* invalid colours instead of erroring, so
+    reusing the TOML encoder here produced a launch that started perfectly and
+    applied no theme at all — invisible to every check except looking at a page.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def _render_table(name: str, table: dict) -> list[str]:
     """Render one TOML table, recursing into sub-tables after its scalars."""
     lines = [f"[{name}]"]
@@ -117,8 +132,10 @@ def write_config(path: str | Path, tokens: dict) -> Path:
 def theme_cli_flags(tokens: dict) -> list[str]:
     """Return `--theme.<path>=<value>` flags for `streamlit run`.
 
-    Emits the global-only keys plus both mode blocks, so the flags alone fully
-    theme a dashboard regardless of the working directory.
+    Emits the scalar keys for the base and both mode blocks, so the flags alone
+    theme a dashboard regardless of the working directory. List-valued options
+    (the chart palettes) are omitted because Streamlit's CLI cannot represent
+    them; they are carried by the generated TOML file.
     """
     flags: list[str] = []
 
@@ -126,8 +143,14 @@ def theme_cli_flags(tokens: dict) -> list[str]:
         for key, value in table.items():
             if isinstance(value, dict):
                 emit(f"{prefix}.{key}", value)
+            elif isinstance(value, (list, tuple)):
+                # Streamlit's CLI cannot express a list-valued config option: a
+                # bracketed value is stored as a plain string and a repeated flag
+                # just keeps the last one. These keys (the chart palettes) reach
+                # Streamlit through the generated TOML file instead.
+                continue
             else:
-                flags.append(f"--{prefix}.{key}={_toml_value(value)}")
+                flags.append(f"--{prefix}.{key}={_cli_value(value)}")
 
     emit("theme", build_full_config(tokens)["theme"])
     return flags

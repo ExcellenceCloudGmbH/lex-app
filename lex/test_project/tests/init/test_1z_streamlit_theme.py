@@ -410,20 +410,30 @@ class TestCluster1z_ConfigWriter:
             assert option in template, f"{option} is not a Streamlit config option"
 
     # -- 1.223 --------------------------------------------------------
-    def test_1_223_list_and_bool_values_are_cli_encoded(self) -> None:
-        """Scenario 1.223: chart palettes and booleans survive the flag
-        encoding as JSON, which is what Streamlit's parser accepts — a bare
-        Python `['#14b4b4']` or `False` would be mis-parsed."""
+    def test_1_223_scalar_values_are_cli_encoded_bare(self) -> None:
+        """Scenario 1.223: flag values are BARE, and booleans are lowercase
+        literals.
+
+        This test previously asserted the opposite — that values were
+        JSON-encoded — which was the bug: Streamlit takes a flag value verbatim,
+        so `--theme.primaryColor="#14b4b4"` arrives with its quotes and is
+        silently discarded as an invalid colour. See 1.236 for the test that
+        asserts what Streamlit actually resolves.
+        """
         from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
         from lex.lex_app.streamlit.theme.tokens import TOKENS
 
         flags = theme_cli_flags(TOKENS)
         by_option = {f[2:].split("=", 1)[0]: f.split("=", 1)[1] for f in flags}
 
-        assert by_option["theme.chartCategoricalColors"].startswith("[")
-        assert '"#14b4b4"' in by_option["theme.chartCategoricalColors"]
+        # Strings: bare, no quoting of any kind.
+        assert by_option["theme.primaryColor"] == "#14b4b4"
+        assert by_option["theme.baseRadius"] == "12px"
+        # Booleans: TOML-style lowercase literals, which Streamlit parses.
         assert by_option["theme.linkUnderline"] == "false"
         assert by_option["theme.showWidgetBorder"] == "true"
+        # Lists cannot be expressed on Streamlit's CLI at all — see 1.236c.
+        assert "theme.chartCategoricalColors" not in by_option
 
     # -- 1.224 --------------------------------------------------------
     def test_1_224_write_config_creates_the_file(self, tmp_path) -> None:
@@ -807,3 +817,88 @@ class TestCluster1z_LaunchPorts:
         assert (public, streamlit_port) == ("9201", "9200")
         assert flags == [], f"nothing should be appended, got {flags}"
         assert upstream == "http://localhost:9200"
+
+
+class TestCluster1z_ResolvedByStreamlit:
+    """Streamlit must RESOLVE our flags to the intended values.
+
+    This class exists because of a real escape. The CLI flags were originally
+    encoded with the TOML encoder, so a colour arrived as ``"#14b4b4"`` *with the
+    quotes* — which Streamlit treats as an invalid colour and **silently skips**
+    rather than rejecting. Every earlier check passed: the flags were well-formed,
+    every option name existed, and a real Streamlit process started with no
+    complaint. The theme simply did not apply, and only looking at a rendered
+    page revealed it.
+
+    The lesson encoded here: asserting the shape of a flag is not the same as
+    asserting the value Streamlit ends up with. These tests ask Streamlit.
+    """
+
+    @staticmethod
+    def _resolved(flags):
+        """Ask Streamlit what it resolves, via `streamlit config show`."""
+        import subprocess
+        import sys
+
+        out = subprocess.run(
+            [sys.executable, "-m", "streamlit", "config", "show"] + list(flags),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        ).stdout
+        values = {}
+        for line in out.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or " = " not in stripped:
+                continue
+            key, _, raw = stripped.partition(" = ")
+            values.setdefault(key.strip(), raw.strip())
+        return values
+
+    # -- 1.236 --------------------------------------------------------
+    def test_1_236_streamlit_resolves_the_brand_values(self) -> None:
+        """Scenario 1.236: the values Streamlit ends up holding are the brand
+        values — not a quoted string that it will discard as an invalid colour."""
+        from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        resolved = self._resolved(theme_cli_flags(TOKENS))
+
+        # `config show` renders TOML, so a correct string value appears quoted
+        # exactly once. A double-quoted value means our encoding leaked quotes.
+        assert resolved["primaryColor"] == '"#14b4b4"', resolved.get("primaryColor")
+        assert resolved["baseRadius"] == '"12px"', resolved.get("baseRadius")
+        assert resolved["dataframeHeaderBackgroundColor"] == '"#F6F8FA"'
+        assert resolved["linkUnderline"] == "false"
+
+    # -- 1.236b -------------------------------------------------------
+    def test_1_236b_no_flag_value_carries_quotes(self) -> None:
+        """Scenario 1.236: the fast guard for the same bug. Streamlit takes a
+        flag value verbatim, so a quote character in one is always wrong."""
+        from lex.lex_app.streamlit.theme.config_writer import theme_cli_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        offenders = [f for f in theme_cli_flags(TOKENS) if '"' in f or "'" in f]
+        assert not offenders, f"flag values must be bare, got: {offenders[:3]}"
+
+    # -- 1.236c -------------------------------------------------------
+    def test_1_236c_list_options_go_via_toml_not_flags(self) -> None:
+        """Scenario 1.236: Streamlit's CLI cannot express a list-valued option —
+        a bracketed value is stored as a plain string and a repeated flag keeps
+        only the last. So the chart palettes are deliberately omitted from the
+        flags and carried by the generated TOML instead. Asserted so the split
+        is a documented contract rather than an accident."""
+        from lex.lex_app.streamlit.theme.config_writer import (
+            build_full_config,
+            theme_cli_flags,
+        )
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        flags = theme_cli_flags(TOKENS)
+        assert not [f for f in flags if "chartCategoricalColors" in f]
+        assert not [f for f in flags if "chartSequentialColors" in f]
+        assert not [f for f in flags if "chartDivergingColors" in f]
+
+        # …but they ARE in the file, so the theme is complete when it is used.
+        theme = build_full_config(TOKENS)["theme"]
+        assert theme["chartCategoricalColors"][0] == "#14b4b4"

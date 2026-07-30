@@ -182,14 +182,14 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.211 – 1.235 |
+| Scenario range | 1.211 – 1.236 |
 | Type | U + I |
 | Files covered | `lex/lex_app/streamlit/theme/{tokens,mapping,config_writer}.py`, `lex/bin/lex.py` (`_safe_theme_flags`), `lex/.streamlit/config.toml` (generated) |
 | Phase 2 scope | Streamlit floor `>=1.58` only — the planned CSS layer was **dropped**; the native theme surface already covers the sidebar and dataframe header, and automatic CSS injection has no public hook (the `runpy` shim would break Streamlit's AST magic). Shipped theme therefore touches **no** Streamlit internals. See the design doc §7. |
 | Test file | `lex/test_project/tests/init/test_1y_streamlit_theme.py` |
 | Test classes | `TestCluster1y_Tokens`, `_Mapping`, `_StreamlitContract`, `_ConfigWriter`, `_Fonts`, `_LaunchFlags`, `_CommittedConfig` |
 | Fixtures | none (pure data transforms; `tmp_path` for the file write) |
-| Tests landed | **37 pass / 0 fail** |
+| Tests landed | **40 pass / 0 fail** |
 | Coverage gain | Streamlit theme parity phase 1 — token source of truth, native theme mapping, CLI + file delivery, drift guard |
 | Status | ✅ Complete — see the allocation note. Phase 1 of the design (`docs/superpowers/specs/2026-07-30-streamlit-theme-parity-design.md`); phases 2–4 (CSS layer, live host handshake, cross-repo tokens.json) are separate. |
 ### Batch 1y — IDE-aware setup run configurations ✅
