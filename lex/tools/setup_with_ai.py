@@ -276,12 +276,18 @@ def _environment_registry():
         return None
 
 
-def _onboarding_module():
-    """Return ``lex_mcp.ai_onboarding``, or ``None`` when unavailable.
+#: How long one onboarding action may take. Rendering six modes across seven
+#: environments is file I/O only, but a cold interpreter start on Windows plus
+#: a large payload justifies a generous ceiling.
+ONBOARDING_TIMEOUT_SECONDS = 180
 
-    Note this is imported *in this process*, not through the project
-    interpreter, so a ``lex`` launched from a different environment than the
-    project virtualenv will not find it.
+
+def _onboarding_module():
+    """Return ``lex_mcp.ai_onboarding`` from *this* process, or ``None``.
+
+    Only usable when this interpreter is the same one lex-mcp-local is
+    installed into; :func:`invoke_onboarding` decides that. Prefer that
+    function over calling this directly.
     """
     try:
         import importlib
@@ -289,6 +295,81 @@ def _onboarding_module():
         return importlib.import_module("lex_mcp.ai_onboarding")
     except Exception:
         return None
+
+
+def _same_interpreter(python_executable: Path | str | None) -> bool:
+    """True when *python_executable* is the interpreter running this process."""
+    if python_executable is None:
+        return True
+    try:
+        return Path(python_executable).resolve() == Path(sys.executable).resolve()
+    except OSError:
+        return False
+
+
+def invoke_onboarding(
+    python_executable: Path | str | None,
+    action: str,
+    request: Mapping[str, Any] | None = None,
+    *,
+    timeout_seconds: float = ONBOARDING_TIMEOUT_SECONDS,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run one onboarding action, returning ``(response, error)``.
+
+    The environment registry lives in ``lex-mcp-local``, which is installed
+    into the *project's* interpreter — not necessarily the one running ``lex``.
+    Two things follow:
+
+    * When ``lex`` runs from a different virtualenv, an in-process import finds
+      either nothing or a second, possibly skewed copy.
+    * On the very run that installs the package, an in-process import cannot
+      work at all. pip records an editable install as a ``.pth`` file, and
+      ``.pth`` files are only processed by ``site`` at interpreter startup, so
+      the already-running ``lex`` process never gets the new directory on
+      ``sys.path``. ``importlib.invalidate_caches()`` does not help.
+
+    So the authoritative path is a subprocess against *python_executable*. The
+    in-process call is used only when that is demonstrably the same
+    interpreter, which keeps the ``ai-verify`` pre-flight cheap without ever
+    risking a version skew.
+    """
+    payload: dict[str, Any] = {"action": action, **dict(request or {})}
+
+    if _same_interpreter(python_executable):
+        module = _onboarding_module()
+        if module is not None:
+            try:
+                return module.handle_request(payload), None
+            except Exception as exc:  # pragma: no cover - defensive
+                return None, f"{type(exc).__name__}: {exc}"
+
+    if python_executable is None:
+        return None, "no project interpreter available to run onboarding"
+
+    try:
+        proc = subprocess.run(
+            [str(python_executable), "-m", "lex_mcp.ai_onboarding"],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        detail = (proc.stderr or "").strip().splitlines()
+        tail = detail[-1] if detail else f"exit code {proc.returncode}"
+        return None, f"lex_mcp.ai_onboarding produced no response ({tail})"
+
+    try:
+        response = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"unparseable onboarding response ({exc})"
+    if not isinstance(response, dict):
+        return None, "onboarding response was not a JSON object"
+    return response, response.get("error")
 
 
 def normalize_ai_environments(
@@ -358,17 +439,23 @@ def normalize_ai_environments(
     return tuple(out) or tuple(default) or (DEFAULT_AI_ENVIRONMENT,)
 
 
-def suggest_ai_environments(project_root: Path) -> tuple[str, ...]:
-    """Environments to pre-select in the setup form for this machine/project."""
-    try:
-        import importlib
+def suggest_ai_environments(
+    project_root: Path,
+    python_executable: Path | str | None = None,
+) -> tuple[str, ...]:
+    """Environments to pre-select in the setup form for this machine/project.
 
-        onboarding = importlib.import_module("lex_mcp.ai_onboarding")
-        suggested = tuple(onboarding.suggest_environments(project_root))
+    Routed through :func:`invoke_onboarding` for the same reason onboarding is:
+    detection lives in lex-mcp-local, which is installed into the project
+    interpreter. Falls back to the default so the form always renders.
+    """
+    response, _error = invoke_onboarding(
+        python_executable, "resolve", {"project_root": str(project_root)}
+    )
+    if response:
+        suggested = tuple(response.get("suggested") or ())
         if suggested:
-            return suggested
-    except Exception:
-        pass
+            return normalize_ai_environments(list(suggested))
     return (DEFAULT_AI_ENVIRONMENT,)
 
 
@@ -1546,58 +1633,67 @@ def configure_ai_integration(
     notes: list[str] = []
     github_directory_path: Path | None = None
 
-    onboarding = _onboarding_module()
-    onboarding_error = (
-        None if onboarding is not None else "lex_mcp.ai_onboarding is not importable"
+    # Run onboarding through the project's interpreter. That is the only
+    # interpreter guaranteed to have lex-mcp-local importable — in particular on
+    # this very run, where pip has just written a .pth that the already-running
+    # `lex` process can never pick up.
+    result, onboarding_error = invoke_onboarding(
+        python_path,
+        "onboard",
+        {
+            "project_root": str(project_root_path),
+            "mode": normalize_mcp_mode(mcp_mode),
+            "environments": list(selected_environments),
+            "server_definition": dict(server_definition),
+            "home": str(home) if home is not None else None,
+        },
     )
 
     # The legacy fallback can only configure GitHub Copilot. Downgrading to it
     # silently would leave a user who asked for --environment claude-code with
     # a Copilot-only setup and a "Setup complete" message, which is what
     # happened before this guard existed.
-    if onboarding is None and set(selected_environments) != {DEFAULT_AI_ENVIRONMENT}:
+    if result is None and set(selected_environments) != {DEFAULT_AI_ENVIRONMENT}:
         raise SetupWithAIError(
             "Cannot onboard "
             f"{', '.join(selected_environments)}: the agentic-environment "
-            "registry could not be imported from lex-mcp-local in the "
-            f"interpreter running this command ({sys.executable}).\n"
-            f"  Import error: {onboarding_error}\n"
+            "registry could not be reached in the project interpreter "
+            f"({python_path}).\n"
+            f"  Error: {onboarding_error}\n"
             "Only 'pycharm-copilot' can be configured without it. Fix one of:\n"
-            "  - run `lex` from the virtual environment that has lex-mcp-local "
-            "installed (the same one shown as 'Using interpreter' above);\n"
+            "  - reinstall lex-mcp-local into that interpreter "
+            "(`lex setup-with-ai` does this for you);\n"
             "  - upgrade lex-mcp-local to a release that ships "
             "lex_mcp.ai_onboarding."
         )
 
-    if onboarding is not None:
-        result = onboarding.onboard_project(
-            project_root_path,
-            mode=normalize_mcp_mode(mcp_mode),
-            environments=selected_environments,
-            server_definition=server_definition,
-            home=home,
-            env=env,
-        )
-        # Report every config we actually own, not only the ones that changed:
-        # on an idempotent re-run nothing is written, and reporting an empty
-        # list used to fall through to the JetBrains path below even when that
-        # environment was never selected.
-        for config in result.configs:
-            if config.skipped:
-                continue
-            config_paths.append(Path(config.path))
-        payload_files = list(result.files_written)
-        notes = list(result.notes)
+    if result is not None:
         errors = [
             error
-            for payload in result.payloads
-            for error in payload.errors
-        ] + [config.error for config in result.configs if config.error]
+            for payload in result.get("payloads", [])
+            for error in payload.get("errors", [])
+        ] + [
+            config["error"]
+            for config in result.get("configs", [])
+            if config.get("error")
+        ]
+        if onboarding_error:
+            errors.insert(0, onboarding_error)
         if errors:
             raise SetupWithAIError(
                 "Could not complete environment onboarding: "
                 + "; ".join(str(error) for error in errors[:5])
             )
+        # Report every config we actually own, not only the ones that changed:
+        # on an idempotent re-run nothing is written, and reporting an empty
+        # list used to fall through to the JetBrains path below even when that
+        # environment was never selected.
+        for config in result.get("configs", []):
+            if config.get("skipped"):
+                continue
+            config_paths.append(Path(config["path"]))
+        payload_files = list(result.get("files_written", []))
+        notes = list(result.get("notes", []))
         github_dir = project_root_path.resolve() / ".github"
         if github_dir.is_dir():
             github_directory_path = github_dir
@@ -1642,6 +1738,7 @@ def launch_setup_with_ai_form(
     reporter: Callable[[str], None] | None = None,
     timeout_seconds: int = 900,
     suggested_environments: Iterable[str] | None = None,
+    python_executable: Path | str | None = None,
 ) -> SetupWithAICredentials:
     state = secrets.token_urlsafe(16)
     result: dict[str, SetupWithAICredentials] = {}
@@ -1650,7 +1747,7 @@ def launch_setup_with_ai_form(
     preselected = normalize_ai_environments(
         suggested_environments
         if suggested_environments is not None
-        else suggest_ai_environments(Path(project_root))
+        else suggest_ai_environments(Path(project_root), python_executable)
     )
 
     class SetupWithAIHandler(BaseHTTPRequestHandler):

@@ -853,7 +853,7 @@ def setup_with_ai(
     # non-interactive run must never silently write into every tool installed
     # on the machine, so it falls back to the long-standing default.
     suggested = cli_environments or (
-        () if no_browser else suggest_ai_environments(root)
+        () if no_browser else suggest_ai_environments(root, python_executable)
     )
     credentials = _collect_setup_with_ai_credentials(
         github_token=github_token,
@@ -894,24 +894,22 @@ def setup_with_ai(
     else:
         click.echo("Warning: could not detect installed lex-mcp-local version.")
 
-    # The environment layer is imported *in this process*, not through
-    # python_executable, so a `lex` launched from a different interpreter than
-    # the project venv cannot see it. Check explicitly rather than letting the
-    # onboarding step fall back to a Copilot-only setup.
-    try:
-        import importlib
+    # Probe the environment registry through the *project* interpreter — the
+    # same path onboarding uses. Probing this process instead would report a
+    # false failure on every first install, because pip's .pth file is only
+    # honoured at interpreter startup.
+    from lex.tools.setup_with_ai import invoke_onboarding
 
-        importlib.import_module("lex_mcp.ai_onboarding")
-    except Exception as exc:
+    _registry_probe, registry_error = invoke_onboarding(
+        python_executable, "describe"
+    )
+    if _registry_probe is None:
         click.echo(
-            f"Warning: lex-mcp-local is not importable from the interpreter "
-            f"running this command ({sys.executable}): "
-            f"{type(exc).__name__}: {exc}"
+            f"Warning: the agentic-environment registry is not reachable in "
+            f"{python_executable}: {registry_error}"
         )
         click.echo(
-            "         Only pycharm-copilot can be configured in that state. "
-            "Run `lex` from the same virtual environment shown as "
-            "'Using interpreter' below."
+            "         Only pycharm-copilot can be configured in that state."
         )
     if effective_mcp_mode == "backward" and not _has_unified_mcp_entry_point(python_executable):
         click.echo(

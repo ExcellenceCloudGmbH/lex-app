@@ -615,6 +615,7 @@ def _sync_agentic_environments(
     project_root: Path,
     mode: str,
     environments: Iterable[str] | None,
+    python_executable: Path | None = None,
 ) -> tuple[tuple[EnvironmentVerificationResult, ...], str | None, bool]:
     """Materialise the mode payload for every agentic environment in use.
 
@@ -623,6 +624,11 @@ def _sync_agentic_environments(
     Cursor's ``.cursor`` tree, Codex's ``AGENTS.md``, …) so new environments
     ship with a lex-mcp-local release and need no lex-app change.
 
+    The call goes through *python_executable* rather than an in-process import,
+    for the same reason every other package lookup in this module does: the
+    registry lives in the project's virtualenv, which is not necessarily the
+    interpreter running ``lex``.
+
     Returns ``(results, error, handled)``. ``handled`` tells the caller that
     asset delivery is fully owned by this phase, so the legacy per-mode
     directory walk below must be skipped — otherwise a project that opted out
@@ -630,39 +636,40 @@ def _sync_agentic_environments(
     written into it.
     """
     try:
-        from lex_mcp.ai_onboarding import (  # type: ignore[import-not-found]
-            read_enabled_environments,
-            sync_project_payloads,
-        )
-    except Exception:
+        from lex.tools.setup_with_ai import invoke_onboarding
+    except Exception:  # pragma: no cover - defensive
+        return (), None, False
+
+    request: dict[str, object] = {
+        "project_root": str(project_root),
+        "mode": mode,
+    }
+    if environments:
+        request["environments"] = list(environments)
+
+    response, error = invoke_onboarding(python_executable, "sync", request)
+    if response is None:
         # lex-mcp-local predates the environment registry (or is not
         # installed): fall back to the legacy .github mirror entirely. This is
         # an expected downgrade path, not a verification failure.
         return (), None, False
+    if error:
+        return (), f"environment payload sync failed: {error}", False
 
-    keys = tuple(environments) if environments else read_enabled_environments(
-        project_root
-    )
-    try:
-        results = sync_project_payloads(
-            project_root, mode=mode, environments=keys
-        )
-    except Exception as exc:
-        return (), f"environment payload sync failed: {exc}", False
-
+    results = response.get("payloads") or []
     converted = tuple(
         EnvironmentVerificationResult(
-            environment=result.environment,
-            display_name=result.display_name,
-            dialect=result.dialect,
-            written=tuple(result.written),
-            pruned=tuple(result.pruned),
-            unchanged_count=len(result.unchanged),
-            errors=tuple(result.errors),
+            environment=result.get("environment", ""),
+            display_name=result.get("display_name", ""),
+            dialect=result.get("dialect", ""),
+            written=tuple(result.get("written", ())),
+            pruned=tuple(result.get("pruned", ())),
+            unchanged_count=len(result.get("unchanged", ())),
+            errors=tuple(result.get("errors", ())),
         )
         for result in results
     )
-    handled = bool(results) and all(result.ok for result in results)
+    handled = bool(converted) and all(result.ok for result in converted)
     return converted, None, handled
 
 
@@ -788,7 +795,7 @@ def verify_ai_assets(
             environment_error,
             environments_handled,
         ) = _sync_agentic_environments(
-            project_root_resolved, active_mode, environments
+            project_root_resolved, active_mode, environments, python_path
         )
         for environment_result in environment_results:
             if environment_result.written or environment_result.pruned:
