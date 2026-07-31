@@ -22,7 +22,7 @@ from lex.tools.setup_with_ai import (
     configure_ai_integration,
     install_lex_mcp_local,
     launch_setup_with_ai_form,
-    probe_lex_mcp_local_server_for_pycharm,
+    probe_lex_mcp_local_server,
     resolve_active_python_executable,
 )
 from lex.tools.verify_ai_assets import verify_ai_assets
@@ -765,16 +765,71 @@ def setup(project_root):
     "--mcp-mode",
     default="forward",
     show_default=True,
-    type=click.Choice(["forward", "backward"], case_sensitive=False),
-    help="MCP workflow mode. Determines which .github directory is copied and "
-         "which mode the server runs in (written to LEX_MCP_MODE in .env and mcp.json).",
+    type=click.Choice(
+        [
+            "forward",
+            "backward",
+            "edit",
+            "review",
+            "mvp_generator",
+            "mvp_completion",
+        ],
+        case_sensitive=False,
+    ),
+    help="MCP workflow mode. Determines which agent payload is delivered and "
+         "which mode the server runs in (written to LEX_MCP_MODE in .env and "
+         "every MCP config).",
+)
+@click.option(
+    "-e",
+    "--environment",
+    "environments",
+    multiple=True,
+    help=(
+        "Agentic environment(s) to onboard: pycharm-copilot, vscode-copilot, "
+        "copilot-cli, cursor, claude-code, codex, windsurf, or 'all'. "
+        "Repeatable. When omitted, the browser form lets you pick (with "
+        "detected tools pre-selected); with --no-browser the default is "
+        "pycharm-copilot."
+    ),
+)
+@click.option(
+    "--list-environments",
+    is_flag=True,
+    help="Print the supported agentic environments and exit.",
 )
 @click.option(
     "--no-browser",
     is_flag=True,
     help="Skip the local setup page and prompt in the terminal instead.",
 )
-def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url, mcp_mode, no_browser):
+def setup_with_ai(
+    project_root,
+    github_token,
+    remote_mcp_api_key,
+    remote_mcp_url,
+    mcp_mode,
+    environments,
+    list_environments,
+    no_browser,
+):
+    from lex.tools.setup_with_ai import (
+        describe_ai_environments,
+        normalize_ai_environments,
+        suggest_ai_environments,
+    )
+
+    if list_environments:
+        click.echo("Supported agentic environments:")
+        for entry in describe_ai_environments():
+            aliases = entry.get("aliases") or []
+            alias_text = f" (aliases: {', '.join(aliases)})" if aliases else ""
+            click.echo(f"  {entry['key']:<16} {entry['display_name']}{alias_text}")
+            summary = entry.get("summary")
+            if summary:
+                click.echo(f"                   {summary}")
+        return
+
     # The LLM agent's working directory IS the project root for setup-with-ai.
     # Do not walk up to a git toplevel / marker file: the LLM often runs
     # inside a subdirectory of a larger checkout, and walking up causes
@@ -788,18 +843,35 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
     click.echo(f".env: {env_path} ({'created' if created else 'exists'})")
     _echo_generated_config_paths(root.as_posix(), generated_ide_configs)
 
+    # An explicit --environment wins outright; otherwise the browser form
+    # offers what is installed here and the terminal path falls back to the
+    # historically supported target.
+    cli_environments = (
+        normalize_ai_environments(list(environments)) if environments else ()
+    )
+    # Auto-detection only pre-selects checkboxes in the browser form. A
+    # non-interactive run must never silently write into every tool installed
+    # on the machine, so it falls back to the long-standing default.
+    suggested = cli_environments or (
+        () if no_browser else suggest_ai_environments(root)
+    )
     credentials = _collect_setup_with_ai_credentials(
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
         project_root=root,
         env_file_path=Path(env_path),
         no_browser=no_browser,
+        suggested_environments=suggested,
     )
 
     # The browser form lets the user pick forward/backward; use that choice
     # unless the CLI flag was explicitly set by the caller.
     effective_mcp_mode = credentials.mcp_mode if credentials.mcp_mode else mcp_mode
+    effective_environments = cli_environments or normalize_ai_environments(
+        credentials.environments
+    )
     click.echo(f"MCP workflow mode: {effective_mcp_mode}")
+    click.echo(f"Agentic environments: {', '.join(effective_environments)}")
 
     click.echo("Installing lex-mcp-local into the active virtual environment...")
     try:
@@ -837,6 +909,7 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
             remote_mcp_api_key=credentials.remote_mcp_api_key,
             remote_mcp_url=remote_mcp_url,
             mcp_mode=effective_mcp_mode,
+            environments=effective_environments,
             python_executable=python_executable,
             verify_server=False,
         )
@@ -847,9 +920,9 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
     server_probe_warning: str | None = None
     copilot_state_db_path = None
     copilot_state_warning: str | None = None
-    click.echo(f"Validating {artifacts.server_name} with a PyCharm-style MCP session...")
+    click.echo(f"Validating {artifacts.server_name} over a real MCP stdio session...")
     try:
-        server_probe = probe_lex_mcp_local_server_for_pycharm(
+        server_probe = probe_lex_mcp_local_server(
             project_root=root,
             python_executable=artifacts.python_executable,
             wrapper_script_path=artifacts.wrapper_script_path,
@@ -859,26 +932,35 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
                 remote_mcp_api_key=credentials.remote_mcp_api_key,
                 remote_mcp_url=remote_mcp_url,
                 mcp_mode=effective_mcp_mode,
+                environments=effective_environments,
             ),
         )
     except SetupWithAIError as exc:
         server_probe_warning = str(exc)
     else:
-        try:
-            copilot_state_db_path = bootstrap_github_copilot_mcp_server_for_pycharm(
-                server_probe,
-                mcp_config_path=artifacts.mcp_config_path,
-                server_name=artifacts.server_name,
-            )
-        except SetupWithAIError as exc:
-            copilot_state_warning = str(exc)
+        # Only JetBrains Copilot keeps a tools/list cache that has to be
+        # primed; every other environment re-probes on its own.
+        if "pycharm-copilot" in effective_environments:
+            try:
+                copilot_state_db_path = bootstrap_github_copilot_mcp_server_for_pycharm(
+                    server_probe,
+                    mcp_config_path=artifacts.mcp_config_path,
+                    server_name=artifacts.server_name,
+                )
+            except SetupWithAIError as exc:
+                copilot_state_warning = str(exc)
 
     click.echo(f"Updated .env with AI credentials: {artifacts.env_file_path}")
-    if artifacts.github_directory_path is not None:
-        click.echo(f"Copied lex-mcp-local GitHub files: {artifacts.github_directory_path}")
     if artifacts.docs_directory_path is not None:
         click.echo(f"Copied lex-app docs: {artifacts.docs_directory_path}")
-    click.echo(f"Registered {artifacts.server_name} in GitHub Copilot MCP config: {artifacts.mcp_config_path}")
+    if artifacts.payload_files_written:
+        click.echo(
+            f"Delivered agent payload: "
+            f"{len(artifacts.payload_files_written)} file(s) written across "
+            f"{len(artifacts.environments)} environment(s)."
+        )
+    for config_path in artifacts.mcp_config_paths:
+        click.echo(f"Registered {artifacts.server_name} in: {config_path}")
     click.echo(f"Using interpreter: {artifacts.python_executable}")
     click.echo(f"Using wrapper: {artifacts.wrapper_script_path}")
     if server_probe is not None:
@@ -892,25 +974,17 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
         )
         if copilot_state_db_path is not None:
             click.echo(f"Primed GitHub Copilot MCP cache: {copilot_state_db_path}")
-            click.echo(
-                f"{artifacts.server_name} is configured and primed for PyCharm-managed stdio launch."
-            )
         elif copilot_state_warning is not None:
             click.echo(f"Warning: {copilot_state_warning}")
             click.echo(
-                f"{artifacts.server_name} is configured for PyCharm-managed stdio launch, "
-                "but the Copilot cache could not be primed automatically."
+                "The Copilot tool-list cache could not be primed automatically; "
+                "restarting the IDE will refresh it."
             )
-        else:
-            click.echo(f"{artifacts.server_name} is configured for PyCharm-managed stdio launch.")
-        click.echo(
-            "If PyCharm is already open, restart it once so GitHub Copilot reloads the MCP configuration "
-            f"and starts {artifacts.server_name} from inside the IDE."
-        )
     elif server_probe_warning is not None:
         click.echo(
             "Warning: "
-            f"{server_probe_warning} GitHub Copilot may still be able to launch the server from mcp.json on demand."
+            f"{server_probe_warning} Your IDE may still be able to launch the "
+            "server from its MCP config on demand."
         )
 
     # Final asset sweep: make sure every required directory (docs, .github,
@@ -919,7 +993,11 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
     # copy step silently no-op'd.
     click.echo("Verifying AI asset directories...")
     try:
-        verify_result = verify_ai_assets(project_root=root, mode=effective_mcp_mode)
+        verify_result = verify_ai_assets(
+            project_root=root,
+            mode=effective_mcp_mode,
+            environments=effective_environments,
+        )
     except SetupWithAIError as exc:
         click.echo(f"Warning: AI asset verification failed: {exc}")
     else:
@@ -945,9 +1023,11 @@ def setup_with_ai(project_root, github_token, remote_mcp_api_key, remote_mcp_url
         else:
             click.echo("AI assets verified: nothing to restore.")
 
-    click.echo(
-        "Setup complete. Open GitHub Copilot in PyCharm and write your first prompt."
-    )
+    click.echo("Setup complete. Next steps for each environment you selected:")
+    for note in artifacts.environment_notes:
+        click.echo(f"  - {note}")
+    if not artifacts.environment_notes:
+        click.echo("  - Open your AI assistant and write your first prompt.")
 
 
 @lex.command(name="ai-update", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -978,6 +1058,18 @@ def ai_update(project_root):
             click.echo("  Upgraded lex-mcp-local package.")
         for dest in result.artifact_directories_copied:
             click.echo(f"  Copied {dest.name} to {dest}")
+        environments_configured = getattr(result, "environments_configured", ())
+        if environments_configured:
+            click.echo(
+                f"  Agentic environments: {', '.join(environments_configured)}"
+            )
+        payload_written = getattr(result, "payload_files_written", 0)
+        payload_pruned = getattr(result, "payload_files_pruned", 0)
+        if payload_written or payload_pruned:
+            click.echo(
+                f"  Agent payload: {payload_written} file(s) written, "
+                f"{payload_pruned} stale file(s) removed."
+            )
         if result.server_restarted:
             click.echo("  Stopped MCP server (will restart on next use).")
         has_action = (
@@ -986,6 +1078,8 @@ def ai_update(project_root):
             or result.package_upgraded
             or result.artifact_directories_copied
             or result.server_restarted
+            or payload_written
+            or payload_pruned
         )
         if not has_action:
             click.echo("  Already up to date.")
@@ -1000,7 +1094,9 @@ def ai_faq():
     ai_faq_module.launch_ai_faq(reporter=click.echo)
 
 
-def _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode):
+def _run_ai_verify_command(
+    project_root, mode, quiet, silent, align_mcp_mode, environments=()
+):
     """Verify (and silently restore) the LEX AI asset directories.
 
     Walks the canonical ``.github`` directory shipped by the active MCP mode's
@@ -1021,6 +1117,7 @@ def _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode):
             silent=silent,
             align_mcp_mode=align_mcp_mode,
             reporter=click.echo,
+            environments=list(environments) or None,
         )
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -1031,13 +1128,25 @@ def _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode):
 @click.option(
     "--mode",
     "mode",
-    type=click.Choice(["auto", "forward", "backward", "all"], case_sensitive=False),
+    type=click.Choice(
+        [
+            "auto",
+            "forward",
+            "backward",
+            "edit",
+            "review",
+            "mvp_generator",
+            "mvp_completion",
+            "all",
+        ],
+        case_sensitive=False,
+    ),
     default="auto",
     show_default=True,
     help=(
         "Which MCP mode's assets to verify. 'auto' (default) detects the active "
         "mode from --mode > override file > project .env > mcp.json > "
-        "process env > forward. 'all' verifies both forward and backward."
+        "process env > forward. 'all' verifies every mode's assets."
     ),
 )
 @click.option(
@@ -1062,8 +1171,22 @@ def _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode):
         "server in the middle of an MCP tool call."
     ),
 )
-def ai_verify(project_root, mode, quiet, silent, align_mcp_mode):
-    _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode)
+@click.option(
+    "-e",
+    "--environment",
+    "environments",
+    multiple=True,
+    help=(
+        "Agentic environment(s) whose assets should be verified "
+        "(pycharm-copilot, vscode-copilot, copilot-cli, cursor, claude-code, "
+        "codex, windsurf, or 'all'). Repeatable. Defaults to the project's "
+        "LEX_AI_ENVIRONMENTS value."
+    ),
+)
+def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments):
+    _run_ai_verify_command(
+        project_root, mode, quiet, silent, align_mcp_mode, environments
+    )
 
 
 @lex.command(name="ai_verify", hidden=True, context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -1071,13 +1194,25 @@ def ai_verify(project_root, mode, quiet, silent, align_mcp_mode):
 @click.option(
     "--mode",
     "mode",
-    type=click.Choice(["auto", "forward", "backward", "all"], case_sensitive=False),
+    type=click.Choice(
+        [
+            "auto",
+            "forward",
+            "backward",
+            "edit",
+            "review",
+            "mvp_generator",
+            "mvp_completion",
+            "all",
+        ],
+        case_sensitive=False,
+    ),
     default="auto",
     show_default=True,
     help=(
         "Which MCP mode's assets to verify. 'auto' (default) detects the active "
         "mode from --mode > override file > project .env > mcp.json > "
-        "process env > forward. 'all' verifies both forward and backward."
+        "process env > forward. 'all' verifies every mode's assets."
     ),
 )
 @click.option(
@@ -1102,8 +1237,22 @@ def ai_verify(project_root, mode, quiet, silent, align_mcp_mode):
         "server in the middle of an MCP tool call."
     ),
 )
-def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode):
-    _run_ai_verify_command(project_root, mode, quiet, silent, align_mcp_mode)
+@click.option(
+    "-e",
+    "--environment",
+    "environments",
+    multiple=True,
+    help=(
+        "Agentic environment(s) whose assets should be verified "
+        "(pycharm-copilot, vscode-copilot, copilot-cli, cursor, claude-code, "
+        "codex, windsurf, or 'all'). Repeatable. Defaults to the project's "
+        "LEX_AI_ENVIRONMENTS value."
+    ),
+)
+def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode, environments):
+    _run_ai_verify_command(
+        project_root, mode, quiet, silent, align_mcp_mode, environments
+    )
 
 
 @lex.command(name="ai-dashboard", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -1186,11 +1335,22 @@ def _collect_setup_with_ai_credentials(
     project_root: Path,
     env_file_path: Path,
     no_browser: bool,
+    suggested_environments: tuple[str, ...] = (),
 ) -> SetupWithAICredentials:
+    from lex.tools.setup_with_ai import (
+        DEFAULT_AI_ENVIRONMENT,
+        normalize_ai_environments,
+    )
+
+    fallback_environments = normalize_ai_environments(
+        list(suggested_environments) or [DEFAULT_AI_ENVIRONMENT]
+    )
+
     if github_token and remote_mcp_api_key:
         return SetupWithAICredentials(
             github_token=github_token,
             remote_mcp_api_key=remote_mcp_api_key,
+            environments=fallback_environments,
         )
 
     if not no_browser:
@@ -1200,6 +1360,7 @@ def _collect_setup_with_ai_credentials(
                 project_root=project_root,
                 env_file_path=env_file_path,
                 reporter=click.echo,
+                suggested_environments=suggested_environments or None,
             )
         except SetupWithAIError as exc:
             click.echo(f"Browser setup page failed: {exc}")
@@ -1216,6 +1377,7 @@ def _collect_setup_with_ai_credentials(
     return SetupWithAICredentials(
         github_token=final_github_token,
         remote_mcp_api_key=final_remote_mcp_api_key,
+        environments=fallback_environments,
     )
 
 # Commands that have dedicated handlers and do NOT need Django management
