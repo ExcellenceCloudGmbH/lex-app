@@ -893,6 +893,26 @@ def setup_with_ai(
         click.echo(f"Installed lex-mcp-local {installed_version}.")
     else:
         click.echo("Warning: could not detect installed lex-mcp-local version.")
+
+    # The environment layer is imported *in this process*, not through
+    # python_executable, so a `lex` launched from a different interpreter than
+    # the project venv cannot see it. Check explicitly rather than letting the
+    # onboarding step fall back to a Copilot-only setup.
+    try:
+        import importlib
+
+        importlib.import_module("lex_mcp.ai_onboarding")
+    except Exception as exc:
+        click.echo(
+            f"Warning: lex-mcp-local is not importable from the interpreter "
+            f"running this command ({sys.executable}): "
+            f"{type(exc).__name__}: {exc}"
+        )
+        click.echo(
+            "         Only pycharm-copilot can be configured in that state. "
+            "Run `lex` from the same virtual environment shown as "
+            "'Using interpreter' below."
+        )
     if effective_mcp_mode == "backward" and not _has_unified_mcp_entry_point(python_executable):
         click.echo(
             f"Warning: backward mode requires lex-mcp-local >= {MINIMUM_DUAL_MODE_VERSION}, "
@@ -959,6 +979,11 @@ def setup_with_ai(
             f"{len(artifacts.payload_files_written)} file(s) written across "
             f"{len(artifacts.environments)} environment(s)."
         )
+    else:
+        click.echo(
+            "Delivered agent payload: nothing to write "
+            f"(already up to date) for {', '.join(artifacts.environments)}."
+        )
     for config_path in artifacts.mcp_config_paths:
         click.echo(f"Registered {artifacts.server_name} in: {config_path}")
     click.echo(f"Using interpreter: {artifacts.python_executable}")
@@ -1023,7 +1048,14 @@ def setup_with_ai(
         else:
             click.echo("AI assets verified: nothing to restore.")
 
-    click.echo("Setup complete. Next steps for each environment you selected:")
+    configured = ", ".join(artifacts.environments) or "pycharm-copilot"
+    click.echo(f"Setup complete for: {configured}")
+    if set(artifacts.environments) != set(effective_environments):
+        click.echo(
+            "Warning: requested "
+            f"{', '.join(effective_environments)} but configured {configured}."
+        )
+    click.echo("Next steps:")
     for note in artifacts.environment_notes:
         click.echo(f"  - {note}")
     if not artifacts.environment_notes:

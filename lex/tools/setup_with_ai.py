@@ -20,7 +20,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs
 
 DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
@@ -144,6 +144,35 @@ AI_ENVIRONMENT_CARD_DEFS: tuple[dict[str, str], ...] = (
 SUPPORTED_AI_ENVIRONMENTS: tuple[str, ...] = tuple(
     card["value"] for card in AI_ENVIRONMENT_CARD_DEFS
 )
+#: Mirror of the alias table in ``lex_mcp.environments``. The registry is
+#: authoritative; this exists only so ``--environment claude`` still resolves
+#: correctly when the registry cannot be imported. Without it the fallback
+#: silently discarded every alias and substituted the default, which onboarded
+#: the wrong tool while reporting success.
+AI_ENVIRONMENT_ALIASES: dict[str, str] = {
+    "pycharm": "pycharm-copilot",
+    "jetbrains": "pycharm-copilot",
+    "jetbrains-copilot": "pycharm-copilot",
+    "intellij": "pycharm-copilot",
+    "copilot": "pycharm-copilot",
+    "vscode": "vscode-copilot",
+    "vs-code": "vscode-copilot",
+    "code": "vscode-copilot",
+    "vscode-github-copilot": "vscode-copilot",
+    "gh-copilot": "copilot-cli",
+    "copilot-terminal": "copilot-cli",
+    "cursor-ide": "cursor",
+    "cursor-agent": "cursor",
+    "claude": "claude-code",
+    "claudecode": "claude-code",
+    "anthropic-claude-code": "claude-code",
+    "openai-codex": "codex",
+    "codex-cli": "codex",
+    "gpt-codex": "codex",
+    "codeium": "windsurf",
+    "windsurf-ide": "windsurf",
+    "cascade": "windsurf",
+}
 
 GITHUB_TOKEN_URL = "https://github.com/settings/tokens/new?description=Full+Classic+PAT&scopes=repo,workflow,admin:org,admin:repo_hook,user,project,admin:enterprise,read:enterprise,manage_runners:enterprise,read:audit_log,write:network_configurations,manage_billing:copilot"
 GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
@@ -157,11 +186,8 @@ LEGACY_LEX_MCP_SERVER_NAMES = ("lex-mcp-wrapper",)
 LEX_MCP_LOCAL_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = (".github",)
 # Directories inside the lex-app package that are copied into the project root.
 LEX_APP_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = ("docs",)
-LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
-    "--no-cache-dir",
-    "--extra-index-url",
-    "https://pypi.org/simple",
-    "lex-mcp-local",
+LEX_MCP_LOCAL_SOURCE_DIRECTORY = Path(
+    "/Users/melihsunbul/LUND_IT/lex-mcp-local"
 )
 _SAFE_UNQUOTED_ENV_VALUE_RE = re.compile(r"^[A-Za-z0-9._:/@+-]*$")
 LEGACY_GITHUB_TOKEN_ENV_NAMES = ("COPILOT_GITHUB_TOKEN",)
@@ -250,16 +276,38 @@ def _environment_registry():
         return None
 
 
+def _onboarding_module():
+    """Return ``lex_mcp.ai_onboarding``, or ``None`` when unavailable.
+
+    Note this is imported *in this process*, not through the project
+    interpreter, so a ``lex`` launched from a different environment than the
+    project virtualenv will not find it.
+    """
+    try:
+        import importlib
+
+        return importlib.import_module("lex_mcp.ai_onboarding")
+    except Exception:
+        return None
+
+
 def normalize_ai_environments(
     environments: str | Iterable[str] | None,
     *,
     default: Iterable[str] = (DEFAULT_AI_ENVIRONMENT,),
+    strict: bool = True,
 ) -> tuple[str, ...]:
     """Normalise environment names, preferring the lex-mcp-local registry.
 
     Accepts a comma/space separated string or an iterable, resolves aliases
-    (``vscode`` -> ``vscode-copilot``), expands ``all``, and drops
-    duplicates while preserving order.
+    (``vscode`` -> ``vscode-copilot``), expands ``all``, and drops duplicates
+    while preserving order. Empty input falls back to *default*.
+
+    With *strict* (the default) an unrecognised name raises
+    :class:`SetupWithAIError`. Silently dropping it and falling back to the
+    default is far worse than failing: it onboards a tool the user did not ask
+    for and still reports success. Pass ``strict=False`` only for values read
+    back from persisted config, where tolerating drift is correct.
     """
     registry = _environment_registry()
     if registry is not None:
@@ -267,8 +315,9 @@ def normalize_ai_environments(
             return tuple(
                 registry.resolve_environment_keys(environments, default=tuple(default))
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            if strict:
+                raise SetupWithAIError(str(exc)) from exc
 
     if environments is None:
         items: list[str] = []
@@ -280,16 +329,33 @@ def normalize_ai_environments(
         items = list(default)
 
     out: list[str] = []
+    unknown: list[str] = []
     for item in items:
-        candidate = item.strip().lower().replace("_", "-")
+        candidate = item.strip().lower().replace("_", "-").replace(" ", "-")
         if candidate == "all":
             for key in SUPPORTED_AI_ENVIRONMENTS:
                 if key not in out:
                     out.append(key)
             continue
-        if candidate in SUPPORTED_AI_ENVIRONMENTS and candidate not in out:
-            out.append(candidate)
-    return tuple(out) or (DEFAULT_AI_ENVIRONMENT,)
+        resolved = (
+            candidate
+            if candidate in SUPPORTED_AI_ENVIRONMENTS
+            else AI_ENVIRONMENT_ALIASES.get(candidate)
+        )
+        if resolved is None:
+            unknown.append(item)
+            continue
+        if resolved not in out:
+            out.append(resolved)
+
+    if unknown and strict:
+        raise SetupWithAIError(
+            f"Unknown agentic environment(s): {', '.join(unknown)}. "
+            f"Choose from: {', '.join(SUPPORTED_AI_ENVIRONMENTS)} (or 'all'). "
+            "Run `lex setup-with-ai --list-environments` for the full list "
+            "with aliases."
+        )
+    return tuple(out) or tuple(default) or (DEFAULT_AI_ENVIRONMENT,)
 
 
 def suggest_ai_environments(project_root: Path) -> tuple[str, ...]:
@@ -330,15 +396,14 @@ def build_lex_mcp_local_install_command(
     *,
     upgrade: bool = False,
 ) -> list[str]:
-    entitlement_token = remote_mcp_api_key.strip()
-    if not entitlement_token:
-        raise SetupWithAIError("Lex MCP Access Key is required to install lex-mcp-local.")
+    """Build the editable install command for the local lex-mcp checkout.
 
-    index_url = (
-        "https://dl.cloudsmith.io/"
-        f"{quote(entitlement_token, safe='')}/"
-        "excellence-cloud/lex-mcp-local/python/simple/"
-    )
+    ``remote_mcp_api_key`` remains part of the public signature because setup
+    also uses it to authenticate the hosted MCP runtime.  Local package
+    installation itself must not send that secret to a package index.
+    """
+    del remote_mcp_api_key
+
     cmd = [
         str(python_executable),
         "-m",
@@ -347,12 +412,7 @@ def build_lex_mcp_local_install_command(
     ]
     if upgrade:
         cmd.append("--upgrade")
-    cmd += [
-        LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[0],
-        "--index-url",
-        index_url,
-        *LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[1:],
-    ]
+    cmd.extend(["--editable", str(LEX_MCP_LOCAL_SOURCE_DIRECTORY)])
     return cmd
 
 
@@ -1486,13 +1546,28 @@ def configure_ai_integration(
     notes: list[str] = []
     github_directory_path: Path | None = None
 
-    onboarding = None
-    try:
-        import importlib
+    onboarding = _onboarding_module()
+    onboarding_error = (
+        None if onboarding is not None else "lex_mcp.ai_onboarding is not importable"
+    )
 
-        onboarding = importlib.import_module("lex_mcp.ai_onboarding")
-    except Exception:
-        onboarding = None
+    # The legacy fallback can only configure GitHub Copilot. Downgrading to it
+    # silently would leave a user who asked for --environment claude-code with
+    # a Copilot-only setup and a "Setup complete" message, which is what
+    # happened before this guard existed.
+    if onboarding is None and set(selected_environments) != {DEFAULT_AI_ENVIRONMENT}:
+        raise SetupWithAIError(
+            "Cannot onboard "
+            f"{', '.join(selected_environments)}: the agentic-environment "
+            "registry could not be imported from lex-mcp-local in the "
+            f"interpreter running this command ({sys.executable}).\n"
+            f"  Import error: {onboarding_error}\n"
+            "Only 'pycharm-copilot' can be configured without it. Fix one of:\n"
+            "  - run `lex` from the virtual environment that has lex-mcp-local "
+            "installed (the same one shown as 'Using interpreter' above);\n"
+            "  - upgrade lex-mcp-local to a release that ships "
+            "lex_mcp.ai_onboarding."
+        )
 
     if onboarding is not None:
         result = onboarding.onboard_project(
@@ -1503,9 +1578,14 @@ def configure_ai_integration(
             home=home,
             env=env,
         )
+        # Report every config we actually own, not only the ones that changed:
+        # on an idempotent re-run nothing is written, and reporting an empty
+        # list used to fall through to the JetBrains path below even when that
+        # environment was never selected.
         for config in result.configs:
-            if config.written or config.created:
-                config_paths.append(Path(config.path))
+            if config.skipped:
+                continue
+            config_paths.append(Path(config.path))
         payload_files = list(result.files_written)
         notes = list(result.notes)
         errors = [
@@ -1610,9 +1690,12 @@ def launch_setup_with_ai_form(
             mcp_mode = normalize_mcp_mode(
                 form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
             )
+            # Not strict: a malformed POST must not raise inside the request
+            # handler. The form only ever submits registry keys.
             selected_environments = normalize_ai_environments(
                 form_data.get("ai_environments", []),
                 default=preselected,
+                strict=False,
             )
 
             if not github_token or not remote_mcp_api_key:
@@ -2224,7 +2307,7 @@ def _build_setup_form_html(
           </ul>
           <p><a class="button" href="{html.escape(GITHUB_TOKEN_URL)}" target="_blank" rel="noreferrer">Open GitHub token page</a></p>
           <div class="meta">
-            <div>Use the Lex MCP Access Key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
+            <div>Use the Lex MCP Access Key to authenticate your hosted MCP server. The <code>lex-mcp-local</code> package is installed in editable mode from <code>{html.escape(str(LEX_MCP_LOCAL_SOURCE_DIRECTORY))}</code>.</div>
           </div>
         </article>
 
@@ -2246,7 +2329,7 @@ def _build_setup_form_html(
               Lex MCP Access Key
               <input type="password" name="remote_mcp_api_key" autocomplete="off" required>
             </label>
-            <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
+            <p class="hint">Paste the API key used by the hosted MCP endpoint. The local package install does not send this key to a package index.</p>
 
             <button type="submit">Save and finish setup</button>
           </form>
