@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 210
+max_scenario: 217
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -252,3 +252,14 @@ letters:
       and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
       Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
       SQL is unaffected (history+serializers+init+exports 385 pass with it live).
+  z:
+    title: LEX Design System tokens — vendored Python module (lex_tokens.py)
+    scenarios: 1.211-1.217
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: module importability, top-level shorthand constants, TOKENS light/dark structure, Phase 8
+      ERROR value (#d32f2f), Phase 8 onWarning text role, ERROR alias ↔ TOKENS consistency,
+      light/dark section parity gate
