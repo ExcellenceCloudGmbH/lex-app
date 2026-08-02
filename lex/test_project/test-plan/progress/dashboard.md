@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 25 | 210 | 104 | 0 | 0 |
+| 1. Init — Project Bootstrap | 26 | 217 | 111 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -55,6 +55,7 @@
 | 1w | `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart | 1.184-1.186 | complete | 3 | 0 | 0 | scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi |
 | 1x | Health exposes encrypted runtime metadata for the Instance Controller | 1.187-1.194 | complete | 0 | 0 | 0 | scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py; moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC. |
 | 1y | IDE-aware setup run configurations for PyCharm and VS Code | 1.203-1.210 | complete | 8 | 0 | 0 | best-effort IDE marker detection; unknown/conflicting environments generate both formats; VS Code launchers retain full PyCharm command/env/prompt parity and preserve user JSONC entries |
+| 1z | LEX Design System tokens — vendored Python module (lex_tokens.py) | 1.211-1.217 | complete | 7 | 0 | 0 | module importability, top-level shorthand constants, TOKENS light/dark structure, Phase 8 ERROR value (#d32f2f), Phase 8 onWarning text role, ERROR alias ↔ TOKENS consistency, light/dark section parity gate |
 
 ## 2. CRUD via REST API (`crud_api`)
 

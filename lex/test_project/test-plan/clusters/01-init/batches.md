@@ -193,3 +193,21 @@
 | Status | ✅ Complete — clear VS Code/PyCharm sessions generate their native format; unknown or conflicting sessions generate both; existing VS Code entries survive regeneration. See [2026-07-23 session](../../progress/sessions/2026-07-23-ide-run-configs.md). |
 
 ---
+
+---
+
+### Batch 1z — LEX Design System tokens — vendored Python module ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.211 – 1.217 |
+| Type | U |
+| Files covered | `lex/lex_app/design_system/lex_tokens.py` |
+| Test file | `lex/test_project/tests/init/test_1z_lex_tokens.py` |
+| Test classes | `TestCluster01z_LexTokens` |
+| Fixtures | none — pure-Python module import, no DB, no network |
+| Tests landed | **7 pass / 0 fail** (7 subtests via `subTest`) |
+| Coverage gain | vendored token module importability, shorthand constants, TOKENS light/dark structure, Phase 8 ERROR value (#d32f2f), Phase 8 onWarning role, top-level alias consistency, mode section parity |
+| Status | ✅ Complete — pins the Phase 8 token values; a stale re-generation or accidental rollback to an older token set will be caught by 1.214 (ERROR) and 1.215 (onWarning). See [2026-08-02 session](../../progress/sessions/2026-08-02-lex-tokens-vendor.md). |
+
+---
