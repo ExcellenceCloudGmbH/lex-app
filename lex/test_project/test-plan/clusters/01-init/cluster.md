@@ -175,3 +175,11 @@ does not remove user launch configurations.
 | 1.210 | Standalone generator | auto-detection is reused and the console wrapper exits successfully |
 
 **Scenario range:** 1.203 – 1.210. **Test file:** `lex/test_project/tests/init/test_1y_ide_run_configs.py`. **Type:** U. **Status:** ✅ Complete (July 23). Sources: `generate_pycharm_configs.py`, `lex/bin/lex.py`, `pyproject.toml`.
+
+### 1z. Migration-only history skip ✅
+
+**What it tests:** that a process which only applies migration files does not build the bitemporal history models, and — more importantly — that every command which might *generate* migrations still does.
+
+**Why a regression matters:** in one direction a large project cannot be deployed at all (the container is OOM-killed before the first table exists); in the other, `makemigrations` runs without the `Historical<X>` models in the registry, sees them as deleted, and writes migrations that drop the history tables.
+
+**Scenario range:** 1.211 – 1.217. **Test file:** `lex/test_project/tests/init/test_1z_migration_only_history_skip.py`. **Type:** U. **Status:** ✅ 7 pass.

@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 25 | 210 | 104 | 0 | 0 |
+| 1. Init — Project Bootstrap | 26 | 217 | 112 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -38,7 +38,7 @@
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |
-| 1i | rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident | 1.195-1.200 | complete | 6 | 0 | 0 | management command that surgically re-anchors user-entered datetimes mis-stored after the rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until) (--cutoff required, no global default — too-early corrupts good data; --until defaults to now), excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197 late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag. Ships with the USE_TZ=True cutover. |
+| 1i | rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident | 1.195-1.200 | complete | 7 | 0 | 0 | management command that surgically re-anchors user-entered datetimes mis-stored after the rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until) (--cutoff required, no global default — too-early corrupts good data; --until defaults to now), excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197 late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag. Ships with the USE_TZ=True cutover. |
 | 1j |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1k |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
@@ -55,6 +55,7 @@
 | 1w | `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart | 1.184-1.186 | complete | 3 | 0 | 0 | scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi |
 | 1x | Health exposes encrypted runtime metadata for the Instance Controller | 1.187-1.194 | complete | 0 | 0 | 0 | scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py; moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC. |
 | 1y | IDE-aware setup run configurations for PyCharm and VS Code | 1.203-1.210 | complete | 8 | 0 | 0 | best-effort IDE marker detection; unknown/conflicting environments generate both formats; VS Code launchers retain full PyCharm command/env/prompt parity and preserve user JSONC entries |
+| 1z | Migration-only processes skip history registration (deploy memory) | 1.211-1.217 | complete | 7 | 0 | 0 | a new-instance deploy was OOM-killed applying migrations. Every tracked model gains a Level 1 Historical<X> and a Level 2 Meta<Historical<X>>, so app startup builds 3x the model classes - measured at exactly 3.0x classes and ~0.21 MiB/model, linear in model count (scripts/benchmark_history_registration_memory.py). A process only applying migration files never reads them, so registration is skipped. The guard is a positive match on known-safe command lines only, because makemigrations must keep the history models or autodetection writes table drops. Letter z is the last free single letter in cluster 1 |
 
 ## 2. CRUD via REST API (`crud_api`)
 

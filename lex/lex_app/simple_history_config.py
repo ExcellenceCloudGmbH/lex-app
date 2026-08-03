@@ -201,3 +201,75 @@ def get_model_exclusion_reason(model_class):
         return "Already has history tracking"
     
     return None  # Should be tracked
+
+# ---------------------------------------------------------------------------
+# Migration-only processes
+# ---------------------------------------------------------------------------
+#
+# Registering history doubles the model count twice over: every tracked model
+# gains a Level 1 ``Historical<X>`` and a Level 2 ``Meta<Historical<X>>``, each
+# carrying the parent's full field set. A process that is only *applying*
+# migration files never touches those classes -- ``migrate`` builds its state
+# from the migration files themselves, not from the live app registry -- but it
+# still pays to construct them at import time, on top of the ProjectState the
+# migration executor builds over the same tripled model set.
+#
+# On a large project that is the difference between a deploy that fits in the
+# container's memory and one that is OOM-killed before the first table exists.
+
+#: Management commands that only ever *apply* existing migrations.
+_APPLY_ONLY_COMMANDS = {"migrate"}
+
+#: Commands that apply migrations but can also *generate* them first. Safe to
+#: skip registration only when generation is explicitly disabled.
+#:
+#: ``init`` is deliberately NOT here. It applies migrations, but it also syncs
+#: Keycloak resources and permissions by enumerating the live app registry
+#: (``get_all_django_models`` -> ``app_config.get_models()``). Skipping history
+#: registration there would make every ``Historical<X>`` and
+#: ``Meta<Historical<X>>`` invisible to that sync, so the history models would
+#: silently lose their Keycloak resources. History is load-bearing; nothing that
+#: reads the registry for anything other than applying migrations may skip it.
+_CONDITIONAL_COMMANDS = {"lex_migrate"}
+
+
+def is_migration_only_process(argv=None) -> bool:
+    """True when this process only applies migrations and needs no history models.
+
+    Deliberately a positive match on a known-safe command line, never a
+    heuristic: the cost of a false positive is severe. ``makemigrations`` needs
+    every ``Historical<X>`` present in the app registry, because they are built
+    at runtime -- if they are missing while autodetection runs, Django sees them
+    as deleted models and writes migrations that **drop the history tables**.
+    So a command that might generate migrations only qualifies when generation
+    is explicitly switched off.
+
+    This never disables history *tracking*: it only avoids constructing the
+    history model classes in a short-lived process that applies migration files
+    and exits. History tables are created by the migrations themselves, and the
+    serving process registers everything as before.
+
+    Set ``LEX_SKIP_MIGRATE_HISTORY=false`` to disable the optimisation entirely.
+    """
+    import os
+    import sys
+
+    override = os.getenv("LEX_SKIP_MIGRATE_HISTORY")
+    if override is not None and override.strip().lower() in {"0", "false", "no"}:
+        return False
+
+    args = list(sys.argv if argv is None else argv)
+    if not args:
+        return False
+
+    # Never skip while generating migrations, whatever else is on the line.
+    if "makemigrations" in args:
+        return False
+
+    if any(arg in _APPLY_ONLY_COMMANDS for arg in args[1:]):
+        return True
+
+    if any(arg in _CONDITIONAL_COMMANDS for arg in args[1:]):
+        return "--no-makemigrations" in args
+
+    return False
