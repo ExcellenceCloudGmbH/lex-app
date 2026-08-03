@@ -548,12 +548,25 @@ async def _persist_jwt_to_session_if_needed(request: Request, jwt_token: str, pa
     if not PERSIST_JWT_AUTH_TO_SESSION:
         return
 
+    incoming_exp = int(payload.get("exp") or 0)
+
     # Reuse existing valid server-side session if available; otherwise replace stale one.
     existing_sid = (request.session.get("user") or {}).get("sid")
     if existing_sid:
         existing = await _get_tokens(existing_sid)
         existing_exp = int((existing or {}).get("expires_at") or 0)
-        if existing and existing.get("access_token") and (not existing_exp or _now() < (existing_exp - TOKEN_EXPIRY_SKEW_SECONDS)):
+        still_valid = bool(
+            existing
+            and existing.get("access_token")
+            and (not existing_exp or _now() < (existing_exp - TOKEN_EXPIRY_SKEW_SECONDS))
+        )
+        # A strictly newer token supersedes a still-valid one. The embedded path
+        # gets no refresh token, so renewal can only arrive as a fresh
+        # ``auth_token`` from the frontend — which necessarily shows up *before*
+        # the stored one expires. Keeping the older token here would discard
+        # every such renewal and let the session die anyway, which is exactly the
+        # dead end the caller was trying to avoid.
+        if still_valid and not (incoming_exp and incoming_exp > existing_exp):
             return
         await _drop_tokens(existing_sid)
 

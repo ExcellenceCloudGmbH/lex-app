@@ -192,3 +192,11 @@ does not remove user launch configurations.
 **Scenario range:** 1.211 – 1.216. **Test file:** `lex/test_project/tests/init/test_1z_proxy_iframe_breakout.py`. **Type:** U. **Status:** ✅ Complete (2026-07-21). Source: `lex/proxy.py` (`_unauthenticated_response`, `_is_iframe_document_request`). Follow-up (separate change): give the embedded `auth_token` path a refresh token so the proxy renews silently instead of forcing re-login at the 4h SSO cap.
 
 ---
+
+### 1aa. Embedded Streamlit token renewal ✅
+
+**What it tests:** that the embedded Streamlit auth flow can renew itself — the token endpoint publishes when to renew, and the proxy adopts a renewed token instead of keeping the older one.
+
+**Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
+
+**Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.

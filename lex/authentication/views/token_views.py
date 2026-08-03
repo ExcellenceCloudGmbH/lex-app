@@ -13,19 +13,84 @@ from rest_framework.views import APIView
 logger = logging.getLogger(__name__)
 
 
+#: How long before the token actually expires the client should renew it. The
+#: embedded Streamlit iframe cannot re-authenticate itself (the proxy would have
+#: to frame Keycloak, which forbids it), so the caller must renew *before* the
+#: token dies rather than react afterwards.
+TOKEN_REFRESH_SKEW_SECONDS = 60
+
+
+def _access_token_expiry(session, token: str) -> int | None:
+    """Epoch seconds at which ``token`` stops being accepted, or ``None``.
+
+    Prefers the value oauth2_authcodeflow already stored on the session; falls
+    back to the token's own ``exp``. The signature is deliberately not verified
+    here — this is our own session's token being read for its expiry, and the
+    proxy is the component that authenticates it (against Keycloak's JWKS).
+    """
+    stored = session.get('oidc_access_expires_at')
+    if stored:
+        try:
+            return int(stored)
+        except (TypeError, ValueError):
+            logger.warning("Session oidc_access_expires_at is not an int; falling back to token exp")
+
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+        exp = claims.get('exp')
+        return int(exp) if exp else None
+    except jwt.PyJWTError:
+        logger.warning("Could not read exp from the session access token")
+        return None
+
+
 class StreamlitTokenView(APIView):
-    """Smart JWT token endpoint - gets new token, keeps valid ones, or refreshes expiring ones"""
+    """Hands the embedded Streamlit iframe the caller's Keycloak access token.
+
+    The token is the session's own access token, so the auth proxy in front of
+    Streamlit can validate it against Keycloak's JWKS. It is short-lived, and the
+    proxy has no way to renew it on the embedded path — it is given no refresh
+    token, and deliberately so: a refresh token would have to travel through the
+    browser and into the iframe URL, where it would land in access logs, history
+    and ``Referer`` headers.
+
+    Renewal is therefore the caller's job, which is why the response carries the
+    expiry alongside the token: the frontend re-requests before ``expires_at``
+    and re-sources the iframe, and the proxy adopts the newer token.
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        """Get or refresh JWT token based on current token state"""
+        """Return the current access token and when the caller must renew it."""
+        token = request.session.get('oidc_access_token')
+        if not token:
+            # The user is authenticated to Django but has no OIDC token on the
+            # session (e.g. the session was created by another auth backend, or
+            # was partially flushed). Previously this raised KeyError and
+            # surfaced as a 500; a 401 tells the caller to re-authenticate,
+            # which is the only thing that can actually fix it.
+            logger.warning("Streamlit token requested but no OIDC access token is on the session")
+            return Response(
+                {'error': 'No active OIDC session; re-authentication required'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
+        payload = {'token': token}
 
-            # No token provided or token invalid - generate new one
-        return Response({
-            'token': request.session['oidc_access_token'],
+        expires_at = _access_token_expiry(request.session, token)
+        if expires_at:
+            now = int(datetime.now(timezone.utc).timestamp())
+            expires_in = max(0, expires_at - now)
+            payload.update({
+                'expires_at': datetime.fromtimestamp(expires_at, timezone.utc).isoformat(),
+                'expires_in': expires_in,
+                # Never negative and never later than expiry, so a token that is
+                # already inside the skew window tells the caller to renew now
+                # rather than scheduling a refresh in the past.
+                'refresh_interval': max(0, expires_in - TOKEN_REFRESH_SKEW_SECONDS),
+            })
 
-        }, status=status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
     def _check_token_status(self, token: str, user) -> str:

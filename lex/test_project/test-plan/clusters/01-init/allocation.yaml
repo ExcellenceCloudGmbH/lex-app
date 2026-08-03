@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 216
+max_scenario: 222
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -266,4 +266,20 @@ letters:
       as "refused to connect"; top-level redirect and API 401 unchanged. Covers lex/proxy.py
       _unauthenticated_response / _is_iframe_document_request. Renumbered from y/1.195-1.200 on
       merge - both the letter and the range were taken on lex-app-v2 while this was open
+  aa:
+    title: Embedded Streamlit token renewal (issuer expiry + proxy adoption)
+    scenarios: 1.217-1.222
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than
+      merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval
+      (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy
+      would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy
+      adopts a strictly newer auth_token rather than discarding it while the stored one is still
+      valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
+      a-z. Renumbered from z/1.201-1.206 on merge
 
