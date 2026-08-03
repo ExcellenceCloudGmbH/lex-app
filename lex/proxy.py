@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ from authlib.integrations.starlette_client import OAuth
 from starlette.applications import Starlette
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response, JSONResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
@@ -474,6 +475,66 @@ def _callback_url(request: Request) -> str:
     return f"{_external_base_url(request)}/auth/callback"
 
 
+def _login_url(request: Request) -> str:
+    return f"{_external_base_url(request)}/auth/login"
+
+
+def _is_iframe_document_request(request: Request) -> bool:
+    """True for a document navigation happening inside an ``<iframe>``/``<frame>``.
+
+    Browsers set ``Sec-Fetch-Dest: iframe`` (or ``frame``) on the iframe's own
+    document request. Redirecting such a request to Keycloak would load the login
+    page inside the frame, which Keycloak forbids via ``X-Frame-Options`` /
+    ``Content-Security-Policy: frame-ancestors 'self'`` -- so the browser renders
+    "refused to connect" instead. We detect that case to break out of the frame.
+    """
+    return request.headers.get("sec-fetch-dest", "").strip().lower() in {"iframe", "frame"}
+
+
+def _frame_breakout_response(request: Request) -> Response:
+    """A 401 that escapes the iframe to a full-page login instead of framing the IdP.
+
+    Three layered mechanisms, most-reliable last:
+      1. best-effort automatic top-level navigation (works when the browser allows
+         the frame to navigate the top window);
+      2. a ``postMessage`` so a cooperating parent shell can drive re-auth;
+      3. a user-clickable ``target="_top"`` link, which is always permitted because
+         it is a user gesture.
+    """
+    login = _login_url(request)
+    login_js = json.dumps(login)  # safe JS string literal
+    login_attr = html.escape(login, quote=True)
+    body = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<title>Session expired</title></head><body>"
+        "<script>(function(){var u=" + login_js + ";"
+        "try{if(window.top!==window.self){window.top.location.href=u;}"
+        "else{window.location.href=u;}}catch(e){}"
+        "try{window.parent.postMessage({type:'lex-auth-required',login:u},'*');}catch(e){}"
+        "})();</script>"
+        "<div style=\"font:16px system-ui,Arial,sans-serif;padding:24px;text-align:center\">"
+        "Your session has expired. "
+        "<a href=\"" + login_attr + "\" target=\"_top\" rel=\"noopener\">Sign in again</a>."
+        "</div></body></html>"
+    )
+    return HTMLResponse(body, status_code=401)
+
+
+def _unauthenticated_response(request: Request) -> Response:
+    """Response to send when no valid identity is present.
+
+    - iframe/frame document load -> break out to a top-level login (never frame the IdP)
+    - other top-level HTML navigation -> normal redirect to login
+    - XHR / fetch / API call -> 401 JSON
+    """
+    accepts_html = "text/html" in request.headers.get("accept", "")
+    if accepts_html and _is_iframe_document_request(request):
+        return _frame_breakout_response(request)
+    if accepts_html:
+        return RedirectResponse(url="/auth/login")
+    return JSONResponse({"error": "Authentication required"}, status_code=401)
+
+
 # -----------------------------------------------------------------------------
 # NEW: persist auth_token login to session
 # -----------------------------------------------------------------------------
@@ -848,9 +909,10 @@ async def proxy(request: Request):
 
     # 3) Deny
     if not user_payload:
-        if "text/html" in request.headers.get("accept", ""):
-            return RedirectResponse(url="/auth/login")
-        return JSONResponse({"error": "Authentication required"}, status_code=401)
+        # Never redirect an iframe document load to the IdP: Keycloak's login page
+        # sets frame-ancestors 'self' and the browser shows "refused to connect".
+        # Break out to a top-level login instead (see _unauthenticated_response).
+        return _unauthenticated_response(request)
 
     method = request.method
     url = httpx.URL(UPSTREAM + request.url.path)
