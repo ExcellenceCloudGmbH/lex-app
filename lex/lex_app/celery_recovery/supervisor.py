@@ -55,6 +55,14 @@ def _requeue_grace_seconds() -> int:
     return max(1, int(getattr(_settings(), "LEX_TASK_REQUEUE_GRACE_SECONDS", 60)))
 
 
+def _dispatch_grace_seconds() -> int:
+    """How long a dispatched-but-never-started claim is left alone before the
+    supervisor starts verifying it against the broker queue. Generous by
+    design: a scheduling backlog (full cluster, node-group max) is a normal
+    condition, not a failure."""
+    return max(1, int(getattr(_settings(), "LEX_TASK_DISPATCH_GRACE_SECONDS", 300)))
+
+
 def _default_queue() -> str:
     s = _settings()
     return getattr(s, "CELERY_TASK_DEFAULT_QUEUE", None) or "celery"
@@ -82,6 +90,10 @@ def _requeue(app, task_id: str, payload: Dict[str, Any]) -> None:
     """
     incremented = dict(payload)
     incremented["retries"] = int(incremented.get("retries", 0)) + 1
+    if incremented.get("status") == "dispatched":
+        # The re-dispatched message goes back on the queue unconsumed — reset
+        # the claim clock so the next scans judge it against a fresh window.
+        incremented["claimed_at"] = time.time()
     queue = incremented.get("queue") or _default_queue()
 
     # Grant the grace window *before* dispatching so the task can never be
@@ -352,6 +364,7 @@ def scan_and_recover(app=None) -> Dict[str, int]:
         "cancelled": 0,
         "already_finished": 0,
         "skipped_locked": 0,
+        "dispatched_waiting": 0,
     }
 
     for task_id in registry.list_tracked():
@@ -366,6 +379,37 @@ def scan_and_recover(app=None) -> Dict[str, int]:
             registry.deregister(task_id)
             stats["orphaned"] += 1
             continue
+
+        # ── Dispatched-but-never-started claims ──────────────────────
+        # No heartbeat has ever existed for these: the message on the broker
+        # queue IS the liveness story. A missing heartbeat therefore proves
+        # nothing — only the queue does. While the message is still queued
+        # (or the queue is unreadable) the task is merely waiting for
+        # capacity and MUST be left alone: a same-task-id requeue would put
+        # a second copy of the message on the broker and run the work twice.
+        # Only when the message has verifiably vanished (Redis evicted or
+        # flushed — exactly the 2026-07-14 incident) does it fall through to
+        # the lock + requeue path below, where recovery is safe and exactly
+        # what this subsystem is for. These skips happen BEFORE the recovery
+        # lock so a waiting claim never burns a lock window.
+        if payload.get("status") == "dispatched":
+            age = time.time() - float(payload.get("claimed_at") or 0)
+            if age < _dispatch_grace_seconds():
+                stats["dispatched_waiting"] += 1
+                continue
+            queue = payload.get("queue") or _default_queue()
+            still_queued = registry.task_id_in_queue(task_id, queue)
+            if still_queued is not False:
+                # True → backlog; None → unknown: never double-dispatch on
+                # uncertainty. Either way, leave it for a later pass.
+                stats["dispatched_waiting"] += 1
+                continue
+            logger.warning(
+                "Celery recovery: dispatched task %s vanished from queue %s "
+                "without ever starting (broker flushed/evicted?); recovering",
+                task_id,
+                queue,
+            )
 
         # Multi-supervisor safety: claim this dead task before acting on it.
         # If another replica already holds the lock, skip it this pass — that
@@ -423,7 +467,15 @@ _stop = threading.Event()
 
 
 def run_forever(interval: Optional[int] = None) -> None:
-    """Always-on supervisor loop (for a dedicated recovery process)."""
+    """Supervisor loop for a dedicated recovery process.
+
+    Each pass sweeps for dead workers and then converges the in-flight LIST
+    mirror onto the index SET. That second step matters when the pod is run
+    on demand (KEDA ScaledObject on the list's length): the list is what
+    decides whether this pod keeps running, so a stale entry would pin it up
+    forever and a lost one would scale it away mid-calculation. Reconciling
+    only at startup would let either drift persist for the pod's whole life.
+    """
     interval = interval or _scan_interval()
     app = _get_app()
     logger.info("Celery recovery supervisor loop started (interval=%ss)", interval)
@@ -433,6 +485,10 @@ def run_forever(interval: Optional[int] = None) -> None:
             scan_and_recover(app)
         except Exception:
             logger.exception("Celery recovery: scan pass failed")
+        try:
+            registry.reconcile_inflight_list()
+        except Exception:
+            logger.exception("Celery recovery: in-flight list reconcile failed")
 
 
 def stop_forever() -> None:

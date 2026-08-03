@@ -22,8 +22,10 @@ unaffected.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import pickle
+import time
 from typing import Any, Dict, List, Optional
 
 from . import redis_keys
@@ -104,6 +106,47 @@ def _decode(raw: str) -> Dict[str, Any]:
     return pickle.loads(base64.b64decode(raw))
 
 
+# Add the id to the index and, only if it was not already there, mirror it onto
+# the in-flight LIST. One script so the two cannot diverge.
+_TRACK_LUA = """
+if redis.call('SADD', KEYS[1], ARGV[1]) == 1 then
+  redis.call('LPUSH', KEYS[2], ARGV[1])
+  return 1
+end
+return 0
+"""
+
+
+def _track(client, task_id: str) -> None:
+    """Index ``task_id`` and mirror it onto the in-flight LIST, atomically.
+
+    The LIST is the KEDA scale signal, so the two writes diverging in the
+    *losing* direction — indexed but not listed — means the recovery pod is
+    never brought up for that task and it goes unguarded. As separate round
+    trips that is a real, if narrow, window; as one Lua script it cannot
+    happen. Either both land or neither does, and "neither" is the ordinary
+    best-effort degradation every registry operation already has.
+
+    The ``SADD`` result gates the ``LPUSH`` so that re-tracking an id already
+    in flight — a supervisor requeue, or the dispatch-claim being upgraded to
+    running by ``task_prerun`` — never double-counts the signal.
+
+    Falls back to the non-atomic pair if scripting is unavailable, so a Redis
+    without EVAL still gets the (slightly weaker) mirror rather than none.
+    """
+    index = redis_keys.index_key()
+    inflight = redis_keys.inflight_list_key()
+    try:
+        client.eval(_TRACK_LUA, 2, index, inflight, task_id)
+        return
+    except Exception:
+        logger.debug(
+            "Celery recovery: EVAL unavailable; tracking %s non-atomically", task_id
+        )
+    if client.sadd(index, task_id):
+        client.lpush(inflight, task_id)
+
+
 def register(
     task_id: str,
     name: str,
@@ -136,12 +179,117 @@ def register(
             "kwargs": kwargs,
             "queue": queue,
             "retries": retries,
+            # A worker is executing this task right now — the heartbeat is
+            # the liveness signal from here on (vs. "dispatched", where the
+            # message is still on the broker and no heartbeat exists yet).
+            "status": "running",
         }
-        client.set(redis_keys.payload_key(task_id), _encode(payload), ex=_payload_ttl())
-        client.sadd(redis_keys.index_key(), task_id)
-        client.set(redis_keys.heartbeat_key(task_id), "1", ex=_heartbeat_ttl())
+        # Single round trip for the payload and heartbeat writes; the index and
+        # its LIST mirror are written together by _track (see there for why).
+        pipe = client.pipeline()
+        pipe.set(redis_keys.payload_key(task_id), _encode(payload), ex=_payload_ttl())
+        pipe.set(redis_keys.heartbeat_key(task_id), "1", ex=_heartbeat_ttl())
+        pipe.execute()
+        _track(client, task_id)
     except Exception:
         logger.warning("Celery recovery: register failed for %s", task_id, exc_info=True)
+
+
+def claim_dispatched(
+    task_id: str,
+    name: str,
+    args: Any,
+    kwargs: Any,
+    queue: Optional[str],
+) -> None:
+    """Claim ``task_id`` at DISPATCH time, before any worker exists.
+
+    Closes the dispatch-to-start ownership gap (incident 2026-07-14, instance
+    1410): a calculation row goes ``IN_PROGRESS`` when its task is dispatched,
+    but registration used to happen only in ``task_prerun`` — so a task whose
+    worker pod was still Pending was invisible to the recovery machinery and
+    the startup reset blind-aborted its healthy, merely-queued row.
+
+    The claim is a normal registry entry with ``status="dispatched"``,
+    ``claimed_at`` (epoch seconds) and **no heartbeat** — the message sitting
+    on the broker is its liveness story, which the supervisor verifies via
+    :func:`task_id_in_queue` instead of a heartbeat. ``task_prerun`` upgrades
+    the entry to ``status="running"`` when a worker picks the task up.
+
+    Written with ``SET NX``: if a payload already exists (the worker won the
+    race and registered first, or this is a supervisor requeue) the claim
+    never clobbers it. Best-effort no-op like every registry operation.
+    """
+    if not task_id:
+        return
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        payload = {
+            "name": name,
+            "args": args,
+            "kwargs": kwargs,
+            "queue": queue,
+            "retries": 0,
+            "status": "dispatched",
+            "claimed_at": time.time(),
+        }
+        # NX: never overwrite an existing payload (prerun/requeue owns it).
+        client.set(
+            redis_keys.payload_key(task_id), _encode(payload),
+            ex=_payload_ttl(), nx=True,
+        )
+        # Index either way — whoever wrote the payload, the id is in flight.
+        #
+        # This is what makes the scale signal rise at *dispatch* rather than at
+        # task start: the supervisor is brought up while the worker pod is
+        # still Pending, which is precisely the window the 1410 incident left
+        # unguarded. The claim→running upgrade in register() re-tracks the same
+        # id, which _track's SADD gate turns into a no-op for the LIST.
+        _track(client, task_id)
+    except Exception:
+        logger.warning(
+            "Celery recovery: claim_dispatched failed for %s", task_id, exc_info=True
+        )
+
+
+def task_id_in_queue(task_id: str, queue: str) -> Optional[bool]:
+    """Whether the broker queue still holds the message for ``task_id``.
+
+    Inspects the Redis list backing ``queue`` (Kombu's storage for
+    unconsumed messages) and matches the Celery message id in ``headers.id``
+    (protocol v2) or ``properties.correlation_id``. Used by the supervisor to
+    decide whether a long-dispatched-but-never-started task is merely waiting
+    for capacity (leave it alone) or has vanished from the broker entirely —
+    e.g. Redis was evicted or flushed — in which case a same-task-id requeue
+    is safe because no duplicate message can exist.
+
+    Returns ``True``/``False`` on a definitive scan, ``None`` when the queue
+    cannot be read — callers must treat ``None`` as "assume still queued"
+    (never double-dispatch on uncertainty).
+    """
+    if not task_id or not queue:
+        return None
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        for raw in client.lrange(queue, 0, -1) or []:
+            try:
+                message = json.loads(raw)
+            except Exception:
+                continue
+            headers = message.get("headers") or {}
+            properties = message.get("properties") or {}
+            if task_id in (headers.get("id"), properties.get("correlation_id")):
+                return True
+        return False
+    except Exception:
+        logger.warning(
+            "Celery recovery: queue inspection failed for %s", task_id, exc_info=True
+        )
+        return None
 
 
 def refresh_heartbeat(task_id: str) -> None:
@@ -175,8 +323,66 @@ def deregister(task_id: str) -> None:
         client.srem(redis_keys.index_key(), task_id)
         client.delete(redis_keys.payload_key(task_id))
         client.delete(redis_keys.heartbeat_key(task_id))
+        # Drain every occurrence from the in-flight LIST mirror (count 0 =
+        # all) so the KEDA scale signal returns to zero with the index.
+        client.lrem(redis_keys.inflight_list_key(), 0, task_id)
     except Exception:
         logger.warning("Celery recovery: deregister failed for %s", task_id, exc_info=True)
+
+
+def reconcile_inflight_list() -> int:
+    """Converge the in-flight LIST mirror onto current index-SET membership.
+
+    Rollout / crash safety: a pod that starts with a non-empty index — tasks
+    registered before the list existed (mid-cutover), or a leaked entry from a
+    crash between the SET and LIST writes — must expose the true amount of
+    in-flight work to KEDA. Called at recovery-supervisor startup and after
+    every sweep, so drift in either direction self-heals rather than
+    accumulating for the lifetime of the pod.
+
+    Deliberately a *diff*, never ``DEL`` + rebuild. Workers register
+    concurrently with this call, and a rebuild reads the SET, then clears the
+    LIST, then rewrites it: an id that a worker SADDs after that read but
+    LPUSHes before the clear is wiped and never restored. The list would then
+    undercount and KEDA could scale the supervisor away while that task is
+    still in flight. Converging entry-by-entry against live state cannot lose
+    an id that way.
+
+    Each removal re-checks ``SISMEMBER`` rather than trusting the snapshot, so
+    an id registered mid-pass is kept. The residual race is therefore biased
+    toward over-counting, which only keeps the pod up — the safe direction.
+
+    Returns the resulting number of tracked entries (0 on any failure —
+    best-effort like every registry operation).
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+    index = redis_keys.index_key()
+    inflight = redis_keys.inflight_list_key()
+    try:
+        members = set(client.smembers(index) or [])
+        current = list(client.lrange(inflight, 0, -1) or [])
+
+        # Drop ids the list still carries that the index no longer tracks —
+        # and any duplicate occurrences, so LLEN stays an exact count.
+        for task_id in set(current):
+            if task_id not in members or current.count(task_id) > 1:
+                if not client.sismember(index, task_id):
+                    client.lrem(inflight, 0, task_id)
+                elif current.count(task_id) > 1:
+                    client.lrem(inflight, 0, task_id)
+                    client.lpush(inflight, task_id)
+
+        # Add ids the index tracks that never made it onto the list.
+        missing = [t for t in members if t not in set(current)]
+        if missing:
+            client.lpush(inflight, *missing)
+
+        return int(client.llen(inflight) or 0)
+    except Exception:
+        logger.warning("Celery recovery: reconcile_inflight_list failed", exc_info=True)
+        return 0
 
 
 def list_tracked() -> List[str]:

@@ -106,6 +106,23 @@ class Command(BaseCommand):
                 "run_recovery_supervisor: enable(app) failed; continuing"
             )
 
+        # Rebuild the in-flight LIST mirror (the KEDA scale signal) from the
+        # index SET so a pod starting mid-cutover — or after a crash between
+        # the SET and LIST writes — exposes the true in-flight work to KEDA.
+        # Best-effort: a failure only degrades the scale signal, never recovery.
+        try:
+            from lex.lex_app.celery_recovery import registry
+
+            reconciled = registry.reconcile_inflight_list()
+            logger.info(
+                "run_recovery_supervisor: in-flight list reconciled (%s entries)",
+                reconciled,
+            )
+        except Exception:  # pragma: no cover - never block startup on wiring
+            logger.exception(
+                "run_recovery_supervisor: reconcile_inflight_list failed; continuing"
+            )
+
         if run_once:
             stats = supervisor.scan_and_recover(app)
             self.stdout.write(f"Recovery sweep stats: {stats}")

@@ -29,3 +29,9 @@ def payload_key(task_id: str) -> str:
 def index_key() -> str:
     """SET of every task_id currently tracked for recovery."""
     return f"{key_prefix()}lex:recover:index"
+
+
+def inflight_list_key() -> str:
+    """LIST mirror of :func:`index_key`; KEDA reads its length (``LLEN``) to
+    scale the recovery pod 0↔1 while calculation work is in flight."""
+    return f"{key_prefix()}lex:recover:inflight"
