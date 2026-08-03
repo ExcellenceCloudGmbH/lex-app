@@ -89,8 +89,11 @@ def load_clusters(plan_dir: Path) -> list[Cluster]:
         letters = []
         for letter, spec in (data["letters"] or {}).items():
             _require(
-                re.fullmatch(r"[a-z]", str(letter)) is not None,
-                f"{yml}: letter {letter!r} must be a single lowercase letter",
+                # Two-letter ids (aa, ab, ...) continue past z. Cluster 1
+                # exhausted a-z, and refusing to allocate past that would push
+                # batches into clusters they do not belong to.
+                re.fullmatch(r"[a-z]{1,2}", str(letter)) is not None,
+                f"{yml}: letter {letter!r} must be one or two lowercase letters",
             )
             _require(
                 spec.get("status") in VALID_STATUSES,

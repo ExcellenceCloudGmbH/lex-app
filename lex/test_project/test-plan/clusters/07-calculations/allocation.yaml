@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 204
+max_scenario: 221
 letters:
   a:
     title: ''
@@ -180,3 +180,17 @@ letters:
       xfail: 0
     note: before commit — the Session 89 inline guard broke nested-dispatch parallelism (a nested `CalculateNAV`
       ran inline on the parent's worker unless the caller opened an explicit `WaitF
+  s:
+    title: Calculations must not move edited_at / edited_by (Celery-OFF + startup)
+    scenarios: 7.205-7.221
+    status: complete
+    tests:
+      pass: 17
+      skip: 0
+      xfail: 0
+    note: Audit-column contract for the sync dispatch paths and the startup recovery sweep. Covers
+      SUCCESS/ERROR/CANCELLED terminal states, child-record output rows, created_at immutability,
+      IN_PROGRESS-at-restart -> ABORTED (7.211 both columns, 7.217 authorship via a distinct sentinel), and a recovery-tracked row. Includes three negative controls
+      (real user edit stamps; a user edit after a calculation still stamps; an explicit edited_at
+      override is honoured) that guard against a fix over-suppressing genuine edits. 17 pass, including the reported case driven through the real HTTP calculate=true endpoint (7.219 interrupted -> restart -> ABORTED leaves edited_at/edited_by unchanged; 7.220 the stamp is absent before any completion could revert it; 7.221 a genuine HTTP field edit still stamps). --
+      these paths were already correct; the batch pins them so the BUG-028 fix cannot regress them.

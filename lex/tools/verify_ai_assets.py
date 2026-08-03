@@ -1,13 +1,23 @@
 """Verify and restore the static asset directories that the LEX MCP server
 depends on.
 
-The LEX MCP runtime ships in two flavors inside the ``lex-mcp-local``
-distribution:
+The LEX MCP runtime ships six workflow modes inside the ``lex-mcp-local``
+distribution, each with its own agent payload package:
 
-* **forward** mode — driven by :mod:`lex_mcp_local`, ships
-  ``src/lex_mcp_local/.github`` (new-project creation workflow).
-* **backward** mode — driven by :mod:`lex_mcp_reverse`, ships
-  ``src/lex_mcp_reverse/.github`` (existing-project documentation/migration).
+* **forward** — :mod:`lex_mcp_local` (new-project creation workflow).
+* **backward** — :mod:`lex_mcp_reverse` (documentation / reverse mapping).
+* **edit** — :mod:`lex_mcp_edit` (targeted changes).
+* **review** — :mod:`lex_mcp_review` (static audits).
+* **mvp_generator** — :mod:`lex_mcp_mvp` (reduced-scope build).
+* **mvp_completion** — :mod:`lex_mcp_mvp_completion` (MVP to full product).
+
+Assets are delivered per **agentic environment**, not just per mode: the
+project's ``LEX_AI_ENVIRONMENTS`` value decides which of GitHub Copilot
+(JetBrains / VS Code / CLI), Cursor, Claude Code, OpenAI Codex, and Windsurf
+receive the payload, and each receives it in its own native layout. That work
+is delegated to ``lex_mcp.ai_onboarding`` so new environments ship with a
+lex-mcp-local release and need no lex-app change. The legacy ``.github``
+mirror below is the fallback for installs that predate the registry.
 
 Mode selection inside the MCP server is determined by the CLI flag
 (``--mode``), a one-shot override file (``~/.lex-mcp/mode-override``), or
@@ -38,7 +48,10 @@ This module exposes :func:`verify_ai_assets`, which:
 3. Restores any file under the project root that is missing or whose contents
    have drifted from the canonical copy (byte-for-byte comparison).
 
-User-added files in the destination are never deleted.
+User-added files in the destination are preserved except in mode-managed
+subdirectories (currently ``.github/agents``, ``.github/instructions``, and
+``.github/prompts``), which are mirrored exactly so stale mode assets are
+removed during mode switches.
 """
 
 from __future__ import annotations
@@ -71,6 +84,10 @@ DEFAULT_MCP_MODE = MCP_MODE_FORWARD
 MCP_MODE_PACKAGE: dict[str, str] = {
     MCP_MODE_FORWARD: "lex_mcp_local",
     MCP_MODE_BACKWARD: "lex_mcp_reverse",
+    "edit": "lex_mcp_edit",
+    "review": "lex_mcp_review",
+    "mvp_generator": "lex_mcp_mvp",
+    "mvp_completion": "lex_mcp_mvp_completion",
 }
 
 # Directories shipped inside each mode's package that must mirror to project
@@ -96,13 +113,35 @@ class DirectoryVerificationResult:
     source_directory: Path | None
     destination_directory: Path
     restored_files: tuple[Path, ...] = ()
+    removed_files: tuple[Path, ...] = ()
     missing_files: tuple[Path, ...] = ()
     modified_files: tuple[Path, ...] = ()
     skipped_reason: str | None = None
 
     @property
     def ok(self) -> bool:
-        return self.skipped_reason is None and not self.restored_files
+        return (
+            self.skipped_reason is None
+            and not self.restored_files
+            and not self.removed_files
+        )
+
+
+@dataclass(frozen=True)
+class EnvironmentVerificationResult:
+    """Outcome of syncing one agentic environment's native asset layout."""
+
+    environment: str
+    display_name: str
+    dialect: str
+    written: tuple[str, ...] = ()
+    pruned: tuple[str, ...] = ()
+    unchanged_count: int = 0
+    errors: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
 
 
 @dataclass(frozen=True)
@@ -113,14 +152,26 @@ class VerifyAIAssetsResult:
     mode: str
     mode_source: str
     directories: tuple[DirectoryVerificationResult, ...] = field(default_factory=tuple)
+    environments: tuple[EnvironmentVerificationResult, ...] = field(
+        default_factory=tuple
+    )
+    environment_sync_error: str | None = None
 
     @property
     def restored_files(self) -> tuple[Path, ...]:
         return tuple(p for d in self.directories for p in d.restored_files)
 
     @property
+    def removed_files(self) -> tuple[Path, ...]:
+        return tuple(p for d in self.directories for p in d.removed_files)
+
+    @property
     def ok(self) -> bool:
-        return all(d.ok for d in self.directories)
+        return (
+            all(d.ok for d in self.directories)
+            and all(e.ok for e in self.environments)
+            and self.environment_sync_error is None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -219,13 +270,49 @@ def _read_override_mode() -> str | None:
         return None
 
 
-def _resolve_mode_from_mcp_json_files(project_root: Path) -> str | None:
-    """Scan CWD-relative mcp.json files for the active mode.
+def _read_mode_from_codex_toml(config_path: Path) -> str | None:
+    """Extract the active mode from a Codex ``config.toml`` MCP table."""
+    if not config_path.is_file():
+        return None
+    try:
+        from lex_mcp.environments import (  # type: ignore[import-not-found]
+            SERVERS_KEY_CODEX,
+            read_toml_server,
+        )
+    except Exception:
+        return None
+    try:
+        entry = read_toml_server(
+            config_path.read_text(encoding="utf-8"),
+            _LEX_MCP_SERVER_NAME,
+            servers_key=SERVERS_KEY_CODEX,
+        )
+    except OSError:
+        return None
+    if not entry:
+        return None
+    args = entry.get("args") or []
+    if isinstance(args, (list, tuple)):
+        for index, arg in enumerate(args):
+            if str(arg) == "--mode" and index + 1 < len(args):
+                value = str(args[index + 1]).strip().lower()
+                if value in MCP_MODE_PACKAGE:
+                    return value
+    env_block = entry.get("env") or {}
+    if isinstance(env_block, dict):
+        value = str(env_block.get("LEX_MCP_MODE", "")).strip().lower()
+        if value in MCP_MODE_PACKAGE:
+            return value
+    return None
 
-    Checks the same locations that lex-mcp-local's
-    ``_candidate_mcp_json_paths()`` scans in the working directory:
-    ``mcp.json``, ``.vscode/mcp.json``, ``.cursor/mcp.json``,
-    ``.idea/mcp.json``, ``.pycharm/mcp.json``.
+
+def _resolve_mode_from_mcp_json_files(project_root: Path) -> str | None:
+    """Scan project-scoped MCP configs for the active mode.
+
+    Covers every environment the MCP server supports: the Copilot configs
+    (``mcp.json``, ``.vscode/mcp.json``, ``.idea/mcp.json``), Cursor
+    (``.cursor/mcp.json``), Claude Code (``.mcp.json``), and Codex
+    (``.codex/config.toml``, which is TOML rather than JSON).
     Returns the first valid mode found, or *None*.
     """
     root = Path(project_root).resolve()
@@ -233,6 +320,7 @@ def _resolve_mode_from_mcp_json_files(project_root: Path) -> str | None:
         root / "mcp.json",
         root / ".vscode" / "mcp.json",
         root / ".cursor" / "mcp.json",
+        root / ".mcp.json",
         root / ".idea" / "mcp.json",
         root / ".pycharm" / "mcp.json",
     ]
@@ -240,7 +328,7 @@ def _resolve_mode_from_mcp_json_files(project_root: Path) -> str | None:
         mode = _read_mode_from_mcp_json(path)
         if mode:
             return mode
-    return None
+    return _read_mode_from_codex_toml(root / ".codex" / "config.toml")
 
 
 def resolve_active_mcp_mode(
@@ -381,6 +469,59 @@ def _restore_file(source_file: Path, destination_file: Path) -> None:
         ) from exc
 
 
+def _prune_managed_files(
+    source_directory: Path,
+    destination_directory: Path,
+    *,
+    managed_relative_dirs: tuple[str, ...],
+) -> tuple[Path, ...]:
+    """Delete stale files in managed subdirectories that are absent in source.
+
+    This is used for mode-scoped AI assets (for example ``.github/agents``),
+    where leaving old files in place causes mixed-mode tool surfaces.
+    """
+    removed: list[Path] = []
+
+    for relative_dir in managed_relative_dirs:
+        source_root = source_directory / relative_dir
+        destination_root = destination_directory / relative_dir
+
+        if not destination_root.exists():
+            continue
+
+        source_relative_files: set[Path] = set()
+        if source_root.is_dir():
+            for source_file in _iter_source_files(source_root):
+                source_relative_files.add(source_file.relative_to(source_directory))
+
+        for current_root, _dirs, files in os.walk(destination_root):
+            current_root_path = Path(current_root)
+            for file_name in files:
+                destination_file = current_root_path / file_name
+                destination_relative = destination_file.relative_to(destination_directory)
+                if destination_relative in source_relative_files:
+                    continue
+                try:
+                    destination_file.unlink()
+                    removed.append(destination_relative)
+                except OSError as exc:
+                    raise SetupWithAIError(
+                        f"Could not remove stale mode asset {destination_file}: {exc}"
+                    ) from exc
+
+        # Best-effort cleanup of empty directories left behind.
+        for current_root, _dirs, _files in os.walk(destination_root, topdown=False):
+            current_root_path = Path(current_root)
+            if current_root_path == destination_root:
+                continue
+            try:
+                current_root_path.rmdir()
+            except OSError:
+                continue
+
+    return tuple(removed)
+
+
 def verify_directory(
     project_root: Path,
     source_directory: Path | None,
@@ -388,6 +529,7 @@ def verify_directory(
     *,
     skipped_reason: str | None = None,
     display_name: str | None = None,
+    prune_extra_relative_dirs: tuple[str, ...] = (),
 ) -> DirectoryVerificationResult:
     """Verify (and restore) every file inside *source_directory* under *project_root*."""
     destination_directory = Path(project_root).resolve() / directory_name
@@ -431,14 +573,31 @@ def verify_directory(
         _restore_file(source_file, destination_file)
         restored.append(relative_path)
 
+    removed = ()
+    if prune_extra_relative_dirs:
+        removed = _prune_managed_files(
+            source_directory,
+            destination_directory,
+            managed_relative_dirs=prune_extra_relative_dirs,
+        )
+
     return DirectoryVerificationResult(
         directory_name=label,
         source_directory=source_directory,
         destination_directory=destination_directory,
         restored_files=tuple(restored),
+        removed_files=removed,
         missing_files=tuple(missing),
         modified_files=tuple(modified),
     )
+
+# Subdirectories in ``.github`` that are mode-owned. During mode switch, these
+# must be mirrored exactly to avoid carrying stale assets from the previous mode.
+MODE_MANAGED_GITHUB_SUBDIRS: tuple[str, ...] = (
+    "agents",
+    "instructions",
+    "prompts",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +611,61 @@ def _modes_to_verify(mode: str) -> tuple[str, ...]:
     return (mode,)
 
 
+def _sync_agentic_environments(
+    project_root: Path,
+    mode: str,
+    environments: Iterable[str] | None,
+) -> tuple[tuple[EnvironmentVerificationResult, ...], str | None, bool]:
+    """Materialise the mode payload for every agentic environment in use.
+
+    Delegates to ``lex_mcp.ai_onboarding``, which owns the per-environment
+    renderers (Copilot's ``.github`` tree, Claude Code's ``.claude`` tree,
+    Cursor's ``.cursor`` tree, Codex's ``AGENTS.md``, …) so new environments
+    ship with a lex-mcp-local release and need no lex-app change.
+
+    Returns ``(results, error, handled)``. ``handled`` tells the caller that
+    asset delivery is fully owned by this phase, so the legacy per-mode
+    directory walk below must be skipped — otherwise a project that opted out
+    of the Copilot surfaces would still get an unmanaged ``.github`` tree
+    written into it.
+    """
+    try:
+        from lex_mcp.ai_onboarding import (  # type: ignore[import-not-found]
+            read_enabled_environments,
+            sync_project_payloads,
+        )
+    except Exception:
+        # lex-mcp-local predates the environment registry (or is not
+        # installed): fall back to the legacy .github mirror entirely. This is
+        # an expected downgrade path, not a verification failure.
+        return (), None, False
+
+    keys = tuple(environments) if environments else read_enabled_environments(
+        project_root
+    )
+    try:
+        results = sync_project_payloads(
+            project_root, mode=mode, environments=keys
+        )
+    except Exception as exc:
+        return (), f"environment payload sync failed: {exc}", False
+
+    converted = tuple(
+        EnvironmentVerificationResult(
+            environment=result.environment,
+            display_name=result.display_name,
+            dialect=result.dialect,
+            written=tuple(result.written),
+            pruned=tuple(result.pruned),
+            unchanged_count=len(result.unchanged),
+            errors=tuple(result.errors),
+        )
+        for result in results
+    )
+    handled = bool(results) and all(result.ok for result in results)
+    return converted, None, handled
+
+
 def verify_ai_assets(
     project_root: Path,
     *,
@@ -460,6 +674,11 @@ def verify_ai_assets(
     env: Mapping[str, str] | None = None,
     docs_directory_names: tuple[str, ...] = LEX_APP_EMBEDDED_DIRECTORY_NAMES,
     mode_directory_names: tuple[str, ...] = MCP_MODE_DIRECTORIES,
+    align_mcp_mode: bool = False,
+    mcp_config_path: Path | None = None,
+    mode_align_source_tool: str = "lex-ai-verify",
+    sync_environments: bool = True,
+    environments: Iterable[str] | None = None,
 ) -> VerifyAIAssetsResult:
     """Verify every asset directory required by the active MCP mode.
 
@@ -473,8 +692,69 @@ def verify_ai_assets(
     python_executable:
         Interpreter used to locate installed packages. Defaults to the active
         virtual environment's interpreter.
+    align_mcp_mode:
+        When *True*, treat ``<project_root>/.env``'s ``LEX_MCP_MODE`` as the
+        source of truth. If the persisted MCP runtime view (override file or
+        ``mcp.json``) disagrees, invoke the equivalent of the in-server
+        ``switch_to_mode`` MCP tool to align them before verifying assets.
+        Disabled by default to preserve the lightweight pre-flight behaviour.
+    mcp_config_path:
+        Path to the IDE ``mcp.json`` used for mode alignment. When *None*,
+        the GitHub Copilot config is auto-resolved.
+    sync_environments:
+        When *True* (default), also materialise the mode's agent payload in
+        every agentic environment the project targets (Copilot, Claude Code,
+        Cursor, Codex, Windsurf, …) via ``lex_mcp.ai_onboarding``.
+    environments:
+        Explicit environment keys to sync. Defaults to the project's
+        ``LEX_AI_ENVIRONMENTS`` value, then to what the project already has
+        on disk.
     """
     project_root_resolved = Path(project_root).resolve()
+
+    # ── Optional: align MCP runtime mode with project .env ────────────────
+    # Treat the project's .env ``LEX_MCP_MODE`` as the source of truth. If
+    # the runtime (override file or mcp.json) disagrees, run the
+    # ``switch_to_mode`` primitives so the running MCP server is told to
+    # adopt the .env mode before we restore assets for it.
+    if align_mcp_mode and mode != "all":
+        try:
+            from lex.tools.mcp_mode_invoke import invoke_switch_to_mode
+            from lex.tools.setup_with_ai import (
+                resolve_github_copilot_mcp_config_path,
+            )
+
+            env_mode = _read_env_file_value(
+                project_root_resolved / ".env", "LEX_MCP_MODE"
+            )
+            env_mode = (env_mode or "").strip().lower() or None
+            if env_mode and env_mode in MCP_MODE_PACKAGE:
+                resolved_mcp_path = (
+                    Path(mcp_config_path).resolve()
+                    if mcp_config_path is not None
+                    else resolve_github_copilot_mcp_config_path()
+                )
+                runtime_mode = (
+                    _read_override_mode()
+                    or _read_mode_from_mcp_json(resolved_mcp_path)
+                    or _resolve_mode_from_mcp_json_files(project_root_resolved)
+                )
+                if runtime_mode != env_mode:
+                    invoke_switch_to_mode(
+                        env_mode,
+                        project_root=project_root_resolved,
+                        mcp_config_path=resolved_mcp_path,
+                        source_tool=mode_align_source_tool,
+                        reason="aligning runtime mode with project .env",
+                    )
+                if mode is None:
+                    mode = env_mode
+        except Exception:
+            # Best-effort — alignment failures must never block verification.
+            # If the Copilot mcp.json path cannot be resolved, the mode
+            # cannot be aligned, but we can still verify assets for
+            # whatever mode resolve_active_mcp_mode picks up.
+            pass
 
     if mode == "all":
         active_mode, mode_source = "all", "cli"
@@ -493,8 +773,49 @@ def verify_ai_assets(
 
     results: list[DirectoryVerificationResult] = []
 
-    # Mode-specific directories (currently ``.github`` per mode).
+    # ── Agentic environments ──────────────────────────────────────────────
+    # Every environment the project targets gets the active mode's payload in
+    # its own native layout. For Copilot surfaces that is a byte-mirror of the
+    # package ``.github`` tree; for the others it is a rendered translation.
+    # When this phase succeeds it owns asset delivery outright, so the legacy
+    # per-mode walk below is skipped.
+    environment_results: tuple[EnvironmentVerificationResult, ...] = ()
+    environment_error: str | None = None
+    environments_handled = False
+    if sync_environments and active_mode != "all":
+        (
+            environment_results,
+            environment_error,
+            environments_handled,
+        ) = _sync_agentic_environments(
+            project_root_resolved, active_mode, environments
+        )
+        for environment_result in environment_results:
+            if environment_result.written or environment_result.pruned:
+                results.append(
+                    DirectoryVerificationResult(
+                        directory_name=(
+                            f"{environment_result.display_name} "
+                            f"[{environment_result.dialect}]"
+                        ),
+                        source_directory=None,
+                        destination_directory=project_root_resolved,
+                        restored_files=tuple(
+                            Path(p) for p in environment_result.written
+                        ),
+                        removed_files=tuple(
+                            Path(p) for p in environment_result.pruned
+                        ),
+                    )
+                )
+
+    # Mode-specific directories (currently ``.github`` per mode). Skipped
+    # entirely once the environment phase succeeded: it already delivered the
+    # right tree to the right places, and running this walk as well would push
+    # a .github payload into projects that use none of the Copilot surfaces.
     for mode_name in _modes_to_verify(active_mode):
+        if environments_handled and set(mode_directory_names) == {".github"}:
+            break
         package_name = MCP_MODE_PACKAGE[mode_name]
         for directory_name in mode_directory_names:
             display_name = (
@@ -526,6 +847,11 @@ def verify_ai_assets(
                     source,
                     directory_name,
                     display_name=display_name,
+                    prune_extra_relative_dirs=(
+                        MODE_MANAGED_GITHUB_SUBDIRS
+                        if directory_name == ".github" and active_mode != "all"
+                        else ()
+                    ),
                 )
             )
 
@@ -559,4 +885,6 @@ def verify_ai_assets(
         mode=active_mode,
         mode_source=mode_source,
         directories=tuple(results),
+        environments=environment_results,
+        environment_sync_error=environment_error,
     )

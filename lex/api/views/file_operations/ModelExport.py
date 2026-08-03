@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import datetime as _dt
 import logging
+from zoneinfo import ZoneInfo
 import os
 import re
 import tempfile
@@ -12,8 +13,10 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import parse_qs
 
 import pandas as pd
+from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist
 from django.db.models import Q
+from django.utils import timezone as _dj_tz
 from django.db.models import QuerySet
 from django.http import FileResponse, JsonResponse
 from lex.api.filters import UserReadRestrictionFilterBackend, ForeignKeyFilterBackend
@@ -30,6 +33,48 @@ AG_GROUP_HIERARCHY_COLUMN = "__ag_group_hierarchy_label"
 AG_GROUP_HIERARCHY_DEPTH_COLUMN = "__ag_group_hierarchy_depth"
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_export_zone(zone: "str | None"):
+    """Validate an IANA zone name; fall back to settings.TIME_ZONE."""
+    if zone:
+        try:
+            return ZoneInfo(zone)
+        except Exception:  # noqa: BLE001 - bad client input falls back safely
+            logger.warning("export: ignoring invalid timezone %r", zone)
+    try:
+        return ZoneInfo(settings.TIME_ZONE)
+    except Exception:  # noqa: BLE001
+        return ZoneInfo("UTC")
+
+
+def _to_excel_naive(df: "pd.DataFrame", zone: "str | None" = None) -> "pd.DataFrame":
+    """Make datetime cells timezone-naive for Excel, in the requester's zone.
+
+    Excel has no timezone type, and ``xlsxwriter`` refuses tz-aware datetimes
+    (``Excel does not support datetimes with timezones``). Under ``USE_TZ=True``
+    the ORM yields aware UTC values, so we render each one as a **local
+    wall-clock** in ``zone`` — the requester's browser timezone, passed on the
+    export request — before dropping the tzinfo. That way the workbook shows the
+    same local time the user sees in the grid, not UTC. When ``zone`` is absent
+    or invalid we fall back to ``settings.TIME_ZONE``. A no-op under
+    ``USE_TZ=False`` (values are already naive).
+    """
+    target = _resolve_export_zone(zone)
+
+    def _strip(value):
+        if isinstance(value, _dt.datetime) and value.tzinfo is not None:
+            return value.astimezone(target).replace(tzinfo=None)
+        return value
+
+    for col in df.columns:
+        series = df[col]
+        if isinstance(series.dtype, pd.DatetimeTZDtype):
+            df[col] = series.dt.tz_convert(target).dt.tz_localize(None)
+        elif series.dtype == object:
+            df[col] = series.map(_strip)
+    return df
+
 
 # Streaming export tunables. Kept conservative so the process stays well
 # within a 2 GB RAM / 0.1 CPU production envelope.
@@ -867,7 +912,13 @@ class ModelExportView(GenericAPIView):
         if isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, _dt.datetime):
-            return value.replace(tzinfo=None) if value.tzinfo is not None else value
+            # Excel has no timezone: render an aware value as a naive wall-clock
+            # in the requester's browser zone (set on `post`), so the workbook
+            # shows local time, not UTC. Naive values pass through unchanged.
+            if value.tzinfo is not None:
+                target = _resolve_export_zone(getattr(self, "_export_target_zone", None))
+                return value.astimezone(target).replace(tzinfo=None)
+            return value
         if isinstance(value, (_dt.date, _dt.time)):
             return value
         if isinstance(value, (list, tuple, set, dict)):
@@ -1694,6 +1745,12 @@ class ModelExportView(GenericAPIView):
 
         json_data = request.data if isinstance(request.data, dict) else {}
         ag_export_payload = json_data.get("ag_export")
+        # Excel has no timezone; render aware datetimes in the requester's browser
+        # zone (frontend sends `timezone`) so the workbook shows local wall-clock,
+        # not UTC. Falls back to settings.TIME_ZONE when absent/invalid. Stored on
+        # self so the streaming/fast paths' _normalize_cell_value can use it too.
+        export_timezone = request.query_params.get("timezone") or json_data.get("timezone")
+        self._export_target_zone = export_timezone
 
         if isinstance(ag_export_payload, dict) and isinstance(ag_export_payload.get("request"), dict):
             selected_ids = self._extract_selected_ids_for_export(json_data)
@@ -1787,6 +1844,8 @@ class ModelExportView(GenericAPIView):
         # Excel limits worksheet names to 31 chars and disallows []:*?/\
         sheet_name = re.sub(r'[\[\]:*?/\\]', '_', model.__name__)[:31]
 
+        # Excel has no timezone type; strip tz from aware (USE_TZ=True) datetimes.
+        df = _to_excel_naive(df, export_timezone)
         df.to_excel(writer, sheet_name=sheet_name, merge_cells=False, freeze_panes=(1, 1), index=True)
 
         worksheet = writer.sheets.get(sheet_name)

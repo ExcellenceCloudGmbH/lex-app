@@ -3,9 +3,9 @@
 Intent: customers rely on ``?as_of`` to reconstruct what a record looked like
 before an edit, and on ``edited_at`` to know when the edit happened. Those two
 contracts must agree to the microsecond and survive the timezone chain end to
-end: the edit stamps naive UTC (``lex_datetime_now``), the API serializes it
-with an explicit ``Z`` (BUG-025 fix), ``parse_as_of_datetime`` reads ``Z``
-back to naive UTC, and ``get_queryset_as_of`` compares it against the
+end: the edit stamps aware UTC (``lex_datetime_now`` under ``USE_TZ=True``), the
+API serializes it with a real offset, ``parse_as_of_datetime`` normalizes any
+anchor to UTC, and ``get_queryset_as_of`` compares it against the
 ``sys_from``/``valid_from`` windows stamped by the same clock. A shift
 anywhere in that chain (the BUG-025 class of failure) silently time-travels to
 the wrong snapshot — worse than an error, it returns plausible wrong data.
@@ -23,8 +23,11 @@ from __future__ import annotations
 
 import time as _time
 from datetime import datetime, timezone as dt_timezone
+from urllib.parse import quote
 
 import pytest
+from django.conf import settings
+from django.utils import timezone as dj_tz
 from rest_framework import status
 
 from lex.core.models.LexModel import lex_datetime_now
@@ -36,9 +39,25 @@ pytestmark = pytest.mark.history
 
 
 def _parse_serialized_utc(rendered: str) -> datetime:
-    """Parse an API datetime string back to the naive-UTC storage clock."""
-    parsed = datetime.fromisoformat(rendered.replace("Z", "+00:00"))
-    return parsed.astimezone(dt_timezone.utc).replace(tzinfo=None)
+    """Parse an API datetime string to the same convention the ORM stores.
+
+    Under ``USE_TZ=True`` the stored value is aware UTC; under ``USE_TZ=False``
+    it is naive UTC. Return a value directly comparable to the field either way.
+    """
+    parsed = datetime.fromisoformat(rendered.replace("Z", "+00:00")).astimezone(dt_timezone.utc)
+    return parsed if settings.USE_TZ else parsed.replace(tzinfo=None)
+
+
+def _utc_z(dt: datetime) -> str:
+    """Format a datetime as a valid UTC ISO string ending in 'Z'.
+
+    Under USE_TZ=True ``lex_datetime_now()`` is aware, so ``dt.isoformat() + "Z"``
+    would yield a malformed ``…+00:00Z`` (offset AND Z) that the as_of parser
+    rejects — silently dropping the anchor. Normalize to naive UTC first.
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(dt_timezone.utc).replace(tzinfo=None)
+    return dt.isoformat() + "Z"
 
 
 class TestCluster05m_AsOfEditTime(E2ETestCase):
@@ -59,7 +78,9 @@ class TestCluster05m_AsOfEditTime(E2ETestCase):
         return item, t_before_edit
 
     def _snapshots(self, pk, as_of: str):
-        url = self.url_history(HIST_SIMPLE, pk) + f"?as_of={as_of}"
+        # URL-encode: a serialized offset like +02:00 would otherwise be decoded
+        # as a space in the query string, silently dropping the as_of anchor.
+        url = self.url_history(HIST_SIMPLE, pk) + f"?as_of={quote(str(as_of), safe='')}"
         resp = self.client.get(url)
         self.assertEqual(
             resp.status_code, status.HTTP_200_OK,
@@ -110,7 +131,7 @@ class TestCluster05m_AsOfEditTime(E2ETestCase):
         """
         item, t_before_edit = self._create_and_edit()
 
-        snaps = self._snapshots(item.pk, t_before_edit.isoformat() + "Z")
+        snaps = self._snapshots(item.pk, _utc_z(t_before_edit))
         self.assertEqual(
             len(snaps), 1,
             f"At a pre-edit instant the system knew exactly one version, "
@@ -137,7 +158,7 @@ class TestCluster05m_AsOfEditTime(E2ETestCase):
         """
         item, _ = self._create_and_edit()
 
-        snaps = self._snapshots(item.pk, lex_datetime_now().isoformat() + "Z")
+        snaps = self._snapshots(item.pk, _utc_z(lex_datetime_now()))
         self.assertEqual(
             len(snaps), 2,
             f"After one edit the system knows two versions, got {len(snaps)}.",
@@ -186,7 +207,7 @@ class TestCluster05m_AsOfEditTime(E2ETestCase):
 
         # Strictly before the edit, only v1 existed. (t_before_edit predates
         # the edit by a real wall-clock gap, immune to precision issues.)
-        before_edit = self._snapshots(item.pk, t_before_edit.isoformat() + "Z")
+        before_edit = self._snapshots(item.pk, _utc_z(t_before_edit))
         self.assertEqual(
             [s["snapshot"]["name"] for s in before_edit], ["v1"],
             "Strictly before the edit, the system must know only v1.",
@@ -219,7 +240,7 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
         return item, t_before_edit
 
     def _list_names(self, as_of: str) -> list:
-        url = self.url_list(HIST_SIMPLE) + f"?as_of={as_of}"
+        url = self.url_list(HIST_SIMPLE) + f"?as_of={quote(str(as_of), safe='')}"
         resp = self.client.get(url)
         self.assertEqual(
             resp.status_code, status.HTTP_200_OK,
@@ -239,12 +260,12 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
         item, t_before_edit = self._create_and_edit()
 
         self.assertEqual(
-            self._list_names(t_before_edit.isoformat() + "Z"), ["v1"],
+            self._list_names(_utc_z(t_before_edit)), ["v1"],
             "The list endpoint must show the pre-edit values at a pre-edit "
             "UTC anchor — this is the grid's time-travel surface.",
         )
         self.assertEqual(
-            self._list_names(lex_datetime_now().isoformat() + "Z"), ["v2"],
+            self._list_names(_utc_z(lex_datetime_now())), ["v2"],
             "The list endpoint must show the current values at a present anchor.",
         )
 
@@ -262,7 +283,14 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
         """
         item, t_before_edit = self._create_and_edit()
 
-        naive = t_before_edit.isoformat()  # no Z, no offset — naive on purpose
+        # Build a genuinely naive string (no Z, no offset). Under USE_TZ=True
+        # lex_datetime_now() is aware, so strip the tzinfo to test the "naive
+        # anchor is read as UTC" contract rather than accidentally sending +00:00.
+        t_naive = (
+            t_before_edit if dj_tz.is_naive(t_before_edit)
+            else dj_tz.make_naive(t_before_edit, dt_timezone.utc)
+        )
+        naive = t_naive.isoformat()  # no Z, no offset — naive on purpose
         self.assertEqual(
             self._list_names(naive), ["v1"],
             "A naive as_of must be read as UTC (parse contract). If this "
@@ -276,7 +304,7 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
             _dt.timezone(_dt.timedelta(hours=2))
         )
         self.assertEqual(
-            self._list_names(berlin.isoformat().replace("+", "%2B")), ["v1"],
+            self._list_names(berlin.isoformat()), ["v1"],
             "An offset-aware local-time anchor denoting the same instant "
             "must time-travel to the same snapshot.",
         )

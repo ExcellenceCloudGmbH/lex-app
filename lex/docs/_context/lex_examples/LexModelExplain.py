@@ -1,10 +1,15 @@
 import logging
-from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Mapping, Optional, Set, Union
+from abc import ABCMeta
 
 import streamlit as st
+from dataclasses import dataclass
+from typing import Any, Dict, FrozenSet, Literal, Mapping, Optional, Set, Union
+
 from django.db import models, transaction
-from django_lifecycle import LifecycleModel, hook, BEFORE_SAVE, AFTER_SAVE
+from django_lifecycle import LifecycleModel, hook, AFTER_UPDATE, AFTER_CREATE, BEFORE_SAVE, AFTER_SAVE, BEFORE_CREATE, \
+    BEFORE_UPDATE
+
+from lex.api.utils import operation_context
 
 logger = logging.getLogger(__name__)
 
@@ -498,9 +503,41 @@ class LexModel(LifecycleModel):
                 f"Transaction error during rollback: {transaction_error}"
             ) from transaction_error
 
-    # created_by and edited_by are automatically managed by LexModel.
-    # They are immutable audit fields and cannot be overridden programmatically.
-    # The actor is resolved from the authenticated request user.
+    @hook(BEFORE_UPDATE)
+    def update_edited_by(self):
+        # Skip if we are syncing from history (bitemporal sync)
+        if getattr(self, 'skip_history_when_saving', False):
+            return
+
+        # self.track()
+        context = operation_context.get()
+        # from lex_app.celery_tasks import print_context_state
+        # print_context_state()
+        if context and hasattr(context['request_obj'], 'user'):
+            # self.edited_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
+            self.edited_by = str(context['request_obj'].user)
+        elif context.get('request_obj') and "api-key" in [h.lower() for h in getattr(context['request_obj'], 'headers', {})]:
+            self.edited_by = "Technical User"
+        else:
+            self.edited_by = 'Initial Data Upload'
+        # self.save_without_historical_record(skip_hooks=True)
+
+    @hook(BEFORE_CREATE)
+    def update_created_by(self):
+        # Skip if we are syncing from history (bitemporal sync)
+        if getattr(self, 'skip_history_when_saving', False):
+            return
+
+        context = operation_context.get()
+        logger.info(f"Request object: {context['request_obj']}")
+        if context and hasattr(context['request_obj'], 'user'):
+            # self.created_by = f"{context['request_obj'].user.first_name} {context['request_obj'].user.last_name} - {context['request_obj'].user.email}"
+            self.created_by = str(context['request_obj'].user)
+        elif context.get('request_obj') and "api-key" in [h.lower() for h in getattr(context['request_obj'], 'headers', {})]:
+            self.edited_by = "Technical User"
+        else:
+            self.created_by = 'Initial Data Upload'
+        # self.save_without_historical_record(skip_hooks=True)
 
 
     def track(self):

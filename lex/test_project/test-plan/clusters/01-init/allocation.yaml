@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 206
+max_scenario: 222
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -215,29 +215,71 @@ letters:
       fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py;
       moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC.'
   y:
-    title: Streamlit auth proxy — iframe re-auth breakout (refused-to-connect fix)
+    title: IDE-aware setup run configurations for PyCharm and VS Code
+    scenarios: 1.203-1.210
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: best-effort IDE marker detection; unknown/conflicting environments generate both formats;
+      VS Code launchers retain full PyCharm command/env/prompt parity and preserve user JSONC entries
+  i:
+    title: rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident
     scenarios: 1.195-1.200
     status: complete
     tests:
       pass: 6
       skip: 0
       xfail: 0
-    note: scenarios 1.195–1.200; unauthenticated iframe/frame document loads break out to a top-level
-      login instead of redirecting the frame to Keycloak (login page sets frame-ancestors 'self' →
-      "refused to connect"); top-level redirect + API 401 unchanged. Covers lex/proxy.py
-      `_unauthenticated_response` / `_is_iframe_document_request`.
+    note: management command that surgically re-anchors user-entered datetimes mis-stored after the
+      rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until)
+      (--cutoff required, no global default — too-early corrupts good data; --until defaults to now),
+      excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own
+      date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197
+      late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag.
+      Ships with the USE_TZ=True cutover.
+  r:
+    title: Fetched datetimes come back in the DB-session display zone (Berlin)
+    scenarios: 1.201-1.202
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: DATABASES['default']['TIME_ZONE'] = TIME_ZONE runs the Postgres session in Berlin, so a
+      fetched DateTimeField returns aware in the display zone (11:00+02:00) not UTC — str()/.date()/.hour
+      and model __str__ render local with no per-field/per-model changes; storage + instant unchanged.
+      Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw
+      SQL is unaffected (history+serializers+init+exports 385 pass with it live).
   z:
-    title: Embedded Streamlit token renewal (issuer expiry + proxy adoption)
-    scenarios: 1.201-1.206
+    title: Streamlit auth proxy - iframe re-auth breakout (refused-to-connect fix)
+    scenarios: 1.211-1.216
     status: complete
     tests:
       pass: 6
       skip: 0
       xfail: 0
-    note: follow-up to 1y — makes the expiry dead end avoidable instead of merely graceful.
-      StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only
-      returned by dead code that self-signed HS256 the RS256/JWKS proxy would reject) and 401s
-      instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly
-      newer auth_token rather than discarding it while the stored one is still valid, which
-      silently defeated any renewal. Deliberately no refresh token on the embedded path — it
-      would have to travel through the iframe URL
+    note: >-
+      unauthenticated iframe/frame document loads break out to a top-level login instead of
+      redirecting the frame to Keycloak, whose login page sets frame-ancestors 'self' and renders
+      as "refused to connect"; top-level redirect and API 401 unchanged. Covers lex/proxy.py
+      _unauthenticated_response / _is_iframe_document_request. Renumbered from y/1.195-1.200 on
+      merge - both the letter and the range were taken on lex-app-v2 while this was open
+  aa:
+    title: Embedded Streamlit token renewal (issuer expiry + proxy adoption)
+    scenarios: 1.217-1.222
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than
+      merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval
+      (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy
+      would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy
+      adopts a strictly newer auth_token rather than discarding it while the stored one is still
+      valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
+      a-z. Renumbered from z/1.201-1.206 on merge
+

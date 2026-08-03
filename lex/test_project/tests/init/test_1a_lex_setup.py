@@ -52,7 +52,11 @@ class TestCluster01a_LexSetup(TestCase):
         # Import lazily — ``lex.bin.lex`` sets env vars at import time.
         from lex.bin.lex import setup
         runner = CliRunner()
-        return runner.invoke(setup, [], catch_exceptions=False)
+        # Cluster 1a describes the neutral-shell scaffolding contract. Keep it
+        # deterministic when a developer runs the suite from an IDE terminal;
+        # cluster 1y covers each detected-IDE branch explicitly.
+        with patch("generate_pycharm_configs.detect_ide", return_value=None):
+            return runner.invoke(setup, [], catch_exceptions=False)
 
     # -- 1.1 -----------------------------------------------------------
     def test_1_1_fresh_directory_scaffolds_all_three_artifacts(self) -> None:

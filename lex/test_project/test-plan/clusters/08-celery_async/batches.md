@@ -178,3 +178,20 @@
 | Status | ✅ Complete — source fix + paired tests + plan sync in one change. Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Companion: Batch 7r withdrawn (inline guard + 7.199 flip + test file removed), 7q restored to committed assertions |
 
 ---
+
+### Batch 8c — Celery dispatch must not move `edited_at` / `edited_by` (BUG-028) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.145 – 8.153 |
+| Type | I |
+| Files covered | `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper, `calc_and_save`, `CallbackTask` status persistence), `lex/core/models/CalculationModel.py` (`dispatch_calculation_task`) |
+| Test file | `lex/test_project/tests/celery_async/test_8c_calculation_audit_columns.py` |
+| Test classes | `TestCluster08c_CalculationAuditColumns` — 8.145 undecorated dispatch keeps both columns (✅); **8.146/8.147** decorated dispatch keeps `edited_at`/`edited_by` (✅, was BUG-028); 8.148 failed decorated calc keeps them (✅ — the rollback protects it); **8.149** child output rows under decorated dispatch (✅); 8.150 terminal status write (✅); **8.151** decorated-vs-undecorated parity — the invariant stated directly (✅); 8.152 negative control, a user edit under Celery still stamps (✅); **8.153** the boundary — a decorated `calculate()` with **Celery OFF** is clean (✅), so the trigger is decoration *and* Celery dispatch, not decoration alone |
+| Fixtures | `AuditUndecoratedCalc` / `AuditDecoratedCalc` (byte-identical bodies, differing only by `@lex_shared_task`), `AuditDecoratedFailingCalc` (non-atomic), `AuditCeleryChild`, `AuditDecoratedParentCalc` — added to `celery_async/models.py` |
+| Tests landed | **9 pass / 0 fail** |
+| Coverage gain | the audit-column contract across both Celery dispatch paths; pins the parity invariant |
+| Status | ✅ Complete — **BUG-028 resolved.** The `lex_shared_task` worker wrapper now enters `calculation_execution_context()` (the same guard the undecorated `calc_and_save` path uses), so a decorated `calculate()` no longer stamps `edited_at`/`edited_by`. The four scenarios that asserted the correct behaviour are now live regression gates. |
+| Note | Two assertions had to be strengthened before they could detect the defect, and both are worth remembering. (1) `edited_by`: a worker resolves the same fallback actor the fixture already carried, so an identical overwrite was invisible — 8.147 now seeds a distinct sentinel via `queryset.update()`. (2) The failing calc is deliberately `is_atomic = False`: under `is_atomic = True` the raise rolls the whole calculation back and would hide any stamp. Fixture note — the decorated tasks require explicit Celery task names; Celery derives a default name from `module.func_name` and all three `calculate` methods share one fixture module, so without them the last registration silently wins and one model runs another's body. |
+
+---

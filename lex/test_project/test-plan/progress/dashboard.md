@@ -10,19 +10,19 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 24 | 206 | 100 | 0 | 0 |
+| 1. Init — Project Bootstrap | 27 | 222 | 116 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
-| 3. Validation Hooks | 6 | 32 | 0 | 0 | 0 |
+| 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
 | 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
-| 7. Calculation State Machine | 18 | 204 | 61 | 0 | 0 |
-| 8. Celery & Async | 14 | 144 | 80 | 12 | 0 |
+| 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
+| 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
 | 10. API Layer | 13 | 71 | 21 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 9 | 45 | 13 | 0 | 0 |
-| 13. Export Endpoint | 5 | 30 | 0 | 0 | 0 |
+| 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
+| 13. Export Endpoint | 7 | 37 | 7 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 6 | 33 | 0 | 0 | 0 |
 | 15. Calculation Logging Surface | 8 | 34 | 13 | 0 | 0 |
 
@@ -31,6 +31,7 @@
 | Batch | Title | Scenarios | Status | Pass | Skip | Xfail | Note |
 |---|---|---|---|---|---|---|---|
 | 1a | `lex setup` — scaffolding | 1.1-1.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 1aa | Embedded Streamlit token renewal (issuer expiry + proxy adoption) | 1.217-1.222 | complete | 6 | 0 | 0 | follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly newer auth_token rather than discarding it while the stored one is still valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted a-z. Renumbered from z/1.201-1.206 on merge |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -38,6 +39,7 @@
 | 1f |  | 1.8-1.15 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1g |  | 1.44-1.46 | complete | 10 | 0 | 0 | `_make_sync_manager()` fixture, no Keycloak/DB |
 | 1h |  | 1.47-1.50 | complete | 15 | 0 | 0 | `requests.get` patched, network-free |
+| 1i | rebase_incident_datetimes — re-anchor datetimes corrupted by the TIME_ZONE incident | 1.195-1.200 | complete | 6 | 0 | 0 | management command that surgically re-anchors user-entered datetimes mis-stored after the rc212 TIME_ZONE flip (f622c9c); dry-run by default, PER-INSTANCE window [--cutoff, --until) (--cutoff required, no global default — too-early corrupts good data; --until defaults to now), excludes app-stamped created_at/edited_at. Correction is DST-aware (AT TIME ZONE per value's own date — winter −1h vs summer −2h); the ~2 transition hours/year are flagged for review. 1.197 late-upgrader safety, 1.198 post-fix bound, 1.199 DST-aware winter shift, 1.200 transition-flag. Ships with the USE_TZ=True cutover. |
 | 1j |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1k |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 1l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
@@ -46,14 +48,15 @@
 | 1o | Lazy imports + sync-exclusion + history-config helpers |  | complete | 15 | 0 | 0 | scenarios 1.110–1.124 |
 | 1p | Settings / config / URLs / top-level views |  | complete | 22 | 0 | 0 | scenarios 1.125–1.146 |
 | 1q | Migration file completeness gate | 1.147 | complete | 1 | 0 | 0 | scenario 1.147; `lex makemigrations ... --check --dry-run` must stay clean for framework apps |
+| 1r | Fetched datetimes come back in the DB-session display zone (Berlin) | 1.201-1.202 | complete | 2 | 0 | 0 | DATABASES['default']['TIME_ZONE'] = TIME_ZONE runs the Postgres session in Berlin, so a fetched DateTimeField returns aware in the display zone (11:00+02:00) not UTC — str()/.date()/.hour and model __str__ render local with no per-field/per-model changes; storage + instant unchanged. Postgres-only guard; Django date-part lookups use explicit AT TIME ZONE so bitemporal/as_of raw SQL is unaffected (history+serializers+init+exports 385 pass with it live). |
 | 1s | Log-noise cleanup + lex-namespace debug control (EXC-1787) |  | complete | 10 | 0 | 0 | scenarios 1.159–1.168; urllib3 InsecureRequestWarning gate + `LEX_LOG_LEVEL` lex-only DEBUG + console-handler level + blanket `LEX_SUPPRESS_WARNINGS` filter |
 | 1t | `DISABLE_SERVER_SIDE_CURSORS` placement (production cursor crash) | 1.169-1.170 | complete | 2 | 0 | 0 | scenarios 1.169–1.170; flag was module-level (ignored by Django) so server-side cursors stayed on behind the pooling proxy → `InvalidCursorName` on every `.iterator()`; now set per |
 | 1u | Fast ASGI health/readiness probes | 1.171-1.175 | complete | 5 | 0 | 0 | scenarios 1.171–1.175; `/health` short-circuits to static liveness, `/readiness` gates on DB readiness, non-probe HTTP falls through to Django |
 | 1v | `TIME_ZONE`↔`USE_TZ` coupling — `django_celery_beat` DatabaseScheduler correctness |  | complete | 5 | 0 | 0 | scenarios 1.179–1.183; `TIME_ZONE="UTC"` when `USE_TZ=False` so beat's naive-as-UTC read is correct for the recovery `IntervalSchedule` AND future-edit `ClockedSchedule` (was off b |
 | 1w | `LEX_TASK_RECOVERY_ENABLED` defaults OFF — stuck calc resets on restart | 1.184-1.186 | complete | 3 | 0 | 0 | scenarios 1.184–1.186; default flipped `true`→`false` so the startup sweep blind-aborts a stuck `IN_PROGRESS` row on restart when no recovery-supervisor pod runs (local/CI/un-provi |
 | 1x | Health exposes encrypted runtime metadata for the Instance Controller | 1.187-1.194 | complete | 0 | 0 | 0 | scenarios 1.187–1.194 (renumbered from 1.171–1.178 during the 2026-07-07 BUG-023 letter-collision fix — this file previously shared letter 1u + IDs 1.171–1.175 with test_1u_fast_health_asgi.py; moved to fresh letter x + fresh IDs). Encrypted runtime version/SHA in the health payload for IC. |
-| 1y | Streamlit auth proxy — iframe re-auth breakout (refused-to-connect fix) | 1.195-1.200 | complete | 6 | 0 | 0 | scenarios 1.195–1.200; unauthenticated iframe/frame document loads break out to a top-level login instead of redirecting the frame to Keycloak (login page sets frame-ancestors 'self' → "refused to connect"); top-level redirect + API 401 unchanged. Covers lex/proxy.py `_unauthenticated_response` / `_is_iframe_document_request`. |
-| 1z | Embedded Streamlit token renewal (issuer expiry + proxy adoption) | 1.201-1.206 | complete | 6 | 0 | 0 | follow-up to 1y — makes the expiry dead end avoidable instead of merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only returned by dead code that self-signed HS256 the RS256/JWKS proxy would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly newer auth_token rather than discarding it while the stored one is still valid, which silently defeated any renewal. Deliberately no refresh token on the embedded path — it would have to travel through the iframe URL |
+| 1y | IDE-aware setup run configurations for PyCharm and VS Code | 1.203-1.210 | complete | 8 | 0 | 0 | best-effort IDE marker detection; unknown/conflicting environments generate both formats; VS Code launchers retain full PyCharm command/env/prompt parity and preserve user JSONC entries |
+| 1z | Streamlit auth proxy - iframe re-auth breakout (refused-to-connect fix) | 1.211-1.216 | complete | 6 | 0 | 0 | unauthenticated iframe/frame document loads break out to a top-level login instead of redirecting the frame to Keycloak, whose login page sets frame-ancestors 'self' and renders as "refused to connect"; top-level redirect and API 401 unchanged. Covers lex/proxy.py _unauthenticated_response / _is_iframe_document_request. Renumbered from y/1.195-1.200 on merge - both the letter and the range were taken on lex-app-v2 while this was open |
 
 ## 2. CRUD via REST API (`crud_api`)
 
@@ -80,6 +83,7 @@
 | 3d |  | 3.7 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 3e | Pre-validation snapshot lifecycle (v1→v2 calculate-all memory fix) | 3.9-3.10 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 3f | Default-on lean `_initial_state` (last full-field snapshot removed; hooks preserved) | 3.11-3.32 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 3g | DateTimeField aware-on-assignment invariant (AwareDateTimeDescriptor) | 3.33-3.38 | complete | 6 | 0 | 0 | Under USE_TZ=True Django only normalizes at the DB boundary, so in-memory assignments stay naive while fetches are aware -- the mix crashes downstream pandas/xirr comparisons. The descriptor makes every DateTimeField assignment aware immediately (default-tz, the save-time interpretation), instant unchanged. Includes the deferred-loading (data-descriptor) regression guard. Ships with the USE_TZ=True cutover. |
 
 ## 4. Permissions (`permissions`)
 
@@ -160,6 +164,7 @@
 | 7p | Sync-mode streaming combinatorial expansion (OOM fix) | 7.178-7.187 | complete | 10 | 0 | 0 | scenarios 7.178–7.187; depth-first generator yields one model at a time (O(depth) vs O(N)) so sync calcs (CELERY_ACTIVE=False) stop OOM-ing the web pod; byte-identical ordered outp |
 | 7q | Nested fan-out dispatches by default from inside a worker | 7.196-7.201 | rolled-back | 6 | 0 | 0 | scenarios 7.196–7.201; removed the `is_celery_worker_process()` inline guard from both dispatch paths (`CalculatedModelMixin._dispatch_model_processing`, `CalculationModel.calculat |
 | 7r | (withdrawn — Session 91) Per-instance inline-inside-worker guard |  | rolled-back | 0 | 0 | 0 | before commit — the Session 89 inline guard broke nested-dispatch parallelism (a nested `CalculateNAV` ran inline on the parent's worker unless the caller opened an explicit `WaitF |
+| 7s | Calculations must not move edited_at / edited_by (Celery-OFF + startup) | 7.205-7.221 | complete | 17 | 0 | 0 | Audit-column contract for the sync dispatch paths and the startup recovery sweep. Covers SUCCESS/ERROR/CANCELLED terminal states, child-record output rows, created_at immutability, IN_PROGRESS-at-restart -> ABORTED (7.211 both columns, 7.217 authorship via a distinct sentinel), and a recovery-tracked row. Includes three negative controls (real user edit stamps; a user edit after a calculation still stamps; an explicit edited_at override is honoured) that guard against a fix over-suppressing genuine edits. 17 pass, including the reported case driven through the real HTTP calculate=true endpoint (7.219 interrupted -> restart -> ABORTED leaves edited_at/edited_by unchanged; 7.220 the stamp is absent before any completion could revert it; 7.221 a genuine HTTP field edit still stamps). -- these paths were already correct; the batch pins them so the BUG-028 fix cannot regress them. |
 
 ## 8. Celery & Async (`celery_async`)
 
@@ -167,6 +172,7 @@
 |---|---|---|---|---|---|---|---|
 | 8a | a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26) | 8.1-8.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8b |  | 8.5-8.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 8c | Celery dispatch must not move edited_at / edited_by (BUG-028) | 8.145-8.153 | complete | 9 | 0 | 0 | The two Celery dispatch paths must be audit-indistinguishable. calc_and_save (undecorated) wraps calculation_execution_context(); the lex_shared_task wrapper does not, so a decorated calculate() stamps audit columns on every successful run -- BUG-028. 8.146/8.147/8.149/8.151 assert the correct behaviour; the lex_shared_task wrapper now enters calculation_execution_context(), so these pass as live regression gates (BUG-028 resolved). 8.148 passes because a failed calculation rolls its writes back (pinned so a future partial-commit change cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery task names; all three calculate methods share one module and would otherwise collide. |
 | 8g | Task infrastructure — `lex/lex_app/celery_tasks.py` | 8.7-8.15 | complete | 9 | 0 | 0 | Redis-free (`celery_tasks.py` |
 | 8h | Dispatcher & local scheduler | 8.16-8.21 | complete | 6 | 0 | 0 | 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45% |
 | 8i | `celery.py` app config | 8.22-8.30 | complete | 9 | 0 | 0 | 8.22–8.30 (priority/nesting/filters/no-op/propagation |
@@ -236,6 +242,7 @@
 | 12g | Datetime timezone ambiguity (BUG-025, fixed) | 12.36-12.38 | complete | 3 | 0 | 0 | live regression gates — BUG-025 fixed in the same change (explicit 'Z' rendering for naive-UTC datetimes on USE_TZ=False targets via REST_FRAMEWORK DATETIME_FORMAT) |
 | 12h | Clearing a FileField through the REST update path | 12.39-12.41 | complete | 3 | 0 | 0 | LexClearableFileField/-ImageField — an explicit empty multipart value clears the stored file (omit still keeps, upload still replaces); frontend twin F9 batch 9d sends the marker |
 | 12i | Foreign-key display names in the read contract (BUG-F-003 backend fix) | 12.42-12.45 | complete | 4 | 0 | 0 | additive companion `<fk>__short_description` = str(related) emitted alongside the raw FK id on both list and detail paths; list resolves names in one batched pk__in query per FK (mirrors ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of frontend BUG-F-003 (FK columns rendered as bare ids) |
+| 12j | Datetime write→read round trip under the aware-UTC convention | 12.46-12.48 | complete | 3 | 0 | 0 | live regression gates for the USE_TZ=True cutover — a client that sends an explicit instant (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone; summer round trip, year-end midnight across the winter offset, and a truthful designated instant. Frontend twin datetimeConventionRoundTrip.test.ts. |
 
 ## 13. Export Endpoint (`exports`)
 
@@ -246,6 +253,8 @@
 | 13c | AG Grid export path — grouped & selected | 13.9 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13d | Auth & edge cases | 13.11-13.12 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 13e |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
+| 13f | Export renders datetimes in the requester's browser timezone | 13.31-13.33 | complete | 3 | 0 | 0 | Excel has no tz type, so aware-UTC datetimes must be baked as a local wall-clock at export time. Both write paths render in the requester's zone (frontend sends `timezone` on the export request) — legacy pandas (_to_excel_naive) and streaming/fast (_normalize_cell_value) — falling back to settings.TIME_ZONE for absent/invalid. Ships with the USE_TZ=True cutover. |
+| 13g | Report-file Excel boundary renders and re-reads the display zone | 13.34-13.37 | complete | 4 | 0 | 0 | XLSXField.create_excel_file_from_dfs crashed on the aware datetimes USE_TZ=True introduced ("Excel does not support datetimes with timezones"). _excel_display_naive renders aware values as settings.TIME_ZONE wall-clock and strips tzinfo -- data columns, object columns, (multi)index and column headers. Round-trip proven — a cell read back from the file re-assigned to a LexModel DateTimeField restores the exact original instant via the 3g invariant. |
 
 ## 14. AG Grid Query Endpoint (`queries`)
 

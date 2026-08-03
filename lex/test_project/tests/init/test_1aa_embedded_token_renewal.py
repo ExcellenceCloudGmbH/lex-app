@@ -7,7 +7,7 @@ refresh token would have to travel through the browser and into an iframe URL,
 where it lands in access logs, history and ``Referer`` headers. Renewal is
 therefore the caller's job, and it can only work if two things hold: the token
 endpoint tells the caller *when* to renew, and the proxy *adopts* the renewed
-token when it arrives. Batch 1y made the expiry dead end graceful; this batch
+token when it arrives. The iframe-breakout batch made the expiry dead end graceful; this batch
 removes the dead end.
 
 A regression here is silent. If the endpoint stops publishing an expiry the
@@ -15,10 +15,10 @@ caller has nothing to schedule against; if the proxy keeps the older token, ever
 renewal is discarded and the session dies at the original expiry anyway -- with
 no error anywhere, just a user sent back to the login page mid-work.
 
-Cluster 1z — scenarios 1.201–1.206. Type: U.
+Cluster 1aa — scenarios 1.217–1.222. Type: U.
 Covers: lex/authentication/views/token_views.py (StreamlitTokenView.post,
         _access_token_expiry), lex/proxy.py (_persist_jwt_to_session_if_needed).
-Run: python -m lex pytest lex/test_project/tests/init/test_1z_embedded_token_renewal.py -v
+Run: python -m lex pytest lex/test_project/tests/init/test_1aa_embedded_token_renewal.py -v
 """
 
 from __future__ import annotations
@@ -79,14 +79,14 @@ class _FakeTokenStore:
         self.tokens.pop(sid, None)
 
 
-class TestCluster01z_EmbeddedTokenRenewal(SimpleTestCase):
-    """Cluster 1z: the token endpoint publishes an expiry and the proxy adopts renewals."""
+class TestCluster01aa_EmbeddedTokenRenewal(SimpleTestCase):
+    """Cluster 1aa: the token endpoint publishes an expiry and the proxy adopts renewals."""
 
     # -- the issuer side -------------------------------------------------
 
-    def test_1_201_token_response_carries_expiry_metadata(self):
+    def test_1_217_token_response_carries_expiry_metadata(self):
         """
-        Scenario 1.201: the endpoint tells the caller when to renew.
+        Scenario 1.217: the endpoint tells the caller when to renew.
         Given: an authenticated session holding a Keycloak access token
         When: the frontend POSTs to the streamlit-token endpoint
         Then: the response carries the token plus expires_in / expires_at /
@@ -109,9 +109,9 @@ class TestCluster01z_EmbeddedTokenRenewal(SimpleTestCase):
             "The caller must be told to renew before expiry, not at it.",
         )
 
-    def test_1_202_expiry_falls_back_to_the_token_exp(self):
+    def test_1_218_expiry_falls_back_to_the_token_exp(self):
         """
-        Scenario 1.202: expiry still published when the session lacks the hint.
+        Scenario 1.218: expiry still published when the session lacks the hint.
         Given: a session with an access token but no oidc_access_expires_at
         When: the endpoint is called
         Then: the expiry is read from the token's own exp claim — the caller is
@@ -127,9 +127,9 @@ class TestCluster01z_EmbeddedTokenRenewal(SimpleTestCase):
             msg="Expiry must fall back to the token's exp claim.",
         )
 
-    def test_1_203_missing_session_token_is_a_clean_401(self):
+    def test_1_219_missing_session_token_is_a_clean_401(self):
         """
-        Scenario 1.203: no OIDC token on the session is an auth problem, not a crash.
+        Scenario 1.219: no OIDC token on the session is an auth problem, not a crash.
         Given: a user authenticated to Django whose session carries no OIDC token
         When: the endpoint is called
         Then: a 401 is returned rather than a KeyError surfacing as a 500 — only
@@ -158,9 +158,9 @@ class TestCluster01z_EmbeddedTokenRenewal(SimpleTestCase):
                 )
             )
 
-    def test_1_204_newer_token_supersedes_a_still_valid_one(self):
+    def test_1_220_newer_token_supersedes_a_still_valid_one(self):
         """
-        Scenario 1.204: a renewal arriving early is adopted, not discarded.
+        Scenario 1.220: a renewal arriving early is adopted, not discarded.
         Given: a stored token that is still valid for another 2 minutes
         When: the frontend re-sources the iframe with a token valid for an hour
         Then: the stored token becomes the newer one — renewal necessarily arrives
@@ -183,9 +183,9 @@ class TestCluster01z_EmbeddedTokenRenewal(SimpleTestCase):
         )
         self.assertIn("sid-old", store.dropped, "The superseded entry must not be left behind.")
 
-    def test_1_205_older_or_equal_token_leaves_the_session_alone(self):
+    def test_1_221_older_or_equal_token_leaves_the_session_alone(self):
         """
-        Scenario 1.205: a repeat of the same token does not churn the session.
+        Scenario 1.221: a repeat of the same token does not churn the session.
         Given: a stored token valid for another hour
         When: the same token arrives again (an iframe reload re-sending auth_token)
         Then: the stored entry and the session id are untouched — rotating the
@@ -202,9 +202,9 @@ class TestCluster01z_EmbeddedTokenRenewal(SimpleTestCase):
         self.assertEqual(session["user"]["sid"], "sid-keep", "An equal token must not rotate the session.")
         self.assertEqual(store.dropped, [], "Nothing should be dropped for a no-op re-send.")
 
-    def test_1_206_expired_token_is_replaced(self):
+    def test_1_222_expired_token_is_replaced(self):
         """
-        Scenario 1.206: an expired stored token is still replaced (unchanged behaviour).
+        Scenario 1.222: an expired stored token is still replaced (unchanged behaviour).
         Given: a stored token that expired a minute ago
         When: a fresh token arrives
         Then: the stale entry is dropped and the fresh one stored — this is the

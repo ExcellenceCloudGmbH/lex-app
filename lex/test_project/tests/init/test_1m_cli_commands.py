@@ -244,6 +244,7 @@ class TestCluster01m_ExplicitClickCommands(TestCase):
         "setup-with-ai",
         "ai-update",
         "ai-faq",
+        "ai_issue_report",
     })
 
     def test_1_105_explicit_commands_are_all_registered(self):
@@ -297,6 +298,7 @@ class TestCluster01m_HelpInvocability(TestCase):
         "setup-with-ai",
         "ai-update",
         "ai-faq",
+        "ai_issue_report",
     })
 
     def test_1_107_lex_root_help_lists_explicit_commands(self):

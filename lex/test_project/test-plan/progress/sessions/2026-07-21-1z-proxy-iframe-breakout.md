@@ -1,11 +1,11 @@
 ---
 date: 2026-07-21
-clusters: [1y]
-tests_added: "6 (1.195–1.200) + source in 1 file (lex/proxy.py)"
-suite_tally: "1y 6 pass / 0 fail (python -m lex pytest)"
+clusters: [1z]
+tests_added: "6 (1.211–1.216) + source in 1 file (lex/proxy.py)"
+suite_tally: "1z 6 pass / 0 fail (python -m lex pytest)"
 ---
 
-**Batch 1y landed — the Streamlit auth proxy now breaks out of the iframe on
+**Batch 1z landed — the Streamlit auth proxy now breaks out of the iframe on
 re-auth instead of framing Keycloak** (customer report: "auth.excellence-cloud.de
 refused to connect" inside the embedded Streamlit dashboard after some time, on
 lex-app `2.0.0rc199`). Root cause: `lex/proxy.py` silently logs the embed in from
@@ -19,4 +19,4 @@ load via `Sec-Fetch-Dest` and return a 401 that breaks out to a top-level login
 top-level redirects and API 401s are unchanged. Follow-up (separate change): give
 the embedded `auth_token` path a refresh token so the proxy renews silently rather
 than only degrading the failure gracefully. See
-[batch 1y](../../clusters/01-init/batches.md).
+[batch 1z](../../clusters/01-init/batches.md).

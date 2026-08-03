@@ -5,9 +5,9 @@ tests_added: 6
 suite_tally: "1z: 6 pass / 0 fail"
 ---
 
-# Batch 1z — embedded Streamlit token renewal
+# Batch 1aa — embedded Streamlit token renewal
 
-Follow-up to [batch 1y](../../clusters/01-init/batches.md), which made the embedded
+Follow-up to [batch 1z](../../clusters/01-init/batches.md), which made the embedded
 session's expiry a *graceful* re-login instead of a "refused to connect" wall. This
 batch removes the re-login.
 
@@ -19,7 +19,7 @@ Renewal turned out to be impossible for two independent reasons, both fixed here
   JWKS, would have rejected anyway;
 - the proxy discarded a renewed token whenever the stored one was still valid. Since
   renewal can only arrive *before* expiry, that discarded every renewal and let the
-  session die at the original deadline. Scenario 1.204 is the gate: it fails against
+  session die at the original deadline. Scenario 1.220 is the gate: it fails against
   the pre-fix proxy and passes with it.
 
 The PR's original follow-up asked for a refresh token on the embedded path. That was
