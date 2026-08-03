@@ -1,7 +1,7 @@
 cluster: 8
 slug: celery_async
 title: Celery & Async
-max_scenario: 144
+max_scenario: 153
 letters:
   a:
     title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
@@ -137,3 +137,18 @@ letters:
       xfail: 0
     note: 'scenarios 8.116–8.122; pins the three silent-failure invariants of the `lex-recovery-beat`
       driver: the beat schedule names the registered `sweep_dead_workers` task and excludes it '
+  c:
+    title: Celery dispatch must not move edited_at / edited_by (BUG-028)
+    scenarios: 8.145-8.153
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: The two Celery dispatch paths must be audit-indistinguishable. calc_and_save (undecorated)
+      wraps calculation_execution_context(); the lex_shared_task wrapper does not, so a decorated
+      calculate() stamps audit columns on every successful run -- BUG-028. 8.146/8.147/8.149/8.151 assert the correct behaviour; the lex_shared_task wrapper now enters
+      calculation_execution_context(), so these pass as live regression gates (BUG-028 resolved). 8.148 passes
+      because a failed calculation rolls its writes back (pinned so a future partial-commit change
+      cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery
+      task names; all three calculate methods share one module and would otherwise collide.

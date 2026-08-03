@@ -875,3 +875,131 @@ class GeneralErrorAbortCalc(CalculatedModelMixin):
 
 
 ALL_MODELS.extend([GeneralErrorAbortMarker, GeneralErrorAbortCalc])
+
+
+# ---------------------------------------------------------------------
+# Audit-column fixtures (sub-cluster 7s)
+#
+# Real project calculate()/update() bodies write fields and save. These
+# mirror that shape so the batch can assert the framework's contract:
+# a system-triggered calculation must never move edited_at / edited_by.
+# ---------------------------------------------------------------------
+
+
+@_permissive
+class AuditColumnsChild(LexModel):
+    """Pre-existing plain row a calculation *updates* (not creates).
+
+    edited_at only exists on an UPDATE, so proving the contract for
+    child records needs a row that already exists before the calc runs.
+    """
+
+    name = models.CharField(max_length=200)
+    payload = models.IntegerField(default=0)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+@_permissive
+class AuditColumnsCalc(CalculationModel):
+    """``calculate()`` writes a field and saves *itself* — the common shape."""
+
+    name = models.CharField(max_length=200)
+    result = models.IntegerField(default=0)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        self.result = (self.result or 0) + 1
+        self.save()
+
+
+@_permissive
+class AuditColumnsFailingCalc(CalculationModel):
+    """Saves itself, then raises — drives the ERROR terminal path."""
+
+    name = models.CharField(max_length=200)
+    result = models.IntegerField(default=0)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        self.result = (self.result or 0) + 1
+        self.save()
+        raise RuntimeError(f"AuditColumnsFailingCalc({self.name!r}) failing on purpose")
+
+
+@_permissive
+class AuditColumnsCancelCalc(CalculationModel):
+    """Saves itself, then cooperatively cancels — drives CANCELLED."""
+
+    name = models.CharField(max_length=200)
+    result = models.IntegerField(default=0)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.core.models.CalculationModel import CalculationCancelled
+
+        self.result = (self.result or 0) + 1
+        self.save()
+        raise CalculationCancelled("cluster 7s cooperative cancel")
+
+
+@_permissive
+class AuditColumnsParentCalc(CalculationModel):
+    """``calculate()`` updates a pre-existing child row (child_pk)."""
+
+    name = models.CharField(max_length=200)
+    child_pk = models.IntegerField(null=True, blank=True)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    is_atomic = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        if self.child_pk:
+            child = AuditColumnsChild.objects.get(pk=self.child_pk)
+            child.payload = (child.payload or 0) + 1
+            child.save()
+
+
+ALL_MODELS.extend([
+    AuditColumnsChild,
+    AuditColumnsCalc,
+    AuditColumnsFailingCalc,
+    AuditColumnsCancelCalc,
+    AuditColumnsParentCalc,
+])
+
+AUDIT_CALC = "auditcolumnscalc"

@@ -1,7 +1,7 @@
 cluster: 3
 slug: validation_hooks
 title: Validation Hooks
-max_scenario: 32
+max_scenario: 38
 letters:
   a:
     title: ''
@@ -63,3 +63,16 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  g:
+    title: DateTimeField aware-on-assignment invariant (AwareDateTimeDescriptor)
+    scenarios: 3.33-3.38
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: Under USE_TZ=True Django only normalizes at the DB boundary, so in-memory assignments stay
+      naive while fetches are aware -- the mix crashes downstream pandas/xirr comparisons. The
+      descriptor makes every DateTimeField assignment aware immediately (default-tz, the save-time
+      interpretation), instant unchanged. Includes the deferred-loading (data-descriptor) regression
+      guard. Ships with the USE_TZ=True cutover.

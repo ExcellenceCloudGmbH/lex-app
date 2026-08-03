@@ -6,10 +6,35 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag (e.g. v2.0.0rc124)"
+      source:
+        description: "Where to install lex-app from"
         required: true
+        type: choice
+        default: pypi
+        options:
+          - pypi
+          - git
+      tag:
+        description: "source=pypi: release tag (e.g. v2.0.0rc124)"
+        required: false
         type: string
+      git_ref:
+        description: "source=git: branch, tag or commit (e.g. feat/recovery-supervisor-on-demand)"
+        required: false
+        type: string
+      image_tag:
+        description: "source=git: tag to push the image under (e.g. recovery-supervisor-on-demand)"
+        required: false
+        type: string
+      python_base_image:
+        description: "Optional base image override (e.g. python:3.12.12-slim-bookworm)"
+        required: false
+        type: string
+
+env:
+  LEX_APP_REPO_URL: https://github.com/ExcellenceCloudGmbH/lex-app
+  PROD_IMAGE: europe-docker.pkg.dev/superb-blend-305320/lex-prod-registry/lex_app
+  PUB_IMAGE: europe-docker.pkg.dev/superb-blend-305320/lex-public-registry/lex_app
 
 jobs:
   build:
@@ -18,32 +43,130 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
-      TAG_NAME: ${{ steps.tag-name.outputs.TAG_NAME }}
+      TAG_NAME: ${{ steps.resolve.outputs.IMAGE_TAG }}
+      LEX_APP_SPEC: ${{ steps.resolve.outputs.LEX_APP_SPEC }}
     steps:
       - uses: actions/checkout@v2
         with:
-          token: ${{ secrets.PAT}}
+          token: ${{ secrets.PAT }}
           fetch-depth: 0
 
-      - name: Determine release tag
-        id: resolve-tag
+      # Resolves, in one place: what pip installs, what the image is tagged
+      # with, and which python base image to build on.
+      - name: Resolve build source
+        id: resolve
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_SOURCE: ${{ inputs.source }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_GIT_REF: ${{ inputs.git_ref }}
+          IN_IMAGE_TAG: ${{ inputs.image_tag }}
+          IN_PY_BASE: ${{ inputs.python_base_image }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          if [[ -n "${{ inputs.tag }}" ]]; then
-            TAG="${{ inputs.tag }}"
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            TAG="${{ github.event.workflow_run.head_branch }}"
-          else
-            TAG=$(git describe --tags --abbrev=0 HEAD)
+          set -euo pipefail
+
+          SOURCE="${IN_SOURCE:-pypi}"
+          # A finished PyPI publish always means "build that release", never a
+          # git build — otherwise stale dispatch inputs could hijack a release.
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            SOURCE="pypi"
           fi
-          echo "TAG=${TAG}" >> "$GITHUB_OUTPUT"
-          # PyPI versions have no leading 'v'. The Dockerfile does
-          # `pip install lex-app==${IMAGE_VERSION}`, so the build-arg must
-          # be the stripped version (v2.0.0rc124 -> 2.0.0rc124); passing the
-          # raw tag makes pip reject "lex-app==v2.0.0rc124". Image TAGS below
-          # keep the 'v' — only the pip install version is stripped.
-          echo "VERSION=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "Resolved tag: ${TAG} (pip version: ${TAG#v})"
+
+          if [[ "$SOURCE" == "git" ]]; then
+            REF="${IN_GIT_REF:-}"
+            [[ -n "$REF" ]] || { echo "::error::source=git requires git_ref"; exit 1; }
+
+            IMAGE_TAG="${IN_IMAGE_TAG:-}"
+            [[ -n "$IMAGE_TAG" ]] || { echo "::error::source=git requires image_tag"; exit 1; }
+            # Docker tags: [A-Za-z0-9_.-] only, max 128 chars, no leading . or -.
+            # Branch names contain '/', so they can never be used verbatim.
+            IMAGE_TAG="${IMAGE_TAG//[^A-Za-z0-9_.-]/-}"
+            IMAGE_TAG="${IMAGE_TAG:0:128}"
+            [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_] ]] || {
+              echo "::error::image_tag must start with a letter, digit or underscore"; exit 1; }
+
+            # Pin the ref to a commit. Two reasons: the image stays reproducible
+            # after the branch moves, and the pip layer cannot be served from a
+            # stale build cache when only the branch head changed.
+            # A branch and a tag of the same name both match here; refs/heads
+            # sorts first, so the branch wins.
+            LS="$(git ls-remote "$LEX_APP_REPO_URL" "$REF" || true)"
+            SHA="$(awk '$2 ~ /\^\{\}$/ {print $1; exit}' <<<"$LS")"   # peeled annotated tag
+            [[ -n "$SHA" ]] || SHA="$(awk 'NR==1{print $1}' <<<"$LS")"
+            if [[ -z "$SHA" ]]; then
+              if [[ "$REF" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+                SHA="$REF"   # already a commit sha; ls-remote cannot match those
+              else
+                echo "::error::'${REF}' is not a branch, tag or commit on ${LEX_APP_REPO_URL}"
+                exit 1
+              fi
+            fi
+
+            SPEC="git+${LEX_APP_REPO_URL}@${SHA}"
+            # lex/_version.py is only stamped by the PyPI publish workflow, so a
+            # git build would otherwise report 0.0.0.dev0 on /health. Make it say
+            # which ref it came from. This reaches /health because
+            # runtime_health.py imports lex._version.__version__ directly rather
+            # than reading dist metadata (which is frozen at install time).
+            VERSION_LABEL="0.0.0.dev0+$(tr -c 'A-Za-z0-9' '.' <<<"$IMAGE_TAG" \
+              | sed 's/\.\{2,\}/./g; s/^\.//; s/\.$//').${SHA:0:7}"
+            PY_DEFAULT="python:3.12.12-slim-bookworm"
+            # Never move :latest for an unreleased build.
+            TAGS="$(printf '%s\n' "${PROD_IMAGE}:${IMAGE_TAG}" "${PUB_IMAGE}:${IMAGE_TAG}")"
+            SOURCE_DESC="git ref ${REF} @ ${SHA}"
+          else
+            TAG="${IN_TAG:-}"
+            if [[ -z "$TAG" && "$EVENT_NAME" == "workflow_run" ]]; then
+              TAG="${WORKFLOW_RUN_BRANCH:-}"
+            fi
+            if [[ -z "$TAG" ]]; then
+              TAG="$(git describe --tags --abbrev=0 HEAD)"
+            fi
+
+            # PyPI versions have no leading 'v'. The build-arg must be the
+            # stripped version (v2.0.0rc124 -> 2.0.0rc124); passing the raw tag
+            # makes pip reject "lex-app==v2.0.0rc124". Image tags keep the 'v'.
+            SPEC="lex-app==${TAG#v}"
+            IMAGE_TAG="$TAG"
+            VERSION_LABEL=""   # the published wheel already carries the version
+
+            PY_DEFAULT="python:3.9.25-slim-bookworm"
+            if [[ "$TAG" == "latest" || "$TAG" == v2* ]]; then
+              PY_DEFAULT="python:3.12.12-slim-bookworm"
+            fi
+
+            TAG_LIST=("${PROD_IMAGE}:${TAG}" "${PUB_IMAGE}:${TAG}")
+            if [[ "$TAG" == v2* ]]; then
+              TAG_LIST+=("${PROD_IMAGE}:latest" "${PUB_IMAGE}:latest")
+            fi
+            TAGS="$(printf '%s\n' "${TAG_LIST[@]}")"
+            SOURCE_DESC="PyPI release ${TAG}"
+          fi
+
+          PY="${IN_PY_BASE:-$PY_DEFAULT}"
+
+          {
+            echo "IMAGE_TAG=${IMAGE_TAG}"
+            echo "LEX_APP_SPEC=${SPEC}"
+            echo "LEX_APP_VERSION_LABEL=${VERSION_LABEL}"
+            echo "PYTHON_BASE_IMAGE=${PY}"
+            echo "TAGS<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Image build"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| source | \`${SOURCE_DESC}\` |"
+            echo "| pip install | \`${SPEC}\` |"
+            echo "| base image | \`${PY}\` |"
+            echo "| tags | \`$(tr '\n' ' ' <<<"$TAGS")\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - id: "gcloud-auth"
         name: "Authenticate to Google Cloud"
@@ -63,46 +186,6 @@ jobs:
           username: "oauth2accesstoken"
           password: "${{ steps.gcloud-auth.outputs.access_token }}"
 
-      - name: Prepare image tags
-        id: image-tags
-        shell: bash
-        run: |
-          TAG="${{ steps.resolve-tag.outputs.TAG }}"
-
-          PROD="europe-docker.pkg.dev/superb-blend-305320/lex-prod-registry/lex_app"
-          PUB="europe-docker.pkg.dev/superb-blend-305320/lex-public-registry/lex_app"
-
-          # Always tag with the release tag
-          TAGS="${PROD}:${TAG}
-          ${PUB}:${TAG}"
-
-          # If v2*, also tag as latest
-          if [[ "$TAG" == v2* ]]; then
-            TAGS="${TAGS}
-            ${PROD}:latest
-            ${PUB}:latest"
-          fi
-
-          {
-            echo "TAGS<<EOF"
-            echo "$TAGS"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      # NEW: decide python base image from IMAGE_VERSION/tag
-      - name: Compute python base image
-        id: python-base
-        shell: bash
-        run: |
-          TAG="${{ steps.resolve-tag.outputs.TAG }}"
-          PY="python:3.9.25-slim-bookworm"
-
-          if [[ "$TAG" == "latest" || "$TAG" == v2* ]]; then
-            PY="python:3.12.12-slim-bookworm"
-          fi
-
-          echo "PYTHON_BASE_IMAGE=$PY" >> "$GITHUB_OUTPUT"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -110,9 +193,14 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags: ${{ steps.image-tags.outputs.TAGS }}
+          tags: ${{ steps.resolve.outputs.TAGS }}
           context: .
           file: ./build/Dockerfile
           build-args: |
-            IMAGE_VERSION=${{ steps.resolve-tag.outputs.VERSION }}
-            PYTHON_BASE_IMAGE=${{ steps.python-base.outputs.PYTHON_BASE_IMAGE }}
+            LEX_APP_SPEC=${{ steps.resolve.outputs.LEX_APP_SPEC }}
+            LEX_APP_VERSION_LABEL=${{ steps.resolve.outputs.LEX_APP_VERSION_LABEL }}
+            PYTHON_BASE_IMAGE=${{ steps.resolve.outputs.PYTHON_BASE_IMAGE }}
+          labels: |
+            org.opencontainers.image.source=${{ env.LEX_APP_REPO_URL }}
+            org.opencontainers.image.version=${{ steps.resolve.outputs.IMAGE_TAG }}
+            de.excellencecloud.lex-app.pip-spec=${{ steps.resolve.outputs.LEX_APP_SPEC }}

@@ -11,9 +11,9 @@ ordinary top-level redirect and the API 401 untouched. A regression here either
 resurrects the "refused to connect" wall (over-eager redirect) or breaks normal
 top-level / API auth (over-eager breakout).
 
-Cluster 1y — scenarios 1.195–1.200. Type: U.
+Cluster 1z — scenarios 1.211–1.216. Type: U.
 Covers: lex/proxy.py (_unauthenticated_response, _is_iframe_document_request).
-Run: python -m lex pytest lex/test_project/tests/init/test_1y_proxy_iframe_breakout.py -v
+Run: python -m lex pytest lex/test_project/tests/init/test_1z_proxy_iframe_breakout.py -v
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ def _request(headers: dict[str, str], scheme: str = "https", host: str = "app.ex
     return Request(scope)
 
 
-class TestCluster01y_ProxyIframeBreakout(SimpleTestCase):
-    """Cluster 1y: unauthenticated-response routing of the Streamlit auth proxy."""
+class TestCluster01z_ProxyIframeBreakout(SimpleTestCase):
+    """Cluster 1z: unauthenticated-response routing of the Streamlit auth proxy."""
 
     def setUp(self) -> None:
         # Force _external_base_url() to derive the login URL from the request rather
@@ -57,10 +57,10 @@ class TestCluster01y_ProxyIframeBreakout(SimpleTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    # -- 1.195 ---------------------------------------------------------
-    def test_1_195_iframe_document_breaks_out_instead_of_framing_idp(self) -> None:
+    # -- 1.211 ---------------------------------------------------------
+    def test_1_211_iframe_document_breaks_out_instead_of_framing_idp(self) -> None:
         """
-        Scenario 1.195: an unauthenticated iframe document load breaks out to a top-level login.
+        Scenario 1.211: an unauthenticated iframe document load breaks out to a top-level login.
         Given: no valid identity and an iframe document navigation (Sec-Fetch-Dest: iframe, Accept: text/html)
         When: the proxy builds the unauthenticated response
         Then: it is a 401 that escapes the frame (top-nav + postMessage + target="_top" link to the
@@ -87,10 +87,10 @@ class TestCluster01y_ProxyIframeBreakout(SimpleTestCase):
             msg="breakout must point at this proxy's absolute login URL",
         )
 
-    # -- 1.196 ---------------------------------------------------------
-    def test_1_196_frame_document_also_breaks_out(self) -> None:
+    # -- 1.212 ---------------------------------------------------------
+    def test_1_212_frame_document_also_breaks_out(self) -> None:
         """
-        Scenario 1.196: a legacy <frame> document load breaks out the same way as an <iframe>.
+        Scenario 1.212: a legacy <frame> document load breaks out the same way as an <iframe>.
         Given: no valid identity and Sec-Fetch-Dest: frame with Accept: text/html
         When: the proxy builds the unauthenticated response
         Then: it is the same 401 HTML frame-breakout (frame and iframe are both framed contexts).
@@ -102,10 +102,10 @@ class TestCluster01y_ProxyIframeBreakout(SimpleTestCase):
         self.assertIsInstance(resp, HTMLResponse, msg="a framed (<frame>) load must also break out")
         self.assertEqual(resp.status_code, 401, msg="frame-breakout must signal unauthenticated (401)")
 
-    # -- 1.197 ---------------------------------------------------------
-    def test_1_197_top_level_html_still_redirects_to_login(self) -> None:
+    # -- 1.213 ---------------------------------------------------------
+    def test_1_213_top_level_html_still_redirects_to_login(self) -> None:
         """
-        Scenario 1.197: a top-level HTML navigation still redirects to the login route.
+        Scenario 1.213: a top-level HTML navigation still redirects to the login route.
         Given: no valid identity and a top-level document load (Sec-Fetch-Dest: document, Accept: text/html)
         When: the proxy builds the unauthenticated response
         Then: it redirects to /auth/login -- unchanged behaviour, since a top-level page can render the IdP.
@@ -120,10 +120,10 @@ class TestCluster01y_ProxyIframeBreakout(SimpleTestCase):
             msg="top-level redirect target must be the login route",
         )
 
-    # -- 1.198 ---------------------------------------------------------
-    def test_1_198_html_without_sec_fetch_headers_keeps_redirect(self) -> None:
+    # -- 1.214 ---------------------------------------------------------
+    def test_1_214_html_without_sec_fetch_headers_keeps_redirect(self) -> None:
         """
-        Scenario 1.198: clients that omit Sec-Fetch-* keep the existing redirect (safe default).
+        Scenario 1.214: clients that omit Sec-Fetch-* keep the existing redirect (safe default).
         Given: no valid identity, Accept: text/html, and no Sec-Fetch-* headers (older/non-browser client)
         When: the proxy builds the unauthenticated response
         Then: it redirects to login -- the breakout only triggers on a positively-identified framed context.
@@ -135,10 +135,10 @@ class TestCluster01y_ProxyIframeBreakout(SimpleTestCase):
             msg="absent Sec-Fetch-* must fall back to the pre-existing redirect, not a breakout",
         )
 
-    # -- 1.199 ---------------------------------------------------------
-    def test_1_199_non_html_request_returns_401_json(self) -> None:
+    # -- 1.215 ---------------------------------------------------------
+    def test_1_215_non_html_request_returns_401_json(self) -> None:
         """
-        Scenario 1.199: an XHR/API call gets a JSON 401, not a redirect or an HTML page.
+        Scenario 1.215: an XHR/API call gets a JSON 401, not a redirect or an HTML page.
         Given: no valid identity and a non-HTML request (Accept: application/json)
         When: the proxy builds the unauthenticated response
         Then: it is a 401 JSON body so the caller can handle auth programmatically.
@@ -148,10 +148,10 @@ class TestCluster01y_ProxyIframeBreakout(SimpleTestCase):
         self.assertIsInstance(resp, JSONResponse, msg="non-HTML callers must get a JSON response")
         self.assertEqual(resp.status_code, 401, msg="non-HTML unauthenticated response must be 401")
 
-    # -- 1.200 ---------------------------------------------------------
-    def test_1_200_iframe_detection_is_case_insensitive_and_scoped(self) -> None:
+    # -- 1.216 ---------------------------------------------------------
+    def test_1_216_iframe_detection_is_case_insensitive_and_scoped(self) -> None:
         """
-        Scenario 1.200: the framed-context detector matches iframe/frame case-insensitively and nothing else.
+        Scenario 1.216: the framed-context detector matches iframe/frame case-insensitively and nothing else.
         Given: requests carrying various Sec-Fetch-Dest values (or none)
         When: _is_iframe_document_request inspects them
         Then: iframe/FRAME are detected (case-insensitive); document and a missing header are not.

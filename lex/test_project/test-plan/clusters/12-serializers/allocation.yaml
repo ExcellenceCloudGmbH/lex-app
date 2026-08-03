@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 45
+max_scenario: 48
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -95,3 +95,15 @@ letters:
       ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so
       filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of
       frontend BUG-F-003 (FK columns rendered as bare ids)
+  j:
+    title: Datetime write→read round trip under the aware-UTC convention
+    scenarios: 12.46-12.48
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: live regression gates for the USE_TZ=True cutover — a client that sends an explicit instant
+      (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone;
+      summer round trip, year-end midnight across the winter offset, and a truthful designated instant.
+      Frontend twin datetimeConventionRoundTrip.test.ts.

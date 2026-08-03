@@ -140,15 +140,69 @@
 
 ---
 
-### Batch 1y — Streamlit auth proxy: iframe re-auth breakout (refused-to-connect fix) ✅
+---
+
+### Batch 1i — `rebase_incident_datetimes` maintenance command ✅
 
 | Property | Value |
 | --- | --- |
 | Scenario range | 1.195 – 1.200 |
+| Type | E |
+| Files covered | `lex/lex_app/management/commands/rebase_incident_datetimes.py` (new) |
+| Test file | `lex/test_project/tests/init/test_1i_rebase_incident_datetimes.py` |
+| Test model | `lex/test_project/tests/init/models.py` → `IncidentDatetimeItem` (user `event_at` + managed `created_at`/`edited_at`) |
+| Test classes | `TestCluster01i_RebaseIncidentDatetimes` (1.195 `--apply` re-anchors in-window value & spares `created_at`; 1.196 dry-run writes nothing; 1.197 **pre-upgrade** row untouched — late-upgrader safety; 1.198 **post-fix** row untouched — window upper bound; 1.199 **DST-aware** winter value shifts −1h not −2h; 1.200 **DST-transition** value flagged for review) |
+| Fixtures | none — seeds rows via `.update()` to stamp `created_at`/`event_at` directly |
+| Tests landed | **6 pass / 0 fail** |
+| Coverage gain | incident data-migration command (dry-run/apply, per-instance `[--cutoff, --until)` window, app-stamped exclusion, ambiguous-row + DST-transition reporting, DST-aware correction) |
+| Status | ✅ Complete — ships with the `USE_TZ=True` cutover. Corrects only user-entered datetimes created in the **per-instance** window `[--cutoff, --until)` — `--cutoff` (that instance's rc212 upgrade) is **required**, no global default, because too-early over-corrects correct pre-upgrade rows; `--until` (that instance's aware-UTC fix, default now) stops post-fix correct rows being re-shifted. Framework-managed timestamps and out-of-window rows are provably left alone. PostgreSQL-only (`AT TIME ZONE`); not idempotent (run once per instance). |
+
+---
+
+---
+
+### Batch 1r — Fetched datetimes return in the DB-session display zone ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.201 – 1.202 |
+| Type | I |
+| Files covered | `lex/lex_app/settings.py` (`DATABASES['default']['TIME_ZONE'] = TIME_ZONE`, Postgres-guarded) |
+| Test file | `lex/test_project/tests/init/test_1r_fetched_datetime_zone.py` |
+| Test model | reuses `IncidentDatetimeItem` (`event_at`) |
+| Test classes | `TestCluster01r_FetchedDatetimeZone` (1.201 fetched value carries the display-zone offset & preserves the instant; 1.202 Berlin wall-clock reads 11:00 with no `localtime()`) |
+| Fixtures | none |
+| Tests landed | **2 pass / 0 fail** (stable over repeated runs) |
+| Coverage gain | DB-session display zone on reads (the zero-refactor fix for UTC-looking `str()`/labels) |
+| Status | ✅ Complete — running the Postgres session in `TIME_ZONE` makes every fetched `DateTimeField` come back aware-Berlin (`11:00+02:00`) instead of UTC, so `str()`, `.date()`, `.hour`, and model `__str__` render local **with no per-field or per-model changes** — storage stays UTC, instant unchanged. Django's date-part lookups inject an explicit `AT TIME ZONE`, so bitemporal/`as_of` raw SQL is unaffected (verified: history + serializers + init + exports **385 pass** with it live; calc/audit/crud/api **457 pass**, the one api_layer failure is a pre-existing ordering artifact that passes in isolation with or without this change). |
+
+---
+
+### Batch 1y — IDE-aware setup run configurations ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.203 – 1.210 |
+| Type | U |
+| Files covered | `generate_pycharm_configs.py`, `lex/bin/lex.py`, `pyproject.toml` |
+| Test file | `lex/test_project/tests/init/test_1y_ide_run_configs.py` |
+| Test classes | `TestCluster01y_IdeRunConfigurations` |
+| Fixtures | `tempfile.TemporaryDirectory`, Click `CliRunner`, controlled IDE environment markers; no database models |
+| Tests landed | **8 pass / 0 fail, 10 subtests pass**; setup regression (`1a` + `1m`) **13 pass / 0 fail, 9 subtests pass** |
+| Coverage gain | n/a — scaffolding module is outside configured `source = lex` and `lex/bin/lex.py` is explicitly omitted; tests pin IDE selection/fallback, VS Code parity, JSONC merge, idempotency, and setup output paths |
+| Status | ✅ Complete — clear VS Code/PyCharm sessions generate their native format; unknown or conflicting sessions generate both; existing VS Code entries survive regeneration. See [2026-07-23 session](../../progress/sessions/2026-07-23-ide-run-configs.md). |
+
+---
+
+### Batch 1z — Streamlit auth proxy: iframe re-auth breakout (refused-to-connect fix) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.211 – 1.216 |
 | Type | U |
 | Files covered | `lex/proxy.py` (`_unauthenticated_response`, `_is_iframe_document_request`) |
-| Test file | `lex/test_project/tests/init/test_1y_proxy_iframe_breakout.py` |
-| Test classes | `TestCluster01y_ProxyIframeBreakout` (1.195 iframe → 401 frame-breakout not IdP redirect, 1.196 `<frame>` also breaks out, 1.197 top-level HTML still redirects to `/auth/login`, 1.198 no `Sec-Fetch-*` keeps redirect, 1.199 non-HTML → 401 JSON, 1.200 `_is_iframe_document_request` case-insensitive + scoped) |
+| Test file | `lex/test_project/tests/init/test_1z_proxy_iframe_breakout.py` |
+| Test classes | `TestCluster01z_ProxyIframeBreakout` (1.211 iframe → 401 frame-breakout not IdP redirect, 1.212 `<frame>` also breaks out, 1.213 top-level HTML still redirects to `/auth/login`, 1.214 no `Sec-Fetch-*` keeps redirect, 1.215 non-HTML → 401 JSON, 1.216 `_is_iframe_document_request` case-insensitive + scoped) |
 | Fixtures | none — minimal ASGI `Request` builder + `patch.object(proxy, "PUBLIC_URL", "")` |
 | Tests landed | **6 pass / 0 fail** (`python -m lex pytest`) |
 | Coverage gain | proxy deny-branch routing: `Sec-Fetch-Dest: iframe`/`frame` document loads break out to a top-level login instead of redirecting the frame into Keycloak's un-frameable login page (`frame-ancestors 'self'` → "refused to connect"); the top-level redirect and API-401 paths stay unchanged |

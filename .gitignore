@@ -6,3 +6,6 @@ dist/*
 *.egg-info
 *.sqlite3
 lex/_version.py
+.lex-ai-reports/
+build/
+/build
