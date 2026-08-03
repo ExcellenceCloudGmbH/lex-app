@@ -90,6 +90,31 @@ jobs:
       - name: Checkout backend (lex)
         uses: actions/checkout@v4
 
+      # The Python tokens are VENDORED (the Streamlit host installs from PyPI and cannot reach
+      # the private registry the JS packages live in), so nothing else notices when they go stale.
+      # The generated file carries no version string, so this DIFFS it against the artefact
+      # attached to the lex-tokens release rather than comparing versions.
+      - name: LEX tokens freshness (vendored lex_tokens.py matches the released artefact)
+        env:
+          GH_TOKEN: ${{ secrets.LEX_PACKAGES_TOKEN || secrets.FRONTEND_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::No token available - skipping the LEX tokens freshness check."
+            exit 0
+          fi
+          if ! gh release download --repo ExcellenceCloudGmbH/lex-design-system \
+                 --pattern 'lex_tokens.py' --dir /tmp/lex-tokens --clobber; then
+            echo "::warning::Could not download lex_tokens.py from the latest release - skipping."
+            exit 0
+          fi
+          if ! diff -u /tmp/lex-tokens/lex_tokens.py lex/lex_app/design_system/lex_tokens.py; then
+            echo "::error::Vendored lex_tokens.py is stale. Copy the released artefact over"
+            echo "::error::lex/lex_app/design_system/lex_tokens.py and commit."
+            exit 1
+          fi
+          echo "vendored lex_tokens.py matches the released artefact"
+
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
