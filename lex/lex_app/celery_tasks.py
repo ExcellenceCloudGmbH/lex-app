@@ -694,8 +694,18 @@ def lex_shared_task(_func=None, **task_opts):
                 # on the calling thread from the parent CalculationModel,
                 # so wrapping again with None would just spam warnings and
                 # break the logging chain.
+                #
+                # Presence of context/model_context means this is a dispatched
+                # calculation, so also enter calculation_execution_context() —
+                # the same guard the undecorated ``calc_and_save`` path uses.
+                # Without it, saves inside a decorated calculate() body would
+                # stamp edited_at/edited_by (a calculation is not a user edit).
                 if context or model_context:
-                    with CeleryCalculationContext(context, model_context):
+                    from lex.core.models.CalculationModel import (
+                        calculation_execution_context,
+                    )
+                    with CeleryCalculationContext(context, model_context), \
+                            calculation_execution_context():
                         result = func(*args, **kwargs)
                 else:
                     result = func(*args, **kwargs)
