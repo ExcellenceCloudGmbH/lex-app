@@ -4,17 +4,11 @@ Serves the Streamlit calculation widget, which polls this while a calculation
 runs. Deliberately narrow: it returns only what the widget renders, so polling
 stays cheap regardless of how wide the model is.
 
-Permissions reuse the record's own read path -- see ``_readable_or_none``.
 """
 
 from django.http import JsonResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-
-#: Most recent log lines returned when ``include_log`` is requested. Bounded so
-#: a long calculation cannot turn a 2-second poll into a large response.
-LOG_TAIL_LIMIT = 50
-
 
 class CalculationStatus(APIView):
     http_method_names = ["get"]

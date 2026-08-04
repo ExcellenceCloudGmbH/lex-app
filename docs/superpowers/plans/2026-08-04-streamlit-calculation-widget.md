@@ -63,7 +63,7 @@ import pytest
 from lex.core.models.CalculationModel import CalculationModel
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
-from .models import ApiLayerCalc
+from .models import ALL_MODELS, ApiLayerCalc
 
 pytestmark = pytest.mark.api_layer
 
@@ -72,6 +72,10 @@ CALC = "apilayercalc"
 
 class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
     """Cluster 10o: the status contract the Streamlit widget polls."""
+
+    # Required by E2ETestCase: drives dynamic table creation in setUpClass.
+    # Without it every test dies on "relation lex_app_apilayercalc does not exist".
+    e2e_models = ALL_MODELS
 
     def url_status(self, model_name: str, pk: int) -> str:
         return f"/api/model_entries/{model_name}/{pk}/calculation-status"
@@ -100,11 +104,16 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
 
 Run: `PROJECT_ROOT=lex/test_project python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py::TestCluster10o_CalculationStatusEndpoint::test_10_72_returns_status_for_a_never_calculated_record -v`
 
-Expected: FAIL — 404, because the URL is not registered yet.
+Expected: FAIL, because the URL is not registered. Note the failure shape: an
+unregistered route falls through to the SPA catch-all, which returns a streaming
+`FileResponse`, so the assertion dies on `resp.content` rather than showing a
+clean 404. That is still a genuine red state.
 
 - [ ] **Step 3: Write the endpoint**
 
-Create `lex/api/views/calculations/CalculationStatus.py`:
+Create `lex/api/views/calculations/CalculationStatus.py` (`LOG_TAIL_LIMIT` and the
+read-permission filter arrive in Tasks 3 and 4 — do not add them yet, and do not
+document them before they exist):
 
 ```python
 """Read-only calculation state for one record.
@@ -112,18 +121,11 @@ Create `lex/api/views/calculations/CalculationStatus.py`:
 Serves the Streamlit calculation widget, which polls this while a calculation
 runs. Deliberately narrow: it returns only what the widget renders, so polling
 stays cheap regardless of how wide the model is.
-
-Permissions reuse the record's own read path -- see ``_readable_or_none``.
 """
 
 from django.http import JsonResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-
-#: Most recent log lines returned when ``include_log`` is requested. Bounded so
-#: a long calculation cannot turn a 2-second poll into a large response.
-LOG_TAIL_LIMIT = 50
-
 
 class CalculationStatus(APIView):
     http_method_names = ["get"]
