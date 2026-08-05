@@ -45,3 +45,20 @@
 **Why a regression matters:** `as_of` answers "what did this record look like before the edit?" — audit-grade functionality customers explicitly rely on.
 
 **Scenario range:** 5.98 – 5.103. **Test file:** `lex/test_project/tests/history/test_5m_asof_edit_time.py`. **Type:** E. **Status:** ✅ Complete — 5 pass; 5.101 `xfail(strict)` pins **BUG-026** (`edited_at` vs history-window clock-read gap; anchoring `as_of` at a record's own `edited_at` misses the edit).
+
+### 5n. Activation catch-up (reconcile pass) ✅
+
+**What it tests:** `reconcile_pending_activations` — the pass that activates future-dated
+records whose scheduling timer never fired. Overdue `SCHEDULED` meta rows are activated,
+not-yet-due rows are left alone, the pass is idempotent, activations older than the age
+window are not replayed, a failing record is given up after the attempt cap, and terminal
+meta states (DONE / CANCELLED) are never resurrected.
+
+**Why a regression matters:** both timer backends are volatile. The in-process one — used
+by every instance without Celery, which is most of them — is lost on every restart with
+nothing to rehydrate it, so a deploy silently dropped pending activations and the data
+never became current. This pass is the floor that makes that recoverable, and the reason
+per-instance beat can be retired.
+
+**Scenario range:** 5.104 – 5.109. **Test file:** `lex/test_project/tests/history/test_5n_activation_reconcile.py`. **Type:** E. **Status:** ✅ 6 pass.
+

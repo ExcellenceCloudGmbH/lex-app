@@ -47,3 +47,20 @@
 | Prereqs | BUG-025 fix (Z-serialized datetimes) |
 | Status | ✅ Complete — 5 pass / 1 xfail(strict) |
 | Note | Customer concern 2026-07-14 ("we rely on the as_of mechanism"). 5.98 edited_at is the true edit instant and its serialized form denotes the same instant; 5.99 as_of before the edit returns exactly the pre-edit snapshot (values included); 5.100 as_of now knows both versions, latest current; 5.101 (xfail strict, **BUG-026**) anchoring as_of on the record's own serialized edited_at must land on the post-edit side — fails today because `edited_at` and `valid_from`/`sys_from` come from separate clock reads (~ms gap). Fix design + the `_history_date` trap are documented in the BUG-026 row. Extension (2026-07-14, customer list-time-travel report): 5.102 the LIST endpoint (`?as_of=`, the grid's surface) shows pre-edit values at a pre-edit UTC anchor and current values at now; 5.103 naive as_of == UTC by contract, and an offset-aware local anchor for the same instant lands identically — pinning the backend as correct while the frontend's naive-local anchors (BUG-F-022) were the real culprit. |
+
+---
+
+### Batch 5n — Activation catch-up (reconcile pass) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 5.104 – 5.109 |
+| Type | E |
+| Files covered | `lex/core/services/activation_reconcile.py` (new), `lex/lex_app/settings.py` (4 `LEX_ACTIVATION_RECONCILE_*` knobs), `lex/lex_app/apps.py` (startup wiring, gated to the served backend) |
+| Test file | `lex/test_project/tests/history/test_5n_activation_reconcile.py` |
+| Test classes | `TestCluster05n_ActivationReconcile` |
+| Fixtures | `HistSimpleItem` (shared with 5l) |
+| Est. tests | 6 |
+| Status | ✅ Complete — 6 pass / 0 fail |
+| Note | Consumer side of the contract 5l covers on the producer side. Two real defects were caught by these tests while writing them: (1) `activate_history_version` reports failure by **return value**, not by raising, so treating a clean return as success counted activations that never happened — 5.104 caught it; (2) `@lex_shared_task` wraps that return as `(result, args)`, so the status string has to be unwrapped, and `_outcome_of` degrades to "not success" rather than indexing blindly, so a future change to the decorator causes a retry rather than a silent drop. |
+
