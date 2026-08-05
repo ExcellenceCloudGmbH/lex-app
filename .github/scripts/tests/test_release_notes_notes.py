@@ -101,7 +101,7 @@ def test_transport_posts_to_the_models_endpoint_and_returns_the_content():
         captured["json_body"] = json_body
         return {"choices": [{"message": {"content": "RESULT"}}]}
 
-    got = notes.github_models("PROMPT", token="tok123", post=fake_post)
+    got = notes.github_models("PROMPT", api_key="tok123", post=fake_post)
     assert got == "RESULT"
     assert captured["url"] == notes.MODELS_ENDPOINT
     assert captured["headers"]["Authorization"] == "Bearer tok123"
@@ -111,7 +111,7 @@ def test_transport_posts_to_the_models_endpoint_and_returns_the_content():
 
 def test_transport_raises_on_a_malformed_response():
     with pytest.raises(ValueError, match="unexpected response"):
-        notes.github_models("P", token="t", post=lambda u, *, headers, json_body: {"oops": 1})
+        notes.github_models("P", api_key="t", post=lambda u, *, headers, json_body: {"oops": 1})
 
 
 def test_anthropic_transport_posts_and_returns_the_text():
@@ -141,3 +141,112 @@ def test_anthropic_transport_joins_multiple_text_blocks():
     payload = {"content": [{"type": "text", "text": "one\n"}, {"type": "text", "text": "two"}]}
     got = notes.anthropic_messages("P", api_key="k", post=lambda u, *, headers, json_body: payload)
     assert got == "one\ntwo"
+
+
+# ── Gemini ────────────────────────────────────────────────────────────
+
+def test_gemini_posts_and_returns_the_text():
+    captured = {}
+
+    def fake_post(url, *, headers, json_body):
+        captured.update(url=url, headers=headers, json_body=json_body)
+        return {"candidates": [{"content": {"parts": [{"text": "RESULT"}]}}]}
+
+    got = notes.gemini_generate("PROMPT", api_key="g-key", post=fake_post)
+    assert got == "RESULT"
+    # The key travels in a header, never in the query string.
+    assert captured["headers"]["x-goog-api-key"] == "g-key"
+    assert "g-key" not in captured["url"]
+    assert captured["json_body"]["contents"][0]["parts"][0]["text"] == "PROMPT"
+
+
+def test_gemini_joins_multiple_parts():
+    payload = {"candidates": [{"content": {"parts": [{"text": "one\n"}, {"text": "two"}]}}]}
+    got = notes.gemini_generate("P", api_key="k", post=lambda u, *, headers, json_body: payload)
+    assert got == "one\ntwo"
+
+
+def test_gemini_raises_on_a_malformed_response():
+    import pytest
+
+    with pytest.raises(ValueError, match="unexpected response"):
+        notes.gemini_generate("P", api_key="k", post=lambda u, *, headers, json_body: {"nope": 1})
+
+
+# ── OpenAI ────────────────────────────────────────────────────────────
+
+def test_openai_posts_and_returns_the_text():
+    captured = {}
+
+    def fake_post(url, *, headers, json_body):
+        captured.update(url=url, headers=headers, json_body=json_body)
+        return {"choices": [{"message": {"content": "RESULT"}}]}
+
+    got = notes.openai_chat("PROMPT", api_key="sk-o", post=fake_post)
+    assert got == "RESULT"
+    assert captured["url"] == notes.OPENAI_ENDPOINT
+    assert captured["headers"]["Authorization"] == "Bearer sk-o"
+
+
+def test_openai_raises_on_a_malformed_response():
+    import pytest
+
+    with pytest.raises(ValueError, match="unexpected response"):
+        notes.openai_chat("P", api_key="k", post=lambda u, *, headers, json_body: {"nope": 1})
+
+
+# ── Provider selection ────────────────────────────────────────────────
+
+def test_every_advertised_provider_is_in_the_registry():
+    assert set(notes.PROVIDERS) == {"anthropic", "gemini", "openai", "github-models"}
+    for name in notes.PROVIDER_ORDER:
+        assert name in notes.PROVIDERS
+
+
+def test_explicit_choice_wins_even_when_others_have_keys():
+    env = {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "g", "OPENAI_API_KEY": "o"}
+    chosen, _ = notes.resolve_provider("gemini", env)
+    assert chosen == "gemini"
+
+
+def test_explicit_choice_is_case_and_alias_tolerant():
+    env = {"GEMINI_API_KEY": "g"}
+    for spelling in ("Gemini", "  gemini  ", "google"):
+        chosen, _ = notes.resolve_provider(spelling, env)
+        assert chosen == "gemini"
+    env = {"OPENAI_API_KEY": "o"}
+    for spelling in ("gpt", "OpenAI"):
+        chosen, _ = notes.resolve_provider(spelling, env)
+        assert chosen == "openai"
+
+
+def test_explicit_choice_without_its_key_is_an_error():
+    import pytest
+
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+        notes.resolve_provider("gemini", {"ANTHROPIC_API_KEY": "a"})
+
+
+def test_unknown_provider_name_is_an_error_listing_the_valid_ones():
+    import pytest
+
+    with pytest.raises(ValueError, match="llama"):
+        notes.resolve_provider("llama", {"ANTHROPIC_API_KEY": "a"})
+
+
+def test_auto_follows_the_documented_order():
+    env = {"GEMINI_API_KEY": "g", "OPENAI_API_KEY": "o", "GITHUB_TOKEN": "t"}
+    assert notes.resolve_provider("auto", env)[0] == "gemini"
+    env["ANTHROPIC_API_KEY"] = "a"
+    assert notes.resolve_provider("auto", env)[0] == "anthropic"
+
+
+def test_auto_with_no_keys_returns_none():
+    assert notes.resolve_provider("auto", {}) is None
+    assert notes.resolve_provider("", {}) is None
+
+
+def test_the_resolved_callable_actually_reaches_its_transport():
+    _, call = notes.resolve_provider("gemini", {"GEMINI_API_KEY": "g-key"})
+    payload = {"candidates": [{"content": {"parts": [{"text": "VIA REGISTRY"}]}}]}
+    assert call("P", post=lambda u, *, headers, json_body: payload) == "VIA REGISTRY"
