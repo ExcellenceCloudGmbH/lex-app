@@ -279,6 +279,57 @@ gated, and because repairing it is what eventually makes that section durable.
 Until then, frontend entries appear if and only if the manual manifest is present at
 both ends of the range.
 
+### What repairing it actually takes (investigated 2026-08-05, deferred)
+
+Less than it looks. Everything downstream of the preflight is ready; only the two
+secrets are missing.
+
+**Ruled out:** the `"test": "vite test"` bug recorded in `CLAUDE.md` is **stale**. On
+`lex-app-v2-pac-latest` — the branch this workflow builds — it is `"test": "vitest"`,
+and `vitest`, `@vitest/coverage-v8`, `jsdom`, `@playwright/test`, `e2e/`,
+`playwright.config.ts` and `vitest.setup.ts` are all present. That bug survives only
+on the v1 default branch.
+
+**`NPM_MARMELAB_TOKEN`** — external, longest lead time. PAC depends on four paid
+`@react-admin/*` packages and its `.npmrc` reads
+`//registry.marmelab.com/:_authToken=${NPM_MARMELAB_TOKEN}`. No engineering
+workaround: without it `yarn install` cannot resolve the tree, so unit tests, E2E and
+build all fail. Someone with the react-admin Enterprise subscription must issue it.
+
+**`FRONTEND_REPO_TOKEN`** — check `LEX_PACKAGES_TOKEN` first. It was added
+2026-08-03, is referenced only by this workflow, and is already the primary in the
+tokens-freshness step (`secrets.LEX_PACKAGES_TOKEN || secrets.FRONTEND_REPO_TOKEN`).
+If it already carries repo-read scope on PAC, reuse it in the three `actions/checkout`
+steps and no new secret is needed. Otherwise prefer the existing GitHub App —
+`DOCS_APP_ID`/`DOCS_APP_PRIVATE_KEY` with `repositories: "process-admin-general-client"`,
+the same pattern `update_docs.yml` already uses — over a classic PAT, per the
+org-owned-credentials rationale in `CLAUDE.md`.
+
+**Unvalidated once the secrets land.** No step past the preflight has ever executed.
+`COVERAGE_THRESHOLD: "76"` is an untested guess (178 test files against 211 source
+files makes it plausible, not proven), and the E2E job boots a real Django backend via
+`globalSetup` (migrate + seed) driving Chromium. The workflow triggers on
+`release: released`, so the first real execution would otherwise happen *during a
+release* — use the existing `workflow_dispatch` first:
+
+```bash
+gh workflow run frontend_build.yml -f frontend_branch=lex-app-v2-pac-latest
+```
+
+**Then close the loop with this design.** Add a manifest write immediately before the
+existing bundle commit in `build-and-commit`, and `frontend_range()` starts returning
+a real range instead of `None`:
+
+```yaml
+- name: Record the PAC commit this bundle came from
+  run: |
+    printf '{\n  "repo": "%s",\n  "branch": "%s",\n  "sha": "%s",\n  "built_at": "%s"\n}\n' \
+      "$FRONTEND_REPO" "$FRONTEND_BRANCH" \
+      "$(cd frontend && git rev-parse HEAD)" \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      > lex/react/build/.frontend-version.json
+```
+
 ## Error handling
 
 | Condition | Behaviour |
