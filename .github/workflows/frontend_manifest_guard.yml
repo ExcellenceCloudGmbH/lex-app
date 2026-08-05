@@ -1,0 +1,51 @@
+# ──────────────────────────────────────────────────────────────────────
+#  A rebuilt frontend bundle must say which PAC commit produced it.
+#
+#  frontend_build.yml would do this automatically, but it has never run:
+#  every execution since v2.0.0rc218 failed at its secrets preflight
+#  (FRONTEND_REPO_TOKEN and NPM_MARMELAB_TOKEN are not configured), so
+#  bundles are hand-committed with no provenance at all.
+#
+#  Until that is repaired, this guard makes the manual manifest update
+#  impossible to forget. Release notes cannot report frontend changes
+#  truthfully without it.
+# ──────────────────────────────────────────────────────────────────────
+name: Frontend Manifest Guard
+
+on:
+  pull_request:
+    paths:
+      - "lex/react/build/**"
+
+jobs:
+  manifest:
+    name: "Bundle change requires a manifest update"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the manifest moved with the bundle
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          MANIFEST="lex/react/build/.frontend-version.json"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- lex/react/build/ | grep -v "^${MANIFEST}$" || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No bundle files changed apart from the manifest — nothing to check."
+            exit 0
+          fi
+          if git diff --name-only "$BASE" "$HEAD" -- "$MANIFEST" | grep -q .; then
+            echo "Bundle and manifest both updated."
+            exit 0
+          fi
+          echo "::error::This PR changes lex/react/build/ without updating ${MANIFEST}."
+          echo "Add the PAC commit the bundle was built from, e.g.:"
+          echo '  {"repo": "ExcellenceCloudGmbH/process-admin-general-client",'
+          echo '   "branch": "lex-app-v2-pac-latest", "sha": "<pac sha>",'
+          echo '   "built_at": "<ISO 8601 UTC>"}'
+          echo "Without it, release notes cannot report frontend changes truthfully."
+          exit 1

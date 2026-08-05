@@ -1,0 +1,69 @@
+# ──────────────────────────────────────────────────────────────────────
+#  On promotion to a full release: commit the mechanical CHANGELOG.md
+#  entry, and (later) publish the approved body to quackback.
+#
+#  The digest is rebuilt here rather than carried over from the gate run.
+#  Workflow artifacts are scoped to the run that produced them, and the
+#  gate runs on `prereleased` while this runs on `released` — two runs,
+#  two events. Since the tag is fixed once the prerelease exists, the
+#  digest is deterministic, so re-deriving it is cheaper than cross-run
+#  artifact plumbing and needs no extra token.
+#
+#  CHANGELOG.md is mechanical and is never hand-edited. Only the business
+#  note in the release body is reviewed, so a human rewriting the prose
+#  cannot desync the technical record.
+# ──────────────────────────────────────────────────────────────────────
+name: Publish Release Notes
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to (re)generate the changelog entry for"
+        required: true
+        type: string
+
+jobs:
+  changelog:
+    name: "Commit the CHANGELOG entry"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Render and prepend the entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          DATE=$(git log -1 --format=%cs "refs/tags/$TAG")
+          PYTHONPATH=.github/scripts python -m release_notes render-changelog \
+            --tag "$TAG" --date "$DATE"
+
+      - name: Commit
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "No changelog change for $TAG — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): ${TAG}"
+          # The release has already shipped by this point, so a push race is
+          # safe to retry once and then fail loudly.
+          git push || { git pull --rebase && git push; }
