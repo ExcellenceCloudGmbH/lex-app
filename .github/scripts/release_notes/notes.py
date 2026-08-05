@@ -58,7 +58,7 @@ GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "{model}:generateContent"
 )
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-pro"
 
 OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 OPENAI_MODEL = "gpt-4o"
@@ -70,33 +70,77 @@ MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions"
 MODEL = "openai/gpt-4o"
 
 _INSTRUCTIONS = """\
-You are writing the release note for a business application called LEX.
+You are writing the customer-facing release note for LEX.
 
-Audience: two readers at once. A business user who has never seen the codebase
-and wants to know what changed for them, and a technical user who wants to know
-what actually changed. One document must satisfy both.
+WHAT LEX IS
+LEX is a platform for building business applications. Customers use a deployed
+LEX instance through a web UI: browsing and editing records in data grids,
+uploading files, running calculations over that data, and reading calculation
+logs and audit history. Your readers are those business users and the people
+who support them. They have never seen the source code and do not know how LEX
+is built, tested or released.
 
-Rules:
-- Use only these headings, in this order: "## Main changes", "## Optimizations",
-  "## Bug fixes". Omit any heading you have nothing to put under it. Never emit
-  a heading with no entries.
-- Each entry is a bullet starting with a bold summary phrase, then one or two
-  plain sentences. Example: "- **New sidebar.** A full-height side navigation."
-- Group entries by what the change means to a user, NOT by which repository or
-  component it came from. Never mention "backend", "frontend", or repository
-  names.
-- Do not invent changes. Every entry must trace to an item in the digest.
-- Do not mention internal class names, file paths, or commit hashes.
-- End with a line starting "**Upgrade note:**" describing any action needed on
-  upgrade, or stating that none is needed.
+THE MOST IMPORTANT RULE
+Describe only what changed **for someone using LEX**. The digest also contains
+work on the toolchain that builds and ships LEX — CI pipelines, test plans,
+release automation, developer setup. Entries with "internal": true are that
+kind of work. Leave them out. Entries without the flag may still be internal;
+judge by whether a user of the LEX web UI could notice.
 
-Match the tone and shape of this previous release note exactly:
+Never describe a change to our own tooling as a LEX capability. A previous
+release turned "the release-note drafter can now call Gemini" into "LEX can now
+connect to Gemini and OpenAI, allowing you to integrate with a wider range of
+large language models" — a feature that does not exist, announced to customers.
+If you find yourself writing about models, pipelines, CI, or repositories, stop:
+that is our machinery, not the product.
+
+IF NOTHING IS USER-FACING
+Say so, in full:
+
+    No user-facing changes in this release. This release contains internal
+    improvements to how LEX is built and released.
+
+    **Upgrade note:** no action is needed on upgrade.
+
+That is a correct and complete answer. Do not pad a thin release by promoting
+internal work into features. A short honest note is worth more than a long
+invented one.
+
+FORMAT
+Use only these headings, in this order, and only when you have entries for them:
+"## Main changes" (new capability), "## Optimizations" (existing things now
+faster, lighter or more reliable), "## Bug fixes" (something was wrong and is
+now right). Omit any heading you have nothing for. Never write a heading with
+nothing under it.
+
+Each entry is one bullet: a bold summary phrase, then one or two plain
+sentences saying what a user will notice.
+
+    - **New sidebar.** A full-height side navigation with a consolidated header
+      bar. More room for your data, and models are easier to find.
+
+WRITING
+- Group by what the change means to a user, never by component or repository.
+  Never write "backend", "frontend", or a repository name.
+- Merge entries describing the same user-visible change into one bullet. Two
+  fixes to embedded authentication are one bullet, not two.
+- Be concrete. "Date columns show the date only, with the full timestamp on
+  hover" — not "an improved date experience".
+- Cut filler. No "seamless", "robust", "enhanced experience", "allowing you to",
+  "a wider range of". If removing a phrase loses no information, remove it.
+- Every statement must trace to a digest entry. Do not infer capabilities that
+  are not there, and do not soften or inflate what an entry says.
+- No class names, file paths, commit hashes, PR numbers or internal jargon.
+- End with a line starting "**Upgrade note:**" — any action needed on upgrade,
+  or that none is.
+
+Match the tone of this previous release note:
 
 <exemplar>
 {exemplar}
 </exemplar>
 
-Here is the digest of what changed in {tag}:
+Changes in {tag}:
 
 <digest>
 {digest}
@@ -186,7 +230,10 @@ def _post(url: str, *, headers: dict, json_body: dict) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def github_models(prompt: str, *, api_key: str, post: Callable[..., dict] = _post) -> str:
+def github_models(
+    prompt: str, *, api_key: str, model: str = MODEL,
+    post: Callable[..., dict] = _post,
+) -> str:
     """Call GitHub Models with the job's GITHUB_TOKEN. No new secret needed.
 
     The calling workflow job must declare `permissions: models: read`.
@@ -195,7 +242,7 @@ def github_models(prompt: str, *, api_key: str, post: Callable[..., dict] = _pos
         MODELS_ENDPOINT,
         headers={"Authorization": f"Bearer {api_key}", "Accept": "application/vnd.github+json"},
         json_body={
-            "model": MODEL,
+            "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
         },
@@ -207,14 +254,15 @@ def github_models(prompt: str, *, api_key: str, post: Callable[..., dict] = _pos
 
 
 def anthropic_messages(
-    prompt: str, *, api_key: str, post: Callable[..., dict] = _post
+    prompt: str, *, api_key: str, model: str = ANTHROPIC_MODEL,
+    post: Callable[..., dict] = _post,
 ) -> str:
     """Draft via the Anthropic Messages API. Requires ANTHROPIC_API_KEY."""
     payload = post(
         ANTHROPIC_ENDPOINT,
         headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
         json_body={
-            "model": ANTHROPIC_MODEL,
+            "model": model,
             "max_tokens": ANTHROPIC_MAX_TOKENS,
             "messages": [{"role": "user", "content": prompt}],
         },
@@ -236,13 +284,16 @@ def _chat_completion_text(payload: dict, who: str) -> str:
         raise ValueError(f"unexpected response from {who}: {payload!r}") from exc
 
 
-def openai_chat(prompt: str, *, api_key: str, post: Callable[..., dict] = _post) -> str:
+def openai_chat(
+    prompt: str, *, api_key: str, model: str = OPENAI_MODEL,
+    post: Callable[..., dict] = _post,
+) -> str:
     """Draft via the OpenAI chat-completions API. Requires OPENAI_API_KEY."""
     payload = post(
         OPENAI_ENDPOINT,
         headers={"Authorization": f"Bearer {api_key}"},
         json_body={
-            "model": OPENAI_MODEL,
+            "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
         },
@@ -250,7 +301,10 @@ def openai_chat(prompt: str, *, api_key: str, post: Callable[..., dict] = _post)
     return _chat_completion_text(payload, "OpenAI")
 
 
-def gemini_generate(prompt: str, *, api_key: str, post: Callable[..., dict] = _post) -> str:
+def gemini_generate(
+    prompt: str, *, api_key: str, model: str = GEMINI_MODEL,
+    post: Callable[..., dict] = _post,
+) -> str:
     """Draft via the Gemini generateContent API. Requires GEMINI_API_KEY.
 
     The key goes in the `x-goog-api-key` header rather than the `?key=` query
@@ -258,7 +312,7 @@ def gemini_generate(prompt: str, *, api_key: str, post: Callable[..., dict] = _p
     credential out of request logs, proxy logs and error messages.
     """
     payload = post(
-        GEMINI_ENDPOINT.format(model=GEMINI_MODEL),
+        GEMINI_ENDPOINT.format(model=model),
         headers={"x-goog-api-key": api_key},
         json_body={
             "contents": [{"parts": [{"text": prompt}]}],
@@ -292,6 +346,13 @@ PROVIDERS: dict[str, tuple[str, Callable[..., str]]] = {
 # answers 410 during its brownout, so it is only ever a last resort.
 PROVIDER_ORDER = ("anthropic", "gemini", "openai", "github-models")
 
+_DEFAULT_MODELS = {
+    "anthropic": ANTHROPIC_MODEL,
+    "gemini": GEMINI_MODEL,
+    "openai": OPENAI_MODEL,
+    "github-models": MODEL,
+}
+
 # What people actually type.
 _ALIASES = {
     "google": "gemini",
@@ -304,6 +365,14 @@ _ALIASES = {
     "github-models": "github-models",
     "githubmodels": "github-models",
 }
+
+
+def model_for(provider: str, env: dict) -> str:
+    """The model to use, honouring a LEX_NOTES_MODEL override."""
+    override = (env.get("LEX_NOTES_MODEL") or "").strip()
+    if override:
+        return override
+    return _DEFAULT_MODELS[provider]
 
 
 def resolve_provider(
@@ -333,12 +402,12 @@ def resolve_provider(
             raise ValueError(
                 f"notes provider {resolved!r} was requested but {env_key} is not set"
             )
-        return resolved, functools.partial(call, api_key=api_key)
+        return resolved, functools.partial(call, api_key=api_key, model=model_for(resolved, env))
 
     for candidate in PROVIDER_ORDER:
         env_key, call = PROVIDERS[candidate]
         api_key = env.get(env_key, "")
         if api_key:
-            return candidate, functools.partial(call, api_key=api_key)
+            return candidate, functools.partial(call, api_key=api_key, model=model_for(candidate, env))
 
     return None

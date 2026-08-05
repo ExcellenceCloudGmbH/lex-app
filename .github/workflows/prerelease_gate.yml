@@ -212,6 +212,10 @@ jobs:
           # With none of them, drafting fails open with a visible notice rather
           # than blocking the release.
           LEX_NOTES_PROVIDER: ${{ vars.LEX_NOTES_PROVIDER || secrets.LEX_NOTES_PROVIDER }}
+          # Optional: override the model for whichever provider is chosen.
+          # Defaults are the reasoning tier, not the fast tier — deciding
+          # what is user-facing and what to merge is judgement work.
+          LEX_NOTES_MODEL: ${{ vars.LEX_NOTES_MODEL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

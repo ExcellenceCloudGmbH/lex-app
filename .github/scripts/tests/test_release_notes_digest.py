@@ -190,3 +190,34 @@ def test_the_same_pr_number_in_each_repo_stays_separate():
     got = digest.build_digest("v2.1.7", "v2.1.6", back, front)
     assert len(got["changes"]) == 2
     assert {c["component"] for c in got["changes"]} == {"backend", "frontend"}
+
+
+# ── Internal-vs-user-facing classification ────────────────────────────
+
+def test_housekeeping_types_are_flagged_internal():
+    for t in ("ci", "build", "chore", "test", "docs"):
+        assert digest.is_internal(t, None) is True, t
+
+
+def test_toolchain_scopes_are_flagged_internal_whatever_the_type():
+    # feat(release-notes) is a feature *of our pipeline*, not of LEX. Read as
+    # a product change it becomes "LEX can now connect to Gemini" — which is
+    # what v2.1.7rc1 actually published.
+    for scope in ("release-notes", "test-plan", "ci", "gate", "showcase", "plan", "spec"):
+        assert digest.is_internal("feat", scope) is True, scope
+
+
+def test_product_changes_are_not_flagged_internal():
+    for typ, scope in (("fix", "auth"), ("fix", "calc"), ("feat", "grid"), ("fix", "proxy")):
+        assert digest.is_internal(typ, scope) is False, (typ, scope)
+
+
+def test_the_digest_carries_the_flag():
+    commits = [
+        digest.Commit(sha="aaa", subject="feat(release-notes): pluggable providers"),
+        digest.Commit(sha="bbb", subject="fix(auth): renew the embedded token"),
+    ]
+    got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
+    by_scope = {c["scope"]: c["internal"] for c in got["changes"]}
+    assert by_scope["release-notes"] is True
+    assert by_scope["auth"] is False
