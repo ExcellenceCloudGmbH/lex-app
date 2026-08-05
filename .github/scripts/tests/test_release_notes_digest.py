@@ -47,3 +47,59 @@ def test_an_unknown_prefix_is_not_treated_as_a_type():
     got = digest.parse_subject("wibble(core): something")
     assert got.type == "other"
     assert got.subject == "wibble(core): something"
+
+
+def test_build_digest_maps_commits_to_entries():
+    commits = [
+        digest.Commit(sha="705850d", subject="fix(calc): stop stamping edited_at"),
+        digest.Commit(sha="81edcbc", subject="feat(setup): onboard any agentic IDE"),
+    ]
+    got = digest.build_digest(
+        tag="v2.1.7",
+        previous_tag="v2.1.6",
+        backend_commits=commits,
+        frontend_commits=[],
+    )
+    assert got["tag"] == "v2.1.7"
+    assert got["previous_tag"] == "v2.1.6"
+    assert [c["sha"] for c in got["changes"]] == ["705850d", "81edcbc"]
+    assert got["changes"][0]["component"] == "backend"
+    assert got["changes"][0]["type"] == "fix"
+
+
+def test_build_digest_labels_frontend_commits():
+    got = digest.build_digest(
+        tag="v2.1.7",
+        previous_tag="v2.1.6",
+        backend_commits=[],
+        frontend_commits=[digest.Commit(sha="a3f91c2", subject="fix(export): send the viewer timezone")],
+    )
+    assert got["changes"][0]["component"] == "frontend"
+
+
+def test_merge_commits_are_dropped():
+    commits = [
+        digest.Commit(sha="1111111", subject="Merge pull request #678 from Excellence/fix/x"),
+        digest.Commit(sha="2222222", subject="Merge branch 'lex-app-v2' into feature"),
+        digest.Commit(sha="3333333", subject="fix(core): a real change"),
+    ]
+    got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
+    assert [c["sha"] for c in got["changes"]] == ["3333333"]
+
+
+def test_bundle_update_commits_are_dropped():
+    commits = [
+        digest.Commit(sha="4444444", subject="build(frontend): update bundle from Excellence/pac@abc123"),
+        digest.Commit(sha="5555555", subject="feat(core): a real change"),
+    ]
+    got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
+    assert [c["sha"] for c in got["changes"]] == ["5555555"]
+
+
+def test_empty_subjects_are_dropped():
+    commits = [
+        digest.Commit(sha="6666666", subject="   "),
+        digest.Commit(sha="7777777", subject="fix(core): real"),
+    ]
+    got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
+    assert [c["sha"] for c in got["changes"]] == ["7777777"]

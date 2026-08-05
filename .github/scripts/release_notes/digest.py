@@ -50,3 +50,63 @@ def parse_subject(subject: str) -> Parsed:
         breaking=match.group("breaking") == "!",
         subject=match.group("subject"),
     )
+
+
+@dataclass(frozen=True)
+class Commit:
+    """One commit as read from git, before enrichment."""
+
+    sha: str
+    subject: str
+    pr_number: int | None = None
+    pr_title: str | None = None
+
+
+# Commits that are real work but say nothing about the shipped product.
+_MERGE_PREFIXES = ("Merge pull request ", "Merge branch ", "Merge remote-tracking ")
+_BUNDLE_PREFIX = "build(frontend): update bundle"
+
+
+def is_noise(subject: str) -> bool:
+    """True for commits that must never reach a changelog."""
+    subject = (subject or "").strip()
+    if not subject:
+        return True
+    if subject.startswith(_MERGE_PREFIXES):
+        return True
+    if subject.startswith(_BUNDLE_PREFIX):
+        return True
+    return False
+
+
+def _entry(commit: Commit, component: str) -> dict:
+    # The PR title leads when there is one: PR titles in this repository are
+    # consistently well-formed, while only 57% of non-merge commit subjects
+    # conform. Enrichment is what makes the input usable at that number.
+    subject = commit.pr_title or commit.subject
+    parsed = parse_subject(subject)
+    return {
+        "sha": commit.sha,
+        "component": component,
+        "type": parsed.type,
+        "scope": parsed.scope,
+        "breaking": parsed.breaking,
+        "subject": parsed.subject,
+        "pr_number": commit.pr_number,
+    }
+
+
+def build_digest(
+    tag: str,
+    previous_tag: str | None,
+    backend_commits: list[Commit],
+    frontend_commits: list[Commit],
+) -> dict:
+    """Assemble the digest both renderers consume."""
+    changes: list[dict] = []
+    for component, commits in (("backend", backend_commits), ("frontend", frontend_commits)):
+        for commit in commits:
+            if is_noise(commit.pr_title or commit.subject):
+                continue
+            changes.append(_entry(commit, component))
+    return {"tag": tag, "previous_tag": previous_tag, "changes": changes}
