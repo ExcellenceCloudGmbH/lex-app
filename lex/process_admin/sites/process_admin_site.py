@@ -4,6 +4,7 @@ from django.http import HttpResponse
 from django.urls import path, register_converter
 from lex.api.utils import create_model_converter
 from lex.api.views.LexLoggerView.LexLoggerView import LexLoggerView
+from lex.api.views.calculations.CalculationStatus import CalculationStatus
 from lex.api.views.calculations.CleanCalculations import CleanCalculations
 from lex.api.views.calculations.DownloadMarkdownPdf import DownloadMarkdownPdf
 from lex.api.views.calculations.InitCalculationLogs import InitCalculationLogs
@@ -247,6 +248,11 @@ class ProcessAdminSite:
                 "api/init-calculation-logs",
                 InitCalculationLogs.as_view(),
                 name="init-calculation-logs",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/<int:pk>/calculation-status",
+                CalculationStatus.as_view(),
+                name="calculation-status",
             ),
             path(
                 "api/clean-calculations",
