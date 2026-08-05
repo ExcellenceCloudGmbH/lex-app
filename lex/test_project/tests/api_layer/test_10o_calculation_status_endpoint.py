@@ -8,7 +8,7 @@ renders and nothing the caller is not allowed to see -- a response that
 confirms a record exists and errored, to someone who cannot read that record,
 is a leak.
 
-Cluster 10o — scenarios 10.72–10.80. Type: E.
+Cluster 10o — scenarios 10.72–10.81. Type: E.
 Covers: lex/api/views/calculations/CalculationStatus.py.
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py -v
 """
@@ -59,11 +59,14 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
         calculation_id: str | None = None,
         first_at=None,
         step=timedelta(seconds=1),
+        prefix: str = "line",
     ):
         """Create ``count`` CalculationLog rows for ``instance``, ``step`` apart.
 
         ``calculation_id`` identifies the run the rows belong to — pass it to
-        give a record more than one run's worth of log.
+        give a record more than one run's worth of log. ``prefix`` labels the
+        line text, so a scenario with two runs can tell whose line it is
+        looking at.
 
         ``timestamp`` is ``auto_now_add``, so rows written in a loop can land on
         the same microsecond and leave "which line is newest" up to the
@@ -78,7 +81,7 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
         for i in range(count):
             row = CalculationLog.objects.create(
                 calculationId=calculation_id,
-                calculation_log=f"line {i}",
+                calculation_log=f"{prefix} {i}",
                 content_type=content_type,
                 object_id=instance.pk,
             )
@@ -396,6 +399,61 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
                 "The widget prints this as 'took 38s'. Got "
                 f"{body['duration_seconds']!r} — a duration covering the "
                 "yesterday run too would read as 86438s."
+            ),
+        )
+
+    def test_10_81_the_tail_covers_only_the_latest_run(self):
+        """
+        Scenario 10.81: a re-run's tail carries none of the previous run's lines.
+        Given: a record whose earlier run logged plenty, re-run just now with a
+               handful of lines — fewer than the tail limit
+        When: the widget polls with include_log=true
+        Then: only the current run's lines come back. started_at/finished_at are
+              already scoped to the newest calculationId (10.80), so an unscoped
+              tail pads the newest run out of yesterday's rows and prints them
+              under a header claiming the run took 38 seconds — the log then
+              contradicts the timings in the same envelope.
+        """
+        item = ApiLayerCalc.objects.create(name="rerun")
+        ApiLayerCalc.objects.filter(pk=item.pk).update(
+            is_calculated=CalculationModel.SUCCESS,
+        )
+        self._make_logs(
+            item,
+            count=8,
+            calculation_id="run-previous",
+            first_at=timezone.now() - timedelta(days=1),
+            prefix="previous",
+        )
+        current_lines = 3
+        self._make_logs(
+            item,
+            count=current_lines,
+            calculation_id="run-current",
+            first_at=timezone.now() - timedelta(seconds=30),
+            prefix="current",
+        )
+
+        body = self.client.get(
+            self.url_status(CALC, item.pk) + "?include_log=true"
+        ).json()
+
+        self.assertEqual(
+            body["log"], [f"current {i}" for i in range(current_lines)],
+            msg=(
+                "The tail must be exactly the latest run's lines, oldest first. "
+                f"Got {body['log']} — anything from 'run-previous' is a line "
+                "from yesterday rendered as part of a run that took 30s."
+            ),
+        )
+        self.assertIs(
+            body["log_truncated"], False,
+            msg=(
+                f"The latest run logged {current_lines} lines, well inside the "
+                "tail limit, so nothing about it was truncated. Got "
+                f"log_truncated={body['log_truncated']!r} — counting the "
+                "previous run's rows towards the limit is the same bug seen "
+                "from the other side."
             ),
         )
 

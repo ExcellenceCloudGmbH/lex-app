@@ -12,8 +12,9 @@ record exists and leak its calculation state.
 
 The log tail is opt-in via ``?include_log=true``: the widget's log panel is off
 by default, so the ordinary poll must not read log rows at all. Run timings come
-from ``CalculationLog`` as well -- see ``_run_window`` -- because the record
-itself is not stamped when a calculation writes it.
+from ``CalculationLog`` as well, because the record itself is not stamped when a
+calculation writes it. Both are scoped to the record's newest run -- see
+``_latest_run_rows`` -- so the tail and the timings always describe the same one.
 
 """
 
@@ -86,23 +87,22 @@ class CalculationStatus(APIView):
         }
 
     @staticmethod
-    def _run_window(instance):
-        """(start, end) of the record's most recent run, or ``(None, None)``.
+    def _latest_run_rows(instance):
+        """The record's ``CalculationLog`` rows, narrowed to its most recent run.
 
-        The record carries no timestamp of its own -- since PR #675 a
-        calculation-owned save deliberately does not stamp ``edited_at`` -- so
-        its ``CalculationLog`` rows, found through their generic FK, are the
-        only trace of when a run happened.
+        ``CalculationLog`` points at records through a generic FK, so the rows
+        are found by (content type, pk) rather than a reverse accessor.
 
-        Scoped to the newest ``calculationId``: a record that has been
-        calculated before still holds the earlier runs' rows, and a window
-        spanning all of them would report days for a run that took seconds.
-        One query, so the poll does not gain a round trip.
+        A record that has been calculated before still holds every earlier run's
+        rows, so everything derived from the log has to say *which* run it is
+        describing -- both the timings and the tail, or the envelope contradicts
+        itself. The ``calculationId`` of the newest row is that run; it stays a
+        ``Subquery`` so narrowing costs no extra round trip on a 2-second poll.
         """
         # Imported here rather than at module import: this view module is
         # pulled in while the URLconf is assembled.
         from django.contrib.contenttypes.models import ContentType
-        from django.db.models import Max, Min, Subquery
+        from django.db.models import Subquery
 
         from lex.audit_logging.models.CalculationLog import CalculationLog
 
@@ -111,34 +111,44 @@ class CalculationStatus(APIView):
             content_type=content_type, object_id=instance.pk,
         )
         latest_run = rows.order_by("-timestamp", "-id").values("calculationId")[:1]
-        window = rows.filter(calculationId=Subquery(latest_run)).aggregate(
+        return rows.filter(calculationId=Subquery(latest_run))
+
+    @classmethod
+    def _run_window(cls, instance):
+        """(start, end) of the record's most recent run, or ``(None, None)``.
+
+        The record carries no timestamp of its own -- since PR #675 a
+        calculation-owned save deliberately does not stamp ``edited_at`` -- so
+        its ``CalculationLog`` rows are the only trace of when a run happened.
+
+        Scoped to the newest run: a window spanning every run the record ever
+        had would report days for a run that took seconds.
+        """
+        from django.db.models import Max, Min
+
+        window = cls._latest_run_rows(instance).aggregate(
             first=Min("timestamp"), last=Max("timestamp"),
         )
         return window["first"], window["last"]
 
-    @staticmethod
-    def _log_tail(instance) -> dict:
-        """The last ``LOG_TAIL_LIMIT`` log lines for this record, oldest first.
+    @classmethod
+    def _log_tail(cls, instance) -> dict:
+        """The last ``LOG_TAIL_LIMIT`` lines of the newest run, oldest first.
 
-        ``CalculationLog`` points at records through a generic FK, so the rows
-        are found by (content type, pk) rather than a reverse accessor.
+        Scoped to the same run as ``_run_window``. Unscoped, a re-run that
+        logged fewer than ``LOG_TAIL_LIMIT`` lines would have its tail padded
+        out of the *previous* run's rows -- printing yesterday's lines beneath a
+        header stating this run took seconds -- and would report the log as
+        truncated whenever the record's whole history crossed the limit, however
+        short the run being watched.
 
         One query, and one row more than the caller can receive: fetching
         ``LOG_TAIL_LIMIT + 1`` is what makes "there were earlier lines"
         answerable without a second COUNT over a table that grows with every
         line every calculation has ever logged.
         """
-        # Imported here rather than at module import: this view module is
-        # pulled in while the URLconf is assembled.
-        from django.contrib.contenttypes.models import ContentType
-
-        from lex.audit_logging.models.CalculationLog import CalculationLog
-
-        content_type = ContentType.objects.get_for_model(type(instance))
         newest_first = list(
-            CalculationLog.objects.filter(
-                content_type=content_type, object_id=instance.pk,
-            )
+            cls._latest_run_rows(instance)
             # id breaks ties: auto_now_add stamps can collide within a run, and
             # the tail must not reshuffle between two polls.
             .order_by("-timestamp", "-id")
