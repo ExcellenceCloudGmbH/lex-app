@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 250
+max_scenario: 262
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -284,10 +284,10 @@ letters:
       a-z. Renumbered from z/1.201-1.206 on merge
   ab:
     title: Streamlit lex_calculation() widget — trigger one record and watch it
-    scenarios: 1.223-1.250
+    scenarios: 1.223-1.262
     status: complete
     tests:
-      pass: 28
+      pass: 40
       skip: 0
       xfail: 0
     note: >-
@@ -311,4 +311,23 @@ letters:
       only the PATCH is authoritative and the envelope is one poll old (1.249), and left
       enabled when the key is absent, so a backend older than the flag does not disable
       everyone's button (1.250). Pairs with batch 10o, the status endpoint it polls.
+      1.251-1.262 are the usability pass after the first page built with thirteen of
+      these widgets: a click took seven seconds to change a word, and running one
+      calculation greyed every other widget on the page. Three causes, all measured
+      against the real runtime with AppTest. Every widget issued its own blocking GET
+      every run, so a page cost one round trip per widget in series - `read_status_cached`
+      shares one read per (model, pk, include_log) for at most half a poll interval
+      (1.251-1.253), out of `st.session_state` and never `st.cache_data`, because
+      session_state is per-user and a status envelope describes a record the next reader
+      may not be allowed to see at all - the endpoint 404s an unreadable record precisely
+      so its existence is not disclosed (1.254, 1.262). The poll timer was decided inside
+      the fragment, where the only way to obtain one is to rerun the whole script;
+      `st.rerun()` raises, so every widget below lost its turn and asked for a rerun of
+      its own next run. Reading status before declaring the fragment makes one pass enough
+      (1.245 rewritten, 1.258), leaving app-scope reruns at exactly two per calculation -
+      the click that starts the watch and the poll that ends it (1.259). And a click now
+      renders "Running" from the trigger's own response rather than after a re-read
+      (1.255), giving it back if the trigger was refused (1.256) and yielding to the next
+      real read (1.257). Measured on 13 tiles over 2 records - load 13 GETs to 2, a rerun
+      13 to 0, a click 14 script runs and 104 GETs to 2 and 1 (1.260-1.261).
 

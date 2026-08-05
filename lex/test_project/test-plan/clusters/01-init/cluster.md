@@ -209,6 +209,8 @@ does not remove user launch configurations.
 
 **Why a regression matters:** every failure mode here is silent. Polling that forgets to stop is permanent backend load nobody notices, multiplied by every tab left open. An exception escaping the widget does not report an error — Streamlit renders top-to-bottom, so the page just loses everything below the widget. A colour literal keeps rendering the old palette after the next token refresh with nothing failing. And an in-process ORM call would skip the record's read permission, resolve the wrong audit actor and miss the `_defer_calculate_hook` trigger path all at once — a second way to start a calculation is what produced the `edited_at` bug in PR #675.
 
+**And one that was not silent at all.** The first page built with thirteen of these took seven seconds to change "Not calculated" to "Running" after a click, and greyed every widget on the page whenever any one calculation started or stopped. Nothing was broken; the page was a queue. 1.251–1.262 hold the three properties that fixed it — one read per record per run, a poll timer decided before the fragment is declared, and a click that renders its own answer — and 1.260–1.262 hold them against the real Streamlit runtime, because "how many times does the script run" is a claim about Streamlit, not about this code.
+
 | Scenario | Title | Asserts |
 | --- | --- | --- |
 | 1.223 | Frontend origin is enough | `REACT_APP_URL` — the variable `lex_view` already needs — resolves the API base, so reaching the backend needs no new configuration |
@@ -233,11 +235,23 @@ does not remove user launch configurations.
 | 1.242 | The token comes from the session | read from `session_state["access_token"]`, with no environment fallback |
 | 1.243 | An expired session asks for a reload | no token renders "Session expired — reload the page", and makes no backend call at all |
 | 1.244 | A failed read survives a real render | a 500 renders a caption through the full widget, not an exception |
-| 1.245 | Finding work in progress starts the watch | a record found `IN_PROGRESS` under a fragment declared without an interval reruns to build the timer |
+| 1.245 | Finding work in progress starts the watch | a record found `IN_PROGRESS` has its poll timer declared in that same run, with no rerun — the status is read before the fragment is declared, which is the only moment `run_every` is heard |
 | 1.246 | A settled record costs one render | `SUCCESS` renders once, stores no interval and does not rerun |
 | 1.247 | No run permission disables the button | `can_calculate: false` draws the button disabled with the backend's reason beside it, and issues no trigger — the reason arrives before the click, not after it |
 | 1.248 | A running record still disables it | `IN_PROGRESS` disables the button even for a caller who may calculate — the double-trigger guard is independent of permission |
 | 1.249 | The 403 backstop survives a stale envelope | an envelope saying "you may" plus a backend that refuses still renders the refusal: the flag is one poll old and only the PATCH is authoritative |
 | 1.250 | A missing flag is not a denial | an envelope with no `can_calculate` key leaves the button enabled, so a backend older than the field does not disable it for everyone |
+| 1.251 | A page costs one read per record | thirteen tiles over two records issue two GETs, not thirteen — every read is a blocking round trip inside the render |
+| 1.252 | The cache answers only what it was asked | a second record, and a widget wanting the log, each cost their own read; a log-less envelope would leave the log panel permanently empty |
+| 1.253 | A rerun does not re-read a settled record | an idle widget re-renders from the read it already has, which is what any other widget's start or finish costs the page |
+| 1.254 | The cache stops at the session boundary | two sessions each read as themselves; no `st.cache_data`/`cache_resource`/`lru_cache` anywhere in the module, and the cache is fetched only from `st.session_state` |
+| 1.255 | A click renders its own answer | "Running" appears in the render that handled the click, with no status read between the trigger and the word |
+| 1.256 | A refused trigger takes the optimism back | a 403 on the click renders the refusal, keeps the real status and starts no poll |
+| 1.257 | The optimism lasts one render | the first fresh read after a click replaces it and clears the flag |
+| 1.258 | A running record does not cost the page | three widgets, the middle one `IN_PROGRESS`, all render in one pass; only that one carries a timer |
+| 1.259 | Polling is silent until there is news | a poll that finds the work continuing re-reads and asks for nothing; the one that finds it finished reruns, because only a full run drops the browser's timer |
+| 1.260 | A page of tiles loads in one run | `AppTest`: thirteen tiles, one script run, two reads — and a rerun moments later issues none |
+| 1.261 | A click costs one rerun, not one per tile | `AppTest`: pressing Calculate reruns the script once more and re-reads only the record that changed |
+| 1.262 | Two sessions never share a status | `AppTest`: two sessions on one record each issue their own read and render their own answer |
 
-**Scenario range:** 1.223 – 1.250. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-05) — 28 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this polls — and, for 1.247–1.250, the source of the `can_calculate` flag the button is drawn from.
+**Scenario range:** 1.223 – 1.262. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-05) — 40 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this polls — and, for 1.247–1.250, the source of the `can_calculate` flag the button is drawn from.

@@ -105,6 +105,12 @@ the status read failed (record missing, unreadable, backend unreachable). The
 widget has already rendered an explanation in all of those cases — a `None`
 return is not something you need to report.
 
+`status` is whatever the badge is showing, which for the one render that handles
+a click is `IN_PROGRESS` before any status read has confirmed it (see [What a
+page costs](#what-a-page-costs)). That is on purpose: a dashboard branching on
+the return value should never render finished results underneath a badge that
+says the record is running.
+
 Note the log and the calculate permission are **rendered but not returned**:
 `log`, `log_truncated`, `can_calculate` and `calculate_denied_reason` are not
 keys of the return value. The widget has already acted on the last two — the
@@ -283,20 +289,83 @@ dashboard showing ten finished calculations makes **zero** requests after its
 first render.
 
 The stopping is not free of subtlety, which is why it is pinned by scenarios
-1.228–1.230 and 1.245–1.246. `st.fragment` reads `run_every` only when the
-fragment is *declared*, and only a full script run declares one — so both
-starting and stopping the poll require a full rerun, and the widget issues one
-only when the interval actually changes. Rebuilding on every poll would rerun
-your whole dashboard every two seconds, which is worse than the polling.
+1.228–1.230, 1.245–1.246 and 1.258–1.259. `st.fragment` reads `run_every` only
+when the fragment is *declared*, and only a full script run declares one. The
+widget therefore reads the record's status **before** declaring its fragment, so
+a record that is already running gets its timer in that same run. Deciding it
+inside the fragment instead is what the first version did, and the only way out
+from there is `st.rerun()` — which raises, taking every widget still to be drawn
+down with it (see [What a page costs](#what-a-page-costs)).
+
+That leaves exactly **two full script runs per calculation**, both of which a
+reader can account for:
+
+- **the click**, which builds the browser's poll timer, and
+- **the poll that finds the run finished**, which takes it down.
 
 Two consequences for you as an author:
 
 - **Your script is not re-executed by a poll.** Only the widget's fragment
   reruns, so a heavy dataframe above the widget does not reload every two
   seconds. This is the entire reason polling is viable here.
-- **A rerun does happen when the state changes** — when a running record is first
-  discovered, and when a run finishes. Code above the widget runs again at those
-  two moments, so keep expensive loads behind `st.cache_data` as usual.
+- **A rerun does happen at those two moments.** Code above the widget runs again
+  when a run starts and when it ends, so keep expensive loads behind
+  `st.cache_data` as usual.
+
+## What a page costs
+
+The widget is built for pages with a lot of these on them — a status tile per
+line of a report — so the cost of *one* is not the interesting number. Measured
+on thirteen tiles over two records, which is the page this section exists
+because of:
+
+| | Reads (HTTP GET) | Full script runs |
+| --- | --- | --- |
+| First load | **2** | 1 |
+| A rerun moments later | **0** | 1 |
+| Pressing one **Calculate** | **1** | 2 |
+
+Three things get you there, and all three are pinned by scenarios 1.251–1.262.
+
+**Reads are shared, per session.** A status read is a blocking HTTP GET inside
+the render, and Streamlit renders top-to-bottom, so thirteen widgets used to
+mean thirteen round trips the reader waited through in series. Reads are now
+cached by `(model, pk, include_log)` for at most half a poll interval (and never
+more than a second), so widgets asking the same question get one answer, and a
+rerun moments later re-renders without asking again. The half-interval bound is
+what stops the cache answering the very poll it was built to make cheap.
+
+The cache lives in `st.session_state` — **not** `st.cache_data`. That is
+deliberate and it is a permission boundary, not a preference. `st.cache_data` is
+keyed by arguments and shared by every session the server is running; a status
+envelope describes a record the next reader may have no permission to see at
+all. The status endpoint answers an unreadable record with the same 404 as a
+missing one specifically so its existence is not disclosed, and a cross-session
+cache would hand over exactly that. `session_state` is already scoped to one
+signed-in user, so the boundary comes for free. The bearer token is deliberately
+*not* part of the cache key: keying by it is what a cross-session cache would
+need to be safe, and it would park one user's credential where another user's
+request can reach it.
+
+**The poll timer is decided before the fragment is declared.** `run_every` is
+read at declaration only, so a widget that discovers *inside* its fragment that
+it should be polling can obtain a timer in exactly one way: rerun the whole
+script. `st.rerun()` raises, so that exception travelled out through every
+widget still to be drawn — they never rendered, found their own running records
+on the next run, and each asked for a rerun of its own. One click on a page of
+thirteen tiles cost **fourteen script runs and 104 reads**. Reading the status
+first makes one pass enough.
+
+**A click renders its own answer.** Pressing Calculate used to leave the badge
+reading "Not calculated" until a re-read agreed — about seven seconds on that
+page — so the honest reading was that the button had not worked. The widget now
+renders **Running** from the trigger's own response. This is not a guess:
+`One.update` sets `is_calculated = IN_PROGRESS` and saves it *before* it answers
+the PATCH, so the record really is running by then; the widget is declining to
+ask again, not predicting. If the trigger is refused, the optimism is taken back
+in the same render and the refusal is shown instead. The next real status read
+supersedes it either way, so it can never become a second opinion about the
+record.
 
 ## Cost: `show_log=True` is the only expensive argument
 
@@ -378,7 +447,7 @@ button that appears to do nothing.
 
 | Batch | Scenarios | Covers |
 | --- | --- | --- |
-| [1ab](../../lex/test_project/test-plan/clusters/01-init/batches.md) | 1.223 – 1.250 (28 pass) | The widget and its HTTP client — poll lifecycle, presentation, trigger transport, the disabled-with-reason button and its 403 backstop, every failure path, and the gates on colour drift and Django imports. |
+| [1ab](../../lex/test_project/test-plan/clusters/01-init/batches.md) | 1.223 – 1.262 (40 pass) | The widget and its HTTP client — poll lifecycle, presentation, trigger transport, the disabled-with-reason button and its 403 backstop, every failure path, and the gates on colour drift and Django imports. 1.251–1.262 cover what a *page* of widgets costs: shared reads, the per-session cache boundary, the optimistic click, and the rerun budget — the last three measured against the real Streamlit runtime with `AppTest`, because "how many times does the script run" is a claim about Streamlit rather than about this code. |
 | [10o](../../lex/test_project/test-plan/clusters/10-api_layer/batches.md) | 10.72 – 10.83 (12 pass) | The status endpoint — the six statuses, read-permission indistinguishability, `can_calculate` pinned against what `One.update` really enforces, log bounding and truncation, run scoping. |
 
 ## Follow-ups
