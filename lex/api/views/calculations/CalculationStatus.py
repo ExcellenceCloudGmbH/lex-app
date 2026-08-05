@@ -11,7 +11,9 @@ code, same body -- because a distinguishable response would itself confirm the
 record exists and leak its calculation state.
 
 The log tail is opt-in via ``?include_log=true``: the widget's log panel is off
-by default, so the ordinary poll must not read log rows at all.
+by default, so the ordinary poll must not read log rows at all. Run timings come
+from ``CalculationLog`` as well -- see ``_run_window`` -- because the record
+itself is not stamped when a calculation writes it.
 
 """
 
@@ -72,13 +74,47 @@ class CalculationStatus(APIView):
         return readable.first()
 
     def _envelope(self, instance) -> dict:
+        started, finished = self._run_window(instance)
         return {
             "status": instance.is_calculated,
             "error": self._error_of(instance),
-            "started_at": None,
-            "finished_at": None,
-            "duration_seconds": None,
+            "started_at": started.isoformat() if started else None,
+            "finished_at": finished.isoformat() if finished else None,
+            "duration_seconds": (
+                (finished - started).total_seconds() if started and finished else None
+            ),
         }
+
+    @staticmethod
+    def _run_window(instance):
+        """(start, end) of the record's most recent run, or ``(None, None)``.
+
+        The record carries no timestamp of its own -- since PR #675 a
+        calculation-owned save deliberately does not stamp ``edited_at`` -- so
+        its ``CalculationLog`` rows, found through their generic FK, are the
+        only trace of when a run happened.
+
+        Scoped to the newest ``calculationId``: a record that has been
+        calculated before still holds the earlier runs' rows, and a window
+        spanning all of them would report days for a run that took seconds.
+        One query, so the poll does not gain a round trip.
+        """
+        # Imported here rather than at module import: this view module is
+        # pulled in while the URLconf is assembled.
+        from django.contrib.contenttypes.models import ContentType
+        from django.db.models import Max, Min, Subquery
+
+        from lex.audit_logging.models.CalculationLog import CalculationLog
+
+        content_type = ContentType.objects.get_for_model(type(instance))
+        rows = CalculationLog.objects.filter(
+            content_type=content_type, object_id=instance.pk,
+        )
+        latest_run = rows.order_by("-timestamp", "-id").values("calculationId")[:1]
+        window = rows.filter(calculationId=Subquery(latest_run)).aggregate(
+            first=Min("timestamp"), last=Max("timestamp"),
+        )
+        return window["first"], window["last"]
 
     @staticmethod
     def _log_tail(instance) -> dict:

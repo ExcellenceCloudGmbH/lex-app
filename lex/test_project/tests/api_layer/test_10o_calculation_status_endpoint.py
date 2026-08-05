@@ -8,14 +8,14 @@ renders and nothing the caller is not allowed to see -- a response that
 confirms a record exists and errored, to someone who cannot read that record,
 is a leak.
 
-Cluster 10o — scenarios 10.72–10.79. Type: E.
+Cluster 10o — scenarios 10.72–10.80. Type: E.
 Covers: lex/api/views/calculations/CalculationStatus.py.
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py -v
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from django.contrib.contenttypes.models import ContentType
@@ -51,8 +51,19 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
     def url_status(self, model_name: str, pk: int) -> str:
         return f"/api/model_entries/{model_name}/{pk}/calculation-status"
 
-    def _make_logs(self, instance, count: int, *, step=timedelta(seconds=1)):
+    def _make_logs(
+        self,
+        instance,
+        count: int,
+        *,
+        calculation_id: str | None = None,
+        first_at=None,
+        step=timedelta(seconds=1),
+    ):
         """Create ``count`` CalculationLog rows for ``instance``, ``step`` apart.
+
+        ``calculation_id`` identifies the run the rows belong to — pass it to
+        give a record more than one run's worth of log.
 
         ``timestamp`` is ``auto_now_add``, so rows written in a loop can land on
         the same microsecond and leave "which line is newest" up to the
@@ -61,11 +72,12 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
         Returns those timestamps, oldest first.
         """
         content_type = ContentType.objects.get_for_model(type(instance))
-        first_at = timezone.now() - step * count
+        calculation_id = calculation_id or f"calc-{instance.pk}"
+        first_at = timezone.now() - step * count if first_at is None else first_at
         stamps = []
         for i in range(count):
             row = CalculationLog.objects.create(
-                calculationId=f"calc-{instance.pk}",
+                calculationId=calculation_id,
                 calculation_log=f"line {i}",
                 content_type=content_type,
                 object_id=instance.pk,
@@ -314,6 +326,76 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
             msg=(
                 f"All {count} lines were returned, so nothing was truncated. "
                 f"Got log_truncated={body['log_truncated']!r}."
+            ),
+        )
+
+    def test_10_80_reports_the_last_run_timings_from_the_calculation_log(self):
+        """
+        Scenario 10.80: "last run" timings come from the log, and from the last
+        run only.
+        Given: a record calculated yesterday and again just now, the later run
+               spanning 38 seconds
+        When: the widget polls
+        Then: started_at, finished_at and duration_seconds describe the later
+              run alone. The record carries no timestamp of its own — since PR
+              #675 a calculation deliberately does not stamp edited_at — so the
+              log is the only trace of when a run happened; and a window
+              stretched across every run the record ever had would render "took
+              1 day" under a result that took under a minute.
+        """
+        item = ApiLayerCalc.objects.create(name="timed")
+        ApiLayerCalc.objects.filter(pk=item.pk).update(
+            is_calculated=CalculationModel.SUCCESS,
+        )
+        self._make_logs(
+            item,
+            count=3,
+            calculation_id="run-yesterday",
+            first_at=timezone.now() - timedelta(days=1),
+            step=timedelta(seconds=5),
+        )
+        last_run = self._make_logs(
+            item,
+            count=3,
+            calculation_id="run-current",
+            first_at=timezone.now() - timedelta(seconds=38),
+            step=timedelta(seconds=19),
+        )
+
+        body = self.client.get(self.url_status(CALC, item.pk)).json()
+
+        self.assertIsNotNone(
+            body["started_at"],
+            msg=(
+                "A record that has been calculated must report when its last "
+                "run started — the widget's 'Last run' line has no other source."
+            ),
+        )
+        self.assertIsNotNone(
+            body["finished_at"],
+            msg="A finished run must report when it finished.",
+        )
+        self.assertEqual(
+            datetime.fromisoformat(body["started_at"]), last_run[0],
+            msg=(
+                "started_at must be the first log line of the LATEST run "
+                f"({last_run[0].isoformat()}), not of the record's whole log "
+                f"history. Got {body['started_at']}."
+            ),
+        )
+        self.assertEqual(
+            datetime.fromisoformat(body["finished_at"]), last_run[-1],
+            msg=(
+                "finished_at must be the last log line of the latest run "
+                f"({last_run[-1].isoformat()}). Got {body['finished_at']}."
+            ),
+        )
+        self.assertEqual(
+            body["duration_seconds"], 38.0,
+            msg=(
+                "The widget prints this as 'took 38s'. Got "
+                f"{body['duration_seconds']!r} — a duration covering the "
+                "yesterday run too would read as 86438s."
             ),
         )
 
