@@ -8,7 +8,7 @@ renders and nothing the caller is not allowed to see -- a response that
 confirms a record exists and errored, to someone who cannot read that record,
 is a leak.
 
-Cluster 10o — scenarios 10.72–10.79. Type: E.
+Cluster 10o — scenarios 10.72–10.76. Type: E.
 Covers: lex/api/views/calculations/CalculationStatus.py.
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py -v
 """
@@ -38,6 +38,9 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
 
     e2e_models = ALL_MODELS
 
+    #: A pk that certainly does not exist — a dashboard pinned to a deleted record.
+    MISSING_PK = 999999
+
     def url_status(self, model_name: str, pk: int) -> str:
         return f"/api/model_entries/{model_name}/{pk}/calculation-status"
 
@@ -59,6 +62,104 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
         self.assertIsNone(body["started_at"], "A record never run has no start time.")
         self.assertIsNone(body["finished_at"])
         self.assertIsNone(body["error"])
+
+    def test_10_73_reports_each_terminal_status_distinctly(self):
+        """
+        Scenario 10.73: ABORTED and CANCELLED are not collapsed into ERROR.
+        Given: records parked in each state a calculation can end (or sit) in
+        When: the widget polls each one
+        Then: each reports its own state verbatim. The widget picks its message
+              from this one value: an aborted row is a stale state that earns a
+              re-run nudge, a cancelled row is the user's own doing, and neither
+              is a failure. Collapsing them into ERROR is what made incident
+              1410 unreadable.
+        """
+        for state in (
+            CalculationModel.SUCCESS,
+            CalculationModel.ERROR,
+            CalculationModel.ABORTED,
+            CalculationModel.CANCELLED,
+            CalculationModel.IN_PROGRESS,
+        ):
+            with self.subTest(state=state):
+                item = ApiLayerCalc.objects.create(name=f"c-{state}")
+                ApiLayerCalc.objects.filter(pk=item.pk).update(is_calculated=state)
+
+                resp = self.client.get(self.url_status(CALC, item.pk))
+
+                self.assertEqual(
+                    resp.status_code, 200,
+                    msg=(
+                        f"Polling a record in {state} must succeed. Got "
+                        f"{resp.status_code} with body {resp.content!r}."
+                    ),
+                )
+                self.assertEqual(
+                    resp.json()["status"], state,
+                    msg=(
+                        f"A record in {state} must be reported as {state!r}, not "
+                        f"{resp.json()['status']!r}. The widget has nothing else "
+                        "to distinguish a stale run from a failed one."
+                    ),
+                )
+
+    def test_10_74_surfaces_the_calculation_error_message(self):
+        """
+        Scenario 10.74: a failed calculation returns its error text.
+        Given: a record in ERROR carrying the message its calculation died with
+        When: the widget polls
+        Then: status and message arrive together in the same envelope, so the
+              dashboard can explain the failure in place instead of sending the
+              user into the table to find out why.
+        """
+        message = "ValueError: no FX rate for 2026-03-31"
+        item = ApiLayerCalc.objects.create(name="failed")
+        ApiLayerCalc.objects.filter(pk=item.pk).update(
+            is_calculated=CalculationModel.ERROR,
+            calculation_error_message=message,
+        )
+
+        resp = self.client.get(self.url_status(CALC, item.pk))
+
+        self.assertEqual(
+            resp.status_code, 200,
+            msg=f"Polling a failed record must succeed. Got {resp.content!r}.",
+        )
+        body = resp.json()
+        self.assertEqual(
+            body["status"], CalculationModel.ERROR,
+            msg=(
+                "The error text is only rendered for a record the envelope also "
+                f"reports as ERROR. Got status {body['status']!r}."
+            ),
+        )
+        self.assertEqual(
+            body["error"], message,
+            msg=(
+                "The envelope must carry the calculation's own error text, "
+                f"verbatim. Expected {message!r}, got {body['error']!r} — a "
+                "widget with no message can only say 'it failed'."
+            ),
+        )
+
+    def test_10_75_unknown_pk_is_a_404(self):
+        """
+        Scenario 10.75: a stale pk in a dashboard does not 500.
+        Given: a pk that no longer exists, e.g. a dashboard left pointing at a
+               deleted record
+        When: the widget polls it
+        Then: a plain 404, so the widget renders "Record not found" rather than
+              an exception that would take out everything below it on the page.
+        """
+        resp = self.client.get(self.url_status(CALC, self.MISSING_PK))
+
+        self.assertEqual(
+            resp.status_code, 404,
+            msg=(
+                "Polling a pk that does not exist must be a clean 404, not "
+                f"{resp.status_code}. Body: {resp.content!r}"
+            ),
+        )
 
 
 class TestCluster10o_CalculationStatusEndpoint_ReadDenied(AuthenticatedE2ETestCase):
