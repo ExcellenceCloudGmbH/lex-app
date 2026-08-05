@@ -36,7 +36,8 @@ jobs:
 
       - name: Run tests
         # -p no:cacheprovider keeps the runner from writing .pytest_cache.
-        # --rootdir pins config discovery to the repo root so pyproject's
-        # `-p no:django` addopt applies (pytest-django is not installed here,
-        # and disabling a missing plugin is a no-op, not an error).
+        # pytest walks upward from the test path and finds pyproject.toml on
+        # its own, so its `-p no:django` addopt applies here too. That is
+        # harmless: pytest-django is not installed on this runner, and
+        # disabling a missing plugin is a no-op rather than an error.
         run: python -m pytest .github/scripts/tests/ -q -p no:cacheprovider
