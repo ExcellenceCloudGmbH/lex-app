@@ -78,9 +78,13 @@ def frontend_sha_at(ref: str, *, show: Callable[[str, str], str | None] = git_sh
     if blob is None:
         return None
     try:
-        return json.loads(blob)["sha"]
+        sha = json.loads(blob)["sha"]
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
+    # A blank or null SHA is exactly as untruthful as a missing one, and the
+    # manifest is hand-written today, so a typo can produce it. Collapse both
+    # to None rather than letting `Range(to_sha="")` reach a renderer.
+    return sha or None
 
 
 def frontend_range(

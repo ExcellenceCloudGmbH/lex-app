@@ -109,3 +109,21 @@ def _shas(mapping: dict[str, str]):
         return json.dumps({"repo": "x/y", "branch": "b", "sha": mapping[ref]})
 
     return show
+
+
+def test_frontend_sha_at_treats_a_blank_sha_as_absent():
+    # A hand-written manifest can carry an empty or null sha. Both are as
+    # untruthful as a missing file, so both must collapse to None rather
+    # than producing a Range with a blank end.
+    assert ranges.frontend_sha_at("v2.1.6", show=lambda ref, path: '{"sha": ""}') is None
+    assert ranges.frontend_sha_at("v2.1.6", show=lambda ref, path: '{"sha": null}') is None
+
+
+def test_frontend_range_is_none_when_a_recorded_sha_is_blank():
+    shas = {"v2.1.5": "aaa1111", "v2.1.6": ""}
+
+    def show(ref: str, path: str) -> str | None:
+        import json as _json
+        return _json.dumps({"sha": shas[ref]}) if ref in shas else None
+
+    assert ranges.frontend_range("v2.1.5", "v2.1.6", show=show) is None
