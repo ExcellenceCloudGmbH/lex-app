@@ -201,11 +201,19 @@ jobs:
           test -s drafted.md
           echo "Drafted $(wc -l < drafted.md) lines."
 
-      - name: Append the note to the prerelease body
-        if: ${{ always() && steps.draft.outcome == 'success' }}
+      # Runs whatever happened above. Gating this on the drafter succeeding is
+      # what turned the first real run into silence: the drafter crashed on a
+      # missing style file, this step skipped, and the prerelease carried no
+      # note and no explanation. `notes.draft()` guarantees a usable body, but
+      # only once it is reached — anything that dies earlier needs a signal
+      # here, or the failure is invisible to the person about to promote.
+      - name: Append the note (or a failure notice) to the prerelease body
+        if: ${{ always() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name }}
+          DRAFT_OUTCOME: ${{ steps.draft.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           BODY=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
@@ -213,11 +221,30 @@ jobs:
             echo "Notes already drafted for $TAG — leaving the human's edits alone."
             exit 0
           fi
+
+          if [ "$DRAFT_OUTCOME" = "success" ] && [ -s drafted.md ]; then
+            cp drafted.md note.md
+          else
+            # Loud, not silent. The reviewer sees this on the page they are
+            # already looking at, with a link to the log that explains it.
+            {
+              printf '<!-- lex:notes-draft-failed -->\n\n'
+              printf '> **Release notes could not be drafted automatically.**\n'
+              printf '> The drafting step failed — see [the workflow run](%s).\n' "$RUN_URL"
+              printf '> Write the notes by hand before promoting, or re-run the job.\n'
+            } > note.md
+          fi
+
           {
             printf '%s\n' "$BODY"
             printf '\n---\n\n'
-            cat drafted.md
+            cat note.md
             printf '\n<!-- lex:notes-drafted tag=%s -->\n' "$TAG"
           } > combined.md
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file combined.md
-          echo "Drafted release notes onto $TAG — review and edit before promoting."
+
+          if [ "$DRAFT_OUTCOME" = "success" ]; then
+            echo "Drafted release notes onto $TAG — review and edit before promoting."
+          else
+            echo "::warning::Drafting failed for $TAG; posted a failure notice on the release instead."
+          fi
