@@ -90,16 +90,50 @@ def _load_exemplar() -> str:
     return notes.FALLBACK_EXEMPLAR
 
 
-def cmd_draft_notes(args: argparse.Namespace) -> int:
+def _pick_model():
+    """Choose a drafting transport, preferring Anthropic.
+
+    GitHub Models was the original choice — it needed no new secret. It is now
+    being retired and its endpoint answers 410 `github_models_retirement_brownout`,
+    which is what produced the empty first draft on v2.1.7rc1. Anthropic wins
+    when ANTHROPIC_API_KEY is set; GitHub Models remains as a fallback for
+    whatever is left of its life. Returns None when neither is usable, which
+    `notes.draft()` turns into a fallback body rather than a crash.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if api_key:
+        print("Drafting via the Anthropic Messages API.", file=sys.stderr)
+        return lambda prompt: notes.anthropic_messages(prompt, api_key=api_key)
+
     token = os.environ.get("GITHUB_TOKEN", "")
-    if not token:
-        print("GITHUB_TOKEN is not set", file=sys.stderr)
-        return 1
+    if token:
+        print(
+            "ANTHROPIC_API_KEY is not set — falling back to GitHub Models, "
+            "which is being retired and may answer 410.",
+            file=sys.stderr,
+        )
+        return lambda prompt: notes.github_models(prompt, token=token)
+
+    return None
+
+
+def cmd_draft_notes(args: argparse.Namespace) -> int:
+    model = _pick_model()
+    if model is None:
+        print(
+            "No drafting credential: set ANTHROPIC_API_KEY (preferred) or "
+            "GITHUB_TOKEN.",
+            file=sys.stderr,
+        )
+
+        def model(prompt: str) -> str:  # noqa: F811 — fail open, not hard
+            raise RuntimeError("no drafting credential configured")
+
     exemplar = _load_exemplar()
     body = notes.draft(
         _digest_for(args.tag, pac_checkout=_pac_arg(args)),
         exemplar=exemplar,
-        model=lambda prompt: notes.github_models(prompt, token=token),
+        model=model,
     )
     sys.stdout.write(body)
     return 0

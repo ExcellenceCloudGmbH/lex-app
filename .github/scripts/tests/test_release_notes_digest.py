@@ -147,3 +147,46 @@ def test_enrich_survives_a_lookup_failure():
     commits = [digest.Commit(sha="deadbee", subject="fix(core): x")]
     got = digest.enrich_with_prs(commits, lookup=boom)
     assert got[0].pr_number is None
+
+
+def test_commits_from_one_pr_collapse_to_a_single_entry():
+    # 17 commits from PR #696 produced 17 identical lines on v2.1.7rc1,
+    # because enrichment gives every commit in a PR the same title.
+    commits = [
+        digest.Commit(sha=f"{i:07d}", subject=f"work {i}", pr_number=696,
+                      pr_title="feat(release-notes): automation")
+        for i in range(17)
+    ]
+    got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
+    assert len(got["changes"]) == 1
+    assert got["changes"][0]["pr_number"] == 696
+    # The first commit in the range represents the PR.
+    assert got["changes"][0]["sha"] == "0000000"
+
+
+def test_distinct_prs_are_kept_apart():
+    commits = [
+        digest.Commit(sha="aaa", subject="x", pr_number=696, pr_title="fix(a): one"),
+        digest.Commit(sha="bbb", subject="y", pr_number=697, pr_title="fix(b): two"),
+        digest.Commit(sha="ccc", subject="z", pr_number=696, pr_title="fix(a): one"),
+    ]
+    got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
+    assert [c["pr_number"] for c in got["changes"]] == [696, 697]
+
+
+def test_commits_without_a_pr_are_never_collapsed():
+    commits = [
+        digest.Commit(sha="aaa", subject="fix(core): direct push one"),
+        digest.Commit(sha="bbb", subject="fix(core): direct push two"),
+    ]
+    got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
+    assert len(got["changes"]) == 2
+
+
+def test_the_same_pr_number_in_each_repo_stays_separate():
+    # Backend #12 and frontend #12 are different pull requests.
+    back = [digest.Commit(sha="aaa", subject="x", pr_number=12, pr_title="fix(api): backend")]
+    front = [digest.Commit(sha="bbb", subject="y", pr_number=12, pr_title="fix(ui): frontend")]
+    got = digest.build_digest("v2.1.7", "v2.1.6", back, front)
+    assert len(got["changes"]) == 2
+    assert {c["component"] for c in got["changes"]} == {"backend", "frontend"}
