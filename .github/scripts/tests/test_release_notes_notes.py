@@ -250,3 +250,72 @@ def test_the_resolved_callable_actually_reaches_its_transport():
     _, call = notes.resolve_provider("gemini", {"GEMINI_API_KEY": "g-key"})
     payload = {"candidates": [{"content": {"parts": [{"text": "VIA REGISTRY"}]}}]}
     assert call("P", post=lambda u, *, headers, json_body: payload) == "VIA REGISTRY"
+
+
+# ── Prompt guardrails ─────────────────────────────────────────────────
+#
+# These pin the instructions that stop the drafter announcing our toolchain as
+# a product feature. v2.1.7rc1 published "LEX can now connect to Gemini and
+# OpenAI" from a commit about the release-note drafter. Deleting any of these
+# lines re-opens that door, so the tests fail loudly if they go.
+
+def test_prompt_states_what_lex_is():
+    prompt = notes.build_prompt(_digest(), exemplar="X")
+    assert "WHAT LEX IS" in prompt
+    assert "never seen the source code" in prompt
+
+
+def test_prompt_forbids_promoting_internal_work_to_features():
+    prompt = notes.build_prompt(_digest(), exemplar="X")
+    assert '"internal": true' in prompt
+    assert "Leave them out." in prompt
+    # The actual failure, kept in the prompt as a worked example. Collapse
+    # whitespace first: the instructions are hard-wrapped, so the phrase spans
+    # a line break in the source.
+    flat = " ".join(prompt.split())
+    assert "LEX can now connect to Gemini and OpenAI" in flat
+    assert "that is our machinery, not the product" in flat
+
+
+def test_prompt_permits_an_empty_release():
+    prompt = notes.build_prompt(_digest(), exemplar="X")
+    assert "No user-facing changes in this release." in prompt
+    assert "Do not pad a thin release" in prompt
+
+
+def test_prompt_requires_merging_duplicate_user_visible_changes():
+    prompt = notes.build_prompt(_digest(), exemplar="X")
+    assert "Merge entries describing the same user-visible change" in prompt
+
+
+def test_the_internal_flag_reaches_the_prompt():
+    d = {"tag": "v1", "previous_tag": None, "changes": [
+        {"sha": "a", "component": "backend", "type": "feat", "scope": "release-notes",
+         "breaking": False, "subject": "pluggable providers", "pr_number": 1, "internal": True},
+    ]}
+    assert '"internal": true' in notes.build_prompt(d, exemplar="X").lower()
+
+
+# ── Model selection ───────────────────────────────────────────────────
+
+def test_default_model_per_provider():
+    assert notes.model_for("gemini", {}) == notes.GEMINI_MODEL
+    assert notes.model_for("anthropic", {}) == notes.ANTHROPIC_MODEL
+
+
+def test_lex_notes_model_overrides_the_default():
+    assert notes.model_for("gemini", {"LEX_NOTES_MODEL": "gemini-3-ultra"}) == "gemini-3-ultra"
+
+
+def test_the_resolved_callable_carries_the_overridden_model():
+    captured = {}
+
+    def fake_post(url, *, headers, json_body):
+        captured.update(url=url)
+        return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    _, call = notes.resolve_provider(
+        "gemini", {"GEMINI_API_KEY": "k", "LEX_NOTES_MODEL": "gemini-3-ultra"}
+    )
+    call("P", post=fake_post)
+    assert "gemini-3-ultra" in captured["url"]

@@ -77,6 +77,24 @@ class Commit:
 _MERGE_PREFIXES = ("Merge pull request ", "Merge branch ", "Merge remote-tracking ")
 _BUNDLE_PREFIX = "build(frontend): update bundle"
 
+# Work on the toolchain rather than on the product. Kept in the digest — the
+# changelog is a record of everything that shipped — but flagged so the note
+# drafter can leave it out. Without this flag a model reads
+# `feat(release-notes): pluggable model provider` as a LEX feature and writes
+# "LEX can now connect to Gemini", which is what v2.1.7rc1 published.
+INTERNAL_TYPES = frozenset({"ci", "build", "chore", "test", "docs"})
+INTERNAL_SCOPES = frozenset({
+    "release-notes", "test-plan", "ci", "gate", "showcase", "plan", "spec",
+    "setup-with-ai", "agent", "copilot",
+})
+
+
+def is_internal(type_: str, scope: str | None) -> bool:
+    """True when a change is about how we build LEX, not about LEX."""
+    if type_ in INTERNAL_TYPES:
+        return True
+    return (scope or "").strip().lower() in INTERNAL_SCOPES
+
 
 def is_noise(subject: str) -> bool:
     """True for commits that must never reach a changelog."""
@@ -104,6 +122,7 @@ def _entry(commit: Commit, component: str) -> dict:
         "breaking": parsed.breaking,
         "subject": parsed.subject,
         "pr_number": commit.pr_number,
+        "internal": is_internal(parsed.type, parsed.scope),
     }
 
 
