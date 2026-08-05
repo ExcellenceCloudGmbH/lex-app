@@ -20,7 +20,7 @@ Three regressions these scenarios exist to prevent, all of them silent:
   keep rendering the old palette after the next token refresh, and nothing
   would fail.
 
-Cluster 1ab -- scenarios 1.223-1.241. Type: U.
+Cluster 1ab -- scenarios 1.223-1.246. Type: U.
 Covers: lex/lex_app/streamlit/_client.py, lex/lex_app/streamlit/calculation.py,
         lex/lex_app/streamlit/__init__.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1ab_calculation_widget.py -v
@@ -577,5 +577,364 @@ class TestCluster01ab_CalculationWidgetState(SimpleTestCase):
                 f"{sorted(imported)} -- any model or Django import here is a "
                 "path to the database that bypasses DRF permissions and the "
                 "audit actor."
+            ),
+        )
+
+
+class _FakeStreamlit:
+    """Stands in for the ``streamlit`` module at the widget's boundary.
+
+    Real decorators and real context managers, so the widget's own code path is
+    what runs -- a plain Mock would let ``@st.fragment`` swallow the render body
+    whole and every scenario below would pass without executing anything.
+    Records what was rendered so a scenario can assert on it.
+    """
+
+    class Rerun(Exception):
+        """Stands in for Streamlit's RerunException, which is control flow."""
+
+    def __init__(self, button_returns: bool = False):
+        self.session_state: dict = {}
+        self.rendered: list = []
+        self.button_keys: list = []
+        self.declared_intervals: list = []
+        self._button_returns = button_returns
+
+    def fragment(self, func=None, *, run_every=None, **kwargs):
+        self.declared_intervals.append(run_every)
+        return func if func is not None else (lambda f: f)
+
+    def columns(self, spec, **kwargs):
+        import contextlib
+
+        return [contextlib.nullcontext() for _ in spec]
+
+    def button(self, label, *, key=None, disabled=False, **kwargs):
+        self.button_keys.append(key)
+        self.rendered.append(("button", label))
+        return self._button_returns
+
+    def rerun(self, *, scope="app"):
+        raise self.Rerun(scope)
+
+    def __getattr__(self, name):
+        def _render(*args, **kwargs):
+            self.rendered.append((name, args[0] if args else None))
+
+        return _render
+
+    def text_of(self) -> str:
+        return " | ".join(f"{kind}:{value}" for kind, value in self.rendered)
+
+
+class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
+    """Cluster 1ab: the rendered widget and the package's public surface."""
+
+    ENVELOPE = {"status": "SUCCESS", "error": None, "duration_seconds": 12.0}
+
+    def _fake_host(self, token: str = "user-token", **kwargs) -> "_FakeStreamlit":
+        fake = _FakeStreamlit(**kwargs)
+        fake.session_state["access_token"] = token
+        return fake
+
+    def test_1_239_the_last_run_line_separates_never_run_from_a_duration(self):
+        """
+        Scenario 1.239: "no timings" and "ran instantly" are different things.
+        Given: a record that has never run, and one that took 38 seconds
+        When: the widget renders its last-run line
+        Then: the first says so in words and the second reports the duration.
+              The endpoint returns null timings for a record with no log rows,
+              and formatting null as a number would put "took 0s" under a record
+              that has never been calculated at all
+        """
+        from lex.lex_app.streamlit.calculation import StatusState, last_run_caption
+
+        never = last_run_caption(StatusState(status="NOT_CALCULATED"))
+        ran = last_run_caption(
+            StatusState(
+                status="SUCCESS",
+                finished_at="2026-08-04T10:00:38",
+                duration_seconds=38.0,
+            ),
+        )
+
+        self.assertIn(
+            "never", never.lower(),
+            msg=(
+                "A record with no run behind it must say so rather than render "
+                f"an empty or zeroed duration. Got {never!r}."
+            ),
+        )
+        self.assertIn(
+            "38", ran,
+            msg=(
+                "A finished run must report how long it took -- that is the "
+                f"whole point of the line. Got {ran!r}."
+            ),
+        )
+
+    def test_1_240_the_package_is_the_public_surface(self):
+        """
+        Scenario 1.240: authors import from the package, not its internals.
+        Given: the streamlit package
+        When: an author imports the widgets
+        Then: both are on the package surface, and the pre-existing
+              lex.lex_app.streamlit.embed path still resolves to the same
+              function. Dashboards already written against embed must not break
+              to make room for the new widget
+        """
+        from lex.lex_app.streamlit import lex_calculation, lex_view
+        from lex.lex_app.streamlit.embed import lex_view as legacy_lex_view
+
+        self.assertTrue(
+            callable(lex_calculation),
+            msg="lex_calculation must be callable straight off the package.",
+        )
+        self.assertIs(
+            lex_view, legacy_lex_view,
+            msg=(
+                "The package must re-export the very same lex_view, not a copy: "
+                "lex.lex_app.streamlit.embed is a documented import path and "
+                "existing dashboards use it."
+            ),
+        )
+
+    def test_1_241_two_widgets_on_one_page_keep_separate_state(self):
+        """
+        Scenario 1.241: a dashboard may watch more than one record.
+        Given: two widgets on one page -- two different records, then the same
+               record twice under explicit keys
+        When: both render
+        Then: each gets its own widget key and its own poll bookkeeping. Every
+              piece of widget state is namespaced by that key; sharing one would
+              make Streamlit reject the second button as a duplicate widget ID
+              and let either record's status overwrite the other's poll interval
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.ENVELOPE,
+        ):
+            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation("quarter", 2)
+
+        self.assertEqual(
+            len(set(fake.button_keys)), 2,
+            msg=(
+                "Two records must produce two distinct button keys; got "
+                f"{fake.button_keys!r}, which Streamlit rejects as a duplicate "
+                "widget ID."
+            ),
+        )
+        poll_keys = [k for k in fake.session_state if k != "access_token"]
+        self.assertEqual(
+            len(set(poll_keys)), 2,
+            msg=(
+                "Each widget must keep its own poll bookkeeping; got "
+                f"{poll_keys!r}, so one record's status would decide the "
+                "other's polling."
+            ),
+        )
+
+        same_record = self._fake_host()
+        with mock.patch.object(calculation, "st", same_record), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.ENVELOPE,
+        ):
+            calculation.lex_calculation("quarter", 1, key="left")
+            calculation.lex_calculation("quarter", 1, key="right")
+
+        self.assertEqual(
+            len(set(same_record.button_keys)), 2,
+            msg=(
+                "The key argument is what lets one record appear twice on a "
+                f"page; got {same_record.button_keys!r}."
+            ),
+        )
+
+    def test_1_242_the_token_comes_from_the_streamlit_session(self):
+        """
+        Scenario 1.242: the widget acts as the signed-in user, never as the host.
+        Given: a Streamlit session holding an access token, and one without
+        When: the widget resolves the token it will call the backend with
+        Then: it reads the host's own session_state["access_token"] -- the key
+              lex/streamlit_app.py writes and keeps refreshed -- and produces
+              nothing when the session is empty, so an expired session asks for
+              a reload instead of calling the backend unauthenticated.
+
+              It must never fall back to LEX_API_KEY: that is the instance's
+              machine-to-machine secret, sent as "Api-Key" and resolving to a
+              technical user. As a bearer token it would not authenticate at
+              all, and if it did it would run one user's calculation under an
+              actor that is nobody
+        """
+        import inspect
+
+        from lex.lex_app.streamlit import calculation
+
+        with mock.patch.object(calculation, "st", self._fake_host("abc")):
+            self.assertEqual(
+                calculation._session_token(), "abc",
+                msg=(
+                    "The token must come from the host's session_state, which "
+                    "is where lex/streamlit_app.py stores and refreshes it."
+                ),
+            )
+        with mock.patch.object(calculation, "st", self._fake_host("")):
+            self.assertIsNone(
+                calculation._session_token(),
+                msg=(
+                    "An empty access_token is not a token; returning it would "
+                    "send 'Bearer ' to the backend and read as a server fault "
+                    "rather than an expired session."
+                ),
+            )
+
+        self.assertNotIn(
+            "LEX_API_KEY", inspect.getsource(calculation),
+            msg=(
+                "LEX_API_KEY is the instance's machine secret (Authorization: "
+                "Api-Key), not a user token. Falling back to it would silently "
+                "detach the run from the person who asked for it."
+            ),
+        )
+
+    def test_1_243_an_expired_session_asks_for_a_reload_without_calling_out(self):
+        """
+        Scenario 1.243: a dead session is a message, not a failed request.
+        Given: a Streamlit session with no access token
+        When: the widget renders
+        Then: it renders a prompt, returns None, and never calls the backend.
+              An unauthenticated call would come back 401 and be reported as
+              "status unavailable" -- pointing the reader at the backend for a
+              problem that a page reload fixes
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = _FakeStreamlit()
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+        ) as get_json:
+            returned = calculation.lex_calculation("quarter", 1)
+
+        self.assertIsNone(
+            returned, msg=f"There is no status to report; got {returned!r}.",
+        )
+        get_json.assert_not_called()
+        self.assertIn(
+            "reload", fake.text_of().lower(),
+            msg=(
+                "The reader needs the action that fixes it. Rendered: "
+                f"{fake.text_of()!r}"
+            ),
+        )
+
+    def test_1_244_a_failed_read_renders_a_message_instead_of_raising(self):
+        """
+        Scenario 1.244: the whole failure path survives a real render.
+        Given: a backend that answers 500
+        When: the widget renders
+        Then: it renders the failure, returns None and raises nothing -- and it
+              does not schedule a poll. Streamlit renders top-to-bottom, so an
+              exception escaping here erases every widget below this one; and a
+              widget that kept polling a broken backend would have every open
+              dashboard retrying it in lockstep for as long as it stays down
+        """
+        from lex.lex_app.streamlit import calculation
+        from lex.lex_app.streamlit._client import LexApiError
+
+        fake = self._fake_host()
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            side_effect=LexApiError("boom", status=500),
+        ):
+            returned = calculation.lex_calculation("quarter", 1)
+
+        self.assertIsNone(
+            returned,
+            msg=f"A failed read reports no status; got {returned!r}.",
+        )
+        self.assertIn(
+            "unavailable", fake.text_of().lower(),
+            msg=f"The failure must be rendered. Rendered: {fake.text_of()!r}",
+        )
+        self.assertEqual(
+            [i for i in fake.declared_intervals if i is not None], [],
+            msg=(
+                "A widget that cannot read status must not schedule a poll; "
+                f"declared intervals {fake.declared_intervals!r}."
+            ),
+        )
+
+    def test_1_245_a_record_found_running_reruns_to_start_the_poll_timer(self):
+        """
+        Scenario 1.245: discovering work in progress actually starts the watch.
+        Given: a record that is IN_PROGRESS, and a widget whose fragment was
+               declared without a poll interval
+        When: the widget renders
+        Then: it stores the interval and asks for a full script rerun. run_every
+              is read only when a fragment is declared, and only a full script
+              run declares one, so without the rerun the widget would render
+              "Running" once and then sit there forever -- the status would never
+              update and no error would ever appear
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={"status": "IN_PROGRESS", "error": None},
+        ):
+            with self.assertRaises(
+                fake.Rerun,
+                msg=(
+                    "Finding the record running must rerun the script; without "
+                    "it the browser never gets a poll timer."
+                ),
+            ):
+                calculation.lex_calculation("quarter", 1, poll_interval=2.0)
+
+        self.assertIn(
+            2.0, fake.session_state.values(),
+            msg=(
+                "The interval must be stored before the rerun, or the "
+                "re-declared fragment reads nothing back. Session state: "
+                f"{fake.session_state!r}"
+            ),
+        )
+
+    def test_1_246_a_settled_record_renders_once_without_rerunning(self):
+        """
+        Scenario 1.246: a finished record costs one render and nothing more.
+        Given: a record in SUCCESS
+        When: the widget renders
+        Then: it returns the status, declares no poll interval and does not
+              rerun. This is the steady state of every dashboard: if a settled
+              record still asked for a rerun, the page would rerun itself in a
+              loop for as long as it stayed open
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.ENVELOPE,
+        ):
+            returned = calculation.lex_calculation("quarter", 1)
+
+        self.assertEqual(
+            (returned or {}).get("status"), "SUCCESS",
+            msg=(
+                "The widget must hand the envelope back so the dashboard can "
+                f"branch on it; got {returned!r}."
+            ),
+        )
+        self.assertEqual(
+            fake.declared_intervals, [None],
+            msg=(
+                "A settled record must declare no poll interval; got "
+                f"{fake.declared_intervals!r}."
             ),
         )

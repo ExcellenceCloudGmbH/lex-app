@@ -18,7 +18,10 @@ missing, broken, unreachable -- becomes a state the widget can render.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 from typing import Optional
+
+import streamlit as st
 
 from lex.lex_app.design_system import ERROR, MUTED, SUCCESS, WARNING
 from lex.lex_app.streamlit import _client
@@ -174,3 +177,163 @@ def trigger_calculation(model: str, pk, token: str) -> Optional[str]:
             return "You don't have permission to run this"
         return str(exc)
     return None
+
+
+def widget_key_for(model: str, pk, key: Optional[str] = None) -> str:
+    """The namespace every piece of this widget's state hangs off.
+
+    Derived from the record by default, so two widgets watching two records on
+    one page never share a slot. ``key`` is what makes the *same* record
+    renderable twice on one page -- without it Streamlit rejects the second
+    button as a duplicate widget ID, and either widget's status would decide the
+    other's poll interval.
+    """
+    return key or f"lex_calc_{model}_{pk}"
+
+
+def _every_key(widget_key: str) -> str:
+    return f"{widget_key}__every"
+
+
+def _session_token() -> Optional[str]:
+    """The signed-in user's access token, as the Streamlit host holds it.
+
+    ``lex/streamlit_app.py`` writes and refreshes ``session_state["access_token"]``
+    (see ``_update_tokens_from_response`` / ``ensure_valid_access_token``), so
+    reading that key means the widget always uses the freshest token the host
+    has, including one just renewed by the background refresher.
+
+    Deliberately no environment fallback: the instance's API key is a
+    machine-to-machine secret sent as ``Api-Key``, resolving to a technical
+    user. As a bearer token it would not authenticate, and if it did it would
+    detach the run from the person who asked for it.
+
+    Never raises -- ``session_state`` is unavailable when there is no script
+    context (an import-time scan, a worker thread), and a widget helper must not
+    turn that into a page-wide exception.
+    """
+    try:
+        token = st.session_state.get("access_token") or ""
+    except Exception:  # pragma: no cover - depends on Streamlit's runtime state
+        return None
+    return token.strip() or None
+
+
+def last_run_caption(state: StatusState) -> str:
+    """One line describing the record's last run.
+
+    "Never run" rather than a zeroed duration when the endpoint reports null
+    timings: a record with no log rows has not run, and rendering that as
+    "took 0s" claims a run that never happened.
+    """
+    stamp = state.finished_at or state.started_at
+    if not stamp:
+        return "Never run"
+    if state.duration_seconds is None:
+        return f"Last run: {stamp}"
+    return f"Last run: {stamp} (took {state.duration_seconds:g}s)"
+
+
+def lex_calculation(
+    model: str,
+    pk,
+    *,
+    label: str = "Calculate",
+    show_status: bool = True,
+    show_last_run: bool = True,
+    show_error: bool = True,
+    show_log: bool = False,
+    poll_interval: float = 2.0,
+    key: Optional[str] = None,
+) -> Optional[dict]:
+    """Render a calculate button and live status for one record.
+
+    Returns the latest status envelope, or ``None`` before the first successful
+    read, so the dashboard can branch on it::
+
+        status = lex_calculation("quarter", pk=42)
+        if status and status["status"] == "SUCCESS":
+            st.dataframe(load_results())
+
+    Pass ``key`` when the same record appears more than once on a page.
+    """
+    widget_key = widget_key_for(model, pk, key)
+    token = _session_token()
+
+    if not token:
+        # Not an error state: an unauthenticated call would come back 401 and be
+        # reported as "status unavailable", pointing the reader at the backend
+        # for something a page reload fixes.
+        st.warning("Session expired — reload the page to sign in again.")
+        return None
+
+    every_key = _every_key(widget_key)
+    # Read before declaring: this is the interval the fragment is *declared*
+    # with, and the only value the browser's timer actually reflects.
+    declared = st.session_state.get(every_key)
+    state_box: dict = {}
+
+    @st.fragment(run_every=declared)
+    def _render():
+        state = read_status(model, pk, token, include_log=show_log)
+        state_box["state"] = state
+        desired = poll_interval_for(state.status, poll_interval)
+
+        if state.status is None:
+            st.caption(state.message)
+        else:
+            look = presentation_for(state.status)
+            running = state.status in _ACTIVE_STATUSES
+
+            left, right = st.columns([1, 2])
+            with left:
+                if st.button(label, key=f"{widget_key}__btn", disabled=running):
+                    failure = trigger_calculation(model, pk, token)
+                    if failure:
+                        st.error(failure)
+                    else:
+                        # The record is running now, whatever the read a moment
+                        # ago said, so the watch starts from here.
+                        desired = poll_interval
+            with right:
+                if show_status:
+                    # escape(): an unrecognised status is rendered verbatim, and
+                    # this is the one place widget text reaches the page as HTML.
+                    st.markdown(
+                        "<span style='color:{colour};font-weight:600'>{label}</span>".format(
+                            colour=look.colour, label=escape(look.label),
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+            if look.suggests_rerun:
+                st.caption("This run was interrupted — run it again.")
+            if show_last_run:
+                st.caption(last_run_caption(state))
+            if show_error and state.error:
+                st.error(state.error)
+            if show_log and state.log:
+                st.code("\n".join(state.log), language=None)
+                if state.log_truncated:
+                    st.caption("Showing the most recent lines only.")
+
+        st.session_state[every_key] = desired
+        if poll_timer_needs_rebuild(declared, desired):
+            # App scope, not fragment scope: only a full script run re-declares
+            # the fragment, and only a full script run clears the browser's
+            # existing auto-rerun interval. st.rerun(scope="fragment") would do
+            # neither -- and raises outright during a full-app run.
+            st.rerun()
+
+    _render()
+
+    state = state_box.get("state")
+    if state is None or state.status is None:
+        return None
+    return {
+        "status": state.status,
+        "error": state.error,
+        "started_at": state.started_at,
+        "finished_at": state.finished_at,
+        "duration_seconds": state.duration_seconds,
+    }
