@@ -15,7 +15,9 @@ Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from unittest import mock
 
 import pytest
 from django.contrib.auth.models import Group
@@ -571,6 +573,30 @@ class TestCluster10o_CalculationStatus_CalculatePermission(E2ETestCase):
         group, _ = Group.objects.get_or_create(name=NO_CALCULATE_GROUP)
         self.user.groups.add(group)
 
+    @staticmethod
+    @contextmanager
+    def _without_background_calculation():
+        """Authorise the trigger for real, without starting a real calculation.
+
+        ``One.update`` hands an accepted calculation to a module-level
+        ``ThreadPoolExecutor`` and returns 202 immediately. What these two
+        scenarios are about is the authorisation that happens *before* that
+        hand-off; the worker itself is fire-and-forget and outlives the test,
+        writing history and audit rows while the next test's fixture teardown
+        flushes the very same tables. Suppressing it keeps the whole request path
+        real -- permission classes, view body, status code -- and stops only the
+        straggler.
+
+        Patched on ``CalculationModel`` rather than on ``One``: ``One.update``
+        imports the executor inside the function body, so the name it binds is
+        read off the defining module at call time and a patch anywhere else
+        would quietly do nothing.
+        """
+        with mock.patch(
+            "lex.core.models.CalculationModel._calculation_executor",
+        ) as executor:
+            yield executor
+
     def test_10_82_a_caller_who_may_not_run_is_told_before_pressing(self):
         """
         Scenario 10.82: read permission does not imply permission to run.
@@ -619,11 +645,12 @@ class TestCluster10o_CalculationStatus_CalculatePermission(E2ETestCase):
 
         # The load-bearing half: the flag is a claim about One.update, so pin it
         # against One.update rather than against our reading of it.
-        triggered = self.client.patch(
-            self.url_detail(API_LAYER_CALC_RUN_RESTRICTED, item.pk),
-            data={"calculate": "true"},
-            format="json",
-        )
+        with self._without_background_calculation() as executor:
+            triggered = self.client.patch(
+                self.url_detail(API_LAYER_CALC_RUN_RESTRICTED, item.pk),
+                data={"calculate": "true"},
+                format="json",
+            )
         self.assertEqual(
             triggered.status_code, 403,
             msg=(
@@ -633,6 +660,7 @@ class TestCluster10o_CalculationStatus_CalculatePermission(E2ETestCase):
                 "the widget is disabling a button that works."
             ),
         )
+        executor.submit.assert_not_called()
 
     def test_10_83_a_caller_who_may_run_gets_an_enabled_button(self):
         """
@@ -670,11 +698,12 @@ class TestCluster10o_CalculationStatus_CalculatePermission(E2ETestCase):
             ),
         )
 
-        triggered = self.client.patch(
-            self.url_detail(API_LAYER_CALC_RUN_RESTRICTED, item.pk),
-            data={"calculate": "true"},
-            format="json",
-        )
+        with self._without_background_calculation():
+            triggered = self.client.patch(
+                self.url_detail(API_LAYER_CALC_RUN_RESTRICTED, item.pk),
+                data={"calculate": "true"},
+                format="json",
+            )
         self.assertEqual(
             triggered.status_code, 202,
             msg=(
