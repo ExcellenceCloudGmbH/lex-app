@@ -338,43 +338,36 @@ Expected: FAIL — the endpoint returns 200 with the record's state, because it 
 
 - [ ] **Step 3: Apply the read filter**
 
-Replace the `get` method in `lex/api/views/calculations/CalculationStatus.py`:
+**Delegate to the filter backend the list view already uses — do not hand-roll a check.**
+`UserReadRestrictionFilterBackend` (`lex/api/views/model_entries/filter_backends.py`,
+declared by `ListModelEntries` at `List.py:439`) is the only thing that handles all
+the real cases: models with a custom `permission_read` (per-row `result.allowed`),
+models on the default `LexModel.permission_read` (translated into a **queryset
+filter** from Keycloak scopes, never a boolean), legacy `can_read`, and the AuditLog
+special cases.
 
 ```python
-    def get(self, request, *args, **kwargs):
-        model_container = self.kwargs["model_container"]
-        pk = self.kwargs["pk"]
+    def _readable_or_none(self, request, model_class, pk):
+        """The record, or None when it is missing OR unreadable by this caller."""
+        from lex.api.views.model_entries.filter_backends import (
+            UserReadRestrictionFilterBackend,
+        )
 
-        instance = self._readable_or_none(request, model_container.model_class, pk)
-        if instance is None:
-            # Deliberately identical to a genuine 404: distinguishing them would
-            # confirm the record exists to a caller who may not read it.
-            return JsonResponse({"detail": "Not found."}, status=404)
-
-        return JsonResponse(self._envelope(instance))
-
-    @staticmethod
-    def _readable_or_none(request, model_class, pk):
-        """The record, or None when it is missing OR unreadable by this user.
-
-        Reuses the model's own ``permission_read`` rather than a parallel check,
-        so the endpoint can never drift from what a record fetch would allow.
-        """
-        from lex.core.models.UserContext import UserContext
-
-        instance = model_class.objects.filter(pk=pk).first()
-        if instance is None:
-            return None
-
-        permission_read = getattr(instance, "permission_read", None)
-        if permission_read is None:
-            return instance
-
-        result = permission_read(UserContext.from_request(request))
-        return instance if getattr(result, "is_allowed", True) else None
+        queryset = model_class.objects.filter(pk=pk)
+        readable = UserReadRestrictionFilterBackend().filter_queryset(
+            request, queryset, self
+        )
+        return readable.first()
 ```
 
-Before implementing, confirm the real names by reading `lex/core/models/LexModel.py` for `PermissionResult` and `lex/core/models/UserContext.py` for the constructor — use whatever the codebase actually exposes, not these names if they differ.
+Two traps this avoids, both of which a hand-rolled version walks into:
+
+- `PermissionResult` exposes **`allowed`**, not `is_allowed`. A `getattr(result,
+  "is_allowed", True)` silently defaults to *allow* on every deny — a security hole
+  that passes review because it looks defensive.
+- Models on the **default** `permission_read` never reach a boolean at all; their
+  permission is expressed as a queryset filter. A boolean-only check leaves the
+  majority of models completely unfiltered.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
