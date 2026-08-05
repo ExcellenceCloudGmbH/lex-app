@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 83
+max_scenario: 84
 letters:
   a:
     title: ''
@@ -129,10 +129,10 @@ letters:
       recorded
   o:
     title: Read-only calculation-status endpoint for the Streamlit widget
-    scenarios: 10.72-10.83
+    scenarios: 10.72-10.84
     status: complete
     tests:
-      pass: 12
+      pass: 13
       skip: 0
       xfail: 0
     note: >-

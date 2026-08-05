@@ -8,7 +8,7 @@ renders and nothing the caller is not allowed to see -- a response that
 confirms a record exists and errored, to someone who cannot read that record,
 is a leak.
 
-Cluster 10o — scenarios 10.72–10.83. Type: E.
+Cluster 10o — scenarios 10.72–10.84. Type: E.
 Covers: lex/api/views/calculations/CalculationStatus.py.
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py -v
 """
@@ -711,4 +711,43 @@ class TestCluster10o_CalculationStatus_CalculatePermission(E2ETestCase):
                 f"returned {triggered.status_code} with {triggered.content!r} — "
                 "the widget is offering a button that cannot work."
             ),
+        )
+
+
+class TestCluster10o_CalculationStatusRouting(E2ETestCase):
+    """Cluster 10o: the route registration the widget depends on."""
+
+    e2e_models = ALL_MODELS
+
+    def url_status(self, model_name: str, pk: int) -> str:
+        return f"/api/model_entries/{model_name}/{pk}/calculation-status"
+
+    def test_10_84_the_status_route_is_registered_against_this_view(self):
+        """
+        Scenario 10.84: the widget's poll target is wired up.
+        Given: the process-admin site that owns the framework's URL table
+        When: the calculation-status route is resolved
+        Then: it exists and dispatches to CalculationStatus. Every other
+              scenario in this batch reaches the endpoint through a hand-built
+              path string, so none of them would notice the registration being
+              dropped or renamed — the widget would simply start polling the
+              SPA catch-all and render "Status unavailable" forever, with no
+              failing test anywhere
+        """
+        from django.urls import resolve
+
+        from lex.api.views.calculations.CalculationStatus import CalculationStatus
+        from lex.process_admin.sites import process_admin_site  # noqa: F401
+
+        item = ApiLayerCalc.objects.create(name="routed")
+        match = resolve(self.url_status(CALC, item.pk))
+
+        self.assertIs(
+            match.func.view_class, CalculationStatus,
+            "The calculation-status path must dispatch to CalculationStatus; "
+            f"it resolved to {match.func!r} instead.",
+        )
+        self.assertEqual(
+            match.kwargs.get("pk"), item.pk,
+            "The route must pass the record's pk through to the view.",
         )

@@ -52,7 +52,7 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 10.72 – 10.83 |
+| Scenario range | 10.72 – 10.84 |
 | Type | E |
 | Files covered | `views/calculations/CalculationStatus.py` (`CalculationStatus`, `_readable_or_none`, `_envelope`, `_calculate_permission`, `_denial_reason`, `_TriggerProbeRequest`, `_latest_run_rows`, `_run_window`, `_log_tail`), route `GET /api/model_entries/<model:model_container>/<int:pk>/calculation-status` |
 | Test file | `lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py` |
