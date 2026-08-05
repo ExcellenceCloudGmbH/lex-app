@@ -69,8 +69,9 @@ lex_calculation(
     show_last_run=True,       # bool — the "Last run: … (took 38s)" caption
     show_error=True,          # bool — inline error box carrying the calculation's own message
     show_log=False,           # bool — live log tail; the only flag with a real cost
-    poll_interval=2.0,        # float — seconds between polls while a run is in progress
+    poll_interval=2.0,        # float — seconds between backend reads while a run is in progress
     key=None,                 # str | None — explicit state namespace
+    sync_page=False,          # bool — re-run the whole page when this record's status changes
 ) -> dict | None
 ```
 
@@ -83,8 +84,9 @@ lex_calculation(
 | `show_last_run` | `True` | Renders one caption describing the most recent run — either `Never run`, `Last run: <timestamp>`, or `Last run: <timestamp> (took 38s)`. |
 | `show_error` | `True` | When the record is in `ERROR` and the model carries a `calculation_error_message` (or `error_message`), renders it in an error box. Set `False` if your dashboard surfaces errors its own way. |
 | `show_log` | `False` | Renders the tail of the running calculation's log. **This is the only argument that costs anything** — see [Cost](#cost-show_logtrue-is-the-only-expensive-argument). |
-| `poll_interval` | `2.0` | Seconds between status reads *while a calculation is in progress*. Ignored otherwise: a settled record is not polled at all. |
-| `key` | `None` | State namespace. Defaults to `lex_calc_<model>_<pk>`, which already keeps two widgets watching two different records independent. You only need `key` to render **the same record twice on one page** — without it Streamlit rejects the second button as a duplicate widget ID, and either widget's status would decide the other's poll interval. |
+| `poll_interval` | `2.0` | Seconds between *backend reads* while a calculation is in progress. Ignored otherwise: a settled record is not read at all. This is **not** how often the tile redraws — the tile keeps itself current on its own, at half this interval, bounded to 0.5–2s, and that redraw issues no request. Two tiles on one record are read at the shorter of the two intervals. |
+| `key` | `None` | State namespace. Defaults to `lex_calc_<model>_<pk>`, which already keeps two widgets watching two different records independent. You only need `key` to render **the same record twice on one page** — without it Streamlit rejects the second button as a duplicate widget ID. |
+| `sync_page` | `False` | Re-run the whole page whenever this record's status changes. Needed only when code **outside** the widget branches on its return value — see [Keeping the rest of the page in step](#keeping-the-rest-of-the-page-in-step). Off by default because a page run greys every element on the page until it is redrawn. |
 
 ### Return value
 
@@ -288,84 +290,116 @@ the page, and again by every browser tab anyone left open over a weekend. A
 dashboard showing ten finished calculations makes **zero** requests after its
 first render.
 
-The stopping is not free of subtlety, which is why it is pinned by scenarios
-1.228–1.230, 1.245–1.246 and 1.258–1.259. `st.fragment` reads `run_every` only
-when the fragment is *declared*, and only a full script run declares one. The
-widget therefore reads the record's status **before** declaring its fragment, so
-a record that is already running gets its timer in that same run. Deciding it
-inside the fragment instead is what the first version did, and the only way out
-from there is `st.rerun()` — which raises, taking every widget still to be drawn
-down with it (see [What a page costs](#what-a-page-costs)).
-
-That leaves exactly **two full script runs per calculation**, both of which a
-reader can account for:
-
-- **the click**, which builds the browser's poll timer, and
-- **the poll that finds the run finished**, which takes it down.
+The reads happen on a background thread the session owns (see [What a page
+costs](#what-a-page-costs)), so "stopping" means that thread stops asking. It
+starts again by itself when you press Calculate. Pinned by scenarios 1.228–1.229
+and 1.256.
 
 Two consequences for you as an author:
 
-- **Your script is not re-executed by a poll.** Only the widget's fragment
-  reruns, so a heavy dataframe above the widget does not reload every two
-  seconds. This is the entire reason polling is viable here.
-- **A rerun does happen at those two moments.** Code above the widget runs again
-  when a run starts and when it ends, so keep expensive loads behind
-  `st.cache_data` as usual.
+- **Your script is never re-executed by a poll.** Only the widget's own tile
+  redraws, so a heavy dataframe above the widget does not reload every two
+  seconds — and the redraw itself issues no request, so it costs a dictionary
+  lookup.
+- **Nothing outside the widget updates on its own.** That is the trade for the
+  above; see [Keeping the rest of the page in
+  step](#keeping-the-rest-of-the-page-in-step).
 
 ## What a page costs
 
 The widget is built for pages with a lot of these on them — a status tile per
 line of a report — so the cost of *one* is not the interesting number. Measured
-on thirteen tiles over two records, which is the page this section exists
-because of:
+in a browser on thirteen tiles over six records, against a backend answering in
+300 ms, which is the page this section exists because of:
 
-| | Reads (HTTP GET) | Full script runs |
+| | Then | Now |
 | --- | --- | --- |
-| First load | **2** | 1 |
-| A rerun moments later | **0** | 1 |
-| Pressing one **Calculate** | **1** | 2 |
+| Time to render the whole page | seconds | **17 ms** |
+| Reads on the render thread | 13 | **0** |
+| Click → badge reads "Running" | ~7 s | **103 ms** |
+| Full script runs caused by a click | 14 | **0** |
+| Page greyed (share of wall clock) | seconds at a time | **0.8 %**, in ~20 ms flickers |
 
-Three things get you there, and all three are pinned by scenarios 1.251–1.262.
+One rule produces all of it, and scenarios 1.251–1.266 hold each half:
 
-**Reads are shared, per session.** A status read is a blocking HTTP GET inside
-the render, and Streamlit renders top-to-bottom, so thirteen widgets used to
-mean thirteen round trips the reader waited through in series. Reads are now
-cached by `(model, pk, include_log)` for at most half a poll interval (and never
-more than a second), so widgets asking the same question get one answer, and a
-rerun moments later re-renders without asking again. The half-interval bound is
-what stops the cache answering the very poll it was built to make cheap.
+> **The render path performs no I/O and reruns nothing but itself.**
 
-The cache lives in `st.session_state` — **not** `st.cache_data`. That is
-deliberate and it is a permission boundary, not a preference. `st.cache_data` is
-keyed by arguments and shared by every session the server is running; a status
-envelope describes a record the next reader may have no permission to see at
-all. The status endpoint answers an unreadable record with the same 404 as a
-missing one specifically so its existence is not disclosed, and a cross-session
-cache would hand over exactly that. `session_state` is already scoped to one
-signed-in user, so the boundary comes for free. The bearer token is deliberately
-*not* part of the cache key: keying by it is what a cross-session cache would
-need to be safe, and it would park one user's credential where another user's
-request can reach it.
+**No I/O.** Streamlit runs a page top-to-bottom on one thread. A tile that reads
+its own status *inside* the render does not load slowly — it holds up every tile
+below it, in series, before any of them exist. All reads and all triggers now
+belong to `StatusPoller` (`lex/lex_app/streamlit/_status_poller.py`), a daemon
+thread the session owns. `lex_calculation()` registers what it wants watched and
+reads whatever answer is already in hand; both are dictionary lookups. The
+thread reads up to four records at once, keeps one pooled HTTPS connection per
+thread, and stops asking about a record the moment it settles.
 
-**The poll timer is decided before the fragment is declared.** `run_every` is
-read at declaration only, so a widget that discovers *inside* its fragment that
-it should be polling can obtain a timer in exactly one way: rerun the whole
-script. `st.rerun()` raises, so that exception travelled out through every
-widget still to be drawn — they never rendered, found their own running records
-on the next run, and each asked for a rerun of its own. One click on a page of
-thirteen tiles cost **fourteen script runs and 104 reads**. Reading the status
-first makes one pass enough.
+The click follows the same rule. `One.update` re-reads the record, clears
+terminal state, saves it, registers the calculation and broadcasts it before it
+answers — doing that inside the click handler is exactly why the button used to
+feel dead. The trigger is queued and the render finishes immediately.
+
+**No page reruns.** `run_every` is read only when a fragment is *declared*, and
+only a full script run declares one — so any design that adapts the poll timer
+to the record's status has to rerun the page to change it. `st.rerun()` raises,
+so that rerun took every widget still to be drawn with it; they never rendered,
+found their own running records next time round, and each asked for a rerun of
+its own. **One click cost fourteen script runs and 104 reads.** The timer is now
+declared unconditionally and never rebuilt. Holding it costs a redraw of a
+dictionary lookup once a second; rebuilding it costs a page.
 
 **A click renders its own answer.** Pressing Calculate used to leave the badge
-reading "Not calculated" until a re-read agreed — about seven seconds on that
-page — so the honest reading was that the button had not worked. The widget now
-renders **Running** from the trigger's own response. This is not a guess:
-`One.update` sets `is_calculated = IN_PROGRESS` and saves it *before* it answers
-the PATCH, so the record really is running by then; the widget is declining to
-ask again, not predicting. If the trigger is refused, the optimism is taken back
-in the same render and the refusal is shown instead. The next real status read
-supersedes it either way, so it can never become a second opinion about the
-record.
+reading "Not calculated" until a re-read agreed, so the honest reading was that
+the button had not worked. The widget renders **Running** the moment the click is
+accepted. This is not a guess: `One.update` sets `is_calculated = IN_PROGRESS`
+and saves it *before* it answers, so the record really is running by then. If the
+trigger is refused, the optimism is taken back and the refusal is shown instead.
+The next real read supersedes it either way, so it can never become a second
+opinion about the record.
+
+### The poller is per session, and that is a permission boundary
+
+The poller lives in `st.session_state` — **not** `st.cache_resource`, and not a
+module-level singleton. That is deliberate and it is not a preference.
+`st.cache_resource` is shared by every session the server is running; the poller
+holds status envelopes *and a bearer token*. The status endpoint answers an
+unreadable record with the same 404 as a missing one, specifically so that its
+existence is not disclosed — and a shared poller would hand over exactly the
+answer that machinery exists to withhold, as well as making one user's
+credential reachable from another user's request. `session_state` is already
+scoped to one signed-in user, so the boundary comes for free. Pinned by 1.261.
+
+The polling thread never touches `st` at all (pinned by 1.260): a thread with no
+script run context that calls into Streamlit either raises or writes into
+whichever session happens to be current. The token is handed in from the render
+thread; results come back through plain dictionaries under a lock. The thread
+also stops itself once the session stops rendering, because a closed tab gives
+no teardown signal a background thread can see.
+
+### Keeping the rest of the page in step
+
+The tile updates itself in place. Code *outside* it does not — Streamlit only
+re-evaluates your script on a page run, and the whole point of the above is that
+the widget stops causing them. So this:
+
+```python
+status = lex_calculation("quarter", pk=42)
+if status and status["status"] == "SUCCESS":
+    st.dataframe(load_results())
+```
+
+shows the dataframe as of the last page run. The widget always re-runs the page
+**once**, when the first read for a record lands, so the pattern is correct on a
+freshly opened page rather than only after the reader happens to click
+something. Beyond that, pass `sync_page=True` to keep the page following one
+record:
+
+```python
+status = lex_calculation("quarter", pk=42, sync_page=True)
+```
+
+Use it for the one tile whose result the page is built around, not for all of
+them: each page run greys every element until it is redrawn, and a dashboard of
+tiles should not flicker because one of them finished.
 
 ## Cost: `show_log=True` is the only expensive argument
 

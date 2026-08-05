@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 262
+max_scenario: 266
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -284,50 +284,53 @@ letters:
       a-z. Renumbered from z/1.201-1.206 on merge
   ab:
     title: Streamlit lex_calculation() widget — trigger one record and watch it
-    scenarios: 1.223-1.262
+    scenarios: 1.223-1.266
     status: complete
     tests:
-      pass: 40
+      pass: 44
       skip: 0
       xfail: 0
     note: >-
-      native widget replacing "embed a whole React table just to click one button".
-      Covers `lex/lex_app/streamlit/_client.py` (backend URL resolution, bearer token read
-      from the host's `session_state["access_token"]`, `LexApiError`) and
-      `calculation.py` (fragment poll loop, status presentation, trigger), plus the package
-      `__init__` as the public surface (1.240). Gates the three properties a dashboard
-      depends on. Polling self-terminates: `poll_interval_for` returns None on every
-      terminal status and on a failed read, and the `st.fragment` `run_every` timer is
-      rebuilt only when the interval actually changes, because only a full script run
-      re-declares a fragment (1.228-1.230, 1.245-1.246). No failure path raises out of the
-      widget - Streamlit renders top-to-bottom, so an escaping exception erases every widget
-      below it (1.232, 1.236, 1.243-1.244). And the widget imports no Django model, so read
-      permission, audit actor and the `_defer_calculate_hook` trigger path stay identical to
-      the React UI's (1.238); `calculate` travels in the PATCH body, not the query string
-      (1.235). 1.247-1.250 close the design's disabled-with-reason gap: the button is drawn
-      disabled with the backend's reason beside it when the envelope's `can_calculate` is
-      false (1.247), still disabled while a run is in progress for the separate
-      double-trigger reason (1.248), still relays a 403 that arrives after the click because
-      only the PATCH is authoritative and the envelope is one poll old (1.249), and left
-      enabled when the key is absent, so a backend older than the flag does not disable
-      everyone's button (1.250). Pairs with batch 10o, the status endpoint it polls.
-      1.251-1.262 are the usability pass after the first page built with thirteen of
-      these widgets: a click took seven seconds to change a word, and running one
-      calculation greyed every other widget on the page. Three causes, all measured
-      against the real runtime with AppTest. Every widget issued its own blocking GET
-      every run, so a page cost one round trip per widget in series - `read_status_cached`
-      shares one read per (model, pk, include_log) for at most half a poll interval
-      (1.251-1.253), out of `st.session_state` and never `st.cache_data`, because
-      session_state is per-user and a status envelope describes a record the next reader
-      may not be allowed to see at all - the endpoint 404s an unreadable record precisely
-      so its existence is not disclosed (1.254, 1.262). The poll timer was decided inside
-      the fragment, where the only way to obtain one is to rerun the whole script;
-      `st.rerun()` raises, so every widget below lost its turn and asked for a rerun of
-      its own next run. Reading status before declaring the fragment makes one pass enough
-      (1.245 rewritten, 1.258), leaving app-scope reruns at exactly two per calculation -
-      the click that starts the watch and the poll that ends it (1.259). And a click now
-      renders "Running" from the trigger's own response rather than after a re-read
-      (1.255), giving it back if the trigger was refused (1.256) and yielding to the next
-      real read (1.257). Measured on 13 tiles over 2 records - load 13 GETs to 2, a rerun
-      13 to 0, a click 14 script runs and 104 GETs to 2 and 1 (1.260-1.261).
-
+      native widget replacing "embed a whole React table just to click one button". Covers
+      `lex/lex_app/streamlit/_client.py` (backend URL resolution, per-thread pooled session, bearer token
+      read from the host's `session_state["access_token"]`, `LexApiError`), the new `_status_poller.py`
+      (the session-owned thread that does every read and every trigger) and `calculation.py` (the render,
+      status presentation, optimistic click), plus the package `__init__` as the public surface (1.240).
+      Gates the three properties a dashboard depends on. Polling self-terminates: `poll_interval_for`
+      returns None on every terminal status and on a failed read, and the poller stops asking about a
+      settled record while re-arming when the reader triggers one (1.228-1.229, 1.256, 1.262). No failure
+      path raises out of the widget - Streamlit renders top-to-bottom, so an escaping exception erases
+      every widget below it (1.232, 1.236, 1.243-1.244, and 1.266 drives a total outage through the real
+      runtime). And neither the widget nor the poller imports a Django model, so read permission, audit
+      actor and the `_defer_calculate_hook` trigger path stay identical to the React UI's (1.238);
+      `calculate` travels in the PATCH body, not the query string (1.235). 1.247-1.250 close the disabled-
+      with-reason gap: the button is drawn disabled with the backend's reason beside it when the
+      envelope's `can_calculate` is false (1.247), still disabled while a run is in progress for the
+      separate double-trigger reason (1.248), still relays a 403 that arrives after the click because only
+      the PATCH is authoritative and the envelope is a read old (1.249), and left enabled when the key is
+      absent, so a backend older than the flag does not disable everyone's button (1.250). Pairs with
+      batch 10o, the status endpoint it reads. 1.251-1.266 are the usability pass, and they replace an
+      earlier one that did not work: after it, the reader still reported tiles hanging before they
+      rendered, a Calculate button that never looked interactive, and every other section greying whenever
+      one calculation ran. The earlier pass had cached reads and moved the timer decision earlier - it was
+      treating a symptom. Both faults were the render path doing what a render path must not, and the rule
+      that ends them is one sentence: the render performs no I/O and reruns nothing but itself. No I/O -
+      Streamlit runs a page on one thread, so a tile reading its own status inside the render holds up
+      every tile below it, in series, before any of them exist; all reads and triggers moved to a daemon
+      thread the session owns, leaving the render a dictionary lookup (1.251-1.253, and 1.264 asserts no
+      read lands on the script's own thread). No page reruns - `run_every` is heard only at declaration
+      and only a full run declares, so adapting the timer to the status requires rerunning the page, and
+      `st.rerun()` raises, taking every widget still to be drawn with it: one click cost fourteen script
+      runs and 104 reads. The timer is now declared unconditionally and never rebuilt (1.230, 1.245-1.246,
+      1.265). One deliberate rerun remains, once per record per session when the first read lands, so that
+      branching on the return value is true on a freshly opened page; `sync_page=True` opts one tile into
+      following its record thereafter. It is guarded by a call-stack flag rather than session_state,
+      because the poller fills snapshots on another thread and a record can go from unknown to known
+      between an app-scope check and the fragment body - which reintroduced the exact cascade. A click
+      renders "Running" from the accepted trigger rather than after a re-read (1.254), gives it back if
+      refused (1.249) and yields to the next real read (1.255). The per-session boundary now covers a
+      bearer token as well as status envelopes: the poller lives in session_state, never cache_resource or
+      module state (1.261), and the polling thread never touches `st` at all (1.260). Measured in a
+      browser, 13 tiles over 6 records against a 300ms backend: whole-page render seconds to 17ms, reads
+      on the render thread 13 to 0, click-to-"Running" ~7s to 103ms, full script runs caused by a click 14
+      to 0, page greyed seconds-at-a-time to 0.8% of wall clock in ~20ms flickers.

@@ -13,13 +13,36 @@ bypass all three at once.
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any, Dict, Optional
 
 import requests
 
-#: Seconds before a backend call is abandoned. Short on purpose: this runs
-#: inside a page render, and a hung request freezes the whole dashboard.
+#: Seconds before a backend call is abandoned. These run on the poller thread
+#: rather than inside a render, so a hung backend no longer freezes a page --
+#: but a call that never returns would still stall that record's watch, and a
+#: dashboard whose tiles quietly stop updating is worse than one that says so.
 REQUEST_TIMEOUT = 10
+
+#: One :class:`requests.Session` per calling thread.
+#:
+#: A bare ``requests.get`` opens a new TCP connection -- and, against an HTTPS
+#: deployment, negotiates a new TLS session -- for every single call. A page
+#: watching six records pays that handshake six times per poll, which is most of
+#: what a status read costs and none of what it is for. A Session keeps the
+#: connection alive, so the second read onwards is one round trip.
+#:
+#: Thread-local because ``requests.Session`` is not thread-safe, and the poller
+#: reads several records at once through a small pool.
+_sessions = threading.local()
+
+
+def _session() -> requests.Session:
+    session = getattr(_sessions, "session", None)
+    if session is None:
+        session = requests.Session()
+        _sessions.session = session
+    return session
 
 
 class LexApiError(Exception):
@@ -77,7 +100,7 @@ def get_json(path: str, token: str, params: Optional[dict] = None) -> Dict[str, 
     """GET ``path`` and return parsed JSON, or raise :class:`LexApiError`."""
     url = f"{resolve_api_base_url()}{path}"
     try:
-        response = requests.get(
+        response = _session().get(
             url, headers=_headers(token), params=params, timeout=REQUEST_TIMEOUT,
         )
     except requests.RequestException as exc:
@@ -102,7 +125,7 @@ def patch_json(
     """
     url = f"{resolve_api_base_url()}{path}"
     try:
-        response = requests.patch(
+        response = _session().patch(
             url,
             headers=_headers(token),
             params=params,

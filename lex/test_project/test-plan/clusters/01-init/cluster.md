@@ -209,7 +209,7 @@ does not remove user launch configurations.
 
 **Why a regression matters:** every failure mode here is silent. Polling that forgets to stop is permanent backend load nobody notices, multiplied by every tab left open. An exception escaping the widget does not report an error — Streamlit renders top-to-bottom, so the page just loses everything below the widget. A colour literal keeps rendering the old palette after the next token refresh with nothing failing. And an in-process ORM call would skip the record's read permission, resolve the wrong audit actor and miss the `_defer_calculate_hook` trigger path all at once — a second way to start a calculation is what produced the `edited_at` bug in PR #675.
 
-**And one that was not silent at all.** The first page built with thirteen of these took seven seconds to change "Not calculated" to "Running" after a click, and greyed every widget on the page whenever any one calculation started or stopped. Nothing was broken; the page was a queue. 1.251–1.262 hold the three properties that fixed it — one read per record per run, a poll timer decided before the fragment is declared, and a click that renders its own answer — and 1.260–1.262 hold them against the real Streamlit runtime, because "how many times does the script run" is a claim about Streamlit, not about this code.
+**And one that was not silent at all.** The first page built with thirteen of these took seven seconds to change "Not calculated" to "Running" after a click, greyed every widget on the page whenever any one calculation started or stopped, and left tiles hanging before they rendered at all. Nothing was broken; the page was a queue. An initial fix cached reads and moved the timer decision earlier, and the reader reported all three symptoms again — the cache had been treating a symptom. Both faults were the render path doing what a render path must not: **it performs no I/O, and it reruns nothing but itself.** Reads and triggers moved to a session-owned polling thread, and the redraw timer is declared unconditionally so it never has to be rebuilt. 1.251–1.266 hold each half, and 1.264–1.266 hold it against the real Streamlit runtime, because "how many times does the script run, and on which thread" is a claim about Streamlit, not about this code.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
@@ -220,7 +220,7 @@ does not remove user launch configurations.
 | 1.227 | Called as the signed-in user | GET and PATCH both send `Authorization: Bearer <token>` — never the instance `Api-Key`, which resolves to a technical user |
 | 1.228 | Polling stops on a terminal status | `poll_interval_for` returns `None` for SUCCESS, ERROR, ABORTED, CANCELLED, NOT_CALCULATED and for a failed read |
 | 1.229 | Polling runs while work is in flight | `IN_PROGRESS` keeps the requested interval |
-| 1.230 | Both directions need a full script run | `poll_timer_needs_rebuild` fires when the declared and desired intervals differ, in either direction, and only then — `st.fragment` reads `run_every` at declaration, and only a full run re-declares it |
+| 1.230 | The redraw timer is declared unconditionally | `ui_refresh_for` is never `None`, for any interval including nonsense — `run_every` is heard only at declaration, so a tile that dropped its timer could only get one back by rerunning the page, and `st.rerun()` raises |
 | 1.231 | `ABORTED` is interrupted, not failed | ABORTED gets the re-run nudge and `ERROR` does not |
 | 1.232 | No read failure raises | refused, missing, broken and unreachable each produce a rendered message and nothing escapes |
 | 1.233 | `show_log=False` costs nothing | `include_log` is not sent at all, so the endpoint skips the log query |
@@ -235,23 +235,27 @@ does not remove user launch configurations.
 | 1.242 | The token comes from the session | read from `session_state["access_token"]`, with no environment fallback |
 | 1.243 | An expired session asks for a reload | no token renders "Session expired — reload the page", and makes no backend call at all |
 | 1.244 | A failed read survives a real render | a 500 renders a caption through the full widget, not an exception |
-| 1.245 | Finding work in progress starts the watch | a record found `IN_PROGRESS` has its poll timer declared in that same run, with no rerun — the status is read before the fragment is declared, which is the only moment `run_every` is heard |
-| 1.246 | A settled record costs one render | `SUCCESS` renders once, stores no interval and does not rerun |
+| 1.245 | Finding work in progress starts no page rerun | a record found `IN_PROGRESS` keeps being watched and the page is never re-run — that rerun used to grey every other tile |
+| 1.246 | A settled tile redraws for free | repeated redraws of a `SUCCESS` record issue no reads and never rerun the page — the steady state of a dashboard must cost nothing |
 | 1.247 | No run permission disables the button | `can_calculate: false` draws the button disabled with the backend's reason beside it, and issues no trigger — the reason arrives before the click, not after it |
 | 1.248 | A running record still disables it | `IN_PROGRESS` disables the button even for a caller who may calculate — the double-trigger guard is independent of permission |
 | 1.249 | The 403 backstop survives a stale envelope | an envelope saying "you may" plus a backend that refuses still renders the refusal: the flag is one poll old and only the PATCH is authoritative |
 | 1.250 | A missing flag is not a denial | an envelope with no `can_calculate` key leaves the button enabled, so a backend older than the field does not disable it for everyone |
-| 1.251 | A page costs one read per record | thirteen tiles over two records issue two GETs, not thirteen — every read is a blocking round trip inside the render |
-| 1.252 | The cache answers only what it was asked | a second record, and a widget wanting the log, each cost their own read; a log-less envelope would leave the log panel permanently empty |
-| 1.253 | A rerun does not re-read a settled record | an idle widget re-renders from the read it already has, which is what any other widget's start or finish costs the page |
-| 1.254 | The cache stops at the session boundary | two sessions each read as themselves; no `st.cache_data`/`cache_resource`/`lru_cache` anywhere in the module, and the cache is fetched only from `st.session_state` |
-| 1.255 | A click renders its own answer | "Running" appears in the render that handled the click, with no status read between the trigger and the word |
-| 1.256 | A refused trigger takes the optimism back | a 403 on the click renders the refusal, keeps the real status and starts no poll |
-| 1.257 | The optimism lasts one render | the first fresh read after a click replaces it and clears the flag |
-| 1.258 | A running record does not cost the page | three widgets, the middle one `IN_PROGRESS`, all render in one pass; only that one carries a timer |
-| 1.259 | Polling is silent until there is news | a poll that finds the work continuing re-reads and asks for nothing; the one that finds it finished reruns, because only a full run drops the browser's timer |
-| 1.260 | A page of tiles loads in one run | `AppTest`: thirteen tiles, one script run, two reads — and a rerun moments later issues none |
-| 1.261 | A click costs one rerun, not one per tile | `AppTest`: pressing Calculate reruns the script once more and re-reads only the record that changed |
-| 1.262 | Two sessions never share a status | `AppTest`: two sessions on one record each issue their own read and render their own answer |
+| 1.251 | Rendering a tile issues no backend call | thirteen tiles over six records render with zero reads — every read inside a render is a round trip the tiles below wait through, in series, before they exist |
+| 1.252 | One record costs one read | seven tiles on one record and six on another cost two reads, not thirteen |
+| 1.253 | A click returns before the trigger is sent | the click handler queues the PATCH and finishes; `One.update` re-reads, saves, registers and broadcasts before answering, and waiting on that is why the button felt dead |
+| 1.254 | A click renders its own answer | "Running" appears in the render that handled the click, with no read between the trigger and the word |
+| 1.255 | A real read replaces the optimism | the first read after a trigger clears the pending flag, in both directions — it confirms the run or reveals it never took |
+| 1.256 | Polling stops on settling and re-arms on a trigger | a settled record is not read a minute later; triggering it starts the watch again, so the tile is not stuck on "Running" |
+| 1.257 | The poller stops when the session goes quiet | past the idle timeout the loop reports that it should end — a closed tab gives no teardown signal a thread can see |
+| 1.258 | The log is watched separately | a tile showing the log and one not are read independently; sharing would either charge every tile for the log or leave the asking tile's panel empty |
+| 1.259 | The shortest requested interval wins | two tiles asking 5s and 0.5s watch the record at 0.5s; it cannot be watched at two rates |
+| 1.260 | The poller never touches Streamlit | nothing outside `get_poller()` references `st`; a thread with no script context writes into whichever session is current |
+| 1.261 | Two sessions never share a poller or a token | each session gets its own instance, out of `session_state` and never module state |
+| 1.262 | A failed read is still an answer | an unreachable backend stores a renderable state and stops polling, so a tile is neither blank nor a retry storm |
+| 1.263 | Connections are pooled, per thread | one thread reuses one `Session`; another gets its own, because `requests.Session` is not thread-safe and the poller reads concurrently |
+| 1.264 | A page of tiles loads in one run and no render-thread reads | `AppTest`: thirteen tiles, one script run, and not one read on the script's own thread |
+| 1.265 | Every tile declares a timer | `AppTest`: no tile reruns the page to obtain one, and all thirteen get their turn |
+| 1.266 | A total outage costs content, never the page | `AppTest`: every connection refused, no exception escapes, all thirteen tiles still render |
 
-**Scenario range:** 1.223 – 1.262. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-05) — 40 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this polls — and, for 1.247–1.250, the source of the `can_calculate` flag the button is drawn from.
+**Scenario range:** 1.223 – 1.266. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-05) — 44 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/_status_poller.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this reads — and, for 1.247–1.250, the source of the `can_calculate` flag the button is drawn from.
