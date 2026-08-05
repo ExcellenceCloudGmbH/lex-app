@@ -26,8 +26,17 @@ CHANGELOG_PATH = ranges.REPO_ROOT / "CHANGELOG.md"
 def _all_tags(tag: str) -> list[str]:
     result = subprocess.run(
         ["git", "tag", "--merged", tag, "--sort=-creatordate"],
-        cwd=ranges.REPO_ROOT, check=True, capture_output=True, text=True,
+        cwd=ranges.REPO_ROOT, capture_output=True, text=True,
     )
+    if result.returncode != 0:
+        # Almost always a shallow clone or a missing tag fetch, and the raw
+        # CalledProcessError ("exit status 128") says none of that.
+        raise SystemExit(
+            f"Could not list tags reachable from {tag!r}: "
+            f"{result.stderr.strip() or 'git exited ' + str(result.returncode)}\n"
+            "The tag must exist locally — check out with fetch-depth: 0, or "
+            "run `git fetch origin --tags`."
+        )
     return result.stdout.splitlines()
 
 
@@ -91,43 +100,47 @@ def _load_exemplar() -> str:
 
 
 def _pick_model():
-    """Choose a drafting transport, preferring Anthropic.
+    """Resolve the drafting transport from LEX_NOTES_PROVIDER and the environment.
 
-    GitHub Models was the original choice — it needed no new secret. It is now
-    being retired and its endpoint answers 410 `github_models_retirement_brownout`,
-    which is what produced the empty first draft on v2.1.7rc1. Anthropic wins
-    when ANTHROPIC_API_KEY is set; GitHub Models remains as a fallback for
-    whatever is left of its life. Returns None when neither is usable, which
-    `notes.draft()` turns into a fallback body rather than a crash.
+    Which model writes the note is configuration. Set LEX_NOTES_PROVIDER to
+    anthropic / gemini / openai / github-models, or leave it unset for "auto",
+    which takes the first provider whose key is present.
+
+    Returns None when nothing is configured, which `notes.draft()` turns into a
+    fallback body. An explicit choice that cannot be honoured raises instead —
+    quietly drafting with a different provider than the one requested would be
+    worse than a visible failure.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key:
-        print("Drafting via the Anthropic Messages API.", file=sys.stderr)
-        return lambda prompt: notes.anthropic_messages(prompt, api_key=api_key)
+    choice = os.environ.get("LEX_NOTES_PROVIDER", "")
+    try:
+        resolved = notes.resolve_provider(choice, os.environ)
+    except ValueError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return None
 
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if token:
+    if resolved is None:
+        configured = ", ".join(env for env, _ in notes.PROVIDERS.values())
         print(
-            "ANTHROPIC_API_KEY is not set — falling back to GitHub Models, "
-            "which is being retired and may answer 410.",
+            f"No drafting credential found. Set one of: {configured} — "
+            "and optionally LEX_NOTES_PROVIDER to choose between them.",
             file=sys.stderr,
         )
-        return lambda prompt: notes.github_models(prompt, token=token)
+        return None
 
-    return None
+    name, call = resolved
+    how = "requested" if choice and choice.strip().lower() != "auto" else "auto-selected"
+    print(f"Drafting via {name} ({how}).", file=sys.stderr)
+    return call
 
 
 def cmd_draft_notes(args: argparse.Namespace) -> int:
     model = _pick_model()
     if model is None:
-        print(
-            "No drafting credential: set ANTHROPIC_API_KEY (preferred) or "
-            "GITHUB_TOKEN.",
-            file=sys.stderr,
-        )
-
-        def model(prompt: str) -> str:  # noqa: F811 — fail open, not hard
-            raise RuntimeError("no drafting credential configured")
+        # _pick_model already explained why on stderr. Hand `draft()` something
+        # that raises so it produces its fallback body: exiting here instead
+        # would leave the release with no note and no explanation.
+        def model(prompt: str) -> str:  # noqa: F811
+            raise RuntimeError("no usable notes provider — see the log above")
 
     exemplar = _load_exemplar()
     body = notes.draft(

@@ -201,10 +201,20 @@ jobs:
         id: draft
         continue-on-error: true
         env:
-          # Anthropic is preferred; GitHub Models is a fallback for whatever
-          # remains of its life (it now answers 410 during its retirement
-          # brownout). With neither, drafting fails open with a visible notice.
+          # Which model writes the note is configuration, not code. Set the
+          # repository variable LEX_NOTES_PROVIDER to anthropic / gemini /
+          # openai / github-models to pin one, or leave it unset for "auto",
+          # which takes the first provider whose key is present, in that order.
+          # A secret of the same name is honoured too, for orgs that prefer to
+          # keep the choice out of the UI.
+          #
+          # Only the keys you set need to exist; unset ones are simply skipped.
+          # With none of them, drafting fails open with a visible notice rather
+          # than blocking the release.
+          LEX_NOTES_PROVIDER: ${{ vars.LEX_NOTES_PROVIDER || secrets.LEX_NOTES_PROVIDER }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name }}

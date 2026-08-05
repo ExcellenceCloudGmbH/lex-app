@@ -8,6 +8,7 @@ a human can act on.
 
 from __future__ import annotations
 
+import functools
 import json
 import urllib.request
 from typing import Callable
@@ -52,6 +53,15 @@ ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MODEL = "claude-sonnet-5"
 ANTHROPIC_MAX_TOKENS = 4096
+
+GEMINI_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    "{model}:generateContent"
+)
+GEMINI_MODEL = "gemini-2.5-flash"
+
+OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+OPENAI_MODEL = "gpt-4o"
 
 MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions"
 # A live external dependency: GitHub's model catalogue changes, and a retired
@@ -176,14 +186,14 @@ def _post(url: str, *, headers: dict, json_body: dict) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def github_models(prompt: str, *, token: str, post: Callable[..., dict] = _post) -> str:
+def github_models(prompt: str, *, api_key: str, post: Callable[..., dict] = _post) -> str:
     """Call GitHub Models with the job's GITHUB_TOKEN. No new secret needed.
 
     The calling workflow job must declare `permissions: models: read`.
     """
     payload = post(
         MODELS_ENDPOINT,
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        headers={"Authorization": f"Bearer {api_key}", "Accept": "application/vnd.github+json"},
         json_body={
             "model": MODEL,
             "messages": [{"role": "user", "content": prompt}],
@@ -216,3 +226,119 @@ def anthropic_messages(
     if not blocks:
         raise ValueError(f"unexpected response from Anthropic, no text: {payload!r}")
     return "".join(blocks)
+
+
+def _chat_completion_text(payload: dict, who: str) -> str:
+    """Pull the text out of an OpenAI-shaped chat completion."""
+    try:
+        return payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"unexpected response from {who}: {payload!r}") from exc
+
+
+def openai_chat(prompt: str, *, api_key: str, post: Callable[..., dict] = _post) -> str:
+    """Draft via the OpenAI chat-completions API. Requires OPENAI_API_KEY."""
+    payload = post(
+        OPENAI_ENDPOINT,
+        headers={"Authorization": f"Bearer {api_key}"},
+        json_body={
+            "model": OPENAI_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+        },
+    )
+    return _chat_completion_text(payload, "OpenAI")
+
+
+def gemini_generate(prompt: str, *, api_key: str, post: Callable[..., dict] = _post) -> str:
+    """Draft via the Gemini generateContent API. Requires GEMINI_API_KEY.
+
+    The key goes in the `x-goog-api-key` header rather than the `?key=` query
+    parameter Google's quickstarts use. Both authenticate; only one keeps the
+    credential out of request logs, proxy logs and error messages.
+    """
+    payload = post(
+        GEMINI_ENDPOINT.format(model=GEMINI_MODEL),
+        headers={"x-goog-api-key": api_key},
+        json_body={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2},
+        },
+    )
+    try:
+        parts = payload["candidates"][0]["content"]["parts"]
+        blocks = [part["text"] for part in parts if "text" in part]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"unexpected response from Gemini: {payload!r}") from exc
+    if not blocks:
+        raise ValueError(f"unexpected response from Gemini, no text: {payload!r}")
+    return "".join(blocks)
+
+
+# ── Provider registry ─────────────────────────────────────────────────
+#
+# Which provider drafts the note is configuration, not code. Set
+# LEX_NOTES_PROVIDER to one of the names below, or leave it unset for "auto",
+# which picks the first provider whose key is present in PROVIDER_ORDER.
+
+PROVIDERS: dict[str, tuple[str, Callable[..., str]]] = {
+    "anthropic": ("ANTHROPIC_API_KEY", anthropic_messages),
+    "gemini": ("GEMINI_API_KEY", gemini_generate),
+    "openai": ("OPENAI_API_KEY", openai_chat),
+    "github-models": ("GITHUB_TOKEN", github_models),
+}
+
+# Auto-selection order. GitHub Models is last: it is being retired and now
+# answers 410 during its brownout, so it is only ever a last resort.
+PROVIDER_ORDER = ("anthropic", "gemini", "openai", "github-models")
+
+# What people actually type.
+_ALIASES = {
+    "google": "gemini",
+    "gemini": "gemini",
+    "gpt": "openai",
+    "openai": "openai",
+    "claude": "anthropic",
+    "anthropic": "anthropic",
+    "github": "github-models",
+    "github-models": "github-models",
+    "githubmodels": "github-models",
+}
+
+
+def resolve_provider(
+    choice: str | None, env: dict
+) -> tuple[str, Callable[..., str]] | None:
+    """Resolve a provider name and env into (name, callable).
+
+    The callable takes the prompt and an optional `post`, with the key already
+    bound. Returns None when nothing is configured — the caller turns that into
+    a fallback body rather than a crash. Raises ValueError when an explicit
+    choice is unusable, because silently drafting with a different provider
+    than the one asked for is worse than failing loudly.
+    """
+    name = (choice or "").strip().lower()
+
+    if name and name != "auto":
+        resolved = _ALIASES.get(name)
+        if resolved is None:
+            raise ValueError(
+                f"unknown notes provider {choice!r}. Valid: "
+                + ", ".join(sorted(set(_ALIASES.values())))
+                + ", auto"
+            )
+        env_key, call = PROVIDERS[resolved]
+        api_key = env.get(env_key, "")
+        if not api_key:
+            raise ValueError(
+                f"notes provider {resolved!r} was requested but {env_key} is not set"
+            )
+        return resolved, functools.partial(call, api_key=api_key)
+
+    for candidate in PROVIDER_ORDER:
+        env_key, call = PROVIDERS[candidate]
+        api_key = env.get(env_key, "")
+        if api_key:
+            return candidate, functools.partial(call, api_key=api_key)
+
+    return None
