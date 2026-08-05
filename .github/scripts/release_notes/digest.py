@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,11 +152,25 @@ def collect_commits(
     return commits
 
 
+# Prefer a merged PR, but fall back to any PR the commit is associated with.
+#
+# Filtering on `merged_at` alone loses real titles: commits reach lex-app-v2
+# while their tracking PR is still open, so `2dfc626`, `8d7705a` and `6f9e67a`
+# all sit on the branch under PR #692 with `merged_at: null`. Taking `.[0]`
+# *before* the filter made that produce nothing at all — indistinguishable
+# from "this commit has no PR" — which is exactly the enrichment the 57%
+# commit conformance depends on.
+_PR_JQ = (
+    "[.[] | select(.merged_at != null)] + . "
+    "| .[0] | select(. != null) | [.number, .title] | @json"
+)
+
+
 def _lookup_pr(sha: str) -> tuple[int, str] | None:
-    """The merged PR a commit belongs to, via the GitHub API."""
+    """The PR a commit belongs to, via the GitHub API. Merged ones win."""
     result = subprocess.run(
         ["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls",
-         "--jq", ".[0] | select(.merged_at != null) | [.number, .title] | @json"],
+         "--jq", _PR_JQ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -175,8 +190,14 @@ def enrich_with_prs(
 
     A lookup failure is not fatal. Release notes are worth having with
     partial enrichment; they are not worth failing a release for.
+
+    The tally is logged because a *systemic* failure — a missing
+    `pull-requests: read` permission, say — degrades every entry to its raw
+    commit subject while looking exactly like "these commits had no PRs".
+    A count makes that visible instead of silent.
     """
     enriched: list[Commit] = []
+    hits = 0
     for commit in commits:
         try:
             found = lookup(commit.sha)
@@ -185,8 +206,12 @@ def enrich_with_prs(
         if found is None:
             enriched.append(commit)
         else:
+            hits += 1
             number, title = found
             enriched.append(
                 Commit(sha=commit.sha, subject=commit.subject, pr_number=number, pr_title=title)
             )
+    if commits:
+        print(f"PR enrichment: {hits}/{len(commits)} commits matched a pull request.",
+              file=sys.stderr)
     return enriched

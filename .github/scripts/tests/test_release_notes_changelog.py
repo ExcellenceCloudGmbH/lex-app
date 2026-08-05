@@ -111,3 +111,33 @@ def test_prepend_puts_the_newest_release_directly_below_the_preamble():
 def test_prepend_tolerates_a_file_without_the_expected_preamble():
     out = changelog.prepend("## [2.1.6] - 2026-07-23\n", "## [2.1.7] - 2026-08-05\n")
     assert out.index("## [2.1.7]") < out.index("## [2.1.6]")
+
+
+def test_prepend_replaces_an_existing_section_for_the_same_version():
+    # publish_release_notes.yml advertises a "(re)generate" tag input, and
+    # re-running a failed job is routine, so the same version can be rendered
+    # twice. It must replace, not duplicate.
+    first = changelog.prepend(None, "## [2.1.7] - 2026-08-05\n\n### Added\n- one\n")
+    again = changelog.prepend(first, "## [2.1.7] - 2026-08-05\n\n### Added\n- one\n")
+    assert again.count("## [2.1.7]") == 1
+    assert again.count("- one") == 1
+
+
+def test_prepend_replaces_even_when_the_date_differs():
+    first = changelog.prepend(None, "## [2.1.7] - 2026-08-05\n\n### Added\n- one\n")
+    again = changelog.prepend(first, "## [2.1.7] - 2026-08-09\n\n### Added\n- two\n")
+    assert again.count("## [2.1.7]") == 1
+    assert "2026-08-09" in again
+    assert "- two" in again
+    assert "- one" not in again
+
+
+def test_prepend_leaves_other_versions_untouched_when_replacing():
+    doc = changelog.prepend(None, "## [2.1.6] - 2026-07-23\n\n### Fixed\n- old\n")
+    doc = changelog.prepend(doc, "## [2.1.7] - 2026-08-05\n\n### Added\n- new\n")
+    doc = changelog.prepend(doc, "## [2.1.7] - 2026-08-06\n\n### Added\n- newer\n")
+    assert doc.count("## [2.1.6]") == 1
+    assert doc.count("## [2.1.7]") == 1
+    assert "- old" in doc          # the untouched older release survives
+    assert "- newer" in doc
+    assert "- new\n" not in doc

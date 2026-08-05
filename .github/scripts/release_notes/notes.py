@@ -17,6 +17,9 @@ FAILURE_MARKER = "<!-- lex:notes-draft-failed -->"
 REQUIRED_HEADINGS = ("## Main changes", "## Optimizations", "## Bug fixes")
 
 MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions"
+# A live external dependency: GitHub's model catalogue changes, and a retired
+# id becomes a hard error here. `draft()` degrades to the fallback body rather
+# than failing the gate, so the symptom is stub notes, not a red release.
 MODEL = "openai/gpt-4o"
 
 _INSTRUCTIONS = """\

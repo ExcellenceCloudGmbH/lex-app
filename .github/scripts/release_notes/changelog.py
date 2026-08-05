@@ -61,10 +61,42 @@ def render(digest: dict, *, date: str, repo: str) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
+def _strip_existing_section(existing: str, heading: str) -> str:
+    """Remove an already-present section for the same version, if any.
+
+    publish_release_notes.yml exposes a `tag` input described as
+    "(re)generate", and re-running a failed job is routine, so the same
+    version can legitimately be rendered twice. Without this the second run
+    appends a byte-identical duplicate — and the workflow's `git diff --quiet`
+    guard does not catch it, because the file genuinely did change.
+    """
+    lines = existing.splitlines(keepends=True)
+    out, skipping = [], False
+    for line in lines:
+        if line.startswith(heading):
+            skipping = True
+            continue
+        if skipping:
+            # Any other version heading ends the section being replaced.
+            if line.startswith("## ["):
+                skipping = False
+            else:
+                continue
+        out.append(line)
+    return "".join(out)
+
+
 def prepend(existing: str | None, section: str) -> str:
-    """Insert `section` directly below the preamble."""
+    """Insert `section` directly below the preamble, replacing any same-version entry."""
     if not existing:
         return f"{PREAMBLE}\n{section}"
+
+    # "## [2.1.7] - 2026-08-05" -> "## [2.1.7]", so a re-render on a different
+    # date still replaces rather than duplicates.
+    first = section.splitlines()[0]
+    heading = first.split(" - ")[0] if " - " in first else first.rstrip()
+    existing = _strip_existing_section(existing, heading)
+
     marker = PREAMBLE.rstrip()
     if existing.startswith(marker):
         rest = existing[len(marker):].lstrip("\n")

@@ -96,10 +96,26 @@ cannot corrupt the technical record.
 The digest is rebuilt at release time rather than carried over from the gate run.
 Workflow artifacts are scoped to the run that produced them, so passing one between
 two workflows triggered by two different events would need cross-run download
-plumbing and a token. Since the tag is fixed once the prerelease exists, the range
-is fixed too, and `digest` + `changelog` rendering are deterministic — re-running
-them costs one API call sequence and no model call, which is cheaper than the
-plumbing it replaces.
+plumbing and a token. Since the tag is fixed once the prerelease exists, the commit
+range is fixed too, and re-running costs one API call sequence and no model call —
+cheaper than the plumbing it replaces.
+
+**The rebuild is reproducible, not strictly deterministic**, and the difference
+matters to anyone treating the changelog as a replay of the approved note:
+
+- `draft-notes` checks out the tag (a `release` event sets `GITHUB_REF` to
+  `refs/tags/<tag>`), while `publish_release_notes.yml` pins
+  `ref: default_branch`. Promotion can happen well after the gate, so a change to
+  the parsing logic landing in between means the two artifacts were produced by
+  two versions of the tool.
+- `enrich_with_prs` queries the live API on both runs. A PR title edited between
+  them, or a PR that transitions from open to merged, changes the text — and since
+  `parse_subject` runs on the PR title in preference to the commit subject, it can
+  move an entry into a different section.
+
+Neither breaks anything: the changelog is regenerated rather than reviewed, and is
+explicitly not a transcript of the note a human approved. But do not build anything
+on top of an assumption of byte-identical replay.
 
 ## Module layout
 
