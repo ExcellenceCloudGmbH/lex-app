@@ -50,7 +50,11 @@
 | 10.79 | A short log is not flagged | every line returns and `log_truncated` is false |
 | 10.80 | Timings come from the last run only | a record run yesterday and again just now reports the 38-second window, not the span between the two |
 | 10.81 | The tail covers only the latest run | a short re-run's tail is not padded out of the previous run's rows |
+| 10.82 | Readable but not runnable | a caller who may read the record and may not run it gets `can_calculate: false` with the restriction's own reason — and the trigger really is refused (403) |
+| 10.83 | Runnable | the same record polled by an allowed caller reports `can_calculate: true` with no reason — and the trigger really is accepted (202) |
 
-**Scenario range:** 10.72 – 10.81. **Test file:** `lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py`. **Type:** E. **Status:** ✅ Complete (2026-08-04) — 10 pass / 0 fail. Source: `lex/api/views/calculations/CalculationStatus.py`. Both the timings and the tail are scoped by `Subquery` to the newest `calculationId`, so they always describe the same run.
+**Scenario range:** 10.72 – 10.83. **Test file:** `lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py`. **Type:** E. **Status:** ✅ Complete (2026-08-05) — 12 pass / 0 fail. Source: `lex/api/views/calculations/CalculationStatus.py`. Both the timings and the tail are scoped by `Subquery` to the newest `calculationId`, so they always describe the same run.
+
+`can_calculate` (10.82–10.83) is the second permission this endpoint reports and the second place one could be got wrong — this time by *inventing* it. Read permission cannot answer whether the caller may trigger a run, so the endpoint reuses `UserPermission`, the DRF permission class `OneModelEntry` declares, evaluated against the trigger's own PATCH payload. It authorises nothing: `One.update` still authorises itself, unchanged, and the widget keeps its 403 handler for the moment the two disagree because the permission changed between the poll and the click. Both scenarios issue that real PATCH alongside the poll, since a flag that quietly disagrees with the endpoint it describes is the entire failure mode — and it is not symmetric: enabled-then-403 costs a click, disabled-when-allowed leaves nothing to press.
 
 ---

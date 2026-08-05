@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 246
+max_scenario: 250
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -284,10 +284,10 @@ letters:
       a-z. Renumbered from z/1.201-1.206 on merge
   ab:
     title: Streamlit lex_calculation() widget — trigger one record and watch it
-    scenarios: 1.223-1.246
+    scenarios: 1.223-1.250
     status: complete
     tests:
-      pass: 24
+      pass: 28
       skip: 0
       xfail: 0
     note: >-
@@ -304,5 +304,11 @@ letters:
       below it (1.232, 1.236, 1.243-1.244). And the widget imports no Django model, so read
       permission, audit actor and the `_defer_calculate_hook` trigger path stay identical to
       the React UI's (1.238); `calculate` travels in the PATCH body, not the query string
-      (1.235). Pairs with batch 10o, the status endpoint it polls.
+      (1.235). 1.247-1.250 close the design's disabled-with-reason gap: the button is drawn
+      disabled with the backend's reason beside it when the envelope's `can_calculate` is
+      false (1.247), still disabled while a run is in progress for the separate
+      double-trigger reason (1.248), still relays a 403 that arrives after the click because
+      only the PATCH is authoritative and the envelope is one poll old (1.249), and left
+      enabled when the key is absent, so a backend older than the flag does not disable
+      everyone's button (1.250). Pairs with batch 10o, the status endpoint it polls.
 

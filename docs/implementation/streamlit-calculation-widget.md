@@ -17,8 +17,8 @@
 >
 > **Design:**
 > [`docs/superpowers/specs/2026-08-04-streamlit-calculation-widget-design.md`](../superpowers/specs/2026-08-04-streamlit-calculation-widget-design.md).
-> Where this document and the design disagree, this one describes the code as
-> committed — see [Known divergence from the design](#known-divergence-from-the-design).
+> This document describes the code as committed; the widget now implements the
+> design's error-handling table in full.
 
 ## What it is for
 
@@ -105,8 +105,11 @@ the status read failed (record missing, unreadable, backend unreachable). The
 widget has already rendered an explanation in all of those cases — a `None`
 return is not something you need to report.
 
-Note the log is **rendered but not returned**: `log` and `log_truncated` are not
-keys of the return value.
+Note the log and the calculate permission are **rendered but not returned**:
+`log`, `log_truncated`, `can_calculate` and `calculate_denied_reason` are not
+keys of the return value. The widget has already acted on the last two — the
+button is drawn from them — and a dashboard branching on the record's *status*
+should not have to step around fields describing its own button.
 
 ## Worked example
 
@@ -222,13 +225,48 @@ its calculation state, to someone not allowed to know either. The widget renders
 dashboard: if a reader reports "record not found" for a record you know exists,
 the question to ask is about their permissions, not the data.
 
-**A user who may not run the calculation is told after pressing the button.** The
-button is disabled *while a calculation is in progress*, and at no other time —
-it is not pre-emptively disabled for want of permission. Pressing it issues the
-trigger, the backend refuses with 403, and the widget renders **"You don't have
-permission to run this"** in an error box beside the button. Nothing is raised
-and nothing else on the page is affected. See
-[Known divergence from the design](#known-divergence-from-the-design).
+**A user who may not run the calculation is told before pressing the button.**
+The status envelope carries `can_calculate` — the backend's own answer to *may
+this caller trigger a run on this record* — and the widget draws the button
+disabled when it is `false`, with `calculate_denied_reason` rendered beside it. A
+button that looks usable and is not is worse than one that explains itself, and
+the point of this widget is that the reader does not have to go somewhere else to
+find out what happened.
+
+Nothing about that moves a permission decision into the client. The endpoint does
+not invent a rule: it instantiates
+[`UserPermission`](../../lex/api/views/permissions/UserPermission.py) — the very
+DRF permission class `OneModelEntry` declares — and evaluates it against the same
+`PATCH` body the button would send, so its answer is produced by the code that
+enforces the trigger rather than by a second implementation that could drift.
+Concretely: `has_permission()` for the model-level rule
+(`modification_restriction.can_modify_in_general`), then `has_object_permission()`
+for the record-level one (`can_be_modified`, which receives the `{"calculate":
+"true"}` payload). The `reason` is the framework's own denial message, which
+already lists the restriction's `violations` — text the model author wrote for a
+user to read, and text this caller would receive in the 403 body anyway. Nothing
+is disclosed that pressing the button would not disclose.
+
+**The button is still disabled while a calculation is in progress**, for the
+separate reason that a record must not be triggered twice; the two conditions are
+independent and both hold.
+
+**The 403 path remains.** The envelope is at most one poll old and the permission
+behind it can change between the poll and the click — and only the `PATCH` is
+actually being authorised. A refusal that arrives late is still caught and still
+rendered as **"You don't have permission to run this"** in an error box beside
+the button. Belt and braces: losing that branch would turn a stale envelope into
+a button that silently does nothing.
+
+Two directions of error are not symmetric, and the implementation is biased
+accordingly. A button left enabled for someone who may not run the record costs
+one click and one message, which the 403 path above already handles. A button
+disabled
+for someone who *may* run it is a dead end with nothing left to press. So the
+widget treats **only** an explicit `can_calculate: false` as a refusal (a missing
+key — an endpoint older than the flag — leaves the button enabled), and the
+endpoint reports the button as enabled if evaluating the permission raises at
+all, leaving the decision to the trigger itself.
 
 ## Polling self-terminates
 
@@ -305,6 +343,8 @@ GET /api/model_entries/<model:model_container>/<int:pk>/calculation-status?inclu
   "started_at": "2026-08-04T12:04:11+00:00",
   "finished_at": null,
   "duration_seconds": null,
+  "can_calculate": true,
+  "calculate_denied_reason": null,
   "log": ["Loading positions…", "Valuing 1,204 rows…"],
   "log_truncated": true
 }
@@ -314,6 +354,11 @@ GET /api/model_entries/<model:model_container>/<int:pk>/calculation-status?inclu
 come from `CalculationLog`, scoped to the newest `calculationId` — the record
 carries no timestamp of its own, and a window spanning every run it ever had
 would report days for a run that took seconds.
+
+`can_calculate` is what the trigger below would answer for this caller, computed
+by running `One.update`'s own permission class against the trigger's own payload
+(see [Permissions](#permissions)). `calculate_denied_reason` is a string only
+when `can_calculate` is `false`, and `null` otherwise.
 
 The trigger is the React UI's own call, unchanged:
 
@@ -329,33 +374,12 @@ and never looks at the query string, so a flag parked in the URL is dropped and
 the PATCH degrades into an empty partial update — no calculation, no error, a
 button that appears to do nothing.
 
-## Known divergence from the design
-
-The design
-([`2026-08-04-streamlit-calculation-widget-design.md`](../superpowers/specs/2026-08-04-streamlit-calculation-widget-design.md),
-"Error handling") specifies *"No calculate permission (403 on PATCH) → Button
-**disabled** with reason"*, on the reasoning that a hidden button reads as a
-broken dashboard.
-
-**The code as committed does not do this.** `lex_calculation()` disables the
-button only while the record is `IN_PROGRESS`; a user without run permission sees
-an enabled button and learns of the refusal after pressing it. Nothing breaks —
-the refusal is caught and rendered as "You don't have permission to run this" —
-but the reason arrives one click later than designed, and it arrives every time.
-
-Implementing the designed behaviour needs something the status endpoint does not
-currently return: whether *this caller* may trigger the calculation. Read
-permission alone cannot answer it. Closing the gap means adding that field to the
-status envelope (cluster 10o) and a disabled-with-reason branch in the widget
-(cluster 1ab), which is a change to both halves and out of scope for the batches
-as landed.
-
 ## Tests
 
 | Batch | Scenarios | Covers |
 | --- | --- | --- |
-| [1ab](../../lex/test_project/test-plan/clusters/01-init/batches.md) | 1.223 – 1.246 (24 pass) | The widget and its HTTP client — poll lifecycle, presentation, trigger transport, every failure path, and the gates on colour drift and Django imports. |
-| [10o](../../lex/test_project/test-plan/clusters/10-api_layer/batches.md) | 10.72 – 10.81 (10 pass) | The status endpoint — the six statuses, read-permission indistinguishability, log bounding and truncation, run scoping. |
+| [1ab](../../lex/test_project/test-plan/clusters/01-init/batches.md) | 1.223 – 1.250 (28 pass) | The widget and its HTTP client — poll lifecycle, presentation, trigger transport, the disabled-with-reason button and its 403 backstop, every failure path, and the gates on colour drift and Django imports. |
+| [10o](../../lex/test_project/test-plan/clusters/10-api_layer/batches.md) | 10.72 – 10.83 (12 pass) | The status endpoint — the six statuses, read-permission indistinguishability, `can_calculate` pinned against what `One.update` really enforces, log bounding and truncation, run scoping. |
 
 ## Follow-ups
 
@@ -363,8 +387,14 @@ as landed.
       under `content/features/dashboards/`, and cross-link it from the Streamlit
       dashboards section. Remove this file's "what the user sees" half once that
       ships, keeping the internal contract notes here.
-- [ ] Decide whether to close the disabled-button divergence above, or amend the
-      design to match the code. It should not stay a silent difference.
+- [ ] `UserPermission.has_object_permission` builds its denial message from the
+      wrong arguments (`get_permission_denied_message(obj, user, violations)`
+      where the signature is `(access_type, requested_unit, violations)`), so a
+      record-level refusal reads as *"You do not have general &lt;record&gt;-access
+      to the requested &lt;user&gt;."* — in the 403 body of every modify endpoint,
+      not just here. `_calculate_permission` falls back to a plain sentence
+      rather than surfacing it; fixing the message itself changes a
+      user-visible string across the API and wants its own change.
 - [ ] `_client.py` is deliberately action-agnostic — it is the piece a future
       `lex_action()` would reuse unchanged. If a second widget is wanted,
       generalising should be "add a widget module", not "refactor the first one".

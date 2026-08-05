@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 81
+max_scenario: 83
 letters:
   a:
     title: ''
@@ -129,10 +129,10 @@ letters:
       recorded
   o:
     title: Read-only calculation-status endpoint for the Streamlit widget
-    scenarios: 10.72-10.81
+    scenarios: 10.72-10.83
     status: complete
     tests:
-      pass: 10
+      pass: 12
       skip: 0
       xfail: 0
     note: >-
@@ -149,4 +149,12 @@ letters:
       accurate `log_truncated` flag from one over-fetched row rather than a second COUNT
       (10.78-10.79), and is scoped - like the run timings, which the record itself does not
       carry - to the newest `calculationId`, so a re-run's tail carries none of the previous
-      run's lines (10.80-10.81). Pairs with batch 1ab, the widget that polls it.
+      run's lines (10.80-10.81). 10.82-10.83 add `can_calculate` /
+      `calculate_denied_reason`, the flag the widget draws its button from: read permission
+      cannot answer "may this caller run it", so the endpoint instantiates
+      `UserPermission` - the permission class `OneModelEntry` itself declares - and
+      evaluates it against the trigger's own `{"calculate":"true"}` payload rather than
+      re-deriving the rule. Both scenarios also issue the real PATCH, because a flag that
+      disagrees with `One.update` lies in one direction or the other: enabled-then-403 is
+      recoverable, disabled-when-allowed is a dead end. Pairs with batch 1ab, the widget
+      that polls it.

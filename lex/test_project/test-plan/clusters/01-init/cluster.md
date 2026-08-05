@@ -235,5 +235,9 @@ does not remove user launch configurations.
 | 1.244 | A failed read survives a real render | a 500 renders a caption through the full widget, not an exception |
 | 1.245 | Finding work in progress starts the watch | a record found `IN_PROGRESS` under a fragment declared without an interval reruns to build the timer |
 | 1.246 | A settled record costs one render | `SUCCESS` renders once, stores no interval and does not rerun |
+| 1.247 | No run permission disables the button | `can_calculate: false` draws the button disabled with the backend's reason beside it, and issues no trigger — the reason arrives before the click, not after it |
+| 1.248 | A running record still disables it | `IN_PROGRESS` disables the button even for a caller who may calculate — the double-trigger guard is independent of permission |
+| 1.249 | The 403 backstop survives a stale envelope | an envelope saying "you may" plus a backend that refuses still renders the refusal: the flag is one poll old and only the PATCH is authoritative |
+| 1.250 | A missing flag is not a denial | an envelope with no `can_calculate` key leaves the button enabled, so a backend older than the field does not disable it for everyone |
 
-**Scenario range:** 1.223 – 1.246. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-04) — 24 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this polls.
+**Scenario range:** 1.223 – 1.250. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-05) — 28 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this polls — and, for 1.247–1.250, the source of the `can_calculate` flag the button is drawn from.
