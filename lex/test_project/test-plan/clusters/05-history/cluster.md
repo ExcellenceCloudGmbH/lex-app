@@ -60,5 +60,5 @@ nothing to rehydrate it, so a deploy silently dropped pending activations and th
 never became current. This pass is the floor that makes that recoverable, and the reason
 per-instance beat can be retired.
 
-**Scenario range:** 5.104 – 5.109. **Test file:** `lex/test_project/tests/history/test_5n_activation_reconcile.py`. **Type:** E. **Status:** ✅ 6 pass.
+**Scenario range:** 5.104 – 5.110. **Test file:** `lex/test_project/tests/history/test_5n_activation_reconcile.py`. **Type:** E. **Status:** ✅ 7 pass.
 

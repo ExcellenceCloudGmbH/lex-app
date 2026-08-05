@@ -14,7 +14,7 @@
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
-| 5. History & Bitemporal | 13 | 109 | 21 | 6 | 3 |
+| 5. History & Bitemporal | 13 | 110 | 22 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
@@ -119,7 +119,7 @@
 | 5k |  | 5.81-5.87 | complete | 0 | 3 | 1 | auto-skip — MetaHistorical* not wired; prod registration covered in unit tests |
 | 5l |  | 5.91-5.97 | planned | 0 | 0 | 0 | save side of the future-activation handoff (worker side = 8.43); scenarios 5.91–5.97, reuses `HistSimpleItem` |
 | 5m | Edit-time correctness + as_of time-travel round trip | 5.98-5.103 | complete | 5 | 0 | 1 | end-to-end edited_at → Z serialization → parse_as_of_datetime → get_queryset_as_of chain; 5.101 xfail(strict) pins BUG-026 (edited_at vs valid_from/sys_from clock-read gap) |
-| 5n | Activation catch-up (reconcile pass) | 5.104-5.109 | complete | 6 | 0 | 0 | catch-up pass that activates overdue SCHEDULED meta rows without a timer. Closes the gap where the in-process LocalSchedulerBackend queue is lost on every restart (all non-Celery instances), and makes retiring per-instance beat safe by turning a missed timer into latency rather than silent data loss |
+| 5n | Activation catch-up (reconcile pass) | 5.104-5.110 | complete | 7 | 0 | 0 | catch-up pass that activates overdue SCHEDULED meta rows without a timer. Closes the gap where the in-process LocalSchedulerBackend queue is lost on every restart (all non-Celery instances), and makes retiring per-instance beat safe by turning a missed timer into latency rather than silent data loss |
 
 ## 6. Audit Logging (`audit_logging`)
 

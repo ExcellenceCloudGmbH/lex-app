@@ -42,7 +42,7 @@
 | Test file | `lex/test_project/tests/history/test_5m_asof_edit_time.py` |
 | Test classes | `TestCluster05m_AsOfEditTime` |
 | Fixtures | reuses `HistSimpleItem` |
-| Est. tests | 6 |
+| Est. tests | 7 |
 | Coverage gain | pins the full timestamp chain end to end (stamp → serialize → parse → compare) |
 | Prereqs | BUG-025 fix (Z-serialized datetimes) |
 | Status | ✅ Complete — 5 pass / 1 xfail(strict) |
@@ -54,13 +54,13 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 5.104 – 5.109 |
+| Scenario range | 5.104 – 5.110 |
 | Type | E |
 | Files covered | `lex/core/services/activation_reconcile.py` (new), `lex/lex_app/settings.py` (4 `LEX_ACTIVATION_RECONCILE_*` knobs), `lex/lex_app/apps.py` (startup wiring, gated to the served backend) |
 | Test file | `lex/test_project/tests/history/test_5n_activation_reconcile.py` |
 | Test classes | `TestCluster05n_ActivationReconcile` |
 | Fixtures | `HistSimpleItem` (shared with 5l) |
-| Est. tests | 6 |
-| Status | ✅ Complete — 6 pass / 0 fail |
+| Est. tests | 7 |
+| Status | ✅ Complete — 7 pass / 0 fail |
 | Note | Consumer side of the contract 5l covers on the producer side. Two real defects were caught by these tests while writing them: (1) `activate_history_version` reports failure by **return value**, not by raising, so treating a clean return as success counted activations that never happened — 5.104 caught it; (2) `@lex_shared_task` wraps that return as `(result, args)`, so the status string has to be unwrapped, and `_outcome_of` degrades to "not success" rather than indexing blindly, so a future change to the decorator causes a retry rather than a silent drop. |
-
+| Follow-up | 5.110 added after review: the loop is a long-lived thread doing ORM work, and Django only closes connections on `request_finished`. Without `close_old_connections` around each pass the thread holds one connection for the life of the pod, so a Postgres restart or failover ends catch-up permanently while logging an error every interval. |

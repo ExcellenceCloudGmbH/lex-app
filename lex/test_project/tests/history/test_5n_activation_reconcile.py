@@ -29,7 +29,10 @@ Intent (``lex/core/services/activation_reconcile.py``):
           ``LEX_ACTIVATION_RECONCILE_MAX_ATTEMPTS``, then given up, so a
           permanently-broken row cannot burn a pass forever (5.108);
       (f) terminal meta states (DONE / CANCELLED) are never re-activated
-          (5.109).
+          (5.109);
+      (g) the background loop closes stale database connections around every
+          pass, so a Postgres restart does not silently end catch-up for the
+          life of the pod (5.110).
 
 Companion to 5l, which covers the *producer* side of the same contract (a
 future save schedules correctly). 5n covers what happens when that schedule is
@@ -365,4 +368,43 @@ class TestCluster05n_ActivationReconcile(E2ETestCase):
         self.assertEqual(
             HistSimpleItem.objects.get(pk=item.pk).name, "before",
             "The withdrawn change must not be applied.",
+        )
+
+    # -- 5.110 ---------------------------------------------------------------
+    def test_5_110_loop_closes_stale_connections_around_each_pass(self) -> None:
+        """
+        Scenario 5.110 — the loop must survive a database connection dying.
+        Given: the background loop running a pass
+        When:  the pass completes (or fails)
+        Then:  close_old_connections is called before AND after.
+
+        Django opens a connection per thread and normally closes it on the
+        request_finished signal. A background thread has no request cycle, so
+        without this the connection is held for the life of the pod; once
+        Postgres drops it, restarts or fails over, every later pass raises
+        OperationalError and the loop logs an error every interval forever
+        without ever reconnecting — a silent stop dressed up as noise.
+        """
+        from lex.core.services import activation_reconcile
+
+        calls = []
+
+        def _stop_after_one_pass(*_a, **_kw):
+            activation_reconcile.stop_background_reconcile()
+            return {}
+
+        with patch("django.db.close_old_connections", side_effect=lambda: calls.append("closed")), \
+             patch.object(
+                 activation_reconcile,
+                 "reconcile_pending_activations",
+                 side_effect=_stop_after_one_pass,
+             ):
+            activation_reconcile._stop.clear()
+            activation_reconcile._loop()
+
+        self.assertGreaterEqual(
+            len(calls), 2,
+            "close_old_connections must run before and after each pass; "
+            f"saw {len(calls)} call(s). Without both, a dropped connection ends "
+            "catch-up for the life of the pod.",
         )

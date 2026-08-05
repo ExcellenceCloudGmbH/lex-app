@@ -1,7 +1,7 @@
 cluster: 5
 slug: history
 title: History & Bitemporal
-max_scenario: 109
+max_scenario: 110
 letters:
   a:
     title: ''
@@ -120,10 +120,10 @@ letters:
       5.101 xfail(strict) pins BUG-026 (edited_at vs valid_from/sys_from clock-read gap)
   n:
     title: Activation catch-up (reconcile pass)
-    scenarios: 5.104-5.109
+    scenarios: 5.104-5.110
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: catch-up pass that activates overdue SCHEDULED meta rows without a timer. Closes the gap where the in-process LocalSchedulerBackend queue is lost on every restart (all non-Celery instances), and makes retiring per-instance beat safe by turning a missed timer into latency rather than silent data loss

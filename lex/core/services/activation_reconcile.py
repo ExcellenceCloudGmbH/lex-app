@@ -259,15 +259,35 @@ _thread: threading.Thread | None = None
 
 
 def _loop() -> None:
+    """Run a pass, wait, repeat — until stopped.
+
+    ``close_old_connections`` around each pass is required, not hygiene. Django
+    opens a database connection per thread and normally closes it on the
+    ``request_finished`` signal; a background thread has no request cycle, so
+    without this the connection is opened once and held for the life of the pod.
+    When Postgres drops an idle connection, restarts, or fails over, that
+    connection goes stale and every later pass raises OperationalError. The loop
+    would survive — it catches — but it would log an error every interval
+    forever and never reconnect, which is a silent stop dressed up as noise.
+
+    Calling it before *and* after matters: before, so a pass never starts on a
+    connection that died while we were waiting; after, so a failed pass cannot
+    leave a broken connection parked until the next one.
+    """
+    from django.db import close_old_connections
+
     interval = _interval()
     logger.info("Activation reconcile loop started (interval=%ss)", interval)
     # One pass immediately: a restart is the single most likely reason an
     # in-process timer was lost, so startup is when catch-up matters most.
     while True:
         try:
+            close_old_connections()
             reconcile_pending_activations()
         except Exception:  # pragma: no cover - reconcile already swallows
             logger.exception("Activation reconcile: pass failed")
+        finally:
+            close_old_connections()
         if _stop.wait(interval):
             return
 
