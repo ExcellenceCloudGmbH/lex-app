@@ -200,3 +200,40 @@ does not remove user launch configurations.
 **Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
 
 **Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.
+
+---
+
+### 1ab. Streamlit `lex_calculation()` widget ✅
+
+**What it tests:** the native Streamlit widget that triggers a calculation on one record and shows its live status — the replacement for embedding a whole React table view in an iframe just to click one button. Two modules and the package surface: `_client.py` resolves the backend URL, attaches the signed-in user's bearer token and turns every HTTP or transport failure into a single catchable `LexApiError`; `calculation.py` decides the poll interval, presents each status and triggers the run.
+
+**Why a regression matters:** every failure mode here is silent. Polling that forgets to stop is permanent backend load nobody notices, multiplied by every tab left open. An exception escaping the widget does not report an error — Streamlit renders top-to-bottom, so the page just loses everything below the widget. A colour literal keeps rendering the old palette after the next token refresh with nothing failing. And an in-process ORM call would skip the record's read permission, resolve the wrong audit actor and miss the `_defer_calculate_hook` trigger path all at once — a second way to start a calculation is what produced the `edited_at` bug in PR #675.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.223 | Frontend origin is enough | `REACT_APP_URL` — the variable `lex_view` already needs — resolves the API base, so reaching the backend needs no new configuration |
+| 1.224 | Explicit override wins | `LEX_API_URL` takes precedence, for a deployment not serving the API from the frontend host |
+| 1.225 | Unreachable backend | a transport failure arrives as `LexApiError` with `status is None`, never as a bare `requests` exception |
+| 1.226 | Error responses carry status and detail | 403, 404 and 500 are distinguishable, and a non-JSON body (proxy HTML, ingress 502) degrades to `HTTP <code>` instead of a decode error on top of the original |
+| 1.227 | Called as the signed-in user | GET and PATCH both send `Authorization: Bearer <token>` — never the instance `Api-Key`, which resolves to a technical user |
+| 1.228 | Polling stops on a terminal status | `poll_interval_for` returns `None` for SUCCESS, ERROR, ABORTED, CANCELLED, NOT_CALCULATED and for a failed read |
+| 1.229 | Polling runs while work is in flight | `IN_PROGRESS` keeps the requested interval |
+| 1.230 | Both directions need a full script run | `poll_timer_needs_rebuild` fires when the declared and desired intervals differ, in either direction, and only then — `st.fragment` reads `run_every` at declaration, and only a full run re-declares it |
+| 1.231 | `ABORTED` is interrupted, not failed | ABORTED gets the re-run nudge and `ERROR` does not |
+| 1.232 | No read failure raises | refused, missing, broken and unreachable each produce a rendered message and nothing escapes |
+| 1.233 | `show_log=False` costs nothing | `include_log` is not sent at all, so the endpoint skips the log query |
+| 1.234 | The opt-in actually opts in | the flag is the literal string `"true"` the endpoint matches — a Python `True` would arrive as `"True"` and silently leave the panel empty |
+| 1.235 | The trigger is the React UI's own call | `PATCH /api/model_entries/<model>/default/one/<pk>` with `calculate` in the **body**; `One.update` reads `request.data` and never the query string |
+| 1.236 | No trigger failure raises | a refused trigger renders "You don't have permission to run this"; any other failure renders its message |
+| 1.237 | Colours come from the design system | no hex literal in the module — every colour resolves from `lex.lex_app.design_system` |
+| 1.238 | No Django import | the widget module imports no model, so permission, audit actor and trigger path stay the React UI's |
+| 1.239 | "Never run" is not "took 0s" | null timings render `Never run`; a real run renders its stamp and duration |
+| 1.240 | The package is the public surface | `lex.lex_app.streamlit` exports `lex_view`, `Flow` and `lex_calculation`, and `…streamlit.embed` still works |
+| 1.241 | Two widgets keep separate state | keys derive from the record by default; an explicit `key` is what lets the same record render twice on one page |
+| 1.242 | The token comes from the session | read from `session_state["access_token"]`, with no environment fallback |
+| 1.243 | An expired session asks for a reload | no token renders "Session expired — reload the page", and makes no backend call at all |
+| 1.244 | A failed read survives a real render | a 500 renders a caption through the full widget, not an exception |
+| 1.245 | Finding work in progress starts the watch | a record found `IN_PROGRESS` under a fragment declared without an interval reruns to build the timer |
+| 1.246 | A settled record costs one render | `SUCCESS` renders once, stores no interval and does not rerun |
+
+**Scenario range:** 1.223 – 1.246. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-04) — 24 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this polls.

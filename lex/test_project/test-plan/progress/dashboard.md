@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 27 | 222 | 116 | 0 | 0 |
+| 1. Init — Project Bootstrap | 28 | 246 | 140 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -19,7 +19,7 @@
 | 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
-| 10. API Layer | 13 | 71 | 21 | 0 | 0 |
+| 10. API Layer | 14 | 81 | 31 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
 | 13. Export Endpoint | 7 | 37 | 7 | 0 | 0 |
@@ -32,6 +32,7 @@
 |---|---|---|---|---|---|---|---|
 | 1a | `lex setup` — scaffolding | 1.1-1.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1aa | Embedded Streamlit token renewal (issuer expiry + proxy adoption) | 1.217-1.222 | complete | 6 | 0 | 0 | follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly newer auth_token rather than discarding it while the stored one is still valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted a-z. Renumbered from z/1.201-1.206 on merge |
+| 1ab | Streamlit lex_calculation() widget — trigger one record and watch it | 1.223-1.246 | complete | 24 | 0 | 0 | native widget replacing "embed a whole React table just to click one button". Covers `lex/lex_app/streamlit/_client.py` (backend URL resolution, bearer token read from the host's `session_state["access_token"]`, `LexApiError`) and `calculation.py` (fragment poll loop, status presentation, trigger), plus the package `__init__` as the public surface (1.240). Gates the three properties a dashboard depends on. Polling self-terminates: `poll_interval_for` returns None on every terminal status and on a failed read, and the `st.fragment` `run_every` timer is rebuilt only when the interval actually changes, because only a full script run re-declares a fragment (1.228-1.230, 1.245-1.246). No failure path raises out of the widget - Streamlit renders top-to-bottom, so an escaping exception erases every widget below it (1.232, 1.236, 1.243-1.244). And the widget imports no Django model, so read permission, audit actor and the `_defer_calculate_hook` trigger path stay identical to the React UI's (1.238); `calculate` travels in the PATCH body, not the query string (1.235). Pairs with batch 10o, the status endpoint it polls. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -214,6 +215,7 @@
 | 10l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 10m | Calculation-log tree pagination + N+1 fix | 10.61-10.66 | complete | 6 | 0 | 0 | scenarios 10.61–10.66; `CalculationLogTreeView` now paginates (limit/offset) and resolves child ids in one query (`assertNumQueries(3)` pins N+1 gone) instead of loading every row  |
 | 10n |  | 10.67-10.69 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 10o | Read-only calculation-status endpoint for the Streamlit widget | 10.72-10.81 | complete | 10 | 0 | 0 | `GET /api/model_entries/<model:model_container>/<int:pk>/calculation-status` - the narrow read `lex_calculation()` polls, in `views/calculations/CalculationStatus.py`. Reads are filtered through `UserReadRestrictionFilterBackend`, the same backend list reads use, rather than a hand-rolled check - read permission here is a queryset filter, not a boolean. A record the caller may not read therefore returns the same 404 status AND the same body as one that does not exist (10.76); a distinguishable response would confirm the record exists and leak its calculation state. Terminal statuses stay distinct - ABORTED and CANCELLED are not collapsed into ERROR (10.73). The log tail is opt-in behind `?include_log=true`, so the 2-second poll never runs the `CalculationLog` query by default (10.77), is bounded to `LOG_TAIL_LIMIT=50` with an accurate `log_truncated` flag from one over-fetched row rather than a second COUNT (10.78-10.79), and is scoped - like the run timings, which the record itself does not carry - to the newest `calculationId`, so a re-run's tail carries none of the previous run's lines (10.80-10.81). Pairs with batch 1ab, the widget that polls it. |
 
 ## 11. Stress & Performance (`stress`)
 

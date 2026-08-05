@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 246
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -282,4 +282,27 @@ letters:
       adopts a strictly newer auth_token rather than discarding it while the stored one is still
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
+  ab:
+    title: Streamlit lex_calculation() widget — trigger one record and watch it
+    scenarios: 1.223-1.246
+    status: complete
+    tests:
+      pass: 24
+      skip: 0
+      xfail: 0
+    note: >-
+      native widget replacing "embed a whole React table just to click one button".
+      Covers `lex/lex_app/streamlit/_client.py` (backend URL resolution, bearer token read
+      from the host's `session_state["access_token"]`, `LexApiError`) and
+      `calculation.py` (fragment poll loop, status presentation, trigger), plus the package
+      `__init__` as the public surface (1.240). Gates the three properties a dashboard
+      depends on. Polling self-terminates: `poll_interval_for` returns None on every
+      terminal status and on a failed read, and the `st.fragment` `run_every` timer is
+      rebuilt only when the interval actually changes, because only a full script run
+      re-declares a fragment (1.228-1.230, 1.245-1.246). No failure path raises out of the
+      widget - Streamlit renders top-to-bottom, so an escaping exception erases every widget
+      below it (1.232, 1.236, 1.243-1.244). And the widget imports no Django model, so read
+      permission, audit actor and the `_defer_calculate_hook` trigger path stay identical to
+      the React UI's (1.238); `calculate` travels in the PATCH body, not the query string
+      (1.235). Pairs with batch 10o, the status endpoint it polls.
 

@@ -31,3 +31,26 @@
 **Scenario range:** 10.61 – 10.66. **Test file:** `lex/test_project/tests/api_layer/test_10m_calculation_log_tree.py`. **Type:** I. **Status:** ✅ Complete (Session 77 — June 8). Scenarios: 10.61 default limit bounds the page; 10.62 offset walks the dataset; 10.63 child ids resolved per parent; 10.64 `isRoot` present only for parentless rows (stripped on children); 10.65 the integration surface — `assertNumQueries(3)` across 25 parents+children proves the N+1 is gone; 10.66 `calculation_id` filter scopes the rows.
 
 ---
+
+### 10o. Read-only calculation-status endpoint ✅
+
+**What it tests:** `CalculationStatus` — `GET /api/model_entries/<model:model_container>/<int:pk>/calculation-status`, the narrow read the Streamlit `lex_calculation()` widget (batch 1ab) polls every couple of seconds. It returns only what the widget renders: the record's `is_calculated` status, its error message, and the start/end/duration of its most recent run, reconstructed from `CalculationLog` because the record itself carries no timestamp — since PR #675 a calculation-owned save deliberately does not stamp `edited_at`. A bounded log tail is available behind `?include_log=true`.
+
+**Why a regression matters:** a purpose-built endpoint is a new place for a permission to be forgotten, and this one answers questions about records by pk. A status response that confirms a record exists and errored, to a caller who may not read that record, is a real leak — and it would leak silently, since nothing about it looks like a failure. The endpoint therefore filters through the same `UserReadRestrictionFilterBackend` every list read uses rather than a hand-rolled check (read permission here is a queryset filter, not a boolean), and answers an unreadable record with the same 404 **and the same body** as a missing one. The rest is poll economics: at one request every two seconds per open widget, anything unbounded — the whole log, a COUNT over every line ever logged, a window spanning every run the record ever had — becomes load and misinformation at the same time.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 10.72 | Never-calculated record | `NOT_CALCULATED` with null timings — a fresh record is a state, not an error |
+| 10.73 | Terminal states stay distinct | `ABORTED` and `CANCELLED` report verbatim, not collapsed into `ERROR` |
+| 10.74 | Failed calculation | status and `calculation_error_message` arrive in the same envelope |
+| 10.75 | Unknown pk | 404, not a 500 — a dashboard pinned to a deleted record must not page anyone |
+| 10.76 | Unreadable record is indistinguishable from missing | an errored record the caller may not read and a nonexistent pk return byte-for-byte identical responses — same status code, same body |
+| 10.77 | Log absent unless requested | the default poll returns no `log` keys at all and issues no `CalculationLog` query |
+| 10.78 | Log is bounded and reports truncation | exactly the newest `LOG_TAIL_LIMIT` (50) lines, oldest first, with `log_truncated` true |
+| 10.79 | A short log is not flagged | every line returns and `log_truncated` is false |
+| 10.80 | Timings come from the last run only | a record run yesterday and again just now reports the 38-second window, not the span between the two |
+| 10.81 | The tail covers only the latest run | a short re-run's tail is not padded out of the previous run's rows |
+
+**Scenario range:** 10.72 – 10.81. **Test file:** `lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py`. **Type:** E. **Status:** ✅ Complete (2026-08-04) — 10 pass / 0 fail. Source: `lex/api/views/calculations/CalculationStatus.py`. Both the timings and the tail are scoped by `Subquery` to the newest `calculationId`, so they always describe the same run.
+
+---
