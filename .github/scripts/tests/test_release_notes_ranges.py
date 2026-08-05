@@ -56,3 +56,56 @@ def test_previous_release_tag_is_none_when_only_the_tag_itself_is_present():
 def test_previous_release_tag_is_none_when_only_junk_precedes_it():
     tags = ["v2.1.6", "v0.0.0-hazem", "recovery-supervisor-on-demand.0"]
     assert ranges.previous_release_tag("v2.1.6", tags=tags) is None
+
+
+def test_frontend_sha_at_reads_the_manifest():
+    def fake_show(ref: str, path: str) -> str | None:
+        assert path == ranges.MANIFEST_PATH
+        return '{"repo": "x/y", "branch": "b", "sha": "a3f91c2", "built_at": "2026-08-05T09:14:22Z"}'
+
+    assert ranges.frontend_sha_at("v2.1.6", show=fake_show) == "a3f91c2"
+
+
+def test_frontend_sha_at_returns_none_when_the_manifest_is_absent():
+    assert ranges.frontend_sha_at("v2.1.6", show=lambda ref, path: None) is None
+
+
+def test_frontend_sha_at_returns_none_on_malformed_manifest():
+    assert ranges.frontend_sha_at("v2.1.6", show=lambda ref, path: "not json") is None
+    assert ranges.frontend_sha_at("v2.1.6", show=lambda ref, path: '{"no_sha": 1}') is None
+
+
+def test_frontend_range_is_none_when_the_manifest_is_missing_at_either_end():
+    # Missing at the current tag.
+    shas = {"v2.1.5": "aaa1111"}
+    got = ranges.frontend_range("v2.1.5", "v2.1.6", show=_shas(shas))
+    assert got is None
+
+    # Missing at the previous tag.
+    shas = {"v2.1.6": "bbb2222"}
+    got = ranges.frontend_range("v2.1.5", "v2.1.6", show=_shas(shas))
+    assert got is None
+
+
+def test_frontend_range_resolves_when_present_at_both_ends():
+    shas = {"v2.1.5": "aaa1111", "v2.1.6": "bbb2222"}
+    got = ranges.frontend_range("v2.1.5", "v2.1.6", show=_shas(shas))
+    assert got == ranges.Range(from_sha="aaa1111", to_sha="bbb2222")
+
+
+def test_frontend_range_on_the_first_release_has_no_lower_bound():
+    shas = {"v2.1.6": "bbb2222"}
+    got = ranges.frontend_range(None, "v2.1.6", show=_shas(shas))
+    assert got == ranges.Range(from_sha=None, to_sha="bbb2222")
+
+
+def _shas(mapping: dict[str, str]):
+    """Build a `show` stub that serves manifests for the given refs only."""
+    import json
+
+    def show(ref: str, path: str) -> str | None:
+        if ref not in mapping:
+            return None
+        return json.dumps({"repo": "x/y", "branch": "b", "sha": mapping[ref]})
+
+    return show
