@@ -112,3 +112,32 @@ def test_transport_posts_to_the_models_endpoint_and_returns_the_content():
 def test_transport_raises_on_a_malformed_response():
     with pytest.raises(ValueError, match="unexpected response"):
         notes.github_models("P", token="t", post=lambda u, *, headers, json_body: {"oops": 1})
+
+
+def test_anthropic_transport_posts_and_returns_the_text():
+    captured = {}
+
+    def fake_post(url, *, headers, json_body):
+        captured.update(url=url, headers=headers, json_body=json_body)
+        return {"content": [{"type": "text", "text": "RESULT"}]}
+
+    got = notes.anthropic_messages("PROMPT", api_key="sk-test", post=fake_post)
+    assert got == "RESULT"
+    assert captured["url"] == notes.ANTHROPIC_ENDPOINT
+    assert captured["headers"]["x-api-key"] == "sk-test"
+    assert captured["headers"]["anthropic-version"] == notes.ANTHROPIC_VERSION
+    assert captured["json_body"]["model"] == notes.ANTHROPIC_MODEL
+    assert captured["json_body"]["messages"][0]["content"] == "PROMPT"
+
+
+def test_anthropic_transport_raises_on_a_malformed_response():
+    import pytest
+
+    with pytest.raises(ValueError, match="unexpected response"):
+        notes.anthropic_messages("P", api_key="k", post=lambda u, *, headers, json_body: {"oops": 1})
+
+
+def test_anthropic_transport_joins_multiple_text_blocks():
+    payload = {"content": [{"type": "text", "text": "one\n"}, {"type": "text", "text": "two"}]}
+    got = notes.anthropic_messages("P", api_key="k", post=lambda u, *, headers, json_body: payload)
+    assert got == "one\ntwo"

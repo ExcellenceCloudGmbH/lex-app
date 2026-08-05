@@ -40,6 +40,19 @@ FALLBACK_EXEMPLAR = """\
 
 REQUIRED_HEADINGS = ("## Main changes", "## Optimizations", "## Bug fixes")
 
+# ── Transports ────────────────────────────────────────────────────────
+#
+# Anthropic is the default. GitHub Models was the original choice because it
+# needed no new secret, but it is being retired: as of 2026-08-05 its endpoint
+# answers 410 with `github_models_retirement_brownout`. It is kept as a
+# fallback for whatever remains of its life, and the CLI prefers Anthropic
+# whenever ANTHROPIC_API_KEY is set.
+
+ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+ANTHROPIC_MODEL = "claude-sonnet-5"
+ANTHROPIC_MAX_TOKENS = 4096
+
 MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions"
 # A live external dependency: GitHub's model catalogue changes, and a retired
 # id becomes a hard error here. `draft()` degrades to the fallback body rather
@@ -181,3 +194,25 @@ def github_models(prompt: str, *, token: str, post: Callable[..., dict] = _post)
         return payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise ValueError(f"unexpected response from GitHub Models: {payload!r}") from exc
+
+
+def anthropic_messages(
+    prompt: str, *, api_key: str, post: Callable[..., dict] = _post
+) -> str:
+    """Draft via the Anthropic Messages API. Requires ANTHROPIC_API_KEY."""
+    payload = post(
+        ANTHROPIC_ENDPOINT,
+        headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+        json_body={
+            "model": ANTHROPIC_MODEL,
+            "max_tokens": ANTHROPIC_MAX_TOKENS,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+    )
+    try:
+        blocks = [b["text"] for b in payload["content"] if b.get("type") == "text"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"unexpected response from Anthropic: {payload!r}") from exc
+    if not blocks:
+        raise ValueError(f"unexpected response from Anthropic, no text: {payload!r}")
+    return "".join(blocks)

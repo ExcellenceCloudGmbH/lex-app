@@ -113,13 +113,30 @@ def build_digest(
     backend_commits: list[Commit],
     frontend_commits: list[Commit],
 ) -> dict:
-    """Assemble the digest both renderers consume."""
+    """Assemble the digest both renderers consume.
+
+    One entry per pull request, not per commit. Enrichment gives every commit
+    in a PR that PR's title, so a branch of seventeen commits otherwise renders
+    as seventeen identical lines — which is exactly what v2.1.7rc1 shipped.
+    Commits that came in without a PR are kept individually, since each is the
+    only record of itself.
+    """
     changes: list[dict] = []
+    seen_prs: set[tuple[str, int]] = set()
+
     for component, commits in (("backend", backend_commits), ("frontend", frontend_commits)):
         for commit in commits:
             if is_noise(commit.pr_title or commit.subject):
                 continue
+            if commit.pr_number is not None:
+                # Scoped by component: backend #12 and frontend #12 are
+                # different pull requests in different repositories.
+                key = (component, commit.pr_number)
+                if key in seen_prs:
+                    continue
+                seen_prs.add(key)
             changes.append(_entry(commit, component))
+
     return {"tag": tag, "previous_tag": previous_tag, "changes": changes}
 
 

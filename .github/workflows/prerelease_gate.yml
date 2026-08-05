@@ -188,6 +188,10 @@ jobs:
         id: draft
         continue-on-error: true
         env:
+          # Anthropic is preferred; GitHub Models is a fallback for whatever
+          # remains of its life (it now answers 410 during its retirement
+          # brownout). With neither, drafting fails open with a visible notice.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name }}
