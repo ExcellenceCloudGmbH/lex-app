@@ -155,3 +155,69 @@ jobs:
             && echo "Removed lingering tag ref $TAG." \
             || echo "Tag $TAG already gone (cleaned up with the release)."
           echo "Deleted failed prerelease $TAG; the version name is free to re-cut."
+
+  # ── GREEN: draft the business-facing release note into the prerelease
+  #    body, below the gate marker. The human who promotes the release is
+  #    already reading this page, so review costs no extra step.
+  #
+  #    Never fails the gate. A changelog generator that can turn a release
+  #    red is worse than one that occasionally emits a stub.
+  draft-notes:
+    name: "Draft release notes (green)"
+    needs: [gate, mark-validated]
+    if: ${{ needs.gate.outputs.overall_ok == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # edit the prerelease body
+      models: read           # GitHub Models inference
+      pull-requests: read    # digest._lookup_pr reads commits/{sha}/pulls;
+                             # unlisted permissions default to none, and
+                             # contents:write does not cover this endpoint.
+                             # Without it every lookup 403s and the digest
+                             # silently degrades to raw commit subjects.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags + full history are the input
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Draft the note
+        id: draft
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # -e matters here: without it a crash in the drafter still exits 0,
+          # `continue-on-error` never fires, and the next step happily posts an
+          # empty note and stamps the idempotence marker — turning a loud
+          # failure into a silent one that also blocks any retry.
+          set -euo pipefail
+          PYTHONPATH=.github/scripts python -m release_notes draft-notes --tag "$TAG" > drafted.md
+          test -s drafted.md
+          echo "Drafted $(wc -l < drafted.md) lines."
+
+      - name: Append the note to the prerelease body
+        if: ${{ always() && steps.draft.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          BODY=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+          if printf '%s' "$BODY" | grep -q 'lex:notes-drafted'; then
+            echo "Notes already drafted for $TAG — leaving the human's edits alone."
+            exit 0
+          fi
+          {
+            printf '%s\n' "$BODY"
+            printf '\n---\n\n'
+            cat drafted.md
+            printf '\n<!-- lex:notes-drafted tag=%s -->\n' "$TAG"
+          } > combined.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file combined.md
+          echo "Drafted release notes onto $TAG — review and edit before promoting."

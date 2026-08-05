@@ -1,0 +1,45 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Tests for the Python helpers under .github/scripts/.
+#
+#  These are CI-side scripts, not framework code, so they are not part of
+#  the test-plan clusters and do not need Django. Plain pytest, no DB.
+#
+#  Until this workflow existed the directory held 158 passing tests that
+#  nothing ever ran.
+# ──────────────────────────────────────────────────────────────────────
+name: Script Tests
+
+on:
+  push:
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/scripts_tests.yml"
+      - "pyproject.toml"          # supplies pytest's addopts
+  pull_request:
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/scripts_tests.yml"
+      - "pyproject.toml"          # supplies pytest's addopts
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: "pytest .github/scripts/tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install --quiet pytest pyyaml
+
+      - name: Run tests
+        # -p no:cacheprovider keeps the runner from writing .pytest_cache.
+        # pytest walks upward from the test path and finds pyproject.toml on
+        # its own, so its `-p no:django` addopt applies here too. That is
+        # harmless: pytest-django is not installed on this runner, and
+        # disabling a missing plugin is a no-op rather than an error.
+        run: python -m pytest .github/scripts/tests/ -q -p no:cacheprovider
