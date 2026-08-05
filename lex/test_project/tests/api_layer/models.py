@@ -129,7 +129,59 @@ class ApiLayerCalc(CalculationModel):
         return None
 
 
-ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
+class ApiLayerCalcReadRestricted(CalculationModel):
+    """CalculationModel whose ``permission_read`` denies the ``deny_all`` group.
+
+    Deliberately *not* ``@_permissive``: the read-leak scenario (10.76) needs a
+    record that genuinely fails the record's own read permission for a real
+    caller. The group-driven deny profile mirrors Cluster 4e's
+    ``FilterBackendItem`` so the endpoint is exercised through the real
+    permission pipeline (``permission_read`` →
+    ``UserReadRestrictionFilterBackend``) instead of a monkeypatch that could
+    diverge from what a normal record fetch allows.
+    """
+
+    name = models.CharField(max_length=200)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):  # pragma: no cover
+        return None
+
+    def permission_read(self, uc):
+        if "deny_all" in uc.groups:
+            return PermissionResult.deny(
+                "cluster 10o: deny-all profile — record must stay invisible",
+            )
+        return PermissionResult.allow_all("cluster 10o: readable by default")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 10o")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+ALL_MODELS = [
+    ApiSimpleItem,
+    SchemaFKTarget,
+    SchemaItem,
+    SchemaHiddenItem,
+    ApiLayerCalc,
+    ApiLayerCalcReadRestricted,
+]
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"
+API_LAYER_CALC_RESTRICTED = "apilayercalcreadrestricted"
