@@ -8,15 +8,22 @@ renders and nothing the caller is not allowed to see -- a response that
 confirms a record exists and errored, to someone who cannot read that record,
 is a leak.
 
-Cluster 10o — scenarios 10.72–10.76. Type: E.
+Cluster 10o — scenarios 10.72–10.79. Type: E.
 Covers: lex/api/views/calculations/CalculationStatus.py.
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py -v
 """
 
 from __future__ import annotations
 
-import pytest
+from datetime import timedelta
 
+import pytest
+from django.contrib.contenttypes.models import ContentType
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
+
+from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.core.models.CalculationModel import CalculationModel
 from lex.test_project.tests._authenticated_e2e_test_case import AuthenticatedE2ETestCase
 from lex.test_project.tests._e2e_test_case import E2ETestCase
@@ -43,6 +50,30 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
 
     def url_status(self, model_name: str, pk: int) -> str:
         return f"/api/model_entries/{model_name}/{pk}/calculation-status"
+
+    def _make_logs(self, instance, count: int, *, step=timedelta(seconds=1)):
+        """Create ``count`` CalculationLog rows for ``instance``, ``step`` apart.
+
+        ``timestamp`` is ``auto_now_add``, so rows written in a loop can land on
+        the same microsecond and leave "which line is newest" up to the
+        database. The stamps are rewritten afterwards so the log has one
+        unambiguous chronological order for the assertions to hold against.
+        Returns those timestamps, oldest first.
+        """
+        content_type = ContentType.objects.get_for_model(type(instance))
+        first_at = timezone.now() - step * count
+        stamps = []
+        for i in range(count):
+            row = CalculationLog.objects.create(
+                calculationId=f"calc-{instance.pk}",
+                calculation_log=f"line {i}",
+                content_type=content_type,
+                object_id=instance.pk,
+            )
+            at = first_at + step * i
+            CalculationLog.objects.filter(pk=row.pk).update(timestamp=at)
+            stamps.append(at)
+        return stamps
 
     def test_10_72_returns_status_for_a_never_calculated_record(self):
         """
@@ -158,6 +189,131 @@ class TestCluster10o_CalculationStatusEndpoint(E2ETestCase):
             msg=(
                 "Polling a pk that does not exist must be a clean 404, not "
                 f"{resp.status_code}. Body: {resp.content!r}"
+            ),
+        )
+
+    def test_10_77_log_is_absent_unless_requested(self):
+        """
+        Scenario 10.77: the default poll never pays for log data.
+        Given: a record that has log lines
+        When: the widget polls it without asking for the log
+        Then: the envelope carries no log at all, and no query reads the log
+              line column. The widget's log panel is off by default, and a
+              dashboard that never opens it must not drag the lines out of the
+              database every two seconds for the life of the page.
+        """
+        item = ApiLayerCalc.objects.create(name="quiet")
+        self._make_logs(item, count=3)
+        line_column = CalculationLog._meta.get_field("calculation_log").column
+
+        with CaptureQueriesContext(connection) as queries:
+            body = self.client.get(self.url_status(CALC, item.pk)).json()
+
+        self.assertNotIn(
+            "log", body,
+            msg=(
+                "A poll that did not ask for the log must not carry one. "
+                f"Got envelope keys {sorted(body)}."
+            ),
+        )
+        self.assertNotIn(
+            "log_truncated", body,
+            msg=(
+                "log_truncated describes a log that is not there — it must be "
+                f"absent too. Got envelope keys {sorted(body)}."
+            ),
+        )
+        line_reads = [
+            q["sql"] for q in queries.captured_queries if line_column in q["sql"]
+        ]
+        self.assertEqual(
+            line_reads, [],
+            msg=(
+                "The default poll must not read log lines from the database. "
+                f"These queries touched the {line_column!r} column: {line_reads}"
+            ),
+        )
+
+    def test_10_78_log_is_bounded_and_reports_truncation(self):
+        """
+        Scenario 10.78: a long calculation cannot bloat a 2-second poll.
+        Given: a record with more log lines than the tail limit
+        When: the widget polls with include_log=true
+        Then: exactly the newest LOG_TAIL_LIMIT lines come back, oldest first,
+              and log_truncated tells the widget that earlier lines were
+              dropped. A calculation that logs per row would otherwise put its
+              whole history on the wire every two seconds — and a tail printed
+              backwards is worse than no tail.
+        """
+        from lex.api.views.calculations.CalculationStatus import LOG_TAIL_LIMIT
+
+        overflow = 10
+        count = LOG_TAIL_LIMIT + overflow
+        item = ApiLayerCalc.objects.create(name="chatty")
+        self._make_logs(item, count=count)
+
+        body = self.client.get(
+            self.url_status(CALC, item.pk) + "?include_log=true"
+        ).json()
+
+        self.assertEqual(
+            len(body["log"]), LOG_TAIL_LIMIT,
+            msg=(
+                f"A {count}-line log must arrive trimmed to the "
+                f"{LOG_TAIL_LIMIT}-line tail. Got {len(body['log'])} lines."
+            ),
+        )
+        self.assertEqual(
+            body["log"], [f"line {i}" for i in range(overflow, count)],
+            msg=(
+                "The tail must be the NEWEST lines, oldest first — that is the "
+                f"order the widget prints them in. Got {body['log'][:3]} … "
+                f"{body['log'][-3:]}."
+            ),
+        )
+        self.assertIs(
+            body["log_truncated"], True,
+            msg=(
+                f"{overflow} lines were dropped, so the widget must be told the "
+                f"log is partial. Got log_truncated={body['log_truncated']!r}."
+            ),
+        )
+
+    def test_10_79_short_log_comes_back_whole_and_unflagged(self):
+        """
+        Scenario 10.79: a log that fits is not reported as truncated.
+        Given: a record with fewer log lines than the tail limit
+        When: the widget polls with include_log=true
+        Then: every line comes back and log_truncated is False, so the widget
+              says "earlier lines omitted" only when lines really were omitted.
+              A flag that is always on tells the reader nothing.
+        """
+        from lex.api.views.calculations.CalculationStatus import LOG_TAIL_LIMIT
+
+        count = 3
+        self.assertLess(
+            count, LOG_TAIL_LIMIT,
+            msg="This scenario needs a log that fits inside the tail limit.",
+        )
+        item = ApiLayerCalc.objects.create(name="brief")
+        self._make_logs(item, count=count)
+
+        body = self.client.get(
+            self.url_status(CALC, item.pk) + "?include_log=true"
+        ).json()
+
+        self.assertEqual(
+            body["log"], [f"line {i}" for i in range(count)],
+            msg=(
+                "A log shorter than the limit must come back whole and in "
+                f"order. Got {body['log']}."
+            ),
+        )
+        self.assertIs(
+            body["log_truncated"], False,
+            msg=(
+                f"All {count} lines were returned, so nothing was truncated. "
+                f"Got log_truncated={body['log_truncated']!r}."
             ),
         )
 

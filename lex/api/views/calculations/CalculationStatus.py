@@ -10,12 +10,20 @@ may not read is reported exactly as a record that does not exist -- same status
 code, same body -- because a distinguishable response would itself confirm the
 record exists and leak its calculation state.
 
+The log tail is opt-in via ``?include_log=true``: the widget's log panel is off
+by default, so the ordinary poll must not read log rows at all.
+
 """
 
 from django.http import JsonResponse
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
+
+#: Most recent log lines returned when ``include_log`` is requested. Bounded so
+#: a long calculation cannot turn a 2-second poll into a large response.
+LOG_TAIL_LIMIT = 50
+
 
 class CalculationStatus(APIView):
     http_method_names = ["get"]
@@ -34,7 +42,13 @@ class CalculationStatus(APIView):
             # allowed to see it, leaking its calculation state.
             return JsonResponse({"detail": "Not found."}, status=404)
 
-        return JsonResponse(self._envelope(instance))
+        envelope = self._envelope(instance)
+        # Opt-in only: the log keys stay absent -- not empty -- unless asked
+        # for, so the poll a collapsed widget repeats every 2s never runs the
+        # log query.
+        if request.query_params.get("include_log") == "true":
+            envelope.update(self._log_tail(instance))
+        return JsonResponse(envelope)
 
     def _readable_or_none(self, request, model_class, pk):
         """The record, or ``None`` when it is missing OR unreadable by this caller.
@@ -65,6 +79,40 @@ class CalculationStatus(APIView):
             "finished_at": None,
             "duration_seconds": None,
         }
+
+    @staticmethod
+    def _log_tail(instance) -> dict:
+        """The last ``LOG_TAIL_LIMIT`` log lines for this record, oldest first.
+
+        ``CalculationLog`` points at records through a generic FK, so the rows
+        are found by (content type, pk) rather than a reverse accessor.
+
+        One query, and one row more than the caller can receive: fetching
+        ``LOG_TAIL_LIMIT + 1`` is what makes "there were earlier lines"
+        answerable without a second COUNT over a table that grows with every
+        line every calculation has ever logged.
+        """
+        # Imported here rather than at module import: this view module is
+        # pulled in while the URLconf is assembled.
+        from django.contrib.contenttypes.models import ContentType
+
+        from lex.audit_logging.models.CalculationLog import CalculationLog
+
+        content_type = ContentType.objects.get_for_model(type(instance))
+        newest_first = list(
+            CalculationLog.objects.filter(
+                content_type=content_type, object_id=instance.pk,
+            )
+            # id breaks ties: auto_now_add stamps can collide within a run, and
+            # the tail must not reshuffle between two polls.
+            .order_by("-timestamp", "-id")
+            .values_list("calculation_log", flat=True)[: LOG_TAIL_LIMIT + 1]
+        )
+
+        truncated = len(newest_first) > LOG_TAIL_LIMIT
+        lines = newest_first[:LOG_TAIL_LIMIT]
+        lines.reverse()  # the widget prints a log top-down, oldest first
+        return {"log": lines, "log_truncated": truncated}
 
     @staticmethod
     def _error_of(instance):
