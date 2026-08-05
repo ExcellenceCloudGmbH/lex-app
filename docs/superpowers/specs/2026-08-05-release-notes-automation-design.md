@@ -69,9 +69,9 @@ prerelease_gate.yml  (existing — 13 clusters)
       │ green
       ▼
 draft-notes job  (new)
-      ├─ resolve_range.py     → backend range; frontend range if manifest present
-      ├─ build_digest.py      → structured JSON of changes
-      └─ draft_notes.py       → business note via GitHub Models
+      ├─ ranges.py    → backend range; frontend range if manifest present
+      ├─ digest.py    → structured JSON of changes
+      └─ notes.py     → business note via GitHub Models
       │
       └─ writes the business note into the prerelease body
       │
@@ -82,8 +82,8 @@ release:released
       │
       ▼
 publish_release_notes.yml  (new)
-      ├─ resolve_range.py + build_digest.py   (re-run — deterministic)
-      ├─ render_changelog.py → Keep a Changelog section
+      ├─ ranges.py + digest.py   (re-run — deterministic)
+      ├─ changelog.py → Keep a Changelog section
       ├─ commits it to CHANGELOG.md
       └─ publish_quackback()  → interface only, see Out of scope
 ```
@@ -97,7 +97,7 @@ The digest is rebuilt at release time rather than carried over from the gate run
 Workflow artifacts are scoped to the run that produced them, so passing one between
 two workflows triggered by two different events would need cross-run download
 plumbing and a token. Since the tag is fixed once the prerelease exists, the range
-is fixed too, and `build_digest` + `render_changelog` are deterministic — re-running
+is fixed too, and `digest` + `changelog` rendering are deterministic — re-running
 them costs one API call sequence and no model call, which is cheaper than the
 plumbing it replaces.
 
@@ -110,19 +110,24 @@ the cluster test-plan.
 ```
 .github/scripts/release_notes/
     __init__.py
-    resolve_range.py       # tag → (backend range, frontend range | None)
-    build_digest.py        # ranges → digest JSON
-    render_changelog.py    # digest → Keep a Changelog section
-    draft_notes.py         # digest → business note via gh models
-    quackback.py           # publish interface — raises NotImplementedError
+    ranges.py       # tag → (backend range, frontend range | None)
+    digest.py       # ranges → digest JSON
+    changelog.py    # digest → Keep a Changelog section
+    notes.py        # digest → business note via GitHub Models
+    quackback.py    # publish interface — raises NotImplementedError
+    __main__.py     # CLI the workflows call
 .github/scripts/tests/
-    test_resolve_range.py
-    test_build_digest.py
-    test_render_changelog.py
-    test_draft_notes.py
+    test_release_notes_ranges.py
+    test_release_notes_digest.py
+    test_release_notes_changelog.py
+    test_release_notes_notes.py
 ```
 
-### `resolve_range.py`
+Modules are named for their domain rather than for a verb, so the call sites read
+as `changelog.render(...)` and `notes.draft(...)` rather than
+`render_changelog.render(...)`.
+
+### `ranges.py`
 
 Given the current tag, returns the backend commit range and, when available, the
 frontend one.
@@ -138,7 +143,7 @@ tags. If the file is absent at either end, the function returns `None` for the
 frontend range and the frontend section is omitted entirely. There is no fallback
 and no guess.
 
-### `build_digest.py`
+### `digest.py`
 
 Turns ranges into a structured digest — the single source of truth for both
 downstream renderers.
@@ -172,7 +177,7 @@ generally arrived through PRs whose titles are well-formed.
 Dropped from the digest: merge commits, bundle-update commits, and commits whose
 message is empty after stripping the conventional prefix.
 
-### `render_changelog.py`
+### `changelog.py`
 
 A pure function: digest in, markdown out. No network, no model, golden-file testable.
 
@@ -193,7 +198,7 @@ The result is prepended to `CHANGELOG.md` at the repository root, below the
 `Keep a Changelog` preamble. That file does not exist yet; the first run creates it,
 preamble included.
 
-### `draft_notes.py`
+### `notes.py`
 
 Sends the digest plus `docs/releases/RELEASE_NOTES_2.1.3_github.md` — as a style
 exemplar, not a content template — to GitHub Models, and requires back the house
@@ -274,20 +279,25 @@ both ends of the range.
 
 Tests live in `.github/scripts/tests/`, run with pytest, following `test_docs_mirror.py`.
 
-**`resolve_range`** — junk tags (`v0.0.0-hazem`, `recovery-supervisor-on-demand.0`)
+**No workflow currently runs that directory.** It holds 158 passing tests that CI has
+never executed. Adding `.github/workflows/scripts_tests.yml` is therefore the first
+implementation step, not an afterthought — without it the tests below would join the
+existing pile of never-run coverage, and every task after it would be unverified.
+
+**`ranges`** — junk tags (`v0.0.0-hazem`, `recovery-supervisor-on-demand.0`)
 are excluded; rc tags are valid baselines; a missing manifest at either end yields
 `None`; the first-release case resolves to the root commit.
 
-**`build_digest`** — merge commits and bundle commits are dropped; PR enrichment
+**`digest`** — merge commits and bundle commits are dropped; PR enrichment
 prefers the PR title over the commit subject; a commit with no associated PR still
 produces an entry; non-conforming subjects are classified as `other` rather than
 discarded.
 
-**`render_changelog`** — golden-file comparison across a fixture digest covering
+**`changelog`** — golden-file comparison across a fixture digest covering
 every type, both components, and a breaking change; `docs`/`ci`/`chore` are
 excluded; an empty section emits no heading.
 
-**`draft_notes`** — a stubbed model client returning valid output passes validation;
+**`notes`** — a stubbed model client returning valid output passes validation;
 malformed output produces the stub and the failure marker; the model client is never
 called for an empty digest.
 
