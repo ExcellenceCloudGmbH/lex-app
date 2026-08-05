@@ -16,16 +16,59 @@ from ``CalculationLog`` as well, because the record itself is not stamped when a
 calculation writes it. Both are scoped to the record's newest run -- see
 ``_latest_run_rows`` -- so the tail and the timings always describe the same one.
 
+``can_calculate`` reports whether *this* caller may trigger a run on this record,
+so the widget can draw a button that tells the truth instead of one that only
+fails when pressed. It decides nothing: the trigger is a PATCH through
+``One.update``, which authorises itself exactly as it always has. This endpoint
+merely runs the same permission class against the same payload and reports what
+that authorisation would say -- see ``_calculate_permission``.
+
 """
+
+import logging
 
 from django.http import JsonResponse
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
+from lex.api.views.permissions.UserPermission import UserPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 #: Most recent log lines returned when ``include_log`` is requested. Bounded so
 #: a long calculation cannot turn a 2-second poll into a large response.
 LOG_TAIL_LIMIT = 50
+
+#: The body ``lex_calculation()`` sends to start a run. The permission probe
+#: carries it verbatim: a ``modification_restriction`` may inspect
+#: ``request_data``, and answering for a payload other than the one the button
+#: will actually send is one way the two endpoints could drift apart.
+TRIGGER_PAYLOAD = {"calculate": "true"}
+
+#: Rendered beside the disabled button when the framework offers no usable text
+#: of its own.
+DEFAULT_DENIED_REASON = "You do not have permission to run this calculation."
+
+
+class _TriggerProbeRequest:
+    """The caller's own request, presented as the PATCH the button would send.
+
+    ``UserPermission`` branches on ``request.method`` and hands ``request.data``
+    to the model's ``modification_restriction``; everything else it reads --
+    ``user`` above all -- must stay the real request's, or the probe would be
+    answering about somebody else. Hence delegation rather than a fabricated
+    request object.
+    """
+
+    method = "PATCH"
+
+    def __init__(self, request):
+        # Assigned first: ``__getattr__`` below dereferences it.
+        self._request = request
+        self.data = dict(TRIGGER_PAYLOAD)
+
+    def __getattr__(self, name):
+        return getattr(self._request, name)
 
 
 class CalculationStatus(APIView):
@@ -45,7 +88,7 @@ class CalculationStatus(APIView):
             # allowed to see it, leaking its calculation state.
             return JsonResponse({"detail": "Not found."}, status=404)
 
-        envelope = self._envelope(instance)
+        envelope = self._envelope(request, instance)
         # Opt-in only: the log keys stay absent -- not empty -- unless asked
         # for, so the poll a collapsed widget repeats every 2s never runs the
         # log query.
@@ -74,8 +117,9 @@ class CalculationStatus(APIView):
         )
         return readable.first()
 
-    def _envelope(self, instance) -> dict:
+    def _envelope(self, request, instance) -> dict:
         started, finished = self._run_window(instance)
+        can_calculate, denied_reason = self._calculate_permission(request, instance)
         return {
             "status": instance.is_calculated,
             "error": self._error_of(instance),
@@ -84,7 +128,75 @@ class CalculationStatus(APIView):
             "duration_seconds": (
                 (finished - started).total_seconds() if started and finished else None
             ),
+            "can_calculate": can_calculate,
+            "calculate_denied_reason": denied_reason,
         }
+
+    def _calculate_permission(self, request, instance):
+        """``(can_calculate, reason)`` for this caller on this record.
+
+        Answered by :class:`~lex.api.views.permissions.UserPermission` -- the
+        very permission class ``OneModelEntry`` declares -- evaluated against the
+        PATCH the widget's button would send. Reusing the class instead of
+        re-deriving the rule is the whole point: a parallel check that says "no"
+        to somebody ``One.update`` would have accepted disables a button with
+        nothing left to press, and one that says "yes" to somebody it would
+        refuse just restores the click-then-403 this replaced.
+
+        This is emphatically *not* the authorisation. Nothing here decides
+        whether a calculation may run; ``One.update`` still does, on its own
+        request, unchanged. This only reports the decision that endpoint would
+        reach, so the widget can draw an honest button -- and the widget keeps
+        its 403 handler for the moment the two disagree because the permission
+        changed between the poll and the click.
+
+        Nothing is disclosed that pressing the button would not disclose: the
+        caller already passed this record's read permission to get here, and the
+        denial text is what the 403 body would carry.
+        """
+        permission = UserPermission()
+        probe = _TriggerProbeRequest(request)
+        try:
+            if not permission.has_permission(probe, self):
+                return False, self._denial_reason(permission)
+            if not permission.has_object_permission(probe, self, instance):
+                # ``has_object_permission`` sets a message too, but builds it
+                # from the wrong arguments upstream -- the instance and the user
+                # land where the access type and the unit belong -- so it reads
+                # as "You do not have general <record>-access to the requested
+                # <user>.". Beside a disabled button that is worse than saying
+                # nothing specific. Correcting it would change the 403 body of
+                # every modify endpoint, which is not this change's business.
+                return False, DEFAULT_DENIED_REASON
+        except Exception:
+            # A restriction that raises is an application bug, and the framework
+            # already falls open on one (see ``One.create``). Falling open is
+            # also the only safe direction for this flag: an enabled button that
+            # then fails is recoverable and already handled, a button disabled by
+            # mistake is a dead end. The PATCH is unaffected either way -- it
+            # would raise for itself, and answer for itself.
+            logger.exception(
+                "Could not evaluate calculate permission for %s(pk=%r); "
+                "reporting the button as enabled and leaving the decision to "
+                "the trigger itself",
+                type(instance).__name__,
+                instance.pk,
+            )
+            return True, None
+        return True, None
+
+    @staticmethod
+    def _denial_reason(permission) -> str:
+        """The framework's own explanation for a refusal, or a plain fallback.
+
+        ``UserPermission`` composes this from the model's
+        ``modification_restriction`` ``violations`` -- text the model author
+        wrote to explain the refusal to a user, and text this caller would
+        receive in the 403 body anyway. Repeating it up front is what turns a
+        disabled button from a dead end into an answer.
+        """
+        message = (getattr(permission, "message", None) or "").strip()
+        return message or DEFAULT_DENIED_REASON
 
     @staticmethod
     def _latest_run_rows(instance):

@@ -9,6 +9,7 @@ observable REST-layer wiring on top of everything below.
 from __future__ import annotations
 
 from django.db import models
+from lex.core.mixins.ModelModificationRestriction import ModelModificationRestriction
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
 
@@ -173,6 +174,70 @@ class ApiLayerCalcReadRestricted(CalculationModel):
         return True
 
 
+#: Django group whose members may read :class:`ApiLayerCalcCalculateRestricted`
+#: but may not run it. Used by 10.82; 10.83 is the same caller without it.
+NO_CALCULATE_GROUP = "no_calculate"
+
+#: The restriction's own explanation, appended to ``violations``. The framework
+#: puts this text in the 403 body, so the status envelope may repeat it without
+#: telling the caller anything pressing the button would not.
+NO_CALCULATE_VIOLATION = "cluster 10o: this profile may read the record but not run it"
+
+
+class RunDeniedForBlockedGroup(ModelModificationRestriction):
+    """Denies *modification* — and therefore the calculate trigger — to one group.
+
+    ``calculate=true`` is a PATCH through ``One.update``, which DRF authorises
+    with ``UserPermission`` → the model's ``modification_restriction``. Denying
+    here denies the trigger itself, so 10.82's envelope assertion is a statement
+    about the permission the framework really enforces rather than about a
+    parallel rule that could drift away from it.
+
+    Read is left wide open on purpose: the pair of scenarios needs a caller who
+    *may* see the record — otherwise the endpoint would 404 (10.76) and there
+    would be no envelope to carry ``can_calculate`` at all.
+    """
+
+    def _is_blocked(self, user) -> bool:
+        groups = getattr(user, "groups", None)
+        if groups is None:
+            return False
+        return groups.filter(name=NO_CALCULATE_GROUP).exists()
+
+    def can_modify_in_general(self, user, violations):
+        if self._is_blocked(user):
+            # ``violations`` is None on some framework call sites (see
+            # ``ModelContainer.get_permission_restrictions_for_user``).
+            if violations is not None:
+                violations.append(NO_CALCULATE_VIOLATION)
+            return False
+        return True
+
+
+@_permissive
+class ApiLayerCalcCalculateRestricted(CalculationModel):
+    """Readable by everyone, runnable only by callers outside the blocked group.
+
+    The asymmetry is the point: read permission alone cannot answer "may this
+    caller press Calculate", so an endpoint that inferred one from the other
+    would be wrong for exactly this record.
+    """
+
+    name = models.CharField(max_length=200)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    modification_restriction = RunDeniedForBlockedGroup()
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):  # pragma: no cover
+        return None
+
+
 ALL_MODELS = [
     ApiSimpleItem,
     SchemaFKTarget,
@@ -180,8 +245,10 @@ ALL_MODELS = [
     SchemaHiddenItem,
     ApiLayerCalc,
     ApiLayerCalcReadRestricted,
+    ApiLayerCalcCalculateRestricted,
 ]
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"
 API_LAYER_CALC_RESTRICTED = "apilayercalcreadrestricted"
+API_LAYER_CALC_RUN_RESTRICTED = "apilayercalccalculaterestricted"

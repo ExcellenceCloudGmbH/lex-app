@@ -8,7 +8,7 @@ renders and nothing the caller is not allowed to see -- a response that
 confirms a record exists and errored, to someone who cannot read that record,
 is a leak.
 
-Cluster 10o — scenarios 10.72–10.81. Type: E.
+Cluster 10o — scenarios 10.72–10.83. Type: E.
 Covers: lex/api/views/calculations/CalculationStatus.py.
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_calculation_status_endpoint.py -v
 """
@@ -18,6 +18,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pytest
+from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -31,7 +32,11 @@ from lex.test_project.tests._e2e_test_case import E2ETestCase
 from .models import (
     ALL_MODELS,
     API_LAYER_CALC_RESTRICTED,
+    API_LAYER_CALC_RUN_RESTRICTED,
+    NO_CALCULATE_GROUP,
+    NO_CALCULATE_VIOLATION,
     ApiLayerCalc,
+    ApiLayerCalcCalculateRestricted,
     ApiLayerCalcReadRestricted,
 )
 
@@ -538,5 +543,143 @@ class TestCluster10o_CalculationStatusEndpoint_ReadDenied(AuthenticatedE2ETestCa
             msg=(
                 "The shared 404 body must carry no record-specific detail. "
                 f"Got {denied.json()!r}"
+            ),
+        )
+
+
+class TestCluster10o_CalculationStatus_CalculatePermission(E2ETestCase):
+    """Cluster 10o: ``can_calculate`` must agree with what ``One.update`` enforces.
+
+    The widget draws its Calculate button from this one flag, so the flag is a
+    promise about a *different* endpoint. Both scenarios below therefore assert
+    the envelope **and** issue the real trigger, because a flag that merely looks
+    plausible is exactly the failure this pair exists to catch: disagree one way
+    and the button is disabled for someone who may run the record, disagree the
+    other and it is enabled for someone who may not.
+
+    ``ApiLayerCalcCalculateRestricted`` is readable by everyone and runnable only
+    outside ``no_calculate``, so read permission cannot stand in for the answer.
+    """
+
+    e2e_models = ALL_MODELS
+
+    def url_status(self, model_name: str, pk: int) -> str:
+        return f"/api/model_entries/{model_name}/{pk}/calculation-status"
+
+    def _block_this_caller(self):
+        """Put the signed-in user in the group the model's restriction refuses."""
+        group, _ = Group.objects.get_or_create(name=NO_CALCULATE_GROUP)
+        self.user.groups.add(group)
+
+    def test_10_82_a_caller_who_may_not_run_is_told_before_pressing(self):
+        """
+        Scenario 10.82: read permission does not imply permission to run.
+        Given: a record this caller may read but whose modification the model's
+               restriction refuses them
+        When: the widget polls its status
+        Then: the poll succeeds — proving the record IS readable — and reports
+              can_calculate false with the restriction's own reason, and the
+              PATCH that the button would issue really is refused. Without the
+              flag the widget can only render an enabled button, take the click,
+              and relay a 403 the backend already knew about before the page was
+              drawn.
+        """
+        self._block_this_caller()
+        item = ApiLayerCalcCalculateRestricted.objects.create(name="hands-off")
+
+        resp = self.client.get(self.url_status(API_LAYER_CALC_RUN_RESTRICTED, item.pk))
+
+        self.assertEqual(
+            resp.status_code, 200,
+            msg=(
+                "This caller may read the record, so the status poll must "
+                f"succeed — got {resp.status_code} with {resp.content!r}. A 404 "
+                "here would mean the scenario is testing read permission "
+                "(10.76) rather than run permission."
+            ),
+        )
+        body = resp.json()
+        self.assertIs(
+            body["can_calculate"], False,
+            msg=(
+                "The caller may not run this record, so the envelope must say "
+                f"so. Got can_calculate={body['can_calculate']!r} — the widget "
+                "would render an enabled button that only fails on click."
+            ),
+        )
+        self.assertIn(
+            NO_CALCULATE_VIOLATION, body["calculate_denied_reason"] or "",
+            msg=(
+                "A disabled button with no reason reads as a broken dashboard. "
+                "The envelope must carry the restriction's own explanation, "
+                f"{NO_CALCULATE_VIOLATION!r}; got "
+                f"{body['calculate_denied_reason']!r}."
+            ),
+        )
+
+        # The load-bearing half: the flag is a claim about One.update, so pin it
+        # against One.update rather than against our reading of it.
+        triggered = self.client.patch(
+            self.url_detail(API_LAYER_CALC_RUN_RESTRICTED, item.pk),
+            data={"calculate": "true"},
+            format="json",
+        )
+        self.assertEqual(
+            triggered.status_code, 403,
+            msg=(
+                "can_calculate=false has to mean the trigger is actually "
+                f"refused. The PATCH returned {triggered.status_code} instead — "
+                "the endpoint and the enforcement path have drifted apart, and "
+                "the widget is disabling a button that works."
+            ),
+        )
+
+    def test_10_83_a_caller_who_may_run_gets_an_enabled_button(self):
+        """
+        Scenario 10.83: the flag is not simply always false.
+        Given: the same record, polled by a caller the restriction allows
+        When: the widget polls its status
+        Then: can_calculate is true with no reason attached, and the PATCH the
+              button would issue really is accepted. This is the direction that
+              must never be wrong: a false negative disables the button for
+              somebody who may run the record, and no click can recover from
+              that — there is nothing left to press.
+        """
+        item = ApiLayerCalcCalculateRestricted.objects.create(name="go-ahead")
+
+        resp = self.client.get(self.url_status(API_LAYER_CALC_RUN_RESTRICTED, item.pk))
+
+        self.assertEqual(
+            resp.status_code, 200,
+            msg=f"Polling a readable record must succeed. Got {resp.content!r}.",
+        )
+        body = resp.json()
+        self.assertIs(
+            body["can_calculate"], True,
+            msg=(
+                "This caller may run the record, so the button must be left "
+                f"enabled. Got can_calculate={body['can_calculate']!r} — a "
+                "disabled button here is an unrecoverable dead end."
+            ),
+        )
+        self.assertIsNone(
+            body["calculate_denied_reason"],
+            msg=(
+                "Nothing was denied, so there is no reason to render beside the "
+                f"button. Got {body['calculate_denied_reason']!r}."
+            ),
+        )
+
+        triggered = self.client.patch(
+            self.url_detail(API_LAYER_CALC_RUN_RESTRICTED, item.pk),
+            data={"calculate": "true"},
+            format="json",
+        )
+        self.assertEqual(
+            triggered.status_code, 202,
+            msg=(
+                "can_calculate=true promises the trigger goes through. The PATCH "
+                f"returned {triggered.status_code} with {triggered.content!r} — "
+                "the widget is offering a button that cannot work."
             ),
         )

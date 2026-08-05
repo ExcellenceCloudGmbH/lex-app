@@ -20,7 +20,7 @@ Three regressions these scenarios exist to prevent, all of them silent:
   keep rendering the old palette after the next token refresh, and nothing
   would fail.
 
-Cluster 1ab -- scenarios 1.223-1.246. Type: U.
+Cluster 1ab -- scenarios 1.223-1.250. Type: U.
 Covers: lex/lex_app/streamlit/_client.py, lex/lex_app/streamlit/calculation.py,
         lex/lex_app/streamlit/__init__.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1ab_calculation_widget.py -v
@@ -597,6 +597,7 @@ class _FakeStreamlit:
         self.session_state: dict = {}
         self.rendered: list = []
         self.button_keys: list = []
+        self.buttons: list = []
         self.declared_intervals: list = []
         self._button_returns = button_returns
 
@@ -611,8 +612,12 @@ class _FakeStreamlit:
 
     def button(self, label, *, key=None, disabled=False, **kwargs):
         self.button_keys.append(key)
+        self.buttons.append({"label": label, "key": key, "disabled": disabled})
         self.rendered.append(("button", label))
-        return self._button_returns
+        # Streamlit never reports a press for a button it drew disabled, so
+        # neither does this stand-in -- otherwise a scenario could "click" a
+        # button the real host would not have let the reader touch.
+        return self._button_returns and not disabled
 
     def rerun(self, *, scope="app"):
         raise self.Rerun(scope)
@@ -936,5 +941,163 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
             msg=(
                 "A settled record must declare no poll interval; got "
                 f"{fake.declared_intervals!r}."
+            ),
+        )
+
+    def test_1_247_a_caller_who_may_not_run_gets_a_disabled_button_and_a_reason(self):
+        """
+        Scenario 1.247: the refusal is rendered before the click, not after it.
+        Given: a status envelope reporting that this caller may not calculate,
+               and the backend's reason for it
+        When: the widget renders
+        Then: the button is drawn disabled, the reason is rendered beside it, and
+              no trigger is issued. A button that looks usable and is not is a
+              worse experience than one that explains itself -- and the point of
+              this widget is that the reader does not have to go elsewhere to
+              find out what happened. Nothing here decides the permission: the
+              server already did, and the widget is only drawing the answer
+        """
+        from lex.lex_app.streamlit import calculation
+
+        reason = "Only the close team may run the quarterly close."
+        fake = self._fake_host(button_returns=True)
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={
+                "status": "NOT_CALCULATED",
+                "error": None,
+                "can_calculate": False,
+                "calculate_denied_reason": reason,
+            },
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.patch_json",
+        ) as patch_json:
+            calculation.lex_calculation("quarter", 1)
+
+        self.assertTrue(
+            all(b["disabled"] for b in fake.buttons),
+            msg=(
+                "A caller the backend will refuse must not be offered a live "
+                f"button. Buttons drawn: {fake.buttons!r}."
+            ),
+        )
+        self.assertIn(
+            reason, fake.text_of(),
+            msg=(
+                "A disabled control with no explanation reads as a broken "
+                f"dashboard. Rendered: {fake.text_of()!r}"
+            ),
+        )
+        patch_json.assert_not_called()
+
+    def test_1_248_a_running_record_still_disables_the_button(self):
+        """
+        Scenario 1.248: permission is a second reason to disable, not a
+        replacement for the first.
+        Given: a record already IN_PROGRESS, whose envelope says this caller may
+               calculate
+        When: the widget renders
+        Then: the button is still disabled. The two reasons are independent --
+              somebody allowed to run a record must still not be able to start a
+              second run on top of the one already going, which is what the
+              duplicate-calculation guard in One.update would otherwise have to
+              absorb on every impatient click
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={
+                "status": "IN_PROGRESS",
+                "error": None,
+                "can_calculate": True,
+            },
+        ):
+            # A record found running re-declares the fragment to start the poll
+            # timer (1.245); the render under test has already happened by then.
+            with self.assertRaises(fake.Rerun):
+                calculation.lex_calculation("quarter", 1, poll_interval=2.0)
+
+        self.assertTrue(
+            all(b["disabled"] for b in fake.buttons),
+            msg=(
+                "A record already running must not offer a second trigger. "
+                f"Buttons drawn: {fake.buttons!r}."
+            ),
+        )
+
+    def test_1_249_a_stale_envelope_still_meets_the_403_backstop(self):
+        """
+        Scenario 1.249: the envelope is an optimisation, never the authority.
+        Given: an envelope claiming this caller may calculate, and a backend that
+               refuses the trigger anyway
+        When: the reader presses the button
+        Then: the refusal is rendered, not raised. The flag is read once per poll
+              and the permission behind it can change between the poll and the
+              click -- and only the PATCH is authoritative, because only the
+              PATCH is the thing being authorised. Dropping this path would move
+              the decision into the client, where a stale answer becomes a
+              silent no-op instead of a message
+        """
+        from lex.lex_app.streamlit import calculation
+        from lex.lex_app.streamlit._client import LexApiError
+
+        fake = self._fake_host(button_returns=True)
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={
+                "status": "NOT_CALCULATED",
+                "error": None,
+                "can_calculate": True,
+            },
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.patch_json",
+            side_effect=LexApiError("Forbidden", status=403),
+        ):
+            calculation.lex_calculation("quarter", 1)
+
+        self.assertFalse(
+            any(b["disabled"] for b in fake.buttons),
+            msg=(
+                "The envelope said this caller may run the record, so the button "
+                f"must be live. Buttons drawn: {fake.buttons!r}."
+            ),
+        )
+        self.assertIn(
+            "permission", fake.text_of().lower(),
+            msg=(
+                "A refusal that arrives only on the click must still be "
+                f"rendered. Rendered: {fake.text_of()!r}"
+            ),
+        )
+
+    def test_1_250_an_envelope_without_the_flag_leaves_the_button_alone(self):
+        """
+        Scenario 1.250: a missing flag is not a denial.
+        Given: a status envelope with no can_calculate key at all -- a backend
+               older than this field, or a response shaped by an older widget's
+               expectations
+        When: the widget renders
+        Then: the button stays enabled. Absence of an answer must fall back to
+              the pre-existing behaviour (press it and find out), because the
+              opposite default would disable the button for every user of every
+              deployment that has not shipped the endpoint change yet -- with no
+              way to press through it
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        with mock.patch.object(calculation, "st", fake), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={"status": "NOT_CALCULATED", "error": None},
+        ):
+            calculation.lex_calculation("quarter", 1)
+
+        self.assertFalse(
+            any(b["disabled"] for b in fake.buttons),
+            msg=(
+                "An envelope that says nothing about permission must not be "
+                f"read as a refusal. Buttons drawn: {fake.buttons!r}."
             ),
         )

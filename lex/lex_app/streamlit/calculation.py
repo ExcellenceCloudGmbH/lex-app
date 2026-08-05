@@ -30,6 +30,12 @@ from lex.lex_app.streamlit import _client
 #: nothing about the record will change again until somebody acts on it.
 _ACTIVE_STATUSES = {"IN_PROGRESS"}
 
+#: Shown when this caller may not run the record: beside the disabled button when
+#: the status envelope said so up front, and in place of a backend message when a
+#: click got through to a 403 anyway. One constant, so the two cannot drift into
+#: describing the same refusal differently.
+NO_PERMISSION_MESSAGE = "You don't have permission to run this"
+
 
 @dataclass(frozen=True)
 class Presentation:
@@ -46,6 +52,10 @@ class StatusState:
 
     ``status`` is ``None`` when the read itself failed; ``message`` then carries
     what to show the reader instead.
+
+    ``can_calculate`` is the backend's answer to "may this caller trigger a run
+    on this record", not the widget's own judgement -- it defaults to ``True``
+    because the widget must never be the thing that refuses.
     """
 
     status: Optional[str]
@@ -56,6 +66,8 @@ class StatusState:
     duration_seconds: Optional[float] = None
     log: Optional[list] = None
     log_truncated: bool = False
+    can_calculate: bool = True
+    calculate_denied_reason: Optional[str] = None
 
 
 _PRESENTATIONS = {
@@ -144,6 +156,12 @@ def read_status(model: str, pk, token: str, include_log: bool) -> StatusState:
         duration_seconds=payload.get("duration_seconds"),
         log=payload.get("log"),
         log_truncated=bool(payload.get("log_truncated")),
+        # Only an explicit ``false`` disables the button. A missing key is an
+        # endpoint older than the flag, not a refusal -- reading absence as
+        # "denied" would disable the button for every user of a deployment that
+        # has not shipped the endpoint yet, with no way to press through it.
+        can_calculate=payload.get("can_calculate", True) is not False,
+        calculate_denied_reason=payload.get("calculate_denied_reason"),
     )
 
 
@@ -168,13 +186,18 @@ def trigger_calculation(model: str, pk, token: str) -> Optional[str]:
     ``request.data`` and never looks at the query string, so a flag parked in
     the URL is dropped and the PATCH degrades into an empty partial update --
     no calculation, no error, a button that appears to do nothing.
+
+    The 403 branch stays even though the status envelope now reports the same
+    permission up front: the envelope is one poll old, and this call is the only
+    thing actually being authorised. Losing this branch would turn a refusal that
+    arrived late into a button that silently does nothing.
     """
     path = f"/api/model_entries/{model}/default/one/{pk}"
     try:
         _client.patch_json(path, token, json={"calculate": "true"})
     except _client.LexApiError as exc:
         if exc.status == 403:
-            return "You don't have permission to run this"
+            return NO_PERMISSION_MESSAGE
         return str(exc)
     return None
 
@@ -284,10 +307,18 @@ def lex_calculation(
         else:
             look = presentation_for(state.status)
             running = state.status in _ACTIVE_STATUSES
+            # Two independent reasons to refuse a click, and both have to hold:
+            # a record already running must not be triggered a second time, and
+            # a caller the backend will refuse should not have to press the
+            # button to find that out. Neither is a decision made here --
+            # ``blocked`` is the server's own answer, carried in the envelope.
+            blocked = not state.can_calculate
 
             left, right = st.columns([1, 2])
             with left:
-                if st.button(label, key=f"{widget_key}__btn", disabled=running):
+                if st.button(
+                    label, key=f"{widget_key}__btn", disabled=running or blocked,
+                ):
                     failure = trigger_calculation(model, pk, token)
                     if failure:
                         st.error(failure)
@@ -305,6 +336,13 @@ def lex_calculation(
                         ),
                         unsafe_allow_html=True,
                     )
+                if blocked:
+                    # Beside the button, not somewhere below it: a disabled
+                    # control with no explanation reads as a broken dashboard,
+                    # and the reason is the whole reason to disable it up front.
+                    # st.caption does not render HTML, so this text -- which
+                    # comes from the backend -- needs no escaping.
+                    st.caption(state.calculate_denied_reason or NO_PERMISSION_MESSAGE)
 
             if look.suggests_rerun:
                 st.caption("This run was interrupted — run it again.")
