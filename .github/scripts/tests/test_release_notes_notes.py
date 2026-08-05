@@ -319,3 +319,34 @@ def test_the_resolved_callable_carries_the_overridden_model():
     )
     call("P", post=fake_post)
     assert "gemini-3-ultra" in captured["url"]
+
+
+def test_prompt_tells_the_model_to_write_from_the_detail():
+    flat = " ".join(notes.build_prompt(_digest(), exemplar="X").split())
+    assert "Base your description on the detail, not the subject." in flat
+    assert "Do not invent specifics to fill the gap" in flat
+
+
+def test_prompt_includes_the_detail_text():
+    d = {"tag": "v1", "previous_tag": None, "changes": [
+        {"sha": "a", "component": "backend", "type": "fix", "scope": "auth",
+         "breaking": False, "subject": "renew the token", "pr_number": 678,
+         "internal": False, "detail": "Sessions died at the original deadline."},
+    ]}
+    assert "Sessions died at the original deadline." in notes.build_prompt(d, exemplar="X")
+
+
+def test_an_oversized_digest_is_trimmed_into_budget():
+    changes = [
+        {"sha": f"{i}", "component": "backend", "type": "fix", "scope": "auth",
+         "breaking": False, "subject": f"fix {i}", "pr_number": i,
+         "internal": False, "detail": "y" * 9000}
+        for i in range(20)
+    ]
+    prompt = notes.build_prompt(
+        {"tag": "v1", "previous_tag": None, "changes": changes}, exemplar="X"
+    )
+    assert len(prompt.encode("utf-8")) <= notes.MAX_PROMPT_BYTES
+    # Still describes every change, just more briefly.
+    for i in range(20):
+        assert f"fix {i}" in prompt

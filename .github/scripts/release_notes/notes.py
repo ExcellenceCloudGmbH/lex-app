@@ -106,6 +106,22 @@ That is a correct and complete answer. Do not pad a thin release by promoting
 internal work into features. A short honest note is worth more than a long
 invented one.
 
+WHAT YOU ARE GIVEN
+Each entry has a "subject" — one line, written for reviewers — and a "detail",
+which is the author's own explanation from the pull request. **Base your
+description on the detail, not the subject.** The subject says what was
+changed; the detail usually says what was wrong, what a user experienced, and
+what they will experience now. That is the release note.
+
+The detail is written for engineers. Take the user-visible facts from it and
+leave the internals behind: read past the root-cause analysis and file names to
+the symptom and the outcome. If the detail describes something a user never
+sees, that entry probably does not belong in the note at all.
+
+Where an entry has no detail, say only what the subject supports. Do not
+invent specifics to fill the gap — a thin bullet is better than a confident
+wrong one.
+
 FORMAT
 Use only these headings, in this order, and only when you have entries for them:
 "## Main changes" (new capability), "## Optimizations" (existing things now
@@ -150,13 +166,44 @@ Return only the markdown release note. No preamble, no explanation.
 """
 
 
+# Matches the budget the Copilot test-bot prompt uses in
+# .github/scripts/copilot_assemble_prompt.py. Well inside every provider's
+# context window; the cap exists to stop an unusually large release quietly
+# turning into an expensive or truncated request.
+MAX_PROMPT_BYTES = 60_000
+
+
 def build_prompt(digest: dict, *, exemplar: str) -> str:
-    """Assemble the model prompt from the digest and a style exemplar."""
-    return _INSTRUCTIONS.format(
-        exemplar=exemplar,
-        tag=digest["tag"],
-        digest=json.dumps(digest["changes"], indent=2),
+    """Assemble the model prompt from the digest and a style exemplar.
+
+    Entries carry the author's PR body in "detail". That is the material the
+    note is actually written from — a subject line alone makes the model invent
+    specifics, which is how "renew the embedded Streamlit token" became a claim
+    about automatic session renewal that nobody had verified.
+    """
+    changes = digest["changes"]
+    prompt = _INSTRUCTIONS.format(
+        exemplar=exemplar, tag=digest["tag"],
+        digest=json.dumps(changes, indent=2),
     )
+
+    if len(prompt.encode("utf-8")) <= MAX_PROMPT_BYTES:
+        return prompt
+
+    # Over budget: shorten details, longest first, so one enormous PR body
+    # cannot crowd out every other change. Internal entries already have none.
+    trimmed = [dict(c) for c in changes]
+    for limit in (2000, 1000, 400, 0):
+        for entry in trimmed:
+            if len(entry.get("detail", "")) > limit:
+                entry["detail"] = entry["detail"][:limit].rstrip() + "…[truncated]" if limit else ""
+        prompt = _INSTRUCTIONS.format(
+            exemplar=exemplar, tag=digest["tag"],
+            digest=json.dumps(trimmed, indent=2),
+        )
+        if len(prompt.encode("utf-8")) <= MAX_PROMPT_BYTES:
+            break
+    return prompt
 
 
 def validate(text: str) -> str | None:
