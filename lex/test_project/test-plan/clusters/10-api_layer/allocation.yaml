@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 84
+max_scenario: 88
 letters:
   a:
     title: ''
@@ -158,3 +158,28 @@ letters:
       disagrees with `One.update` lies in one direction or the other: enabled-then-403 is
       recoverable, disabled-when-allowed is a dead end. Pairs with batch 1ab, the widget
       that polls it.
+
+  p:
+    title: Named serializers — choosing which fields a record shows
+    scenarios: 10.85-10.88
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      named serializers - the mechanism that decides which fields a record shows, and what
+      lex_calculation(serializer=...) passes through. api_serializers on the model class maps a name to a
+      serializer class, and ?serializer=<name> selects between them in
+      ModelEntryProviderMixin.get_serializer_class. The chain these scenarios protect crosses three
+      codebases - a Streamlit helper that hands the name to lex_view, a React data provider that forwards
+      it as meta.serializer, and this DRF view that resolves it - and only its two ends are visible to
+      anyone: an author writes a name, a page shows fields. If the query parameter stopped selecting
+      anything nothing would break; every dashboard would quietly show the default field list forever,
+      which is the failure nobody notices. 10.85 pins the wide baseline the narrow view is measured
+      against. 10.86 is the feature: a compact serializer declaring three fields returns three, and
+      field_2/internal_note are absent rather than null. 10.87 keeps a typo loud - an unknown name is
+      refused with the name and the available list in the body, because falling back to the default would
+      render a plausible page showing the wrong fields. 10.88 pins that declaring a name adds to the map
+      rather than replacing it: the React table and every framework-internal lookup read 'default', and a
+      registration that displaced it would narrow the whole product to whatever one dashboard wanted.

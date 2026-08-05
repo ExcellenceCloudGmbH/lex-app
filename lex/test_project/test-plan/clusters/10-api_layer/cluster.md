@@ -58,3 +58,17 @@
 `can_calculate` (10.82–10.83) is the second permission this endpoint reports and the second place one could be got wrong — this time by *inventing* it. Read permission cannot answer whether the caller may trigger a run, so the endpoint reuses `UserPermission`, the DRF permission class `OneModelEntry` declares, evaluated against the trigger's own PATCH payload. It authorises nothing: `One.update` still authorises itself, unchanged, and the widget keeps its 403 handler for the moment the two disagree because the permission changed between the poll and the click. Both scenarios issue that real PATCH alongside the poll, since a flag that quietly disagrees with the endpoint it describes is the entire failure mode — and it is not symmetric: enabled-then-403 costs a click, disabled-when-allowed leaves nothing to press.
 
 ---
+
+
+### 10p. Named serializers — choosing which fields a record shows ✅
+
+`api_serializers` on the model class maps a name to a serializer, and `?serializer=<name>` selects between them. It is what `lex_calculation(serializer=...)` passes through: the Streamlit embed hands the name to `lex_view`, which puts it in the query string, and the React data provider forwards it here. Everything between the dashboard author and the field list is transport — which is why this is worth pinning. The chain crosses three codebases and only its two ends are visible: an author writes a name, a page shows fields. If the parameter stopped selecting anything, nothing would break; every dashboard would quietly show the default field list.
+
+| Scenario | Claim | How |
+| --- | --- | --- |
+| 10.85 | Without a name, nothing is hidden | the default serializer returns every business field — the wide baseline the narrow view is measured against |
+| 10.86 | A named serializer narrows the field list | `?serializer=compact` returns the three declared fields; `field_2` and `internal_note` are absent, not null |
+| 10.87 | A typo fails loudly | an unknown name is refused, and the body carries both the name and the available list — falling back to the default would render a plausible page showing the wrong fields |
+| 10.88 | Declaring a name does not remove the default | the map holds both, because the React table and every framework-internal lookup read `default` |
+
+**Scenario range:** 10.85 – 10.88. **Test file:** `lex/test_project/tests/api_layer/test_10p_named_serializers.py`. **Type:** E2E. **Status:** ✅ Complete (2026-08-05) — 4 pass / 0 fail. Sources: `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (`get_serializer_class`), `lex/api/serializers/base_serializers.py` (`get_serializer_map_for_model`). Pairs with [batch 1ab](../01-init/batches.md), the Streamlit embed that passes the name.

@@ -9,6 +9,7 @@ observable REST-layer wiring on top of everything below.
 from __future__ import annotations
 
 from django.db import models
+from rest_framework import serializers
 from lex.core.mixins.ModelModificationRestriction import ModelModificationRestriction
 from lex.core.models.CalculationModel import CalculationModel
 from lex.core.models.LexModel import LexModel, PermissionResult
@@ -238,6 +239,47 @@ class ApiLayerCalcCalculateRestricted(CalculationModel):
         return None
 
 
+
+# ---------------------------------------------------------------------------
+# Named serializers (Cluster 10p) — what ``lex_calculation(serializer=...)`` picks
+# ---------------------------------------------------------------------------
+
+@_permissive
+class ApiLayerSerializerCalc(CalculationModel):
+    """A record with more fields than a dashboard wants to show.
+
+    ``api_serializers`` is the whole mechanism: a mapping of name to serializer
+    class on the model, which ``?serializer=<name>`` selects between. The
+    Streamlit embed passes that name straight through, so what a dashboard
+    shows is decided here and never listed twice.
+    """
+
+    name = models.CharField(max_length=200)
+    field_1 = models.CharField(max_length=200, default="one")
+    field_2 = models.CharField(max_length=200, default="two")
+    internal_note = models.TextField(blank=True, default="not for dashboards")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):  # pragma: no cover
+        return None
+
+
+class _CompactSerializer(serializers.ModelSerializer):
+    """The dashboard's view of the record: three fields, not seven."""
+
+    class Meta:
+        model = ApiLayerSerializerCalc
+        fields = ["id", "name", "field_1"]
+
+
+ApiLayerSerializerCalc.api_serializers = {"compact": _CompactSerializer}
+
+
 ALL_MODELS = [
     ApiSimpleItem,
     SchemaFKTarget,
@@ -246,9 +288,11 @@ ALL_MODELS = [
     ApiLayerCalc,
     ApiLayerCalcReadRestricted,
     ApiLayerCalcCalculateRestricted,
+    ApiLayerSerializerCalc,
 ]
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"
 API_LAYER_CALC_RESTRICTED = "apilayercalcreadrestricted"
 API_LAYER_CALC_RUN_RESTRICTED = "apilayercalccalculaterestricted"
+API_LAYER_SERIALIZER_CALC = "apilayerserializercalc"
