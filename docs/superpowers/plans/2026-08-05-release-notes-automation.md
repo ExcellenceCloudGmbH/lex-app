@@ -64,10 +64,12 @@ on:
     paths:
       - ".github/scripts/**"
       - ".github/workflows/scripts_tests.yml"
+      - "pyproject.toml"          # supplies pytest's addopts
   pull_request:
     paths:
       - ".github/scripts/**"
       - ".github/workflows/scripts_tests.yml"
+      - "pyproject.toml"          # supplies pytest's addopts
   workflow_dispatch:
 
 jobs:
