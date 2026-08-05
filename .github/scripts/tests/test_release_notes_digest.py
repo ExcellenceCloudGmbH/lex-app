@@ -103,3 +103,47 @@ def test_empty_subjects_are_dropped():
     ]
     got = digest.build_digest("v2.1.7", "v2.1.6", commits, [])
     assert [c["sha"] for c in got["changes"]] == ["7777777"]
+
+
+def test_collect_commits_parses_the_git_log_format():
+    raw = "705850d\x1ffix(calc): stop stamping edited_at\n81edcbc\x1ffeat(setup): onboard IDEs"
+    got = digest.collect_commits("v2.1.6", "v2.1.7", run_log=lambda a, b: raw)
+    assert got == [
+        digest.Commit(sha="705850d", subject="fix(calc): stop stamping edited_at"),
+        digest.Commit(sha="81edcbc", subject="feat(setup): onboard IDEs"),
+    ]
+
+
+def test_collect_commits_returns_empty_for_an_empty_log():
+    assert digest.collect_commits("v2.1.6", "v2.1.7", run_log=lambda a, b: "") == []
+
+
+def test_enrich_prefers_the_pr_title():
+    commits = [digest.Commit(sha="705850d", subject="publishable")]
+
+    def fake_lookup(sha: str):
+        assert sha == "705850d"
+        return (675, "fix(calc): never stamp edited_at for a calculation-owned save")
+
+    got = digest.enrich_with_prs(commits, lookup=fake_lookup)
+    assert got[0].pr_number == 675
+    assert got[0].pr_title == "fix(calc): never stamp edited_at for a calculation-owned save"
+    # The original subject is preserved, not overwritten.
+    assert got[0].subject == "publishable"
+
+
+def test_enrich_leaves_a_commit_without_a_pr_untouched():
+    commits = [digest.Commit(sha="deadbee", subject="fix(core): direct push")]
+    got = digest.enrich_with_prs(commits, lookup=lambda sha: None)
+    assert got[0].pr_number is None
+    assert got[0].pr_title is None
+    assert got[0].subject == "fix(core): direct push"
+
+
+def test_enrich_survives_a_lookup_failure():
+    def boom(sha: str):
+        raise RuntimeError("gh api rate limited")
+
+    commits = [digest.Commit(sha="deadbee", subject="fix(core): x")]
+    got = digest.enrich_with_prs(commits, lookup=boom)
+    assert got[0].pr_number is None
