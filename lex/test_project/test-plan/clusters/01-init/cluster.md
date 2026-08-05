@@ -252,10 +252,15 @@ does not remove user launch configurations.
 | 1.259 | The shortest requested interval wins | two tiles asking 5s and 0.5s watch the record at 0.5s; it cannot be watched at two rates |
 | 1.260 | The poller never touches Streamlit | nothing outside `get_poller()` references `st`; a thread with no script context writes into whichever session is current |
 | 1.261 | Two sessions never share a poller or a token | each session gets its own instance, out of `session_state` and never module state |
-| 1.262 | A failed read is still an answer | an unreachable backend stores a renderable state and stops polling, so a tile is neither blank nor a retry storm |
+| 1.262 | A transient failure is retried, a refusal is not | a read that never concluded backs off and tries again; a 404 stops. Giving up on both is what froze tiles on "Status unavailable" until a reload |
 | 1.263 | Connections are pooled, per thread | one thread reuses one `Session`; another gets its own, because `requests.Session` is not thread-safe and the poller reads concurrently |
 | 1.264 | A page of tiles loads in one run and no render-thread reads | `AppTest`: thirteen tiles, one script run, and not one read on the script's own thread |
 | 1.265 | Every tile declares a timer | `AppTest`: no tile reruns the page to obtain one, and all thirteen get their turn |
 | 1.266 | A total outage costs content, never the page | `AppTest`: every connection refused, no exception escapes, all thirteen tiles still render |
+| 1.267 | A failed read never erases a confirmed status | a read that fails after `SUCCESS` keeps the badge and adds a reconnecting caption; our view lapsed, the record did not change |
+| 1.268 | A redraw keeps the poller alive | a session whose only activity is tiles redrawing outlives the idle timeout — otherwise a calculation longer than 90s froze on "Running" |
+| 1.269 | A trigger does not wait for the read pass | the PATCH goes out before the pass's reads; behind them it landed a full round of backend latency after the click |
+| 1.270 | One script run's watches are read in one batch | six records registered together are read in one pass, not one-then-five |
+| 1.271 | A failed first read does not silence the return value | the single priming page run is spent on a real status, not on a failure, so a dashboard branching on the value is not stuck at `None` |
 
-**Scenario range:** 1.223 – 1.266. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-05) — 44 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/_status_poller.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this reads — and, for 1.247–1.250, the source of the `can_calculate` flag the button is drawn from.
+**Scenario range:** 1.223 – 1.271. **Test file:** `lex/test_project/tests/init/test_1ab_calculation_widget.py`. **Type:** U. **Status:** ✅ Complete (2026-08-05) — 49 pass / 0 fail. Sources: `lex/lex_app/streamlit/_client.py`, `lex/lex_app/streamlit/_status_poller.py`, `lex/lex_app/streamlit/calculation.py`, `lex/lex_app/streamlit/__init__.py`. Pairs with [batch 10o](../10-api_layer/batches.md), the status endpoint this reads — and, for 1.247–1.250, the source of the `can_calculate` flag the button is drawn from.

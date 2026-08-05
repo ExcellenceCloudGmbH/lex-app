@@ -76,6 +76,11 @@ class StatusState:
     log_truncated: bool = False
     can_calculate: bool = True
     calculate_denied_reason: Optional[str] = None
+    #: HTTP status of a failed read, ``None`` when the request never arrived.
+    #: What separates an answer from an outage: 403 and 404 *are* answers about
+    #: this record and will not change on their own, while a timeout, a 401 or a
+    #: 502 says nothing about the record at all and must be tried again.
+    failure_status: Optional[int] = None
 
 
 def _status_path(model: str, pk) -> str:
@@ -98,7 +103,11 @@ def read_status(model: str, pk, token: str, include_log: bool) -> StatusState:
     try:
         payload = _client.get_json(_status_path(model, pk), token, params=params)
     except _client.LexApiError as exc:
-        return StatusState(status=None, message=_failure_message(exc.status))
+        return StatusState(
+            status=None,
+            message=_failure_message(exc.status),
+            failure_status=exc.status,
+        )
     except Exception as exc:  # pragma: no cover - defensive, keeps the thread alive
         return StatusState(status=None, message=f"Status unavailable: {exc}")
 
@@ -127,7 +136,38 @@ def _failure_message(status_code: Optional[int]) -> str:
         return "Not available"
     if status_code == 404:
         return "Record not found"
+    if status_code == 401:
+        # The host refreshes ``session_state["access_token"]`` in the
+        # background, so this is very often a read that raced a rotation rather
+        # than a session that has actually ended. Worth saying, because
+        # "unavailable" sends the reader to look at the backend.
+        return "Reconnecting…"
     return "Status unavailable"
+
+
+#: Failures that are *answers about this record* and will not change on their
+#: own. Everything else -- a timeout, a 502, a 401 against a token the host is
+#: about to rotate -- says nothing about the record, so it is retried.
+_TERMINAL_FAILURES = frozenset({403, 404})
+
+#: The footnote beside a status that is still being shown after a read failed.
+#: Deliberately about the connection and not about the record: the status is
+#: perfectly available, it is our contact with the backend that lapsed, and
+#: putting "Status unavailable" next to a visible status is both alarming and
+#: untrue. Retrying is what makes this an accurate promise rather than a hope.
+LAPSE_MESSAGE = "Reconnecting…"
+
+
+def is_retryable_failure(state: "StatusState") -> bool:
+    """Whether a failed read is worth trying again.
+
+    Getting this wrong in the strict direction is what made a page feel
+    unreliable: treating *every* failure as final meant one dropped connection
+    left a tile reading "Status unavailable" for the rest of the session, with a
+    reload as the only way out. Getting it wrong in the loose direction turns a
+    deleted record into a poll that never stops.
+    """
+    return state.status is None and state.failure_status not in _TERMINAL_FAILURES
 
 
 #: Shown when this caller may not run the record: beside the disabled button when
@@ -175,6 +215,8 @@ class _Watch:
     #: ``False`` once a read settles the record. The entry stays -- its snapshot
     #: is what every later render displays -- but it stops costing requests.
     active: bool = True
+    #: Consecutive failed reads, which set the backoff. Reset by any answer.
+    failures: int = 0
 
 
 @dataclass
@@ -185,6 +227,15 @@ class _Snapshot:
     #: answer moved without having to compare envelopes field by field, which is
     #: what ``sync_page`` needs to rerun a page exactly once per change.
     generation: int = 0
+    #: The most recent read failed and this is the last answer that did not.
+    #: Kept rather than overwritten: a tile that has shown "Success" for ten
+    #: minutes should not start reading "Status unavailable" because one poll
+    #: timed out. The record did not change; our view of it lapsed, which is a
+    #: much smaller thing to say and belongs in a caption, not the badge.
+    stale: bool = False
+    #: Why the last read failed, for the caption above. ``None`` when the last
+    #: read succeeded.
+    lapse: Optional[str] = None
 
 
 @dataclass
@@ -219,12 +270,30 @@ class StatusPoller:
 
     #: Reads issued at once. A page watching six records should cost one round
     #: trip's worth of latency, not six -- but an unbounded fan-out would let a
-    #: dashboard open as many backend connections as it has tiles.
-    MAX_PARALLEL_READS = 4
+    #: dashboard open as many backend connections as it has tiles. Worth more
+    #: than it looks here: every request through ``KeycloakPermissionsMiddleware``
+    #: makes two uncached network calls to Keycloak, so a status read is not a
+    #: cheap query and the number of *rounds* is what a reader waits through.
+    MAX_PARALLEL_READS = 8
 
     #: Floor on the sleep between passes, so a zero or negative interval cannot
     #: turn the loop into a spin.
     TICK_FLOOR = 0.05
+
+    #: How long a brand-new watch waits before its first read. Small, and not
+    #: zero on purpose: a script run registers every tile's watch within a few
+    #: milliseconds, and a thread that woke on the first one would read that
+    #: record alone and only then discover the rest -- two rounds of backend
+    #: latency to fill a page instead of one. This lets one script run's watches
+    #: leave together.
+    NEW_WATCH_SETTLE = 0.03
+
+    #: Backoff after a failed read: doubling from the first bound to the second.
+    #: The point is to keep trying without turning an outage into a retry storm
+    #: -- thirteen tiles meeting a backend that is down should cost one read per
+    #: record per interval, widening as it stays down.
+    RETRY_BACKOFF_START = 1.0
+    RETRY_BACKOFF_CEILING = 30.0
 
     def __init__(
         self,
@@ -252,6 +321,7 @@ class StatusPoller:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._pool: Optional[ThreadPoolExecutor] = None
+        self._trigger_pool: Optional[ThreadPoolExecutor] = None
 
     # ── called from the render thread ────────────────────────────────────────
 
@@ -282,7 +352,7 @@ class StatusPoller:
                 self._watches[key] = _Watch(
                     include_log=include_log,
                     interval=self._sane_interval(interval),
-                    due_at=self._clock(),
+                    due_at=self._clock() + self.NEW_WATCH_SETTLE,
                 )
                 self._wake.set()
             else:
@@ -300,12 +370,34 @@ class StatusPoller:
 
         Never blocks and never fetches: this is the whole of the render path's
         contact with the backend. ``None`` means the first read has not landed,
-        which the widget renders as "Checking" -- not as an error, and above all
-        not as a reason to wait.
+        which the widget renders as a placeholder -- not as an error, and above
+        all not as a reason to wait.
+
+        Doubles as the session's heartbeat, and has to. Liveness used to be
+        refreshed by :meth:`set_token` alone, which only a full script run
+        reaches -- and the whole design is that a settled page never has one. A
+        calculation running longer than :data:`IDLE_EXIT_SECONDS` therefore
+        outlived the thread watching it, and its tile sat on "Running" until the
+        reader reloaded. A redraw is the honest signal that somebody still has
+        the page open, and every redraw calls this.
+        """
+        with self._lock:
+            self._last_seen = self._clock()
+            snapshot = self._snapshots.get(self._watch_key(model, pk, include_log))
+            return snapshot.state if snapshot else None
+
+    def lapse(self, model: str, pk, include_log: bool) -> Optional[str]:
+        """Why the last read failed, when an older answer is being shown instead.
+
+        ``None`` while reads are landing. Non-``None`` means :meth:`peek` is
+        returning a status the backend has since stopped confirming -- which the
+        reader is owed, but as a footnote rather than in place of the status.
         """
         with self._lock:
             snapshot = self._snapshots.get(self._watch_key(model, pk, include_log))
-            return snapshot.state if snapshot else None
+            if snapshot is None or not snapshot.stale:
+                return None
+            return snapshot.lapse
 
     def generation(self, model: str, pk, include_log: bool) -> int:
         """How many times this view's answer has been replaced."""
@@ -326,14 +418,22 @@ class StatusPoller:
             return record.trigger_error if record else None
 
     def request_trigger(self, model: str, pk) -> None:
-        """Queue a run and return immediately.
+        """Start a run and return immediately.
 
         The PATCH is real work -- ``One.update`` re-reads the record, clears
         terminal state, saves, registers the calculation and broadcasts it before
         answering -- and doing it inside the click handler is what made pressing
-        the button feel like nothing had happened. Queueing it lets the same
-        render that handled the click paint "Running", because by the time the
-        PATCH returns the record already is.
+        the button feel like nothing had happened.
+
+        It is dispatched on its own thread rather than handed to the polling
+        loop, which matters more than it sounds. The loop spends most of its
+        time inside a read pass, and a read is not quick: every request through
+        ``KeycloakPermissionsMiddleware`` costs two uncached calls to Keycloak.
+        A trigger queued behind that pass reached the backend a second or more
+        after the click, so the calculation genuinely started late even though
+        the badge said "Running" straight away -- the button was not slow to
+        *respond*, it was slow to *act*, which is worse because nothing on
+        screen admits it. A reader's action never waits behind housekeeping.
         """
         record_key = self._record_key(model, pk)
         with self._lock:
@@ -346,9 +446,42 @@ class StatusPoller:
             for key, watch in self._watches.items():
                 if key[0] == record_key[0] and key[1] == record_key[1]:
                     watch.active = True
+                    watch.failures = 0
                     watch.due_at = self._clock()
         self._wake.set()
         self._ensure_running()
+        self._dispatch_triggers()
+
+    def _dispatch_triggers(self) -> None:
+        """Send whatever is queued, on the trigger pool, without blocking.
+
+        Does nothing when the poller has no threads of its own -- the tests
+        drive it, and :meth:`run_once` drains the same queue under the same
+        lock, so a trigger is sent exactly once either way.
+        """
+        if not self._autostart or self._stop.is_set():
+            return
+        with self._lock:
+            if self._trigger_pool is None:
+                self._trigger_pool = ThreadPoolExecutor(
+                    max_workers=2, thread_name_prefix="lex-calculation-trigger",
+                )
+            pool = self._trigger_pool
+        pool.submit(self._drain_triggers)
+
+    def _drain_triggers(self) -> None:
+        with self._lock:
+            token = self._token
+            queued, self._queue = self._queue, []
+        if not token:
+            with self._lock:
+                # Put them back: a token is one render away, and dropping a
+                # reader's click because one had not arrived yet is the kind of
+                # failure nothing on the page could explain.
+                self._queue[:0] = queued
+            return
+        for record_key in queued:
+            self._send_trigger(record_key, token)
 
     def is_watching(self, model: str, pk, include_log: bool) -> bool:
         """Whether this view is still being polled."""
@@ -360,12 +493,13 @@ class StatusPoller:
         """Shut the thread down. For tests and for an explicit teardown."""
         self._stop.set()
         self._wake.set()
-        thread, pool = self._thread, self._pool
-        self._thread, self._pool = None, None
+        thread, pool, triggers = self._thread, self._pool, self._trigger_pool
+        self._thread, self._pool, self._trigger_pool = None, None, None
         if thread and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=2.0)
-        if pool:
-            pool.shutdown(wait=False)
+        for closing in (pool, triggers):
+            if closing:
+                closing.shutdown(wait=False)
 
     # ── the thread ───────────────────────────────────────────────────────────
 
@@ -464,27 +598,84 @@ class StatusPoller:
         now = self._clock()
         with self._lock:
             for key, state in results:
+                watch = self._watches.get(key)
+                previous = self._snapshots.get(key)
+
+                if state.status is None:
+                    retryable = is_retryable_failure(state)
+                    keep = (
+                        retryable
+                        and previous is not None
+                        and previous.state.status is not None
+                    )
+                    if keep:
+                        # Not news about the record. Keep what was last
+                        # confirmed and footnote it, so a tile that has read
+                        # "Success" for ten minutes does not start reading
+                        # "Status unavailable" because one poll timed out.
+                        #
+                        # The footnote is LAPSE_MESSAGE and not the read's own
+                        # message on purpose: "Status unavailable" beside a
+                        # status the reader can see is a contradiction, and it
+                        # is the wrong thing to say -- the status is available,
+                        # it is our contact with the backend that dropped.
+                        self._snapshots[key] = _Snapshot(
+                            state=previous.state,
+                            read_at=previous.read_at,
+                            generation=previous.generation,
+                            stale=True,
+                            lapse=LAPSE_MESSAGE,
+                        )
+                    else:
+                        # Either nothing was ever confirmed, or this failure *is*
+                        # an answer -- a 404 after a good read means the record
+                        # has gone, and continuing to show its last status would
+                        # be describing something that no longer exists.
+                        self._generation += 1
+                        self._snapshots[key] = _Snapshot(
+                            state=state, read_at=now, generation=self._generation,
+                            stale=True, lapse=None,
+                        )
+                    if watch is not None:
+                        if retryable:
+                            # Back off, but never give up. Stopping outright is
+                            # what left one dropped connection showing "Status
+                            # unavailable" until the reader reloaded the page.
+                            watch.failures += 1
+                            watch.active = True
+                            watch.due_at = now + self._backoff(watch.failures)
+                        else:
+                            # 403 or 404: an answer about this record, and not
+                            # one that changes on its own.
+                            watch.active = False
+                    continue
+
                 self._generation += 1
                 self._snapshots[key] = _Snapshot(
                     state=state, read_at=now, generation=self._generation,
                 )
-                watch = self._watches.get(key)
                 if watch is None:
                     continue
+                watch.failures = 0
                 watch.due_at = now + watch.interval
                 # A read that reached the backend outranks the optimism, in both
                 # directions: it confirms the run, or it reveals that the trigger
                 # never took. Optimism covers exactly one round trip and must not
                 # become a second opinion about the record.
                 record = self._records.get((key[0], key[1]))
-                if record is not None and state.status is not None:
+                if record is not None:
                     record.pending = False
                 if state.status not in ACTIVE_STATUSES:
-                    # Settled, or unreadable. Either way nothing here changes
-                    # again on its own, and an idle dashboard that kept asking is
-                    # permanent load multiplied by every tab left open -- and
-                    # invisible, because nothing is broken.
+                    # Settled. Nothing here changes again on its own, and an idle
+                    # dashboard that kept asking is permanent load multiplied by
+                    # every tab left open -- and invisible, because nothing is
+                    # broken.
                     watch.active = False
+
+    def _backoff(self, failures: int) -> float:
+        """Seconds before retrying, doubling to a ceiling."""
+        delay = self.RETRY_BACKOFF_START * (2 ** max(0, failures - 1))
+        return min(self.RETRY_BACKOFF_CEILING, delay)
 
     def _read(self, key: WatchKey, token: str) -> StatusState:
         model, pk, include_log = key

@@ -375,6 +375,62 @@ thread; results come back through plain dictionaries under a lock. The thread
 also stops itself once the session stops rendering, because a closed tab gives
 no teardown signal a background thread can see.
 
+### What happens when reads fail
+
+A status read is not cheap. Every request through `KeycloakPermissionsMiddleware`
+makes **two uncached network calls to Keycloak** (`get_uma_permissions` and
+`oidc.userinfo`), so a poll is a real round trip and, under load, one that
+sometimes does not come back. Three rules keep that from reading as a broken
+page:
+
+**A failure is retried, unless it is an answer.** 403 and 404 *are* answers
+about the record and will not change on their own, so they stop the watch.
+Everything else — a timeout, a 502, a 401 against a token the host is about to
+rotate — says nothing about the record, so it is retried on a backoff doubling
+from 1s to 30s. Treating every failure as final is what left one dropped
+connection showing "Status unavailable" until the reader reloaded the page.
+
+**A failure never erases a confirmed status.** If a read fails and the record
+last read `SUCCESS`, the badge still says `SUCCESS` and a separate caption says
+`Reconnecting…`. The calculation did not stop being finished; our contact with
+the backend lapsed, which is a much smaller thing to say — and putting "Status
+unavailable" next to a status the reader can see is both alarming and untrue.
+The exception is a 404 arriving after a good read: the record has gone, so the
+old status goes with it.
+
+**A tile that is redrawing keeps its poller alive.** Liveness used to be
+refreshed only on a full script run, and the whole design is that a settled page
+never has one — so a calculation running longer than 90 seconds outlived the
+thread watching it and froze on "Running". `peek()` refreshes it now, and every
+redraw calls `peek()`.
+
+### The first moments of a page
+
+A tile appears with the page and before anything is known about its record, so
+it renders `—` — a placeholder holding the space the status will occupy, not the
+word "Checking", which thirteen tiles all saying at once reads as a page that
+cannot reach its backend.
+
+How long that lasts is one backend round trip, not several: watches registered
+during a single script run are held for 30 ms so they leave in one parallel
+batch (up to 8 at a time). Without that, the poller wakes on the first tile's
+watch, reads that record alone, and only then discovers the rest — two rounds of
+latency to fill a page.
+
+### Pressing the button
+
+The click is acknowledged in the same render that handled it, with `Starting…`
+rather than `Running`: the reader pressed a button and is owed an answer to
+*that*. It also fails better — a refusal arriving after `Starting…` is a story,
+and after `Running` it is a contradiction.
+
+The trigger is dispatched on its own thread, not handed to the polling loop.
+That loop spends most of its time inside a read pass, and a trigger queued
+behind one reached the backend a second or more after the click — so the
+calculation genuinely started late while the badge already said it had started.
+`request_trigger()` returns in about a millisecond; the PATCH leaves within
+~15 ms.
+
 ### Keeping the rest of the page in step
 
 The tile updates itself in place. Code *outside* it does not — Streamlit only

@@ -135,15 +135,33 @@ def _poller(*, answers=None, trigger=None, clock=None):
         triggers.append({"model": model, "pk": pk, "token": token})
         return trigger(model, pk, token) if callable(trigger) else trigger
 
+    clock = clock or _Clock()
     instance = StatusPoller(
         reader=_read,
         trigger=_trigger,
-        clock=clock or _Clock(),
+        clock=clock,
         autostart=False,
     )
     instance.reads = calls
     instance.triggers = triggers
+    instance.clock = clock
     return instance
+
+
+def _pass(poller, times: int = 1):
+    """Step past the settle delay and run one poller pass.
+
+    A brand-new watch is deliberately not due the instant it is registered: one
+    script run registers every tile's watch within a few milliseconds, and a
+    thread that woke on the first would read that record alone and only then
+    discover the rest -- two rounds of backend latency to paint a page instead
+    of one. Scenarios drive a frozen clock, so they have to step over it.
+    """
+    from lex.lex_app.streamlit._status_poller import StatusPoller
+
+    for _ in range(times):
+        poller.clock.advance(StatusPoller.NEW_WATCH_SETTLE)
+        poller.run_once()
 
 
 class _FakeStreamlit:
@@ -820,7 +838,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         """
         poller.set_token("user-token")
         poller.watch(model, pk, include_log=include_log, interval=2.0)
-        poller.run_once()
+        _pass(poller)
 
     @staticmethod
     def _settled(**kwargs):
@@ -877,7 +895,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         with self._page(host, poller):
             calculation.lex_calculation("quarter", 1)
 
-        poller.run_once()
+        _pass(poller)
         self.assertEqual(
             poller.reads[0]["token"], "fresh-token",
             msg=(
@@ -1222,7 +1240,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
             for index in range(6):
                 calculation.lex_calculation("quarter", 2, key=f"b{index}")
 
-        poller.run_once()
+        _pass(poller)
         self.assertEqual(
             len(poller.reads), 2,
             msg=(
@@ -1249,7 +1267,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         poller = _poller(answers={"*": self._settled()}, trigger=None)
         poller.set_token("user-token")
         poller.watch("quarter", 1, include_log=False, interval=2.0)
-        poller.run_once()
+        _pass(poller)
 
         host = _FakeStreamlit(button_returns=True)
         host.session_state["access_token"] = "user-token"
@@ -1267,13 +1285,13 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
             ),
         )
 
-        poller.run_once()
+        _pass(poller)
         self.assertEqual(
             len(poller.triggers), 1,
             msg="The trigger must actually go out on the poller's next pass.",
         )
 
-    def test_1_254_a_click_renders_running_before_any_read_confirms_it(self):
+    def test_1_254_a_click_is_acknowledged_before_any_read_confirms_it(self):
         """
         Scenario 1.254: the badge answers the click, not the next poll.
         Given: a settled record and a reader who presses Calculate
@@ -1291,7 +1309,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         poller = _poller(answers={"*": self._settled(status="NOT_CALCULATED")})
         poller.set_token("user-token")
         poller.watch("quarter", 1, include_log=False, interval=2.0)
-        poller.run_once()
+        _pass(poller)
 
         host = _FakeStreamlit(button_returns=True)
         host.session_state["access_token"] = "user-token"
@@ -1302,10 +1320,14 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
             calculation.lex_calculation("quarter", 1)   # the click lands here
 
         self.assertIn(
-            "Running", host.text_of(),
+            "Starting", host.text_of(),
             msg=(
-                "The render that handled the click must already say Running; it "
-                f"rendered {host.text_of()!r}."
+                "The render that handled the click must acknowledge it in words; "
+                f"it rendered {host.text_of()!r}. 'Starting…' rather than "
+                "'Running' because the reader pressed a button and is owed an "
+                "answer to that, not a status that happens to be correct -- and "
+                "because a refusal a moment later reads as a story after "
+                "'Starting…' and as a contradiction after 'Running'."
             ),
         )
 
@@ -1329,7 +1351,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
 
         poller.watch("quarter", 1, include_log=False, interval=2.0)
         poller.set_token("user-token")
-        poller.run_once()
+        _pass(poller)
 
         self.assertFalse(
             poller.is_pending("quarter", 1),
@@ -1355,10 +1377,10 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         poller.set_token("user-token")
         poller.watch("quarter", 1, include_log=False, interval=2.0)
 
-        poller.run_once()
+        _pass(poller)
         settled_after = len(poller.reads)
         clock.advance(60.0)
-        poller.run_once()
+        _pass(poller)
 
         self.assertEqual(
             len(poller.reads), settled_after,
@@ -1369,7 +1391,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         )
 
         poller.request_trigger("quarter", 1)
-        poller.run_once()
+        _pass(poller)
 
         self.assertGreater(
             len(poller.reads), settled_after,
@@ -1427,7 +1449,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         poller.set_token("user-token")
         poller.watch("quarter", 1, include_log=False, interval=2.0)
         poller.watch("quarter", 1, include_log=True, interval=2.0)
-        poller.run_once()
+        _pass(poller)
 
         asked = sorted(call["include_log"] for call in poller.reads)
         self.assertEqual(
@@ -1455,10 +1477,10 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         poller.watch("quarter", 1, include_log=False, interval=5.0)
         poller.watch("quarter", 1, include_log=False, interval=0.5)
 
-        poller.run_once()
+        _pass(poller)
         first = len(poller.reads)
         clock.advance(0.6)
-        poller.run_once()
+        _pass(poller)
 
         self.assertGreater(
             len(poller.reads), first,
@@ -1551,39 +1573,285 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
             msg="The poller must live in session state, not module state.",
         )
 
-    def test_1_262_a_read_that_fails_is_still_an_answer(self):
+    def test_1_262_a_transient_failure_is_retried_and_a_refusal_is_not(self):
         """
-        Scenario 1.262: an unreachable backend does not leave a tile blank.
-        Given: a backend that cannot be read
-        When: the poller runs a pass
-        Then: it stores the failure as this record's state and stops polling it.
+        Scenario 1.262: a dropped connection is not an answer about the record.
+        Given: a backend that fails a read without ever reaching a conclusion,
+               and separately one that answers 404
+        When: the poller runs passes
+        Then: the first is retried on a widening backoff and the second stops.
 
-        A tile with no state at all renders "Checking" forever, which reads as a
-        page that has hung. And a backend that is down is exactly when a
-        dashboard must not multiply its own retries: thirteen tiles meeting an
-        outage should cost one failed round trip per record, once.
+        Treating every failure as final is what made the page feel unreliable:
+        one blip left a tile reading "Status unavailable" for the rest of the
+        session, and only a reload cleared it. Treating none as final turns a
+        deleted record into a poll that never stops. The line is whether the
+        failure says anything *about this record* -- 403 and 404 do, a timeout
+        does not.
         """
-        from lex.lex_app.streamlit._status_poller import StatusState
+        from lex.lex_app.streamlit._status_poller import StatusPoller, StatusState
 
+        clock = _Clock()
         poller = _poller(
             answers={"*": StatusState(status=None, message="Status unavailable")},
+            clock=clock,
         )
         poller.set_token("user-token")
         poller.watch("quarter", 1, include_log=False, interval=2.0)
-        poller.run_once()
+        _pass(poller)
 
-        state = poller.peek("quarter", 1, False)
         self.assertIsNotNone(
-            state, msg="A failed read must still produce a state to render.",
+            poller.peek("quarter", 1, False),
+            msg="A failed read must still produce a state to render.",
         )
-        self.assertEqual(state.message, "Status unavailable")
-        self.assertFalse(
+        self.assertTrue(
             poller.is_watching("quarter", 1, False),
             msg=(
-                "A record that could not be read must not be retried on a "
-                "timer; that turns an outage into a retry storm."
+                "A read that never reached a conclusion must be tried again. "
+                "Giving up here is what left a tile stuck on 'Status "
+                "unavailable' until the reader reloaded the page."
             ),
         )
+
+        before = len(poller.reads)
+        clock.advance(StatusPoller.RETRY_BACKOFF_START + 0.01)
+        poller.run_once()
+        self.assertGreater(
+            len(poller.reads), before,
+            msg="The retry must actually happen once the backoff has elapsed.",
+        )
+
+        # ...and it widens, so thirteen tiles meeting an outage do not become a
+        # retry storm against a backend that is already struggling.
+        after_second = len(poller.reads)
+        clock.advance(StatusPoller.RETRY_BACKOFF_START + 0.01)
+        poller.run_once()
+        self.assertEqual(
+            len(poller.reads), after_second,
+            msg=(
+                "The second failure must wait longer than the first; the poller "
+                "retried on the same interval, which is a retry storm."
+            ),
+        )
+
+        refused = _poller(
+            answers={"*": StatusState(
+                status=None, message="Record not found", failure_status=404,
+            )},
+        )
+        refused.set_token("user-token")
+        refused.watch("quarter", 9, include_log=False, interval=2.0)
+        _pass(refused)
+
+        self.assertFalse(
+            refused.is_watching("quarter", 9, False),
+            msg=(
+                "A 404 is an answer about this record and will not change on "
+                "its own; retrying it forever is permanent load for nothing."
+            ),
+        )
+
+    def test_1_267_a_failed_read_never_erases_a_status_that_was_confirmed(self):
+        """
+        Scenario 1.267: our view lapses; the record does not change.
+        Given: a record that read SUCCESS, and then a read that fails
+        When: the tile redraws
+        Then: it still reports SUCCESS, and says separately that it is
+              reconnecting.
+
+        Replacing a status the reader has been watching for ten minutes with
+        "Status unavailable" claims something about the record that did not
+        happen. The calculation is still finished; we merely stopped being able
+        to confirm it, which belongs in a footnote and not in the badge.
+        """
+        from lex.lex_app.streamlit._status_poller import StatusState
+
+        answers = {"*": StatusState(status="SUCCESS")}
+        poller = _poller(answers=answers)
+        poller.set_token("user-token")
+        poller.watch("quarter", 1, include_log=False, interval=2.0)
+        _pass(poller)
+
+        self.assertEqual(poller.peek("quarter", 1, False).status, "SUCCESS")
+        self.assertIsNone(
+            poller.lapse("quarter", 1, False),
+            msg="Nothing has lapsed while reads are landing.",
+        )
+
+        answers["*"] = StatusState(status=None, message="Status unavailable")
+        poller.request_trigger("quarter", 1)   # re-arms the watch
+        poller.run_once()
+
+        self.assertEqual(
+            poller.peek("quarter", 1, False).status, "SUCCESS",
+            msg=(
+                "The confirmed status must survive a failed read; the tile now "
+                "reports something the backend never said about the record."
+            ),
+        )
+        self.assertIsNotNone(
+            poller.lapse("quarter", 1, False),
+            msg="The reader is still owed the fact that we have lost contact.",
+        )
+
+    def test_1_268_a_redraw_keeps_the_poller_alive(self):
+        """
+        Scenario 1.268: the thread outlives a calculation that outlives a page run.
+        Given: a session whose only activity is tiles redrawing themselves
+        When: more than the idle timeout passes
+        Then: the poller is still running.
+
+        Liveness used to be refreshed only by set_token, which only a full
+        script run reaches -- and the entire design is that a settled page never
+        has one. So a calculation running longer than the idle timeout outlived
+        the thread watching it, and its tile sat on "Running" until the reader
+        reloaded. A redraw is the honest signal that somebody still has the page
+        open, and peek() is what every redraw calls.
+        """
+        from lex.lex_app.streamlit._status_poller import StatusPoller, StatusState
+
+        clock = _Clock()
+        poller = _poller(
+            answers={"*": StatusState(status="IN_PROGRESS")}, clock=clock,
+        )
+        poller.set_token("user-token")
+        poller.watch("quarter", 1, include_log=False, interval=2.0)
+        _pass(poller)
+
+        # No further app run -- only redraws, which is the steady state.
+        for _ in range(4):
+            clock.advance(StatusPoller.IDLE_EXIT_SECONDS / 2)
+            poller.peek("quarter", 1, False)
+            self.assertIsNotNone(
+                poller.run_once(),
+                msg=(
+                    "A page whose tiles are still redrawing is a page somebody "
+                    "still has open; its poller must not exit. A calculation "
+                    "longer than the idle timeout froze on 'Running' because it "
+                    "did."
+                ),
+            )
+
+    def test_1_269_a_trigger_does_not_wait_for_the_read_pass(self):
+        """
+        Scenario 1.269: a reader's action never queues behind housekeeping.
+        Given: a poller with reads to do
+        When: a trigger is requested
+        Then: it is sent before the due reads of that pass.
+
+        Reads are not quick -- every request through the Keycloak permissions
+        middleware costs two uncached calls to Keycloak -- so a trigger queued
+        behind a read pass reached the backend a second or more after the click.
+        The button was not slow to *respond*; it was slow to *act*, which is
+        worse, because the badge already said the run had started.
+        """
+        order = []
+
+        def _trigger(model, pk, token):
+            order.append("trigger")
+            return None
+
+        poller = _poller(trigger=_trigger)
+        poller.set_token("user-token")
+        poller.watch("quarter", 1, include_log=False, interval=2.0)
+        poller.watch("quarter", 2, include_log=False, interval=2.0)
+        original_read = poller._reader
+
+        def _slow_read(model, pk, token, include_log):
+            order.append("read")
+            return original_read(model, pk, token, include_log)
+
+        poller._reader = _slow_read
+        poller.request_trigger("quarter", 1)
+        _pass(poller)
+
+        self.assertEqual(
+            order[0], "trigger",
+            msg=(
+                f"The trigger must go out before the pass's reads; order was "
+                f"{order!r}. Behind them it lands a full round of backend "
+                "latency after the click."
+            ),
+        )
+
+    def test_1_270_one_script_runs_watches_are_read_in_one_batch(self):
+        """
+        Scenario 1.270: a page fills in one round of latency, not two.
+        Given: six records registered in quick succession, as one script run does
+        When: the poller takes its first pass
+        Then: all six are read in that pass.
+
+        Without the settle delay the thread wakes on the first watch, reads that
+        record alone, and only then discovers the other five -- so the last tile
+        on the page waits two full backend round trips before it can show
+        anything. That is most of the window in which every tile showed a
+        placeholder.
+        """
+        poller = _poller()
+        poller.set_token("user-token")
+        for pk in range(6):
+            poller.watch("quarter", pk, include_log=False, interval=2.0)
+        _pass(poller)
+
+        self.assertEqual(
+            len(poller.reads), 6,
+            msg=(
+                f"All six watches registered in one script run must be read in "
+                f"one pass; the poller read {len(poller.reads)}."
+            ),
+        )
+
+
+    def test_1_271_a_failed_first_read_does_not_silence_the_return_value(self):
+        """
+        Scenario 1.271: a blip on the first read costs a moment, not the session.
+        Given: a record whose first read fails and whose retry succeeds
+        When: the tile redraws after each
+        Then: the widget still has a page run left to announce the real status.
+
+        The widget re-runs the page exactly once per record, when the first
+        answer lands, so that ``status = lex_calculation(...)`` followed by a
+        branch is true on a freshly opened page. Spending that run on a *failed*
+        read -- which produces a snapshot, but not an answer -- left the widget
+        returning None to the dashboard for the rest of the session: the retry
+        that finally succeeded had no run left to announce itself with, and the
+        page below the tile stayed empty while the tile itself read "Success".
+        """
+        from lex.lex_app.streamlit import calculation
+        from lex.lex_app.streamlit._status_poller import StatusState
+
+        answers = {"*": StatusState(status=None, message="Status unavailable")}
+        poller = _poller(answers=answers)
+        poller.set_token("user-token")
+        poller.watch("quarter", 1, include_log=False, interval=2.0)
+        _pass(poller)
+
+        host = _FakeStreamlit()
+        host.session_state["access_token"] = "user-token"
+        with mock.patch.object(calculation, "st", host), mock.patch.object(
+            calculation, "get_poller", return_value=poller,
+        ):
+            calculation.lex_calculation("quarter", 1)
+            self.assertFalse(
+                host.session_state.get("lex_calc_quarter_1__primed"),
+                msg=(
+                    "A failed read is not an answer about the record, so it must "
+                    "not consume the one page run the widget has to announce one."
+                ),
+            )
+
+            answers["*"] = StatusState(status="SUCCESS")
+            poller.request_trigger("quarter", 1)
+            poller.run_once()
+
+            with self.assertRaises(
+                _FakeStreamlit.Rerun,
+                msg=(
+                    "Once a real status lands, the page must run so that code "
+                    "outside the tile sees it. Without this the dashboard "
+                    "branches on None forever."
+                ),
+            ):
+                host.fragments[0]()
 
 
 # ── against the real Streamlit runtime ───────────────────────────────────────

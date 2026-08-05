@@ -123,10 +123,22 @@ _PRESENTATIONS = {
 }
 
 #: Before the first read lands. A tile appears the moment the page does, which
-#: means it appears before anything is known about the record -- and saying so is
-#: the honest rendering. Not an error state: nothing has gone wrong, and the
-#: answer is normally a fraction of a second away.
-CHECKING = Presentation("Checking…", MUTED, False)
+#: means it appears before anything is known about the record.
+#:
+#: Deliberately an ellipsis rather than a word. "Checking…" was read as a
+#: *status* -- thirteen tiles all announcing they were checking looked like a
+#: page that could not reach its backend, when in fact nothing had gone wrong and
+#: nothing had yet been asked. A placeholder should hold the space the status
+#: will occupy and say nothing, which is the truth at that moment.
+CHECKING = Presentation("—", MUTED, False)
+
+#: Between the click and the first read that confirms it. Distinct from
+#: "Running" on purpose: the reader pressed a button and is owed an
+#: acknowledgement that names their action, not a status that happens to be
+#: correct. They also read very differently if the trigger is refused a moment
+#: later -- "Starting…" turning into an error is a story; "Running" turning into
+#: an error is a contradiction.
+STARTING = Presentation("Starting…", WARNING, False)
 
 
 def presentation_for(status: Optional[str]) -> Presentation:
@@ -309,7 +321,7 @@ def lex_calculation(
     seen_key = f"{widget_key}__page_status"
     primed_key = f"{widget_key}__primed"
     st.session_state[seen_key] = _visible_status(poller, model, pk, show_log)
-    if poller.peek(model, pk, show_log) is not None:
+    if _has_status(poller.peek(model, pk, show_log)):
         # Already known when the page ran, so the dashboard below has the real
         # value and there is nothing for the priming rerun to fix. Marking it
         # here is what keeps a page that reruns for its own reasons -- a filter
@@ -334,9 +346,8 @@ def lex_calculation(
     @st.fragment(run_every=ui_refresh_for(poll_interval))
     def _render():
         state = poller.peek(model, pk, show_log)
-        status = optimistic_status(
-            state.status if state else None, poller.is_pending(model, pk),
-        )
+        pending = poller.is_pending(model, pk)
+        status = optimistic_status(state.status if state else None, pending)
 
         if state is None:
             # The first read has not landed. Show the control rather than a
@@ -349,19 +360,21 @@ def lex_calculation(
             with left:
                 clicked = _button(label, widget_key, disabled=False)
             with right:
-                _badge(CHECKING if not clicked else presentation_for(
-                    _OPTIMISTIC_STATUS), show_status)
+                _badge(STARTING if (clicked or pending) else CHECKING, show_status)
             if clicked:
                 poller.request_trigger(model, pk)
                 status = _OPTIMISTIC_STATUS
         elif status is None:
-            # The read reached a conclusion and it was a failure. There is no
-            # badge to draw and no button worth offering.
+            # Every read of this record has failed, so there is nothing to draw
+            # a badge or a button from. Reached only when the *first* read
+            # failed: once one has succeeded, a later failure keeps the answer
+            # it produced and becomes the caption below instead.
             st.caption(state.message)
         else:
             status = _tile(
                 state=state,
                 status=status,
+                pending=pending,
                 label=label,
                 widget_key=widget_key,
                 poller=poller,
@@ -372,6 +385,14 @@ def lex_calculation(
                 show_error=show_error,
                 show_log=show_log,
             )
+
+        lapse = poller.lapse(model, pk, show_log)
+        if lapse and status is not None:
+            # A footnote, deliberately, and only when there is a status to
+            # footnote. The record has not changed -- our view of it has lapsed,
+            # and that is a much smaller thing to say than replacing a status
+            # the reader has been watching with an error.
+            st.caption(lapse)
 
         failure = poller.trigger_error(model, pk)
         if failure:
@@ -384,7 +405,7 @@ def lex_calculation(
             # Whatever else is true, this pass may not rerun the page.
             return
 
-        if state is not None and not st.session_state.get(primed_key):
+        if _has_status(state) and not st.session_state.get(primed_key):
             # The first answer for this record has just landed, and it landed
             # after the page run that returned ``None`` to the dashboard. One
             # run here is what makes the documented pattern -- branch on the
@@ -392,6 +413,12 @@ def lex_calculation(
             # than only after the reader happens to interact with something.
             # Once per record per session; thirteen tiles asking within the same
             # moment coalesce into a single run.
+            #
+            # Keyed on there being a *status*, not merely a snapshot. A first
+            # read that failed is a snapshot too, and spending the one priming
+            # run on it left the widget returning None to the dashboard for the
+            # rest of the session -- the retry that finally succeeded had no run
+            # left to announce itself with.
             st.session_state[primed_key] = True
             st.rerun()
 
@@ -415,6 +442,17 @@ def lex_calculation(
     # The status the badge is showing, so a dashboard branching on the return
     # value cannot render finished results underneath a "Running" badge.
     return _envelope(state, state_box.get("status"))
+
+
+def _has_status(state) -> bool:
+    """Whether a snapshot carries a status the dashboard can branch on.
+
+    A failed read produces a state with no status. It is worth rendering -- the
+    reader is owed the message -- but it is not an answer about the record, and
+    treating it as one is what let a single failed first read silence a widget's
+    return value permanently.
+    """
+    return state is not None and state.status is not None
 
 
 def _visible_status(poller, model: str, pk, include_log: bool) -> Optional[str]:
@@ -442,7 +480,7 @@ def _button(label: str, widget_key: str, *, disabled: bool) -> bool:
 
 
 def _tile(
-    *, state, status, label, widget_key, poller, model, pk,
+    *, state, status, pending, label, widget_key, poller, model, pk,
     show_status, show_last_run, show_error, show_log,
 ) -> Optional[str]:
     """One record's button, badge and detail, in that order.
@@ -462,13 +500,18 @@ def _tile(
     left, right = st.columns([1, 2])
     with left:
         if _button(label, widget_key, disabled=status in ACTIVE_STATUSES or blocked):
-            # Queued, not sent: the PATCH happens on the poller thread, so this
-            # render finishes now and paints "Running" -- which is what the
-            # record already is by the time that PATCH returns.
+            # Dispatched, not awaited: the PATCH goes out on the poller's
+            # trigger thread, so this render finishes now and acknowledges the
+            # press in the same pass that handled it.
             poller.request_trigger(model, pk)
             status = _OPTIMISTIC_STATUS
+            pending = True
 
-    look = presentation_for(status)
+    # "Starting…" until a read confirms the run, then "Running". Both are
+    # honest -- ``One.update`` saves IN_PROGRESS before it answers -- but only
+    # the first is an answer to what the reader just did, and a button that
+    # produces no word of its own is the definition of feeling unresponsive.
+    look = STARTING if (pending and status == _OPTIMISTIC_STATUS) else presentation_for(status)
     with right:
         _badge(look, show_status)
         if blocked:

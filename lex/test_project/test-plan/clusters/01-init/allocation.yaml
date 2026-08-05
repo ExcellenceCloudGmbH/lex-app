@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 266
+max_scenario: 271
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -284,10 +284,10 @@ letters:
       a-z. Renumbered from z/1.201-1.206 on merge
   ab:
     title: Streamlit lex_calculation() widget — trigger one record and watch it
-    scenarios: 1.223-1.266
+    scenarios: 1.223-1.271
     status: complete
     tests:
-      pass: 44
+      pass: 49
       skip: 0
       xfail: 0
     note: >-
@@ -333,4 +333,28 @@ letters:
       module state (1.261), and the polling thread never touches `st` at all (1.260). Measured in a
       browser, 13 tiles over 6 records against a 300ms backend: whole-page render seconds to 17ms, reads
       on the render thread 13 to 0, click-to-"Running" ~7s to 103ms, full script runs caused by a click 14
-      to 0, page greyed seconds-at-a-time to 0.8% of wall clock in ~20ms flickers.
+      to 0, page greyed seconds-at-a-time to 0.8% of wall clock in ~20ms flickers. A third pass
+      (1.267-1.271) fixed what the second one had made worse under a backend that is not perfectly healthy
+      - and that backend is the normal case, because every request through KeycloakPermissionsMiddleware
+      makes two uncached network calls to Keycloak, so a status read is a real round trip that sometimes
+      does not come back. Two of the faults were introduced by the rewrite itself. A failed read set the
+      watch inactive, so one dropped connection froze a tile on 'Status unavailable' for the rest of the
+      session with a reload as the only way out; retries now back off from 1s to 30s, and only 403/404
+      stop a watch because only those are answers about the record (1.262). And liveness was refreshed by
+      set_token alone, which only a full script run reaches - while the entire design is that a settled
+      page never has one, so a calculation longer than the 90s idle timeout outlived the thread watching
+      it and froze on 'Running'; peek() refreshes it now, and every redraw calls peek() (1.268). The rest
+      is what made the page read as unreliable rather than actually be so: a failed read no longer erases
+      a confirmed status, it keeps the badge and adds a 'Reconnecting...' caption, because the calculation
+      did not stop being finished and 'Status unavailable' beside a visible status is both alarming and
+      untrue (1.267); a trigger is dispatched on its own thread instead of queueing behind a read pass,
+      which had it reaching the backend a second or more after the click while the badge already claimed
+      the run had started - request_trigger now returns in ~1ms and the PATCH leaves within ~15ms (1.269);
+      watches registered during one script run settle for 30ms so they leave in one parallel batch of up
+      to eight, instead of the poller waking on the first and discovering the rest only after a full round
+      trip (1.270); and the one page run the widget spends to announce a first answer is no longer spent
+      on a failed read, which had left the return value stuck at None for the session (1.271). The
+      placeholder before the first read is now an em dash rather than 'Checking', which thirteen tiles
+      saying at once read as a page that could not reach its backend, and a click is acknowledged with
+      'Starting...' rather than 'Running' - a refusal a moment later is a story after the first and a
+      contradiction after the second.
