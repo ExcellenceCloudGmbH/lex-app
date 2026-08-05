@@ -72,12 +72,30 @@ def _pac_arg(args: argparse.Namespace) -> Path | None:
     return Path(args.pac_checkout) if args.pac_checkout else None
 
 
+def _load_exemplar() -> str:
+    """The style exemplar, or a built-in stand-in if it is missing.
+
+    A missing style file must never sink a release note. This crashed CI once:
+    the exemplar existed on the author's laptop but had never been committed,
+    so every local dry run passed and the first real run died before
+    `notes.draft()` — the one function that guarantees a usable body.
+    """
+    if EXEMPLAR_PATH.exists():
+        return EXEMPLAR_PATH.read_text(encoding="utf-8")
+    print(
+        f"Style exemplar missing at {EXEMPLAR_PATH} — falling back to the "
+        "built-in one. Restore the file to control the house style.",
+        file=sys.stderr,
+    )
+    return notes.FALLBACK_EXEMPLAR
+
+
 def cmd_draft_notes(args: argparse.Namespace) -> int:
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         print("GITHUB_TOKEN is not set", file=sys.stderr)
         return 1
-    exemplar = EXEMPLAR_PATH.read_text(encoding="utf-8")
+    exemplar = _load_exemplar()
     body = notes.draft(
         _digest_for(args.tag, pac_checkout=_pac_arg(args)),
         exemplar=exemplar,

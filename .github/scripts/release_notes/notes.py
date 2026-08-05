@@ -14,6 +14,30 @@ from typing import Callable
 
 FAILURE_MARKER = "<!-- lex:notes-draft-failed -->"
 
+# Used only when docs/releases/RELEASE_NOTES_2.1.3_github.md is unavailable.
+# The real file is richer and should win; this exists so a missing style
+# reference degrades the prose instead of killing the release note.
+FALLBACK_EXEMPLAR = """\
+## Main changes
+
+- **New sidebar.** A full-height side navigation with a consolidated header bar.
+  More room for your data, and models are easier to find.
+- **Number formatting per column.** Choose how a numeric column displays — a plain
+  number, a currency, or a percentage — and how many decimals to show.
+
+## Optimizations
+
+- **Live-updating tables.** Open grids refresh themselves when the underlying data
+  changes — no manual **Refresh**.
+
+## Bug fixes
+
+- **Timezone bug.** Timestamps could appear shifted by a couple of hours. Times now
+  display correctly in your local timezone.
+
+**Upgrade note:** run database migrations on upgrade. No configuration changes needed.
+"""
+
 REQUIRED_HEADINGS = ("## Main changes", "## Optimizations", "## Bug fixes")
 
 MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions"
