@@ -20,7 +20,18 @@ Three regressions these scenarios exist to prevent, all of them silent:
   keep rendering the old palette after the next token refresh, and nothing
   would fail.
 
-Cluster 1ab -- scenarios 1.223-1.250. Type: U.
+And, since the first page anybody built with thirteen of these widgets, a
+fourth -- the one a reader actually feels. Each widget read its own status
+synchronously and decided its poll timer *inside* its fragment, where the only
+way to get one is to rerun the whole script; ``st.rerun()`` raises, so every
+widget below the one that asked lost its turn and had to ask again on the next
+run, in turn. A page cost thirteen sequential round trips per run and a run per
+running record, and pressing Calculate took seven seconds to say "Running".
+Scenarios 1.251-1.262 hold the three properties that fixed it: one read per
+record per run, a timer decided before the fragment is declared, and a click
+that renders its own answer.
+
+Cluster 1ab -- scenarios 1.223-1.262. Type: U.
 Covers: lex/lex_app/streamlit/_client.py, lex/lex_app/streamlit/calculation.py,
         lex/lex_app/streamlit/__init__.py.
 Run: python -m lex pytest lex/test_project/tests/init/test_1ab_calculation_widget.py -v
@@ -599,11 +610,20 @@ class _FakeStreamlit:
         self.button_keys: list = []
         self.buttons: list = []
         self.declared_intervals: list = []
+        self.fragments: list = []
         self._button_returns = button_returns
 
     def fragment(self, func=None, *, run_every=None, **kwargs):
         self.declared_intervals.append(run_every)
-        return func if func is not None else (lambda f: f)
+
+        def _declare(f):
+            # Kept so a scenario can call the fragment body on its own, which is
+            # what a poll tick is: Streamlit re-executes the stored fragment and
+            # nothing else on the page.
+            self.fragments.append(f)
+            return f
+
+        return _declare(func) if func is not None else _declare
 
     def columns(self, spec, **kwargs):
         import contextlib
@@ -733,7 +753,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
                 "widget ID."
             ),
         )
-        poll_keys = [k for k in fake.session_state if k != "access_token"]
+        poll_keys = [k for k in fake.session_state if str(k).endswith("__every")]
         self.assertEqual(
             len(set(poll_keys)), 2,
             msg=(
@@ -873,17 +893,23 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
             ),
         )
 
-    def test_1_245_a_record_found_running_reruns_to_start_the_poll_timer(self):
+    def test_1_245_a_record_found_running_starts_its_watch_in_the_same_run(self):
         """
         Scenario 1.245: discovering work in progress actually starts the watch.
-        Given: a record that is IN_PROGRESS, and a widget whose fragment was
-               declared without a poll interval
+        Given: a record that is IN_PROGRESS
         When: the widget renders
-        Then: it stores the interval and asks for a full script rerun. run_every
-              is read only when a fragment is declared, and only a full script
-              run declares one, so without the rerun the widget would render
-              "Running" once and then sit there forever -- the status would never
-              update and no error would ever appear
+        Then: the fragment is *declared* with the poll interval, in that same
+              script run, and no rerun is asked for.
+
+        run_every is read only when a fragment is declared, and only a full
+        script run declares one -- so a widget that learns the record is running
+        after the declaration can get a timer only by rerunning the whole
+        script. This widget learns it before, by reading status ahead of the
+        declaration, which is why one render is enough. The rerun it no longer
+        asks for was never free: st.rerun() raises, so every widget below this
+        one on the page lost its turn and had to ask for its own rerun next time
+        round -- one full script run per running widget, each re-reading the
+        whole page.
         """
         from lex.lex_app.streamlit import calculation
 
@@ -892,21 +918,23 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
             "lex.lex_app.streamlit.calculation._client.get_json",
             return_value={"status": "IN_PROGRESS", "error": None},
         ):
-            with self.assertRaises(
-                fake.Rerun,
-                msg=(
-                    "Finding the record running must rerun the script; without "
-                    "it the browser never gets a poll timer."
-                ),
-            ):
-                calculation.lex_calculation("quarter", 1, poll_interval=2.0)
+            calculation.lex_calculation("quarter", 1, poll_interval=2.0)
 
+        self.assertEqual(
+            fake.declared_intervals, [2.0],
+            msg=(
+                "A record found running must have its poll timer declared in "
+                "the very run that found it. Declared "
+                f"{fake.declared_intervals!r} -- None here means the widget "
+                "renders 'Running' and then never updates."
+            ),
+        )
         self.assertIn(
             2.0, fake.session_state.values(),
             msg=(
-                "The interval must be stored before the rerun, or the "
-                "re-declared fragment reads nothing back. Session state: "
-                f"{fake.session_state!r}"
+                "The interval the widget is carrying must be recorded, or a "
+                "later poll cannot tell whether the browser's timer still "
+                f"matches what it wants. Session state: {fake.session_state!r}"
             ),
         )
 
@@ -1014,10 +1042,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
                 "can_calculate": True,
             },
         ):
-            # A record found running re-declares the fragment to start the poll
-            # timer (1.245); the render under test has already happened by then.
-            with self.assertRaises(fake.Rerun):
-                calculation.lex_calculation("quarter", 1, poll_interval=2.0)
+            calculation.lex_calculation("quarter", 1, poll_interval=2.0)
 
         self.assertTrue(
             all(b["disabled"] for b in fake.buttons),
@@ -1099,5 +1124,723 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
             msg=(
                 "An envelope that says nothing about permission must not be "
                 f"read as a refusal. Buttons drawn: {fake.buttons!r}."
+            ),
+        )
+
+
+class _Clock:
+    """A monotonic clock a scenario can move.
+
+    The status cache is time-bounded, so the only way to distinguish "the same
+    script run" from "two seconds later, on a poll" without sleeping is to own
+    the clock. Substituted for the ``time`` module inside the widget's own
+    namespace, so nothing global is touched.
+    """
+
+    def __init__(self, start: float = 1000.0):
+        self.t = start
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+
+class TestCluster01ab_CalculationSharedReads(SimpleTestCase):
+    """Cluster 1ab: what a page of these widgets costs the backend."""
+
+    SETTLED = {"status": "SUCCESS", "error": None, "duration_seconds": 12.0}
+
+    def _fake_host(self, token: str = "user-token", **kwargs) -> "_FakeStreamlit":
+        fake = _FakeStreamlit(**kwargs)
+        fake.session_state["access_token"] = token
+        return fake
+
+    def test_1_251_widgets_watching_one_record_share_a_single_read(self):
+        """
+        Scenario 1.251: a page costs one read per record, not one per widget.
+        Given: thirteen widgets on one page over two records -- a status tile
+               per line of a report, which is what this widget is for
+        When: the page renders
+        Then: two backend reads are issued, not thirteen.
+
+        Every read is a blocking HTTP GET inside the render, and Streamlit
+        renders top-to-bottom, so thirteen of them are thirteen round trips the
+        reader waits through in series before the page finishes. That is the
+        whole of "the dashboard feels non-interactive": nothing is broken, there
+        is simply a queue. Widgets over the same record ask the same question
+        and must get one answer.
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        clock = _Clock()
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.SETTLED,
+        ) as get_json:
+            for index in range(13):
+                calculation.lex_calculation(
+                    "quarter", 1 if index % 2 == 0 else 2, key=f"tile{index}",
+                )
+
+        self.assertEqual(
+            get_json.call_count, 2,
+            msg=(
+                "Thirteen widgets over two records must cost two reads; got "
+                f"{get_json.call_count}. Each extra read is another blocking "
+                "round trip the reader waits through before the page finishes."
+            ),
+        )
+        self.assertEqual(
+            len(fake.buttons), 13,
+            msg=(
+                "Sharing the read must not cost a widget its render; drew "
+                f"{len(fake.buttons)} buttons."
+            ),
+        )
+
+    def test_1_252_a_shared_read_is_never_answered_with_another_question(self):
+        """
+        Scenario 1.252: the cache answers only the question it was asked.
+        Given: widgets over two different records, and two widgets over one
+               record that disagree about whether they want the log
+        When: they render
+        Then: each distinct question costs its own read. A cache keyed loosely
+              enough to collapse them would put one record's status under
+              another record's name -- and would hand a widget that asked for
+              the log an envelope that has no log in it, leaving the panel
+              permanently empty with nothing anywhere to explain why
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        clock = _Clock()
+        seen = []
+
+        def _record(path, token, params=None):
+            seen.append((path, (params or {}).get("include_log")))
+            return {"status": "SUCCESS", "error": None, "log": ["a"]}
+
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json", side_effect=_record,
+        ):
+            calculation.lex_calculation("quarter", 1, key="plain")
+            calculation.lex_calculation("quarter", 2, key="other-record")
+            calculation.lex_calculation("quarter", 1, key="with-log", show_log=True)
+            calculation.lex_calculation("quarter", 1, key="plain-again")
+
+        self.assertEqual(
+            len(seen), 3,
+            msg=(
+                "Three distinct questions -- record 1, record 2, record 1 with "
+                f"the log -- must cost three reads and no more. Issued {seen!r}."
+            ),
+        )
+        self.assertEqual(
+            len({path for path, _ in seen}), 2,
+            msg=f"Two records must be read under two distinct paths; got {seen!r}.",
+        )
+        self.assertIn(
+            "true", [flag for _, flag in seen],
+            msg=(
+                "The widget that asked for the log must issue its own read; "
+                f"otherwise its panel stays empty forever. Issued {seen!r}."
+            ),
+        )
+
+    def test_1_253_an_idle_widget_does_not_read_again_when_the_page_reruns(self):
+        """
+        Scenario 1.253: a rerun is not a reason to re-read a settled record.
+        Given: a widget on a record in SUCCESS, already rendered once
+        When: the script runs again -- which is what any other widget's start or
+              finish does to the whole page
+        Then: no second read is issued.
+
+        This is the point of caching the read rather than merely sharing it
+        within one run. A dashboard of finished calculations greys and
+        re-renders every time any one of them changes state, and if each rerun
+        re-read every record, the cost of one calculation starting would be a
+        full sweep of the backend -- for twelve records whose answer nobody
+        expects to have changed in the intervening moment.
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        clock = _Clock()
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.SETTLED,
+        ) as get_json:
+            calculation.lex_calculation("quarter", 1)
+            self.assertEqual(
+                get_json.call_count, 1,
+                msg="The first render must actually read the status once.",
+            )
+            clock.advance(0.05)
+            calculation.lex_calculation("quarter", 1)
+
+        self.assertEqual(
+            get_json.call_count, 1,
+            msg=(
+                "A rerun moments later must re-render from the read it already "
+                f"has; got {get_json.call_count} reads. Multiply the extra one "
+                "by every idle widget on the page for the cost of leaving this "
+                "out."
+            ),
+        )
+
+    def test_1_254_a_cached_status_can_never_reach_another_user(self):
+        """
+        Scenario 1.254: the cache is confined to one signed-in user.
+        Given: two sessions -- two readers, two permissions, two bearer tokens
+        When: both render a widget on the same record
+        Then: neither is served the other's answer; each reads for itself.
+
+        This is the one place the optimisation could do real harm rather than
+        merely fail. A status envelope describes a record the other reader may
+        have no permission to see at all -- the endpoint answers an unreadable
+        record with the same 404 as a missing one precisely so that its
+        existence is not disclosed. A cache shared across sessions would hand
+        that answer straight over. So the cache lives in session_state, which
+        Streamlit scopes to one session; the module holds no process-wide store
+        and uses none of Streamlit's own cross-session caches, which is what the
+        source gate below keeps true after this test stops being read.
+        """
+        import ast
+        import inspect
+
+        from lex.lex_app.streamlit import calculation
+
+        clock = _Clock()
+        alice = self._fake_host("alice-token")
+        bob = self._fake_host("bob-token")
+
+        answers = {"alice-token": "SUCCESS", "bob-token": "ERROR"}
+        seen_tokens = []
+
+        def _by_caller(path, token, params=None):
+            seen_tokens.append(token)
+            return {"status": answers[token], "error": None}
+
+        with mock.patch.object(calculation, "time", clock), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json", side_effect=_by_caller,
+        ):
+            with mock.patch.object(calculation, "st", alice):
+                calculation.lex_calculation("quarter", 1)
+            with mock.patch.object(calculation, "st", bob):
+                calculation.lex_calculation("quarter", 1)
+
+        self.assertEqual(
+            seen_tokens, ["alice-token", "bob-token"],
+            msg=(
+                "The second session must issue its own read as itself. Reads "
+                f"made as {seen_tokens!r} -- one entry here means one user was "
+                "served the other's view of the record."
+            ),
+        )
+        self.assertIn(
+            "Error", bob.text_of(),
+            msg=(
+                "The second reader must see the status their own permissions "
+                f"produced. Rendered: {bob.text_of()!r}"
+            ),
+        )
+
+        # Prose may discuss the caches that are refused; code may not call them.
+        # Walked rather than grepped so the reasoning above stays writable.
+        tree = ast.parse(inspect.getsource(calculation))
+        referenced = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        referenced |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        for shared in ("cache_data", "cache_resource", "lru_cache"):
+            self.assertNotIn(
+                shared, referenced,
+                msg=(
+                    f"{shared} is keyed by arguments and shared by every "
+                    "session this server renders, so one reader's status "
+                    "envelope would answer another reader's widget. The cache "
+                    "must stay in st.session_state, which is already per-user."
+                ),
+            )
+        self.assertIn(
+            "session_state", inspect.getsource(calculation._status_cache),
+            msg=(
+                "The cache must be fetched out of st.session_state and nowhere "
+                "else -- that is the only thing making it one user's."
+            ),
+        )
+
+    def test_1_255_a_click_renders_running_before_any_read_confirms_it(self):
+        """
+        Scenario 1.255: pressing Calculate answers immediately.
+        Given: a record in NOT_CALCULATED, and a reader who presses Calculate
+        When: the trigger succeeds
+        Then: the badge already reads "Running" in that same render, without a
+              second status read.
+
+        The reader pressed a button; the interface has to say something. Waiting
+        for the trigger to land and then re-reading the record before admitting
+        anything happened is how a click came to take seven seconds to show a
+        word -- and for those seven seconds the badge still said "Not
+        calculated", so the honest reading of the page was that the button had
+        not worked. The trigger has in fact already set the record IN_PROGRESS
+        by the time it answers, so this is not a guess: it is declining to ask
+        again.
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host(button_returns=True)
+        clock = _Clock()
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={"status": "NOT_CALCULATED", "error": None},
+        ) as get_json, mock.patch(
+            "lex.lex_app.streamlit.calculation._client.patch_json", return_value={},
+        ) as patch_json:
+            with self.assertRaises(
+                fake.Rerun,
+                msg=(
+                    "Starting a run is one of the two moments the script may "
+                    "rerun: the browser's poll timer is only built when a "
+                    "fragment is declared."
+                ),
+            ):
+                calculation.lex_calculation("quarter", 1)
+
+        patch_json.assert_called_once()
+        self.assertIn(
+            "Running", fake.text_of(),
+            msg=(
+                "The click must render its own answer. Rendered: "
+                f"{fake.text_of()!r} -- the only status read said "
+                "NOT_CALCULATED, so anything else here means the reader is "
+                "waiting on a second round trip to be told what just happened."
+            ),
+        )
+        self.assertEqual(
+            get_json.call_count, 1,
+            msg=(
+                "No status read may stand between the trigger and the word "
+                f"'Running'; the widget made {get_json.call_count}."
+            ),
+        )
+
+    def test_1_256_a_refused_trigger_takes_the_optimism_back(self):
+        """
+        Scenario 1.256: nothing is claimed when nothing was started.
+        Given: a backend that refuses the trigger on the click
+        When: the reader presses Calculate
+        Then: the badge shows the record's real status and the refusal is
+              rendered -- and the widget does not start polling. Rendering
+              "Running" ahead of the backend is only defensible while the
+              backend agrees; a click that was refused and still showed Running
+              would leave the reader watching a calculation that does not exist,
+              and the widget polling for it
+        """
+        from lex.lex_app.streamlit import calculation
+        from lex.lex_app.streamlit._client import LexApiError
+
+        fake = self._fake_host(button_returns=True)
+        clock = _Clock()
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={"status": "NOT_CALCULATED", "error": None},
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.patch_json",
+            side_effect=LexApiError("Forbidden", status=403),
+        ):
+            calculation.lex_calculation("quarter", 1)
+
+        self.assertIn(
+            "permission", fake.text_of().lower(),
+            msg=f"The refusal must be rendered. Rendered: {fake.text_of()!r}",
+        )
+        self.assertNotIn(
+            "Running", fake.text_of(),
+            msg=(
+                "A refused trigger started nothing, so nothing may be claimed. "
+                f"Rendered: {fake.text_of()!r}"
+            ),
+        )
+        self.assertEqual(
+            [i for i in fake.declared_intervals if i is not None], [],
+            msg=(
+                "Nothing is running, so nothing must be watched; declared "
+                f"{fake.declared_intervals!r}."
+            ),
+        )
+
+    def test_1_257_the_next_real_read_replaces_the_optimistic_state(self):
+        """
+        Scenario 1.257: the optimism lasts exactly one render.
+        Given: a successful click, and the run that follows it
+        When: the widget reads status again
+        Then: what the backend says is what is rendered, and the optimistic note
+              is gone from session_state. The optimism exists to cover one round
+              trip, not to become a second source of truth about the record --
+              a flag left set would keep claiming "Running" over a run that had
+              already finished, with the real status sitting in hand unrendered
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host(button_returns=True)
+        clock = _Clock()
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={"status": "NOT_CALCULATED", "error": None},
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.patch_json", return_value={},
+        ):
+            with self.assertRaises(fake.Rerun):
+                calculation.lex_calculation("quarter", 1)
+
+        fake._button_returns = False
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={"status": "IN_PROGRESS", "error": None},
+        ) as get_json:
+            calculation.lex_calculation("quarter", 1)
+
+        self.assertGreaterEqual(
+            get_json.call_count, 1,
+            msg=(
+                "The run that follows a click must actually re-read the record "
+                "-- the click invalidated what was cached for it, precisely so "
+                "the optimism is checked rather than trusted."
+            ),
+        )
+        self.assertFalse(
+            any(v is True for k, v in fake.session_state.items() if "pending" in str(k)),
+            msg=(
+                "The optimistic note must be spent by the first read that "
+                f"follows it. Session state: {fake.session_state!r}"
+            ),
+        )
+
+    def test_1_258_a_running_record_does_not_cost_the_widgets_below_it(self):
+        """
+        Scenario 1.258: one running record does not rerun the page.
+        Given: three widgets on a page, the middle one on a record that is
+               already IN_PROGRESS -- a page loaded while something runs
+        When: the page renders
+        Then: all three render, in one pass, with no rerun asked for.
+
+        st.rerun() raises. A widget that decided its poll timer after rendering
+        could only get one by rerunning the whole script, and that exception
+        travelled out through every widget still to come -- so widget four
+        onwards never rendered, discovered their own running records on the next
+        run, and each asked for a rerun of their own. A page watching several
+        calculations paid a full script run, and a full sweep of the backend,
+        per running widget. Reading before declaring is what makes one pass
+        enough.
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        clock = _Clock()
+        statuses = {1: "SUCCESS", 2: "IN_PROGRESS", 3: "SUCCESS"}
+
+        def _by_record(path, token, params=None):
+            # /api/model_entries/<model>/<pk>/calculation-status
+            pk = int(path.rstrip("/").split("/")[-2])
+            return {"status": statuses[pk], "error": None}
+
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json", side_effect=_by_record,
+        ):
+            for pk in (1, 2, 3):
+                calculation.lex_calculation("quarter", pk, poll_interval=2.0)
+
+        self.assertEqual(
+            len(fake.buttons), 3,
+            msg=(
+                "Every widget on the page must render in the pass that found "
+                f"the running record; only {len(fake.buttons)} did. The rest "
+                "lost their turn to an exception raised on their behalf."
+            ),
+        )
+        self.assertEqual(
+            fake.declared_intervals, [None, 2.0, None],
+            msg=(
+                "Only the running record may carry a timer, and it must carry "
+                f"it from this pass. Declared {fake.declared_intervals!r}."
+            ),
+        )
+
+    def test_1_259_a_poll_reruns_the_page_when_the_run_ends_and_not_before(self):
+        """
+        Scenario 1.259: polling is silent until there is news.
+        Given: a widget watching a running record, polled twice -- once while
+               the work continues, once after it finishes
+        When: each poll runs
+        Then: the first re-reads and asks for nothing; the second asks for a
+              rerun, because the browser's poll timer can only be taken down by
+              a run that re-declares the fragment without one.
+
+        A rerun greys the whole page and re-renders every widget on it. Doing
+        that on each poll is what made a page with one calculation running feel
+        like a page that had stopped working. Doing it never would leave the
+        timer alive in the browser for as long as the tab stays open, polling a
+        record that will not change again -- so it happens exactly twice per
+        calculation, at the two moments the reader can account for.
+        """
+        from lex.lex_app.streamlit import calculation
+
+        fake = self._fake_host()
+        clock = _Clock()
+        envelope = {"status": "IN_PROGRESS", "error": None}
+
+        with mock.patch.object(calculation, "st", fake), mock.patch.object(
+            calculation, "time", clock,
+        ), mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            side_effect=lambda *a, **k: envelope,
+        ) as get_json:
+            calculation.lex_calculation("quarter", 1, poll_interval=2.0)
+            tick = fake.fragments[-1]
+
+            reads_after_render = get_json.call_count
+            clock.advance(2.0)
+            tick()
+            self.assertEqual(
+                get_json.call_count, reads_after_render + 1,
+                msg=(
+                    "A poll must actually re-read the record; the cache exists "
+                    "to spare a page its duplicates, not to answer the poll "
+                    "with the value it is checking."
+                ),
+            )
+
+            envelope = {"status": "SUCCESS", "error": None, "duration_seconds": 3.0}
+            clock.advance(2.0)
+            with self.assertRaises(
+                fake.Rerun,
+                msg=(
+                    "The poll that finds the run finished must rerun the "
+                    "script: only a full run re-declares the fragment, and only "
+                    "a re-declared fragment drops the browser's timer. Without "
+                    "it the tab polls a settled record until it is closed."
+                ),
+            ):
+                tick()
+
+        self.assertIsNone(
+            calculation.poll_interval_for("SUCCESS", 2.0),
+            msg="A finished run must ask for no further polling.",
+        )
+
+
+#: A page of status tiles over two records -- the shape that exposed all of
+#: this. The run counter is in session_state because that is the only thing
+#: that survives a rerun, and counting reruns is the point.
+_PAGE_OF_TILES = """
+import streamlit as st
+from lex.lex_app.streamlit import lex_calculation
+
+st.session_state["script_runs"] = st.session_state.get("script_runs", 0) + 1
+for index in range(13):
+    lex_calculation("quarter", 1 if index % 2 == 0 else 2, key=f"tile{index}")
+"""
+
+
+class TestCluster01ab_CalculationRerunBudget(SimpleTestCase):
+    """Cluster 1ab: the page's cost, measured against the real Streamlit runtime.
+
+    The claims here -- how many times a script runs, how many reads a page
+    costs, whether one session can see another's cache -- are claims about
+    Streamlit's own behaviour: how it re-executes a script after st.rerun(), and
+    how far session_state reaches. A stand-in for the streamlit module can be
+    made to agree with any of them, so these use AppTest, which runs the real
+    thing.
+    """
+
+    SETTLED = {"status": "SUCCESS", "error": None, "duration_seconds": 12.0}
+
+    def _page(self, script: str = _PAGE_OF_TILES, token: str = "user-token"):
+        from streamlit.testing.v1 import AppTest
+
+        page = AppTest.from_string(script)
+        page.session_state["access_token"] = token
+        return page
+
+    def test_1_260_a_page_of_tiles_loads_in_one_run_and_two_reads(self):
+        """
+        Scenario 1.260: the whole page costs what one record costs, twice.
+        Given: thirteen tiles over two settled records
+        When: the page loads, and then reruns
+        Then: the script runs once, issuing two reads, and the rerun issues
+              none.
+
+        Two separate failures are being held down at once, and only the real
+        runtime can show both. Thirteen reads is thirteen blocking round trips
+        in series. And a script that reruns itself while rendering is a page
+        that greys, discards what it drew and starts again -- for a reader,
+        indistinguishable from a page that will not settle.
+        """
+        page = self._page()
+        with mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.SETTLED,
+        ) as get_json:
+            page.run()
+
+        self.assertEqual(
+            page.exception, [],
+            msg=f"The page must render cleanly; got {page.exception!r}.",
+        )
+        self.assertEqual(
+            page.session_state["script_runs"], 1,
+            msg=(
+                "Thirteen settled tiles must not rerun the script at all; it "
+                f"ran {page.session_state['script_runs']} times. Each rerun "
+                "greys the page and re-renders every widget on it."
+            ),
+        )
+        self.assertEqual(
+            get_json.call_count, 2,
+            msg=(
+                "Two records must cost two reads however many tiles show them; "
+                f"got {get_json.call_count}."
+            ),
+        )
+
+        with mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.SETTLED,
+        ) as rerun_reads:
+            page.run()
+
+        self.assertEqual(
+            rerun_reads.call_count, 0,
+            msg=(
+                "A rerun moments later must re-render from what it already "
+                f"read; it issued {rerun_reads.call_count} reads. This is the "
+                "cost every other widget pays when any one of them changes "
+                "state."
+            ),
+        )
+
+    def test_1_261_pressing_calculate_costs_one_rerun_not_one_per_tile(self):
+        """
+        Scenario 1.261: a click starts a run; it does not restart the page.
+        Given: a page of thirteen tiles, and a reader who presses one Calculate
+        When: the trigger succeeds
+        Then: the script runs once more -- the one rerun that builds the poll
+              timer -- and the page re-reads only the record that changed.
+
+        Before, the click reran the page and every tile on it re-read its own
+        record in series before the badge was allowed to say "Running": the
+        seven seconds the reader was actually complaining about. The rerun
+        itself cannot go, because the browser's poll timer is only built when a
+        fragment is declared and only a full run declares one. What goes is its
+        price.
+        """
+        page = self._page()
+        with mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value=self.SETTLED,
+        ):
+            page.run()
+
+        runs_before = page.session_state["script_runs"]
+
+        with mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json",
+            return_value={"status": "IN_PROGRESS", "error": None},
+        ) as get_json, mock.patch(
+            "lex.lex_app.streamlit.calculation._client.patch_json", return_value={},
+        ) as patch_json:
+            page.button(key="tile0__btn").click().run()
+
+        patch_json.assert_called_once()
+        self.assertEqual(
+            page.exception, [],
+            msg=f"The click must not break the page; got {page.exception!r}.",
+        )
+        self.assertLessEqual(
+            page.session_state["script_runs"] - runs_before, 2,
+            msg=(
+                "A click may cost the run that handles it and the one rerun "
+                "that installs the poll timer, and no more. The script ran "
+                f"{page.session_state['script_runs'] - runs_before} times."
+            ),
+        )
+        self.assertLessEqual(
+            get_json.call_count, 2,
+            msg=(
+                "Only the record that was just triggered has news; the other "
+                "twelve tiles must not be re-read to find that out. The click "
+                f"issued {get_json.call_count} reads."
+            ),
+        )
+
+    def test_1_262_two_sessions_never_see_each_others_cached_status(self):
+        """
+        Scenario 1.262: the cache stops at the session boundary, for real.
+        Given: two Streamlit sessions -- two readers on the same server -- both
+               showing a widget on the same record
+        When: each renders
+        Then: each issues its own read, as itself, and renders its own answer.
+
+        1.254 pins the same rule against a stand-in for session_state; this
+        pins it against the runtime that actually enforces the boundary,
+        because the consequence of being wrong is not a slow page. The status
+        endpoint answers a record this caller may not read with the same 404 as
+        a record that does not exist, specifically so that its existence is not
+        disclosed -- and a cache reaching across sessions would hand over the
+        answer that machinery exists to withhold.
+        """
+        one_tile = """
+import streamlit as st
+from lex.lex_app.streamlit import lex_calculation
+
+lex_calculation("quarter", 1)
+"""
+        answers = {"alice-token": "SUCCESS", "bob-token": "ERROR"}
+        callers = []
+
+        def _by_caller(path, token, params=None):
+            callers.append(token)
+            return {"status": answers[token], "error": None}
+
+        alice = self._page(one_tile, token="alice-token")
+        bob = self._page(one_tile, token="bob-token")
+        with mock.patch(
+            "lex.lex_app.streamlit.calculation._client.get_json", side_effect=_by_caller,
+        ):
+            alice.run()
+            bob.run()
+
+        self.assertEqual(
+            callers, ["alice-token", "bob-token"],
+            msg=(
+                "Each session must read as itself. Reads made as "
+                f"{callers!r} -- a single entry means one reader was shown a "
+                "record's status through the other's permissions."
+            ),
+        )
+        rendered = " ".join(m.value for m in bob.markdown)
+        self.assertIn(
+            "Error", rendered,
+            msg=(
+                "The second session must render the answer its own read "
+                f"produced. Rendered: {rendered!r}"
             ),
         )
