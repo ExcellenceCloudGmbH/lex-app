@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 #: a long calculation cannot turn a 2-second poll into a large response.
 LOG_TAIL_LIMIT = 50
 
-#: The body ``lex_calculation()`` sends to start a run. The permission probe
+#: The body ``lex_calculation_streamlit()`` sends to start a run. The probe
 #: carries it verbatim: a ``modification_restriction`` may inspect
 #: ``request_data``, and answering for a payload other than the one the button
 #: will actually send is one way the two endpoints could drift apart.

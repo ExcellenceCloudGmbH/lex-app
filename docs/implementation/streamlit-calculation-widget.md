@@ -1,4 +1,24 @@
-# `lex_calculation()` — Streamlit Calculation Widget
+# Streamlit calculation widgets
+
+> **Two entry points.** `lex_calculation()` embeds the lex-app frontend's own
+> record view — the fields shown and their formatting are the product's, chosen
+> with a named `serializer`. `lex_calculation_streamlit()` renders the trigger
+> natively and is what the rest of this document describes; it is the one for a
+> dashboard of many tiles, and the only one that returns a value the page can
+> branch on.
+>
+> | | `lex_calculation()` (embed) | `lex_calculation_streamlit()` (native) |
+> | --- | --- | --- |
+> | Shows the record's fields | **yes**, from the serializer | no — trigger and status only |
+> | Cost per tile | a full React app, its own WebSockets and auth handshake | a dictionary lookup |
+> | Sizing | fixed pixel height, scrolls inside | flows with the page |
+> | Returns to Python | nothing (a frame is a separate context) | the status envelope |
+> | Auth | session cookie, `SameSite=None` cross-site | bearer token |
+>
+> `lex_calculation(model, pk, *, serializer=None, view="show"|"edit"|"list", height=420, ...)`
+> is URL construction over `lex_view` and nothing else — see
+> `lex/lex_app/streamlit/calculation_embed.py`.
+
 
 > **Status:** Internal-only feature doc. `docs/features/` is mirror-owned from
 > `lex-app-docs` (see [`docs/.docs-sync.yml`](../.docs-sync.yml)), so the
@@ -9,7 +29,11 @@
 >
 > **Source of truth:**
 > [`lex/lex_app/streamlit/calculation.py`](../../lex/lex_app/streamlit/calculation.py)
-> (the widget),
+> (the native widget),
+> [`lex/lex_app/streamlit/calculation_embed.py`](../../lex/lex_app/streamlit/calculation_embed.py)
+> (the embed),
+> [`lex/lex_app/streamlit/_status_poller.py`](../../lex/lex_app/streamlit/_status_poller.py)
+> (the polling thread),
 > [`lex/lex_app/streamlit/_client.py`](../../lex/lex_app/streamlit/_client.py)
 > (the HTTP client),
 > [`lex/api/views/calculations/CalculationStatus.py`](../../lex/api/views/calculations/CalculationStatus.py)
@@ -27,21 +51,25 @@ and tell me how it went.* Until now the only way to offer that from Streamlit wa
 `lex_view("quarter")` — embedding the whole React table view in an iframe, with
 its toolbar and its grid, to deliver one button and one status line.
 
-`lex_calculation()` is that button and that status line, natively:
+`lex_calculation_streamlit()` is that button and that status line, natively:
 
 ```python
 import streamlit as st
-from lex.lex_app.streamlit import lex_calculation
+from lex.lex_app.streamlit import lex_calculation_streamlit
 
-lex_calculation("quarter", pk=42)
+lex_calculation_streamlit("quarter", pk=42)
 ```
 
 No iframe, no table, no second UI to keep in sync. The widget renders a
 **Calculate** button, a coloured status badge, a last-run line, and — while the
 calculation is running — refreshes itself until it finishes.
 
-`lex.lex_app.streamlit` is now the import path for both widgets, exporting
-`lex_view`, `Flow` and `lex_calculation`. The older
+If you want the record's **fields** as well as the trigger, use
+`lex_calculation()` instead — it embeds the frontend's own record view and takes
+a named `serializer` to choose which fields appear.
+
+`lex.lex_app.streamlit` is the import path for all of them, exporting `lex_view`,
+`Flow`, `lex_calculation` and `lex_calculation_streamlit`. The older
 `lex.lex_app.streamlit.embed` path keeps working unchanged, so dashboards
 already written against it need no edits.
 
@@ -54,13 +82,13 @@ Pair them:
 
 ```python
 quarter_id = st.selectbox("Quarter", options=load_quarter_ids())
-lex_calculation("quarter", pk=quarter_id)
+lex_calculation_streamlit("quarter", pk=quarter_id)
 ```
 
 ## API
 
 ```python
-lex_calculation(
+lex_calculation_streamlit(
     model,                    # str, positional — the model container name, e.g. "quarter"
     pk,                       # positional — the record's primary key
     *,
@@ -438,7 +466,7 @@ re-evaluates your script on a page run, and the whole point of the above is that
 the widget stops causing them. So this:
 
 ```python
-status = lex_calculation("quarter", pk=42)
+status = lex_calculation_streamlit("quarter", pk=42)
 if status and status["status"] == "SUCCESS":
     st.dataframe(load_results())
 ```
@@ -450,7 +478,7 @@ something. Beyond that, pass `sync_page=True` to keep the page following one
 record:
 
 ```python
-status = lex_calculation("quarter", pk=42, sync_page=True)
+status = lex_calculation_streamlit("quarter", pk=42, sync_page=True)
 ```
 
 Use it for the one tile whose result the page is built around, not for all of

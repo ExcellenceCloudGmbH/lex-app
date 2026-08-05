@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 271
+max_scenario: 275
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -284,10 +284,10 @@ letters:
       a-z. Renumbered from z/1.201-1.206 on merge
   ab:
     title: Streamlit lex_calculation() widget — trigger one record and watch it
-    scenarios: 1.223-1.271
+    scenarios: 1.223-1.275
     status: complete
     tests:
-      pass: 49
+      pass: 53
       skip: 0
       xfail: 0
     note: >-
@@ -357,4 +357,19 @@ letters:
       placeholder before the first read is now an em dash rather than 'Checking', which thirteen tiles
       saying at once read as a page that could not reach its backend, and a click is acknowledged with
       'Starting...' rather than 'Running' - a refusal a moment later is a story after the first and a
-      contradiction after the second.
+      contradiction after the second. 1.272-1.275 add the second way to put a calculation on a page,
+      alongside the first rather than instead of it: lex_calculation() now embeds the lex-app frontend's
+      own record view and the native widget keeps the same behaviour under the name
+      lex_calculation_streamlit(). The embed is URL construction over lex_view and nothing else - 1.275
+      pins that its only first-party import is lex_view, because a module that also spoke to the API
+      directly would be a second implementation of the exact thing embedding the product's own view exists
+      to avoid. It targets the frontend's own per-record routes, which React Admin already registers for
+      every lex resource (the app passes both list and show when it builds each Resource), so nothing
+      invents a URL the app does not serve (1.272). The serializer name is the point of the signature: it
+      is the same name the REST API takes as a path segment,
+      /api/model_entries/<model>/<serializer>/one/<pk>, so declaring it on the model decides which fields
+      appear with no frontend change and nothing listed twice (1.273). Chrome is hidden by default, unlike
+      lex_view, because an iframe is a fixed box and the surrounding navigation is a large fraction of a
+      420px one (1.274). What the embed cannot do is return a value - a frame is a separate browsing
+      context - so a dashboard that branches on a record's status still wants the native widget, which is
+      why both are on the package surface and 1.240 now asserts both.

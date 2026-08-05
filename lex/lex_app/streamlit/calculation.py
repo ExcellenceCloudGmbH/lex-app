@@ -1,6 +1,14 @@
-"""``lex_calculation()`` -- trigger one calculation and watch it, natively.
+"""``lex_calculation_streamlit()`` -- trigger one calculation and watch it, natively.
 
-Replaces embedding a whole React table just to run one record.
+Renders the trigger and its live status as ordinary Streamlit elements: no
+iframe, no second React runtime per tile, a Python return value the rest of the
+page can branch on, and it flows with the page instead of living in a
+fixed-height box. That is what makes a *dashboard of tiles* viable.
+
+:func:`lex.lex_app.streamlit.lex_calculation` is the other half of the choice:
+it embeds the lex-app frontend's own record view, so the fields and their
+formatting are the product's and stay the product's. Reach for that when you
+want the record; reach for this when you want the trigger.
 
 Everything here goes through :mod:`lex.lex_app.streamlit._client`, over HTTP, as
 the signed-in user. The module deliberately imports no Django model: an
@@ -22,7 +30,8 @@ A render that fetches does not "load slowly": Streamlit runs the script on one
 thread, so a tile blocking on a status read holds up every tile below it, in
 series, before any of them exist. Reads therefore belong to
 :mod:`lex.lex_app.streamlit._status_poller`, which does them on a thread the
-session owns; :func:`lex_calculation` only ever looks up what is already known.
+session owns; :func:`lex_calculation_streamlit` only ever looks up what is
+already known.
 The click follows the same rule -- ``One.update`` re-reads the record, clears
 terminal state, saves, registers the calculation and broadcasts it before
 answering, and doing that inside the click handler is exactly why pressing
@@ -58,7 +67,7 @@ from lex.lex_app.streamlit._status_poller import (
 )
 
 __all__ = [
-    "lex_calculation",
+    "lex_calculation_streamlit",
     "NO_PERMISSION_MESSAGE",
     "StatusState",
     "presentation_for",
@@ -265,7 +274,7 @@ def _envelope(state: StatusState, status: Optional[str]) -> dict:
     }
 
 
-def lex_calculation(
+def lex_calculation_streamlit(
     model: str,
     pk,
     *,
@@ -283,7 +292,7 @@ def lex_calculation(
     Returns the latest status envelope, or ``None`` before the first read has
     landed, so the dashboard can branch on it::
 
-        status = lex_calculation("quarter", pk=42)
+        status = lex_calculation_streamlit("quarter", pk=42)
         if status and status["status"] == "SUCCESS":
             st.dataframe(load_results())
 

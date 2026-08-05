@@ -241,16 +241,16 @@ class _FakeStreamlit:
 #: rendered perfectly and a page that died half way both show too few buttons.
 _PAGE_OF_TILES = """
 import streamlit as st
-from lex.lex_app.streamlit import lex_calculation
+from lex.lex_app.streamlit import lex_calculation_streamlit
 
 st.session_state["script_runs"] = st.session_state.get("script_runs", 0) + 1
 st.session_state["tiles_rendered"] = 0
 
 for i in range(7):
-    lex_calculation("quarter", 1, key=f"a{i}")
+    lex_calculation_streamlit("quarter", 1, key=f"a{i}")
     st.session_state["tiles_rendered"] += 1
 for i in range(6):
-    lex_calculation("quarter", 2, key=f"b{i}")
+    lex_calculation_streamlit("quarter", 2, key=f"b{i}")
     st.session_state["tiles_rendered"] += 1
 """
 
@@ -790,13 +790,24 @@ class TestCluster01ab_CalculationWidgetState(SimpleTestCase):
               function. Dashboards already written against embed must not break
               to make room for the new widget.
         """
-        from lex.lex_app.streamlit import lex_calculation, lex_view
+        from lex.lex_app.streamlit import (
+            lex_calculation, lex_calculation_streamlit, lex_view,
+        )
         from lex.lex_app.streamlit.embed import lex_view as legacy_lex_view
 
-        self.assertTrue(
-            callable(lex_calculation),
-            msg="lex_calculation must be callable straight off the package.",
-        )
+        for name, fn in (
+            ("lex_calculation", lex_calculation),
+            ("lex_calculation_streamlit", lex_calculation_streamlit),
+        ):
+            self.assertTrue(
+                callable(fn),
+                msg=(
+                    f"{name} must be callable straight off the package. Both "
+                    "ways of putting a calculation on a page are supported on "
+                    "purpose: the embed renders the product's own record view, "
+                    "the native one returns a value a dashboard can branch on."
+                ),
+            )
         self.assertIs(
             lex_view, legacy_lex_view,
             msg=(
@@ -862,8 +873,8 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         poller = _poller(answers={"*": self._settled()})
         host = self._host()
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
-            calculation.lex_calculation("quarter", 2)
+            calculation.lex_calculation_streamlit("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 2)
 
         self.assertEqual(
             len(set(host.button_keys)), 2,
@@ -893,7 +904,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         poller = _poller(answers={"*": self._settled()})
         host = self._host(token="fresh-token")
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
 
         _pass(poller)
         self.assertEqual(
@@ -918,7 +929,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         poller = _poller(answers={"*": self._settled()})
         host = self._host(token="")
         with self._page(host, poller):
-            result = calculation.lex_calculation("quarter", 1)
+            result = calculation.lex_calculation_streamlit("quarter", 1)
 
         self.assertIsNone(result, msg="Nothing can be reported without a session.")
         self.assertIn(
@@ -949,7 +960,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         host = self._host()
         self._prime(poller)
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             host.fragments[0]()
 
         self.assertIn(
@@ -978,7 +989,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         host = self._host()
         self._prime(poller)
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             host.fragments[0]()
 
         self.assertTrue(
@@ -1007,7 +1018,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         host = self._host()
         self._prime(poller)
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             before = len(poller.reads)
             host.fragments[0]()
             host.fragments[0]()
@@ -1045,7 +1056,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         host = self._host()
         self._prime(poller)
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             host.fragments[0]()
 
         self.assertTrue(
@@ -1077,7 +1088,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         host = self._host()
         self._prime(poller)
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             host.fragments[0]()
 
         self.assertTrue(
@@ -1108,7 +1119,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         host = self._host(button_returns=True)
         self._prime(poller)
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             host.fragments[0]()          # the click
             poller.run_once()            # the poller sends it and is refused
             host.fragments[0]()          # the tile redraws
@@ -1156,7 +1167,7 @@ class TestCluster01ab_CalculationWidgetSurface(SimpleTestCase):
         host = self._host()
         self._prime(poller)
         with self._page(host, poller):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             host.fragments[0]()
 
         self.assertFalse(
@@ -1207,7 +1218,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
             calculation, "get_poller", return_value=poller,
         ):
             for index in range(13):
-                calculation.lex_calculation("quarter", index % 6, key=f"t{index}")
+                calculation.lex_calculation_streamlit("quarter", index % 6, key=f"t{index}")
 
         self.assertEqual(
             poller.reads, [],
@@ -1236,9 +1247,9 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
             calculation, "get_poller", return_value=poller,
         ):
             for index in range(7):
-                calculation.lex_calculation("quarter", 1, key=f"a{index}")
+                calculation.lex_calculation_streamlit("quarter", 1, key=f"a{index}")
             for index in range(6):
-                calculation.lex_calculation("quarter", 2, key=f"b{index}")
+                calculation.lex_calculation_streamlit("quarter", 2, key=f"b{index}")
 
         _pass(poller)
         self.assertEqual(
@@ -1275,7 +1286,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         with mock.patch.object(calculation, "st", host), mock.patch.object(
             calculation, "get_poller", return_value=poller,
         ):
-            calculation.lex_calculation("quarter", 1)   # the click lands here
+            calculation.lex_calculation_streamlit("quarter", 1)   # the click lands here
 
         self.assertEqual(
             poller.triggers, [],
@@ -1317,7 +1328,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         with mock.patch.object(calculation, "st", host), mock.patch.object(
             calculation, "get_poller", return_value=poller,
         ):
-            calculation.lex_calculation("quarter", 1)   # the click lands here
+            calculation.lex_calculation_streamlit("quarter", 1)   # the click lands here
 
         self.assertIn(
             "Starting", host.text_of(),
@@ -1830,7 +1841,7 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
         with mock.patch.object(calculation, "st", host), mock.patch.object(
             calculation, "get_poller", return_value=poller,
         ):
-            calculation.lex_calculation("quarter", 1)
+            calculation.lex_calculation_streamlit("quarter", 1)
             self.assertFalse(
                 host.session_state.get("lex_calc_quarter_1__primed"),
                 msg=(
@@ -1852,6 +1863,132 @@ class TestCluster01ab_CalculationPoller(SimpleTestCase):
                 ),
             ):
                 host.fragments[0]()
+
+
+class TestCluster01ab_CalculationEmbed(SimpleTestCase):
+    """Cluster 1ab: the embedded record view.
+
+    ``lex_calculation()`` renders the lex-app frontend's own record view in a
+    frame, so the fields shown and their formatting are the product's and stay
+    the product's. It is URL construction over ``lex_view`` and nothing else --
+    no new transport, no new permission path, no new component -- and these
+    scenarios pin that it stays that way.
+    """
+
+    def test_1_272_the_embed_targets_the_records_own_route(self):
+        """
+        Scenario 1.272: one record, not a table filtered down to one.
+        Given: a model and a primary key
+        When: the path is built for each supported view
+        Then: it is the frontend's own per-record route.
+
+        These are React Admin routes the frontend already registers for every
+        lex resource -- it passes both ``list`` and ``show`` when it builds each
+        Resource -- so nothing here invents a URL the app does not serve.
+        """
+        from lex.lex_app.streamlit.calculation_embed import record_path
+
+        self.assertEqual(record_path("quarter", 42), "quarter/42/show")
+        self.assertEqual(record_path("quarter", 42, "edit"), "quarter/42")
+        self.assertEqual(record_path("quarter", 42, "list"), "quarter")
+
+        with self.assertRaises(
+            ValueError,
+            msg=(
+                "An unknown view must fail loudly here rather than produce a "
+                "URL the frontend answers with its 404 page inside a frame, "
+                "where it looks like the widget is broken."
+            ),
+        ):
+            record_path("quarter", 42, "nonsense")
+
+    def test_1_273_the_serializer_reaches_the_frontend(self):
+        """
+        Scenario 1.273: the field list is chosen on the model, not in Python.
+        Given: a named serializer
+        When: the record is embedded
+        Then: it is handed to lex_view, which puts it in the query string.
+
+        This is the whole point of the signature. The same name is a path
+        segment of the REST API (/api/model_entries/<model>/<serializer>/one/<pk>),
+        so declaring the serializer on the model decides which fields appear --
+        with no frontend change and nothing listed twice.
+        """
+        from lex.lex_app.streamlit import calculation_embed
+
+        with mock.patch.object(calculation_embed, "lex_view") as embed:
+            calculation_embed.lex_calculation(
+                "quarter", 42, serializer="dashboard",
+            )
+
+        self.assertEqual(
+            embed.call_args.args[0], "quarter/42/show",
+            msg="The embed must point at the record's own detail route.",
+        )
+        self.assertEqual(
+            embed.call_args.kwargs["serializer"], "dashboard",
+            msg=(
+                "The serializer name must reach lex_view; without it the "
+                "frontend falls back to the model's default and the argument "
+                "silently does nothing."
+            ),
+        )
+
+    def test_1_274_the_embed_hides_the_chrome_by_default(self):
+        """
+        Scenario 1.274: a page embedding one record wants the record.
+        Given: default arguments
+        When: the record is embedded
+        Then: the toolbar and actions are hidden.
+
+        lex_view defaults these to False, which is right for a full-page table
+        embed and wrong here: an iframe is a fixed box, and the surrounding
+        navigation is a large fraction of a 420px one.
+        """
+        from lex.lex_app.streamlit import calculation_embed
+
+        with mock.patch.object(calculation_embed, "lex_view") as embed:
+            calculation_embed.lex_calculation("quarter", 42)
+
+        self.assertTrue(embed.call_args.kwargs["hide_toolbar"])
+        self.assertTrue(embed.call_args.kwargs["hide_actions"])
+
+    def test_1_275_the_embed_adds_no_second_way_to_reach_the_backend(self):
+        """
+        Scenario 1.275: it is URL construction, and nothing else.
+        Given: the embed module
+        When: its imports are inspected
+        Then: it reaches nothing first-party but lex_view.
+
+        The value of embedding the product's own view is that permissions, the
+        audit actor and the trigger path are the product's. A module that also
+        spoke to the API directly would be a second implementation of exactly
+        the thing it exists to avoid re-implementing.
+        """
+        import ast
+        import pathlib
+
+        from lex.lex_app.streamlit import calculation_embed
+
+        tree = ast.parse(pathlib.Path(calculation_embed.__file__).read_text())
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+
+        first_party = {n for n in imported if n.startswith("lex.")}
+        self.assertEqual(
+            first_party, {"lex.lex_app.streamlit.embed"},
+            msg=(
+                f"The embed module imports {sorted(first_party)}. It must reach "
+                "the backend only through lex_view -- anything else is a second "
+                "path to the API, which is the thing embedding the product's "
+                "own view exists to avoid."
+            ),
+        )
+
 
 
 # ── against the real Streamlit runtime ───────────────────────────────────────
