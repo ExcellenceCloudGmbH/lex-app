@@ -82,10 +82,13 @@ DEFAULT_MCP_MODE = MCP_MODE_FORWARD
 
 # Map mode -> package shipping the mode-specific ``.github`` directory.
 MCP_MODE_PACKAGE: dict[str, str] = {
+    "brief": "lex_mcp_brief",
     MCP_MODE_FORWARD: "lex_mcp_local",
     MCP_MODE_BACKWARD: "lex_mcp_reverse",
     "edit": "lex_mcp_edit",
     "review": "lex_mcp_review",
+    "test": "lex_mcp_test",
+    "input": "lex_mcp_input",
     "mvp_generator": "lex_mcp_mvp",
     "mvp_completion": "lex_mcp_mvp_completion",
 }

@@ -37,10 +37,13 @@ from lex.tools.setup_with_ai import (
 
 
 SUPPORTED_MCP_MODES: tuple[str, ...] = (
+    "brief",
     "forward",
     "backward",
     "edit",
     "review",
+    "test",
+    "input",
     "mvp_generator",
     "mvp_completion",
 )

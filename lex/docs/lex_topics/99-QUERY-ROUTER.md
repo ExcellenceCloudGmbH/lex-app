@@ -26,6 +26,7 @@ Use this file to route a user question to the most relevant focused Lex topic fi
 - examples, API endpoints, model info endpoints → `19-examples-and-endpoints.md`
 - Lex purpose, LexModel vs CalculationModel, CSV-only, project rules → `20-LEX-SPECIFICATIONS.md`
 - @hook, lifecycle hooks, AFTER_CREATE, BEFORE_UPDATE, django-lifecycle, skip_hooks, pre_validation, post_validation → `22-lifecycle-hooks.md`
+- testing, tests, ProcessAdminTestCase, test_path, test scenario, lex pytest, lex_test_config.yaml, test groups, pytestmark, minimal test data → `23-testing-and-test-data.md`
 
 ## Out of Scope Routing
 

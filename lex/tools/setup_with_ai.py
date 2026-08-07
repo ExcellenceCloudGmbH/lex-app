@@ -27,14 +27,24 @@ DEFAULT_REMOTE_MCP_TRANSPORT = "http"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
 DEFAULT_LEX_MCP_MODE = "forward"
 SUPPORTED_MCP_MODES: tuple[str, ...] = (
+    "brief",
     "forward",
     "backward",
     "edit",
     "review",
+    "test",
+    "input",
     "mvp_generator",
     "mvp_completion",
 )
 MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
+    {
+        "value": "brief",
+        "title": "Brief",
+        "desc": "Interview the user and write the project contract first.",
+        "tone": "brief",
+        "icon_html": "&#x1F4AC;",
+    },
     {
         "value": "forward",
         "title": "New Project",
@@ -76,6 +86,20 @@ MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
         "desc": "Audit, validate, and improve quality before merge.",
         "tone": "review",
         "icon_html": "&#x1F50D;",
+    },
+    {
+        "value": "test",
+        "title": "Test",
+        "desc": "Write the test suite and prove it catches regressions.",
+        "tone": "test",
+        "icon_html": "&#x1F9EA;",
+    },
+    {
+        "value": "input",
+        "title": "Input Change",
+        "desc": "Adapt the app to a changed input-data format.",
+        "tone": "input",
+        "icon_html": "&#x1F4E5;",
     },
     {
         "value": "mvp_generator",
@@ -1610,18 +1634,33 @@ def launch_setup_with_ai_form(
             mcp_mode = normalize_mcp_mode(
                 form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
             )
-            selected_environments = normalize_ai_environments(
-                form_data.get("ai_environments", []),
-                default=preselected,
+            # A checkbox is submitted only when it is checked, so an empty list
+            # means the user cleared the selection. Defaulting that to the
+            # pre-selected set would silently onboard every tool detected on
+            # this machine, which is exactly the choice the user just made not
+            # to make — ask again instead.
+            submitted_environments = [
+                value for value in form_data.get("ai_environments", []) if value.strip()
+            ]
+            selected_environments = (
+                normalize_ai_environments(submitted_environments)
+                if submitted_environments
+                else ()
             )
 
+            error_message = None
             if not github_token or not remote_mcp_api_key:
+                error_message = "Both fields are required."
+            elif not selected_environments:
+                error_message = "Select at least one coding environment."
+
+            if error_message:
                 body = _build_setup_form_html(
                     state=state,
                     project_root=project_root,
                     env_file_path=env_file_path,
-                    selected_environments=selected_environments,
-                    error_message="Both fields are required.",
+                    selected_environments=selected_environments or preselected,
+                    error_message=error_message,
                 )
                 encoded = body.encode("utf-8")
                 self.send_response(HTTPStatus.BAD_REQUEST)
@@ -1732,7 +1771,12 @@ def _build_setup_form_html(
             f'<label class="env-card'
             f'{" selected" if card["value"] in chosen_environments else ""}" '
             f'data-env="{card["value"]}">'
-            f'<input type="checkbox" name="ai_environments" value="{card["value"]}" '
+            # The cards sit in their own panel, outside <form>. Without the
+            # form owner attribute the browser drops them from the submission
+            # entirely, and the server falls back to auto-detection — which is
+            # how a user who picked one tool got every tool on their machine.
+            f'<input type="checkbox" form="setupForm" name="ai_environments" '
+            f'value="{card["value"]}" '
             f'{"checked" if card["value"] in chosen_environments else ""}>'
             f'<div class="env-icon">{card["icon_html"]}</div>'
             f'<div class="env-title">{html.escape(card["title"])}</div>'
@@ -2232,7 +2276,7 @@ def _build_setup_form_html(
           <p class="eyebrow">Credentials</p>
           <h2>Save tokens to this project</h2>
           {error_block}
-          <form method="post" action="/submit">
+          <form id="setupForm" method="post" action="/submit">
             <input type="hidden" name="state" value="{html.escape(state)}">
                         <input type="hidden" name="mcp_mode" id="mcpModeInput" value="{html.escape(selected_mode)}">
 

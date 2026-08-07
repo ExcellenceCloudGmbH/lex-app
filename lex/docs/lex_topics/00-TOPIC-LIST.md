@@ -27,6 +27,7 @@ Purpose: high-signal index extracted from `lex_context.md` and `lex_context_repo
 20. `20-LEX-SPECIFICATIONS.md` — canonical project-specific Lex rules and scope constraints
 21. `21-LEX-APP-CONTEXT.yaml` — baked Lex framework runtime context (CalculationModel/LexModel/logging)
 22. `22-lifecycle-hooks.md` — @hook decorator, django-lifecycle, conditional hooks, pre/post validation
+23. `23-testing-and-test-data.md` — ProcessAdminTestCase, JSON scenario data, test_path, `lex pytest`, lex_test_config.yaml groups, minimal-test-data rule
 99. `99-QUERY-ROUTER.md` — keyword-to-topic routing map for fast retrieval
 
 ## Out of Scope
