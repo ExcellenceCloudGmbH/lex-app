@@ -47,3 +47,19 @@
 > `ModelExport.py` (cluster 13f), `List.py` AG-Grid path (14f), `base_serializers.py` (12g) keep their forecasted homes.
 
 ---
+
+### Batch 10o — MCP embed-view tool ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.72 – 10.80 |
+| Type | U |
+| Files covered | `lex/mcp_server/tools/embed.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10o_embed_view_tool.py` |
+| Test classes | `TestCluster10o_ClassifyPath`, `TestCluster10o_BuildEmbedUrl`, `TestCluster10o_ResolveFrontendUrl`, `TestCluster10o_CspOrigins`, `TestCluster10o_EmbedViewInner` |
+| Fixtures | module-level stubs for `fastmcp`, `lex.mcp_server.config/registry/context`, `mcp.types` |
+| Tests | 27 |
+| Coverage gain | embed.py pure helpers + async tool handler |
+| Prereqs | none |
+| Status | ✅ Complete — 27 pass / 0 fail |
+| Note | Coverage task for PR #703 (fix/mcp-server-fastmcp4-port). The sibling modules (config, registry, context) live on an unmerged branch, so the module is loaded by path and stubs replace the missing imports. |
