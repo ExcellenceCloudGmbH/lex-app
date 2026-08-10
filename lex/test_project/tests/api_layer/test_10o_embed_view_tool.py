@@ -342,29 +342,34 @@ class TestCluster10o_ResolveFrontendUrl(unittest.TestCase):
 
     def test_10_79c_lex_frontend_url_fallback(self) -> None:
         """LEX_FRONTEND_URL is used when REACT_APP_URL is absent."""
-        env = {"LEX_FRONTEND_URL": "https://lex.example"}
-        with patch.object(_embed(), "mcp_setting", return_value=None):
-            with patch.dict("os.environ", env, clear=False):
-                # Remove REACT_APP_URL if present so the fallback is reached.
-                with patch.dict("os.environ", {"REACT_APP_URL": ""}, clear=False):
-                    url = _embed()._resolve_frontend_url()
+        # Pop REACT_APP_URL to ensure the key is absent (not just empty).
+        orig_react = os.environ.pop("REACT_APP_URL", None)
+        orig_lex = os.environ.pop("LEX_FRONTEND_URL", None)
+        try:
+            os.environ["LEX_FRONTEND_URL"] = "https://lex.example"
+            with patch.object(_embed(), "mcp_setting", return_value=None):
+                url = _embed()._resolve_frontend_url()
+        finally:
+            if orig_react is not None:
+                os.environ["REACT_APP_URL"] = orig_react
+            if orig_lex is not None:
+                os.environ["LEX_FRONTEND_URL"] = orig_lex
+            else:
+                os.environ.pop("LEX_FRONTEND_URL", None)
         self.assertEqual(url, "https://lex.example")
 
     def test_10_79d_localhost_last_resort(self) -> None:
         """http://localhost:8000 is used when no setting or env var is present."""
-        with patch.object(_embed(), "mcp_setting", return_value=None):
-            with patch.dict("os.environ", {}, clear=False):
-                # Unset both env vars so the fallback kicks in.
-                import os
-                orig_react = os.environ.pop("REACT_APP_URL", None)
-                orig_lex = os.environ.pop("LEX_FRONTEND_URL", None)
-                try:
-                    url = _embed()._resolve_frontend_url()
-                finally:
-                    if orig_react is not None:
-                        os.environ["REACT_APP_URL"] = orig_react
-                    if orig_lex is not None:
-                        os.environ["LEX_FRONTEND_URL"] = orig_lex
+        orig_react = os.environ.pop("REACT_APP_URL", None)
+        orig_lex = os.environ.pop("LEX_FRONTEND_URL", None)
+        try:
+            with patch.object(_embed(), "mcp_setting", return_value=None):
+                url = _embed()._resolve_frontend_url()
+        finally:
+            if orig_react is not None:
+                os.environ["REACT_APP_URL"] = orig_react
+            if orig_lex is not None:
+                os.environ["LEX_FRONTEND_URL"] = orig_lex
         self.assertEqual(url, "http://localhost:8000")
 
 
