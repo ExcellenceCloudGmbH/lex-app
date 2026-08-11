@@ -1007,16 +1007,29 @@ def setup_with_ai(
     # lex-mcp-local, which the lines above have only just installed. A
     # top-level import would make every `lex` command fail on a machine that
     # has never run setup.
-    verify_ai_assets = _require_lex_mcp("ai_assets").verify_ai_assets
+    verify_result = None
     try:
+        # Resolved inside the try on purpose. Setup installs whatever the index
+        # currently serves, and that can be older than this lex-app -- during a
+        # release window it always is. Letting the lookup escape aborts setup
+        # after the credentials, the server registration and the docs are
+        # already in place, which leaves a project half configured over
+        # something the very next command fixes.
+        verify_ai_assets = _require_lex_mcp("ai_assets").verify_ai_assets
         verify_result = verify_ai_assets(
             project_root=root,
             mode=effective_mcp_mode,
             environments=effective_environments,
         )
-    except SetupWithAIError as exc:
-        click.echo(f"Warning: AI asset verification failed: {exc}")
-    else:
+    except (SetupWithAIError, click.ClickException) as exc:
+        message = getattr(exc, "message", None) or str(exc)
+        click.echo(f"Warning: AI asset verification was skipped: {message}")
+        click.echo(
+            "  Setup itself completed. Run `lex ai-update` to finish "
+            "delivering the agent assets."
+        )
+
+    if verify_result is not None:
         restored_total = len(verify_result.restored_files)
         for directory_result in verify_result.directories:
             if directory_result.skipped_reason is not None:
@@ -1057,7 +1070,12 @@ def ai_update(project_root):
     does -- and what it reports -- lives in lex-mcp-local, which is why a new
     migration no longer needs a lex-app release to reach a customer.
     """
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The directory given (or the cwd) IS the project, exactly as
+    # setup-with-ai and ai-verify treat it. This used to walk up to a git
+    # toplevel or marker file, which meant update delivered the agent
+    # payload somewhere setup had never written -- a project without its
+    # own marker got .github and docs copied into its parent.
+    root = resolve_llm_working_directory(project_root)
 
     try:
         exit_code = run_ai_update_bootstrap(root, reporter=click.echo)
@@ -1256,7 +1274,12 @@ def ai_dashboard(project_root):
     API key, and other configuration. Changes are written to .env and mcp.json.
     Press Ctrl+C to stop the dashboard server.
     """
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The directory given (or the cwd) IS the project, exactly as
+    # setup-with-ai and ai-verify treat it. This used to walk up to a git
+    # toplevel or marker file, which meant update delivered the agent
+    # payload somewhere setup had never written -- a project without its
+    # own marker got .github and docs copied into its parent.
+    root = resolve_llm_working_directory(project_root)
     ai_dashboard_module = _require_lex_mcp("ai_dashboard")
     try:
         ai_dashboard_module.launch_ai_dashboard(
@@ -1293,7 +1316,12 @@ def ai_issue_report(project_root, output, artifact_mode, yes):
     Captures Copilot and MCP-related artifacts as raw files without parsing so
     no details are dropped during triage.
     """
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The directory given (or the cwd) IS the project, exactly as
+    # setup-with-ai and ai-verify treat it. This used to walk up to a git
+    # toplevel or marker file, which meant update delivered the agent
+    # payload somewhere setup had never written -- a project without its
+    # own marker got .github and docs copied into its parent.
+    root = resolve_llm_working_directory(project_root)
 
     if not yes:
         # The old wording said the bundle "can include raw secrets". It did,

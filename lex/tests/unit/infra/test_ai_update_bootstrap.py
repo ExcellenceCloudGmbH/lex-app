@@ -17,7 +17,9 @@ commands lex-app decides to issue.
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -253,6 +255,83 @@ class LegacyPackageCompatibilityTests(unittest.TestCase):
             )
 
         fallback.assert_called_once()
+
+
+class InterpreterAndRootResolutionTests(unittest.TestCase):
+    """Two ways the AI commands used to act on the wrong thing entirely.
+
+    Both were found only by building a venv the way the docs tell a user to and
+    running the documented sequence -- neither is reachable from a test that
+    stubs the environment, which is why they survived this long.
+    """
+
+    def test_the_running_virtualenv_outranks_whatever_is_on_path(self):
+        """`lex` is a console script *inside* the venv, so the interpreter
+        running it is the environment that has lex-app. Preferring
+        `which python3` points pip at the system Python: on Debian a PEP 668
+        refusal, elsewhere a silent install into an interpreter this one cannot
+        import from, after which every command reports lex-mcp-local missing.
+
+        Only when no project-local venv was found -- an explicit VIRTUAL_ENV or
+        a `.venv` beside the project still wins, because a system-wide `lex`
+        driven at a project should use that project's environment.
+        """
+        from lex.tools import setup_with_ai
+
+        # Forced rather than inferred: whether the suite itself runs inside a
+        # venv is an accident of how pytest was invoked, and this has to hold
+        # either way.
+        with tempfile.TemporaryDirectory() as tmp:
+            venv_python = Path(tmp) / "venv" / "bin" / "python"
+            venv_python.parent.mkdir(parents=True)
+            venv_python.touch()
+            project = Path(tmp) / "project"
+            project.mkdir()
+
+            with mock.patch.object(setup_with_ai.sys, "prefix", str(venv_python.parent.parent)), \
+                    mock.patch.object(setup_with_ai.sys, "base_prefix", "/usr"), \
+                    mock.patch.object(
+                        setup_with_ai.sys, "executable", str(venv_python)
+                    ), \
+                    mock.patch.object(
+                        setup_with_ai.shutil, "which", return_value="/usr/bin/python3"
+                    ):
+                resolved = setup_with_ai.resolve_active_python_executable(
+                    project, env={}
+                )
+
+            self.assertEqual(resolved, venv_python)
+
+    def test_the_running_interpreter_is_not_dereferenced(self):
+        """A venv's bin/python is a symlink to the base interpreter. Calling
+        resolve() on it hands back exactly the system Python this is meant to
+        avoid -- which is how the first attempt at the fix still failed."""
+        from lex.tools import setup_with_ai
+
+        source = Path(setup_with_ai.__file__).read_text(encoding="utf-8")
+        marker = "running_python = "
+        line = next(l for l in source.splitlines() if marker in l)
+        self.assertIn("abspath", line)
+        self.assertNotIn("resolve()", line)
+
+    def test_every_ai_command_agrees_on_what_the_project_is(self):
+        """setup-with-ai and ai-verify treat the given directory as the project
+        literally, on purpose. ai-update walked up to a marker instead, so in a
+        project without its own marker it delivered .github and docs into the
+        *parent* -- somewhere setup had never written. Update has to land where
+        setup landed or it is not an update.
+        """
+        from lex.bin import lex as cli
+
+        source = Path(cli.__file__).read_text(encoding="utf-8")
+        for command in ("def ai_update(", "def ai_dashboard(", "def ai_issue_report("):
+            start = source.index(command)
+            rest = source[start:]
+            # Up to the next top-level definition, whichever marker comes first.
+            ends = [i for i in (rest.find("\n@", 1), rest.find("\ndef ", 1)) if i > 0]
+            body = rest[: min(ends)] if ends else rest
+            self.assertIn("resolve_llm_working_directory", body, command)
+            self.assertNotIn("find_project_root", body, command)
 
 
 if __name__ == "__main__":

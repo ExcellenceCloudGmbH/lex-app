@@ -486,13 +486,28 @@ def resolve_active_python_executable(
             if candidate.is_file():
                 return Path(os.path.abspath(candidate))
 
+    # The interpreter we are *running in*, when that is itself a virtualenv.
+    # This has to outrank PATH: `lex` is a console script inside the venv, so
+    # sys.executable is the environment that actually has lex-app installed,
+    # whereas `which python3` is whatever the shell happens to expose. Without
+    # this, running .venv/bin/lex without `source .venv/bin/activate` -- from a
+    # project whose root does not itself contain the venv -- points pip at the
+    # system Python. On Debian that is a PEP 668 refusal; elsewhere it silently
+    # installs lex-mcp-local into an interpreter this one cannot import from,
+    # and every later command reports it as not installed.
+    # abspath, never resolve(): a venv's bin/python is a symlink to the base
+    # interpreter, and following it hands back exactly the system Python this
+    # is meant to avoid.
+    running_python = Path(os.path.abspath(os.path.expanduser(sys.executable)))
+    if sys.prefix != sys.base_prefix and running_python.is_file():
+        return running_python
+
     path_python = shutil.which("python") or shutil.which("python3")
     if path_python:
         return Path(os.path.abspath(path_python))
 
-    sys_python = Path(sys.executable).expanduser().resolve()
-    if sys_python.is_file():
-        return sys_python
+    if running_python.is_file():
+        return running_python
 
     raise SetupWithAIError("Could not determine a Python interpreter for the active virtual environment.")
 
