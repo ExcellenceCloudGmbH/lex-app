@@ -239,8 +239,19 @@ LEGACY_GITHUB_TOKEN_ENV_NAMES = ("COPILOT_GITHUB_TOKEN",)
 MINIMUM_DUAL_MODE_VERSION = "1.0.0"
 
 
-class SetupWithAIError(RuntimeError):
-    pass
+try:
+    # Deliberately the *same class*, not a look-alike. The AI commands now raise
+    # from lex-mcp-local, and lex-app has eight `except SetupWithAIError` sites
+    # that must still catch them -- two separately-defined classes with the same
+    # name catch nothing and surface as a raw traceback instead of the one-line
+    # message the user needs. Defining our own below is the pre-install
+    # fallback: `lex setup-with-ai` has to raise something before the package
+    # it installs exists.
+    from lex_mcp.ai_setup import SetupWithAIError  # noqa: F401
+except Exception:  # pragma: no cover - exercised only before setup has run
+
+    class SetupWithAIError(RuntimeError):
+        pass
 
 
 @dataclass(frozen=True)

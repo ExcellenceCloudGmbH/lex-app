@@ -25,7 +25,16 @@ from lex.tools.setup_with_ai import (
     probe_lex_mcp_local_server,
     resolve_active_python_executable,
     run_ai_update_bootstrap,
+    SUPPORTED_MCP_MODES,
 )
+
+# Click validates --mode before any of our code runs, so a hardcoded list here
+# rejects a mode the server supports no matter what the rest of the stack
+# knows. Three copies of this list sat at six modes while the server shipped
+# nine, which is how `lex ai-verify --mode brief` came to fail with "not one
+# of" rather than verifying anything. Derived, like every other roster.
+_MODE_CHOICES = list(SUPPORTED_MCP_MODES)
+_VERIFY_MODE_CHOICES = ["auto", *_MODE_CHOICES, "all"]
 
 
 def _require_lex_mcp(module_name: str):
@@ -765,17 +774,7 @@ def setup(project_root):
     "--mcp-mode",
     default="forward",
     show_default=True,
-    type=click.Choice(
-        [
-            "forward",
-            "backward",
-            "edit",
-            "review",
-            "mvp_generator",
-            "mvp_completion",
-        ],
-        case_sensitive=False,
-    ),
+    type=click.Choice(_MODE_CHOICES, case_sensitive=False),
     help="MCP workflow mode. Determines which agent payload is delivered and "
          "which mode the server runs in (written to LEX_MCP_MODE in .env and "
          "every MCP config).",
@@ -1104,19 +1103,7 @@ def _run_ai_verify_command(
 @click.option(
     "--mode",
     "mode",
-    type=click.Choice(
-        [
-            "auto",
-            "forward",
-            "backward",
-            "edit",
-            "review",
-            "mvp_generator",
-            "mvp_completion",
-            "all",
-        ],
-        case_sensitive=False,
-    ),
+    type=click.Choice(_VERIFY_MODE_CHOICES, case_sensitive=False),
     default="auto",
     show_default=True,
     help=(
@@ -1170,19 +1157,7 @@ def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments):
 @click.option(
     "--mode",
     "mode",
-    type=click.Choice(
-        [
-            "auto",
-            "forward",
-            "backward",
-            "edit",
-            "review",
-            "mvp_generator",
-            "mvp_completion",
-            "all",
-        ],
-        case_sensitive=False,
-    ),
+    type=click.Choice(_VERIFY_MODE_CHOICES, case_sensitive=False),
     default="auto",
     show_default=True,
     help=(
