@@ -853,7 +853,7 @@ def setup_with_ai(
     # non-interactive run must never silently write into every tool installed
     # on the machine, so it falls back to the long-standing default.
     suggested = cli_environments or (
-        () if no_browser else suggest_ai_environments(root)
+        () if no_browser else suggest_ai_environments(root, python_executable)
     )
     credentials = _collect_setup_with_ai_credentials(
         github_token=github_token,
@@ -893,6 +893,24 @@ def setup_with_ai(
         click.echo(f"Installed lex-mcp-local {installed_version}.")
     else:
         click.echo("Warning: could not detect installed lex-mcp-local version.")
+
+    # Probe the environment registry through the *project* interpreter — the
+    # same path onboarding uses. Probing this process instead would report a
+    # false failure on every first install, because pip's .pth file is only
+    # honoured at interpreter startup.
+    from lex.tools.setup_with_ai import invoke_onboarding
+
+    _registry_probe, registry_error = invoke_onboarding(
+        python_executable, "describe"
+    )
+    if _registry_probe is None:
+        click.echo(
+            f"Warning: the agentic-environment registry is not reachable in "
+            f"{python_executable}: {registry_error}"
+        )
+        click.echo(
+            "         Only pycharm-copilot can be configured in that state."
+        )
     if effective_mcp_mode == "backward" and not _has_unified_mcp_entry_point(python_executable):
         click.echo(
             f"Warning: backward mode requires lex-mcp-local >= {MINIMUM_DUAL_MODE_VERSION}, "
@@ -959,6 +977,11 @@ def setup_with_ai(
             f"{len(artifacts.payload_files_written)} file(s) written across "
             f"{len(artifacts.environments)} environment(s)."
         )
+    else:
+        click.echo(
+            "Delivered agent payload: nothing to write "
+            f"(already up to date) for {', '.join(artifacts.environments)}."
+        )
     for config_path in artifacts.mcp_config_paths:
         click.echo(f"Registered {artifacts.server_name} in: {config_path}")
     click.echo(f"Using interpreter: {artifacts.python_executable}")
@@ -1023,7 +1046,14 @@ def setup_with_ai(
         else:
             click.echo("AI assets verified: nothing to restore.")
 
-    click.echo("Setup complete. Next steps for each environment you selected:")
+    configured = ", ".join(artifacts.environments) or "pycharm-copilot"
+    click.echo(f"Setup complete for: {configured}")
+    if set(artifacts.environments) != set(effective_environments):
+        click.echo(
+            "Warning: requested "
+            f"{', '.join(effective_environments)} but configured {configured}."
+        )
+    click.echo("Next steps:")
     for note in artifacts.environment_notes:
         click.echo(f"  - {note}")
     if not artifacts.environment_notes:

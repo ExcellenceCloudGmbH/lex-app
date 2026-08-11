@@ -20,7 +20,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs
 
 DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
@@ -144,6 +144,35 @@ AI_ENVIRONMENT_CARD_DEFS: tuple[dict[str, str], ...] = (
 SUPPORTED_AI_ENVIRONMENTS: tuple[str, ...] = tuple(
     card["value"] for card in AI_ENVIRONMENT_CARD_DEFS
 )
+#: Mirror of the alias table in ``lex_mcp.environments``. The registry is
+#: authoritative; this exists only so ``--environment claude`` still resolves
+#: correctly when the registry cannot be imported. Without it the fallback
+#: silently discarded every alias and substituted the default, which onboarded
+#: the wrong tool while reporting success.
+AI_ENVIRONMENT_ALIASES: dict[str, str] = {
+    "pycharm": "pycharm-copilot",
+    "jetbrains": "pycharm-copilot",
+    "jetbrains-copilot": "pycharm-copilot",
+    "intellij": "pycharm-copilot",
+    "copilot": "pycharm-copilot",
+    "vscode": "vscode-copilot",
+    "vs-code": "vscode-copilot",
+    "code": "vscode-copilot",
+    "vscode-github-copilot": "vscode-copilot",
+    "gh-copilot": "copilot-cli",
+    "copilot-terminal": "copilot-cli",
+    "cursor-ide": "cursor",
+    "cursor-agent": "cursor",
+    "claude": "claude-code",
+    "claudecode": "claude-code",
+    "anthropic-claude-code": "claude-code",
+    "openai-codex": "codex",
+    "codex-cli": "codex",
+    "gpt-codex": "codex",
+    "codeium": "windsurf",
+    "windsurf-ide": "windsurf",
+    "cascade": "windsurf",
+}
 
 GITHUB_TOKEN_URL = "https://github.com/settings/tokens/new?description=Full+Classic+PAT&scopes=repo,workflow,admin:org,admin:repo_hook,user,project,admin:enterprise,read:enterprise,manage_runners:enterprise,read:audit_log,write:network_configurations,manage_billing:copilot"
 GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
@@ -157,11 +186,8 @@ LEGACY_LEX_MCP_SERVER_NAMES = ("lex-mcp-wrapper",)
 LEX_MCP_LOCAL_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = (".github",)
 # Directories inside the lex-app package that are copied into the project root.
 LEX_APP_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = ("docs",)
-LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
-    "--no-cache-dir",
-    "--extra-index-url",
-    "https://pypi.org/simple",
-    "lex-mcp-local",
+LEX_MCP_LOCAL_SOURCE_DIRECTORY = Path(
+    "/Users/melihsunbul/LUND_IT/lex-mcp-local"
 )
 _SAFE_UNQUOTED_ENV_VALUE_RE = re.compile(r"^[A-Za-z0-9._:/@+-]*$")
 LEGACY_GITHUB_TOKEN_ENV_NAMES = ("COPILOT_GITHUB_TOKEN",)
@@ -250,16 +276,119 @@ def _environment_registry():
         return None
 
 
+#: How long one onboarding action may take. Rendering six modes across seven
+#: environments is file I/O only, but a cold interpreter start on Windows plus
+#: a large payload justifies a generous ceiling.
+ONBOARDING_TIMEOUT_SECONDS = 180
+
+
+def _onboarding_module():
+    """Return ``lex_mcp.ai_onboarding`` from *this* process, or ``None``.
+
+    Only usable when this interpreter is the same one lex-mcp-local is
+    installed into; :func:`invoke_onboarding` decides that. Prefer that
+    function over calling this directly.
+    """
+    try:
+        import importlib
+
+        return importlib.import_module("lex_mcp.ai_onboarding")
+    except Exception:
+        return None
+
+
+def _same_interpreter(python_executable: Path | str | None) -> bool:
+    """True when *python_executable* is the interpreter running this process."""
+    if python_executable is None:
+        return True
+    try:
+        return Path(python_executable).resolve() == Path(sys.executable).resolve()
+    except OSError:
+        return False
+
+
+def invoke_onboarding(
+    python_executable: Path | str | None,
+    action: str,
+    request: Mapping[str, Any] | None = None,
+    *,
+    timeout_seconds: float = ONBOARDING_TIMEOUT_SECONDS,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run one onboarding action, returning ``(response, error)``.
+
+    The environment registry lives in ``lex-mcp-local``, which is installed
+    into the *project's* interpreter — not necessarily the one running ``lex``.
+    Two things follow:
+
+    * When ``lex`` runs from a different virtualenv, an in-process import finds
+      either nothing or a second, possibly skewed copy.
+    * On the very run that installs the package, an in-process import cannot
+      work at all. pip records an editable install as a ``.pth`` file, and
+      ``.pth`` files are only processed by ``site`` at interpreter startup, so
+      the already-running ``lex`` process never gets the new directory on
+      ``sys.path``. ``importlib.invalidate_caches()`` does not help.
+
+    So the authoritative path is a subprocess against *python_executable*. The
+    in-process call is used only when that is demonstrably the same
+    interpreter, which keeps the ``ai-verify`` pre-flight cheap without ever
+    risking a version skew.
+    """
+    payload: dict[str, Any] = {"action": action, **dict(request or {})}
+
+    if _same_interpreter(python_executable):
+        module = _onboarding_module()
+        if module is not None:
+            try:
+                return module.handle_request(payload), None
+            except Exception as exc:  # pragma: no cover - defensive
+                return None, f"{type(exc).__name__}: {exc}"
+
+    if python_executable is None:
+        return None, "no project interpreter available to run onboarding"
+
+    try:
+        proc = subprocess.run(
+            [str(python_executable), "-m", "lex_mcp.ai_onboarding"],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        detail = (proc.stderr or "").strip().splitlines()
+        tail = detail[-1] if detail else f"exit code {proc.returncode}"
+        return None, f"lex_mcp.ai_onboarding produced no response ({tail})"
+
+    try:
+        response = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"unparseable onboarding response ({exc})"
+    if not isinstance(response, dict):
+        return None, "onboarding response was not a JSON object"
+    return response, response.get("error")
+
+
 def normalize_ai_environments(
     environments: str | Iterable[str] | None,
     *,
     default: Iterable[str] = (DEFAULT_AI_ENVIRONMENT,),
+    strict: bool = True,
 ) -> tuple[str, ...]:
     """Normalise environment names, preferring the lex-mcp-local registry.
 
     Accepts a comma/space separated string or an iterable, resolves aliases
-    (``vscode`` -> ``vscode-copilot``), expands ``all``, and drops
-    duplicates while preserving order.
+    (``vscode`` -> ``vscode-copilot``), expands ``all``, and drops duplicates
+    while preserving order. Empty input falls back to *default*.
+
+    With *strict* (the default) an unrecognised name raises
+    :class:`SetupWithAIError`. Silently dropping it and falling back to the
+    default is far worse than failing: it onboards a tool the user did not ask
+    for and still reports success. Pass ``strict=False`` only for values read
+    back from persisted config, where tolerating drift is correct.
     """
     registry = _environment_registry()
     if registry is not None:
@@ -267,8 +396,9 @@ def normalize_ai_environments(
             return tuple(
                 registry.resolve_environment_keys(environments, default=tuple(default))
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            if strict:
+                raise SetupWithAIError(str(exc)) from exc
 
     if environments is None:
         items: list[str] = []
@@ -280,29 +410,52 @@ def normalize_ai_environments(
         items = list(default)
 
     out: list[str] = []
+    unknown: list[str] = []
     for item in items:
-        candidate = item.strip().lower().replace("_", "-")
+        candidate = item.strip().lower().replace("_", "-").replace(" ", "-")
         if candidate == "all":
             for key in SUPPORTED_AI_ENVIRONMENTS:
                 if key not in out:
                     out.append(key)
             continue
-        if candidate in SUPPORTED_AI_ENVIRONMENTS and candidate not in out:
-            out.append(candidate)
-    return tuple(out) or (DEFAULT_AI_ENVIRONMENT,)
+        resolved = (
+            candidate
+            if candidate in SUPPORTED_AI_ENVIRONMENTS
+            else AI_ENVIRONMENT_ALIASES.get(candidate)
+        )
+        if resolved is None:
+            unknown.append(item)
+            continue
+        if resolved not in out:
+            out.append(resolved)
+
+    if unknown and strict:
+        raise SetupWithAIError(
+            f"Unknown agentic environment(s): {', '.join(unknown)}. "
+            f"Choose from: {', '.join(SUPPORTED_AI_ENVIRONMENTS)} (or 'all'). "
+            "Run `lex setup-with-ai --list-environments` for the full list "
+            "with aliases."
+        )
+    return tuple(out) or tuple(default) or (DEFAULT_AI_ENVIRONMENT,)
 
 
-def suggest_ai_environments(project_root: Path) -> tuple[str, ...]:
-    """Environments to pre-select in the setup form for this machine/project."""
-    try:
-        import importlib
+def suggest_ai_environments(
+    project_root: Path,
+    python_executable: Path | str | None = None,
+) -> tuple[str, ...]:
+    """Environments to pre-select in the setup form for this machine/project.
 
-        onboarding = importlib.import_module("lex_mcp.ai_onboarding")
-        suggested = tuple(onboarding.suggest_environments(project_root))
+    Routed through :func:`invoke_onboarding` for the same reason onboarding is:
+    detection lives in lex-mcp-local, which is installed into the project
+    interpreter. Falls back to the default so the form always renders.
+    """
+    response, _error = invoke_onboarding(
+        python_executable, "resolve", {"project_root": str(project_root)}
+    )
+    if response:
+        suggested = tuple(response.get("suggested") or ())
         if suggested:
-            return suggested
-    except Exception:
-        pass
+            return normalize_ai_environments(list(suggested))
     return (DEFAULT_AI_ENVIRONMENT,)
 
 
@@ -330,15 +483,14 @@ def build_lex_mcp_local_install_command(
     *,
     upgrade: bool = False,
 ) -> list[str]:
-    entitlement_token = remote_mcp_api_key.strip()
-    if not entitlement_token:
-        raise SetupWithAIError("Lex MCP Access Key is required to install lex-mcp-local.")
+    """Build the editable install command for the local lex-mcp checkout.
 
-    index_url = (
-        "https://dl.cloudsmith.io/"
-        f"{quote(entitlement_token, safe='')}/"
-        "excellence-cloud/lex-mcp-local/python/simple/"
-    )
+    ``remote_mcp_api_key`` remains part of the public signature because setup
+    also uses it to authenticate the hosted MCP runtime.  Local package
+    installation itself must not send that secret to a package index.
+    """
+    del remote_mcp_api_key
+
     cmd = [
         str(python_executable),
         "-m",
@@ -347,12 +499,7 @@ def build_lex_mcp_local_install_command(
     ]
     if upgrade:
         cmd.append("--upgrade")
-    cmd += [
-        LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[0],
-        "--index-url",
-        index_url,
-        *LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX[1:],
-    ]
+    cmd.extend(["--editable", str(LEX_MCP_LOCAL_SOURCE_DIRECTORY)])
     return cmd
 
 
@@ -1486,38 +1633,67 @@ def configure_ai_integration(
     notes: list[str] = []
     github_directory_path: Path | None = None
 
-    onboarding = None
-    try:
-        import importlib
+    # Run onboarding through the project's interpreter. That is the only
+    # interpreter guaranteed to have lex-mcp-local importable — in particular on
+    # this very run, where pip has just written a .pth that the already-running
+    # `lex` process can never pick up.
+    result, onboarding_error = invoke_onboarding(
+        python_path,
+        "onboard",
+        {
+            "project_root": str(project_root_path),
+            "mode": normalize_mcp_mode(mcp_mode),
+            "environments": list(selected_environments),
+            "server_definition": dict(server_definition),
+            "home": str(home) if home is not None else None,
+        },
+    )
 
-        onboarding = importlib.import_module("lex_mcp.ai_onboarding")
-    except Exception:
-        onboarding = None
-
-    if onboarding is not None:
-        result = onboarding.onboard_project(
-            project_root_path,
-            mode=normalize_mcp_mode(mcp_mode),
-            environments=selected_environments,
-            server_definition=server_definition,
-            home=home,
-            env=env,
+    # The legacy fallback can only configure GitHub Copilot. Downgrading to it
+    # silently would leave a user who asked for --environment claude-code with
+    # a Copilot-only setup and a "Setup complete" message, which is what
+    # happened before this guard existed.
+    if result is None and set(selected_environments) != {DEFAULT_AI_ENVIRONMENT}:
+        raise SetupWithAIError(
+            "Cannot onboard "
+            f"{', '.join(selected_environments)}: the agentic-environment "
+            "registry could not be reached in the project interpreter "
+            f"({python_path}).\n"
+            f"  Error: {onboarding_error}\n"
+            "Only 'pycharm-copilot' can be configured without it. Fix one of:\n"
+            "  - reinstall lex-mcp-local into that interpreter "
+            "(`lex setup-with-ai` does this for you);\n"
+            "  - upgrade lex-mcp-local to a release that ships "
+            "lex_mcp.ai_onboarding."
         )
-        for config in result.configs:
-            if config.written or config.created:
-                config_paths.append(Path(config.path))
-        payload_files = list(result.files_written)
-        notes = list(result.notes)
+
+    if result is not None:
         errors = [
             error
-            for payload in result.payloads
-            for error in payload.errors
-        ] + [config.error for config in result.configs if config.error]
+            for payload in result.get("payloads", [])
+            for error in payload.get("errors", [])
+        ] + [
+            config["error"]
+            for config in result.get("configs", [])
+            if config.get("error")
+        ]
+        if onboarding_error:
+            errors.insert(0, onboarding_error)
         if errors:
             raise SetupWithAIError(
                 "Could not complete environment onboarding: "
                 + "; ".join(str(error) for error in errors[:5])
             )
+        # Report every config we actually own, not only the ones that changed:
+        # on an idempotent re-run nothing is written, and reporting an empty
+        # list used to fall through to the JetBrains path below even when that
+        # environment was never selected.
+        for config in result.get("configs", []):
+            if config.get("skipped"):
+                continue
+            config_paths.append(Path(config["path"]))
+        payload_files = list(result.get("files_written", []))
+        notes = list(result.get("notes", []))
         github_dir = project_root_path.resolve() / ".github"
         if github_dir.is_dir():
             github_directory_path = github_dir
@@ -1562,6 +1738,7 @@ def launch_setup_with_ai_form(
     reporter: Callable[[str], None] | None = None,
     timeout_seconds: int = 900,
     suggested_environments: Iterable[str] | None = None,
+    python_executable: Path | str | None = None,
 ) -> SetupWithAICredentials:
     state = secrets.token_urlsafe(16)
     result: dict[str, SetupWithAICredentials] = {}
@@ -1570,7 +1747,7 @@ def launch_setup_with_ai_form(
     preselected = normalize_ai_environments(
         suggested_environments
         if suggested_environments is not None
-        else suggest_ai_environments(Path(project_root))
+        else suggest_ai_environments(Path(project_root), python_executable)
     )
 
     class SetupWithAIHandler(BaseHTTPRequestHandler):
@@ -1610,9 +1787,12 @@ def launch_setup_with_ai_form(
             mcp_mode = normalize_mcp_mode(
                 form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
             )
+            # Not strict: a malformed POST must not raise inside the request
+            # handler. The form only ever submits registry keys.
             selected_environments = normalize_ai_environments(
                 form_data.get("ai_environments", []),
                 default=preselected,
+                strict=False,
             )
 
             if not github_token or not remote_mcp_api_key:
@@ -2224,7 +2404,7 @@ def _build_setup_form_html(
           </ul>
           <p><a class="button" href="{html.escape(GITHUB_TOKEN_URL)}" target="_blank" rel="noreferrer">Open GitHub token page</a></p>
           <div class="meta">
-            <div>Use the Lex MCP Access Key that both authenticates your hosted MCP server and unlocks the Cloudsmith package install for <code>lex-mcp-local</code>.</div>
+            <div>Use the Lex MCP Access Key to authenticate your hosted MCP server. The <code>lex-mcp-local</code> package is installed in editable mode from <code>{html.escape(str(LEX_MCP_LOCAL_SOURCE_DIRECTORY))}</code>.</div>
           </div>
         </article>
 
@@ -2246,7 +2426,7 @@ def _build_setup_form_html(
               Lex MCP Access Key
               <input type="password" name="remote_mcp_api_key" autocomplete="off" required>
             </label>
-            <p class="hint">Paste the API key used both for the hosted MCP endpoint and the entitlement-gated <code>lex-mcp-local</code> package install.</p>
+            <p class="hint">Paste the API key used by the hosted MCP endpoint. The local package install does not send this key to a package index.</p>
 
             <button type="submit">Save and finish setup</button>
           </form>
