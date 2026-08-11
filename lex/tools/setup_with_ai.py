@@ -26,15 +26,65 @@ DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
 DEFAULT_LEX_MCP_MODE = "forward"
-SUPPORTED_MCP_MODES: tuple[str, ...] = (
+
+
+def _installed_mode_roster() -> tuple[str, ...] | None:
+    """Ask the installed lex-mcp-local which modes exist, if it is there.
+
+    The setup form has to render a mode picker before lex-mcp-local is
+    guaranteed to be on disk -- installing it is what this command does, and
+    the access key that authorises the install comes from the form itself. So
+    the literal below has to exist as a cold-start fallback.
+
+    It is a fallback and nothing more. Whenever the package is present -- every
+    re-run, every upgrade, every dashboard launch -- the roster comes from the
+    server, because a mode list maintained in this repository is a mode list
+    that silently falls behind the one the server actually serves. It already
+    did: this table sat at six modes for three releases while the server shipped
+    nine, so brief, test, and input were unreachable from setup.
+    """
+    try:
+        from lex_mcp.ai_setup import SUPPORTED_MCP_MODES as _installed
+    except Exception:
+        return None
+    return tuple(_installed) or None
+
+
+#: Cold-start fallback only -- see :func:`_installed_mode_roster`. Keep in step
+#: with ``lex_mcp.payload.MODE_TO_PACKAGE``; a test in lex-mcp-local fails when
+#: they diverge.
+_FALLBACK_MCP_MODES: tuple[str, ...] = (
+    "brief",
     "forward",
     "backward",
     "edit",
     "review",
+    "test",
+    "input",
     "mvp_generator",
     "mvp_completion",
 )
-MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
+
+SUPPORTED_MCP_MODES: tuple[str, ...] = _installed_mode_roster() or _FALLBACK_MCP_MODES
+def _installed_mode_cards() -> tuple[dict[str, str], ...] | None:
+    """Ask the installed lex-mcp-local for the mode cards. Same rule as the
+    roster above: derive when we can, fall back only on a cold start."""
+    try:
+        from lex_mcp.ai_setup import MCP_MODE_CARD_DEFS as _installed
+    except Exception:
+        return None
+    return tuple(_installed) or None
+
+
+#: Cold-start fallback only -- see :func:`_installed_mode_cards`.
+_FALLBACK_MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
+    {
+        "value": "brief",
+        "title": "Project Brief",
+        "desc": "Interview you about the goal and write the project contract.",
+        "tone": "brief",
+        "icon_html": "&#x1F4DD;",
+    },
     {
         "value": "forward",
         "title": "New Project",
@@ -78,6 +128,20 @@ MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
         "icon_html": "&#x1F50D;",
     },
     {
+        "value": "test",
+        "title": "Test Suite",
+        "desc": "Write the tests, ground them in user stories, prove they bite.",
+        "tone": "test",
+        "icon_html": "&#x1F9EA;",
+    },
+    {
+        "value": "input",
+        "title": "Input Change",
+        "desc": "Adapt the app to a changed input-data format.",
+        "tone": "input",
+        "icon_html": "&#x1F504;",
+    },
+    {
         "value": "mvp_generator",
         "title": "MVP Generator",
         "desc": "Generate a lean, production-minded MVP baseline.",
@@ -91,6 +155,10 @@ MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
         "tone": "mvp_completion",
         "icon_html": "&#x2705;",
     },
+)
+
+MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
+    _installed_mode_cards() or _FALLBACK_MCP_MODE_CARD_DEFS
 )
 #: Agentic environments the setup flow can onboard. Mirrors the registry in
 #: ``lex_mcp.environments`` — that module is authoritative, and this table is
@@ -1681,11 +1749,65 @@ def launch_setup_with_ai_form(
 
 
 # ---------------------------------------------------------------------------
-# ai-update: the actual migration steps and public entry point live in
-# ``lex_mcp.ai_update`` (shipped by lex-mcp-local) so new steps can ship
-# without a lex-app release. This module still exposes ``_read_dotenv_value``
+# ai-update: the migration steps live in ``lex_mcp.ai_update`` (shipped by
+# lex-mcp-local) so new steps can ship without a lex-app release. What stays
+# here is only the bootstrap below, which has to run before the package it
+# upgrades can be imported. This module still exposes ``_read_dotenv_value``
 # because ai_dashboard / verify_ai_assets and other lex-app callers rely on it.
 # ---------------------------------------------------------------------------
+
+
+def run_ai_update_bootstrap(
+    project_root: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    runner=subprocess.run,
+    reporter: Callable[[str], None] | None = None,
+) -> int:
+    """Upgrade lex-mcp-local, then run its migration ladder in a fresh process.
+
+    The two halves cannot share a process. ``lex_mcp.ai_update`` binds its step
+    list at import time, so a run that starts on version N iterates version N's
+    steps regardless of what pip installs underneath it -- which meant a new
+    migration only took effect on the *second* ``lex ai-update`` a customer ran.
+    Re-entering through ``python -m lex_mcp.ai_update`` means the process that
+    reads the ladder is running the version that just landed.
+
+    Deliberately the only part of ai-update still in lex-app, and deliberately
+    dumb: resolve an interpreter, read a key, run pip, hand over. Anything that
+    has an opinion about what an update *does* belongs on the other side of the
+    handoff, where it can change without a lex-app release.
+    """
+    say = reporter or (lambda _message: None)
+    project_root = Path(project_root).resolve()
+    env_file_path = project_root / ".env"
+
+    python_executable = resolve_active_python_executable(project_root, env=env)
+
+    remote_mcp_api_key = _read_dotenv_value(env_file_path, "REMOTE_MCP_API_KEY")
+    if not remote_mcp_api_key:
+        raise SetupWithAIError(
+            "REMOTE_MCP_API_KEY not found in .env — cannot upgrade lex-mcp-local. "
+            "Please run lex setup-with-ai to set your .env file."
+        )
+
+    say("Upgrading lex-mcp-local...")
+    install_lex_mcp_local(
+        python_executable, remote_mcp_api_key, runner=runner, upgrade=True,
+    )
+
+    say("Applying LEX AI updates...")
+    completed = runner(
+        [
+            str(python_executable),
+            "-m",
+            "lex_mcp.ai_update",
+            "--project-root",
+            str(project_root),
+        ],
+        check=False,
+    )
+    return int(getattr(completed, "returncode", 0) or 0)
 
 
 def _read_dotenv_value(env_file_path: Path, key: str) -> str | None:
@@ -1981,8 +2103,17 @@ def _build_setup_form_html(
         width: 22px;
         height: 22px;
       }}
+      .mode-card.brief .mode-icon {{
+        background: rgba(14, 165, 233, 0.10);
+      }}
       .mode-card.forward .mode-icon {{
         background: rgba(36, 182, 187, 0.12);
+      }}
+      .mode-card.test .mode-icon {{
+        background: rgba(217, 70, 239, 0.12);
+      }}
+      .mode-card.input .mode-icon {{
+        background: rgba(249, 115, 22, 0.12);
       }}
       .mode-card.backward .mode-icon {{
         background: rgba(40, 48, 103, 0.08);

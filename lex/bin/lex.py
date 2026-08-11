@@ -24,8 +24,8 @@ from lex.tools.setup_with_ai import (
     launch_setup_with_ai_form,
     probe_lex_mcp_local_server,
     resolve_active_python_executable,
+    run_ai_update_bootstrap,
 )
-from lex.tools.verify_ai_assets import verify_ai_assets
 
 
 def _require_lex_mcp(module_name: str):
@@ -992,6 +992,11 @@ def setup_with_ai(
     # plain `lex setup` left the project partially initialized, or where a
     # copy step silently no-op'd.
     click.echo("Verifying AI asset directories...")
+    # Imported here, not at module scope: verification now ships with
+    # lex-mcp-local, which the lines above have only just installed. A
+    # top-level import would make every `lex` command fail on a machine that
+    # has never run setup.
+    verify_ai_assets = _require_lex_mcp("ai_assets").verify_ai_assets
     try:
         verify_result = verify_ai_assets(
             project_root=root,
@@ -1033,58 +1038,29 @@ def setup_with_ai(
 @lex.command(name="ai-update", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.option("-p", "--project-root", help="Project root (default: execution dir)")
 def ai_update(project_root):
-    """Apply incremental updates to an existing LEX AI setup."""
+    """Apply incremental updates to an existing LEX AI setup.
+
+    A bootstrap only: upgrade lex-mcp-local, then hand off to
+    ``python -m lex_mcp.ai_update`` in a fresh process so the migration steps
+    that run are the ones the upgrade just installed. What an update actually
+    does -- and what it reports -- lives in lex-mcp-local, which is why a new
+    migration no longer needs a lex-app release to reach a customer.
+    """
     root = Path(find_project_root(project_root or os.getcwd())).resolve()
 
-    ai_update_module = _require_lex_mcp("ai_update")
-
-    click.echo("Applying LEX AI updates...")
     try:
-        results = ai_update_module.apply_ai_update(project_root=root)
+        exit_code = run_ai_update_bootstrap(root, reporter=click.echo)
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
+    except subprocess.CalledProcessError as exc:
+        raise click.ClickException(
+            f"Could not upgrade lex-mcp-local (pip exited {exc.returncode})."
+        ) from exc
 
-    if not results:
-        click.echo("No updates to apply.")
-        return
-
-    for result in results:
-        click.echo(f"Applied update to v{result.version}:")
-        if result.env_keys_removed:
-            click.echo(f"  Removed from .env: {', '.join(result.env_keys_removed)}")
-        if result.mcp_env_keys_removed:
-            click.echo(f"  Removed from mcp.json: {', '.join(result.mcp_env_keys_removed)}")
-        if result.package_upgraded:
-            click.echo("  Upgraded lex-mcp-local package.")
-        for dest in result.artifact_directories_copied:
-            click.echo(f"  Copied {dest.name} to {dest}")
-        environments_configured = getattr(result, "environments_configured", ())
-        if environments_configured:
-            click.echo(
-                f"  Agentic environments: {', '.join(environments_configured)}"
-            )
-        payload_written = getattr(result, "payload_files_written", 0)
-        payload_pruned = getattr(result, "payload_files_pruned", 0)
-        if payload_written or payload_pruned:
-            click.echo(
-                f"  Agent payload: {payload_written} file(s) written, "
-                f"{payload_pruned} stale file(s) removed."
-            )
-        if result.server_restarted:
-            click.echo("  Stopped MCP server (will restart on next use).")
-        has_action = (
-            result.env_keys_removed
-            or result.mcp_env_keys_removed
-            or result.package_upgraded
-            or result.artifact_directories_copied
-            or result.server_restarted
-            or payload_written
-            or payload_pruned
+    if exit_code:
+        raise click.ClickException(
+            f"LEX AI update failed (exit code {exit_code}). See the output above."
         )
-        if not has_action:
-            click.echo("  Already up to date.")
-
-    click.echo("LEX AI update complete.")
 
 
 @lex.command(name="ai-faq", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))

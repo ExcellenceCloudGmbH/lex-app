@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -189,7 +190,16 @@ class HandleSaveModeSyncTests(unittest.TestCase):
 
 
 class InvokeSwitchToModeTests(unittest.TestCase):
-    def test_fallback_path_writes_override_env_and_mcp_json(self) -> None:
+    def test_switch_writes_override_env_and_mcp_json(self) -> None:
+        """One implementation, in lex-mcp-local, next to the primitives it drives.
+
+        This used to assert on a ``strategy`` field naming which of two
+        implementations had run. The second one reimplemented the primitives
+        inside lex-app for the case where ``lex_mcp.mode_switch`` could not be
+        imported -- but it reached into ``lex.tools.ai_dashboard``, itself a
+        shim over lex-mcp-local, so the situation it covered could not arise.
+        It went with the move; there is nothing left to pick between.
+        """
         from lex.tools import mcp_mode_invoke
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -213,23 +223,32 @@ class InvokeSwitchToModeTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            override_dir = Path(tmp) / ".lex-mcp"
-            override_file = override_dir / "mode-override"
+            from lex_mcp import mode_switch
 
-            with mock.patch.dict("sys.modules", {"lex_mcp.mode_switch": None}), \
-                 mock.patch.object(ai_dashboard, "MODE_OVERRIDE_DIR", override_dir), \
-                 mock.patch.object(ai_dashboard, "MODE_OVERRIDE_FILE", override_file), \
-                 mock.patch.object(ai_dashboard, "_invalidate_copilot_mcp_cache", return_value=False), \
-                 mock.patch.object(ai_dashboard, "_stop_mcp_server", return_value=False):
-                result = mcp_mode_invoke.invoke_switch_to_mode(
-                    "forward",
-                    project_root=root,
-                    mcp_config_path=mcp_path,
-                    source_tool="unittest",
-                )
+            override_file = Path(tmp) / ".lex-mcp" / "mode-override"
 
-            self.assertIn(result.strategy, {"fallback", "lex_mcp"})
-            self.assertTrue(result.override_written)
+            # Two things this touches outside the temp directory unless it is
+            # boxed in. The override marker lives at a fixed path under the
+            # real $HOME. And mode sync deliberately rewrites the *cwd's*
+            # ``.env`` as well as the project's -- correct in production, where
+            # cwd is the project, and destructive here, where cwd is this
+            # repository and that .env is checked in.
+            previous_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with mock.patch.object(mode_switch, "OVERRIDE_DIR", override_file.parent), \
+                     mock.patch.object(mode_switch, "OVERRIDE_FILE", override_file):
+                    result = mcp_mode_invoke.invoke_switch_to_mode(
+                        "forward",
+                        project_root=root,
+                        mcp_config_path=mcp_path,
+                        source_tool="unittest",
+                        stop_server=False,
+                    )
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertTrue(result.override_written, result.errors)
             updated = json.loads(mcp_path.read_text(encoding="utf-8"))
             server = updated["servers"]["lex-mcp-local"]
             mode_index = server["args"].index("--mode") + 1
@@ -276,9 +295,12 @@ class VerifyAlignsMcpModeTests(unittest.TestCase):
                 captured["target_mode"] = target_mode
                 captured.update(kwargs)
                 from lex.tools.mcp_mode_invoke import InvokeSwitchResult
-                return InvokeSwitchResult(target_mode=target_mode, strategy="lex_mcp")
+                return InvokeSwitchResult(target_mode=target_mode)
 
-            with mock.patch("lex.tools.mcp_mode_invoke.invoke_switch_to_mode", side_effect=fake_invoke) as invoke_mock, \
+            # Patched where the implementation now lives: verification imports
+            # it from lex_mcp.mode_switch, so patching the lex-app shim would
+            # leave the real one running and this test asserting on nothing.
+            with mock.patch("lex_mcp.mode_switch.invoke_switch_to_mode", side_effect=fake_invoke) as invoke_mock, \
                  mock.patch.object(verify_module, "resolve_active_mcp_mode", return_value=("forward", "project-dotenv")), \
                  mock.patch.object(verify_module, "resolve_active_python_executable", return_value=Path("python")), \
                  mock.patch.object(verify_module, "_resolve_package_directory", return_value=None), \
