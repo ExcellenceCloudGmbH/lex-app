@@ -1070,7 +1070,7 @@ def ai_faq():
 
 
 def _run_ai_verify_command(
-    project_root, mode, quiet, silent, align_mcp_mode, environments=()
+    project_root, mode, quiet, silent, align_mcp_mode, environments=(), strict=False
 ):
     """Verify (and silently restore) the LEX AI asset directories.
 
@@ -1085,7 +1085,7 @@ def _run_ai_verify_command(
     ai_verify_module = _require_lex_mcp("ai_verify")
 
     try:
-        ai_verify_module.run_ai_verify(
+        result = ai_verify_module.run_ai_verify(
             project_root=project_root,
             mode=mode,
             quiet=quiet,
@@ -1096,6 +1096,15 @@ def _run_ai_verify_command(
         )
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    # Soft failures -- an unknown environment key, a payload sync that threw --
+    # are reported as [warn] lines and otherwise exit 0, because the MCP
+    # pre-flight calls this on every tool call and must not abort a run over
+    # one. That default is wrong for CI, where a typo in -e reads as success.
+    if strict and not result.ok:
+        raise click.ClickException(
+            "Verification reported problems (see the warnings above)."
+        )
 
 
 @lex.command(name="ai-verify", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -1146,9 +1155,19 @@ def _run_ai_verify_command(
         "LEX_AI_ENVIRONMENTS value."
     ),
 )
-def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments):
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Exit non-zero when verification reports a problem it recovered from "
+        "or warned about, instead of always exiting 0. For CI; the MCP "
+        "pre-flight deliberately does not use it."
+    ),
+)
+def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments, strict):
     _run_ai_verify_command(
-        project_root, mode, quiet, silent, align_mcp_mode, environments
+        project_root, mode, quiet, silent, align_mcp_mode, environments, strict
     )
 
 
@@ -1200,9 +1219,19 @@ def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments):
         "LEX_AI_ENVIRONMENTS value."
     ),
 )
-def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode, environments):
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Exit non-zero when verification reports a problem it recovered from "
+        "or warned about, instead of always exiting 0. For CI; the MCP "
+        "pre-flight deliberately does not use it."
+    ),
+)
+def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode, environments, strict):
     _run_ai_verify_command(
-        project_root, mode, quiet, silent, align_mcp_mode, environments
+        project_root, mode, quiet, silent, align_mcp_mode, environments, strict
     )
 
 
@@ -1255,8 +1284,16 @@ def ai_issue_report(project_root, output, artifact_mode, yes):
     root = Path(find_project_root(project_root or os.getcwd())).resolve()
 
     if not yes:
-        click.echo("WARNING: report can include raw secrets and private conversation artifacts.")
-        click.confirm("Continue and generate the raw issue report?", abort=True)
+        # The old wording said the bundle "can include raw secrets". It did,
+        # and it was uploaded to the ticketing system. Credentials are masked
+        # now, so say what is actually still in there -- an inaccurate warning
+        # is one people learn to click past.
+        click.echo(
+            "This bundle includes MCP configs, logs, and private Copilot "
+            "conversation artifacts, and is uploaded to LEX support."
+        )
+        click.echo("Credential values are masked before anything is written.")
+        click.confirm("Continue and generate the issue report?", abort=True)
 
     ai_issue_report_module = _require_lex_mcp("ai_issue_report")
 
@@ -1271,6 +1308,15 @@ def ai_issue_report(project_root, output, artifact_mode, yes):
 
     click.echo(f"AI issue report written: {result.archive_path}")
     click.echo(f"Captured files: {result.copied_files}")
+    # getattr, not attribute access: lex-app must never assume a lex-mcp-local
+    # newer than whatever the customer has installed. A plain access here turns
+    # an older package into an AttributeError traceback at the end of a report
+    # that was otherwise generated fine.
+    masked = getattr(result, "values_masked", None)
+    if masked is not None:
+        click.echo(f"Credential values masked: {masked}")
+    for skipped in getattr(result, "skipped_oversize", ()):
+        click.echo(f"  [skip] too large to scan, left out: {skipped}")
     if result.missing_sources:
         click.echo(f"Missing sources: {len(result.missing_sources)}")
     if result.collection_errors:
