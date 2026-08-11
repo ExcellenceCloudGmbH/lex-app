@@ -45,14 +45,26 @@ def _require_lex_mcp(module_name: str):
     ``lex setup-with-ai``; if the user runs one of these commands before
     running setup, we surface a clear, actionable error.
     """
-    try:
-        import importlib
+    import importlib
 
+    try:
         return importlib.import_module(f"lex_mcp.{module_name}")
     except ImportError as exc:
+        try:
+            importlib.import_module("lex_mcp")
+        except ImportError:
+            raise click.ClickException(
+                "lex-mcp-local is not installed in the active environment. "
+                "Run `lex setup-with-ai` first to install it, then retry this "
+                "command."
+            ) from exc
+        # The package is there, just older than this lex-app -- the module or a
+        # name inside it does not exist yet. Sending the user to setup-with-ai
+        # here is a dead end; the thing that fixes it is the upgrade.
         raise click.ClickException(
-            "lex-mcp-local is not installed in the active environment. "
-            "Run `lex setup-with-ai` first to install it, then retry this command."
+            f"This lex-app needs a newer lex-mcp-local than the one installed "
+            f"(lex_mcp.{module_name} is unavailable). Run `lex ai-update` to "
+            "upgrade it, then retry this command."
         ) from exc
 
 # Defer Django imports and setup until needed (NOT at import time)

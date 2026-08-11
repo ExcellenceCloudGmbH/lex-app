@@ -1802,23 +1802,150 @@ def run_ai_update_bootstrap(
             "Please run lex setup-with-ai to set your .env file."
         )
 
+    before = _installed_lex_mcp_local_version(python_executable, runner=runner)
     say("Upgrading lex-mcp-local...")
     install_lex_mcp_local(
         python_executable, remote_mcp_api_key, runner=runner, upgrade=True,
     )
+    after = _installed_lex_mcp_local_version(python_executable, runner=runner)
+    if before and after and before != after:
+        say(f"lex-mcp-local {before} -> {after}")
+    elif after:
+        say(f"lex-mcp-local {after} (already current)")
 
     say("Applying LEX AI updates...")
-    completed = runner(
-        [
-            str(python_executable),
-            "-m",
-            "lex_mcp.ai_update",
-            "--project-root",
-            str(project_root),
-        ],
-        check=False,
+
+    if _installed_ai_update_supports_handoff(python_executable, runner=runner):
+        completed = runner(
+            [
+                str(python_executable),
+                "-m",
+                "lex_mcp.ai_update",
+                "--project-root",
+                str(project_root),
+            ],
+            check=False,
+        )
+        return int(getattr(completed, "returncode", 0) or 0)
+
+    # Falling back means the installed package predates the handoff, which
+    # means the pip step did not deliver the current release. pip exits 0 when
+    # it cannot enumerate the index -- an expired access key reads as
+    # "Requirement already satisfied" -- so without saying this out loud, a
+    # failed upgrade is indistinguishable from a successful one.
+    say(
+        "Note: the installed lex-mcp-local predates this lex-app, so only its "
+        "own migrations were applied. If you expected a newer version, check "
+        "that REMOTE_MCP_API_KEY is current and run lex ai-update again."
     )
-    return int(getattr(completed, "returncode", 0) or 0)
+    return _apply_ai_update_in_process(project_root, reporter=say)
+
+
+def _installed_lex_mcp_local_version(
+    python_executable: Path,
+    *,
+    runner=subprocess.run,
+) -> str | None:
+    """Version of the installed package, as a fresh interpreter sees it."""
+    probe = (
+        "import importlib.metadata as m, sys; "
+        "sys.stdout.write(m.version('lex-mcp-local'))"
+    )
+    try:
+        completed = runner(
+            [str(python_executable), "-c", probe],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, TypeError):
+        return None
+    if int(getattr(completed, "returncode", 1) or 0) != 0:
+        return None
+    return (getattr(completed, "stdout", "") or "").strip() or None
+
+
+def _installed_ai_update_supports_handoff(
+    python_executable: Path,
+    *,
+    runner=subprocess.run,
+) -> bool:
+    """Does the installed ``lex_mcp.ai_update`` answer to ``python -m``?
+
+    Releases before the handoff existed have no ``main`` and no ``__main__``
+    guard, so ``python -m lex_mcp.ai_update`` on one of them imports the module,
+    runs nothing, ignores ``--project-root`` and exits 0. The bootstrap would
+    then report a successful update that did not happen -- the worst shape this
+    can fail in, and the one a customer cannot detect.
+
+    Probed in a *fresh* interpreter because the pip run above may have just
+    replaced the package, and this process cannot see that: pip records an
+    install as a ``.pth`` file, and ``.pth`` files are only read by ``site`` at
+    interpreter startup.
+    """
+    probe = (
+        "import importlib, sys; "
+        "m = importlib.import_module('lex_mcp.ai_update'); "
+        "sys.exit(0 if callable(getattr(m, 'main', None)) else 3)"
+    )
+    try:
+        completed = runner(
+            [str(python_executable), "-c", probe],
+            check=False,
+            capture_output=True,
+        )
+    except (OSError, TypeError):
+        return False
+    return int(getattr(completed, "returncode", 3) or 0) == 0
+
+
+def _apply_ai_update_in_process(
+    project_root: Path,
+    *,
+    reporter: Callable[[str], None],
+) -> int:
+    """Drive an older ``lex_mcp.ai_update`` the way lex-app used to.
+
+    Safe to import in this process precisely because we only get here when pip
+    installed nothing new -- the module on disk is the one already importable.
+
+    Every field is read with ``getattr``: this path exists to talk to a release
+    that predates the current one, so it cannot assume any particular result
+    shape. Reporting lives here rather than in the package for the same reason.
+    """
+    try:
+        import importlib
+
+        ai_update = importlib.import_module("lex_mcp.ai_update")
+    except ImportError as exc:
+        raise SetupWithAIError(
+            "lex-mcp-local is installed but its ai_update module could not be "
+            f"imported ({exc}). Run lex setup-with-ai to repair the install."
+        ) from exc
+
+    results = ai_update.apply_ai_update(project_root=Path(project_root)) or []
+
+    for result in results:
+        reporter(f"Applied update to v{getattr(result, 'version', '?')}:")
+        detail: list[str] = []
+        for label, attribute in (
+            ("Removed from .env", "env_keys_removed"),
+            ("Removed from mcp.json", "mcp_env_keys_removed"),
+        ):
+            removed = getattr(result, attribute, ())
+            if removed:
+                detail.append(f"  {label}: {', '.join(removed)}")
+        if getattr(result, "package_upgraded", False):
+            detail.append("  Upgraded lex-mcp-local package.")
+        for destination in getattr(result, "artifact_directories_copied", ()):
+            detail.append(f"  Copied {Path(destination).name} to {destination}")
+        if getattr(result, "server_restarted", False):
+            detail.append("  Stopped MCP server (will restart on next use).")
+        for line in detail or ["  Already up to date."]:
+            reporter(line)
+
+    reporter("LEX AI update complete.")
+    return 0
 
 
 def _read_dotenv_value(env_file_path: Path, key: str) -> str | None:

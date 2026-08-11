@@ -16,7 +16,9 @@ try:
     from lex_mcp import ai_assets as _impl
 except ImportError as _err:  # pragma: no cover - defensive
     raise ImportError(
-        "lex-mcp-local is not installed. Run `lex setup-with-ai` to install it."
+        "This lex-app needs a newer lex-mcp-local: lex_mcp.ai_assets is unavailable in "
+        "the installed one. Run `lex ai-update` to upgrade it, or "
+        "`lex setup-with-ai` if lex-mcp-local is not installed at all."
     ) from _err
 
 from lex_mcp.ai_assets import *  # noqa: F401,F403
