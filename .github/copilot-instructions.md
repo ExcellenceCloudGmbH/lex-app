@@ -1,5 +1,15 @@
 # Lex MCP Workspace Rules
 
+## Coordinator-Agent Architecture
+
+This project uses a **coordinator-agent** pattern for Lex MCP workflows:
+
+- **Coordinator** (you, the IDE LLM): Manages the step loop — kickstart → get_plan_step → delegate → notify → next step → finalize. You do NOT do step work yourself.
+- **Step agents** (`lex-step-00` through `lex-step-19`, plus `lex-step-11-refactor` on existing-project runs): Specialized agents that execute the actual work for each step. Each agent knows exactly what its step requires.
+- **Why**: This keeps your context window lean while ensuring each step gets thorough, focused execution.
+
+When the user asks for any Lex workflow, you act as the coordinator. Call `get_plan_step(step=N)`, invoke the corresponding step agent, and use its output to call `notify_step_complete`. Repeat through all 20 forward steps (0–19).
+
 ## FIRST-ACTION RULE — Lex App Requests
 
 When the user asks to **create**, **build**, **start**, **bootstrap**, or **develop** a **Lex app**, **Lex application**, or any project **using the Lex MCP server**, you MUST call `kickstart_workflow` as your **absolute first action** — before ANY file reads, searches, explorations, clarifying questions, or other tool calls.
@@ -34,26 +44,92 @@ When ambiguous, default to `kickstart_workflow`.
 Every Lex workflow follows this sequence without exception:
 
 ```
-kickstart_workflow OR kickstart_run  →  [work]  →  finalize_workflow
+kickstart_workflow OR kickstart_run  →  [delegate steps 0–19 to agents]  →  finalize_workflow()  →  write audit report  →  finalize_workflow(audit_complete=True)
 ```
 
-See the tool descriptions for step details. Steps (0–12) are optional guidance — the kickstart → finalize pattern is mandatory.
+You are the **coordinator** — call `get_plan_step`, delegate to the step agent, call `notify_step_complete`, and immediately proceed to the next step. Steps are mandatory, not optional. See the tool descriptions for step details.
 
-## Finishing work — offer a pull request
+## Stale Tool-List Recovery (Mode Cache)
 
-When you believe a feature or bugfix is **complete and verified** — the code is written, its tests
-have been run, and they pass — **ask the developer whether to open a pull request.** Do not open one
-without being asked, and do not offer while the work is partial or any test is failing (keep going or
-report the blocker instead).
+Some IDEs cache MCP tools aggressively after a mode switch. If you call a tool
+that is no longer active, the server now returns a structured payload with
+`ok: false` and `stale_tool_call: true` instead of a raw method-not-found
+error.
 
-If the developer says yes:
+When this happens:
 
-1. Create a **new branch** with a meaningful, descriptive name (`feat/…`, `fix/…`). Never push
-   directly to the default `lex-app-v2` branch — the repository ruleset blocks direct pushes, so all
-   work must land via a branch + PR.
-2. Push the branch (`git push -u`) and open the PR with `gh pr create`: a concise title (< 70 chars)
-   and a body covering **what changed and why** plus a short test-plan / verification checklist.
-3. Return the PR URL.
+1. Stop and show the troubleshooting payload to the user.
+2. Refresh tools/list.
+3. If `suggested_mode` is present, call `switch_to_mode(target_mode="...")`.
+4. Retry the original tool call.
 
-If the developer says no, leave the commits in place and continue. (Full agent workflow:
-[`AGENTS.md`](../AGENTS.md) → Prime directive 4.)
+The switch response may include `tool_surface_epoch`; treat that as the latest
+tool-surface version and prefer fresh tool discovery before continuing.
+
+## Reading a data file — delegate it, never read it yourself
+
+The user's input data arrives as whatever they have: `.csv`, `.tsv`, `.xlsx`,
+`.xlsm`, `.xls` or `.pdf`. No format is privileged.
+
+**Invoke the `lex-spreadsheet-reader` sub-agent, one invocation per file.** It
+returns a short report: the sheet inventory, the verbatim column names, observed
+types, number formats, and the structural traps that silently break a parser —
+merged headers, formulas with no cached value, percentages stored as fractions,
+totals rows, hidden sheets.
+
+Delegate rather than read because the numbers are brutal. A 100k-row workbook is
+around six million characters; pulling that through your own context costs you
+the room you needed for the actual work, and the sub-agent hands you back about
+eighty lines instead.
+
+- Build your schema from the report, and carry its `sha256` so the schema cites
+  an exact file version.
+- Treat its "Open questions" list as questions **for the user** — whether a
+  column is always populated, the full set of allowed values, whether a key is
+  unique. Ask; do not guess.
+**For a PDF, invoke `lex-document-reader` instead.** PDFs do not yield to the
+same treatment: a scan or a chart has no text to extract, so the sub-agent looks
+at rendered page images itself and reports what it found. Two things from its
+report matter to you:
+
+- Figures it marks `transcribed (unverified)` were read off pixels. Never record
+  one as an exact number without the user confirming it, and never let one become
+  a column type, an allowed value, or a test's expected value.
+- Its "Verdict for ingestion" is a project decision, not a detail. A PDF with no
+  text layer **cannot be parsed by the app** — a Lex upload parser is pandas
+  code, and pandas has no PDF reader. Put the choice to the user: a
+  machine-readable export, or extraction scoped as real work with its own
+  accuracy criteria. Do not let a successful read imply the problem is solved.
+
+The sub-agent has `lex-mcp-local/read_input_file` for this, so it works with no
+terminal. Never write a throwaway pandas script and read a schema back out of
+stdout: that truncates, it fails silently where there is no shell, and it puts
+the whole file in context when you only needed its shape.
+
+
+## When you cannot know something: ask, do not guess
+
+You are the only actor here who can talk to the user. A sub-agent that hits
+something it cannot know returns the question to you, and if you do not put it to
+the user it becomes a guess with nobody's name on it.
+
+`lex-mcp-local/ask_user_question` puts one question to them. Where the host can
+render a dialog the answer comes back inside that same call and is recorded as
+their own words; where it cannot, you get a form link and a question to relay,
+and you close it with `lex-mcp-local/record_user_answer`. Ask one decision per
+call, offer two to four options that each state their own consequence, and put
+your recommendation first.
+
+Ask **at the moment it comes up**, not at the end. A question saved for the final
+report is answered after the work is finished, when acting on it costs a rewrite
+— which is exactly why it then gets ignored. And carry every answer into the next
+brief: each agent starts with an empty context, so an answer left in this
+conversation is one the next agent will re-guess differently.
+
+If the user will not or cannot answer, say so honestly with
+`record_user_answer(declined=true, assumption='<what you will assume>')`. A
+disclosed gap is a fact. A silent default is a claim nobody made.
+
+Never pass your own inference as though the user said it, and never raise a
+permission or an authority level by default. Your host loads the full doctrine as
+a rule alongside these instructions.

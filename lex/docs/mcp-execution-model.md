@@ -5,7 +5,7 @@ downstream Lex project. It replaces the older forward-only 0-14 step model.
 
 ## Current Shape
 
-`lex-mcp` is a unified FastMCP server. It imports six independent mode
+`lex-mcp` is a unified FastMCP server. It imports nine independent mode
 surfaces and exposes exactly one surface to the IDE assistant at a time.
 
 | Mode | Execution style | Main purpose |
@@ -14,6 +14,8 @@ surfaces and exposes exactly one surface to the IDE assistant at a time.
 | `backward` | Coordinator-agent loop | Reverse-document an existing project |
 | `edit` | Flat task-catalog run | Make targeted changes to an existing Lex app |
 | `review` | Flat review run | Produce audit/review reports |
+| `test` | Flat responsibility run | Write the test suite and prove it catches regressions |
+| `input` | Flat change-area run | Adapt an existing Lex app to a changed input-data format |
 | `mvp_generator` | Checkpoint-gated flat run | Generate a constrained MVP |
 | `mvp_completion` | Coordinator-agent loop | Expand an MVP into full-product scope |
 
@@ -30,7 +32,8 @@ These rules apply to every mode.
    the quick mode picker.
 2. The first mode-specific action is always the mode's kickstart tool:
    `kickstart_workflow`, `kickstart_run`, `reverse_kickstart`,
-   `kickstart_edit`, `kickstart_review`, or `kickstart_mvp`.
+   `kickstart_edit`, `kickstart_review`, `kickstart_test_run`,
+   `kickstart_input_change`, or `kickstart_mvp`.
 3. When a tool returns a brief with an agent name, invoke that agent as the
    worker and keep the coordinator focused on orchestration.
 4. When any MCP tool returns `ok: false`, stop immediately, show the
@@ -51,6 +54,8 @@ Use user intent first; tool names are secondary.
 | Finish, expand, or complete an MVP to full product | `mvp_completion` |
 | Modify or add a feature to an existing Lex app | `edit` |
 | Review or audit an existing project | `review` |
+| Write tests, test data, or audit test effectiveness | `test` |
+| Adapt an existing Lex app to a changed input-data format | `input` |
 | Document or reverse-document existing code | `backward` |
 
 Priority rules:
@@ -61,7 +66,12 @@ Priority rules:
 3. Existing-project implementation changes without MVP-completion wording mean
    `edit`.
 4. Never use `edit` for MVP completion.
-5. Ask exactly one clarification question when intent matches multiple rows.
+5. Requests for tests, test data, or test coverage mean `test`, not `edit`.
+6. Input-format-migration requests ("the input format changed", "the columns
+   are different now", "new CSV layout", "the upload file broke") mean
+   `input`, not `edit`. `edit` is for feature or behavior changes; `review`
+   is a read-only audit.
+7. Ask exactly one clarification question when intent matches multiple rows.
 
 ## Unified Runner and Mode Switching
 
@@ -210,6 +220,105 @@ optional and `finalize_review` is idempotent. Built-in review types are
 `convention` and `business`. Reports land under `reviews/`; the MCP does not
 commit them.
 
+## Test Mode
+
+Use `test` to write the test suite for an existing Lex app and prove it works.
+
+```text
+/lex-test "<path or GitHub URL>"
+kickstart_test_run(project_path=... OR github_url=..., focus=...)
+
+  if prerequisite_blocked:
+    dispatch_reverse_prerequisite(confirm_switch=True, user_request="...")
+    -> run the backward workflow to completion
+    -> switch_to_mode(target_mode="test", ...)
+    -> kickstart_test_run(...)            # resumes from the manifest
+
+list_responsibilities()
+propose_test_plan()
+set_test_plan(responsibilities=[...], rationale="...")
+
+for each planned responsibility:
+  get_responsibility_brief(responsibility="...")
+  runSubagent("lex-test-...", brief)
+  notify_responsibility_complete(responsibility, summary, artifacts, ...)
+
+record_scenario_matrix(scenarios=[...])   # after the scenario designer
+record_test_execution(command, passed, failed, errors, skipped, ...)  # after the runner
+finalize_test_run()
+```
+
+Test mode is flat and autonomous: the orchestrator is handed every
+responsibility and picks the ones the project needs. Two things are enforced.
+
+**Entry gate.** The project must already carry LEX-AI-style user stories
+(`plans/technical_docs/step-03-user-stories.md` or
+`plans/business_docs/business/03-user-journeys.md`). Every assertion has to
+trace back to a stated acceptance criterion, so `kickstart_test_run` returns
+`ok: false` with `prerequisite_blocked` when they are absent and
+`dispatch_reverse_prerequisite` runs the backward workflow first. User stories
+are never invented to pass this gate.
+
+**Exit gate.** `finalize_test_run` refuses a clean report while a mandatory
+responsibility is outstanding, the scenario matrix is unrecorded, the suite was
+never executed, or an acceptance criterion has no effectiveness-proven
+scenario. `incomplete_rationale` produces an explicitly INCOMPLETE report
+instead of bypassing the gate.
+
+Five responsibilities are mandatory and cannot be waived: `story-assurance`,
+`scenario-matrix`, `execution`, `effectiveness-audit`, `gap-report`. The
+optional ones are `chain-authoring`, `assertion-authoring`,
+`calculation-coverage`, `runner-config`, and `chain-fidelity-audit`.
+
+Tests and JSON scenario data land under `Tests/`; reports land under
+`test-runs/`. The MCP does not commit them.
+
+## Input Mode
+
+Use `input` when the input-data format of an existing Lex app changed and the
+app must be adapted: renamed, added, or dropped columns, a new delimiter or
+encoding, a new row grain, or restructured upload files. A Lex App's input
+parsing is hand-written pandas code inside upload models' `calculate()`
+methods, so a format change is a code migration.
+
+```text
+/lex-input "<what changed>"
+kickstart_input_change(project_path=...)
+register_format_change(...)              # once per changed input file
+get_intake_brief()
+runSubagent("lex-input-analyst", brief)  # sniffs sample file or interviews the user
+
+for each impacted change area:
+  get_change_brief(area="...")
+  runSubagent("lex-input-<area>", brief)
+  notify_change_complete(area, summary, artifacts=[...])
+
+get_input_change_status()                # optional
+finalize_input_change()
+```
+
+Input mode is flat like `review` and `edit`: `kickstart_input_change` is the
+only mandatory first call and there is no mandatory ordering afterwards.
+Intake is dual-path. The user either provides a sample file in the new format
+(CSV/TSV headers are sniffed server-side with stdlib csv; XLSX is inspected by
+the analyst agent) or describes the change verbally, in which case
+`lex-input-analyst` interviews the user until the old-vs-new column mapping is
+unambiguous. The analyst writes `input-changes/format-spec-<run-id>.md` and
+recommends impacted areas.
+
+Seven change areas each map to a dedicated agent: `upload-parser`
+(`lex-input-parser`), `data-model` (`lex-input-model`), `migrations`
+(`lex-input-migration`), `calc-fanout` (`lex-input-calc`), `reports`
+(`lex-input-reports`), `serializers` (`lex-input-serializers`), and
+`test-data` (`lex-input-tests`). Shared sub-agents are `lex-validator` and
+`lex-docs-reader`.
+
+Outputs land under `input-changes/` (format spec, per-area change logs,
+`_index.md`, and `INPUT-CHANGE-REPORT.md` written by finalize). Session state
+lives in `.lex-input/manifest.json`. `finalize_input_change` warns when the
+recommended areas (`upload-parser`, `migrations`, `test-data`) never
+completed.
+
 ## MVP Generator Mode
 
 Use `mvp_generator` for a constrained first version.
@@ -281,13 +390,16 @@ The live downstream payload lives inside package-local `.github/` trees:
 | `backward` | `src/lex_mcp_reverse/.github/agents/lex-reverse-step-00` through `lex-reverse-step-17` |
 | `edit` | `src/lex_mcp_edit/.github/agents/lex-edit-*` |
 | `review` | `src/lex_mcp_review/.github/agents/lex-review-*` |
+| `test` | `src/lex_mcp_test/.github/agents/lex-test-*`, plus `lex-docs-reader` |
+| `input` | `src/lex_mcp_input/.github/agents/lex-input-analyst`, `lex-input-parser`, `lex-input-model`, `lex-input-migration`, `lex-input-calc`, `lex-input-reports`, `lex-input-serializers`, `lex-input-tests`, plus `lex-validator` and `lex-docs-reader` |
 | `mvp_generator` | `src/lex_mcp_mvp/.github/agents/lex-mvp-scoper`, `lex-mvp-implementer`, `lex-mvp-verifier` |
 | `mvp_completion` | `src/lex_mcp_mvp_completion/.github/agents/`, steps 9-19 plus support agents |
 
 Slash commands are also shipped from package-local `.github/prompts/` files:
 `/lex-app`, `/lex-resume`, `/lex-reverse`, `/lex-reverse-resume`,
-`/lex-edit`, `/lex-review`, and `/lex-mvp`. `mvp_completion` is entered by
-mode switch rather than a dedicated slash command.
+`/lex-edit`, `/lex-review`, `/lex-test`, `/lex-input`, and `/lex-mvp`.
+`mvp_completion` is entered by mode switch rather than a dedicated slash
+command.
 
 Repository-root `.github/` is not the downstream payload.
 
@@ -302,7 +414,13 @@ Depending on mode, Lex MCP writes these project-local artifacts:
 | `plans/business_docs/` | Backward canonical business docs |
 | `technical-map/` | AST/wiki module map and `CONTEXT.md` files |
 | `reviews/` | Review reports |
+| `.lex-test/manifest.json` | Test-mode session state (plan, scenario matrix, execution) |
+| `Tests/` | JSON scenario data and `ProcessAdminTestCase` modules |
+| `test-runs/` | Per-responsibility test reports and `TEST-REPORT.md` |
+| `lex_test_config.yaml` | Test entrypoint and `lex pytest -m <group>` marker groups |
 | `edits/` | Edit task artifacts and `EDIT-REPORT.md` |
+| `.lex-input/manifest.json` | Input-mode session state |
+| `input-changes/` | Input-change format spec, per-area change logs, `_index.md`, and `INPUT-CHANGE-REPORT.md` |
 | `mvp/<run_id>/` | MVP plan, scope, checklist, and `MVP-REPORT.md` |
 | `docs/` | Copied Lex framework topic references |
 | `AGENTS.md` | Downstream project agent rules written by forward-style setup |
