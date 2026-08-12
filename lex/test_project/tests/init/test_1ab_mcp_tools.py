@@ -18,7 +18,7 @@ Every test here drives **intent** (what a customer or the framework expects)
 not implementation.  No test should break if internals are refactored while
 the observable contract stays the same.
 
-Scenarios: 1.223 – 1.248.
+Scenarios: 1.223 – 1.263.
 """
 
 from __future__ import annotations
@@ -691,14 +691,15 @@ class TestCluster01ab_VerifyAiAssets(TestCase):
             VerifyAIAssetsResult,
         )
 
+        _fake = Path(tempfile.gettempdir()) / "lex-test-fake"
         dirty = DirectoryVerificationResult(
             directory_name=".github",
             source_directory=None,
-            destination_directory=Path("/tmp/fake"),
+            destination_directory=_fake,
             restored_files=(Path("agents/agent.md"),),
         )
         result = VerifyAIAssetsResult(
-            project_root=Path("/tmp/fake"),
+            project_root=_fake,
             mode="forward",
             mode_source="default",
             directories=(dirty,),
@@ -721,14 +722,14 @@ class TestCluster01ab_VerifyAiAssets(TestCase):
 
         clean = DirectoryVerificationResult(
             directory_name="docs",
-            source_directory=Path("/fake/src/docs"),
-            destination_directory=Path("/tmp/fake/docs"),
+            source_directory=Path(tempfile.gettempdir()) / "lex-test-fake-src" / "docs",
+            destination_directory=Path(tempfile.gettempdir()) / "lex-test-fake" / "docs",
             # No restored_files, no removed_files, no skipped_reason → ok=True
         )
         self.assertTrue(clean.ok)
 
         result = VerifyAIAssetsResult(
-            project_root=Path("/tmp/fake"),
+            project_root=Path(tempfile.gettempdir()) / "lex-test-fake",
             mode="forward",
             mode_source="default",
             directories=(clean,),
