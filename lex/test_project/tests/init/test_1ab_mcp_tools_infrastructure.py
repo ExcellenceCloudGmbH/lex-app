@@ -534,10 +534,10 @@ class TestCluster01ab_InvokeSwitchFallback(SimpleTestCase):
         """
         Scenario 1.249: lex_mcp absent → fallback writes env file
         Given lex_mcp.mode_switch cannot be imported
+        And ai_dashboard helpers are stubbed (they need lex-mcp-local not present here)
         And a project_root with a .env file
         When invoke_switch_to_mode is called with target_mode="backward"
-        Then the result is an InvokeSwitchResult and does not raise
-        And if strategy is "fallback", the .env file contains LEX_MCP_MODE=backward
+        Then the result strategy is "fallback" and the .env file contains LEX_MCP_MODE=backward
         """
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp)
@@ -546,14 +546,26 @@ class TestCluster01ab_InvokeSwitchFallback(SimpleTestCase):
             mcp_config = project_root / "mcp.json"
             mcp_config.write_text("{}", encoding="utf-8")
 
-            # Make lex_mcp.mode_switch unavailable to force the fallback branch.
-            broken_modules = {
-                k: v for k, v in sys.modules.items()
-                if k in ("lex_mcp", "lex_mcp.mode_switch")
-            }
+            # Build a minimal stub for lex.tools.ai_dashboard.
+            # The real module imports lex_mcp (not installed here), so we inject
+            # a fake that exposes only the symbols the fallback branch needs.
+            override_dir = Path(tmp) / ".lex-mcp"
+            override_file = override_dir / "mode-override"
+            _ai_dash_stub = types.ModuleType("lex.tools.ai_dashboard")
+            _ai_dash_stub.MODE_OVERRIDE_DIR = override_dir  # type: ignore[attr-defined]
+            _ai_dash_stub.MODE_OVERRIDE_FILE = override_file  # type: ignore[attr-defined]
+            _ai_dash_stub._write_mode_override = lambda mode: None  # type: ignore[attr-defined]
+            _ai_dash_stub._update_mcp_json_mode = lambda path, mode, **kw: False  # type: ignore[attr-defined]
+            _ai_dash_stub._invalidate_copilot_mcp_cache = lambda path, **kw: False  # type: ignore[attr-defined]
+            _ai_dash_stub._stop_mcp_server = lambda path, **kw: False  # type: ignore[attr-defined]
+
             with mock.patch.dict(
                 "sys.modules",
-                {"lex_mcp": None, "lex_mcp.mode_switch": None},
+                {
+                    "lex_mcp": None,
+                    "lex_mcp.mode_switch": None,
+                    "lex.tools.ai_dashboard": _ai_dash_stub,
+                },
             ):
                 result = invoke_switch_to_mode(
                     "backward",
@@ -563,9 +575,9 @@ class TestCluster01ab_InvokeSwitchFallback(SimpleTestCase):
                 )
 
             self.assertIsInstance(result, InvokeSwitchResult)
-            if result.strategy == "fallback":
-                content = env_path.read_text(encoding="utf-8")
-                self.assertIn("LEX_MCP_MODE=backward", content)
+            self.assertEqual(result.strategy, "fallback", msg=result.errors)
+            content = env_path.read_text(encoding="utf-8")
+            self.assertIn("LEX_MCP_MODE=backward", content)
 
 
 # ---------------------------------------------------------------------------
