@@ -199,7 +199,14 @@ class LegacyPackageCompatibilityTests(unittest.TestCase):
         ):
             run_ai_update_bootstrap(self.project_root, env=self.env, runner=runner)
 
-        self.assertEqual(applied, [self.project_root])
+        # Compared resolved, because the product resolves. On Windows %TEMP% is
+        # an 8.3 short path (C:\Users\ATAKAN~1\...) for any username over eight
+        # characters, and resolve() expands it to the long form -- so the same
+        # directory compares unequal to its own unresolved spelling.
+        self.assertEqual(
+            [Path(root).resolve() for root in applied],
+            [self.project_root.resolve()],
+        )
         self.assertFalse(
             any("-m" in c and "lex_mcp.ai_update" in c for c in calls),
             "handed off to a package that would silently do nothing",
@@ -324,7 +331,17 @@ class InterpreterAndRootResolutionTests(unittest.TestCase):
         from lex.bin import lex as cli
 
         source = Path(cli.__file__).read_text(encoding="utf-8")
-        for command in ("def ai_update(", "def ai_dashboard(", "def ai_issue_report("):
+        # ``ai-issue-report`` exists under two spellings that share one
+        # implementation, so the resolution happens in the helper both of them
+        # call. The invariant is about the code that runs, not about which
+        # function literally spells the call -- follow the delegation rather
+        # than requiring every command body to inline it.
+        commands = (
+            "def ai_update(",
+            "def ai_dashboard(",
+            "def _run_ai_issue_report(",
+        )
+        for command in commands:
             start = source.index(command)
             rest = source[start:]
             # Up to the next top-level definition, whichever marker comes first.
@@ -332,6 +349,15 @@ class InterpreterAndRootResolutionTests(unittest.TestCase):
             body = rest[: min(ends)] if ends else rest
             self.assertIn("resolve_llm_working_directory", body, command)
             self.assertNotIn("find_project_root", body, command)
+
+        # And both spellings must actually route into that helper, or the check
+        # above would be inspecting code no command reaches.
+        for entry in ("def ai_issue_report(", "def ai_issue_report_alias("):
+            start = source.index(entry)
+            rest = source[start:]
+            ends = [i for i in (rest.find("\n@", 1), rest.find("\ndef ", 1)) if i > 0]
+            body = rest[: min(ends)] if ends else rest
+            self.assertIn("_run_ai_issue_report(", body, entry)
 
 
 if __name__ == "__main__":

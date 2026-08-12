@@ -165,6 +165,18 @@ MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
 #: only what the browser form renders (plus the fallback used when an older
 #: ``lex-mcp-local`` is installed and the registry is unavailable).
 DEFAULT_AI_ENVIRONMENT = "pycharm-copilot"
+#: ``id`` of the credentials ``<form>`` on the setup page.
+#:
+#: The environment checkboxes are rendered in their own panel, outside that
+#: form. HTML only submits a control that sits outside its form when the
+#: control names its owner via ``form=``, so without this the whole selection
+#: was dropped in transit and the handler fell back to whatever it had
+#: auto-detected: a user who unchecked everything but VS Code got VS Code plus
+#: Claude Code plus Codex plus anything else installed, with nothing on the
+#: page to suggest their clicks had gone nowhere. Referenced in both places so
+#: the id and the reference cannot drift apart.
+SETUP_FORM_ID = "setupForm"
+
 AI_ENVIRONMENT_CARD_DEFS: tuple[dict[str, str], ...] = (
     {
         "value": "pycharm-copilot",
@@ -212,6 +224,56 @@ AI_ENVIRONMENT_CARD_DEFS: tuple[dict[str, str], ...] = (
 SUPPORTED_AI_ENVIRONMENTS: tuple[str, ...] = tuple(
     card["value"] for card in AI_ENVIRONMENT_CARD_DEFS
 )
+
+#: Cold-start mirror of ``lex_mcp.environments._ALIAS_INDEX``.
+#:
+#: The registry in lex-mcp-local is authoritative and is preferred whenever it
+#: can be imported; this table exists for the one moment it cannot — before
+#: ``lex setup-with-ai`` has installed the package. It was missing entirely,
+#: so on that path every alias fell through to the default: a user who asked
+#: for ``claude`` got ``pycharm-copilot`` and no warning. A test in
+#: lex-mcp-local fails if the two drift.
+AI_ENVIRONMENT_ALIASES: dict[str, str] = {
+    # Canonical keys resolve to themselves.
+    **{key: key for key in SUPPORTED_AI_ENVIRONMENTS},
+    "pycharm": "pycharm-copilot",
+    "jetbrains": "pycharm-copilot",
+    "intellij": "pycharm-copilot",
+    "jetbrains-copilot": "pycharm-copilot",
+    "copilot": "pycharm-copilot",
+    "vscode": "vscode-copilot",
+    "vs-code": "vscode-copilot",
+    "code": "vscode-copilot",
+    "vscode-github-copilot": "vscode-copilot",
+    "gh-copilot": "copilot-cli",
+    "copilot-terminal": "copilot-cli",
+    "cursor-ide": "cursor",
+    "cursor-agent": "cursor",
+    "claude": "claude-code",
+    "claudecode": "claude-code",
+    "anthropic-claude-code": "claude-code",
+    "openai-codex": "codex",
+    "codex-cli": "codex",
+    "gpt-codex": "codex",
+    "codeium": "windsurf",
+    "windsurf-ide": "windsurf",
+    "cascade": "windsurf",
+}
+
+
+def _resolve_environment_alias(candidate: str) -> str | None:
+    """Resolve one name against the local mirror, or None when unknown.
+
+    Accepts either separator style, matching the registry: ``vs_code`` and
+    ``vs-code`` are the same request.
+    """
+    normalized = str(candidate or "").strip().lower().replace(" ", "-")
+    if not normalized:
+        return None
+    return (
+        AI_ENVIRONMENT_ALIASES.get(normalized)
+        or AI_ENVIRONMENT_ALIASES.get(normalized.replace("_", "-"))
+    )
 
 GITHUB_TOKEN_URL = "https://github.com/settings/tokens/new?description=Full+Classic+PAT&scopes=repo,workflow,admin:org,admin:repo_hook,user,project,admin:enterprise,read:enterprise,manage_runners:enterprise,read:audit_log,write:network_configurations,manage_billing:copilot"
 GITHUB_COPILOT_MCP_FIRST_BOOT_COMPLETED_KEY = "mcp-first-boot-completed"
@@ -329,16 +391,107 @@ def _environment_registry():
         return None
 
 
+def _onboarding_module():
+    """Return ``lex_mcp.ai_onboarding``, or ``None`` when unimportable here."""
+    try:
+        import importlib
+
+        return importlib.import_module("lex_mcp.ai_onboarding")
+    except Exception:
+        return None
+
+
+def _same_interpreter(python_executable: str | Path | None) -> bool:
+    """True when *python_executable* is the interpreter running this code.
+
+    ``None`` means "no preference", which is this interpreter by definition.
+    """
+    if python_executable is None:
+        return True
+    candidate = os.path.abspath(os.path.expanduser(str(python_executable)))
+    current = os.path.abspath(sys.executable)
+    if os.path.normcase(candidate) == os.path.normcase(current):
+        return True
+    try:
+        return os.path.samefile(candidate, current)
+    except OSError:
+        return False
+
+
+def invoke_onboarding(
+    python_executable: str | Path | None,
+    action: str,
+    **payload: Any,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run one ``lex_mcp.ai_onboarding`` action. Returns ``(response, error)``.
+
+    Onboarding has to execute in the **project's** interpreter, not ours.
+    ``lex setup-with-ai -e codex`` used to fail with "No module named
+    'lex_mcp'" on the line right after it printed "Installed lex-mcp-local":
+    the install had in fact worked, but pip records it as a ``.pth`` file and
+    ``.pth`` files are only read by ``site`` at interpreter startup, so the
+    process that ran pip cannot see the package it just installed —
+    ``importlib.invalidate_caches()`` does not help, because the directory
+    never reached ``sys.path``.
+
+    So the in-process import is only a fast path, taken when the target really
+    is this interpreter and the module really is importable. Everything else
+    goes through the documented stdin/stdout JSON protocol. Never raises: the
+    failure is returned so the caller can report it verbatim.
+    """
+    request: dict[str, Any] = {"action": action, **payload}
+
+    if _same_interpreter(python_executable):
+        module = _onboarding_module()
+        if module is not None:
+            try:
+                return module.handle_request(request), None
+            except Exception as exc:  # pragma: no cover - defensive
+                return None, f"{type(exc).__name__}: {exc}"
+
+    executable = str(python_executable or sys.executable)
+    command = [executable, "-m", "lex_mcp.ai_onboarding"]
+    try:
+        completed = subprocess.run(
+            command,
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+    stdout = (getattr(completed, "stdout", "") or "").strip()
+    stderr = (getattr(completed, "stderr", "") or "").strip()
+    if not stdout:
+        return None, stderr or f"{executable} exited {completed.returncode}"
+    try:
+        response = json.loads(stdout)
+    except ValueError as exc:
+        return None, f"unreadable onboarding response: {exc}: {stdout[:200]}"
+    if not isinstance(response, dict):
+        return None, f"onboarding response was not an object: {stdout[:200]}"
+    return response, None
+
+
 def normalize_ai_environments(
     environments: str | Iterable[str] | None,
     *,
     default: Iterable[str] = (DEFAULT_AI_ENVIRONMENT,),
+    strict: bool = True,
 ) -> tuple[str, ...]:
     """Normalise environment names, preferring the lex-mcp-local registry.
 
     Accepts a comma/space separated string or an iterable, resolves aliases
-    (``vscode`` -> ``vscode-copilot``), expands ``all``, and drops
-    duplicates while preserving order.
+    (``vscode`` -> ``vscode-copilot``), expands ``all``, and drops duplicates
+    while preserving order.
+
+    With *strict* (the default) an unrecognised name raises
+    :class:`SetupWithAIError` naming the valid set. It used to be dropped and
+    the default substituted, which is how a user who asked for ``claude-code``
+    ended up with a Copilot-only setup and nothing said so. Pass
+    ``strict=False`` when *reading back* persisted configuration, where a value
+    written by another version must not become a crash.
     """
     registry = _environment_registry()
     if registry is not None:
@@ -346,8 +499,13 @@ def normalize_ai_environments(
             return tuple(
                 registry.resolve_environment_keys(environments, default=tuple(default))
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # A genuinely unknown name must surface; only an unusable registry
+            # is grounds for falling back to the local mirror below.
+            if _looks_like_unknown_environment(registry, exc):
+                if not strict:
+                    return tuple(default) or (DEFAULT_AI_ENVIRONMENT,)
+                raise SetupWithAIError(str(exc)) from exc
 
     if environments is None:
         items: list[str] = []
@@ -359,16 +517,34 @@ def normalize_ai_environments(
         items = list(default)
 
     out: list[str] = []
+    unknown: list[str] = []
     for item in items:
-        candidate = item.strip().lower().replace("_", "-")
-        if candidate == "all":
+        if item.strip().lower().replace("_", "-") == "all":
             for key in SUPPORTED_AI_ENVIRONMENTS:
                 if key not in out:
                     out.append(key)
             continue
-        if candidate in SUPPORTED_AI_ENVIRONMENTS and candidate not in out:
-            out.append(candidate)
-    return tuple(out) or (DEFAULT_AI_ENVIRONMENT,)
+        resolved = _resolve_environment_alias(item)
+        if resolved is None:
+            unknown.append(item.strip())
+            continue
+        if resolved not in out:
+            out.append(resolved)
+
+    if unknown and strict:
+        raise SetupWithAIError(
+            f"Unknown agentic environment {unknown[0]!r}. Choose from: "
+            f"{', '.join(SUPPORTED_AI_ENVIRONMENTS)}."
+        )
+    return tuple(out) or tuple(default) or (DEFAULT_AI_ENVIRONMENT,)
+
+
+def _looks_like_unknown_environment(registry: Any, exc: BaseException) -> bool:
+    """True when *exc* is the registry rejecting a name, not failing to load."""
+    unknown_type = getattr(registry, "EnvironmentError_", None)
+    if unknown_type is not None and isinstance(exc, unknown_type):
+        return True
+    return isinstance(exc, (ValueError, KeyError, LookupError))
 
 
 def suggest_ai_environments(project_root: Path) -> tuple[str, ...]:
@@ -732,8 +908,28 @@ def _read_pid_file(pid_file_path: Path) -> int | None:
 
 
 def _is_process_running(pid: int) -> bool:
+    """Report whether *pid* is still alive, preferring the installed server's
+    implementation.
+
+    Delegated rather than restated because the POSIX idiom below is wrong on
+    Windows: ``os.kill(pid, 0)`` answers "running" for a process that has
+    already exited, for as long as anything still holds a handle to it -- and
+    the IDE that spawned our server does. lex-mcp-local asks
+    ``GetExitCodeProcess`` instead. Two copies of this would mean the bug
+    lives on in whichever copy the caller happened to reach.
+
+    The fallback runs only before ``lex setup-with-ai`` has installed the
+    package, where the sole caller is a best-effort staleness check.
+    """
     if pid <= 0:
         return False
+
+    try:
+        from lex_mcp.ai_setup import is_process_running as _installed
+    except Exception:
+        pass
+    else:
+        return _installed(pid)
 
     try:
         os.kill(pid, 0)
@@ -1580,33 +1776,33 @@ def configure_ai_integration(
     notes: list[str] = []
     github_directory_path: Path | None = None
 
-    onboarding = None
-    try:
-        import importlib
+    # Driven through the project interpreter, not an in-process import: see
+    # invoke_onboarding for why an import here cannot see a package pip has
+    # only just installed.
+    response, onboarding_error = invoke_onboarding(
+        python_path,
+        "onboard",
+        project_root=str(project_root_path),
+        mode=normalize_mcp_mode(mcp_mode),
+        environments=list(selected_environments),
+        server_definition=server_definition,
+        home=str(home) if home else None,
+    )
 
-        onboarding = importlib.import_module("lex_mcp.ai_onboarding")
-    except Exception:
-        onboarding = None
-
-    if onboarding is not None:
-        result = onboarding.onboard_project(
-            project_root_path,
-            mode=normalize_mcp_mode(mcp_mode),
-            environments=selected_environments,
-            server_definition=server_definition,
-            home=home,
-            env=env,
-        )
-        for config in result.configs:
-            if config.written or config.created:
-                config_paths.append(Path(config.path))
-        payload_files = list(result.files_written)
-        notes = list(result.notes)
-        errors = [
+    if response is not None:
+        errors = [response["error"]] if response.get("error") else []
+        for config in response.get("configs", ()):
+            if config.get("written") or config.get("created"):
+                config_paths.append(Path(config["path"]))
+            if config.get("error"):
+                errors.append(config["error"])
+        payload_files = list(response.get("files_written", ()))
+        notes = list(response.get("notes", ()))
+        errors += [
             error
-            for payload in result.payloads
-            for error in payload.errors
-        ] + [config.error for config in result.configs if config.error]
+            for payload in response.get("payloads", ())
+            for error in payload.get("errors", ())
+        ]
         if errors:
             raise SetupWithAIError(
                 "Could not complete environment onboarding: "
@@ -1616,7 +1812,32 @@ def configure_ai_integration(
         if github_dir.is_dir():
             github_directory_path = github_dir
     else:
-        # Legacy path: Copilot only, verbatim directory copy.
+        # Onboarding is unreachable. The legacy path can only configure
+        # Copilot, so silently taking it would hand someone who asked for
+        # Claude Code a Copilot-only setup and report success -- which is
+        # exactly what happened. Only downgrade when Copilot is all that was
+        # requested; otherwise say why.
+        non_legacy = tuple(
+            environment
+            for environment in selected_environments
+            if environment != DEFAULT_AI_ENVIRONMENT
+        )
+        if non_legacy:
+            # Reported as the caller spelled it. os.path.abspath rewrites a
+            # POSIX-style path into a drive-qualified one on Windows
+            # (/usr/bin/python3 -> C:\usr\bin\python3), and echoing that back
+            # names an interpreter the user never mentioned.
+            reported_interpreter = (
+                python_executable if python_executable is not None else python_path
+            )
+            raise SetupWithAIError(
+                f"Cannot onboard {', '.join(non_legacy)}: the lex-mcp-local "
+                f"environment registry could not be reached through "
+                f"{reported_interpreter} ({onboarding_error}). Run "
+                f"`lex ai-update` to reinstall lex-mcp-local into that "
+                f"interpreter, or re-run with `-e {DEFAULT_AI_ENVIRONMENT}` "
+                f"for the Copilot-only setup."
+            )
         github_directory_path = copy_lex_mcp_local_github_directory(
             project_root_path,
             wrapper_script_path,
@@ -1664,7 +1885,10 @@ def launch_setup_with_ai_form(
     preselected = normalize_ai_environments(
         suggested_environments
         if suggested_environments is not None
-        else suggest_ai_environments(Path(project_root))
+        else suggest_ai_environments(Path(project_root)),
+        # Detection is a convenience; a tool it cannot name must not stop the
+        # setup page from opening.
+        strict=False,
     )
 
     class SetupWithAIHandler(BaseHTTPRequestHandler):
@@ -1704,18 +1928,34 @@ def launch_setup_with_ai_form(
             mcp_mode = normalize_mcp_mode(
                 form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
             )
-            selected_environments = normalize_ai_environments(
-                form_data.get("ai_environments", []),
-                default=preselected,
+            # Emptiness is decided on the raw arrival, before normalisation:
+            # ``normalize_ai_environments`` substitutes a default for an empty
+            # input, so asking it would erase the distinction between "the user
+            # cleared every card" and "the user chose these". Detection
+            # pre-selects the boxes; it never decides for them.
+            submitted_environments = [
+                value
+                for value in form_data.get("ai_environments", [])
+                if value.strip()
+            ]
+            selected_environments = (
+                normalize_ai_environments(submitted_environments)
+                if submitted_environments
+                else ()
             )
 
-            if not github_token or not remote_mcp_api_key:
+            if not github_token or not remote_mcp_api_key or not selected_environments:
+                error_message = (
+                    "Both fields are required."
+                    if not github_token or not remote_mcp_api_key
+                    else "Select at least one coding environment."
+                )
                 body = _build_setup_form_html(
                     state=state,
                     project_root=project_root,
                     env_file_path=env_file_path,
                     selected_environments=selected_environments,
-                    error_message="Both fields are required.",
+                    error_message=error_message,
                 )
                 encoded = body.encode("utf-8")
                 self.send_response(HTTPStatus.BAD_REQUEST)
@@ -1995,19 +2235,32 @@ def _build_setup_form_html(
             f'<div class="error">{html.escape(error_message)}</div>'
         )
     selected_mode = DEFAULT_LEX_MCP_MODE
-    chosen_environments = set(
-        normalize_ai_environments(
-            selected_environments
-            if selected_environments is not None
-            else (DEFAULT_AI_ENVIRONMENT,)
+    # An explicitly empty selection renders with nothing checked. Passing it
+    # through the normaliser would substitute the default, which would tick a
+    # box the user had just cleared — and re-asking with the answer already
+    # filled in is not re-asking. ``None`` still means "no opinion".
+    if selected_environments is not None and not tuple(selected_environments):
+        chosen_environments: set[str] = set()
+    else:
+        chosen_environments = set(
+            normalize_ai_environments(
+                selected_environments
+                if selected_environments is not None
+                else (DEFAULT_AI_ENVIRONMENT,),
+                # Rendering must never raise: this also displays values read
+                # back from a project's .env, which another version may have
+                # written.
+                strict=False,
+            )
         )
-    )
     environment_cards = "".join(
         (
             f'<label class="env-card'
             f'{" selected" if card["value"] in chosen_environments else ""}" '
             f'data-env="{card["value"]}">'
             f'<input type="checkbox" name="ai_environments" value="{card["value"]}" '
+            # form= is load-bearing: this control lives outside the <form>.
+            f'form="{SETUP_FORM_ID}" '
             f'{"checked" if card["value"] in chosen_environments else ""}>'
             f'<div class="env-icon">{card["icon_html"]}</div>'
             f'<div class="env-title">{html.escape(card["title"])}</div>'
@@ -2516,7 +2769,7 @@ def _build_setup_form_html(
           <p class="eyebrow">Credentials</p>
           <h2>Save tokens to this project</h2>
           {error_block}
-          <form method="post" action="/submit">
+          <form method="post" action="/submit" id="{SETUP_FORM_ID}">
             <input type="hidden" name="state" value="{html.escape(state)}">
                         <input type="hidden" name="mcp_mode" id="mcpModeInput" value="{html.escape(selected_mode)}">
 

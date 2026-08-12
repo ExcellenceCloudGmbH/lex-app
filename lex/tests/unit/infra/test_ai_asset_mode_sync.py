@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import json
 import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -79,12 +80,26 @@ class VerifyDirectoryModeManagedPruningTests(unittest.TestCase):
 
 
 class ReadOverrideFileTests(unittest.TestCase):
+    """Reading the one-shot override marker.
+
+    Patched at ``lex_mcp.mode_switch.OVERRIDE_FILE``, which is now the single
+    definition of where the marker lives. There used to be three copies of that
+    path -- here, in ai_assets, and in mode_switch -- and patching only this
+    one meant these tests read the developer's real ``~/.lex-mcp`` instead of
+    their fixture, so they reported whatever mode that machine last switched to.
+    """
+
+    def _override_at(self, path: Path):
+        from lex_mcp import mode_switch
+
+        return mock.patch.object(mode_switch, "OVERRIDE_FILE", path)
+
     def test_reads_json_override_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             override_path = Path(tmp) / "mode-override"
             override_path.write_text('{"mode": "review"}', encoding="utf-8")
 
-            with mock.patch.object(ai_dashboard, "MODE_OVERRIDE_FILE", override_path):
+            with self._override_at(override_path):
                 payload = ai_dashboard._read_override_file()
 
             self.assertEqual(payload, {"mode": "review"})
@@ -94,10 +109,51 @@ class ReadOverrideFileTests(unittest.TestCase):
             override_path = Path(tmp) / "mode-override"
             override_path.write_text("edit", encoding="utf-8")
 
-            with mock.patch.object(ai_dashboard, "MODE_OVERRIDE_FILE", override_path):
+            with self._override_at(override_path):
                 payload = ai_dashboard._read_override_file()
 
             self.assertEqual(payload, {"mode": "edit"})
+
+    def test_an_override_for_another_project_is_not_read(self) -> None:
+        """The reported bug: one project's dashboard switch changed them all."""
+        from lex_mcp import mode_switch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            override_path = Path(tmp) / "mode-override"
+            mine = Path(tmp) / "mine"
+            theirs = Path(tmp) / "theirs"
+            mine.mkdir()
+            theirs.mkdir()
+            override_path.write_text(
+                json.dumps({"mode": "review", "project_root": str(theirs)}),
+                encoding="utf-8",
+            )
+
+            with self._override_at(override_path):
+                self.assertIsNone(ai_dashboard._read_override_file(mine))
+                self.assertEqual(
+                    ai_dashboard._read_override_file(theirs).get("mode"), "review"
+                )
+
+    def test_a_stale_override_is_ignored(self) -> None:
+        """It is a handoff. One still pending an hour later was never collected."""
+        from lex_mcp import mode_switch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            override_path = Path(tmp) / "mode-override"
+            override_path.write_text(
+                json.dumps(
+                    {
+                        "mode": "review",
+                        "written_at": time.time()
+                        - (mode_switch.OVERRIDE_TTL_SECONDS + 60),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self._override_at(override_path):
+                self.assertIsNone(ai_dashboard._read_override_file())
 
 
 class HandleSaveModeSyncTests(unittest.TestCase):
@@ -115,10 +171,14 @@ class HandleSaveModeSyncTests(unittest.TestCase):
         path.write_text(json.dumps(payload), encoding="utf-8")
 
     def _make_switch_result(self, mode: str):
+        # No ``strategy=``: the field was removed from InvokeSwitchResult, and
+        # this fixture kept passing it -- so the test could not even build its
+        # own input and errored out with a TypeError. That is why it failed to
+        # catch the dashboard still reading ``switch_result.strategy``, which
+        # made every real mode change report "Failed to switch mode".
         from lex.tools.mcp_mode_invoke import InvokeSwitchResult
         return InvokeSwitchResult(
             target_mode=mode,
-            strategy="lex_mcp",
             override_written=True,
             server_stopped=False,
         )
@@ -140,8 +200,8 @@ class HandleSaveModeSyncTests(unittest.TestCase):
                 "remote_mcp_url": [""],
             }
 
-            with mock.patch.object(ai_dashboard, "verify_ai_assets", return_value=verify_result) as verify_mock, \
-                 mock.patch("lex.tools.mcp_mode_invoke.invoke_switch_to_mode",
+            with mock.patch("lex_mcp.ai_dashboard.verify_ai_assets", return_value=verify_result) as verify_mock, \
+                 mock.patch("lex_mcp.mode_switch.invoke_switch_to_mode",
                             return_value=self._make_switch_result("forward")) as invoke_mock:
                 successes, errors = ai_dashboard._handle_save(form, root, env_path, mcp_path)
 
@@ -177,10 +237,15 @@ class HandleSaveModeSyncTests(unittest.TestCase):
                 "remote_mcp_url": [""],
             }
 
-            with mock.patch.object(ai_dashboard, "verify_ai_assets", return_value=verify_result) as verify_mock, \
-                 mock.patch.object(ai_dashboard, "MODE_OVERRIDE_DIR", override_dir), \
-                 mock.patch.object(ai_dashboard, "MODE_OVERRIDE_FILE", override_file), \
-                 mock.patch("lex.tools.mcp_mode_invoke.invoke_switch_to_mode") as invoke_mock:
+            from lex_mcp import mode_switch
+
+            # Patched at mode_switch, the single definition of the override
+            # path. The two constants this used to redirect were duplicates,
+            # and the read went through neither of them.
+            with mock.patch("lex_mcp.ai_dashboard.verify_ai_assets", return_value=verify_result) as verify_mock, \
+                 mock.patch.object(mode_switch, "OVERRIDE_DIR", override_dir), \
+                 mock.patch.object(mode_switch, "OVERRIDE_FILE", override_file), \
+                 mock.patch("lex_mcp.mode_switch.invoke_switch_to_mode") as invoke_mock:
                 successes, errors = ai_dashboard._handle_save(form, root, env_path, mcp_path)
 
             self.assertFalse(errors)
@@ -301,10 +366,10 @@ class VerifyAlignsMcpModeTests(unittest.TestCase):
             # it from lex_mcp.mode_switch, so patching the lex-app shim would
             # leave the real one running and this test asserting on nothing.
             with mock.patch("lex_mcp.mode_switch.invoke_switch_to_mode", side_effect=fake_invoke) as invoke_mock, \
-                 mock.patch.object(verify_module, "resolve_active_mcp_mode", return_value=("forward", "project-dotenv")), \
-                 mock.patch.object(verify_module, "resolve_active_python_executable", return_value=Path("python")), \
-                 mock.patch.object(verify_module, "_resolve_package_directory", return_value=None), \
-                 mock.patch.object(verify_module, "resolve_lex_app_package_root", return_value=None):
+                 mock.patch("lex_mcp.ai_assets.resolve_active_mcp_mode", return_value=("forward", "project-dotenv")), \
+                 mock.patch("lex_mcp.ai_assets.resolve_active_python_executable", return_value=Path("python")), \
+                 mock.patch("lex_mcp.ai_assets._resolve_package_directory", return_value=None), \
+                 mock.patch("lex_mcp.ai_assets.resolve_lex_app_package_root", return_value=None):
                 result = verify_module.verify_ai_assets(
                     project_root=root,
                     mode=None,
@@ -338,12 +403,12 @@ class VerifyAlignsMcpModeTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with mock.patch("lex.tools.mcp_mode_invoke.invoke_switch_to_mode") as invoke_mock, \
-                 mock.patch.object(verify_module, "resolve_active_mcp_mode", return_value=("forward", "project-dotenv")), \
-                 mock.patch.object(verify_module, "resolve_active_python_executable", return_value=Path("python")), \
-                 mock.patch.object(verify_module, "_resolve_package_directory", return_value=None), \
-                 mock.patch.object(verify_module, "resolve_lex_app_package_root", return_value=None), \
-                 mock.patch.object(verify_module, "_read_override_mode", return_value=None):
+            with mock.patch("lex_mcp.mode_switch.invoke_switch_to_mode") as invoke_mock, \
+                 mock.patch("lex_mcp.ai_assets.resolve_active_mcp_mode", return_value=("forward", "project-dotenv")), \
+                 mock.patch("lex_mcp.ai_assets.resolve_active_python_executable", return_value=Path("python")), \
+                 mock.patch("lex_mcp.ai_assets._resolve_package_directory", return_value=None), \
+                 mock.patch("lex_mcp.ai_assets.resolve_lex_app_package_root", return_value=None), \
+                 mock.patch("lex_mcp.ai_assets._read_override_mode", return_value=None):
                 verify_module.verify_ai_assets(
                     project_root=root,
                     mode=None,

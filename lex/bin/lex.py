@@ -1290,32 +1290,76 @@ def ai_dashboard(project_root):
         raise click.ClickException(str(exc)) from exc
 
 
-@lex.command(name="ai_issue_report", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.option("-p", "--project-root", help="Project root (default: execution dir)")
-@click.option(
-    "-o",
-    "--output",
-    type=click.Path(path_type=Path, dir_okay=False, writable=True),
-    help="Output zip path (default: <project>/.lex-ai-reports/ai_issue_report_<timestamp>.zip)",
+def _ai_issue_report_options(command):
+    """Apply the shared option set to both spellings of the command."""
+    for decorate in reversed(
+        (
+            click.option(
+                "-p", "--project-root", help="Project root (default: execution dir)"
+            ),
+            click.option(
+                "-o",
+                "--output",
+                type=click.Path(path_type=Path, dir_okay=False, writable=True),
+                help=(
+                    "Output zip path (default: "
+                    "<project>/.lex-ai-reports/ai_issue_report_<timestamp>.zip)"
+                ),
+            ),
+            click.option(
+                "--artifact-mode",
+                type=click.Choice(["auto", "off", "strict"], case_sensitive=False),
+                default="auto",
+                show_default=True,
+                help=(
+                    "Raw artifact capture mode: auto (best-effort), off, "
+                    "strict (require at least one file)."
+                ),
+            ),
+            click.option(
+                "--yes",
+                is_flag=True,
+                help="Skip the confirmation prompt about raw secret inclusion.",
+            ),
+        )
+    ):
+        command = decorate(command)
+    return command
+
+
+# Hyphenated is canonical, matching every sibling (ai-dashboard, ai-faq,
+# ai-update, ai-verify). This command was registered under the underscore
+# alone, so `lex ai-issue-report` -- the spelling the naming convention implies
+# -- failed with "No such command". The underscore survives as a hidden alias
+# because it is what the existing docs and support macros tell people to type.
+# Click has no `aliases=` argument (verified against 8.4), so a second hidden
+# command is the mechanism, exactly as ai-verify/ai_verify already do it.
+@lex.command(
+    name="ai-issue-report",
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
 )
-@click.option(
-    "--artifact-mode",
-    type=click.Choice(["auto", "off", "strict"], case_sensitive=False),
-    default="auto",
-    show_default=True,
-    help="Raw artifact capture mode: auto (best-effort), off, strict (require at least one file).",
-)
-@click.option(
-    "--yes",
-    is_flag=True,
-    help="Skip the confirmation prompt about raw secret inclusion.",
-)
+@_ai_issue_report_options
 def ai_issue_report(project_root, output, artifact_mode, yes):
     """Generate a raw AI issue report bundle for support triage.
 
     Captures Copilot and MCP-related artifacts as raw files without parsing so
     no details are dropped during triage.
     """
+    _run_ai_issue_report(project_root, output, artifact_mode, yes)
+
+
+@lex.command(
+    name="ai_issue_report",
+    hidden=True,
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
+)
+@_ai_issue_report_options
+def ai_issue_report_alias(project_root, output, artifact_mode, yes):
+    """Deprecated spelling of ``ai-issue-report``; kept working."""
+    _run_ai_issue_report(project_root, output, artifact_mode, yes)
+
+
+def _run_ai_issue_report(project_root, output, artifact_mode, yes):
     # The directory given (or the cwd) IS the project, exactly as
     # setup-with-ai and ai-verify treat it. This used to walk up to a git
     # toplevel or marker file, which meant update delivered the agent
@@ -1422,7 +1466,10 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai_issue_report"}
+    # Both spellings of ai-issue-report are listed for the reader's benefit;
+    # _should_skip_django_bootstrap also normalises hyphens and underscores, so
+    # either would match on its own.
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai-issue-report", "ai_issue_report"}
 )
 
 
@@ -1444,7 +1491,32 @@ def _should_skip_django_bootstrap(command_name: str | None) -> bool:
     return any(name in _SKIP_BOOTSTRAP_COMMANDS for name in normalized_names)
 
 
+def _force_utf8_console() -> None:
+    """Make our own output encodable, whatever the console code page is.
+
+    On Windows a redirected or piped stdout is opened with the locale code page
+    — cp1252 on a German or English image — and printing a path it cannot
+    represent raises ``UnicodeEncodeError`` and exits 1. That is not exotic:
+    ``ı ğ ş`` are absent from cp1252, so are Cyrillic and CJK, and the very
+    first thing ``lex setup-with-ai`` does in a fresh project is print the list
+    of files it restored. An IDE or a CI job captures stdout, which is exactly
+    the case that gets the code page instead of a console.
+
+    POSIX is already UTF-8, so this is a no-op there; ``errors="replace"``
+    means a stray unencodable byte degrades to a visible placeholder rather
+    than killing the command. Guarded because stdout is not always a
+    reconfigurable text stream (pytest's capture, for one).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            continue
+
+
 def main():
+    _force_utf8_console()
+
     argv = sys.argv[1:]
     first_arg = argv[0] if argv else None
 
