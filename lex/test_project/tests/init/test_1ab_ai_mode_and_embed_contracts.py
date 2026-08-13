@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import sys
 import tempfile
 import types
 from pathlib import Path
@@ -187,6 +188,7 @@ class TestCluster01ab_AiModeAndEmbedContracts(unittest.TestCase):
                 "mcp.types": mcp_types_module,
             },
         ):
+            sys.modules.pop("lex.mcp_server.tools.embed", None)
             embed = importlib.import_module("lex.mcp_server.tools.embed")
             with patch.object(embed, "_resolve_frontend_url", return_value="https://frontend.example"):
                 blocks = asyncio.run(embed._embed_view_inner(path="process-history"))

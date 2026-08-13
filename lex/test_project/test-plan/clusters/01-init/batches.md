@@ -242,4 +242,4 @@
 | Fixtures | `tempfile.TemporaryDirectory`, import/patch seams for runtime-mode and MCP embed dependencies |
 | Tests landed | **5 pass / 0 fail** (`python -m pytest lex/test_project/tests/init/test_1ab_ai_mode_and_embed_contracts.py -v`) |
 | Coverage gain | pins ai-verify mode-alignment intent + embed token-hygiene contract across MCP payload narration |
-| Status | ✅ Complete (2026-08-13). `python -m lex pytest` was not runnable in this sandbox due missing runtime stack (`celery` bootstrap import), so this pure-U batch was validated with direct pytest invocation. |
+| Status | ✅ Complete (2026-08-13). `python -m lex pytest` was not runnable in this sandbox due to missing runtime stack (`celery` bootstrap import), so this pure-U batch was validated with direct pytest invocation. |
