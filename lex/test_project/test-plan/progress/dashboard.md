@@ -279,3 +279,12 @@
 | 15f | Hierarchy preservation across the .save() boundary | 15.19-15.21 | complete | 0 | 0 | 0 | counts not yet measured — imported at cluster-15 promotion; three scenarios (15.19-15.21) marked @unittest.expectedFailure pending the execute_calculation_sync fix |
 | 15g | Object-less heading frames (TOC nodes) in the log tree | 15.22-15.31 | complete | 10 | 0 | 0 | model_logging_context("...") heading frames — lazy row creation, heading chains, node reuse, routing/root records skip headings, __str__ tree titles |
 | 15h | PDF export renders like the log view | 15.32-15.34 | complete | 3 | 0 | 0 | customer report 2026-07-14 — the Download-PDF of a calculation log lost markdown structure. DownloadMarkdownPdf now renders via WeasyPrint (already a declared dep; xhtml2pdf kept as runtime fallback) with a GitHub-style stylesheet mirroring the frontend log view, and the markdown extras match the log view's parser surface (tables, fenced code, strike; dropped code-friendly which silently disabled __bold__). Contract pinned; anything the log view renders appears rendered in the PDF — never as raw markdown syntax |
+
+## 16. MCP Server Tools (`mcp_tools`)
+
+| Batch | Title | Scenarios | Status | Pass | Skip | Xfail | Note |
+|---|---|---|---|---|---|---|---|
+| 16a | embed-view URL building and path classification | 16.1-16.27 | complete | 27 | 0 | 0 | _classify_path (all view-type branches), _build_title, _resolve_frontend_url (4-level chain), _csp_origins (dedup), _build_embed_url (embed flag, fragment, optional params) |
+| 16b | MCP mode resolution and asset verification | 16.28-16.45 | complete | 18 | 0 | 0 | _read_env_file_value, resolve_active_mcp_mode (all six priority levels), verify_directory (missing/drifted/ok/skipped) |
+| 16c | MCP mode-switch invocation from outside the server | 16.46-16.57 | complete | 12 | 0 | 0 | _normalise_mode, InvokeSwitchResult.ok, invoke_switch_to_mode (invalid mode, fallback strategy, stop_server=False) |
+| 16d | .env file management | 16.58-16.65 | complete | 8 | 0 | 0 | update_env_file: create, update-in-place, append, preserve comments, multi-value, remove legacy token, trailing newline, quoted value |
