@@ -14,6 +14,7 @@ import click
 import uvicorn
 from lex.tools.project_root import find_project_root, resolve_llm_working_directory
 from lex.tools.setup_with_ai import (
+    DEFAULT_LEX_MCP_MODE,
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
     SetupWithAIError,
@@ -784,12 +785,16 @@ def setup(project_root):
 )
 @click.option(
     "--mcp-mode",
-    default="forward",
+    # Derived, not restated — the same reason as _MODE_CHOICES above. Naming a
+    # mode here is an explicit choice, so this flag needs no override gate the way
+    # the form's grid does; it only needs to agree on where "unchosen" lands.
+    default=DEFAULT_LEX_MCP_MODE,
     show_default=True,
     type=click.Choice(_MODE_CHOICES, case_sensitive=False),
     help="MCP workflow mode. Determines which agent payload is delivered and "
          "which mode the server runs in (written to LEX_MCP_MODE in .env and "
-         "every MCP config).",
+         "every MCP config). Defaults to brief, which interviews you and then "
+         "switches to the mode the work needs.",
 )
 @click.option(
     "-e",

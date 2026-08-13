@@ -25,7 +25,16 @@ from urllib.parse import parse_qs, quote
 DEFAULT_REMOTE_MCP_URL = "https://mcp.excellence-cloud.de/mcp"
 DEFAULT_REMOTE_MCP_TRANSPORT = "http"
 DEFAULT_LEX_MCP_PRODUCTION = "false"
-DEFAULT_LEX_MCP_MODE = "forward"
+#: Brief, not forward. A user who has not chosen a mode has not yet said what
+#: they want, and brief is the mode that asks — it interviews them, writes
+#: `.lex/contract.md`, and switches to whichever build mode the answers name.
+#: Defaulting to forward instead installed the heaviest twenty-step workflow for
+#: exactly the user who had expressed no preference.
+#:
+#: Keep in step with `lex_mcp.ai_setup.DEFAULT_LEX_MCP_MODE`. Restated rather
+#: than derived for the same reason as the roster below: this form renders before
+#: lex-mcp-local is guaranteed to be installed.
+DEFAULT_LEX_MCP_MODE = "brief"
 
 
 def _installed_mode_roster() -> tuple[str, ...] | None:
@@ -75,6 +84,28 @@ def _installed_mode_cards() -> tuple[dict[str, str], ...] | None:
     except Exception:
         return None
     return tuple(_installed) or None
+
+
+def _installed_mode_override_field() -> str | None:
+    """The field name that unlocks the mode grid, from the installed package.
+
+    Both surfaces that render the grid have to spell it the same way or the lock
+    never opens, so it is defined once in lex-mcp-local and derived here — same
+    rule as the roster and the cards.
+    """
+    try:
+        from lex_mcp.ai_setup import MODE_OVERRIDE_FIELD as _installed
+    except Exception:
+        return None
+    return str(_installed) or None
+
+
+#: Cold-start fallback only -- see :func:`_installed_mode_override_field`.
+_FALLBACK_MODE_OVERRIDE_FIELD = "mcp_mode_override_ack"
+
+MODE_OVERRIDE_FIELD: str = (
+    _installed_mode_override_field() or _FALLBACK_MODE_OVERRIDE_FIELD
+)
 
 
 #: Cold-start fallback only -- see :func:`_installed_mode_cards`.
@@ -203,6 +234,7 @@ AI_ENVIRONMENT_CARD_DEFS: tuple[dict[str, str], ...] = (
         "title": "Cursor",
         "desc": "Cursor Agent with project rules and commands.",
         "icon_html": "&#x1F5B1;&#xFE0F;",
+        "experimental": "yes",
     },
     {
         "value": "claude-code",
@@ -221,12 +253,14 @@ AI_ENVIRONMENT_CARD_DEFS: tuple[dict[str, str], ...] = (
         "title": "Copilot CLI",
         "desc": "Terminal Copilot sharing the .github payload.",
         "icon_html": "&#x1F4BB;",
+        "experimental": "yes",
     },
     {
         "value": "windsurf",
         "title": "Windsurf",
         "desc": "Cascade rules and workflows.",
         "icon_html": "&#x1F30A;",
+        "experimental": "yes",
     },
 )
 SUPPORTED_AI_ENVIRONMENTS: tuple[str, ...] = tuple(
@@ -381,6 +415,35 @@ def normalize_mcp_mode(
     if candidate in SUPPORTED_MCP_MODES:
         return candidate
     return default
+
+
+def resolve_submitted_mcp_mode(form_data: Mapping[str, list[str]]) -> str:
+    """The mode a submitted setup form actually gets, override gate applied.
+
+    The grid ships deactivated because choosing a mode is normally LEX's job:
+    brief mode interviews the user and switches to whatever the answer names. The
+    ``disabled`` attributes on the radios only ask the browser nicely — the form
+    is served over loopback HTTP, so a hand-built POST, a stale cached page, or a
+    browser with JavaScript off all arrive with no client-side check having run.
+    This is the half that decides.
+
+    A pick without the acknowledgement reverts to the default rather than being
+    refused: setup's job is to finish, and the default *is* the mode that then
+    asks the user what they want, so nothing is lost by falling back to it.
+
+    Lives at module level so it can be tested. The gate used to be inline in
+    ``do_POST``, inside a closure over the server's ``state``, where nothing
+    could reach it.
+    """
+
+    submitted = normalize_mcp_mode(
+        form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
+    )
+    if submitted == DEFAULT_LEX_MCP_MODE:
+        return submitted
+
+    acknowledged = form_data.get(MODE_OVERRIDE_FIELD, [""])[0].strip()
+    return submitted if acknowledged else DEFAULT_LEX_MCP_MODE
 
 
 def _environment_registry():
@@ -1933,9 +1996,7 @@ def launch_setup_with_ai_form(
 
             github_token = form_data.get("github_token", [""])[0].strip()
             remote_mcp_api_key = form_data.get("remote_mcp_api_key", [""])[0].strip()
-            mcp_mode = normalize_mcp_mode(
-                form_data.get("mcp_mode", [DEFAULT_LEX_MCP_MODE])[0],
-            )
+            mcp_mode = resolve_submitted_mcp_mode(form_data)
             # Emptiness is decided on the raw arrival, before normalisation:
             # ``normalize_ai_environments`` substitutes a default for an empty
             # input, so asking it would erase the distinction between "the user
@@ -2264,6 +2325,7 @@ def _build_setup_form_html(
     environment_cards = "".join(
         (
             f'<label class="env-card'
+            f'{" experimental" if card.get("experimental") else ""}'
             f'{" selected" if card["value"] in chosen_environments else ""}" '
             f'data-env="{card["value"]}">'
             f'<input type="checkbox" name="ai_environments" value="{card["value"]}" '
@@ -2273,7 +2335,12 @@ def _build_setup_form_html(
             f'<div class="env-icon">{card["icon_html"]}</div>'
             f'<div class="env-title">{html.escape(card["title"])}</div>'
             f'<p class="env-desc">{html.escape(card["desc"])}</p>'
-            '<div class="env-check">'
+            + (
+                '<p class="env-preview-note">Not officially supported yet</p>'
+                if card.get("experimental")
+                else ""
+            )
+            + '<div class="env-check">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" '
             'stroke-linecap="round" stroke-linejoin="round">'
             '<polyline points="20 6 9 17 4 12"/></svg>'
@@ -2282,13 +2349,19 @@ def _build_setup_form_html(
         )
         for card in AI_ENVIRONMENT_CARD_DEFS
     )
+    # Deactivated by default. Choosing a mode is normally LEX's job: brief mode
+    # interviews the user and switches to whichever mode the answer names, so this
+    # grid is a manual override rather than the way in. It stays reachable behind
+    # the confirmation below — a soft gate, not a hard lock — because someone who
+    # already knows the mode should not have to sit through an interview, and
+    # because the routing can be wrong.
     mode_cards = "".join(
         (
-            f'<label class="mode-card {card["tone"]}'
+            f'<label class="mode-card locked {card["tone"]}'
             f'{" selected" if card["value"] == selected_mode else ""}" '
             f'data-mode="{card["value"]}">'
             f'<input type="radio" name="mcp_mode_select" value="{card["value"]}" '
-            f'{"checked" if card["value"] == selected_mode else ""}>'
+            f'{"checked" if card["value"] == selected_mode else ""} disabled>'
             f'<div class="mode-icon">{card["icon_html"]}</div>'
             f'<div class="mode-title">{html.escape(card["title"])}</div>'
             f'<p class="mode-desc">{html.escape(card["desc"])}</p>'
@@ -2499,7 +2572,41 @@ def _build_setup_form_html(
         border-color: var(--teal);
         box-shadow: 0 0 0 3px rgba(36, 182, 187, 0.18);
       }}
-      .mode-card input[type="radio"] {{
+      /* Deactivated until the override is acknowledged. The selected card stays
+         at full opacity — it is the mode LEX will actually start in, and dimming
+         it would read as "no mode chosen". */
+      .mode-card.locked {{
+        opacity: 0.45;
+        cursor: not-allowed;
+      }}
+      .mode-card.locked:hover {{
+        border-color: var(--line);
+      }}
+      .mode-card.locked.selected {{
+        opacity: 1;
+      }}
+      /* The override control is a mode card, so it inherits the whole look —
+         border, radius, icon well, title, description, and the tick that appears
+         when it is on. It was a bare checkbox with a label beside it, which read
+         as unstyled HTML next to the grid it governs. Full width because it
+         gates all ten cards rather than being one of them. */
+      .mode-card.mode-override {{
+        /* The grid cards get their box from being grid items; this one sits
+           outside `.mode-toggle`, so as a <label> it would default to inline and
+           its block children would spill out of the border. */
+        display: block;
+        margin-bottom: 1rem;
+        opacity: 1;
+        cursor: pointer;
+      }}
+      .mode-card.mode-override:hover {{
+        border-color: var(--teal);
+      }}
+      .mode-card.mode-override .mode-title {{
+        padding-right: 2.25rem;
+      }}
+      .mode-card input[type="radio"],
+      .mode-card input[type="checkbox"] {{
         position: absolute;
         opacity: 0;
         pointer-events: none;
@@ -2605,6 +2712,22 @@ def _build_setup_form_html(
       .env-card.selected {{
         border-color: var(--teal);
         box-shadow: 0 0 0 3px rgba(36, 182, 187, 0.18);
+      }}
+      /* Cursor, Copilot CLI and Windsurf ship ahead of official support: the
+         orange ring is the only warning a user gets before picking one. */
+      .env-card.experimental {{
+        border-color: #e8963c;
+      }}
+      .env-card.experimental:hover,
+      .env-card.experimental.selected {{
+        border-color: #e8963c;
+        box-shadow: 0 0 0 3px rgba(232, 150, 60, 0.2);
+      }}
+      .env-card .env-preview-note {{
+        color: #b8681a;
+        font-size: 0.74rem;
+        font-weight: 600;
+        margin: 0.4rem 0 0;
       }}
       .env-card input[type="checkbox"] {{
         position: absolute;
@@ -2743,14 +2866,6 @@ def _build_setup_form_html(
 
       <section class="grid">
         <article class="panel">
-          <p class="eyebrow">Workflow mode</p>
-          <h2>What would you like to do?</h2>
-          <div class="mode-toggle" id="modeToggle">
-                        {mode_cards}
-          </div>
-        </article>
-
-        <article class="panel">
           <p class="eyebrow">Coding environment</p>
           <h2>Where will you run the agent?</h2>
           <p class="hint">Select every tool you want to use. Each one gets the MCP server registered in its own config, plus the step agents, slash commands, and workspace rules in its native format. Tools already detected on this machine are pre-selected.</p>
@@ -2800,14 +2915,78 @@ def _build_setup_form_html(
           </form>
         </section>
       </div>
+
+        <article class="panel">
+          <p class="eyebrow">Workflow mode</p>
+          <h2>You don't have to decide this now</h2>
+          <p class="hint">LEX starts in <strong>Project Brief</strong>: it asks what you want, writes the project contract, and then switches itself to the mode that work actually needs — building, editing, documenting, testing, deploying. Everything below is the manual override.</p>
+          <label class="mode-card mode-override" id="modeOverrideCard">
+            <input type="checkbox" id="{MODE_OVERRIDE_FIELD}" name="{MODE_OVERRIDE_FIELD}" value="1">
+            <div class="mode-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#24b6bb" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2"/>
+                <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+              </svg>
+            </div>
+            <div class="mode-title">Are you sure you want to override this and pick a mode yourself?</div>
+            <p class="mode-desc">Only worth it if you already know the mode you want and would rather skip the interview. You can change mode at any time later with <code>lex ai-dashboard</code>.</p>
+            <div class="mode-check">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"
+                   stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </label>
+          <div class="mode-toggle locked" id="modeToggle">
+                        {mode_cards}
+          </div>
+        </article>
       </section>
     </main>
     <script>
       (function() {{
-        var cards = document.querySelectorAll('.mode-card');
+        // The override control is itself a .mode-card, so exclude it here or it
+        // would join the radio group it exists to unlock.
+        var cards = document.querySelectorAll('.mode-card:not(.mode-override)');
         var hiddenInput = document.getElementById('mcpModeInput');
+        var modeToggle = document.getElementById('modeToggle');
+        var overrideAck = document.getElementById('{MODE_OVERRIDE_FIELD}');
+        var overrideCard = document.getElementById('modeOverrideCard');
+        var defaultMode = hiddenInput ? hiddenInput.value : '';
+
+        // The visible half of the override gate. The POST handler enforces the
+        // same rule, because a disabled attribute is a suggestion a hand-built
+        // request can ignore.
+        function applyModeLock() {{
+          var unlocked = !!(overrideAck && overrideAck.checked);
+          if (modeToggle) modeToggle.classList.toggle('locked', !unlocked);
+          // Same tick the mode cards use, so "on" looks the same everywhere.
+          if (overrideCard) overrideCard.classList.toggle('selected', unlocked);
+          cards.forEach(function(c) {{
+            c.classList.toggle('locked', !unlocked);
+            var radio = c.querySelector('input[type="radio"]');
+            if (radio) radio.disabled = !unlocked;
+          }});
+          // Re-locking discards a pick that was never submitted, so the form
+          // stops claiming a mode the user backed out of.
+          if (!unlocked && hiddenInput) {{
+            hiddenInput.value = defaultMode;
+            cards.forEach(function(c) {{
+              var isDefault = c.getAttribute('data-mode') === defaultMode;
+              c.classList.toggle('selected', isDefault);
+              var radio = c.querySelector('input[type="radio"]');
+              if (radio) radio.checked = isDefault;
+            }});
+          }}
+        }}
+
+        if (overrideAck) {{
+          overrideAck.addEventListener('change', applyModeLock);
+          applyModeLock();
+        }}
+
         cards.forEach(function(card) {{
           card.addEventListener('click', function() {{
+            if (card.classList.contains('locked')) return;
             cards.forEach(function(c) {{ c.classList.remove('selected'); }});
             card.classList.add('selected');
             var radio = card.querySelector('input[type="radio"]');
