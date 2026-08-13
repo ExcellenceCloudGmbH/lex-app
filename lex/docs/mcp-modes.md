@@ -17,6 +17,7 @@ Use this table for first-pass mode selection. If user intent matches one row exa
 | "Modify existing project" / "implement targeted change" | `edit` | `forward`, `mvp_generator`, `mvp_completion` | Focused edits on an already existing Lex project. |
 | "Review/audit existing project" | `review` | `edit`, `forward` | Produces review artifacts, not implementation changes. |
 | "The input format changed" / "the columns are different now" / "new CSV layout" / "adapt the app to the new data" | `input` | `edit`, `review` | Migrates the app's hand-written input parsing and downstream code to a changed input-data format. |
+| "Deploy this" / "get it running on the server" / "set it up on staging" / "ship it to production" | `deploy` | `forward`, `edit` | Runs the Lex deployment handbook against an app that already exists and proves it runs. Writes no application code. |
 | "Write tests" / "test this app" / "are these tests any good" | `test` | `review`, `edit` | Writes the test suite and proves it catches regressions. Requires user stories to exist first. |
 | "Document an existing project" / "reverse document" | `backward` | `forward`, `edit`, `review` | Reverse documentation and migration workflow. |
 
@@ -39,7 +40,11 @@ Use this table for first-pass mode selection. If user intent matches one row exa
    specifying, or "writing the prompt", choose `brief` — not `forward`. Brief mode
    interviews them and writes `.lex/contract.md`, then hands off. Do not choose
    `brief` when the user already knows what they want and asked you to build it.
-9. Ask one clarification question only when intent matches multiple rows.
+9. If the user wants a working app *running somewhere* — a server, a container,
+   staging, production — choose `deploy`, not `forward` or `edit`. Deploy mode
+   configures and runs; it does not write application code. If the deployment
+   exposes a code defect, finish recording it and switch to `edit`.
+10. Ask one clarification question only when intent matches multiple rows.
 
 ### Fast Intent Examples
 
@@ -55,6 +60,8 @@ Use this table for first-pass mode selection. If user intent matches one row exa
 - "We get a new CSV layout next month, adapt the app to the new data" -> `input`
 - "I want to build something but I'm not sure what I need" -> `brief`
 - "Interview me about my project" / "help me write the spec" -> `brief`
+- "Deploy this to staging" / "get it running on our server" -> `deploy`
+- "What do I need to run this in production?" -> `deploy`
 
 ## Mode Summary
 
@@ -181,6 +188,43 @@ Primary servers/tools:
 - `kickstart_input_change`, `register_format_change`, `get_intake_brief`,
   `list_change_areas`, `get_change_brief`, `notify_change_complete`,
   `get_input_change_status`, `finalize_input_change`
+
+### `deploy`
+Purpose: Get an existing Lex App running in a target environment.
+
+Use when:
+- The app is built and now has to run somewhere: local, staging, or production.
+- The user asks what it takes to run it, or reports that a deployment is broken.
+
+Shape: sequential, like `forward` — the step bodies come from the Lex deployment
+handbook on the remote MCP and are run in order. Unlike `forward` there is no
+git: the server never commits or pushes, because a deployment run touches
+credentials and infrastructure config.
+
+Deployment used to be a hidden second process inside `forward` — a
+`get_deployment_step` tool no payload advertised and a `process="deployment"`
+arm in `notify_step_complete`. It only existed at the tail of a greenfield
+build, which is the one moment nobody is deploying. It is a mode so it can be
+reached on its own, repeatedly, against a project that already exists.
+
+Secrets: this is the one mode that routinely touches real credentials. No
+summary, note, index row, or report may contain a credential *value* — only the
+key name and where it belongs. The user sets the values themselves.
+
+Blocked steps are first-class: a step that stalls on a DNS record, a firewall
+rule, or a credential is recorded `blocked` and the tool points back at that
+same step rather than advancing past it. `finalize_deployment` returns every
+blocked and partial step so a stalled run is never reported as finished.
+
+Output: `deployment/` in the project (per-step notes, `_index.md`, and
+`DEPLOYMENT-REPORT.md` written by finalize). Session state lives in
+`.lex-deploy/manifest.json`.
+
+Primary servers/tools:
+- `src/lex_mcp_deploy/deploy_mcp.py`
+- `kickstart_deployment`, `get_deployment_step`,
+  `notify_deployment_step_complete`, `get_deployment_status`,
+  `finalize_deployment`
 
 ### `mvp_generator`
 Purpose: Reduced-scope forward workflow focused on MVP delivery.
