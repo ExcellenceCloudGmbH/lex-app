@@ -227,3 +227,19 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — MCP embed + AI setup/verify tooling contracts ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.227 |
+| Type | U |
+| Files covered | `lex/mcp_server/tools/embed.py`, `lex/tools/mcp_mode_invoke.py`, `lex/tools/setup_with_ai.py`, `lex/tools/verify_ai_assets.py` |
+| Test file | `lex/test_project/tests/init/test_1ab_ai_mcp_tooling_contracts.py` |
+| Test classes | `TestCluster01ab_McpEmbedContract`, `TestCluster01ab_McpModeAndVerificationContract`, `TestCluster01ab_SetupWithAiProjectRootContract` |
+| Fixtures | `tempfile.TemporaryDirectory`, targeted module stubs/mocks; no database models |
+| Tests landed | **5 pass / 0 fail** |
+| Coverage gain | pins embed URL + token redaction, mode validation/alignment, and project-root targeting for setup/verify tooling |
+| Status | ✅ Complete |

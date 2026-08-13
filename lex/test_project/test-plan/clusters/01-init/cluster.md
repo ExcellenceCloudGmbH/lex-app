@@ -200,3 +200,19 @@ does not remove user launch configurations.
 **Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
 
 **Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.
+
+### 1ab. MCP embed + AI setup/verify tooling contracts ✅
+
+This coverage batch guards the MCP/AI operator path introduced in PR #703:
+embedding React views inside MCP hosts, switching MCP runtime mode safely, and
+ensuring setup/verify flows honour project-local state.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.223 | Embed URL keeps caller params + embed flags | `_build_embed_url` preserves existing query parameters, forces `embed=true`, and propagates UI hide flags / extras with `#embed` fragment |
+| 1.224 | Embed narration redacts auth token | `_embed_view_inner` keeps `auth_token` only in structured widget payload while model-facing narration link remains token-free |
+| 1.225 | Mode invoke rejects unknown mode | `invoke_switch_to_mode` raises `ValueError` for unsupported mode names before side effects |
+| 1.226 | ai-verify aligns runtime mode to project `.env` | with `align_mcp_mode=True`, verifier invokes switch-to-mode when runtime view disagrees with `.env` `LEX_MCP_MODE` |
+| 1.227 | setup-with-ai writes to provided project root | `configure_ai_integration` writes `.env` and onboards environments under the exact supplied `project_root`, not an inferred parent |
+
+**Scenario range:** 1.223 – 1.227. **Test file:** `lex/test_project/tests/init/test_1ab_ai_mcp_tooling_contracts.py`. **Type:** U. **Status:** ✅ Complete (5 pass / 0 fail).
