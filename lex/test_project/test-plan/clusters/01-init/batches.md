@@ -227,3 +227,19 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — AI setup / verify compatibility shims + standalone FastMCP embed registration ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.230 |
+| Type | U |
+| Files covered | `lex/tools/setup_with_ai.py`, `lex/tools/mcp_mode_invoke.py`, `lex/tools/verify_ai_assets.py`, `lex/mcp_server/tools/embed.py` |
+| Test file | `lex/test_project/tests/init/test_1ab_ai_tooling_compat.py` |
+| Test classes | `TestCluster01ab_SetupWithAI`, `TestCluster01ab_AiCompatibilityShims`, `TestCluster01ab_McpEmbedCompatibility` |
+| Fixtures | none — pure unit tests with temporary directories plus synthetic `lex_mcp` / `fastmcp` modules injected via `sys.modules` |
+| Tests landed | **8 pass / 0 fail in 0.07s** |
+| Coverage gain | pairs the PR #703 AI/MCP tooling refactor with cluster coverage for the setup surface, the legacy `lex.tools.*` shim contract, and the standalone FastMCP registration seam |
+| Status | ✅ Complete (2026-08-13). The documented `python -m lex pytest ...` path is blocked in this sandbox by the absence of a PostgreSQL service during Django test-db bootstrap; the batch itself is pure unit coverage and passes via `python -m pytest -p no:django lex/test_project/tests/init/test_1ab_ai_tooling_compat.py -v`. |
