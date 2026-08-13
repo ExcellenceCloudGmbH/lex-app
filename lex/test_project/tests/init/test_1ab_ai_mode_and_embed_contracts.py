@@ -177,29 +177,34 @@ class TestCluster01ab_AiModeAndEmbedContracts(unittest.TestCase):
         mcp_types_module.TextContent = _TextContent
         mcp_types_module.ToolAnnotations = _ToolAnnotations
 
-        with patch.dict(
-            "sys.modules",
-            {
-                "lex.mcp_server.config": config_module,
-                "lex.mcp_server.registry": registry_module,
-                "lex.mcp_server.context": context_module,
-                "mcp.server.fastmcp": fastmcp_module,
-                "mcp.server.fastmcp.resources": fastmcp_resources_module,
-                "mcp.types": mcp_types_module,
-            },
-        ):
+        previous_embed_module = sys.modules.pop("lex.mcp_server.tools.embed", None)
+        try:
+            with patch.dict(
+                "sys.modules",
+                {
+                    "lex.mcp_server.config": config_module,
+                    "lex.mcp_server.registry": registry_module,
+                    "lex.mcp_server.context": context_module,
+                    "mcp.server.fastmcp": fastmcp_module,
+                    "mcp.server.fastmcp.resources": fastmcp_resources_module,
+                    "mcp.types": mcp_types_module,
+                },
+            ):
+                embed = importlib.import_module("lex.mcp_server.tools.embed")
+                with patch.object(embed, "_resolve_frontend_url", return_value="https://frontend.example"):
+                    blocks = asyncio.run(embed._embed_view_inner(path="process-history"))
+
+            narration_text = blocks[0].text
+            structured = json.loads(blocks[1].text)
+            embed_url = structured["embed_url"]
+
+            self.assertIn("auth_token=secret-token", embed_url)
+            self.assertNotIn(
+                "auth_token=secret-token",
+                narration_text,
+                "Model-visible narration must not expose the iframe bootstrap token.",
+            )
+        finally:
             sys.modules.pop("lex.mcp_server.tools.embed", None)
-            embed = importlib.import_module("lex.mcp_server.tools.embed")
-            with patch.object(embed, "_resolve_frontend_url", return_value="https://frontend.example"):
-                blocks = asyncio.run(embed._embed_view_inner(path="process-history"))
-
-        narration_text = blocks[0].text
-        structured = json.loads(blocks[1].text)
-        embed_url = structured["embed_url"]
-
-        self.assertIn("auth_token=secret-token", embed_url)
-        self.assertNotIn(
-            "auth_token=secret-token",
-            narration_text,
-            "Model-visible narration must not expose the iframe bootstrap token.",
-        )
+            if previous_embed_module is not None:
+                sys.modules["lex.mcp_server.tools.embed"] = previous_embed_module
