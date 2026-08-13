@@ -1,8 +1,7 @@
 ---
 description: "Create a new Lex app — immediately bootstraps a Lex MCP workflow with kickstart_workflow"
-agent: "lex"
 argument-hint: "Describe the project you want to build..."
-tools: ["lex-mcp-wrapper/*", "read", "edit", "search", "execute", "todo"]
+tools: ["lex-mcp-local/*", "read", "edit", "search", "execute", "todo", "agent"]
 ---
 
 You are starting a new Lex MCP workflow. The user's message describes the project they want to build.
@@ -16,4 +15,4 @@ You are starting a new Lex MCP workflow. The user's message describes the projec
 
 Do NOT read files, search the codebase, or ask questions before calling `kickstart_workflow`.
 
-After kickstart completes, call `get_plan_step(step=0)` and proceed through the workflow. End with `finalize_workflow`.
+After kickstart completes, you are the **coordinator**. Call `get_plan_step(step=0)`, delegate to the `lex-step-00` agent, then proceed through all 20 forward steps (0–19) using the coordinator loop: get_plan_step → delegate to agent → notify_step_complete → next step. When step 19 is done, call `finalize_workflow()`, write the required audit report, then call `finalize_workflow(audit_complete=True)`.

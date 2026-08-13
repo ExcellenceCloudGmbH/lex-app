@@ -45,11 +45,14 @@ When ambiguous, default to `kickstart_workflow`.
 
 ## After kickstart completes
 
-Follow the mandatory workflow pattern:
+Follow the mandatory coordinator loop:
 
 1. Call `get_plan_step(step=0)` to begin.
-2. Execute steps, committing with `notify_step_complete`.
-3. End with `finalize_workflow` — this is non-negotiable.
+2. Delegate to the `lex-step-00` agent — do NOT do step work yourself.
+3. Call `notify_step_complete` with the agent's summary.
+4. Repeat for all steps (0–19).
+5. Call `finalize_workflow()` and write the required audit report.
+6. Call `finalize_workflow(audit_complete=True)` to finish the run.
 
 ## Git Operations — HANDS OFF
 

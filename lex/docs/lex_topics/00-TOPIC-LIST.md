@@ -4,7 +4,6 @@ Purpose: high-signal index extracted from `lex_context.md` and `lex_context_repo
 
 ## Topics Covered
 
-0. `00-GETTING-STARTED.md` — installation, project structure (ETL convention), running the dev server
 1. `01-architecture-runtime.md` — framework overview, request/calculation flow, runtime stack
 2. `02-project-structure-discovery.md` — project layout, naming rules, auto-discovery/exclusion
 3. `03-lexmodel-core.md` — LexModel fields, hooks, validation rollback, permission method summaries
@@ -27,6 +26,7 @@ Purpose: high-signal index extracted from `lex_context.md` and `lex_context_repo
 20. `20-LEX-SPECIFICATIONS.md` — canonical project-specific Lex rules and scope constraints
 21. `21-LEX-APP-CONTEXT.yaml` — baked Lex framework runtime context (CalculationModel/LexModel/logging)
 22. `22-lifecycle-hooks.md` — @hook decorator, django-lifecycle, conditional hooks, pre/post validation
+23. `23-testing-and-test-data.md` — ProcessAdminTestCase, JSON scenario data, test_path, `lex pytest`, lex_test_config.yaml groups, minimal-test-data rule
 99. `99-QUERY-ROUTER.md` — keyword-to-topic routing map for fast retrieval
 
 ## Out of Scope
@@ -36,8 +36,9 @@ Purpose: high-signal index extracted from `lex_context.md` and `lex_context_repo
 
 ## Recommended Retrieval Flow
 
-- Start with `00-GETTING-STARTED.md` for project bootstrapping.
 - Use `01-architecture-runtime.md` for orientation.
+- For installing or running a Lex app, use `17-cli-settings-imports-utils.md`
+  (the `lex` CLI, settings, env vars). There is no separate getting-started page.
 - Jump to one subsystem page by topic.
 - Use `19-examples-and-endpoints.md` when you need concrete endpoint paths or full-pattern examples.
 
