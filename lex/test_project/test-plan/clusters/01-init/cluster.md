@@ -200,3 +200,32 @@ does not remove user launch configurations.
 **Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
 
 **Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.
+
+---
+
+### 1ab. AI setup / verify compatibility shims + standalone FastMCP embed registration ✅
+
+**What it tests:** that the AI setup and verification entry points keep the
+documented surface from `docs/reference/CLI Commands.md` after their
+implementation moves into `lex-mcp-local`, and that the MCP embed widget still
+registers on standalone FastMCP.
+
+**Why a regression matters:** silent and high-friction. If the setup page drops
+newer modes or loses the user's environment selection, the wrong tooling is
+installed with no warning. If the legacy `lex.tools.*` paths stop proxying to
+`lex-mcp-local`, upgrades break existing callers. If the embed tool still uses
+the vendored FastMCP 1.0 registration style, the widget crashes when it
+registers instead of surfacing the React view inside the chat host.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.223 | Cold-start mode roster stays complete | `lex setup-with-ai` fallback mode roster/cards still expose `brief`, `test`, `input`, and `deploy` before `lex-mcp-local` is installed |
+| 1.224 | Environment checkboxes submit through the owning form | every environment checkbox names `SETUP_FORM_ID`; clearing the selection re-renders with none checked instead of silently restoring auto-detected choices |
+| 1.225 | Environment aliases resolve and unknown values surface | aliases like `claude` / `vscode` map to canonical keys, unknown values raise clearly, and non-strict read-back falls back safely |
+| 1.226 | Running virtualenv outranks PATH | `resolve_active_python_executable()` keeps the interpreter that is already running `lex`, rather than installing into a different `python3` found on PATH |
+| 1.227 | Onboarding uses the interpreter that can see the package | same-interpreter onboarding stays in-process; foreign interpreters are driven via the documented `python -m lex_mcp.ai_onboarding` JSON protocol |
+| 1.228 | `mcp_mode_invoke` remains a compatibility shim | the legacy module re-exports `lex_mcp.mode_switch.invoke_switch_to_mode`, exposes the real result type, derives `SUPPORTED_MCP_MODES` from `lex_mcp.payload`, and proxies extra attributes |
+| 1.229 | `verify_ai_assets` remains a compatibility shim | the legacy module re-exports `lex_mcp.ai_assets.verify_ai_assets`, keeps its public constants visible, and proxies extra attributes |
+| 1.230 | Embed widget registers through `Tool.from_function` | `lex.mcp_server.tools.embed.register()` adds the widget resource and passes the wrapped tool object (with the legacy `ui/resourceUri` metadata intact) to `add_tool()` |
+
+**Scenario range:** 1.223 – 1.230. **Test file:** `lex/test_project/tests/init/test_1ab_ai_tooling_compat.py`. **Type:** U. **Status:** ✅ 8 pass.

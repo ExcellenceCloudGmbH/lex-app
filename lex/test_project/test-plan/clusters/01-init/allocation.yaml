@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 230
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -282,4 +282,16 @@ letters:
       adopts a strictly newer auth_token rather than discarding it while the stored one is still
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
-
+  ab:
+    title: AI setup / verify compatibility shims + standalone FastMCP embed registration
+    scenarios: 1.223-1.230
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      setup-with-ai keeps the full cold-start mode roster, form-owned environment selection,
+      alias resolution, interpreter/onboarding routing, and the legacy lex.tools compatibility
+      shims stay wired to lex-mcp-local while the MCP embed widget registers through
+      Tool.from_function for standalone FastMCP.

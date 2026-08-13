@@ -4,7 +4,8 @@ Use this file to route a user question to the most relevant focused Lex topic fi
 
 ## Keyword → File Map
 
-- install, setup, project structure, ETL, getting started → `00-GETTING-STARTED.md`
+- install, setup, run the app, dev server, `lex` CLI, env vars → `17-cli-settings-imports-utils.md`
+- project structure, project layout, ETL convention, file naming → `02-project-structure-discovery.md`
 - architecture, runtime, request flow, calculation flow → `01-architecture-runtime.md`
 - project layout, discovery, naming, excluded files → `02-project-structure-discovery.md`
 - LexModel, validation hooks, rollback, created_by, edited_by → `03-lexmodel-core.md`
@@ -26,6 +27,7 @@ Use this file to route a user question to the most relevant focused Lex topic fi
 - examples, API endpoints, model info endpoints → `19-examples-and-endpoints.md`
 - Lex purpose, LexModel vs CalculationModel, CSV-only, project rules → `20-LEX-SPECIFICATIONS.md`
 - @hook, lifecycle hooks, AFTER_CREATE, BEFORE_UPDATE, django-lifecycle, skip_hooks, pre_validation, post_validation → `22-lifecycle-hooks.md`
+- testing, tests, ProcessAdminTestCase, test_path, test scenario, lex pytest, lex_test_config.yaml, test groups, pytestmark, dataset fidelity, ground truth, GroundTruth, keepdb, test isolation, reset-first, data_loaded → `23-testing-and-test-data.md`
 
 ## Out of Scope Routing
 
