@@ -61,6 +61,7 @@ _FALLBACK_MCP_MODES: tuple[str, ...] = (
     "review",
     "test",
     "input",
+    "deploy",
     "mvp_generator",
     "mvp_completion",
 )
@@ -140,6 +141,13 @@ _FALLBACK_MCP_MODE_CARD_DEFS: tuple[dict[str, str], ...] = (
         "desc": "Adapt the app to a changed input-data format.",
         "tone": "input",
         "icon_html": "&#x1F504;",
+    },
+    {
+        "value": "deploy",
+        "title": "Deployment",
+        "desc": "Get an existing app running on local, staging, or production.",
+        "tone": "deploy",
+        "icon_html": "&#x1F680;",
     },
     {
         "value": "mvp_generator",
@@ -2520,6 +2528,9 @@ def _build_setup_form_html(
       }}
       .mode-card.input .mode-icon {{
         background: rgba(249, 115, 22, 0.12);
+      }}
+      .mode-card.deploy .mode-icon {{
+        background: rgba(239, 68, 68, 0.12);
       }}
       .mode-card.backward .mode-icon {{
         background: rgba(40, 48, 103, 0.08);

@@ -5,7 +5,7 @@ downstream Lex project. It replaces the older forward-only 0-14 step model.
 
 ## Current Shape
 
-`lex-mcp` is a unified FastMCP server. It imports nine independent mode
+`lex-mcp` is a unified FastMCP server. It imports ten independent mode
 surfaces and exposes exactly one surface to the IDE assistant at a time.
 
 | Mode | Execution style | Main purpose |
@@ -16,6 +16,7 @@ surfaces and exposes exactly one surface to the IDE assistant at a time.
 | `review` | Flat review run | Produce audit/review reports |
 | `test` | Flat responsibility run | Write the test suite and prove it catches regressions |
 | `input` | Flat change-area run | Adapt an existing Lex app to a changed input-data format |
+| `deploy` | Sequential handbook run | Get an existing Lex app running in a target environment |
 | `mvp_generator` | Checkpoint-gated flat run | Generate a constrained MVP |
 | `mvp_completion` | Coordinator-agent loop | Expand an MVP into full-product scope |
 
@@ -33,7 +34,7 @@ These rules apply to every mode.
 2. The first mode-specific action is always the mode's kickstart tool:
    `kickstart_workflow`, `kickstart_run`, `reverse_kickstart`,
    `kickstart_edit`, `kickstart_review`, `kickstart_test_run`,
-   `kickstart_input_change`, or `kickstart_mvp`.
+   `kickstart_input_change`, `kickstart_deployment`, or `kickstart_mvp`.
 3. When a tool returns a brief with an agent name, invoke that agent as the
    worker and keep the coordinator focused on orchestration.
 4. When any MCP tool returns `ok: false`, stop immediately, show the
@@ -56,6 +57,7 @@ Use user intent first; tool names are secondary.
 | Review or audit an existing project | `review` |
 | Write tests, test data, or audit test effectiveness | `test` |
 | Adapt an existing Lex app to a changed input-data format | `input` |
+| Get an existing app running on local, staging, or production | `deploy` |
 | Document or reverse-document existing code | `backward` |
 
 Priority rules:
@@ -71,7 +73,10 @@ Priority rules:
    are different now", "new CSV layout", "the upload file broke") mean
    `input`, not `edit`. `edit` is for feature or behavior changes; `review`
    is a read-only audit.
-7. Ask exactly one clarification question when intent matches multiple rows.
+7. Requests to run the app *somewhere* -- a server, a container, staging,
+   production -- mean `deploy`, not `forward` or `edit`. Deploy mode configures
+   and runs; it writes no application code.
+8. Ask exactly one clarification question when intent matches multiple rows.
 
 ## Unified Runner and Mode Switching
 
@@ -318,6 +323,59 @@ Outputs land under `input-changes/` (format spec, per-area change logs,
 lives in `.lex-input/manifest.json`. `finalize_input_change` warns when the
 recommended areas (`upload-parser`, `migrations`, `test-data`) never
 completed.
+
+## Deployment Mode
+
+Use `deploy` when a Lex App that already exists has to run somewhere.
+
+```text
+/lex-deploy
+kickstart_deployment(project_path=..., deployment_target="local"|"staging"|"production")
+
+for each step the handbook returns:
+  get_deployment_step(step=N)
+  runSubagent("lex-deploy-step", step body + target + notes + deploy_scan)
+  notify_deployment_step_complete(step=N, summary, artifacts=[...],
+                                  commands_run=[...], status=...)
+
+runSubagent("lex-deploy-verifier", "prove it actually runs")
+get_deployment_status()                 # optional
+finalize_deployment()
+```
+
+Deploy is sequential like `forward`: the step bodies come from the Lex
+deployment handbook on the remote MCP and are run in order. Unlike `forward`
+there is no git -- the server never commits or pushes, because a deployment run
+touches credentials and infrastructure config.
+
+`kickstart_deployment` returns a `deploy_scan`: the compose files, Dockerfiles,
+env templates, migration directories, and CI workflows the project already has.
+Read it before asking the user anything, and pass it to every step agent, which
+starts with an empty context.
+
+Two rules are load-bearing.
+
+**Secrets never become artifacts.** No step summary, note, index row, or report
+may contain a credential value -- only the key name and where it belongs. The
+user sets values themselves. A secret found already committed to the repository
+is a halt, not a finding.
+
+**A blocked step is not a finished step.** Deployments stall on things only the
+user can supply: a DNS record, a firewall rule, a credential, an approval.
+Record the step `blocked` or `partial` with a summary naming exactly what is
+missing; `notify_deployment_step_complete` then points back at that same step
+rather than the next one, and a re-run replaces the record instead of appending
+a second one. `finalize_deployment` returns every blocked and partial step so a
+stalled run is never reported as done.
+
+Outputs land under `deployment/` (per-step notes, `_index.md`, and
+`DEPLOYMENT-REPORT.md` written by finalize). Session state lives in
+`.lex-deploy/manifest.json`.
+
+Deployment was previously a second "process" inside forward mode, reachable
+only through an unadvertised `get_deployment_step` tool at the tail of a
+greenfield build. `forward` and `mvp_completion` no longer accept
+`process="deployment"`.
 
 ## MVP Generator Mode
 
