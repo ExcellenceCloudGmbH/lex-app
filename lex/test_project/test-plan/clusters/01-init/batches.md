@@ -227,3 +227,19 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — MCP mode alignment + embed token hygiene regressions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.227 |
+| Type | U |
+| Files covered | `lex/tools/verify_ai_assets.py` (align-runtime branch), `lex/tools/mcp_mode_invoke.py` (mode validation), `lex/tools/setup_with_ai.py` (`_read_dotenv_value` parsing contract), `lex/mcp_server/tools/embed.py` (auth token omitted from model-visible narration) |
+| Test file | `lex/test_project/tests/init/test_1ab_ai_mode_and_embed_contracts.py` |
+| Test classes | `TestCluster01ab_AiModeAndEmbedContracts` |
+| Fixtures | `tempfile.TemporaryDirectory`, import/patch seams for runtime-mode and MCP embed dependencies |
+| Tests landed | **5 pass / 0 fail** (`python -m pytest lex/test_project/tests/init/test_1ab_ai_mode_and_embed_contracts.py -v`) |
+| Coverage gain | pins ai-verify mode-alignment intent + embed token-hygiene contract across MCP payload narration |
+| Status | ✅ Complete (2026-08-13). `python -m lex pytest` was not runnable in this sandbox due missing runtime stack (`celery` bootstrap import), so this pure-U batch was validated with direct pytest invocation. |
