@@ -128,6 +128,23 @@ USAGE_RULE:
 - Prevent circular imports by including the necessary imports inside of the functions that they are needed in. 
 - Add and enforce import integrity checks in validation gates to catch unresolved imports, stale module paths, and relation target mistakes before approval.
 
+## M) Unknowns are disclosed, never invented (critical)
+
+- A value you cannot source is an **open question**, not a decision. Record it
+  where the next reader will hit it — the plan, the contract, the test report —
+  and say what you assumed in the meantime.
+- **Never invent an expected numeric value, and never read one off a run.** A
+  number taken from the application's own output can only fail if the
+  application becomes non-deterministic, so an assertion built on it tests
+  nothing. Expected figures come from outside the app: a ground-truth workbook
+  under `Tests/GroundTruth/`, or a stated acceptance criterion.
+- **Never infer a column's meaning, a business rule, or a permission from
+  nothing.** If the input samples and the stated requirements do not settle it,
+  ask; if nobody answers, write down what you assumed rather than letting the
+  code be the only record of the guess.
+- A criterion you cannot ground is reported **uncovered**. An honest gap is a
+  fact; a silent default is a claim nobody made.
+
 ## Enforcement rule
 
 - Treat this file as authoritative for planning and implementation prompts in this repository.

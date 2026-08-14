@@ -155,4 +155,29 @@ If the developer says **no**, leave the commits as they are and continue.
 | Framework conventions & feature docs | [`docs/`](docs/) |
 | Session history & CI/CD architecture | [`CLAUDE.md`](CLAUDE.md), [`docs/ci-cd/`](docs/ci-cd/) |
 | Claude Code skill for cluster tests | [`.claude/skills/lex-testing/SKILL.md`](.claude/skills/lex-testing/SKILL.md) |
+| MCP server / FastMCP SDK compatibility | [`lex/tests/unit/infra/test_mcp_server_sdk_compat.py`](lex/tests/unit/infra/test_mcp_server_sdk_compat.py) |
+
+### One trap in `lex/mcp_server`
+
+The MCP SDK vendored a copy of FastMCP 1.0 at `mcp.server.fastmcp` and **removed
+it in SDK v2**. `lex-mcp-local` now pins `fastmcp>=4`, and `lex setup-with-ai` /
+`lex ai-update` install it into the same interpreter as lex-app — so the vendored
+path is not deprecated here, it is an `ImportError` waiting for the next customer
+upgrade. Use the standalone distribution:
+
+| Instead of | Use |
+| --- | --- |
+| `from mcp.server.fastmcp import FastMCP` | `from fastmcp import FastMCP` |
+| `from mcp.server.fastmcp.resources import FunctionResource` | `from fastmcp.resources import FunctionResource` |
+| `from mcp.shared.exceptions import McpError` | `from fastmcp.exceptions import McpError` |
+| `server.add_tool(fn, name=..., description=...)` | `server.add_tool(Tool.from_function(fn, name=..., description=...))` |
+| `FastMCP(stateless_http=..., json_response=..., transport_security=...)` | none of these exist; the HTTP options moved off the constructor and the 2026-07-28 protocol is sessionless by construction |
+
+These forms work on fastmcp 3.x and 4.x alike, so there is no version branch to
+maintain. `test_mcp_server_sdk_compat.py` fails with the offending file:line list
+rather than leaving it to be discovered at a customer site — **most of
+`lex/mcp_server` lives on an unmerged branch where twelve modules still use the
+old paths, so expect that test to fail loudly when it lands.** Note also that
+lex-app declares no `fastmcp` dependency of its own; if the MCP server becomes a
+first-class feature, decide deliberately whether it needs an optional extra.
 

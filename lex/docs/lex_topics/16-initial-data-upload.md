@@ -16,7 +16,8 @@ Search keywords: initial data, seed data, JSON, test data, lex_config, subproces
 - Three actions: `create`, `update`, `delete`.
 - Supports foreign key references via `tag:` prefix and date parsing via `datetime:` prefix.
 - File uploads for `FileField` parameters use relative paths from the project root.
-- For model classes that include a CalculationModel include `"is_calculated": "IN_PROGRESS"` in the json so the calculaions are tested.
+- For model classes that include a CalculationModel include `"is_calculated": "IN_PROGRESS"` in the json so the calculations are tested.
+- **This is the same file format Lex tests use.** The loader is literally the same class (`ProcessAdminTestCase`), so a JSON chain written for seeding *is* a test and vice versa. See `23-testing-and-test-data.md` for the testing side: chain layout, the reset-first rule, and how a chain is run on demand rather than at boot.
 
 ## Configuration
 
@@ -108,7 +109,7 @@ Deletes all objects matching `filter_parameters`. Empty `{}` deletes all instanc
 
 ### `tag:` — Foreign Key References
 Resolves to the actual model instance created earlier in the same data load:
-```jsonF
+```json
 "team": "tag:team_design"
 ```
 
@@ -156,6 +157,7 @@ Tests/
 
 ## Where to Expand
 
+- `23-testing-and-test-data.md` — the same format used as a test: layout, reset-first, running, assertions
 - `lex_context.md`: Configuration Files; Testing & Initial Data
 
 ## LLM Prompt Starters

@@ -14,6 +14,7 @@ import click
 import uvicorn
 from lex.tools.project_root import find_project_root, resolve_llm_working_directory
 from lex.tools.setup_with_ai import (
+    DEFAULT_LEX_MCP_MODE,
     DEFAULT_REMOTE_MCP_URL,
     SetupWithAICredentials,
     SetupWithAIError,
@@ -24,8 +25,17 @@ from lex.tools.setup_with_ai import (
     launch_setup_with_ai_form,
     probe_lex_mcp_local_server,
     resolve_active_python_executable,
+    run_ai_update_bootstrap,
+    SUPPORTED_MCP_MODES,
 )
-from lex.tools.verify_ai_assets import verify_ai_assets
+
+# Click validates --mode before any of our code runs, so a hardcoded list here
+# rejects a mode the server supports no matter what the rest of the stack
+# knows. Three copies of this list sat at six modes while the server shipped
+# nine, which is how `lex ai-verify --mode brief` came to fail with "not one
+# of" rather than verifying anything. Derived, like every other roster.
+_MODE_CHOICES = list(SUPPORTED_MCP_MODES)
+_VERIFY_MODE_CHOICES = ["auto", *_MODE_CHOICES, "all"]
 
 
 def _require_lex_mcp(module_name: str):
@@ -36,14 +46,26 @@ def _require_lex_mcp(module_name: str):
     ``lex setup-with-ai``; if the user runs one of these commands before
     running setup, we surface a clear, actionable error.
     """
-    try:
-        import importlib
+    import importlib
 
+    try:
         return importlib.import_module(f"lex_mcp.{module_name}")
     except ImportError as exc:
+        try:
+            importlib.import_module("lex_mcp")
+        except ImportError:
+            raise click.ClickException(
+                "lex-mcp-local is not installed in the active environment. "
+                "Run `lex setup-with-ai` first to install it, then retry this "
+                "command."
+            ) from exc
+        # The package is there, just older than this lex-app -- the module or a
+        # name inside it does not exist yet. Sending the user to setup-with-ai
+        # here is a dead end; the thing that fixes it is the upgrade.
         raise click.ClickException(
-            "lex-mcp-local is not installed in the active environment. "
-            "Run `lex setup-with-ai` first to install it, then retry this command."
+            f"This lex-app needs a newer lex-mcp-local than the one installed "
+            f"(lex_mcp.{module_name} is unavailable). Run `lex ai-update` to "
+            "upgrade it, then retry this command."
         ) from exc
 
 # Defer Django imports and setup until needed (NOT at import time)
@@ -763,22 +785,16 @@ def setup(project_root):
 )
 @click.option(
     "--mcp-mode",
-    default="forward",
+    # Derived, not restated — the same reason as _MODE_CHOICES above. Naming a
+    # mode here is an explicit choice, so this flag needs no override gate the way
+    # the form's grid does; it only needs to agree on where "unchosen" lands.
+    default=DEFAULT_LEX_MCP_MODE,
     show_default=True,
-    type=click.Choice(
-        [
-            "forward",
-            "backward",
-            "edit",
-            "review",
-            "mvp_generator",
-            "mvp_completion",
-        ],
-        case_sensitive=False,
-    ),
+    type=click.Choice(_MODE_CHOICES, case_sensitive=False),
     help="MCP workflow mode. Determines which agent payload is delivered and "
          "which mode the server runs in (written to LEX_MCP_MODE in .env and "
-         "every MCP config).",
+         "every MCP config). Defaults to brief, which interviews you and then "
+         "switches to the mode the work needs.",
 )
 @click.option(
     "-e",
@@ -992,15 +1008,33 @@ def setup_with_ai(
     # plain `lex setup` left the project partially initialized, or where a
     # copy step silently no-op'd.
     click.echo("Verifying AI asset directories...")
+    # Imported here, not at module scope: verification now ships with
+    # lex-mcp-local, which the lines above have only just installed. A
+    # top-level import would make every `lex` command fail on a machine that
+    # has never run setup.
+    verify_result = None
     try:
+        # Resolved inside the try on purpose. Setup installs whatever the index
+        # currently serves, and that can be older than this lex-app -- during a
+        # release window it always is. Letting the lookup escape aborts setup
+        # after the credentials, the server registration and the docs are
+        # already in place, which leaves a project half configured over
+        # something the very next command fixes.
+        verify_ai_assets = _require_lex_mcp("ai_assets").verify_ai_assets
         verify_result = verify_ai_assets(
             project_root=root,
             mode=effective_mcp_mode,
             environments=effective_environments,
         )
-    except SetupWithAIError as exc:
-        click.echo(f"Warning: AI asset verification failed: {exc}")
-    else:
+    except (SetupWithAIError, click.ClickException) as exc:
+        message = getattr(exc, "message", None) or str(exc)
+        click.echo(f"Warning: AI asset verification was skipped: {message}")
+        click.echo(
+            "  Setup itself completed. Run `lex ai-update` to finish "
+            "delivering the agent assets."
+        )
+
+    if verify_result is not None:
         restored_total = len(verify_result.restored_files)
         for directory_result in verify_result.directories:
             if directory_result.skipped_reason is not None:
@@ -1033,58 +1067,34 @@ def setup_with_ai(
 @lex.command(name="ai-update", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.option("-p", "--project-root", help="Project root (default: execution dir)")
 def ai_update(project_root):
-    """Apply incremental updates to an existing LEX AI setup."""
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    """Apply incremental updates to an existing LEX AI setup.
 
-    ai_update_module = _require_lex_mcp("ai_update")
+    A bootstrap only: upgrade lex-mcp-local, then hand off to
+    ``python -m lex_mcp.ai_update`` in a fresh process so the migration steps
+    that run are the ones the upgrade just installed. What an update actually
+    does -- and what it reports -- lives in lex-mcp-local, which is why a new
+    migration no longer needs a lex-app release to reach a customer.
+    """
+    # The directory given (or the cwd) IS the project, exactly as
+    # setup-with-ai and ai-verify treat it. This used to walk up to a git
+    # toplevel or marker file, which meant update delivered the agent
+    # payload somewhere setup had never written -- a project without its
+    # own marker got .github and docs copied into its parent.
+    root = resolve_llm_working_directory(project_root)
 
-    click.echo("Applying LEX AI updates...")
     try:
-        results = ai_update_module.apply_ai_update(project_root=root)
+        exit_code = run_ai_update_bootstrap(root, reporter=click.echo)
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
+    except subprocess.CalledProcessError as exc:
+        raise click.ClickException(
+            f"Could not upgrade lex-mcp-local (pip exited {exc.returncode})."
+        ) from exc
 
-    if not results:
-        click.echo("No updates to apply.")
-        return
-
-    for result in results:
-        click.echo(f"Applied update to v{result.version}:")
-        if result.env_keys_removed:
-            click.echo(f"  Removed from .env: {', '.join(result.env_keys_removed)}")
-        if result.mcp_env_keys_removed:
-            click.echo(f"  Removed from mcp.json: {', '.join(result.mcp_env_keys_removed)}")
-        if result.package_upgraded:
-            click.echo("  Upgraded lex-mcp-local package.")
-        for dest in result.artifact_directories_copied:
-            click.echo(f"  Copied {dest.name} to {dest}")
-        environments_configured = getattr(result, "environments_configured", ())
-        if environments_configured:
-            click.echo(
-                f"  Agentic environments: {', '.join(environments_configured)}"
-            )
-        payload_written = getattr(result, "payload_files_written", 0)
-        payload_pruned = getattr(result, "payload_files_pruned", 0)
-        if payload_written or payload_pruned:
-            click.echo(
-                f"  Agent payload: {payload_written} file(s) written, "
-                f"{payload_pruned} stale file(s) removed."
-            )
-        if result.server_restarted:
-            click.echo("  Stopped MCP server (will restart on next use).")
-        has_action = (
-            result.env_keys_removed
-            or result.mcp_env_keys_removed
-            or result.package_upgraded
-            or result.artifact_directories_copied
-            or result.server_restarted
-            or payload_written
-            or payload_pruned
+    if exit_code:
+        raise click.ClickException(
+            f"LEX AI update failed (exit code {exit_code}). See the output above."
         )
-        if not has_action:
-            click.echo("  Already up to date.")
-
-    click.echo("LEX AI update complete.")
 
 
 @lex.command(name="ai-faq", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -1095,7 +1105,7 @@ def ai_faq():
 
 
 def _run_ai_verify_command(
-    project_root, mode, quiet, silent, align_mcp_mode, environments=()
+    project_root, mode, quiet, silent, align_mcp_mode, environments=(), strict=False
 ):
     """Verify (and silently restore) the LEX AI asset directories.
 
@@ -1110,7 +1120,7 @@ def _run_ai_verify_command(
     ai_verify_module = _require_lex_mcp("ai_verify")
 
     try:
-        ai_verify_module.run_ai_verify(
+        result = ai_verify_module.run_ai_verify(
             project_root=project_root,
             mode=mode,
             quiet=quiet,
@@ -1122,25 +1132,22 @@ def _run_ai_verify_command(
     except SetupWithAIError as exc:
         raise click.ClickException(str(exc)) from exc
 
+    # Soft failures -- an unknown environment key, a payload sync that threw --
+    # are reported as [warn] lines and otherwise exit 0, because the MCP
+    # pre-flight calls this on every tool call and must not abort a run over
+    # one. That default is wrong for CI, where a typo in -e reads as success.
+    if strict and not result.ok:
+        raise click.ClickException(
+            "Verification reported problems (see the warnings above)."
+        )
+
 
 @lex.command(name="ai-verify", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.option("-p", "--project-root", help="Project root (default: execution dir)")
 @click.option(
     "--mode",
     "mode",
-    type=click.Choice(
-        [
-            "auto",
-            "forward",
-            "backward",
-            "edit",
-            "review",
-            "mvp_generator",
-            "mvp_completion",
-            "all",
-        ],
-        case_sensitive=False,
-    ),
+    type=click.Choice(_VERIFY_MODE_CHOICES, case_sensitive=False),
     default="auto",
     show_default=True,
     help=(
@@ -1183,9 +1190,19 @@ def _run_ai_verify_command(
         "LEX_AI_ENVIRONMENTS value."
     ),
 )
-def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments):
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Exit non-zero when verification reports a problem it recovered from "
+        "or warned about, instead of always exiting 0. For CI; the MCP "
+        "pre-flight deliberately does not use it."
+    ),
+)
+def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments, strict):
     _run_ai_verify_command(
-        project_root, mode, quiet, silent, align_mcp_mode, environments
+        project_root, mode, quiet, silent, align_mcp_mode, environments, strict
     )
 
 
@@ -1194,19 +1211,7 @@ def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments):
 @click.option(
     "--mode",
     "mode",
-    type=click.Choice(
-        [
-            "auto",
-            "forward",
-            "backward",
-            "edit",
-            "review",
-            "mvp_generator",
-            "mvp_completion",
-            "all",
-        ],
-        case_sensitive=False,
-    ),
+    type=click.Choice(_VERIFY_MODE_CHOICES, case_sensitive=False),
     default="auto",
     show_default=True,
     help=(
@@ -1249,9 +1254,19 @@ def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments):
         "LEX_AI_ENVIRONMENTS value."
     ),
 )
-def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode, environments):
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Exit non-zero when verification reports a problem it recovered from "
+        "or warned about, instead of always exiting 0. For CI; the MCP "
+        "pre-flight deliberately does not use it."
+    ),
+)
+def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode, environments, strict):
     _run_ai_verify_command(
-        project_root, mode, quiet, silent, align_mcp_mode, environments
+        project_root, mode, quiet, silent, align_mcp_mode, environments, strict
     )
 
 
@@ -1264,7 +1279,12 @@ def ai_dashboard(project_root):
     API key, and other configuration. Changes are written to .env and mcp.json.
     Press Ctrl+C to stop the dashboard server.
     """
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    # The directory given (or the cwd) IS the project, exactly as
+    # setup-with-ai and ai-verify treat it. This used to walk up to a git
+    # toplevel or marker file, which meant update delivered the agent
+    # payload somewhere setup had never written -- a project without its
+    # own marker got .github and docs copied into its parent.
+    root = resolve_llm_working_directory(project_root)
     ai_dashboard_module = _require_lex_mcp("ai_dashboard")
     try:
         ai_dashboard_module.launch_ai_dashboard(
@@ -1275,37 +1295,94 @@ def ai_dashboard(project_root):
         raise click.ClickException(str(exc)) from exc
 
 
-@lex.command(name="ai_issue_report", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.option("-p", "--project-root", help="Project root (default: execution dir)")
-@click.option(
-    "-o",
-    "--output",
-    type=click.Path(path_type=Path, dir_okay=False, writable=True),
-    help="Output zip path (default: <project>/.lex-ai-reports/ai_issue_report_<timestamp>.zip)",
+def _ai_issue_report_options(command):
+    """Apply the shared option set to both spellings of the command."""
+    for decorate in reversed(
+        (
+            click.option(
+                "-p", "--project-root", help="Project root (default: execution dir)"
+            ),
+            click.option(
+                "-o",
+                "--output",
+                type=click.Path(path_type=Path, dir_okay=False, writable=True),
+                help=(
+                    "Output zip path (default: "
+                    "<project>/.lex-ai-reports/ai_issue_report_<timestamp>.zip)"
+                ),
+            ),
+            click.option(
+                "--artifact-mode",
+                type=click.Choice(["auto", "off", "strict"], case_sensitive=False),
+                default="auto",
+                show_default=True,
+                help=(
+                    "Raw artifact capture mode: auto (best-effort), off, "
+                    "strict (require at least one file)."
+                ),
+            ),
+            click.option(
+                "--yes",
+                is_flag=True,
+                help="Skip the confirmation prompt about raw secret inclusion.",
+            ),
+        )
+    ):
+        command = decorate(command)
+    return command
+
+
+# Hyphenated is canonical, matching every sibling (ai-dashboard, ai-faq,
+# ai-update, ai-verify). This command was registered under the underscore
+# alone, so `lex ai-issue-report` -- the spelling the naming convention implies
+# -- failed with "No such command". The underscore survives as a hidden alias
+# because it is what the existing docs and support macros tell people to type.
+# Click has no `aliases=` argument (verified against 8.4), so a second hidden
+# command is the mechanism, exactly as ai-verify/ai_verify already do it.
+@lex.command(
+    name="ai-issue-report",
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
 )
-@click.option(
-    "--artifact-mode",
-    type=click.Choice(["auto", "off", "strict"], case_sensitive=False),
-    default="auto",
-    show_default=True,
-    help="Raw artifact capture mode: auto (best-effort), off, strict (require at least one file).",
-)
-@click.option(
-    "--yes",
-    is_flag=True,
-    help="Skip the confirmation prompt about raw secret inclusion.",
-)
+@_ai_issue_report_options
 def ai_issue_report(project_root, output, artifact_mode, yes):
     """Generate a raw AI issue report bundle for support triage.
 
     Captures Copilot and MCP-related artifacts as raw files without parsing so
     no details are dropped during triage.
     """
-    root = Path(find_project_root(project_root or os.getcwd())).resolve()
+    _run_ai_issue_report(project_root, output, artifact_mode, yes)
+
+
+@lex.command(
+    name="ai_issue_report",
+    hidden=True,
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
+)
+@_ai_issue_report_options
+def ai_issue_report_alias(project_root, output, artifact_mode, yes):
+    """Deprecated spelling of ``ai-issue-report``; kept working."""
+    _run_ai_issue_report(project_root, output, artifact_mode, yes)
+
+
+def _run_ai_issue_report(project_root, output, artifact_mode, yes):
+    # The directory given (or the cwd) IS the project, exactly as
+    # setup-with-ai and ai-verify treat it. This used to walk up to a git
+    # toplevel or marker file, which meant update delivered the agent
+    # payload somewhere setup had never written -- a project without its
+    # own marker got .github and docs copied into its parent.
+    root = resolve_llm_working_directory(project_root)
 
     if not yes:
-        click.echo("WARNING: report can include raw secrets and private conversation artifacts.")
-        click.confirm("Continue and generate the raw issue report?", abort=True)
+        # The old wording said the bundle "can include raw secrets". It did,
+        # and it was uploaded to the ticketing system. Credentials are masked
+        # now, so say what is actually still in there -- an inaccurate warning
+        # is one people learn to click past.
+        click.echo(
+            "This bundle includes MCP configs, logs, and private Copilot "
+            "conversation artifacts, and is uploaded to LEX support."
+        )
+        click.echo("Credential values are masked before anything is written.")
+        click.confirm("Continue and generate the issue report?", abort=True)
 
     ai_issue_report_module = _require_lex_mcp("ai_issue_report")
 
@@ -1320,6 +1397,15 @@ def ai_issue_report(project_root, output, artifact_mode, yes):
 
     click.echo(f"AI issue report written: {result.archive_path}")
     click.echo(f"Captured files: {result.copied_files}")
+    # getattr, not attribute access: lex-app must never assume a lex-mcp-local
+    # newer than whatever the customer has installed. A plain access here turns
+    # an older package into an AttributeError traceback at the end of a report
+    # that was otherwise generated fine.
+    masked = getattr(result, "values_masked", None)
+    if masked is not None:
+        click.echo(f"Credential values masked: {masked}")
+    for skipped in getattr(result, "skipped_oversize", ()):
+        click.echo(f"  [skip] too large to scan, left out: {skipped}")
     if result.missing_sources:
         click.echo(f"Missing sources: {len(result.missing_sources)}")
     if result.collection_errors:
@@ -1385,7 +1471,10 @@ def _collect_setup_with_ai_credentials(
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai_issue_report"}
+    # Both spellings of ai-issue-report are listed for the reader's benefit;
+    # _should_skip_django_bootstrap also normalises hyphens and underscores, so
+    # either would match on its own.
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai-issue-report", "ai_issue_report"}
 )
 
 
@@ -1407,7 +1496,32 @@ def _should_skip_django_bootstrap(command_name: str | None) -> bool:
     return any(name in _SKIP_BOOTSTRAP_COMMANDS for name in normalized_names)
 
 
+def _force_utf8_console() -> None:
+    """Make our own output encodable, whatever the console code page is.
+
+    On Windows a redirected or piped stdout is opened with the locale code page
+    — cp1252 on a German or English image — and printing a path it cannot
+    represent raises ``UnicodeEncodeError`` and exits 1. That is not exotic:
+    ``ı ğ ş`` are absent from cp1252, so are Cyrillic and CJK, and the very
+    first thing ``lex setup-with-ai`` does in a fresh project is print the list
+    of files it restored. An IDE or a CI job captures stdout, which is exactly
+    the case that gets the code page instead of a console.
+
+    POSIX is already UTF-8, so this is a no-op there; ``errors="replace"``
+    means a stray unencodable byte degrades to a visible placeholder rather
+    than killing the command. Guarded because stdout is not always a
+    reconfigurable text stream (pytest's capture, for one).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            continue
+
+
 def main():
+    _force_utf8_console()
+
     argv = sys.argv[1:]
     first_arg = argv[0] if argv else None
 

@@ -36,8 +36,16 @@ from typing import Any, Dict, List, Optional
 
 from lex.mcp_server.config import mcp_setting
 from lex.mcp_server.registry import container_is_writable, get_container
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.resources import FunctionResource
+
+# The standalone ``fastmcp`` distribution, not ``mcp.server.fastmcp``. The MCP
+# SDK vendored a copy of FastMCP 1.0 under that path and dropped it in SDK v2,
+# so the old import is a hard ImportError there -- and lex-mcp-local now pins
+# ``fastmcp>=4``, which brings SDK v2 into any environment that installs both.
+# These paths resolve on fastmcp 3.x and 4.x alike, so there is no version
+# branch to maintain.
+from fastmcp import FastMCP
+from fastmcp.resources import FunctionResource
+from fastmcp.tools import Tool
 from mcp.types import TextContent, ToolAnnotations
 
 logger = logging.getLogger(__name__)
@@ -677,28 +685,35 @@ def register(server: FastMCP) -> None:
     )
 
     # ── Tool ──
+    #
+    # Built through ``Tool.from_function`` rather than passed as a bare callable
+    # with keywords. The vendored FastMCP 1.0 took ``add_tool(fn, name=...,
+    # description=...)``; every standalone release takes a single ``Tool``, so
+    # the old call raises ``TypeError: unexpected keyword argument 'name'``.
     server.add_tool(
-        _embed_view,
-        name="lex_embed_view",
-        description=(
-            "Embed a React frontend view as an interactive widget. "
-            "Supports any route: model list (e.g. 'quarter'), detail "
-            "('quarter/42'), create form ('quarter/create'), edit "
-            "('quarter/42/edit'), or custom routes like "
-            "'calculation_log_tree'. Use hide_toolbar / hide_actions "
-            "to strip additional UI elements. The view renders inside "
-            "the chat as an interactive iframe widget."
-        ),
-        annotations=ToolAnnotations(
-            readOnlyHint=True,
-            openWorldHint=False,
-            destructiveHint=False,
-        ),
-        meta={
-            "ui": {
-                "resourceUri": _RESOURCE_URI,
+        Tool.from_function(
+            _embed_view,
+            name="lex_embed_view",
+            description=(
+                "Embed a React frontend view as an interactive widget. "
+                "Supports any route: model list (e.g. 'quarter'), detail "
+                "('quarter/42'), create form ('quarter/create'), edit "
+                "('quarter/42/edit'), or custom routes like "
+                "'calculation_log_tree'. Use hide_toolbar / hide_actions "
+                "to strip additional UI elements. The view renders inside "
+                "the chat as an interactive iframe widget."
+            ),
+            annotations=ToolAnnotations(
+                readOnlyHint=True,
+                openWorldHint=False,
+                destructiveHint=False,
+            ),
+            meta={
+                "ui": {
+                    "resourceUri": _RESOURCE_URI,
+                },
+                # Legacy flat key for older hosts
+                "ui/resourceUri": _RESOURCE_URI,
             },
-            # Legacy flat key for older hosts
-            "ui/resourceUri": _RESOURCE_URI,
-        },
+        )
     )

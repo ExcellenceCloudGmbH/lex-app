@@ -1,0 +1,172 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "LEX: Init",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "init"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Setup With AI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "setup-with-ai"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Start",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "start",
+        "--reload",
+        "--loop",
+        "asyncio",
+        "lex_app.asgi:application"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Flower",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "flower"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Celery Workers",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "celery-workers",
+        "${input:lexWorkerCount}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "IS_RUNNING_IN_CELERY": "true",
+        "CELERY_ACTIVE": "true"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Make migrations",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "makemigrations"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Migrate",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "migrate"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Streamlit",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "streamlit",
+        "run",
+        "streamlit_app.py"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Create DB",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "create_db"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "LEX: Flush DB",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "flush"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "lexWorkerCount",
+      "type": "promptString",
+      "description": "Worker count",
+      "default": "1"
+    }
+  ]
+}
