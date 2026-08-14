@@ -57,6 +57,30 @@ import pytest
 
 pytestmark = pytest.mark.init
 
+# Explicit ``@lex.command(...)`` names the framework depends on. Pinned
+# here so a rename that leaves a ``.run.xml`` (or the docs) behind fails
+# in CI rather than in the operator's PyCharm.
+EXPLICIT_COMMANDS = frozenset({
+    "celery",
+    "celery-workers",
+    "flower",
+    "streamlit",
+    "start",
+    "setup",
+    "setup-with-ai",
+    "ai-update",
+    "ai-faq",
+    "ai-issue-report",
+    "ai_issue_report",
+})
+
+# Deprecated spellings kept registered — and runnable — for people
+# following older docs and support macros, but registered with
+# ``hidden=True`` so ``lex --help`` advertises one spelling per command.
+HIDDEN_ALIASES = frozenset({
+    "ai_issue_report",
+})
+
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
@@ -234,18 +258,7 @@ class TestCluster01m_ExplicitClickCommands(TestCase):
     sees the breakage at the CLI source-file level.
     """
 
-    EXPECTED_EXPLICIT_COMMANDS = frozenset({
-        "celery",
-        "celery-workers",
-        "flower",
-        "streamlit",
-        "start",
-        "setup",
-        "setup-with-ai",
-        "ai-update",
-        "ai-faq",
-        "ai_issue_report",
-    })
+    EXPECTED_EXPLICIT_COMMANDS = EXPLICIT_COMMANDS
 
     def test_1_105_explicit_commands_are_all_registered(self):
         """1.105: every explicit Click handler we depend on is on the group."""
@@ -288,21 +301,16 @@ class TestCluster01m_HelpInvocability(TestCase):
     covers that side via ``django.core.management.get_commands``.
     """
 
-    EXPECTED_EXPLICIT_COMMANDS = frozenset({
-        "celery",
-        "celery-workers",
-        "flower",
-        "streamlit",
-        "start",
-        "setup",
-        "setup-with-ai",
-        "ai-update",
-        "ai-faq",
-        "ai_issue_report",
-    })
+    EXPECTED_EXPLICIT_COMMANDS = EXPLICIT_COMMANDS
 
     def test_1_107_lex_root_help_lists_explicit_commands(self):
-        """1.107: ``lex --help`` exits 0 and names every explicit command."""
+        """1.107: ``lex --help`` exits 0 and names every explicit command
+        an operator is meant to type.
+
+        Deprecated spellings (``HIDDEN_ALIASES``) are excluded: they stay
+        runnable — 1.108 proves that — but ``hidden=True`` keeps them out
+        of the listing so the help advertises one spelling per command.
+        """
         runner = CliRunner()
         result = runner.invoke(lex, ["--help"])
         self.assertEqual(
@@ -310,11 +318,34 @@ class TestCluster01m_HelpInvocability(TestCase):
             f"`lex --help` failed: exit={result.exit_code}\n"
             f"output: {result.output}",
         )
-        for name in self.EXPECTED_EXPLICIT_COMMANDS:
+        for name in self.EXPECTED_EXPLICIT_COMMANDS - HIDDEN_ALIASES:
             self.assertIn(
                 name, result.output,
                 f"`lex --help` does not mention {name!r}.",
             )
+
+    def test_1_107b_deprecated_aliases_stay_out_of_root_help(self):
+        """1.107b: hidden aliases are registered but not advertised.
+
+        Dropping ``hidden=True`` would list the same command twice under
+        two spellings, which is exactly the ambiguity the canonical
+        hyphenated names exist to remove.
+        """
+        runner = CliRunner()
+        result = runner.invoke(lex, ["--help"])
+        for name in HIDDEN_ALIASES:
+            with self.subTest(command=name):
+                self.assertIn(
+                    name, lex.commands,
+                    f"deprecated alias {name!r} is no longer registered — "
+                    f"drop it from HIDDEN_ALIASES/EXPLICIT_COMMANDS if the "
+                    f"spelling was retired on purpose.",
+                )
+                self.assertNotIn(
+                    name, result.output,
+                    f"`lex --help` lists the deprecated spelling {name!r}; "
+                    f"register it with hidden=True.",
+                )
 
     def test_1_108_each_explicit_subcommand_help_exits_zero(self):
         """1.108: ``lex <cmd> --help`` exits 0 for every explicit handler.
