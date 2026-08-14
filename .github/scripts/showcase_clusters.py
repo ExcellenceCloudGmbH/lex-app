@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from showcase_test_descriptions import (  # noqa: E402
     CRUD_API_TESTS,
     EXPORTS_TESTS,
+    INIT_TESTS,
     PERMISSIONS_TESTS,
     QUERIES_TESTS,
     SERIALIZERS_TESTS,
@@ -191,7 +192,8 @@ CLUSTERS: tuple[Cluster, ...] = (
         why_it_matters=(
             "Day-one onboarding is the single highest-risk moment in "
             "the customer journey."
-        )
+        ),
+        test_descriptions=INIT_TESTS,
     ),
     Cluster(
         key="crud_api",

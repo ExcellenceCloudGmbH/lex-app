@@ -475,13 +475,14 @@ No broker, Redis, or database required.
 | 1.102 | Generated `.run.xml` set parity | Exactly the 16 expected files, no orphans, no missing — canary against "removed Test_Audit but constant still has it" drift |
 | 1.103 | Every `.run.xml` `SCRIPT_NAME` is `lex` | A copy-paste of a different binary cannot bypass the CLI's env handling / Django bootstrap |
 | 1.104 | First-token of every `.run.xml` `PARAMETERS` resolves | Either explicit `@lex.command(...)` Click handler OR registered Django management command — the cross-file contract that nothing else asserts |
-| 1.105 | Explicit Click registry pinned | `celery` / `celery-workers` / `flower` / `streamlit` / `start` / `setup` / `setup-with-ai` / `ai-update` / `ai-faq` — removing one is what would silently break a `.run.xml` |
+| 1.105 | Explicit Click registry pinned | `celery` / `celery-workers` / `flower` / `streamlit` / `start` / `setup` / `setup-with-ai` / `ai-update` / `ai-faq` / `ai-issue-report` (+ its `ai_issue_report` alias) — removing one is what would silently break a `.run.xml` |
 | 1.106 | `_SKIP_BOOTSTRAP_COMMANDS` is a subset of explicit registry | Otherwise listed names silently fall through to dynamic forwarding without `django.setup()` |
-| 1.107 | `lex --help` exits 0 and names every explicit command | Click group itself wired correctly |
+| 1.107 | `lex --help` exits 0 and names every explicit command an operator types | Click group itself wired correctly; deprecated `hidden=True` aliases are excluded (1.107b owns them) |
+| 1.107b | Deprecated spellings stay registered but out of the root help | A hidden alias (`ai_issue_report`) still runs for older docs, while `--help` advertises one spelling per command |
 | 1.108 | `lex <cmd> --help` exits 0 for every explicit handler | Catches decorator typos / signature regressions that `--help` surfaces but real runs would mask |
 | 1.109 | Every Django-side subcommand referenced by a `.run.xml` is registered | `init` / `migrate` / `makemigrations` / `flush` / `test` / `create_db` resolve through Django's command loader — otherwise dynamic forwarding produces a less-helpful error |
 
-**Status:**  Complete — 8 pass / 0 fail in 0.020s. See progress.md Session 40.
+**Status:**  Complete — 9 pass / 0 fail. See progress.md Session 40. 1.107 was split on 14 August 2026 when `ai-issue-report` became the canonical hyphenated spelling and the underscore became a hidden alias: the old assertion required the hidden spelling to appear in `lex --help`, which `hidden=True` guarantees it will not.
 
 ### 5g. History `valid_to` chaining contract  — implemented
 

@@ -1,23 +1,30 @@
 """Drift guard: every agent front-end must share ONE surface-enumeration rule.
 
-There are four prompt surfaces that tell an agent how to decompose a change into
+These are the prompt surfaces that tell an agent how to decompose a change into
 test surfaces and clusters:
 
   1. `lex/test_project/test-plan/progress/conventions.md` — the **canonical**
      source. The cloud Copilot prompt inlines this file verbatim
      (see `copilot_assemble_prompt.assemble_prompt`), so whatever lands here is
      what the cloud agent reads.
-  2. `.github/instructions/testing.instructions.md` — VS Code Copilot / cloud IDE.
-  3. `.claude/skills/lex-testing/SKILL.md` — Claude Code skill.
-  4. `AGENTS.md` — JetBrains Copilot / Cursor / Codex (load-bearing in PyCharm).
+  2. `.claude/skills/lex-testing/SKILL.md` — Claude Code skill.
+  3. `AGENTS.md` — JetBrains Copilot / Cursor / Codex (load-bearing in PyCharm).
+
+`.github/instructions/testing.instructions.md` (VS Code Copilot / cloud IDE) was
+a fourth surface until `.github/instructions/` and `.github/agents/` were removed
+wholesale; AGENTS.md is what those front-ends read now. A guard that keeps
+checking a file nobody ships fails on every run and says nothing about drift, so
+the surface is off the list rather than pinned at a path that does not exist.
+`_surface_text` below turns any *future* deletion into that same conversation —
+an explicit "update SURFACES" failure instead of a bare FileNotFoundError.
 
 These drifted once: the cloud assembler taught a weaker "primary/secondary"
 decomposition while the local surfaces taught full surface enumeration, and none
 of them taught the *execution-path* dimension — which is why an agent enumerated
 the entry points of a feature but missed that one operation can run by more than
 one route, each route its own surface. This test pins that the shared rule — and
-specifically its execution-path clause — is present in all four, so the cloud and
-local paths can never silently diverge again.
+specifically its execution-path clause — is present in every surface, so the
+cloud and local paths can never silently diverge again.
 """
 
 from __future__ import annotations
@@ -32,10 +39,25 @@ CANONICAL = REPO_ROOT / "lex" / "test_project" / "test-plan" / "progress" / "con
 
 SURFACES = {
     "conventions.md (canonical)": CANONICAL,
-    "testing.instructions.md": REPO_ROOT / ".github" / "instructions" / "testing.instructions.md",
     "lex-testing SKILL.md": REPO_ROOT / ".claude" / "skills" / "lex-testing" / "SKILL.md",
     "AGENTS.md": REPO_ROOT / "AGENTS.md",
 }
+
+
+def _surface_text(name: str) -> str:
+    """Read a surface, failing with the actionable message when it is gone.
+
+    A retired surface should be dropped from ``SURFACES`` in the same change
+    that deletes the file. If it isn't, this says so — a raw FileNotFoundError
+    reads like a broken checkout rather than a stale guard.
+    """
+    path = SURFACES[name]
+    assert path.is_file(), (
+        f"{name} is listed as a prompt surface but {path.relative_to(REPO_ROOT)} "
+        f"does not exist. If the surface was retired on purpose, remove it from "
+        f"SURFACES; otherwise restore the file."
+    )
+    return path.read_text()
 
 
 def test_canonical_source_owns_the_surface_rule() -> None:
@@ -55,16 +77,15 @@ def test_canonical_source_owns_the_surface_rule() -> None:
 
 @pytest.mark.parametrize("name", list(SURFACES))
 def test_every_surface_carries_the_execution_path_rule(name: str) -> None:
-    """All four agent front-ends must teach the execution-path surface dimension.
+    """Every agent front-end must teach the execution-path surface dimension.
     If any one drops or never gained it, cloud and local agents drift — exactly
     the failure this guard exists to prevent."""
-    path = SURFACES[name]
-    text = path.read_text().lower()
+    text = _surface_text(name).lower()
     assert "execution path" in text, (
         f"{name} is missing the execution-path surface rule. Every prompt surface "
         f"must teach it (one operation may run by more than one route; each route is "
-        f"its own surface). Update {path.relative_to(REPO_ROOT)} to match the "
-        f"canonical rule in conventions.md."
+        f"its own surface). Update {SURFACES[name].relative_to(REPO_ROOT)} to match "
+        f"the canonical rule in conventions.md."
     )
 
 
@@ -72,10 +93,10 @@ def test_every_surface_carries_the_execution_path_rule(name: str) -> None:
 def test_local_surfaces_point_at_the_canonical_source(name: str) -> None:
     """Each local surface must name conventions.md as the authoritative source, so
     future edits have one obvious home and reviewers know the satellites mirror it."""
-    text = SURFACES[name].read_text()
+    text = _surface_text(name)
     assert "conventions.md" in text, (
         f"{name} must reference conventions.md as the canonical source of the "
-        f"surface rule, so the four surfaces stay anchored to one source of truth."
+        f"surface rule, so every surface stays anchored to one source of truth."
     )
 
 
