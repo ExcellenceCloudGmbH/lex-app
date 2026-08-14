@@ -25,9 +25,11 @@ Coverage status (5 May 2026)
   (kept inline; populated first as the gate-critical clusters).
 * permissions, signals_ws, exports, serializers, queries, crud_api —
   covered here.
-* Other clusters (init, calculations, history, audit_logging,
-  api_layer, stress) fall back to a generic "engineering: add a
-  description in this file" line in the report.
+* init — the CLI-contract scenarios (sub-cluster 1m) are covered here;
+  the rest of the cluster still falls back.
+* Other clusters (calculations, history, audit_logging, api_layer,
+  stress) fall back to a generic "engineering: add a description in
+  this file" line in the report.
 """
 
 from __future__ import annotations
@@ -533,3 +535,38 @@ SERIALIZERS_TESTS: dict[str, str] = {
         "regression from the wrapping process.",
 }
 
+
+# ── init ─────────────────────────────────────────────────────────────
+# Sub-cluster 1m is the operator-facing CLI contract: the run
+# configurations `lex setup` writes into PyCharm must each invoke a
+# subcommand the `lex` CLI actually resolves, and `lex --help` must
+# advertise those subcommands under the spelling an operator types.
+INIT_TESTS: dict[str, str] = {
+    "test_1_102_scaffold_produces_complete_run_file_set":
+        "Setting up a project writes the full set of one-click run configurations — "
+        "every engineer's tray looks the same on every machine.",
+    "test_1_103_every_run_xml_uses_lex_script":
+        "Every generated run configuration invokes the platform CLI rather than a stray "
+        "script, so the environment is prepared the same way each time.",
+    "test_1_104_every_run_subcommand_resolves":
+        "Every one-click run configuration points at a command that really exists. If broken, "
+        "an operator clicks a button in their IDE and gets 'no such command'.",
+    "test_1_105_explicit_commands_are_all_registered":
+        "The commands the platform's tooling and documentation depend on are all still "
+        "registered. If broken, a rename has silently retired a command people rely on.",
+    "test_1_106_skip_bootstrap_set_matches_explicit_handlers":
+        "The list of commands allowed to start without a full application boot only names "
+        "real commands, so no command quietly takes the slow path.",
+    "test_1_107_lex_root_help_lists_explicit_commands":
+        "Running the CLI's help lists every command an operator is meant to type. If broken, "
+        "a working command is undiscoverable to anyone who didn't already know its name.",
+    "test_1_107b_deprecated_aliases_stay_out_of_root_help":
+        "Older spellings kept alive for existing documentation still run, but stay out of the "
+        "help listing so each command is advertised exactly once.",
+    "test_1_108_each_explicit_subcommand_help_exits_zero":
+        "Every command answers '--help' cleanly. If broken, a command is mis-declared and will "
+        "fail the moment someone runs it.",
+    "test_1_109_every_delegated_command_is_a_real_django_command":
+        "Run configurations that hand off to the underlying application framework name commands "
+        "it actually knows, so operators get real work instead of a confusing error.",
+}
