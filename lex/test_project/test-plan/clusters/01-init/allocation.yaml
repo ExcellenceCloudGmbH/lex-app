@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 229
+max_scenario: 246
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -305,3 +305,23 @@ letters:
       applyPolicies, 1.226 no-op when nothing stale, 1.227 live delete by id, 1.228 no-op when
       nothing live, 1.229 missing-id fail-fast.
 
+  ac:
+    title: Streamlit session survival across an idle period (frozen-handshake fix)
+    scenarios: 1.230-1.246
+    status: complete
+    tests:
+      pass: 17
+      skip: 0
+      xfail: 0
+    note: >-
+      the third and last batch on this auth path (z made expiry graceful, aa let the embedded
+      caller renew, ac stops the session expiring at all). Root cause: Streamlit reads request
+      headers off the *websocket handshake*, so every credential the proxy injects is a snapshot
+      that ages while the socket stays open - and session auth had local refresh deliberately
+      disabled, leaving nothing to renew it. Adds proxy /auth/token (secret-guarded pull, proxy
+      stays sole refresh authority so nothing races the rotation), reorders credential precedence
+      so the renewable session outranks the short-lived st_access cookie on both the HTTP and WS
+      paths, and on the Streamlit side stops the frozen header token overwriting a renewed one,
+      renews ahead of expiry for session auth too, and decouples identity from token freshness -
+      the "Missing user information" screen was reporting an expired token as a missing user, and
+      re-entered itself on every rerun. 14 of 17 fail against the pre-fix tree.
