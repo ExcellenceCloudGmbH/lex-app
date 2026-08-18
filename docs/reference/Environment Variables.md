@@ -19,6 +19,9 @@ Lex App reads its runtime configuration from environment variables — usually l
 | Variable                | Purpose                                                                                  |
 | ----------------------- | ---------------------------------------------------------------------------------------- |
 | `IS_STREAMLIT_ENABLED`  | `true` to enable the Streamlit toolbar icon in the frontend. See [[features/access-and-ui/streamlit dashboards]]. |
+| `LEX_INTERNAL_AUTH_SECRET` | Shared secret the dashboard presents when it asks the auth proxy for a fresh access token. `lex streamlit` mints one automatically, because it runs both halves in a single process; set it explicitly only if you run the proxy and Streamlit as separate processes. |
+| `LEX_PROXY_PORT`        | Port the auth proxy listens on. Default `8501`. |
+| `LEX_PROXY_INTERNAL_URL` | Full base URL the dashboard uses to reach the proxy, when it is not `http://127.0.0.1:$LEX_PROXY_PORT`. |
 
 ## Keycloak / OIDC
 

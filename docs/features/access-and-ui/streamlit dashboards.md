@@ -86,6 +86,14 @@ When a dashboard is embedded in the Lex App frontend, the user's access token is
 
 The token exchange is handled automatically by the `StreamlitIframe` component — no developer configuration needed beyond defining the dashboard methods on your models.
 
+### Staying signed in
+
+Access tokens are short-lived, and a dashboard is often left open far longer than one lasts. The framework renews ahead of every expiry for as long as the page is open, so a dashboard someone comes back to after lunch keeps working — nothing to configure, and nothing for the user to click.
+
+Renewal always goes through the auth proxy, which is the only component that holds the refresh token. Your dashboard code never sees or manages tokens; read the current user from `st.session_state["user_info"]` and their permissions from `st.session_state["permissions"]` as usual.
+
+Sessions do not live forever: Keycloak's SSO maximum lifetime still applies, and a session revoked in Keycloak stops working immediately. When renewal genuinely can't succeed, the embedded dashboard asks the surrounding app to re-authenticate, and a standalone one offers a sign-in link.
+
 ## In the Frontend
 
 Dashboards appear in two places:

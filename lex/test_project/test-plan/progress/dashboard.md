@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 27 | 222 | 116 | 0 | 0 |
+| 1. Init — Project Bootstrap | 28 | 239 | 133 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -32,6 +32,7 @@
 |---|---|---|---|---|---|---|---|
 | 1a | `lex setup` — scaffolding | 1.1-1.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1aa | Embedded Streamlit token renewal (issuer expiry + proxy adoption) | 1.217-1.222 | complete | 6 | 0 | 0 | follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly newer auth_token rather than discarding it while the stored one is still valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted a-z. Renumbered from z/1.201-1.206 on merge |
+| 1ab | Streamlit session survival across an idle period (frozen-handshake fix) | 1.223-1.239 | complete | 17 | 0 | 0 | the third and last batch on this auth path (z made expiry graceful, aa let the embedded caller renew, ab stops the session expiring at all). Root cause: Streamlit reads request headers off the *websocket handshake*, so every credential the proxy injects is a snapshot that ages while the socket stays open - and session auth had local refresh deliberately disabled, leaving nothing to renew it. Adds proxy /auth/token (secret-guarded pull, proxy stays sole refresh authority so nothing races the rotation), reorders credential precedence so the renewable session outranks the short-lived st_access cookie on both the HTTP and WS paths, and on the Streamlit side stops the frozen header token overwriting a renewed one, renews ahead of expiry for session auth too, and decouples identity from token freshness - the "Missing user information" screen was reporting an expired token as a missing user, and re-entered itself on every rerun. 14 of 17 fail against the pre-fix tree. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |

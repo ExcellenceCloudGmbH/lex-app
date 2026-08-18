@@ -227,3 +227,21 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — Streamlit session survival across an idle period ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.239 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`internal_token`, `proxy` + `ws_proxy` credential precedence, `_jwt_user_payload`, `_session_user_payload`), `lex/streamlit_app.py` (`_adopt_header_token`, `_sync_tokens_from_headers`, `_pull_token_from_proxy`, `renew_access_token`, `authenticate_from_proxy_or_jwt`, `sync_keycloak_context_from_access_token`, `_token_refresher`, `start_token_refresh_thread_if_needed`, `_within_renewal_grace`), `lex/bin/lex.py` (`streamlit` — mints the shared secret) |
+| Test file | `lex/test_project/tests/init/test_1ab_streamlit_session_survival.py` |
+| Test classes | `TestCluster01ab_ProxyRenewalChannel` (1.223–1.228, 1.239), `TestCluster01ab_StreamlitTokenLifecycle` (1.229–1.238) |
+| Fixtures | none — Starlette `TestClient` over the real `proxy.app`, a hand-signed SessionMiddleware cookie, capturing stand-ins for the HTTP and WebSocket upstreams, and a dict-backed `st.session_state` |
+| Tests landed | **17 pass / 0 fail**; whole `init` cluster **315 pass / 13 skip, 87 subtests pass** |
+| Coverage gain | the renewal path of a *running* dashboard, which had none: the pull endpoint and its secret guard, credential precedence on both the HTTP and WebSocket paths, and the Streamlit-side token lifecycle including the identity/expiry split |
+| Prereqs | batches 1z (breakout) and 1aa (embedded renewal) — same auth path |
+| Status | ✅ Complete — 14 of 17 scenarios fail against the pre-fix tree (the two pre-existing correct behaviours, 1.228 and 1.230, are kept as guards) |
+| Note | Root cause was a lifetime mismatch nobody had named: `st.context.headers` is the handshake request, frozen for the life of a socket that Streamlit keeps open for hours, while the access token it carries lives minutes. Session auth then had local refresh *deliberately* disabled on the reasoning that the proxy manages it — true of the proxy's own traffic, but the proxy can only deliver a credential at handshake time, so nothing renewed the running script's copy. Three secondary defects compounded it: `auth_callback` sets `st_access` on every login and the cookie was consulted before the session, so a normal login reached Streamlit as `jwt` with `refresh_token: None`; `_sync_tokens_from_headers` adopted the header token on mere inequality, reverting each renewal on the next rerun; and the expiry path called `_invalidate_local_auth`, wiping identity and rendering "Missing user information" about headers that were present — sticky, because the next rerun re-read the same frozen headers. Renewal now pulls from the proxy, so the refresh token still has exactly one writer. |

@@ -3,6 +3,7 @@ import asyncio
 import io
 import os
 import platform
+import secrets
 import subprocess
 import sys
 import threading
@@ -352,15 +353,25 @@ def streamlit(ctx):
         if not os.path.isabs(streamlit_app_path):
             streamlit_args[file_index] = f"{LEX_APP_PACKAGE_ROOT}/{streamlit_app_path}"
 
+    proxy_port = os.environ.setdefault("LEX_PROXY_PORT", "8501")
+
+    # Shared secret for the proxy's /auth/token endpoint, which is how the
+    # dashboard renews the access token it was handed at connect time. Minted
+    # here, before either half starts, so both read the same value out of the
+    # environment they share -- the proxy is imported as top-level ``proxy`` in
+    # the uvicorn thread while Streamlit imports ``lex.streamlit_app``, so they
+    # are separate module objects and cannot share a Python-level constant.
+    os.environ.setdefault("LEX_INTERNAL_AUTH_SECRET", secrets.token_urlsafe(32))
+
     def run_uvicorn():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        uvicorn.run("proxy:app", host="0.0.0.0", port=8501, loop="asyncio")
+        uvicorn.run("proxy:app", host="0.0.0.0", port=int(proxy_port), loop="asyncio")
 
     t = threading.Thread(target=run_uvicorn, daemon=True)
     t.start()
 
-    streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"])
+    streamlit_main(streamlit_args + ["--browser.serverPort", proxy_port, "--server.port", "8080"])
 
 
 @lex.command(name="pytest", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))

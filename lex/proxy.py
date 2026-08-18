@@ -99,6 +99,35 @@ PERSIST_JWT_AUTH_TO_SESSION = _env_bool("PERSIST_JWT_AUTH_TO_SESSION", True)
 SET_ST_ACCESS_COOKIE = _env_bool("SET_ST_ACCESS_COOKIE", True)
 ST_ACCESS_COOKIE_MAX_AGE = int(os.getenv("ST_ACCESS_COOKIE_MAX_AGE", "600"))  # 10 minutes
 
+# -----------------------------------------------------------------------------
+# Internal token-pull channel
+# -----------------------------------------------------------------------------
+# Everything this proxy injects into the upstream request -- access token,
+# refresh token, identity -- reaches Streamlit only through the *WebSocket
+# handshake*, and Streamlit snapshots those headers once per connection
+# (``st.context.headers`` reads the session's client request). The socket then
+# stays open for hours, so a running dashboard has no way to learn about a token
+# this proxy refreshed five minutes ago: it is stuck with the credential it was
+# handed at connect time, and dies when that one expires.
+#
+# ``/auth/token`` is the missing pull direction. The co-located Streamlit process
+# presents the browser's own session cookie and gets back a freshly refreshed
+# access token. Refreshing stays exclusively this proxy's job, so the refresh
+# token is never spent from two places -- the rotation race that made local
+# refresh unusable in the first place.
+#
+# The endpoint is guarded by a shared secret rather than the session cookie
+# alone: the cookie is HttpOnly, but page script could still ``fetch`` it with
+# ``credentials: 'include'`` and read the raw access token out of the response.
+# The secret is process-local by default, which is exactly right when the proxy
+# and Streamlit share a process (see ``lex streamlit``); set
+# ``LEX_INTERNAL_AUTH_SECRET`` when they do not.
+INTERNAL_AUTH_HEADER = "x-lex-internal-auth"
+INTERNAL_AUTH_SECRET = os.getenv("LEX_INTERNAL_AUTH_SECRET") or ""
+if not INTERNAL_AUTH_SECRET:
+    INTERNAL_AUTH_SECRET = secrets.token_urlsafe(32)
+    os.environ["LEX_INTERNAL_AUTH_SECRET"] = INTERNAL_AUTH_SECRET
+
 # The proxy talks to an internal Streamlit upstream (typically localhost), so
 # avoid sending those hops through system proxy settings unless explicitly
 # requested.
@@ -462,6 +491,30 @@ def _claims_from_token_set(tokens: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def _jwt_user_payload(token: str, claims: Dict[str, Any]) -> Dict[str, Any]:
+    """Identity for a bare access token. Carries no refresh token, by design."""
+    return {
+        "sub": claims.get("sub"),
+        "email": claims.get("email"),
+        "preferred_username": claims.get("preferred_username"),
+        "access_token": token,
+    }
+
+
+def _session_user_payload(session: Dict[str, Any], tokens: Dict[str, Any]) -> Dict[str, Any]:
+    """Identity for a server-side session, including its renewable token set."""
+    claims = _claims_from_token_set(tokens)
+    session_email = (session.get("user") or {}).get("email") or ""
+    return {
+        "sub": claims.get("sub") or "",
+        "email": claims.get("email") or session_email or tokens.get("email") or "",
+        "preferred_username": claims.get("preferred_username") or claims.get("name") or "",
+        "access_token": tokens.get("access_token"),
+        "id_token": tokens.get("id_token"),
+        "refresh_token": tokens.get("refresh_token"),
+    }
+
+
 # -----------------------------------------------------------------------------
 # URL helpers
 # -----------------------------------------------------------------------------
@@ -671,6 +724,43 @@ async def logout(request: Request):
     return await oauth2_logout(request)
 
 
+async def internal_token(request: Request):
+    """Hand the co-located Streamlit process a *currently valid* access token.
+
+    Streamlit only ever sees the headers of the WebSocket handshake that opened
+    its session, so a dashboard left open outlives the token it was started
+    with. This is the pull side of that: same session, same refresh authority,
+    but readable at any moment rather than only at connect time.
+
+    ``_ensure_valid_access_token`` does the refreshing, so this endpoint returns
+    a token that is valid *now* even when the stored one had already expired.
+    Deliberately no refresh token in the response -- spending it stays this
+    proxy's job alone, which is what keeps rotation single-writer.
+    """
+    supplied = request.headers.get(INTERNAL_AUTH_HEADER, "")
+    # compare_digest rejects non-ASCII str outright, so compare bytes: a header
+    # carrying a stray non-ASCII byte is a 403, not a 500.
+    if not supplied or not secrets.compare_digest(
+        supplied.encode("utf-8", "ignore"), INTERNAL_AUTH_SECRET.encode("utf-8")
+    ):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    if "user" not in request.session:
+        return JSONResponse({"error": "no_session"}, status_code=401)
+
+    tokens = await _ensure_valid_access_token(request.session)
+    if not tokens or not tokens.get("access_token"):
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+
+    return JSONResponse(
+        {
+            "access_token": tokens.get("access_token"),
+            "expires_at": int(tokens.get("expires_at") or 0),
+            "email": tokens.get("email") or (request.session.get("user") or {}).get("email") or "",
+        }
+    )
+
+
 # -----------------------------------------------------------------------------
 # WebSocket proxy
 # -----------------------------------------------------------------------------
@@ -726,39 +816,28 @@ async def ws_proxy(websocket: WebSocket):
     user_payload: Optional[Dict[str, Any]] = None
     auth_method = "none"
 
-    auth_header = websocket.query_params.get("auth_token", "") or websocket.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        jwt_token = auth_header[7:]
-    elif auth_header:
-        jwt_token = auth_header
-    else:
-        jwt_token = websocket.cookies.get("st_access")
-
-    if jwt_token:
+    # Same precedence as the HTTP path, and for the same reason: the handshake
+    # is the *only* moment a long-lived Streamlit connection is handed a
+    # credential, so it must be handed the renewable one whenever it exists.
+    explicit_token = websocket.query_params.get("auth_token", "") or websocket.headers.get("authorization", "")
+    if explicit_token:
+        jwt_token = explicit_token[7:] if explicit_token.startswith("Bearer ") else explicit_token
         payload = validate_jwt_token(jwt_token)
         if payload:
-            user_payload = {
-                "sub": payload.get("sub"),
-                "email": payload.get("email"),
-                "preferred_username": payload.get("preferred_username"),
-                "access_token": jwt_token,
-            }
+            user_payload = _jwt_user_payload(jwt_token, payload)
             auth_method = "jwt"
 
     if not user_payload and "user" in scope_session:
         tokens = await _ensure_valid_access_token({"user": scope_session.get("user")})
         if tokens:
-            claims = _claims_from_token_set(tokens)
-            session_email = (scope_session.get("user") or {}).get("email") or ""
-            user_payload = {
-                "sub": claims.get("sub") or "",
-                "email": claims.get("email") or session_email or tokens.get("email") or "",
-                "preferred_username": claims.get("preferred_username") or claims.get("name") or "",
-                "access_token": tokens.get("access_token"),
-                "id_token": tokens.get("id_token"),
-                "refresh_token": tokens.get("refresh_token"),
-            }
+            user_payload = _session_user_payload(scope_session, tokens)
             auth_method = "session"
+
+    if not user_payload and websocket.cookies.get("st_access"):
+        payload = validate_jwt_token(websocket.cookies["st_access"])
+        if payload:
+            user_payload = _jwt_user_payload(websocket.cookies["st_access"], payload)
+            auth_method = "jwt"
 
     if not user_payload:
         with suppress(Exception):
@@ -872,55 +951,54 @@ async def proxy(request: Request):
     # Track where token came from (important to decide whether to set cookie)
     token_source = "none"
 
-    auth_header = (
-        request.cookies.get("st_access", "")
-        or request.query_params.get("auth_token", "")
+    # 1) Explicit ``auth_token`` handoff (query param or header).
+    #    Highest precedence: it is the freshest credential the caller can
+    #    present, and re-sourcing the iframe with a new one is how the embedded
+    #    dashboard renews itself.
+    jwt_token = ""
+    jwt_payload: Optional[Dict[str, Any]] = None
+    explicit_token = (
+        request.query_params.get("auth_token", "")
         or request.headers.get("auth_token", "")
         or request.headers.get("authorization", "")
     )
-
-    if request.cookies.get("st_access"):
-        token_source = "cookie"
-    elif request.query_params.get("auth_token"):
-        token_source = "query"
-    elif request.headers.get("auth_token") or request.headers.get("authorization"):
-        token_source = "header"
-
-    # 1) JWT auth
-    jwt_token = ""
-    jwt_payload: Optional[Dict[str, Any]] = None
-    if auth_header:
-        jwt_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
+    if explicit_token:
+        token_source = "query" if request.query_params.get("auth_token") else "header"
+        jwt_token = explicit_token[7:] if explicit_token.startswith("Bearer ") else explicit_token
         jwt_payload = validate_jwt_token(jwt_token)
         if jwt_payload:
-            user_payload = {
-                "sub": jwt_payload.get("sub"),
-                "email": jwt_payload.get("email"),
-                "preferred_username": jwt_payload.get("preferred_username"),
-                "access_token": jwt_token,  # keep so we can forward Authorization if desired
-            }
+            user_payload = _jwt_user_payload(jwt_token, jwt_payload)
             auth_method = "jwt"
 
-            # ✅ FIX: persist this one-off auth_token into a real session/token-store entry
+            # Persist this one-off auth_token into a real session/token-store entry
             await _persist_jwt_to_session_if_needed(request, jwt_token, jwt_payload, token_source)
 
-    # 2) Session auth (cookie from SessionMiddleware -> server-side tokens)
+    # 2) Session auth (cookie from SessionMiddleware -> server-side tokens).
+    #    Checked BEFORE the ``st_access`` cookie, and that ordering is the whole
+    #    point: the session is the only credential that carries a refresh token.
+    #    ``auth_callback`` sets ``st_access`` on every login, so consulting the
+    #    cookie first classified a freshly logged-in user as ``jwt`` with no
+    #    refresh token at all -- an unrenewable credential that expired minutes
+    #    later and took the dashboard down with it.
     if not user_payload and "user" in request.session:
         tokens = await _ensure_valid_access_token(request.session)
         if tokens:
-            claims = _claims_from_token_set(tokens)
-            session_email = (request.session.get("user") or {}).get("email") or ""
-            user_payload = {
-                "sub": claims.get("sub") or "",
-                "email": claims.get("email") or session_email or tokens.get("email") or "",
-                "preferred_username": claims.get("preferred_username") or claims.get("name") or "",
-                "access_token": tokens.get("access_token"),
-                "id_token": tokens.get("id_token"),
-                "refresh_token": tokens.get("refresh_token"),
-            }
+            user_payload = _session_user_payload(request.session, tokens)
             auth_method = "session"
 
-    # 3) Deny
+    # 3) ``st_access`` cookie: last resort, for the embedded path where the
+    #    frontend cannot repeat ``auth_token`` on follow-up requests and no
+    #    server-side session was established.
+    if not user_payload and request.cookies.get("st_access"):
+        token_source = "cookie"
+        jwt_token = request.cookies["st_access"]
+        jwt_payload = validate_jwt_token(jwt_token)
+        if jwt_payload:
+            user_payload = _jwt_user_payload(jwt_token, jwt_payload)
+            auth_method = "jwt"
+            await _persist_jwt_to_session_if_needed(request, jwt_token, jwt_payload, token_source)
+
+    # 4) Deny
     if not user_payload:
         # Never redirect an iframe document load to the IdP: Keycloak's login page
         # sets frame-ancestors 'self' and the browser shows "refused to connect".
@@ -1020,6 +1098,8 @@ routes = [
     Route("/oauth2/logout", oauth2_logout, methods=["GET"]),
     Route("/oauth2/sign_out", oauth2_sign_out, methods=["GET"]),
     Route("/auth/logout", oauth2_logout, methods=["GET"]),
+    # Must precede the catch-all, or it would be proxied to Streamlit instead.
+    Route("/auth/token", internal_token, methods=["GET"]),
     WebSocketRoute("/{path:path}", ws_proxy),
     Route("/{path:path}", proxy, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]),
 ]

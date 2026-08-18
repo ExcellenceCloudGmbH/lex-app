@@ -200,3 +200,33 @@ does not remove user launch configurations.
 **Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
 
 **Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.
+
+---
+
+### 1ab. Streamlit session survival across an idle period ✅
+
+**What it tests:** that a Streamlit dashboard left open and idle keeps working. Streamlit reads request headers off the *WebSocket handshake* (`st.context.headers` resolves the session's client), so every credential the proxy injects is a snapshot taken once, when the socket opened — and the socket then stays open for hours. Renewal therefore has to come from a channel that is still live: the proxy's `/auth/token`, which owns the refresh token and remains the only component allowed to spend it.
+
+**Why a regression matters:** it is what the user sees. Before this batch an idle tab died on the access token's own lifetime and reported "Authentication Error: Missing user information" — a message about identity headers that were in fact present, on a page that could not recover, because the next rerun re-read the same frozen headers and invalidated again.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.223 | `/auth/token` needs the internal secret | a valid session cookie alone gets a 403 — page script can `fetch` with credentials, so the HttpOnly cookie must not be enough to exfiltrate a bearer token |
+| 1.224 | the pull returns a token valid *now* | the response carries the refreshed token and its expiry, not the stale stored copy |
+| 1.225 | the refresh token is never handed out | absent from the response — two components rotating it is the race the pull channel exists to avoid |
+| 1.226 | an unrenewable session is a 401 | the caller must distinguish "renewed" from "sign in again" |
+| 1.227 | session outranks the `st_access` cookie (HTTP) | forwarded as session auth *with* the refresh token; the cookie is set on every login, so consulting it first classified a fresh login as unrenewable `jwt` |
+| 1.228 | an explicit `auth_token` still wins | the embedded renewal handoff keeps its precedence over the session |
+| 1.239 | the WS handshake carries the renewable credential | the one moment a long-lived connection is handed anything must hand it the session's refresh token |
+| 1.229 | a stale handshake token never replaces a renewed one | adopting on inequality reverted every renewal on the next rerun |
+| 1.230 | a genuinely newer handshake token is adopted | a reconnect or a re-sourced iframe is a legitimate renewal path |
+| 1.231 | renewal pulls from the proxy | the refresh token in session state stays untouched while the proxy answers |
+| 1.232 | fallback when no proxy answers | the refresh token is spent only then — no second writer to race |
+| 1.233 | identity survives an unrenewable token | the user stays authenticated and identified, flagged only as needing renewal |
+| 1.234 | permissions are kept when Keycloak fails | a failed UMA lookup must not silently demote the user to no access |
+| 1.235 | the refresher runs for session auth too | "the proxy handles it" meant nobody did — the proxy only delivers at handshake time |
+| 1.236 | the refresher stops with the session | closing a tab sets no session-state flag, so a flag-only refresher outlived every abandoned session |
+| 1.237 | a transient failure stays invisible | a proxy restart must not put a re-auth notice in front of someone reading a chart |
+| 1.238 | a persistent failure surfaces recovery | past the grace window the cause is SSO max lifetime or a revoked session; a successful renewal clears the stamp |
+
+**Scenario range:** 1.223 – 1.239. **Test file:** `lex/test_project/tests/init/test_1ab_streamlit_session_survival.py`. **Type:** U. **Status:** ✅ 17 pass.
