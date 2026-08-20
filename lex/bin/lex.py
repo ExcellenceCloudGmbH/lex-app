@@ -967,8 +967,6 @@ def setup_with_ai(
                 copilot_state_warning = str(exc)
 
     click.echo(f"Updated .env with AI credentials: {artifacts.env_file_path}")
-    if artifacts.docs_directory_path is not None:
-        click.echo(f"Copied lex-app docs: {artifacts.docs_directory_path}")
     if artifacts.payload_files_written:
         click.echo(
             f"Delivered agent payload: "

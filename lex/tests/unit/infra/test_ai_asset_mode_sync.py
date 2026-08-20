@@ -369,7 +369,7 @@ class VerifyAlignsMcpModeTests(unittest.TestCase):
                  mock.patch("lex_mcp.ai_assets.resolve_active_mcp_mode", return_value=("forward", "project-dotenv")), \
                  mock.patch("lex_mcp.ai_assets.resolve_active_python_executable", return_value=Path("python")), \
                  mock.patch("lex_mcp.ai_assets._resolve_package_directory", return_value=None), \
-                 mock.patch("lex_mcp.ai_assets.resolve_lex_app_package_root", return_value=None):
+                 mock.patch("lex_mcp.ai_assets.resolve_handbook_docs_source", return_value=None):
                 result = verify_module.verify_ai_assets(
                     project_root=root,
                     mode=None,
@@ -407,7 +407,7 @@ class VerifyAlignsMcpModeTests(unittest.TestCase):
                  mock.patch("lex_mcp.ai_assets.resolve_active_mcp_mode", return_value=("forward", "project-dotenv")), \
                  mock.patch("lex_mcp.ai_assets.resolve_active_python_executable", return_value=Path("python")), \
                  mock.patch("lex_mcp.ai_assets._resolve_package_directory", return_value=None), \
-                 mock.patch("lex_mcp.ai_assets.resolve_lex_app_package_root", return_value=None), \
+                 mock.patch("lex_mcp.ai_assets.resolve_handbook_docs_source", return_value=None), \
                  mock.patch("lex_mcp.ai_assets._read_override_mode", return_value=None):
                 verify_module.verify_ai_assets(
                     project_root=root,

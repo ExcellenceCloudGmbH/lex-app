@@ -327,8 +327,12 @@ LEGACY_LEX_MCP_SERVER_NAMES = ("lex-mcp-wrapper",)
 # consumer project root on every setup / update.  Extend this tuple when a new
 # version of lex-mcp-local ships additional directories that belong in the project.
 LEX_MCP_LOCAL_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = (".github",)
-# Directories inside the lex-app package that are copied into the project root.
-LEX_APP_EMBEDDED_DIRECTORY_NAMES: tuple[str, ...] = ("docs",)
+# The Lex handbook is deliberately absent here. It used to be copied out of this
+# package's own ``lex/docs/``, which capped it at lex-app's release cadence --
+# and `lex ai-update` upgrades lex-mcp-local, not lex-app. It now ships as
+# package-data of `lex_mcp` and is delivered by `lex_mcp.ai_setup` /
+# `lex_mcp.ai_assets`. Do not re-add a copy here.
+
 LEX_MCP_LOCAL_INSTALL_COMMAND_SUFFIX = (
     "--no-cache-dir",
     "--extra-index-url",
@@ -377,7 +381,6 @@ class SetupWithAIArtifacts:
     python_executable: Path
     server_name: str = LEX_MCP_LOCAL_SERVER_NAME
     github_directory_path: Path | None = None
-    docs_directory_path: Path | None = None
     environments: tuple[str, ...] = ()
     mcp_config_paths: tuple[Path, ...] = ()
     payload_files_written: tuple[str, ...] = ()
@@ -842,53 +845,6 @@ def copy_lex_mcp_local_directories(
         if dest is not None:
             copied.append(dest)
     return tuple(copied)
-
-
-def resolve_lex_app_package_root(python_executable: Path) -> Path | None:
-    fallback_package_root = Path(__file__).resolve().parents[1]
-    script = (
-        "import importlib.util, os, sys; "
-        "spec = importlib.util.find_spec('lex'); "
-        "locations = list(spec.submodule_search_locations or []) if spec else []; "
-        "location = locations[0] if locations else (os.path.dirname(spec.origin) if spec and spec.origin else ''); "
-        "sys.stdout.write(location)"
-    )
-    try:
-        result = subprocess.run(
-            [str(python_executable), "-c", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError:
-        return fallback_package_root if fallback_package_root.is_dir() else None
-
-    package_root = result.stdout.strip()
-    if not package_root:
-        return fallback_package_root if fallback_package_root.is_dir() else None
-    return Path(package_root).resolve()
-
-
-def copy_lex_app_docs_directory(
-    project_root: Path,
-    lex_package_root: Path | None,
-) -> Path | None:
-    if lex_package_root is None:
-        return None
-
-    source_directory = lex_package_root.resolve() / "docs"
-    if not source_directory.is_dir():
-        return None
-
-    project_root_resolved = Path(project_root).resolve()
-    destination = (project_root_resolved / source_directory.name).resolve()
-    if source_directory == destination:
-        # True self-copy (source IS the destination). Anything else — including
-        # an editable install where ``lex/docs`` lives under the project root —
-        # must still refresh ``<project_root>/docs`` from the package source.
-        return None
-
-    return _copy_directory_into_project_root(project_root, source_directory)
 
 
 def resolve_github_copilot_mcp_config_path(
@@ -1810,10 +1766,6 @@ def configure_ai_integration(
         else Path(os.path.abspath(python_executable))
     )
     wrapper_script_path = resolve_wrapper_script_path(python_path)
-    docs_directory_path = copy_lex_app_docs_directory(
-        project_root_path,
-        resolve_lex_app_package_root(python_path),
-    )
     env_values = build_ai_env_values(
         github_token=github_token,
         remote_mcp_api_key=remote_mcp_api_key,
@@ -1934,7 +1886,6 @@ def configure_ai_integration(
         wrapper_script_path=wrapper_script_path,
         python_executable=python_path,
         github_directory_path=github_directory_path,
-        docs_directory_path=docs_directory_path,
         environments=selected_environments,
         mcp_config_paths=tuple(config_paths),
         payload_files_written=tuple(payload_files),
