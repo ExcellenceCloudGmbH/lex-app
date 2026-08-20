@@ -224,11 +224,10 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
     naive LOCAL wall-clock, and ``parse_as_of_datetime`` then read those digits
     as UTC — so in Berlin summer every anchor less than 2 h back still landed
     AFTER the edit. Both sides are now fixed: the client sends an absolute
-    instant, and a naive anchor is interpreted in the CONFIGURED timezone
-    (matching DRF's convention for every other datetime input) rather than
-    assumed to be UTC. These scenarios pin the backend side: an aware anchor
-    time-travels exactly, and a naive anchor denoting the same wall clock lands
-    on the same snapshot instead of overshooting by the zone's offset.
+    instant, and the server REFUSES a naive anchor instead of guessing a zone
+    for it. These scenarios pin the backend side: an aware anchor time-travels
+    exactly, and an ambiguous one is a 400 rather than a plausible wrong
+    snapshot.
     """
 
     e2e_models = ALL_MODELS
@@ -242,9 +241,17 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
         item.save()
         return item, t_before_edit
 
-    def _list_names(self, as_of: str) -> list:
+    def _list_response(self, as_of: str):
+        """GET the list endpoint at ``as_of`` WITHOUT asserting the status.
+
+        ``_list_names`` requires 200; the rejection scenario needs the raw
+        response so it can assert a 400.
+        """
         url = self.url_list(HIST_SIMPLE) + f"?as_of={quote(str(as_of), safe='')}"
-        resp = self.client.get(url)
+        return self.client.get(url)
+
+    def _list_names(self, as_of: str) -> list:
+        resp = self._list_response(as_of)
         self.assertEqual(
             resp.status_code, status.HTTP_200_OK,
             f"list?as_of GET failed: {resp.status_code}",
@@ -272,31 +279,25 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
             "The list endpoint must show the current values at a present anchor.",
         )
 
-    def test_5_103_naive_as_of_follows_the_configured_timezone(self) -> None:
+    def test_5_103_naive_as_of_is_rejected_with_400(self) -> None:
         """
-        Scenario 5.103: a NAIVE as_of value is interpreted in the configured
-        timezone, not assumed to be UTC — so a client sending local wall-clock
-        lands on the instant it meant.
+        Scenario 5.103: a NAIVE as_of value is rejected, not guessed at.
 
-        This is the exact trap behind the customer report: reading the digits as
-        UTC put a Berlin anchor 1-2 h in the future, so "1 minute before my edit"
-        still showed the post-edit state. Clients should send an absolute instant
-        (the frontend now does); this pins the fallback for anything that does
-        not, and matches DRF's convention for every other datetime input.
+        A value with no offset does not denote an instant, and every guess the
+        server makes is a silent wrong answer: assuming UTC put a Berlin client's
+        wall clock 1-2 h in the future, so "1 minute before my edit" still showed
+        the post-edit state (customer report 2026-07-14). Every first-party
+        client now sends an absolute instant, so a naive anchor is a bug and a
+        400 surfaces it immediately.
 
         Given: v1 created, then edited to v2
-        When:  GET list?as_of=<pre-edit local wall clock, no offset>
-        Then:  the same snapshot as the offset-bearing form of that wall clock
-
-        Zone-agnostic on purpose: it asserts the two forms AGREE, which holds in
-        any TIME_ZONE under the new rule and fails under the old one whenever
-        TIME_ZONE is not UTC.
+        When:  GET list?as_of=<pre-edit wall clock, no offset>
+        Then:  400, and the error names the as_of field
+        And:   the same wall clock WITH its offset still returns the pre-edit
+               snapshot, proving only the ambiguous form is refused
         """
         item, t_before_edit = self._create_and_edit()
 
-        # What a client actually sends: its own wall clock, with no zone. Under
-        # USE_TZ=True lex_datetime_now() is aware, so render it in the configured
-        # zone and strip the offset.
         local = (
             dj_tz.localtime(t_before_edit) if dj_tz.is_aware(t_before_edit)
             else t_before_edit
@@ -304,16 +305,22 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
         naive = local.replace(tzinfo=None).isoformat()  # no Z, no offset
         aware = local.isoformat()  # same wall clock, offset attached
 
+        resp = self._list_response(naive)
         self.assertEqual(
-            self._list_names(naive), self._list_names(aware),
-            "A naive as_of must denote the same instant as that wall clock with "
-            "its offset attached. If these differ, the parse layer is guessing a "
-            "zone the caller did not mean and every naive anchor time-travels to "
-            "the wrong instant.",
+            resp.status_code, status.HTTP_400_BAD_REQUEST,
+            "A naive as_of must be refused. Accepting it means guessing a zone "
+            "the caller did not state, and the endpoint then returns a plausible "
+            "snapshot of the wrong version.",
         )
+        self.assertIn(
+            "as_of", str(resp.data),
+            f"the 400 should name the offending parameter, got {resp.data!r}",
+        )
+
         self.assertEqual(
-            self._list_names(naive), ["v1"],
-            "The pre-edit wall clock must reach the pre-edit snapshot.",
+            self._list_names(aware), ["v1"],
+            "The same wall clock with its offset attached must still time-travel "
+            "correctly — only the ambiguous form is refused.",
         )
         # And the same instant expressed with an explicit +02:00 offset (a
         # Berlin client converting correctly) must land identically.
