@@ -7,6 +7,7 @@ from typing import Optional
 from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from rest_framework.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -16,27 +17,27 @@ def parse_as_of_datetime(raw_value: str | None) -> Optional[datetime]:
     Parse an incoming as_of query value and normalize it to UTC.
 
     Rules:
-    - Offset-aware datetimes are converted to UTC. This is the form clients
-      should send: it carries the answer, so the server never has to guess.
-    - Naive datetimes are interpreted in the CONFIGURED timezone
-      (``timezone.get_current_timezone()``), and log a warning.
+    - Offset-aware datetimes are converted to UTC. This is the only accepted
+      form: it carries its own zone, so the server never has to guess.
+    - Naive datetimes are REJECTED with a 400 (``ValidationError``).
     - When USE_TZ is disabled, return a naive UTC datetime for ORM compatibility.
 
-    Why naive input follows the configured zone rather than UTC
-    ----------------------------------------------------------
-    It previously assumed UTC. That made ``as_of`` the only datetime input in the
-    API that did not follow DRF's own convention — ``DateTimeField.enforce_timezone``
-    interprets a naive value in ``timezone.get_current_timezone()`` — and it broke
-    the feature for every client sending local wall-clock: a Berlin anchor was
-    evaluated 1-2h in the future, so stepping back less than that offset never
-    reached the pre-edit state (customer report 2026-07-14).
+    Why a naive anchor is rejected rather than assumed
+    -------------------------------------------------
+    Every guess here is a silent wrong answer. A naive anchor originally assumed
+    UTC, which put a Berlin client's wall clock 1-2h in the future: stepping back
+    less than that offset never reached the pre-edit state, and the endpoint
+    returned a plausible snapshot of the wrong version (customer report
+    2026-07-14). The previous commit made the guess follow the configured
+    timezone and logged it, which was correct for the common case but still a
+    guess — wrong for any caller in another zone.
 
-    Aligning the fallback makes a naive anchor correct for the configured zone,
-    and the warning makes the remaining guess visible instead of silent — a wrong
-    snapshot is worse than an error because it looks plausible.
-
-    The warning is not decoration: it is the signal that a client still needs
-    fixing. Once it stops appearing, the naive branch can be replaced with a 400.
+    Now that every first-party client sends an absolute instant
+    (process-admin-general-client ``toAsOfIsoString``), a naive anchor is a bug
+    rather than a use case, and failing loudly makes it immediately visible
+    instead of quietly time-travelling to the wrong instant. This is only
+    tenable because the callers are first-party; it is a deliberate contract
+    narrowing, not a defensive default.
     """
     if raw_value is None:
         return None
@@ -51,18 +52,25 @@ def parse_as_of_datetime(raw_value: str | None) -> Optional[datetime]:
         return None
 
     if timezone.is_naive(parsed):
-        assumed_zone = timezone.get_current_timezone()
+        # Logged as well as raised: the 400 tells the caller, the log tells us
+        # which client still needs fixing.
         logger.warning(
-            "as_of received a naive datetime (%r); interpreting it in the "
-            "configured timezone (%s). Clients should send an absolute instant "
-            "with an offset or a Z designator so the server does not have to "
-            "guess.",
+            "as_of rejected a naive datetime (%r): no timezone attached, so the "
+            "instant it denotes is ambiguous.",
             raw,
-            assumed_zone,
         )
-        parsed_utc = timezone.make_aware(parsed, assumed_zone).astimezone(dt_timezone.utc)
-    else:
-        parsed_utc = parsed.astimezone(dt_timezone.utc)
+        raise ValidationError(
+            {
+                "as_of": (
+                    "must carry a timezone — send an absolute instant such as "
+                    "2026-07-15T12:30:00Z or 2026-07-15T14:30:00+02:00. A value "
+                    "without an offset is ambiguous and would silently select "
+                    "the wrong snapshot."
+                )
+            }
+        )
+
+    parsed_utc = parsed.astimezone(dt_timezone.utc)
 
     if settings.USE_TZ:
         return parsed_utc
