@@ -1308,7 +1308,12 @@ def ai_dashboard(project_root):
     # refuses the others by name. Narrowing it here would let a Click "not one
     # of" reject a mode the installed server happily isolates.
     type=click.Choice(_MODE_CHOICES, case_sensitive=False),
-    default="",
+    # None, not "": click validates a default against the Choice, and the empty
+    # string is not one of the members -- so `default=""` made every invocation
+    # of the command fail with "'' is not one of ...". `--help` rendered fine,
+    # which is why a test that only checked the help text and the registration
+    # did not catch it.
+    default=None,
     help=(
         "The mode this run is for, if you already know. Leave it out and the new "
         "chat's interview decides -- which is the usual case."
@@ -1345,7 +1350,7 @@ def ai_worktree(project_root, name, mode, base, branch):
     result = ai_worktree_module.launch_ai_worktree(
         project_root=root,
         name=name,
-        mode=mode,
+        mode=mode or "",
         base=base,
         branch=branch,
         reporter=click.echo,

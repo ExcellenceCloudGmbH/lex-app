@@ -255,6 +255,26 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertTrue(cli.lex.commands["ai_issue_report"].hidden)
         self.assertFalse(cli.lex.commands["ai-issue-report"].hidden)
 
+    def test_ai_worktree_can_actually_be_invoked(self) -> None:
+        """--help is not proof that a command runs.
+
+        `--mode` was given `default=""` so it could mean "undecided", but
+        click validates a default against its Choice and the empty string is not
+        a member -- so every invocation died with "'' is not one of ...". The
+        help text rendered perfectly, which is exactly why checking the help and
+        the registration caught nothing. This drives the command far enough to
+        reach its own argument handling.
+        """
+        from click.testing import CliRunner
+
+        from lex.bin import lex as cli
+
+        result = CliRunner().invoke(cli.lex, ["ai-worktree", "-p", "/nonexistent-xyz"])
+        self.assertNotIn("is not one of", result.output)
+        # Reaching the implementation and being told there is no repository there
+        # is the success condition; the option parsing is what is under test.
+        self.assertIn("No worktree was prepared", result.output)
+
     def test_every_ai_command_skips_the_django_bootstrap(self) -> None:
         """Derived from the registered commands, not a list kept by hand.
 
