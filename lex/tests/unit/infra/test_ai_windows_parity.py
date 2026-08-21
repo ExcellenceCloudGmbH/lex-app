@@ -256,9 +256,19 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertFalse(cli.lex.commands["ai-issue-report"].hidden)
 
     def test_every_ai_command_skips_the_django_bootstrap(self) -> None:
+        """Derived from the registered commands, not a list kept by hand.
+
+        An AI command runs before there is a project to bootstrap -- several of
+        them exist to create one -- so one left out of _SKIP_BOOTSTRAP_COMMANDS
+        fails on a directory that is not a Lex app yet. A hand-kept roster here
+        would not have noticed: it named four of the six that existed when it was
+        written.
+        """
         from lex.bin import lex as cli
 
-        for name in ("ai-issue-report", "ai_issue_report", "ai-verify", "ai-dashboard"):
+        ai_commands = [name for name in cli.lex.commands if name.startswith("ai")]
+        self.assertGreater(len(ai_commands), 4, "no AI commands were discovered")
+        for name in ai_commands:
             self.assertTrue(cli._should_skip_django_bootstrap(name), name)
 
 

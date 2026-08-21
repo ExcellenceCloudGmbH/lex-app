@@ -1293,6 +1293,66 @@ def ai_dashboard(project_root):
         raise click.ClickException(str(exc)) from exc
 
 
+@lex.command(name="ai-worktree", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.option("-p", "--project-root", help="Project root (default: execution dir)")
+@click.option(
+    "--name",
+    default="",
+    help="What the run is about; used in the branch name.",
+)
+@click.option(
+    "--mode",
+    "mode",
+    # The full roster, not the subset that writes the working tree: which modes
+    # a worktree is meaningful for is the installed lex-mcp-local's call, and it
+    # refuses the others by name. Narrowing it here would let a Click "not one
+    # of" reject a mode the installed server happily isolates.
+    type=click.Choice(_MODE_CHOICES, case_sensitive=False),
+    default="edit",
+    show_default=True,
+    help="Mode the new chat boots into.",
+)
+@click.option(
+    "--base",
+    default="",
+    help=(
+        "Branch to cut from (default: the base a live run already agreed, "
+        "otherwise the branch this checkout is on)."
+    ),
+)
+@click.option(
+    "--branch",
+    default="",
+    help="Explicit branch name, overriding the derived one.",
+)
+def ai_worktree(project_root, name, mode, base, branch):
+    """Prepare a second checkout so another LEX AI chat can work in parallel.
+
+    Two chats editing one repository fight over one working tree. This makes a
+    git worktree, seeds it with the files git cannot carry (.env and the
+    project-scoped MCP configs), and prints the folder to open a chat in.
+    """
+    # The directory given (or the cwd) IS the project, exactly as ai-dashboard
+    # and ai-verify treat it.
+    root = resolve_llm_working_directory(project_root)
+    ai_worktree_module = _require_lex_mcp("ai_worktree")
+    result = ai_worktree_module.launch_ai_worktree(
+        project_root=root,
+        name=name,
+        mode=mode,
+        base=base,
+        branch=branch,
+        reporter=click.echo,
+    )
+
+    # The implementation already explained itself through the reporter, so this
+    # only has to make the exit code say so -- same shape as ai-update's.
+    if not result.get("ok"):
+        raise click.ClickException(
+            "No worktree was prepared. See the output above."
+        )
+
+
 def _ai_issue_report_options(command):
     """Apply the shared option set to both spellings of the command."""
     for decorate in reversed(
@@ -1472,7 +1532,7 @@ _SKIP_BOOTSTRAP_COMMANDS = frozenset(
     # Both spellings of ai-issue-report are listed for the reader's benefit;
     # _should_skip_django_bootstrap also normalises hyphens and underscores, so
     # either would match on its own.
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai-issue-report", "ai_issue_report"}
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai-issue-report", "ai_issue_report", "ai-worktree"}
 )
 
 
