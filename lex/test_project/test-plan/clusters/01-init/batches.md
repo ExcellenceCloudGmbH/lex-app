@@ -227,3 +227,19 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — Ignored client-role self-cleanup (`client-admin` platform role, LEX-5) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.229 |
+| Type | U |
+| Files covered | `lex/lex_app/management/commands/init.py` (`IGNORED_CLIENT_ROLES`, `strip_ignored_role_policies`, `delete_stale_ignored_role_policies`) |
+| Test file | `lex/test_project/tests/init/test_1ab_ignored_role_policy_cleanup.py` |
+| Test classes | `TestCluster01ab_IgnoredClientRolesSet` (1.223 ignore-set contents: `client-admin` in, `release-manager` gone), `TestCluster01ab_StripIgnoredRolePolicies` (1.224 stale `Policy - client-admin` removed from `auth_config`; 1.225 reference detached from a permission's `applyPolicies`, order preserved; 1.226 no-op when nothing stale), `TestCluster01ab_DeleteStaleIgnoredRolePolicies` (1.227 live delete by id via `get_client_authz_policies`/`delete_client_authz_policy`; 1.228 no-op when nothing live; 1.229 missing-id fail-fast, mirrors `delete_resources_individual`'s permission-id check) |
+| Fixtures | `_make_sync_manager` (stubbed `kc_manager`, same pattern as cluster 1e/1g) |
+| Tests landed | **7 pass / 0 fail** |
+| Coverage gain | the LEX-5 admin-role-separation self-cleanup: `client-admin` replaces the abandoned `release-manager` in `IGNORED_CLIENT_ROLES`; a policy minted by an older lex-app for a now-ignored role is stripped from the in-memory `auth_config` (and detached from any permission's `applyPolicies`) before re-import, then deleted live from Keycloak once nothing references it |
+| Status | ✅ Complete. Design: `local_wiki/projects/admin-role-separation-5/README.md`. The sync only ever ADDS `Policy - <role>` entries via Keycloak's `/authz/resource-server/import` endpoint (verified against the existing `ensure_client_role_policies`/`sync_standard_client_role_permissions` pattern — it never deletes what's absent from a re-imported payload), so the live delete of the stale policy is a separate step, run **after** `import_authorization_settings` succeeds so the detached `applyPolicies` reference has already landed in Keycloak and the policy-delete's referential-integrity check passes. Not independently verified against a live Keycloak instance (no cluster access from this change) — the live-delete ordering assumption is grounded in Keycloak's documented policy/permission referential-integrity behavior, not an in-repo test. |

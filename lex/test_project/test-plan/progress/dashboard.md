@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 27 | 222 | 116 | 0 | 0 |
+| 1. Init — Project Bootstrap | 28 | 229 | 123 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -32,6 +32,7 @@
 |---|---|---|---|---|---|---|---|
 | 1a | `lex setup` — scaffolding | 1.1-1.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1aa | Embedded Streamlit token renewal (issuer expiry + proxy adoption) | 1.217-1.222 | complete | 6 | 0 | 0 | follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly newer auth_token rather than discarding it while the stored one is still valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted a-z. Renumbered from z/1.201-1.206 on merge |
+| 1ab | Ignored client-role self-cleanup (client-admin platform role, LEX-5) | 1.223-1.229 | complete | 7 | 0 | 0 | IGNORED_CLIENT_ROLES swaps the abandoned release-manager for the platform-internal client-admin role (init.py:49); the sync only ever ADDS Policy - <role> entries via Keycloak's import endpoint, so a policy minted by an older lex-app for a role that later became ignored would persist forever without an explicit cleanup. Adds strip_ignored_role_policies (in-memory: drops the ignored-role policy from auth_config and detaches its name from every permission's config.applyPolicies) and delete_stale_ignored_role_policies (live: finds Policy - <ignored role> via get_client_authz_policies and deletes it via delete_client_authz_policy once nothing references it, run after import_authorization_settings succeeds so Keycloak's referential-integrity check on the policy delete passes). 1.223 ignore-set contents, 1.224 stale policy removed from config, 1.225 reference detached from a permission's applyPolicies, 1.226 no-op when nothing stale, 1.227 live delete by id, 1.228 no-op when nothing live, 1.229 missing-id fail-fast. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
