@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 248
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -283,3 +283,17 @@ letters:
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
 
+  ab:
+    title: AI tooling shims + MCP embed URL helpers (setup_with_ai, mcp_mode_invoke, verify_ai_assets, embed.py)
+    scenarios: 1.223-1.248
+    status: complete
+    tests:
+      pass: 26
+      skip: 0
+      xfail: 0
+    note: >-
+      pure-function contract for lex/tools/setup_with_ai.py (DEFAULT_LEX_MCP_MODE, SUPPORTED_MCP_MODES,
+      _installed_mode_roster, normalize_mcp_mode, resolve_submitted_mcp_mode, _resolve_environment_alias),
+      shim re-export contracts for lex/tools/mcp_mode_invoke.py and lex/tools/verify_ai_assets.py,
+      and URL/path helpers in lex/mcp_server/tools/embed.py (_classify_path, _build_title,
+      _resolve_frontend_url, _build_embed_url). All 26 pass with lex_mcp / fastmcp mocked.
