@@ -1308,9 +1308,11 @@ def ai_dashboard(project_root):
     # refuses the others by name. Narrowing it here would let a Click "not one
     # of" reject a mode the installed server happily isolates.
     type=click.Choice(_MODE_CHOICES, case_sensitive=False),
-    default="edit",
-    show_default=True,
-    help="Mode the new chat boots into.",
+    default="",
+    help=(
+        "The mode this run is for, if you already know. Leave it out and the new "
+        "chat's interview decides -- which is the usual case."
+    ),
 )
 @click.option(
     "--base",
@@ -1331,6 +1333,10 @@ def ai_worktree(project_root, name, mode, base, branch):
     Two chats editing one repository fight over one working tree. This makes a
     git worktree, seeds it with the files git cannot carry (.env and the
     project-scoped MCP configs), and prints the folder to open a chat in.
+
+    The chat that opens there starts in brief, which asks what the run is, so
+    --mode is optional and defaults to undecided: naming a mode before that
+    interview would put a guess in the branch name and the folder name.
     """
     # The directory given (or the cwd) IS the project, exactly as ai-dashboard
     # and ai-verify treat it.
