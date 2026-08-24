@@ -227,3 +227,24 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+## Batch 1ac — Widget-host manifest construction and validation
+
+- **Scenarios:** 1.251–1.258
+- **Type:** U (pure; no Streamlit runtime, no DB, no browser)
+- **Files covered:** `lex/lex_app/streamlit/widgets/spec.py`
+- **Test file:** `lex/test_project/tests/init/test_1ac_widget_host_manifest.py`
+- **Test class:** `TestCluster1ac_WidgetHostManifest`
+- **Fixtures:** none
+- **Status:** complete — **8 pass / 0 fail**
+
+Companion to the `lex_widgets()` host (design:
+`docs/superpowers/specs/2026-08-25-streamlit-widget-host-design.md`). The manifest is the
+contract between Python and the embedded React host, and the failure it must not have is the
+silent one — a widget absent from a dashboard because a key was misspelled, with a page that
+renders cleanly and nothing logged. Validation therefore raises at the `page.calculation(...)`
+call site so the traceback points at the author's line.
+
+Frontend twin: PAC batch **12c** (`F12.23–F12.31`) validates the same manifest on the consuming
+side, including the `?manifest=` base64url fallback that lets the route be opened in a browser
+with no Streamlit at all.

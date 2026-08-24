@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 258
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -283,3 +283,20 @@ letters:
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
 
+  ac:
+    title: Widget-host manifest construction and validation
+    scenarios: 1.251-1.258
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Pure spec/manifest layer for lex_widgets() - no Streamlit runtime, so the fiddly cases are
+      testable without a browser. Rejects loudly rather than dropping: an unknown option, an
+      unknown widget type or a duplicate id raises at the page.calculation(...) call site instead
+      of producing a page that renders cleanly with a widget silently absent. Boolean pk is
+      refused explicitly because bool subclasses int and would otherwise address record id 1.
+      Letter ac not ab, and range from 1.251 not 1.223, because open PRs #723 and #726 both claim
+      1ab/1.223-1.239 and closed #692 claimed 1.223-1.250 - taking a clear range avoids a
+      three-way collision on merge.

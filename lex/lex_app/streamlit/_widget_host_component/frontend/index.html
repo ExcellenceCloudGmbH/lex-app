@@ -1,0 +1,152 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>lex widget host bridge</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; }
+    #frame { display: block; width: 100%; border: 0; }
+  </style>
+</head>
+<body>
+  <!--
+    Streamlit Custom Component frontend for lex_widgets().
+
+    Responsibilities:
+      1. Mount ONE iframe pointed at the lex-app widget host route.
+      2. Hand it the manifest once it reports ready.
+      3. Grow the Streamlit frame to whatever height the host reports, so a tall
+         log tree and its modal are not clipped inside a fixed box.
+      4. Forward calculation_status envelopes back to Python.
+
+    One iframe per page, not per widget: a dashboard of thirteen calculations
+    used to mean thirteen React runtimes and four WebSockets each. The manifest
+    exists so all of them share one runtime.
+
+    Dependency-free on purpose — no build step, so it ships as a static asset
+    inside the wheel.
+  -->
+  <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+
+  <script>
+    // ── Streamlit bridge shim (the public postMessage protocol) ──────────
+    const Streamlit = (function () {
+      const RENDER_EVENT = "streamlit:render";
+      function _post(type, payload) {
+        window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, payload || {}), "*");
+      }
+      return {
+        RENDER_EVENT,
+        setComponentReady() { _post("streamlit:componentReady", { apiVersion: 1 }); },
+        setComponentValue(value) { _post("streamlit:setComponentValue", { value, dataType: "json" }); },
+        setFrameHeight(height) { _post("streamlit:setFrameHeight", { height }); },
+        events: {
+          addEventListener(type, cb) {
+            window.addEventListener("message", (ev) => {
+              const d = ev.data || {};
+              if (d.type === type) cb({ detail: d });
+            });
+          },
+        },
+      };
+    })();
+
+    const PROTOCOL_VERSION = 1;
+    const SOURCE_TAG = "lex-app";
+
+    let _expectedOrigin = null;
+    let _manifest = null;
+    let _hostReady = false;
+    let _rendered = false;
+    let _lastEventId = null;
+    let _lastHeight = 0;
+
+    function sendManifest() {
+      if (!_hostReady || !_manifest) return;
+      const frame = document.getElementById("frame");
+      // Target the iframe's own origin, never "*" — the manifest names records
+      // the user may see, and a wildcard would leak it to any document that
+      // happened to be framed here.
+      frame.contentWindow.postMessage(
+        { source: "lex-app-host", version: PROTOCOL_VERSION, type: "manifest", payload: _manifest },
+        _expectedOrigin || "*"
+      );
+    }
+
+    // ── Lifecycle: render ────────────────────────────────────────────────
+    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (ev) => {
+      const args = (ev.detail && ev.detail.args) || {};
+      _expectedOrigin = args.expected_origin || null;
+      _manifest = args.manifest || null;
+
+      const frame = document.getElementById("frame");
+      const url = args.url;
+
+      // Navigate only on first render or a genuine URL change. Streamlit
+      // re-fires RENDER on every rerun, and re-pointing src would reload the
+      // React app — the whole point of one persistent runtime is lost if the
+      // runtime is torn down every rerun.
+      if (!_rendered || frame.dataset.url !== url) {
+        frame.src = url;
+        frame.dataset.url = url;
+        _rendered = true;
+        _hostReady = false;   // the new document has not reported ready yet
+      }
+
+      // A rerun may carry a changed manifest for an already-ready host.
+      sendManifest();
+
+      if (!_lastHeight) {
+        const initial = args.min_height || 200;
+        frame.style.height = initial + "px";
+        Streamlit.setFrameHeight(initial);
+      }
+    });
+
+    // ── Inbound: widget host → Streamlit ─────────────────────────────────
+    window.addEventListener("message", (ev) => {
+      const data = ev.data;
+      if (!data || typeof data !== "object") return;
+      if (data.source !== SOURCE_TAG) return;
+
+      // Origin gate. Null only during local dev where the Python side could
+      // not resolve a real origin; in production it is always set.
+      if (_expectedOrigin && ev.origin !== _expectedOrigin) return;
+
+      if (typeof data.version === "number" && data.version > PROTOCOL_VERSION) {
+        console.warn("[lex_widgets] dropping envelope with unsupported version", data.version);
+        return;
+      }
+
+      if (data.type === "widget_host_ready") {
+        _hostReady = true;
+        sendManifest();
+        return;
+      }
+
+      if (data.type === "resize") {
+        const h = Math.max(0, Number((data.payload || {}).height) || 0);
+        // Ignore sub-pixel churn: ResizeObserver fires generously and every
+        // setFrameHeight costs a Streamlit round trip.
+        if (h && Math.abs(h - _lastHeight) > 2) {
+          _lastHeight = h;
+          document.getElementById("frame").style.height = h + "px";
+          Streamlit.setFrameHeight(h);
+        }
+        return;
+      }
+
+      if (data.type === "calculation_status") {
+        // Re-run dedupe: Streamlit may re-render while the same envelope is
+        // still the current value, and forwarding twice re-triggers the
+        // author's branch.
+        if (data.id && data.id === _lastEventId) return;
+        _lastEventId = data.id || null;
+        Streamlit.setComponentValue(data);
+      }
+    });
+
+    Streamlit.setComponentReady();
+  </script>
+</body>
+</html>
