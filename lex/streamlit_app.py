@@ -11,6 +11,8 @@ import requests
 import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
+from lex.streamlit_theme import embed_theme_from_params, theme_follower_html
+
 logger = logging.getLogger(__name__)
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -589,6 +591,34 @@ if not st.session_state.authenticated:
     st.info("Please access this application through the main portal.")
     st.stop()
 
+def _url_embed_theme() -> str:
+    """The mode this page's own URL asks for, or "" if it asks for nothing.
+
+    Thin adapter over :func:`lex.streamlit_theme.embed_theme_from_params` -- the
+    parsing lives there so it is reachable by tests, which cannot import this
+    module (it runs auth and calls ``st.stop()`` at import time).
+    """
+    raw = st.query_params.get_all("embed_options") if hasattr(st.query_params, "get_all") else []
+    if not raw:
+        single = st.query_params.get("embed_options")
+        raw = single if isinstance(single, list) else ([single] if single else [])
+    return embed_theme_from_params(raw)
+
+
+def render_theme_follower() -> None:
+    """Emit the zero-height block that follows theme changes made in lex-app.
+
+    The relay in ``lex/proxy.py`` writes the agreed mode into THIS origin's
+    localStorage, raising a ``storage`` event in every Streamlit tab -- embedded
+    or standalone. The script that reacts to it lives in
+    :func:`lex.streamlit_theme.theme_follower_html`, which documents why the
+    reaction is a reload and what stops it firing needlessly.
+    """
+    import streamlit.components.v1 as components
+
+    components.html(theme_follower_html(_url_embed_theme()), height=0)
+
+
 # Form-safe logout control (won't break no matter what streamlit_structure.main() does).
 #
 # Only DECIDED here; rendered after the app structure, in the `finally` at the
@@ -683,3 +713,8 @@ if __name__ == "__main__":
         # protecting by rendering first.
         if LOGOUT_ENABLED:
             render_logout_link()
+
+        # Zero-height and inert; also in `finally` so theme following survives a
+        # failure in main(). A page stuck on the wrong theme after an error is a
+        # small thing, but it is free to avoid.
+        render_theme_follower()

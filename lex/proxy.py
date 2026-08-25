@@ -1014,9 +1014,10 @@ async def proxy(request: Request):
 # -----------------------------------------------------------------------------
 # Theme relay
 # -----------------------------------------------------------------------------
-#: Storage key both origins agree on. Changing it breaks the handshake, so it is
-#: named once here and mirrored in the frontend's themeRelay.ts.
-THEME_STORAGE_KEY = "lex.theme.mode"
+#: Storage key both origins agree on. Defined in lex/streamlit_theme.py so the
+#: relay and the Streamlit-side follower cannot drift apart; that module is pure
+#: stdlib, so importing it here costs nothing.
+from lex.streamlit_theme import THEME_STORAGE_KEY  # noqa: E402
 
 #: Origins allowed to drive this relay. The lex-app frontend, wherever it lives.
 _THEME_RELAY_ALLOWED = [
