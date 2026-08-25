@@ -59,6 +59,9 @@
     const SOURCE_TAG = "lex-app";
 
     let _expectedOrigin = null;
+    // Supplied by Python so the key has ONE definition (lex/streamlit_theme.py);
+    // a drifted copy here would fail silently -- the write simply wakes nobody.
+    let _themeStorageKey = null;
     let _manifest = null;
     let _hostReady = false;
     let _rendered = false;
@@ -81,6 +84,7 @@
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (ev) => {
       const args = (ev.detail && ev.detail.args) || {};
       _expectedOrigin = args.expected_origin || null;
+      _themeStorageKey = args.theme_storage_key || null;
       _manifest = args.manifest || null;
 
       const frame = document.getElementById("frame");
@@ -144,6 +148,33 @@
         // A click, so never deduped by value -- the envelope id already carries
         // a timestamp so asking twice re-opens.
         Streamlit.setComponentValue(data);
+        return;
+      }
+
+      if (data.type === "theme") {
+        // The widget reports the palette it is wearing. This document is served
+        // BY the Streamlit server, so it shares the Streamlit page's origin and
+        // storage -- writing the key here raises a `storage` event in the page,
+        // where the theme follower is already listening.
+        //
+        // Deliberately not routed through setComponentValue: that would cost a
+        // Python rerun to accomplish something no Python code needs to see, and
+        // the author's `on_status` branch would have to learn to ignore it.
+        //
+        // This is the path that works when lex-app and Streamlit are different
+        // SITES. The relay iframe cannot help there -- browsers give a
+        // cross-site frame partitioned storage, so its write lands somewhere the
+        // standalone page never reads.
+        const mode = (data.payload || {}).mode;
+        if (mode !== "light" && mode !== "dark") return;
+        if (!_themeStorageKey) return;
+        try {
+          if (window.localStorage.getItem(_themeStorageKey) !== mode) {
+            window.localStorage.setItem(_themeStorageKey, mode);
+          }
+        } catch (e) {
+          /* storage disabled: lose theme sync, not the widget */
+        }
         return;
       }
 

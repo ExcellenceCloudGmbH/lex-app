@@ -47,6 +47,7 @@ def render_widget_host(
     manifest: Dict[str, Any],
     expected_origin: Optional[str],
     min_height: int = 200,
+    theme_storage_key: Optional[str] = None,
     key: Optional[str] = None,
 ) -> Any:
     """Render the host iframe and return the latest event value, if any.
@@ -54,6 +55,12 @@ def render_widget_host(
     Returns ``None`` until a widget emits an opted-in envelope; thereafter the
     most recent one. The shim dedupes by envelope id, so a rerun does not
     re-deliver an event the page has already seen.
+
+    ``theme_storage_key`` travels as an arg rather than being baked into the
+    static shim so the key keeps a single definition in ``lex/streamlit_theme.py``.
+    A theme envelope is handled entirely inside the shim -- it writes the key on
+    this origin, where the page's theme follower is listening -- so it never
+    reaches Python and never costs a rerun.
     """
     component = _ensure_declared()
     return component(
@@ -61,6 +68,7 @@ def render_widget_host(
         manifest=manifest,
         expected_origin=expected_origin,
         min_height=min_height,
+        theme_storage_key=theme_storage_key,
         key=key,
         default=None,
     )

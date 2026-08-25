@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.268.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.269.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -125,6 +125,56 @@ class TestCluster1ad_StreamlitThemeFollower:
         # `top` is also a bare global alias for `window.top`, so a future edit
         # writing `top.location` would reintroduce the same fault.
         assert "top." not in html.replace("window.top", "")
+
+
+class TestCluster1ad_ThemeEnvelopeWiring:
+    """The in-frame path: a widget tells the host page its palette directly.
+
+    The relay covers a Streamlit window lex-app holds no handle to. This covers
+    the opposite and commoner case -- widgets embedded IN a Streamlit page, where
+    a postMessage up the frame boundary needs no storage at all. That matters
+    because a cross-site relay frame gets partitioned storage in current
+    browsers, so on separate domains the relay writes somewhere the standalone
+    page never reads, while this path is unaffected.
+    """
+
+    def test_01_269_storage_key_reaches_the_shim(self):
+        """Scenario 1.269: the key is threaded from Python to the static shim.
+
+        The shim writes the storage key that wakes the follower, and it cannot
+        define the key itself without becoming a second copy. So Python passes
+        it. Every link is silent if broken -- a dropped kwarg leaves the shim with
+        no key, and its handler returns without writing, which looks exactly like
+        a theme that never changed.
+        """
+        import ast
+        import inspect
+
+        from lex.lex_app.streamlit._widget_host_component import render_widget_host
+
+        # Link 1: the component accepts it and forwards it.
+        assert "theme_storage_key" in inspect.signature(render_widget_host).parameters
+        forwarded = ast.parse(inspect.getsource(render_widget_host))
+        call = next(
+            n
+            for n in ast.walk(forwarded)
+            if isinstance(n, ast.Call) and any(k.arg == "url" for k in n.keywords)
+        )
+        assert "theme_storage_key" in {k.arg for k in call.keywords}
+
+        # Link 2: every host render supplies it. Both call sites — the page and
+        # the log dialog — or the dialog would open unthemed.
+        host = (pathlib.Path(__file__).resolve().parents[3] / "lex_app/streamlit/widgets/host.py").read_text()
+        assert host.count("theme_storage_key=THEME_STORAGE_KEY") == 2
+        assert "from lex.streamlit_theme import THEME_STORAGE_KEY" in host
+
+        # Link 3: the shim reads it from args rather than hardcoding a copy.
+        shim = (
+            pathlib.Path(__file__).resolve().parents[3]
+            / "lex_app/streamlit/_widget_host_component/frontend/index.html"
+        ).read_text()
+        assert "args.theme_storage_key" in shim
+        assert f'"{THEME_STORAGE_KEY}"' not in shim, "shim hardcodes a second copy of the key"
 
 
 class TestCluster1ad_ThemeFollowerEncoding:

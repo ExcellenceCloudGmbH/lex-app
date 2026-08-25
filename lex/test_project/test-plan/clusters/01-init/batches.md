@@ -278,3 +278,38 @@ What the scenarios protect:
 **Known gap:** the script's own logic (measure background → compare → reload once)
 is covered by a hand-run DOM-double harness, not by CI, because this repository has
 no JS runtime. Seven cases pass. Worth relocating to the frontend repo's vitest.
+
+### Batch 1ad addendum — the in-frame path (scenario 1.269)
+
+The relay alone did not fix a real deployment: a light Streamlit page went on
+hosting dark widgets. Cause: `localStorage` in a **cross-site** iframe is
+partitioned by top-level site in current browsers, so the relay framed by lex-app
+writes to a partition the standalone Streamlit page never reads. The relay is
+still correct for same-site deployments; it is not sufficient.
+
+The widgets are *children* of the Streamlit page, so that boundary needs no
+storage at all:
+
+```
+widget frame (lex-app origin)  --postMessage 'theme'-->  shim (Streamlit origin)
+                                                            |
+                                              writes lex.theme.mode HERE
+                                                            v
+                                        follower in the page reloads with
+                                            corrected embed_options
+```
+
+The shim is served by the Streamlit server, so it is same-origin with the page —
+which is exactly why its write reaches the follower when the relay's does not.
+Handled entirely in the shim: no `setComponentValue`, so no Python rerun, and the
+author's `on_status` branch never sees a theme envelope.
+
+Scenario 1.269 pins the three links, each silent when broken:
+
+| Link | Failure if dropped |
+|---|---|
+| `render_widget_host` accepts and forwards `theme_storage_key` | shim has no key, returns without writing |
+| both host call sites supply it (page **and** log dialog) | the dialog opens unthemed |
+| the shim reads it from args | a second hardcoded copy, free to drift |
+
+Frontend twin: F12.44–F12.45 (the emit side).

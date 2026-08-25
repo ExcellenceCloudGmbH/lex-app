@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.268
+    scenarios: 1.261-1.269
     status: complete
     tests:
-      pass: 11
+      pass: 12
       skip: 0
       xfail: 0
     note: >-
@@ -322,3 +322,11 @@ letters:
       GAP: the emitted script's runtime behaviour is verified only by a DOM-double harness run
       by hand (7 cases, all passing) - this repo has no JS runner, so it is not in CI. Moving it
       to the frontend repo's vitest would close that.
+      1.269 covers the SECOND delivery path, added after the relay was found not to reach a real
+      deployment: widgets embedded IN a Streamlit page postMessage their palette to the host, and
+      the shim - served by the Streamlit server, so same-origin with the page - turns that into
+      the storage write the follower waits for. This is the path that survives cross-SITE
+      deployments, where browsers give the relay iframe partitioned storage and its write lands
+      somewhere the page never reads. The test pins the three links that are each silent when
+      broken: the component accepts and forwards the key, both host call sites supply it, and the
+      static shim reads it from args rather than keeping a second copy.

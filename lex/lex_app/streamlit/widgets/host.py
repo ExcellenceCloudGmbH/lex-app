@@ -46,6 +46,7 @@ import urllib.parse
 from typing import Any, Dict, List, Optional
 
 from lex.lex_app.streamlit._widget_host_component import render_widget_host
+from lex.streamlit_theme import THEME_STORAGE_KEY
 from lex.lex_app.streamlit.embed import _resolve_base_url
 from lex.lex_app.streamlit.widgets.spec import (
     PK,
@@ -266,6 +267,7 @@ class _LexWidgets:
             manifest=self._page._manifest(),
             expected_origin=expected_origin,
             min_height=self._min_height,
+            theme_storage_key=THEME_STORAGE_KEY,
             key=self._component_key,
         )
 
@@ -322,6 +324,7 @@ class _LexWidgets:
                 manifest=build_manifest([spec]),
                 expected_origin=expected_origin,
                 min_height=_DIALOG_LOG_HEIGHT,
+                theme_storage_key=THEME_STORAGE_KEY,
                 key=f"{self._component_key}_log_dialog",
             )
 
