@@ -115,7 +115,12 @@ class _LexWidgets:
             return False
 
         base = _resolve_base_url()
-        url = f"{base}{HOST_PATH}"
+        # embed=true is what actually strips the app chrome (sidebar, appbar,
+        # breadcrumb) -- see useEmbedContext.detectEmbed. Without it the widget
+        # host renders inside the full CustomLayout, which is both wrong to look
+        # at and 100vh-based, so it feeds the host's content-height resize into a
+        # runaway growth loop.
+        url = f"{base}{HOST_PATH}?embed=true"
         parsed = urllib.parse.urlparse(base)
         expected_origin = (
             f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
