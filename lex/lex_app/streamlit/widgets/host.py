@@ -96,11 +96,13 @@ class _LexWidgets:
     def __enter__(self) -> WidgetPage:
         import streamlit as st
 
-        # Read the previous run's event before the body executes, so a
-        # ``page.calculation(...)`` call can return it on this run.
-        state_key = f"_lex_widgets_result_{self._key or 'default'}"
-        self._page._result = st.session_state.get(state_key)
-        self._state_key = state_key
+        # Streamlit stores a keyed component's current value in session_state
+        # under that key, so read it directly rather than stashing a copy of our
+        # own. An earlier version kept a private key and wrote it in __exit__,
+        # which meant the value was always one rerun behind what the component
+        # already knew -- so the first Calculate never surfaced in Python.
+        self._component_key = self._key or "lex_widget_host"
+        self._page._result = st.session_state.get(self._component_key)
         return self._page
 
     def __exit__(self, exc_type, exc, tb) -> bool:
@@ -126,15 +128,15 @@ class _LexWidgets:
             f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
         )
 
-        value = render_widget_host(
+        # Streamlit keeps the returned value in session_state[key] for us; the
+        # next run's __enter__ reads it there. Nothing to stash.
+        render_widget_host(
             url=url,
             manifest=self._page._manifest(),
             expected_origin=expected_origin,
             min_height=self._min_height,
-            key=self._key or "lex_widget_host",
+            key=self._component_key,
         )
-        if value is not None:
-            st.session_state[self._state_key] = value
         return False
 
 
