@@ -197,7 +197,7 @@ class WidgetPage:
 class _LexWidgets:
     """Context manager returned by :func:`lex_widgets`."""
 
-    def __init__(self, *, key: Optional[str], min_height: int) -> None:
+    def __init__(self, *, key: Optional[str], min_height: int) -> None:  # noqa: D107
         self._key = key
         self._min_height = min_height
         self._page = WidgetPage()
@@ -306,11 +306,28 @@ class _LexWidgets:
         _log_dialog()
 
 
-def lex_widgets(*, key: Optional[str] = None, min_height: int = 200) -> _LexWidgets:
+def lex_widgets(*, key: Optional[str] = None, min_height: int = 48) -> _LexWidgets:
     """Open a widget page. See the module docstring for the contract.
 
-    ``key`` distinguishes two hosts on one page; ``min_height`` is the frame
-    height before the host reports its real content height.
+    ``key`` distinguishes two hosts on one page.
+
+    ``min_height`` is only the height used *before* the host reports its real
+    content height -- it is a floor, not a size. It defaults low (one control
+    row) because the old 200px default made a lone button sit in a tall empty
+    band until the first resize landed. Raise it only if you know a block is
+    tall and want to avoid the initial reflow.
+
+    **Width is Streamlit's, not ours.** A custom component occupies a full-width
+    block, so a bare control still spans the page. Constrain it the way you
+    would any Streamlit element -- put it in a column::
+
+        narrow, rest = st.columns([1, 6])
+        with narrow:
+            with lex_widgets(key="run") as page:
+                page.calculation("navcalc", pk=1, variant="action",
+                                 show_log_button=False)
+        with rest:
+            st.write("... your own content, beside the button ...")
     """
     return _LexWidgets(key=key, min_height=min_height)
 
