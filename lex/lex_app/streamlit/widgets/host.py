@@ -105,10 +105,9 @@ class WidgetPage:
         *,
         height: Optional[int] = None,
         calculation_id: Optional[str] = None,
-        stream: bool = False,
         id: Optional[str] = None,
     ) -> None:
-        """Add the calculation log on its own, sized by you.
+        """Add the live calculation log on its own, sized by you.
 
         Prefer this over ``calculation(..., show_log=True)`` when the log is
         the point. A two-pane tree wants width and height; a Calculate control
@@ -127,7 +126,34 @@ class WidgetPage:
                 pk,
                 height=height,
                 calculation_id=calculation_id,
-                stream=stream,
+            )
+        )
+        return None
+
+    def calculation_log_tree(
+        self,
+        model: str,
+        pk: PK,
+        *,
+        height: Optional[int] = None,
+        calculation_id: Optional[str] = None,
+        id: Optional[str] = None,
+    ) -> None:
+        """Add the log's execution TREE rather than its live stream.
+
+        A different question: the stream shows what is happening now, the tree
+        shows how a finished run was structured. Prefer ``calculation_log`` for
+        watching; reach for this when navigating a completed run.
+        """
+        self._auto_id += 1
+        self._specs.append(
+            calculation_log_spec(
+                id or f"w{self._auto_id}",
+                model,
+                pk,
+                height=height,
+                calculation_id=calculation_id,
+                tree=True,
             )
         )
         return None
@@ -239,9 +265,7 @@ class _LexWidgets:
                 pk,
                 height=_DIALOG_LOG_HEIGHT,
                 calculation_id=calculation_id or None,
-                # The popup streams. Someone who just pressed Calculate wants to
-                # watch output arrive, not navigate a structure.
-                stream=True,
+                # The popup streams -- the default for calculation_log now.
             )
             render_widget_host(
                 url=url,
