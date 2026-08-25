@@ -60,6 +60,16 @@ pytestmark = pytest.mark.init
 # Explicit ``@lex.command(...)`` names the framework depends on. Pinned
 # here so a rename that leaves a ``.run.xml`` (or the docs) behind fails
 # in CI rather than in the operator's PyCharm.
+#
+# The ``ai-*`` commands are no longer among them, bar one. Their options ship
+# with lex-mcp-local so that adding a command does not need a lex-app release,
+# and ``lex`` resolves them against the installed package rather than
+# registering them here — see ``_LexGroup`` in ``lex/bin/lex.py``. They are
+# covered below, derived from that package rather than pinned here, because a
+# roster restated in this file is exactly what the move was getting rid of.
+#
+# ``ai-update`` stays: it is a bootstrap that must run before lex-mcp-local
+# exists, and it is the recovery path when the installed one is too old.
 EXPLICIT_COMMANDS = frozenset({
     "celery",
     "celery-workers",
@@ -69,17 +79,31 @@ EXPLICIT_COMMANDS = frozenset({
     "setup",
     "setup-with-ai",
     "ai-update",
-    "ai-faq",
-    "ai-issue-report",
-    "ai_issue_report",
 })
 
-# Deprecated spellings kept registered — and runnable — for people
-# following older docs and support macros, but registered with
-# ``hidden=True`` so ``lex --help`` advertises one spelling per command.
+# Deprecated spellings kept runnable for people following older docs and
+# support macros, but kept out of ``lex --help`` so it advertises one spelling
+# per command. They used to be a second ``hidden=True`` click command each,
+# duplicating the whole option block; the group now normalises the separator,
+# so these resolve rather than being registered.
 HIDDEN_ALIASES = frozenset({
     "ai_issue_report",
+    "ai_verify",
 })
+
+
+def _delegated_commands():
+    """The ``ai-*`` names the installed lex-mcp-local provides, or ``None``.
+
+    Derived, never restated. lex-app deliberately does not know this list --
+    that is the whole point of delegating -- so the test reads it from the same
+    registry the CLI does.
+    """
+    try:
+        from lex_mcp.cli import command_names
+    except ImportError:
+        return None
+    return frozenset(command_names())
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -325,26 +349,62 @@ class TestCluster01m_HelpInvocability(TestCase):
             )
 
     def test_1_107b_deprecated_aliases_stay_out_of_root_help(self):
-        """1.107b: hidden aliases are registered but not advertised.
+        """1.107b: hidden aliases still run but are not advertised.
 
-        Dropping ``hidden=True`` would list the same command twice under
-        two spellings, which is exactly the ambiguity the canonical
-        hyphenated names exist to remove.
+        Listing the same command twice under two spellings is exactly the
+        ambiguity the canonical hyphenated names exist to remove. Resolution,
+        not registration: the group normalises the separator now, where each
+        alias used to be a second ``hidden=True`` command duplicating the whole
+        option block.
         """
+        import click
+
         runner = CliRunner()
         result = runner.invoke(lex, ["--help"])
+        ctx = click.Context(lex)
         for name in HIDDEN_ALIASES:
             with self.subTest(command=name):
-                self.assertIn(
-                    name, lex.commands,
-                    f"deprecated alias {name!r} is no longer registered — "
-                    f"drop it from HIDDEN_ALIASES/EXPLICIT_COMMANDS if the "
-                    f"spelling was retired on purpose.",
+                self.assertIsNotNone(
+                    lex.get_command(ctx, name),
+                    f"deprecated alias {name!r} no longer resolves — "
+                    f"drop it from HIDDEN_ALIASES if the spelling was retired "
+                    f"on purpose.",
                 )
                 self.assertNotIn(
                     name, result.output,
-                    f"`lex --help` lists the deprecated spelling {name!r}; "
-                    f"register it with hidden=True.",
+                    f"`lex --help` lists the deprecated spelling {name!r}.",
+                )
+
+    def test_1_107c_delegated_commands_are_listed_and_runnable(self):
+        """1.107c: what lex-mcp-local provides shows up in `lex --help`.
+
+        The other half of the delegation. lex-app registers none of these, so
+        nothing in its own source would fail if the group stopped resolving
+        them -- `lex ai-verify` would simply become "No such command" at a
+        customer, with `lex --help` quietly one section shorter.
+        """
+        import click
+
+        delegated = _delegated_commands()
+        if delegated is None:
+            self.skipTest("needs lex-mcp-local installed or on the path")
+
+        self.assertTrue(delegated, "lex-mcp-local registered no commands")
+        runner = CliRunner()
+        result = runner.invoke(lex, ["--help"])
+        ctx = click.Context(lex)
+        for name in delegated:
+            with self.subTest(command=name):
+                self.assertNotIn(
+                    name, lex.commands,
+                    f"{name!r} is registered in lex-app after all; it is "
+                    f"supposed to come from lex-mcp-local.",
+                )
+                self.assertIsNotNone(lex.get_command(ctx, name))
+                self.assertIn(name, result.output)
+                self.assertEqual(
+                    runner.invoke(lex, [name, "--help"]).exit_code, 0,
+                    f"`lex {name} --help` did not exit 0.",
                 )
 
     def test_1_108_each_explicit_subcommand_help_exits_zero(self):

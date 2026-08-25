@@ -241,19 +241,66 @@ class ShortPathTests(unittest.TestCase):
 
 
 class CommandSurfaceTests(unittest.TestCase):
-    """Both spellings of ai-issue-report reach the same implementation."""
+    """Both spellings of ai-issue-report reach the same implementation.
 
-    def test_hyphenated_and_underscored_names_are_both_registered(self) -> None:
+    The commands themselves are lex-mcp-local's now, so `lex.commands` -- the
+    dict of what this file registers -- no longer holds them. What matters is
+    what the group *resolves*, which is what a user actually types.
+    """
+
+    @staticmethod
+    def _resolve(name):
+        import click
+
         from lex.bin import lex as cli
 
-        self.assertIn("ai-issue-report", cli.lex.commands)
-        self.assertIn("ai_issue_report", cli.lex.commands)
+        ctx = click.Context(cli.lex)
+        return cli.lex.get_command(ctx, name)
+
+    @staticmethod
+    def _listed():
+        import click
+
+        from lex.bin import lex as cli
+
+        return cli.lex.list_commands(click.Context(cli.lex))
+
+    def test_hyphenated_and_underscored_names_are_both_resolved(self) -> None:
+        self.assertIsNotNone(self._resolve("ai-issue-report"))
+        self.assertIsNotNone(self._resolve("ai_issue_report"))
+        self.assertIsNotNone(self._resolve("ai-verify"))
+        self.assertIsNotNone(self._resolve("ai_verify"))
 
     def test_only_the_canonical_spelling_is_listed(self) -> None:
+        """`lex --help` advertises one spelling per command.
+
+        The underscore used to need a second `hidden=True` click command here,
+        duplicating the whole option block. Normalising the separator in the
+        group covers every command at once, including ones this file has never
+        heard of.
+        """
+        listed = self._listed()
+        self.assertIn("ai-issue-report", listed)
+        self.assertNotIn("ai_issue_report", listed)
+        self.assertIn("ai-verify", listed)
+        self.assertNotIn("ai_verify", listed)
+
+    def test_a_command_this_file_does_not_define_is_still_reachable(self) -> None:
+        """The point of the whole arrangement.
+
+        lex-app must not need a release for lex-mcp-local to add a command, so
+        an `ai-*` name that appears in no `@lex.command` block here has to
+        resolve anyway -- against the installed package, which owns the flags.
+        """
         from lex.bin import lex as cli
 
-        self.assertTrue(cli.lex.commands["ai_issue_report"].hidden)
-        self.assertFalse(cli.lex.commands["ai-issue-report"].hidden)
+        self.assertNotIn("ai-worktree", cli.lex.commands)
+        self.assertIsNotNone(self._resolve("ai-worktree"))
+
+    def test_a_name_that_is_not_an_ai_command_still_does_not_resolve(self) -> None:
+        """The prefix is the gate; it must not swallow everything."""
+        self.assertIsNone(self._resolve("aircraft"))
+        self.assertIsNone(self._resolve("nonsense"))
 
     def test_ai_worktree_can_actually_be_invoked(self) -> None:
         """--help is not proof that a command runs.
@@ -276,20 +323,49 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertIn("No worktree was prepared", result.output)
 
     def test_every_ai_command_skips_the_django_bootstrap(self) -> None:
-        """Derived from the registered commands, not a list kept by hand.
+        """Derived from what the group resolves, not a list kept by hand.
 
         An AI command runs before there is a project to bootstrap -- several of
-        them exist to create one -- so one left out of _SKIP_BOOTSTRAP_COMMANDS
-        fails on a directory that is not a Lex app yet. A hand-kept roster here
-        would not have noticed: it named four of the six that existed when it was
-        written.
+        them exist to create one -- so one that reaches django.setup() fails on
+        a directory that is not a Lex app yet. A hand-kept roster here would not
+        have noticed: it named four of the six that existed when it was written.
         """
         from lex.bin import lex as cli
 
-        ai_commands = [name for name in cli.lex.commands if name.startswith("ai")]
+        ai_commands = [name for name in self._listed() if name.startswith("ai")]
         self.assertGreater(len(ai_commands), 4, "no AI commands were discovered")
         for name in ai_commands:
             self.assertTrue(cli._should_skip_django_bootstrap(name), name)
+
+    def test_a_command_this_file_has_never_heard_of_skips_it_too(self) -> None:
+        """The load-bearing half of the delegation.
+
+        `main()` reads sys.argv[1] *before* click runs, so this gate cannot ask
+        the group whether a name resolves. Without the prefix rule, a command
+        lex-mcp-local adds later would fall through to django.setup() and die in
+        a directory that is not a Lex app -- which is the situation most AI
+        commands exist to fix, so it would fail exactly when it is needed.
+        """
+        from lex.bin import lex as cli
+
+        for name in ("ai-brandnew", "ai_brandnew", "ai-not-invented-yet"):
+            self.assertTrue(cli._should_skip_django_bootstrap(name), name)
+
+        # And it is still a gate, not a pass-through.
+        for name in ("migrate", "makemigrations", "aircraft"):
+            self.assertFalse(cli._should_skip_django_bootstrap(name), name)
+
+    def test_ai_update_is_named_rather_than_left_to_the_prefix(self) -> None:
+        """It is lex-app's own command and the recovery path for every other.
+
+        When the installed lex-mcp-local is too old to have the registry,
+        `lex ai-update` is what fixes it -- so it must keep working whatever
+        happens to the prefix rule, and be listed even when nothing else is.
+        """
+        from lex.bin import lex as cli
+
+        self.assertIn("ai-update", cli._SKIP_BOOTSTRAP_COMMANDS)
+        self.assertIn("ai-update", cli.lex.commands)
 
 
 class SetupFormTests(unittest.TestCase):

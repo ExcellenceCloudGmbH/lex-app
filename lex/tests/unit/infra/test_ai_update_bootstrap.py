@@ -331,17 +331,14 @@ class InterpreterAndRootResolutionTests(unittest.TestCase):
         from lex.bin import lex as cli
 
         source = Path(cli.__file__).read_text(encoding="utf-8")
-        # ``ai-issue-report`` exists under two spellings that share one
-        # implementation, so the resolution happens in the helper both of them
-        # call. The invariant is about the code that runs, not about which
-        # function literally spells the call -- follow the delegation rather
-        # than requiring every command body to inline it.
-        commands = (
-            "def ai_update(",
-            "def ai_dashboard(",
-            "def _run_ai_issue_report(",
-        )
-        for command in commands:
+        # Only the two commands lex-app still owns. The rest moved to
+        # lex-mcp-local along with their options, and the same invariant is
+        # asserted there against the modules that now hold them -- see
+        # `test_every_command_resolves_the_project_the_same_way` in that
+        # repository's tests/test_ai_cli.py. Restating it here over source text
+        # that no longer contains those commands is how this test started
+        # failing for the right reason and the wrong cause.
+        for command in ("def ai_update(", "def setup_with_ai("):
             start = source.index(command)
             rest = source[start:]
             # Up to the next top-level definition, whichever marker comes first.
@@ -350,14 +347,36 @@ class InterpreterAndRootResolutionTests(unittest.TestCase):
             self.assertIn("resolve_llm_working_directory", body, command)
             self.assertNotIn("find_project_root", body, command)
 
-        # And both spellings must actually route into that helper, or the check
-        # above would be inspecting code no command reaches.
-        for entry in ("def ai_issue_report(", "def ai_issue_report_alias("):
-            start = source.index(entry)
-            rest = source[start:]
-            ends = [i for i in (rest.find("\n@", 1), rest.find("\ndef ", 1)) if i > 0]
-            body = rest[: min(ends)] if ends else rest
-            self.assertIn("_run_ai_issue_report(", body, entry)
+    def test_the_delegated_commands_still_resolve_the_project_literally(self):
+        """The same invariant, on the other side of the split.
+
+        These bodies live in lex-mcp-local now. Checking them from here is not
+        redundant with that repository's own test: a customer runs whatever
+        pairing of the two packages they happen to have, and this is the side
+        that knows which commands `lex` is expected to offer.
+        """
+        try:
+            from lex_mcp import cli as lex_mcp_cli
+        except ImportError:
+            self.skipTest("needs lex-mcp-local installed or on the path")
+
+        import importlib
+
+        for name, (module_path, attribute, _) in lex_mcp_cli.COMMANDS.items():
+            with self.subTest(command=name):
+                module = importlib.import_module(module_path)
+                command = getattr(module, attribute)
+                if not any(p.name == "project_root" for p in command.params):
+                    continue  # ai-faq takes no project
+
+                # Per module, not per callback: `ai-verify` hands the raw value
+                # to `run_ai_verify`, which resolves it, exactly as lex-app's
+                # two spellings of ai-issue-report shared one helper. The
+                # invariant is about the code that runs, not about which
+                # function literally spells the call.
+                source = Path(module.__file__).read_text(encoding="utf-8")
+                self.assertIn("resolve_llm_working_directory", source, name)
+                self.assertNotIn("find_project_root", source, name)
 
 
 if __name__ == "__main__":
