@@ -34,8 +34,11 @@ from lex.tools.setup_with_ai import (
 # knows. Three copies of this list sat at six modes while the server shipped
 # nine, which is how `lex ai-verify --mode brief` came to fail with "not one
 # of" rather than verifying anything. Derived, like every other roster.
+#
+# Only setup-with-ai still needs it. The `ai-*` commands build their choices
+# from `payload.MODE_TO_PACKAGE` directly, in the package that defines it --
+# see _LexGroup below.
 _MODE_CHOICES = list(SUPPORTED_MCP_MODES)
-_VERIFY_MODE_CHOICES = ["auto", *_MODE_CHOICES, "all"]
 
 
 def _require_lex_mcp(module_name: str):
@@ -106,7 +109,93 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
 os.environ.setdefault("PROJECT_ROOT", PROJECT_ROOT_DIR.as_posix())
 os.environ.setdefault("LEX_APP_PACKAGE_ROOT", LEX_APP_PACKAGE_ROOT)
 
-lex = click.Group(help="lex-app Command Line Interface")
+class _LexGroup(click.Group):
+    """A click group that lets lex-mcp-local define its own commands.
+
+    Everything under `lex ai-*` is implemented in lex-mcp-local, and its
+    options are declared there too. lex-app used to restate every flag in a
+    ``@lex.command`` block here, which put the surface of a command in a
+    different repository from the function it calls -- on lex-app's release
+    cadence, which the customer drives. A new AI command was therefore
+    unreachable until a customer took a whole framework upgrade, even though
+    `lex ai-update` had already installed the code implementing it.
+
+    So an `ai-*` name this file has never heard of is not an error: it is
+    resolved against the installed package, which owns the flags, the help
+    text and the exit code. Adding a command is a lex-mcp-local release.
+
+    `setup-with-ai` and `ai-update` are the exceptions, and keep their own
+    blocks below. Both must work *before* lex-mcp-local exists on disk, and
+    `ai-update` is the recovery path when the installed one is too old to have
+    the registry -- so it must not be resolved through the registry.
+    """
+
+    #: Names resolved by delegation rather than registration. Both separators:
+    #: `ai_verify` and `ai_issue_report` are what the older docs and the support
+    #: macros tell people to type, and each used to need a second hidden click
+    #: command here duplicating the whole option block.
+    _DELEGATED_PREFIXES = ("ai-", "ai_")
+
+    def get_command(self, ctx, cmd_name):
+        command = super().get_command(ctx, cmd_name)
+        if command is not None:
+            return command
+        if cmd_name.startswith(self._DELEGATED_PREFIXES):
+            return self._delegated_command(cmd_name)
+        return None
+
+    def list_commands(self, ctx):
+        names = set(super().list_commands(ctx))
+        try:
+            names.update(_require_lex_mcp("cli").command_names())
+        except click.ClickException:
+            # Not installed, or too old to have the registry. `setup-with-ai`
+            # and `ai-update` are static and still listed, which are the two a
+            # user needs before anything else here can work.
+            pass
+        return sorted(names)
+
+    @staticmethod
+    def _delegated_command(cmd_name):
+        # The summary comes from the registry rather than from a docstring
+        # here: `lex --help` has to describe a command this file does not
+        # define, and listing must not import the module that does -- one of
+        # them is the 1800-line dashboard.
+        try:
+            summary = _require_lex_mcp("cli").short_help(cmd_name)
+        except click.ClickException:
+            summary = ""
+
+        # help_option_names=[] is load-bearing: without it click answers
+        # `lex ai-verify --help` here, from a command that declares no options,
+        # instead of letting the package that owns them render its own help.
+        @click.command(
+            name=cmd_name,
+            short_help=summary,
+            context_settings=dict(
+                ignore_unknown_options=True,
+                allow_extra_args=True,
+                help_option_names=[],
+            ),
+            add_help_option=False,
+        )
+        @click.pass_context
+        def _delegate(ctx):
+            lex_mcp_cli = _require_lex_mcp("cli")
+            try:
+                exit_code = lex_mcp_cli.dispatch(cmd_name, ctx.args)
+            except lex_mcp_cli.UnknownCommand:
+                raise click.ClickException(
+                    f"`lex {cmd_name}` is not a command this lex-mcp-local "
+                    f"provides. Run `lex ai-update` to upgrade it, or "
+                    f"`lex --help` for the ones it does."
+                ) from None
+            ctx.exit(exit_code)
+
+        return _delegate
+
+
+lex = _LexGroup(help="lex-app Command Line Interface")
 
 # ---------- Project root and configs (no Django) ----------
 
@@ -1095,392 +1184,6 @@ def ai_update(project_root):
         )
 
 
-@lex.command(name="ai-faq", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-def ai_faq():
-    """Open the LEX AI FAQ page in your browser."""
-    ai_faq_module = _require_lex_mcp("ai_faq")
-    ai_faq_module.launch_ai_faq(reporter=click.echo)
-
-
-def _run_ai_verify_command(
-    project_root, mode, quiet, silent, align_mcp_mode, environments=(), strict=False
-):
-    """Verify (and silently restore) the LEX AI asset directories.
-
-    Walks the canonical ``.github`` directory shipped by the active MCP mode's
-    package (``lex_mcp_local`` for forward, ``lex_mcp_reverse`` for backward)
-    and the ``docs`` directory shipped by ``lex``, then rewrites any file under
-    the project root that is missing or whose contents have drifted. Existing
-    user-only files are left untouched, except mode-managed paths under
-    ``.github`` (agents/instructions/prompts), which are mirrored exactly to
-    prevent stale cross-mode AI assets.
-    """
-    ai_verify_module = _require_lex_mcp("ai_verify")
-
-    try:
-        result = ai_verify_module.run_ai_verify(
-            project_root=project_root,
-            mode=mode,
-            quiet=quiet,
-            silent=silent,
-            align_mcp_mode=align_mcp_mode,
-            reporter=click.echo,
-            environments=list(environments) or None,
-        )
-    except SetupWithAIError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    # Soft failures -- an unknown environment key, a payload sync that threw --
-    # are reported as [warn] lines and otherwise exit 0, because the MCP
-    # pre-flight calls this on every tool call and must not abort a run over
-    # one. That default is wrong for CI, where a typo in -e reads as success.
-    if strict and not result.ok:
-        raise click.ClickException(
-            "Verification reported problems (see the warnings above)."
-        )
-
-
-@lex.command(name="ai-verify", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.option("-p", "--project-root", help="Project root (default: execution dir)")
-@click.option(
-    "--mode",
-    "mode",
-    type=click.Choice(_VERIFY_MODE_CHOICES, case_sensitive=False),
-    default="auto",
-    show_default=True,
-    help=(
-        "Which MCP mode's assets to verify. 'auto' (default) detects the active "
-        "mode from --mode > override file > project .env > mcp.json > "
-        "process env > forward. 'all' verifies every mode's assets."
-    ),
-)
-@click.option(
-    "--quiet",
-    is_flag=True,
-    help="Suppress per-file output; only print a summary line (or nothing on success).",
-)
-@click.option(
-    "--silent",
-    is_flag=True,
-    help="Print nothing on success. Implies --quiet. Intended for use as a fast pre-flight "
-         "guard at the start of every MCP tool call.",
-)
-@click.option(
-    "--align-mcp-mode/--no-align-mcp-mode",
-    default=None,
-    help=(
-        "Treat the project .env LEX_MCP_MODE as the source of truth and "
-        "invoke the equivalent of the MCP `switch_to_mode` tool when the "
-        "running MCP server / mcp.json disagree. Enabled by default for "
-        "interactive runs; disabled under --silent to avoid restarting the "
-        "server in the middle of an MCP tool call."
-    ),
-)
-@click.option(
-    "-e",
-    "--environment",
-    "environments",
-    multiple=True,
-    help=(
-        "Agentic environment(s) whose assets should be verified "
-        "(pycharm-copilot, vscode-copilot, copilot-cli, cursor, claude-code, "
-        "codex, windsurf, or 'all'). Repeatable. Defaults to the project's "
-        "LEX_AI_ENVIRONMENTS value."
-    ),
-)
-@click.option(
-    "--strict",
-    is_flag=True,
-    default=False,
-    help=(
-        "Exit non-zero when verification reports a problem it recovered from "
-        "or warned about, instead of always exiting 0. For CI; the MCP "
-        "pre-flight deliberately does not use it."
-    ),
-)
-def ai_verify(project_root, mode, quiet, silent, align_mcp_mode, environments, strict):
-    _run_ai_verify_command(
-        project_root, mode, quiet, silent, align_mcp_mode, environments, strict
-    )
-
-
-@lex.command(name="ai_verify", hidden=True, context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.option("-p", "--project-root", help="Project root (default: execution dir)")
-@click.option(
-    "--mode",
-    "mode",
-    type=click.Choice(_VERIFY_MODE_CHOICES, case_sensitive=False),
-    default="auto",
-    show_default=True,
-    help=(
-        "Which MCP mode's assets to verify. 'auto' (default) detects the active "
-        "mode from --mode > override file > project .env > mcp.json > "
-        "process env > forward. 'all' verifies every mode's assets."
-    ),
-)
-@click.option(
-    "--quiet",
-    is_flag=True,
-    help="Suppress per-file output; only print a summary line (or nothing on success).",
-)
-@click.option(
-    "--silent",
-    is_flag=True,
-    help="Print nothing on success. Implies --quiet. Intended for use as a fast pre-flight "
-         "guard at the start of every MCP tool call.",
-)
-@click.option(
-    "--align-mcp-mode/--no-align-mcp-mode",
-    default=None,
-    help=(
-        "Treat the project .env LEX_MCP_MODE as the source of truth and "
-        "invoke the equivalent of the MCP `switch_to_mode` tool when the "
-        "running MCP server / mcp.json disagree. Enabled by default for "
-        "interactive runs; disabled under --silent to avoid restarting the "
-        "server in the middle of an MCP tool call."
-    ),
-)
-@click.option(
-    "-e",
-    "--environment",
-    "environments",
-    multiple=True,
-    help=(
-        "Agentic environment(s) whose assets should be verified "
-        "(pycharm-copilot, vscode-copilot, copilot-cli, cursor, claude-code, "
-        "codex, windsurf, or 'all'). Repeatable. Defaults to the project's "
-        "LEX_AI_ENVIRONMENTS value."
-    ),
-)
-@click.option(
-    "--strict",
-    is_flag=True,
-    default=False,
-    help=(
-        "Exit non-zero when verification reports a problem it recovered from "
-        "or warned about, instead of always exiting 0. For CI; the MCP "
-        "pre-flight deliberately does not use it."
-    ),
-)
-def ai_verify_alias(project_root, mode, quiet, silent, align_mcp_mode, environments, strict):
-    _run_ai_verify_command(
-        project_root, mode, quiet, silent, align_mcp_mode, environments, strict
-    )
-
-
-@lex.command(name="ai-dashboard", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.option("-p", "--project-root", help="Project root (default: execution dir)")
-def ai_dashboard(project_root):
-    """Open the LEX AI Dashboard in your browser.
-
-    Displays and lets you edit the MCP server mode, GitHub token, Remote MCP
-    API key, and other configuration. Changes are written to .env and mcp.json.
-    Press Ctrl+C to stop the dashboard server.
-    """
-    # The directory given (or the cwd) IS the project, exactly as
-    # setup-with-ai and ai-verify treat it. This used to walk up to a git
-    # toplevel or marker file, which meant update delivered the agent
-    # payload somewhere setup had never written -- a project without its
-    # own marker got .github and docs copied into its parent.
-    root = resolve_llm_working_directory(project_root)
-    ai_dashboard_module = _require_lex_mcp("ai_dashboard")
-    try:
-        ai_dashboard_module.launch_ai_dashboard(
-            project_root=root,
-            reporter=click.echo,
-        )
-    except SetupWithAIError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-
-@lex.command(name="ai-worktree", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
-@click.option("-p", "--project-root", help="Project root (default: execution dir)")
-@click.option(
-    "--name",
-    default="",
-    help="What the run is about; used in the branch name.",
-)
-@click.option(
-    "--mode",
-    "mode",
-    # The full roster, not the subset that writes the working tree: which modes
-    # a worktree is meaningful for is the installed lex-mcp-local's call, and it
-    # refuses the others by name. Narrowing it here would let a Click "not one
-    # of" reject a mode the installed server happily isolates.
-    type=click.Choice(_MODE_CHOICES, case_sensitive=False),
-    # None, not "": click validates a default against the Choice, and the empty
-    # string is not one of the members -- so `default=""` made every invocation
-    # of the command fail with "'' is not one of ...". `--help` rendered fine,
-    # which is why a test that only checked the help text and the registration
-    # did not catch it.
-    default=None,
-    help=(
-        "The mode this run is for, if you already know. Leave it out and the new "
-        "chat's interview decides -- which is the usual case."
-    ),
-)
-@click.option(
-    "--base",
-    default="",
-    help=(
-        "Branch to cut from (default: the base a live run already agreed, "
-        "otherwise the branch this checkout is on)."
-    ),
-)
-@click.option(
-    "--branch",
-    default="",
-    help="Explicit branch name, overriding the derived one.",
-)
-def ai_worktree(project_root, name, mode, base, branch):
-    """Prepare a second checkout so another LEX AI chat can work in parallel.
-
-    Two chats editing one repository fight over one working tree. This makes a
-    git worktree, seeds it with the files git cannot carry (.env and the
-    project-scoped MCP configs), and prints the folder to open a chat in.
-
-    The chat that opens there starts in brief, which asks what the run is, so
-    --mode is optional and defaults to undecided: naming a mode before that
-    interview would put a guess in the branch name and the folder name.
-    """
-    # The directory given (or the cwd) IS the project, exactly as ai-dashboard
-    # and ai-verify treat it.
-    root = resolve_llm_working_directory(project_root)
-    ai_worktree_module = _require_lex_mcp("ai_worktree")
-    result = ai_worktree_module.launch_ai_worktree(
-        project_root=root,
-        name=name,
-        mode=mode or "",
-        base=base,
-        branch=branch,
-        reporter=click.echo,
-    )
-
-    # The implementation already explained itself through the reporter, so this
-    # only has to make the exit code say so -- same shape as ai-update's.
-    if not result.get("ok"):
-        raise click.ClickException(
-            "No worktree was prepared. See the output above."
-        )
-
-
-def _ai_issue_report_options(command):
-    """Apply the shared option set to both spellings of the command."""
-    for decorate in reversed(
-        (
-            click.option(
-                "-p", "--project-root", help="Project root (default: execution dir)"
-            ),
-            click.option(
-                "-o",
-                "--output",
-                type=click.Path(path_type=Path, dir_okay=False, writable=True),
-                help=(
-                    "Output zip path (default: "
-                    "<project>/.lex-ai-reports/ai_issue_report_<timestamp>.zip)"
-                ),
-            ),
-            click.option(
-                "--artifact-mode",
-                type=click.Choice(["auto", "off", "strict"], case_sensitive=False),
-                default="auto",
-                show_default=True,
-                help=(
-                    "Raw artifact capture mode: auto (best-effort), off, "
-                    "strict (require at least one file)."
-                ),
-            ),
-            click.option(
-                "--yes",
-                is_flag=True,
-                help="Skip the confirmation prompt about raw secret inclusion.",
-            ),
-        )
-    ):
-        command = decorate(command)
-    return command
-
-
-# Hyphenated is canonical, matching every sibling (ai-dashboard, ai-faq,
-# ai-update, ai-verify). This command was registered under the underscore
-# alone, so `lex ai-issue-report` -- the spelling the naming convention implies
-# -- failed with "No such command". The underscore survives as a hidden alias
-# because it is what the existing docs and support macros tell people to type.
-# Click has no `aliases=` argument (verified against 8.4), so a second hidden
-# command is the mechanism, exactly as ai-verify/ai_verify already do it.
-@lex.command(
-    name="ai-issue-report",
-    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
-)
-@_ai_issue_report_options
-def ai_issue_report(project_root, output, artifact_mode, yes):
-    """Generate a raw AI issue report bundle for support triage.
-
-    Captures Copilot and MCP-related artifacts as raw files without parsing so
-    no details are dropped during triage.
-    """
-    _run_ai_issue_report(project_root, output, artifact_mode, yes)
-
-
-@lex.command(
-    name="ai_issue_report",
-    hidden=True,
-    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
-)
-@_ai_issue_report_options
-def ai_issue_report_alias(project_root, output, artifact_mode, yes):
-    """Deprecated spelling of ``ai-issue-report``; kept working."""
-    _run_ai_issue_report(project_root, output, artifact_mode, yes)
-
-
-def _run_ai_issue_report(project_root, output, artifact_mode, yes):
-    # The directory given (or the cwd) IS the project, exactly as
-    # setup-with-ai and ai-verify treat it. This used to walk up to a git
-    # toplevel or marker file, which meant update delivered the agent
-    # payload somewhere setup had never written -- a project without its
-    # own marker got .github and docs copied into its parent.
-    root = resolve_llm_working_directory(project_root)
-
-    if not yes:
-        # The old wording said the bundle "can include raw secrets". It did,
-        # and it was uploaded to the ticketing system. Credentials are masked
-        # now, so say what is actually still in there -- an inaccurate warning
-        # is one people learn to click past.
-        click.echo(
-            "This bundle includes MCP configs, logs, and private Copilot "
-            "conversation artifacts, and is uploaded to LEX support."
-        )
-        click.echo("Credential values are masked before anything is written.")
-        click.confirm("Continue and generate the issue report?", abort=True)
-
-    ai_issue_report_module = _require_lex_mcp("ai_issue_report")
-
-    try:
-        result = ai_issue_report_module.create_ai_issue_report(
-            project_root=root,
-            output=output,
-            artifact_mode=str(artifact_mode).lower(),
-        )
-    except (RuntimeError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    click.echo(f"AI issue report written: {result.archive_path}")
-    click.echo(f"Captured files: {result.copied_files}")
-    # getattr, not attribute access: lex-app must never assume a lex-mcp-local
-    # newer than whatever the customer has installed. A plain access here turns
-    # an older package into an AttributeError traceback at the end of a report
-    # that was otherwise generated fine.
-    masked = getattr(result, "values_masked", None)
-    if masked is not None:
-        click.echo(f"Credential values masked: {masked}")
-    for skipped in getattr(result, "skipped_oversize", ()):
-        click.echo(f"  [skip] too large to scan, left out: {skipped}")
-    if result.missing_sources:
-        click.echo(f"Missing sources: {len(result.missing_sources)}")
-    if result.collection_errors:
-        click.echo(f"Collection errors: {len(result.collection_errors)}")
-    if result.ticket_url:
-        click.echo(f"Quackback ticket: {result.ticket_url}")
 
 
 def _collect_setup_with_ai_credentials(
@@ -1539,23 +1242,32 @@ def _collect_setup_with_ai_credentials(
 # command enumeration.  For these, _bootstrap_django() is skipped so that
 # django.setup() (and every AppConfig.ready()) only fires once — inside
 # the actual server process (uvicorn / celery worker / streamlit).
+#: ai-update is named here rather than left to the `ai-` prefix rule below.
+#: It is lex-app's own command and must stay skipped whatever happens to that
+#: rule -- it is the recovery path when the installed lex-mcp-local is too old
+#: for anything else here to work.
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    # Both spellings of ai-issue-report are listed for the reader's benefit;
-    # _should_skip_django_bootstrap also normalises hyphens and underscores, so
-    # either would match on its own.
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update", "ai-faq", "ai-verify", "ai-dashboard", "ai-issue-report", "ai_issue_report", "ai-worktree"}
+    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update"}
 )
 
 
 def _should_skip_django_bootstrap(command_name: str | None) -> bool:
     """Return True when *command_name* is handled directly by Click.
 
-    Accept both hyphen and underscore spellings for the AI commands so the
-    pre-dispatch gate does not accidentally trigger Django bootstrap before
-    Click has a chance to route to the dedicated handler.
+    Every `ai-*` name skips, including ones this file has never heard of. This
+    gate reads ``sys.argv[1]`` *before* click runs, so it cannot ask the group
+    whether the name resolves -- and a command lex-mcp-local defines would
+    otherwise fall through to ``django.setup()`` and fail in a directory that
+    is not a Lex app yet, which is the situation most AI commands exist to fix.
+
+    Both separators, because `ai_verify` and `ai_issue_report` are still
+    spellings people type.
     """
     if command_name is None:
         return False
+
+    if command_name.startswith(("ai-", "ai_")):
+        return True
 
     normalized_names = {
         command_name,
