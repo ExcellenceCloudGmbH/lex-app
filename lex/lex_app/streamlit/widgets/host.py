@@ -83,8 +83,19 @@ class WidgetPage:
         )
         # Route the stored envelope back to the widget that produced it, so two
         # widgets on a page do not read each other's status.
-        if self._result and self._result.get("payload", {}).get("widget_id") == widget_id:
-            return self._result
+        #
+        # The type check is load-bearing, not defensive noise: every envelope
+        # type shares one component value, so an `open_log` click for THIS
+        # widget would otherwise be handed back as if it were a status. Its
+        # payload has no "status" key, so the caller's
+        # ``status["payload"]["status"]`` raised KeyError.
+        result = self._result
+        if (
+            isinstance(result, dict)
+            and result.get("type") == "calculation_status"
+            and (result.get("payload") or {}).get("widget_id") == widget_id
+        ):
+            return result
         return None
 
     def calculation_log(
