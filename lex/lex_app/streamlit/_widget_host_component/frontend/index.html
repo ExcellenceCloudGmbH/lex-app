@@ -136,6 +136,13 @@
         return;
       }
 
+      if (data.type === "open_log") {
+        // A click, so never deduped by value -- the envelope id already carries
+        // a timestamp so asking twice re-opens.
+        Streamlit.setComponentValue(data);
+        return;
+      }
+
       if (data.type === "calculation_status") {
         // Re-run dedupe: Streamlit may re-render while the same envelope is
         // still the current value, and forwarding twice re-triggers the

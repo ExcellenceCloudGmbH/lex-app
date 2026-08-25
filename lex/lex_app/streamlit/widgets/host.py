@@ -35,6 +35,11 @@ from lex.lex_app.streamlit.widgets.spec import (
 #: Route on the lex-app frontend that renders a manifest.
 HOST_PATH = "/embed/widgets"
 
+#: Height for the log inside the page-level dialog. Generous on purpose -- the
+#: whole reason the dialog exists is that the log is unreadable when it is
+#: bounded by a widget's box rather than by the browser window.
+_DIALOG_LOG_HEIGHT = 820
+
 
 class WidgetPage:
     """Collects widget specs inside a ``lex_widgets()`` block.
@@ -174,7 +179,63 @@ class _LexWidgets:
             min_height=self._min_height,
             key=self._component_key,
         )
+
+        self._maybe_open_log_dialog(url, expected_origin)
         return False
+
+    def _maybe_open_log_dialog(self, url: str, expected_origin: Optional[str]) -> None:
+        """Show the log in a PAGE-LEVEL dialog when a widget asks for it.
+
+        Why it cannot simply pop up inside the widget: the log dialog renders in
+        a portal with ``position: fixed``, so inside an embedded frame it is
+        clipped to that frame's viewport and does not grow ``scrollHeight`` --
+        the host's content-height resize cannot rescue it. A Streamlit dialog
+        lives on the page instead of in the frame, so it is bounded by the
+        browser window rather than by a widget's box.
+
+        The dialog hosts its own single-widget manifest. That reuses the whole
+        rendering path rather than adding a second way to draw a log.
+        """
+        import streamlit as st
+
+        event = st.session_state.get(self._component_key)
+        if not isinstance(event, dict) or event.get("type") != "open_log":
+            return
+
+        payload = event.get("payload") or {}
+        seen_key = f"_lex_widgets_log_seen_{self._component_key}"
+        # One dialog per click. Without this the dialog reopens on every rerun,
+        # because the component value persists after being consumed.
+        if st.session_state.get(seen_key) == event.get("id"):
+            return
+        st.session_state[seen_key] = event.get("id")
+
+        model = payload.get("model")
+        pk = payload.get("pk")
+        calculation_id = payload.get("calculationId") or payload.get("calculation_id")
+        if not model or pk is None:
+            return
+
+        title = f"Calculation log — {model} #{pk}"
+
+        @st.dialog(title, width="large")  # type: ignore[misc]
+        def _log_dialog() -> None:
+            spec = calculation_log_spec(
+                "dialog_log",
+                str(model),
+                pk,
+                height=_DIALOG_LOG_HEIGHT,
+                calculation_id=calculation_id or None,
+            )
+            render_widget_host(
+                url=url,
+                manifest=build_manifest([spec]),
+                expected_origin=expected_origin,
+                min_height=_DIALOG_LOG_HEIGHT,
+                key=f"{self._component_key}_log_dialog",
+            )
+
+        _log_dialog()
 
 
 def lex_widgets(*, key: Optional[str] = None, min_height: int = 200) -> _LexWidgets:
