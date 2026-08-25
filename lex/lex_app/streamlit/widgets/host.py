@@ -60,9 +60,16 @@ class WidgetPage:
         show_log: bool = False,
         log_height: Optional[int] = None,
         on_status: bool = False,
+        title: Optional[str] = None,
+        fields: Optional[List[str]] = None,
         id: Optional[str] = None,
     ) -> Optional[dict]:
         """Add a calculation widget: the Calculate control, its status, its log.
+
+        ``title`` overrides the card heading (default: the model name), and
+        ``fields`` names record fields to show beside the control. Those are
+        rendered by the product's own FieldView, so a foreign key arrives as its
+        display name and a datetime is formatted the way the grid formats it.
 
         Returns the latest status envelope when ``on_status=True``, else
         ``None``. The value is from the *previous* run of the script, because
@@ -79,6 +86,8 @@ class WidgetPage:
                 show_log=show_log,
                 log_height=log_height,
                 on_status=on_status,
+                title=title,
+                fields=fields,
             )
         )
         # Route the stored envelope back to the widget that produced it, so two

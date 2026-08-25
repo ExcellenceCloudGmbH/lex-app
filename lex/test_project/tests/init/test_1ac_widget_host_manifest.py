@@ -105,6 +105,41 @@ class TestCluster1ac_WidgetHostManifest:
         assert "shwo_log" in str(exc.value)
         assert "show_log" in str(exc.value)
 
+    def test_01_259_accepts_title_and_fields(self):
+        """Scenario 1.259: a calculation carries a heading and a field list.
+
+        Given a widget asked to show a title and two record fields
+        When the spec is built
+        Then both survive into the options the host consumes
+
+        Regression: these existed on the React side and in the manifest schema
+        before the Python API accepted them, so a caller passing ``title=`` got
+        a TypeError from ``page.calculation()``. A producer and its consumer
+        disagreeing about the same contract is the failure this pins.
+        """
+        spec = calculation_spec(
+            "w1",
+            "calculatenav",
+            1,
+            title="NAV run",
+            fields=["quarter", "calculation_date"],
+        )
+        assert spec["options"]["title"] == "NAV run"
+        assert spec["options"]["fields"] == ["quarter", "calculation_date"]
+        # Survives manifest assembly, i.e. the options are recognised per type.
+        build_manifest([spec])
+
+    def test_01_260_rejects_a_bare_string_for_fields(self):
+        """Scenario 1.260: ``fields="quarter"`` is refused, not iterated.
+
+        Given a single field name passed as a string rather than a list
+        When the spec is built
+        Then it raises -- a string is iterable, so accepting it would silently
+        request a widget showing the fields "q", "u", "a", "r", ...
+        """
+        with pytest.raises(WidgetSpecError, match="must be a list"):
+            calculation_spec("w1", "calculatenav", 1, fields="quarter")
+
     def test_01_258_rejects_unknown_widget_type(self):
         """Scenario 1.258: an unknown widget type is refused with the known set."""
         spec = calculation_spec("w1", "quarter", 42)

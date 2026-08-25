@@ -25,7 +25,7 @@ KNOWN_TYPES = ("calculation", "calculation_log", "calculation_log_tree")
 #: ``calculation`` (where the key is ``log_height``) is caught rather than
 #: silently ignored.
 KNOWN_OPTIONS = {
-    "calculation": ("show_log", "log_height", "on_status"),
+    "calculation": ("show_log", "log_height", "on_status", "title", "fields"),
     "calculation_log": ("height", "calculation_id"),
     "calculation_log_tree": ("height", "calculation_id"),
 }
@@ -45,6 +45,8 @@ def calculation_spec(
     show_log: bool = False,
     log_height: Optional[int] = None,
     on_status: bool = False,
+    title: Optional[str] = None,
+    fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Build one validated calculation widget spec.
 
@@ -61,10 +63,26 @@ def calculation_spec(
         raise WidgetSpecError(f"{widget_id!r}: pk must be a string or int, got {type(pk).__name__}")
     if log_height is not None and (not isinstance(log_height, int) or log_height <= 0):
         raise WidgetSpecError(f"{widget_id!r}: log_height must be a positive int")
+    if title is not None and not isinstance(title, str):
+        raise WidgetSpecError(f"{widget_id!r}: title must be a string")
+    if fields is not None:
+        if isinstance(fields, str) or not isinstance(fields, (list, tuple)):
+            # A bare string would iterate per character and request a widget
+            # showing "n", "a", "v" -- refuse rather than render nonsense.
+            raise WidgetSpecError(
+                f"{widget_id!r}: fields must be a list of field names, not {type(fields).__name__}"
+            )
+        bad = [f for f in fields if not isinstance(f, str) or not f]
+        if bad:
+            raise WidgetSpecError(f"{widget_id!r}: fields must all be non-empty strings")
 
     options: Dict[str, Any] = {"show_log": bool(show_log), "on_status": bool(on_status)}
     if log_height is not None:
         options["log_height"] = log_height
+    if title is not None:
+        options["title"] = title
+    if fields:
+        options["fields"] = list(fields)
 
     return {
         "id": widget_id,

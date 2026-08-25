@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 258
+max_scenario: 260
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -219,7 +219,7 @@ letters:
     scenarios: 1.203-1.210
     status: complete
     tests:
-      pass: 8
+      pass: 10
       skip: 0
       xfail: 0
     note: best-effort IDE marker detection; unknown/conflicting environments generate both formats;
@@ -285,7 +285,7 @@ letters:
 
   ac:
     title: Widget-host manifest construction and validation
-    scenarios: 1.251-1.258
+    scenarios: 1.251-1.260
     status: complete
     tests:
       pass: 8
