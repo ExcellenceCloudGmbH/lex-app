@@ -167,13 +167,19 @@
         // standalone page never reads.
         const mode = (data.payload || {}).mode;
         if (mode !== "light" && mode !== "dark") return;
-        if (!_themeStorageKey) return;
+        if (!_themeStorageKey) {
+          console.warn("[lex-theme] widget reported", mode, "but no storage key was supplied");
+          return;
+        }
         try {
-          if (window.localStorage.getItem(_themeStorageKey) !== mode) {
+          if (window.localStorage.getItem(_themeStorageKey) === mode) {
+            console.info("[lex-theme] widget reports", mode, "- already stored");
+          } else {
             window.localStorage.setItem(_themeStorageKey, mode);
+            console.info("[lex-theme] widget reports", mode, "- stored, page should follow");
           }
         } catch (e) {
-          /* storage disabled: lose theme sync, not the widget */
+          console.warn("[lex-theme] storage unavailable; theme will not sync", e);
         }
         return;
       }

@@ -49,11 +49,19 @@ _FOLLOWER_HTML = """<script>
     var URL_MODE = __URL_MODE__;
 
     // This runs in a srcdoc iframe: same origin as the Streamlit server, so it
-    // shares this origin's localStorage and may read and navigate its parent.
-    // `parent`, not `top` -- when lex-app embeds Streamlit, `top` is lex-app's
-    // page on another origin and every access to it throws.
+    // shares this origin's localStorage and may read, listen on and navigate its
+    // parent. `parent`, not `top` -- when lex-app embeds Streamlit, `top` is
+    // lex-app's page on another origin and every access to it throws.
     var host = window.parent;
-    if (!host || host === window || host.__lexThemeFollowerInstalled) return;
+    if (!host || host === window) return;
+
+    // Guard AND listener both belong to `host`, and that pairing is the point.
+    // Streamlit destroys and recreates this iframe across reruns, while the
+    // Streamlit page persists. A flag on the page with a listener on this
+    // window would survive exactly one render: the next iframe would see the
+    // flag, return early, and the iframe that actually held the listener would
+    // already be gone -- leaving nothing listening anywhere, silently.
+    if (host.__lexThemeFollowerInstalled) return;
     host.__lexThemeFollowerInstalled = true;
 
     /** What is on screen right now, or "" if we cannot tell. */
@@ -78,6 +86,10 @@ _FOLLOWER_HTML = """<script>
     function follow(mode) {
       if (mode !== "light" && mode !== "dark") return;
       var now = currentMode();
+      // One line per decision, because this crosses three contexts with no UI of
+      // its own -- without it, "did not arrive" and "arrived and was correct"
+      // look identical from the outside.
+      console.info("[lex-theme] asked for", mode, "; showing", now || "(unknown)");
       if (!now || now === mode) return;          // already right, or unknowable
       if (host.__lexThemeReloading) return;      // one reload per change
       host.__lexThemeReloading = true;
@@ -98,17 +110,22 @@ _FOLLOWER_HTML = """<script>
       }
     }
 
-    // A change that landed while this page was loading. Deferred one frame so
-    // the app's own styles have painted before we measure them.
+    // A change that landed while this page was loading -- including one an
+    // embedded widget announced before this block rendered, which is the common
+    // ordering. Deferred one frame so the app's styles have painted before we
+    // measure them.
     host.requestAnimationFrame(function () {
-      try { follow(window.localStorage.getItem(KEY)); } catch (e) {}
+      try { follow(host.localStorage.getItem(KEY)); } catch (e) {}
     });
 
-    // `storage` fires in every OTHER window on this origin, which is how the
-    // relay's write reaches us.
-    window.addEventListener("storage", function (ev) {
+    // On `host`, not `window`: see the lifetime note above. `storage` fires in
+    // every OTHER window of this origin, which is how both writers reach us --
+    // the relay iframe (standalone pages) and the widget-host shim (embedded).
+    host.addEventListener("storage", function (ev) {
       if (ev.key === KEY) follow(ev.newValue);
     });
+
+    console.info("[lex-theme] follower listening; page is showing", currentMode() || "(unknown)");
   })();
 </script>
 """

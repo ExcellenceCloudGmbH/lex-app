@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.269.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.270.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -125,6 +125,28 @@ class TestCluster1ad_StreamlitThemeFollower:
         # `top` is also a bare global alias for `window.top`, so a future edit
         # writing `top.location` would reintroduce the same fault.
         assert "top." not in html.replace("window.top", "")
+
+
+    def test_01_270_guard_and_listener_share_one_lifetime(self):
+        """Scenario 1.270: the listener is attached to the object being guarded.
+
+        Streamlit destroys and recreates a component iframe across reruns, while
+        the Streamlit page persists. So a flag on the page paired with a listener
+        on the iframe's own window survives exactly one render: the next iframe
+        sees the flag and returns early, and the iframe that held the listener is
+        already gone. Nothing is listening, nothing is logged, and the theme
+        simply stops following after the first interaction.
+
+        Both must live on the same object. Since the flag has to be on the page
+        (that is what makes it idempotent across reruns), the listener goes there
+        too.
+        """
+        html = theme_follower_html("dark")
+        assert "host.__lexThemeFollowerInstalled" in html
+        assert "host.addEventListener(" in html
+        assert "window.addEventListener(" not in html, (
+            "listener attached to the component iframe, which Streamlit recreates"
+        )
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

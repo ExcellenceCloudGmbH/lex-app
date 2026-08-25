@@ -313,3 +313,29 @@ Scenario 1.269 pins the three links, each silent when broken:
 | the shim reads it from args | a second hardcoded copy, free to drift |
 
 Frontend twin: F12.44–F12.45 (the emit side).
+
+### Batch 1ad addendum 2 — lifetime of the follower (scenario 1.270)
+
+Found by re-reading the follower against Streamlit's rerun model rather than by a
+failing test. The install flag was on the **page** (persists across reruns); the
+`storage` listener was on the **component iframe** (destroyed and recreated per
+rerun). That pairing works for exactly one render:
+
+```
+render 1:  flag unset  -> install, listener on iframe A
+rerun:     iframe A destroyed, iframe B created
+render 2:  flag SET    -> return early, iframe B adds no listener
+           => nothing is listening, nothing is logged
+```
+
+Both now live on the page. The initial read moved to the page's storage too,
+which also handles the common ordering where an embedded widget announces its
+theme *before* this block renders.
+
+Also added: one `console.info` per decision (`[lex-theme] asked for … ; showing …`)
+in the follower, and one in the shim on write. Three cross-context hops with no UI
+of their own otherwise make "never arrived" and "arrived and was already correct"
+look identical from the outside.
+
+Harness re-run after the move: 7/7, including the new pre-existing-stored-value
+case that covers the widget-writes-first ordering.

@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.269
+    scenarios: 1.261-1.270
     status: complete
     tests:
-      pass: 12
+      pass: 13
       skip: 0
       xfail: 0
     note: >-
@@ -330,3 +330,12 @@ letters:
       somewhere the page never reads. The test pins the three links that are each silent when
       broken: the component accepts and forwards the key, both host call sites supply it, and the
       static shim reads it from args rather than keeping a second copy.
+      1.270 covers a lifetime bug found by re-reading the follower against Streamlit's rerun
+      model, not by a failing test: the install flag lived on the persistent Streamlit page while
+      the storage listener lived on the component iframe, which Streamlit destroys and recreates
+      per rerun. That combination works for exactly one render - the next iframe sees the flag,
+      returns early, and the iframe holding the listener is already gone, so nothing listens and
+      nothing is logged. Both now live on the page. The same pass moved the initial read to the
+      page's storage and added one console.info per decision, because three cross-context hops
+      with no UI of their own make "never arrived" and "arrived and was already correct"
+      indistinguishable from the outside.
