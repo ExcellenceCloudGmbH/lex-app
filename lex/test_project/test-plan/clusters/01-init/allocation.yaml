@@ -300,3 +300,25 @@ letters:
       Letter ac not ab, and range from 1.251 not 1.223, because open PRs #723 and #726 both claim
       1ab/1.223-1.239 and closed #692 claimed 1.223-1.250 - taking a clear range avoids a
       three-way collision on merge.
+
+  ad:
+    title: Streamlit theme follower
+    scenarios: 1.261-1.268
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      Python side of lex-app <-> Streamlit theme agreement. Streamlit's theme is boot-time
+      config, so a page can only follow a change by reloading - which makes a WRONG reload
+      expensive (it discards typed input) and a missed one merely cosmetic. Hence 1.263: a URL
+      with no embed_options must report "" and not "light", or every standalone tab would reload
+      on a guess. 1.266 pins the storage key to one Python definition, because the relay in
+      proxy.py and the follower drift apart silently - both halves keep working alone and sync
+      just stops. 1.268 found a real hole while being written: json.dumps escapes what JS needs
+      but not "</script>", which the HTML parser acts on first, so the value could close the
+      element and inject markup; fixed by escaping angle brackets as \u003c/\u003e.
+      GAP: the emitted script's runtime behaviour is verified only by a DOM-double harness run
+      by hand (7 cases, all passing) - this repo has no JS runner, so it is not in CI. Moving it
+      to the frontend repo's vitest would close that.

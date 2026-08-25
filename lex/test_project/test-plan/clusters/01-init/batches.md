@@ -248,3 +248,33 @@ call site so the traceback points at the author's line.
 Frontend twin: PAC batch **12c** (`F12.23–F12.31`) validates the same manifest on the consuming
 side, including the `?manifest=` base64url fallback that lets the route be opened in a browser
 with no Streamlit at all.
+
+## Batch 1ad — Streamlit theme follower
+
+- **Scenarios:** 1.261-1.268
+- **Status:** complete (11 pass)
+- **Source under test:** `lex/streamlit_theme.py`, wired by `lex/streamlit_app.py`
+  (`render_theme_follower`) and `lex/proxy.py` (`/_lex/theme-relay`)
+- **Test file:** `lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py`
+- **Test classes:** `TestCluster1ad_StreamlitThemeFollower`, `TestCluster1ad_ThemeFollowerEncoding`
+
+Closes the loop on cross-origin theme sync. The relay writes the agreed mode into
+the Streamlit origin's `localStorage`; every Streamlit tab on that origin — embedded
+or standalone — gets a `storage` event and reloads with a corrected
+`embed_options`, because Streamlit reads the theme only at boot.
+
+What the scenarios protect:
+
+| Scenario | Property |
+|---|---|
+| 1.261-1.262 | Both `embed_options` spellings parse — repeated params (documented) and comma-joined (what people actually type) |
+| 1.263 | "No theme requested" ≠ "light requested", so a tab the user opened never reloads on a guess |
+| 1.264 | A contradictory URL resolves the same way every time rather than raising into a void |
+| 1.265 | No unreplaced `__KEY__` reaches the browser, where it would fail silently |
+| 1.266 | The storage key has exactly one Python definition |
+| 1.267 | The script uses `parent`, never `top` — `top` is cross-origin when lex-app embeds Streamlit and throws on every access |
+| 1.268 | The mode is encoded as data, including against `</script>` |
+
+**Known gap:** the script's own logic (measure background → compare → reload once)
+is covered by a hand-run DOM-double harness, not by CI, because this repository has
+no JS runtime. Seven cases pass. Worth relocating to the frontend repo's vitest.
