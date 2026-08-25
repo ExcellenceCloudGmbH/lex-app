@@ -62,14 +62,31 @@ class WidgetPage:
         on_status: bool = False,
         title: Optional[str] = None,
         fields: Optional[List[str]] = None,
+        variant: str = "full",
+        show_log_button: bool = True,
         id: Optional[str] = None,
     ) -> Optional[dict]:
         """Add a calculation widget: the Calculate control, its status, its log.
 
-        ``title`` overrides the card heading (default: the model name), and
-        ``fields`` names record fields to show beside the control. Those are
-        rendered by the product's own FieldView, so a foreign key arrives as its
-        display name and a datetime is formatted the way the grid formats it.
+        Composable: **absence means hidden**, so the default is minimal and you
+        add only what a given layout needs.
+
+        * ``variant`` -- ``"full"`` (pill + button), ``"status"`` (pill alone) or
+          ``"action"`` (button alone). Passed straight to the product's own
+          control, which already draws these three.
+        * ``title`` -- a heading. Omit it and no heading renders.
+        * ``fields`` -- record fields beside the control, drawn by the product's
+          FieldView so an FK shows its display name and a datetime is formatted
+          as the grid formats it. Omit for none.
+        * ``show_log_button`` -- the control that opens the live log popup.
+
+        Just the button::
+
+            page.calculation("navcalc", pk=1, variant="action", show_log_button=False)
+
+        Status only, for a compact strip::
+
+            page.calculation("navcalc", pk=1, variant="status", show_log_button=False)
 
         Returns the latest status envelope when ``on_status=True``, else
         ``None``. The value is from the *previous* run of the script, because
@@ -88,6 +105,8 @@ class WidgetPage:
                 on_status=on_status,
                 title=title,
                 fields=fields,
+                variant=variant,
+                show_log_button=show_log_button,
             )
         )
         # Route the stored envelope back to the widget that produced it, so two

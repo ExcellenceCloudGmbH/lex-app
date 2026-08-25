@@ -21,11 +21,26 @@ MANIFEST_VERSION = 1
 #: added without redesigning the transport.
 KNOWN_TYPES = ("calculation", "calculation_log", "calculation_log_tree")
 
+#: What a calculation widget may render. Passed through to the product's own
+#: CalculateFunctionality, which already distinguishes these.
+#:   full   -> status pill + Calculate button
+#:   status -> the pill alone
+#:   action -> the button alone
+CALCULATION_VARIANTS = ("full", "status", "action")
+
 #: Options understood per widget type. Validated per type, so ``height`` on a
 #: ``calculation`` (where the key is ``log_height``) is caught rather than
 #: silently ignored.
 KNOWN_OPTIONS = {
-    "calculation": ("show_log", "log_height", "on_status", "title", "fields"),
+    "calculation": (
+        "show_log",
+        "log_height",
+        "on_status",
+        "title",
+        "fields",
+        "variant",
+        "show_log_button",
+    ),
     "calculation_log": ("height", "calculation_id"),
     "calculation_log_tree": ("height", "calculation_id"),
 }
@@ -47,6 +62,8 @@ def calculation_spec(
     on_status: bool = False,
     title: Optional[str] = None,
     fields: Optional[List[str]] = None,
+    variant: str = "full",
+    show_log_button: bool = True,
 ) -> Dict[str, Any]:
     """Build one validated calculation widget spec.
 
@@ -75,8 +92,18 @@ def calculation_spec(
         bad = [f for f in fields if not isinstance(f, str) or not f]
         if bad:
             raise WidgetSpecError(f"{widget_id!r}: fields must all be non-empty strings")
+    if variant not in CALCULATION_VARIANTS:
+        raise WidgetSpecError(
+            f"{widget_id!r}: unknown variant {variant!r}; "
+            f"known variants: {', '.join(CALCULATION_VARIANTS)}"
+        )
 
-    options: Dict[str, Any] = {"show_log": bool(show_log), "on_status": bool(on_status)}
+    options: Dict[str, Any] = {
+        "show_log": bool(show_log),
+        "on_status": bool(on_status),
+        "variant": variant,
+        "show_log_button": bool(show_log_button),
+    }
     if log_height is not None:
         options["log_height"] = log_height
     if title is not None:
