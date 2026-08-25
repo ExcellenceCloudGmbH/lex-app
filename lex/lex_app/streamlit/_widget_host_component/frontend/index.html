@@ -26,7 +26,11 @@
     Dependency-free on purpose — no build step, so it ships as a static asset
     inside the wheel.
   -->
-  <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+  <!-- loading="eager" is explicit rather than relied upon: the HTML default is
+       eager, but browsers ship lazy heuristics for offscreen frames and a widget
+       that only loads once scrolled to is the complaint this states away. -->
+  <iframe id="frame" loading="eager"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
 
   <script>
     // ── Streamlit bridge shim (the public postMessage protocol) ──────────

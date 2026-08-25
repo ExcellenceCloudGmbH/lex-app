@@ -589,10 +589,23 @@ if not st.session_state.authenticated:
     st.info("Please access this application through the main portal.")
     st.stop()
 
-# Form-safe logout control (won't break no matter what streamlit_structure.main() does)
+# Form-safe logout control (won't break no matter what streamlit_structure.main() does).
+#
+# Only DECIDED here; rendered after the app structure, in the `finally` at the
+# bottom of this file. Streamlit lays the sidebar out in call order, so
+# rendering it here pinned it to the top — above the app's own navigation, which
+# is the wrong place for a logout. Rendering it last puts it at the bottom.
+#
+# The `finally` is what preserves the original guarantee: the control still
+# appears even if streamlit_structure.main() raises.
 _logout_qp = st.query_params.get("is_logout_enabled")
-if _logout_qp is None or str(_logout_qp).lower() not in ("0", "false", "no", "n", "off"):
-    render_logout_link()
+LOGOUT_ENABLED = _logout_qp is None or str(_logout_qp).lower() not in (
+    "0",
+    "false",
+    "no",
+    "n",
+    "off",
+)
 
 # -------------------------
 # Main app
@@ -662,3 +675,11 @@ if __name__ == "__main__":
         else:
             with st.expander(":red[An error occurred while trying to load the app.]"):
                 st.error(traceback.format_exc())
+
+    finally:
+        # Rendered last so it sits at the BOTTOM of the sidebar, beneath the
+        # app's own navigation. In `finally` so a failure in main() still leaves
+        # the user a way out -- the property the original placement was
+        # protecting by rendering first.
+        if LOGOUT_ENABLED:
+            render_logout_link()
