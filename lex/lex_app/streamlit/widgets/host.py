@@ -25,7 +25,12 @@ from typing import Any, Dict, List, Optional
 
 from lex.lex_app.streamlit._widget_host_component import render_widget_host
 from lex.lex_app.streamlit.embed import _resolve_base_url
-from lex.lex_app.streamlit.widgets.spec import PK, build_manifest, calculation_spec
+from lex.lex_app.streamlit.widgets.spec import (
+    PK,
+    build_manifest,
+    calculation_log_spec,
+    calculation_spec,
+)
 
 #: Route on the lex-app frontend that renders a manifest.
 HOST_PATH = "/embed/widgets"
@@ -75,6 +80,38 @@ class WidgetPage:
         # widgets on a page do not read each other's status.
         if self._result and self._result.get("payload", {}).get("widget_id") == widget_id:
             return self._result
+        return None
+
+    def calculation_log(
+        self,
+        model: str,
+        pk: PK,
+        *,
+        height: Optional[int] = None,
+        calculation_id: Optional[str] = None,
+        id: Optional[str] = None,
+    ) -> None:
+        """Add the calculation log on its own, sized by you.
+
+        Prefer this over ``calculation(..., show_log=True)`` when the log is
+        the point. A two-pane tree wants width and height; a Calculate control
+        wants a line. Declaring them separately lets the control sit in a
+        narrow column and the log run full width beneath it -- which is what
+        makes the log readable rather than a letterbox.
+
+        Returns ``None``: a log emits no status. Use ``calculation(...)`` for
+        that.
+        """
+        self._auto_id += 1
+        self._specs.append(
+            calculation_log_spec(
+                id or f"w{self._auto_id}",
+                model,
+                pk,
+                height=height,
+                calculation_id=calculation_id,
+            )
+        )
         return None
 
     # ── internals ───────────────────────────────────────────────────────
