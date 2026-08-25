@@ -16,6 +16,28 @@ The cost, stated plainly: widgets appear where the ``with`` block closes, not
 where each call sits. Interleaving ``st.write()`` between two widgets is not
 available. The context manager makes that boundary a language construct rather
 than a convention someone has to remember.
+
+PERFORMANCE — the one number that matters
+-----------------------------------------
+**Widget count is free. Block count is not.**
+
+Each ``lex_widgets()`` block is one iframe, and each iframe is a full React
+application: its own bundle parse, its own auth handshake, its own ``model_info``
+fetch, its own react-admin mount. Ten widgets in one block boot one app. Ten
+blocks boot ten, they contend for the same network and main thread, and a page
+scrolled during that window shows widgets still coming up -- which reads as
+lazy loading and is not. The frames all start loading immediately; they simply
+have a lot to do.
+
+So prefer::
+
+    with lex_widgets() as page:          # one runtime, ten widgets
+        for pk in pks:
+            page.calculation("navcalc", pk=pk)
+
+over a block per widget. Reach for a second block only when a layout genuinely
+needs Streamlit content between two groups -- that is a real reason, and it
+costs a runtime.
 """
 
 from __future__ import annotations
