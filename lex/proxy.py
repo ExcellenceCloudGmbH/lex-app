@@ -1012,9 +1012,93 @@ async def proxy(request: Request):
 
 
 # -----------------------------------------------------------------------------
+# Theme relay
+# -----------------------------------------------------------------------------
+#: Storage key both origins agree on. Changing it breaks the handshake, so it is
+#: named once here and mirrored in the frontend's themeRelay.ts.
+THEME_STORAGE_KEY = "lex.theme.mode"
+
+#: Origins allowed to drive this relay. The lex-app frontend, wherever it lives.
+_THEME_RELAY_ALLOWED = [
+    o.rstrip("/")
+    for o in (os.getenv("REACT_APP_URL"), os.getenv("LEX_FRONTEND_URL"))
+    if o
+] or ["http://localhost:8000"]
+
+_THEME_RELAY_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>lex theme relay</title></head>
+<body>
+<!--
+  Cross-origin theme relay.
+
+  localStorage is origin-scoped, so the lex-app frontend cannot write the
+  Streamlit origin's storage directly -- and without that, a STANDALONE
+  Streamlit window never learns the theme changed. postMessage only reaches
+  frames you hold a handle to, which a separate window is not.
+
+  This page is served from the Streamlit origin and embedded, hidden, by the
+  frontend. The frontend posts a mode to it; this writes it to storage HERE.
+  Because a storage write raises a `storage` event in every OTHER tab of the
+  same origin, every Streamlit tab -- embedded or standalone -- is notified,
+  with no server involved and no polling.
+-->
+<script>
+  var KEY = "__KEY__";
+  var ALLOWED = __ALLOWED__;
+
+  window.addEventListener("message", function (ev) {
+    if (ALLOWED.indexOf(ev.origin) === -1) return;           // only our frontend
+    var d = ev.data;
+    if (!d || d.type !== "lex-theme-set") return;
+    var mode = d.mode === "dark" ? "dark" : "light";
+    try {
+      // Writing the same value raises no storage event, so a repeat is a
+      // genuine no-op rather than a needless wake-up for every tab.
+      if (window.localStorage.getItem(KEY) !== mode) {
+        window.localStorage.setItem(KEY, mode);
+      }
+      // Answer so the caller knows the relay is alive and which value stuck.
+      ev.source.postMessage({ type: "lex-theme-ack", mode: mode }, ev.origin);
+    } catch (e) {
+      /* storage disabled (private mode, blocked cookies) -- degrade quietly */
+    }
+  });
+
+  // Announce readiness so the frontend can flush a mode queued before load.
+  try {
+    parent.postMessage({ type: "lex-theme-relay-ready" }, "*");
+  } catch (e) {}
+</script>
+</body></html>
+"""
+
+
+async def theme_relay(request: Request) -> Response:
+    """Serve the cross-origin theme relay.
+
+    Framed by the lex-app frontend so it can write THIS origin's storage. See
+    the comment inside the document for why that indirection is necessary.
+    """
+    body = _THEME_RELAY_HTML.replace("__KEY__", THEME_STORAGE_KEY).replace(
+        "__ALLOWED__", json.dumps(_THEME_RELAY_ALLOWED)
+    )
+    return HTMLResponse(
+        body,
+        headers={
+            # Must be framable by the frontend; that is its entire purpose.
+            "Content-Security-Policy": "frame-ancestors " + " ".join(_THEME_RELAY_ALLOWED),
+            # Static and tiny, but never stale: the allow-list is baked in.
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# -----------------------------------------------------------------------------
 # Routing / app
 # -----------------------------------------------------------------------------
 routes = [
+    # Before the catch-all proxy, or it would be forwarded upstream to Streamlit.
+    Route("/_lex/theme-relay", theme_relay, methods=["GET"]),
     Route("/auth/login", login, methods=["GET"]),
     Route("/auth/callback", auth_callback, methods=["GET"]),
     Route("/oauth2/logout", oauth2_logout, methods=["GET"]),
