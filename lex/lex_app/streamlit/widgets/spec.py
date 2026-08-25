@@ -19,7 +19,7 @@ MANIFEST_VERSION = 1
 
 #: Widget types this producer can emit. The manifest is typed so more can be
 #: added without redesigning the transport.
-KNOWN_TYPES = ("calculation", "calculation_log")
+KNOWN_TYPES = ("calculation", "calculation_log", "calculation_log_stream")
 
 #: Options understood per widget type. Validated per type, so ``height`` on a
 #: ``calculation`` (where the key is ``log_height``) is caught rather than
@@ -27,6 +27,7 @@ KNOWN_TYPES = ("calculation", "calculation_log")
 KNOWN_OPTIONS = {
     "calculation": ("show_log", "log_height", "on_status"),
     "calculation_log": ("height", "calculation_id"),
+    "calculation_log_stream": ("height", "calculation_id"),
 }
 
 PK = Union[str, int]
@@ -114,6 +115,7 @@ def calculation_log_spec(
     *,
     height: Optional[int] = None,
     calculation_id: Optional[str] = None,
+    stream: bool = False,
 ) -> Dict[str, Any]:
     """Build a validated spec for the log on its own.
 
@@ -139,7 +141,9 @@ def calculation_log_spec(
 
     return {
         "id": widget_id,
-        "type": "calculation_log",
+        # The stream answers "what is happening now"; the tree answers "what was
+        # the structure of this run". Same options, different question.
+        "type": "calculation_log_stream" if stream else "calculation_log",
         "model": model,
         "pk": pk,
         "options": options,

@@ -94,6 +94,7 @@ class WidgetPage:
         *,
         height: Optional[int] = None,
         calculation_id: Optional[str] = None,
+        stream: bool = False,
         id: Optional[str] = None,
     ) -> None:
         """Add the calculation log on its own, sized by you.
@@ -115,6 +116,7 @@ class WidgetPage:
                 pk,
                 height=height,
                 calculation_id=calculation_id,
+                stream=stream,
             )
         )
         return None
@@ -226,6 +228,9 @@ class _LexWidgets:
                 pk,
                 height=_DIALOG_LOG_HEIGHT,
                 calculation_id=calculation_id or None,
+                # The popup streams. Someone who just pressed Calculate wants to
+                # watch output arrive, not navigate a structure.
+                stream=True,
             )
             render_widget_host(
                 url=url,
