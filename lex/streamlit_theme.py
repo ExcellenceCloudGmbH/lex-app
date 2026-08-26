@@ -110,22 +110,36 @@ _FOLLOWER_HTML = """<script>
       }
     }
 
+    // Published on the page so a writer already INSIDE this frame tree can just
+    // call it. The widget-host shim does, which turns the embedded path from
+    //
+    //   widget -> shim -> localStorage -> storage event -> follower -> reload
+    //
+    // into
+    //
+    //   widget -> shim -> follower -> reload
+    //
+    // Three fewer things that can fail without saying so. The storage route
+    // stays for writers that have no handle to this page -- the relay iframe,
+    // and a sibling tab on this origin.
+    host.__lexThemeFollow = follow;
+
     // A change that landed while this page was loading -- including one an
     // embedded widget announced before this block rendered, which is the common
-    // ordering. Deferred one frame so the app's styles have painted before we
-    // measure them.
+    // ordering, and the reason the shim writes storage as well as calling in.
+    // Deferred one frame so the app's styles have painted before we measure them.
     host.requestAnimationFrame(function () {
       try { follow(host.localStorage.getItem(KEY)); } catch (e) {}
     });
 
     // On `host`, not `window`: see the lifetime note above. `storage` fires in
-    // every OTHER window of this origin, which is how both writers reach us --
-    // the relay iframe (standalone pages) and the widget-host shim (embedded).
+    // every OTHER window of this origin, which is how a writer without a handle
+    // to us gets through.
     host.addEventListener("storage", function (ev) {
       if (ev.key === KEY) follow(ev.newValue);
     });
 
-    console.info("[lex-theme] follower listening; page is showing", currentMode() || "(unknown)");
+    console.info("[lex-theme] follower ready; page is showing", currentMode() || "(unknown)");
   })();
 </script>
 """

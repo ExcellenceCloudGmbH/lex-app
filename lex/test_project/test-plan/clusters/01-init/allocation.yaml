@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.270
+    scenarios: 1.261-1.271
     status: complete
     tests:
-      pass: 13
+      pass: 14
       skip: 0
       xfail: 0
     note: >-
@@ -339,3 +339,11 @@ letters:
       page's storage and added one console.info per decision, because three cross-context hops
       with no UI of their own make "never arrived" and "arrived and was already correct"
       indistinguishable from the outside.
+      1.271 shortens the embedded path rather than debugging it further. It was widget -> shim ->
+      localStorage -> storage event -> follower -> reload; the shim is already inside the page's
+      frame tree and same-origin with it, so the follower now publishes host.__lexThemeFollow and
+      the shim calls it outright: widget -> shim -> follower -> reload. Three fewer links, each of
+      which was silent when broken and only reachable by guessing. The storage route is retained,
+      not replaced - it is the only way in for a writer with no handle to the page (the relay
+      iframe, a sibling tab, and a shim that reports before the follower has rendered, which the
+      install-time read covers). Harness after the change: 8/8 across both routes.

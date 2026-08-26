@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.270.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.271.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -147,6 +147,31 @@ class TestCluster1ad_StreamlitThemeFollower:
         assert "window.addEventListener(" not in html, (
             "listener attached to the component iframe, which Streamlit recreates"
         )
+
+
+    def test_01_271_follower_publishes_a_direct_entry_point(self):
+        """Scenario 1.271: a writer inside the frame tree can skip the storage hop.
+
+        The embedded path used to be widget -> shim -> localStorage -> storage
+        event -> follower -> reload. Every link there is silent when it breaks,
+        and three of them were only reachable by guessing. The shim is already
+        inside the page's frame tree and same-origin with it, so it can call the
+        follower outright.
+
+        The storage route is not removed -- it is the only way in for a writer
+        with no handle to the page (the relay iframe, a sibling tab, and a shim
+        that reports before the follower has rendered).
+        """
+        html = theme_follower_html("dark")
+        assert "host.__lexThemeFollow = follow;" in html
+
+        shim = (
+            pathlib.Path(__file__).resolve().parents[3]
+            / "lex_app/streamlit/_widget_host_component/frontend/index.html"
+        ).read_text()
+        assert "window.parent.__lexThemeFollow(mode)" in shim
+        # Storage is still written, so the pre-render ordering keeps working.
+        assert "window.localStorage.setItem(_themeStorageKey, mode)" in shim
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

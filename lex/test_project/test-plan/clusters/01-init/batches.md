@@ -339,3 +339,30 @@ look identical from the outside.
 
 Harness re-run after the move: 7/7, including the new pre-existing-stored-value
 case that covers the widget-writes-first ordering.
+
+### Batch 1ad addendum 3 — shorten the embedded path (scenario 1.271)
+
+Two rounds of debugging had been spent guessing which link in a five-link chain
+was silent. The chain itself was the problem:
+
+```
+before:  widget -> shim -> localStorage -> storage event -> follower -> reload
+after:   widget -> shim -> follower -> reload
+```
+
+The shim is already inside the Streamlit page's frame tree and same-origin with
+it, so it never needed storage to reach the page. The follower now publishes
+`host.__lexThemeFollow` and the shim calls it directly.
+
+The storage route stays — it is the only way in for a writer holding no handle to
+the page:
+
+| Writer | Route |
+|---|---|
+| widget-host shim (embedded) | direct call, storage as backup |
+| relay iframe (standalone page) | storage |
+| a sibling Streamlit tab | storage |
+| shim reporting before the follower rendered | storage, read at install |
+
+Harness after the change: 8/8, covering the direct call, the storage route, the
+pre-render ordering, and a mixed burst reloading once.

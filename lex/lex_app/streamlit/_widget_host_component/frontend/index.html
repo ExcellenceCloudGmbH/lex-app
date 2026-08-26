@@ -171,15 +171,33 @@
           console.warn("[lex-theme] widget reported", mode, "but no storage key was supplied");
           return;
         }
+        // Storage first, for readers with no handle to this page: sibling tabs
+        // on this origin, and a follower that has not rendered yet (its initial
+        // read picks this up).
         try {
-          if (window.localStorage.getItem(_themeStorageKey) === mode) {
-            console.info("[lex-theme] widget reports", mode, "- already stored");
-          } else {
+          if (window.localStorage.getItem(_themeStorageKey) !== mode) {
             window.localStorage.setItem(_themeStorageKey, mode);
-            console.info("[lex-theme] widget reports", mode, "- stored, page should follow");
           }
         } catch (e) {
-          console.warn("[lex-theme] storage unavailable; theme will not sync", e);
+          console.warn("[lex-theme] storage unavailable", e);
+        }
+
+        // Then call the page directly. Same origin, and we are already inside
+        // its frame tree, so this needs no storage event to be delivered and no
+        // guess about whether one was. It is the shorter path and the one that
+        // reports what happened.
+        try {
+          if (typeof window.parent.__lexThemeFollow === "function") {
+            console.info("[lex-theme] widget reports", mode, "- telling the page directly");
+            window.parent.__lexThemeFollow(mode);
+          } else {
+            console.info(
+              "[lex-theme] widget reports", mode,
+              "- stored, but the page has no follower yet; it will read this on install"
+            );
+          }
+        } catch (e) {
+          console.warn("[lex-theme] could not reach the page's follower", e);
         }
         return;
       }
