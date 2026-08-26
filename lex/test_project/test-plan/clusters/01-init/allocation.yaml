@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.272
+    scenarios: 1.261-1.273
     status: complete
     tests:
-      pass: 15
+      pass: 16
       skip: 0
       xfail: 0
     note: >-
@@ -357,3 +357,12 @@ letters:
       one carries the theme background is Streamlit's business and has moved between versions,
       and the last resort is the OS preference - which is what Streamlit follows when the URL
       names no theme. Harness: 10/10, including the exact regression.
+      1.273 covers LEX_THEME_DEBUG, added because four rounds of this were debugged by inference:
+      the mechanism spans three browsing contexts, is reported with screenshots, and console
+      output was not reaching the diagnosis. A panel rendered IN the page makes one screenshot
+      sufficient - it shows the measured background, the stored value, whether a widget has
+      announced anything and by which route, and whether the reload budget is spent. Off by
+      default, and SPLICED rather than gated: when off the panel code is absent, not
+      present-and-skipped, so no production page carries it and no future edit to a runtime guard
+      can leak a debug box into a dashboard. The scenario also pins that the follower is identical
+      in both variants - diagnostics must observe the mechanism, never alter it.

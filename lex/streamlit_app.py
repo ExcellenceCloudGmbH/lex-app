@@ -11,7 +11,12 @@ import requests
 import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
-from lex.streamlit_theme import embed_theme_from_params, theme_follower_html
+from lex.streamlit_theme import (
+    DEBUG_PANEL_HEIGHT,
+    embed_theme_from_params,
+    theme_debug_enabled,
+    theme_follower_html,
+)
 
 logger = logging.getLogger(__name__)
 log = logging.getLogger(__name__)
@@ -616,7 +621,11 @@ def render_theme_follower() -> None:
     """
     import streamlit.components.v1 as components
 
-    components.html(theme_follower_html(_url_embed_theme()), height=0)
+    debug = theme_debug_enabled()
+    components.html(
+        theme_follower_html(_url_embed_theme(), debug=debug),
+        height=DEBUG_PANEL_HEIGHT if debug else 0,
+    )
 
 
 # Form-safe logout control (won't break no matter what streamlit_structure.main() does).

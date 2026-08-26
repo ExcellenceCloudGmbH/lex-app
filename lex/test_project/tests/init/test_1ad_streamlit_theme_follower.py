@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.272.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.273.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -32,7 +32,9 @@ import pathlib
 import pytest
 
 from lex.streamlit_theme import (
+    DEBUG_PANEL_HEIGHT,
     THEME_STORAGE_KEY,
+    theme_debug_enabled,
     embed_theme_from_params,
     theme_follower_html,
 )
@@ -203,6 +205,46 @@ class TestCluster1ad_StreamlitThemeFollower:
 
         # And a reasoned last resort rather than a guess.
         assert "prefers-color-scheme: dark" in html
+
+
+    def test_01_273_diagnostics_are_off_and_weightless_by_default(self):
+        """Scenario 1.273: the diagnostics panel costs nothing unless asked for.
+
+        A theme problem spans three browsing contexts, so the panel exists to
+        make one screenshot sufficient. But it renders into a block on the page,
+        and a block that is accidentally always on would put a debug box at the
+        bottom of every production dashboard.
+
+        Two properties: the flag defaults off for every spelling of "not set",
+        and when off the emitted script contains no panel code to run.
+        """
+        for value in ({}, {"LEX_THEME_DEBUG": ""}, {"LEX_THEME_DEBUG": "0"},
+                      {"LEX_THEME_DEBUG": "false"}, {"LEX_THEME_DEBUG": "no"}):
+            assert theme_debug_enabled(value) is False, value
+
+        # Accepts the spellings an operator actually types -- someone who writes
+        # "true" and sees nothing would reasonably call the feature broken.
+        for value in ("1", "true", "TRUE", "yes", "on"):
+            assert theme_debug_enabled({"LEX_THEME_DEBUG": value}) is True, value
+
+        # Spliced, not gated: when off, the panel code is ABSENT rather than
+        # present-and-skipped. A runtime guard would ship this to every page and
+        # would only have to be edited wrong once to surface in production.
+        off = theme_follower_html("", debug=False)
+        assert "lex-theme diagnostics" not in off
+        assert "setInterval" not in off, "an inert page must not schedule work"
+
+        on = theme_follower_html("", debug=True)
+        assert on.count("lex-theme diagnostics") == 1
+        assert len(on) > len(off), "the panel should add code, not replace it"
+        assert DEBUG_PANEL_HEIGHT > 0, "an on panel needs room or it renders clipped"
+
+        # Whichever variant is emitted, the follower itself is unchanged --
+        # diagnostics must observe the mechanism, never alter it.
+        for html in (off, on):
+            assert "host.__lexThemeFollow = follow;" in html
+            assert 'host.addEventListener("storage"' in html
+            assert "__DEBUG" not in html, "unreplaced marker would ship to the browser"
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

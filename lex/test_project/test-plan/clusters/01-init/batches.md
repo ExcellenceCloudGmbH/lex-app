@@ -393,3 +393,33 @@ confidently wrong, which is why shortening the delivery chain changed nothing.
 Harness: 10/10, including the exact regression (transparent `.stApp` on a light
 page must still reload) and the inverse (transparent everywhere with an OS
 preference of dark, told dark, must stay put).
+
+### Batch 1ad addendum 5 — make it observable (scenario 1.273)
+
+Four rounds of this were debugged by inference. The mechanism spans three
+browsing contexts, the reports arrive as screenshots, and console output was not
+reaching the diagnosis. So the state is now renderable in the page:
+
+```
+LEX_THEME_DEBUG=1
+```
+
+```
+lex-theme diagnostics (LEX_THEME_DEBUG)
+page showing: light   measured bg rgb(255, 255, 255)
+url embed_options: (none)
+stored on this origin: dark
+widget last reported: dark via direct, 3s ago
+follow entry point: function
+reload already used: no
+```
+
+Each line answers one of the questions that previously needed a guess — in that
+example, the theme arrived, the page measured correctly, and the reload had not
+fired, which localises the fault to `follow()` rather than to delivery.
+
+**Spliced, not gated.** When off, the panel code is *absent* rather than
+present-and-skipped: no production page carries it, and no later edit to a
+runtime guard can leak a debug box into a dashboard. 1.273 also pins that the
+follower is byte-identical in both variants — diagnostics observe the mechanism,
+they never alter it.

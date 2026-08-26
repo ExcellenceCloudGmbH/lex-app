@@ -187,6 +187,15 @@
         // guess about whether one was. It is the shorter path and the one that
         // reports what happened.
         try {
+          // Leave a record on the page regardless of which route we take, so the
+          // diagnostics panel can distinguish "the widget never spoke" from
+          // "it spoke and the page declined". Those look identical otherwise.
+          var at = Date.now();
+          window.parent.__lexThemeLastReport = {
+            mode: mode,
+            route: typeof window.parent.__lexThemeFollow === "function" ? "direct" : "storage",
+            ago: function () { return Math.round((Date.now() - at) / 1000); }
+          };
           if (typeof window.parent.__lexThemeFollow === "function") {
             console.info("[lex-theme] widget reports", mode, "- telling the page directly");
             window.parent.__lexThemeFollow(mode);

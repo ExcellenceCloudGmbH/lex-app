@@ -43,6 +43,58 @@ def embed_theme_from_params(values: Iterable[object]) -> str:
     return ""
 
 
+#: Spliced into the follower only when diagnostics are on. See
+#: :func:`theme_debug_enabled`.
+_DEBUG_PANEL_JS = """    // ── Visible diagnostics ──────────────────────────────────────────────
+    // Spliced in only when LEX_THEME_DEBUG is set, rather than shipped inert and
+    // branched at runtime: a page that never asked for this should not carry the
+    // code, and a future edit to a runtime guard cannot leak a debug box into a
+    // production dashboard.
+    //
+    // The console is the natural home for this, but a theme problem crosses
+    // three browsing contexts and is usually reported with a screenshot. A panel
+    // in the page turns one screenshot into the whole picture.
+    var box = document.createElement("pre");
+    box.style.cssText =
+      "margin:0;padding:8px 10px;font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;" +
+      "border:1px solid rgba(128,128,128,.45);border-radius:6px;white-space:pre-wrap;" +
+      "color:inherit;background:rgba(128,128,128,.08)";
+    document.body.appendChild(box);
+
+    function line(label, value) {
+      return label + ": " + value + "\\n";
+    }
+
+    function paint() {
+      var stored, storageErr = "";
+      try { stored = host.localStorage.getItem(KEY); }
+      catch (e) { storageErr = " (unreadable: " + e.name + ")"; }
+
+      var report = host.__lexThemeLastReport;
+      var bg = "";
+      try {
+        var el = host.document.querySelector(".stApp") || host.document.body;
+        bg = host.getComputedStyle(el).backgroundColor;
+      } catch (e) { bg = "(unreadable)"; }
+
+      box.textContent =
+        "lex-theme diagnostics (LEX_THEME_DEBUG)\\n" +
+        line("page showing", (currentMode() || "unknown") + "   measured bg " + bg) +
+        line("url embed_options", URL_MODE || "(none)") +
+        line("stored on this origin", (stored === null || stored === undefined
+              ? "(unset)" : stored) + storageErr) +
+        line("widget last reported", report
+              ? report.mode + " via " + report.route + ", " + report.ago() + "s ago"
+              : "(nothing yet -- no widget has announced a theme)") +
+        line("follow entry point", typeof host.__lexThemeFollow) +
+        line("reload already used", host.__lexThemeReloading ? "yes" : "no");
+    }
+
+    paint();
+    host.setInterval(paint, 1000);
+"""
+
+
 _FOLLOWER_HTML = """<script>
   (function () {
     var KEY = __KEY__;
@@ -177,12 +229,31 @@ _FOLLOWER_HTML = """<script>
     });
 
     console.info("[lex-theme] follower ready; page is showing", currentMode() || "(unknown)");
-  })();
+
+__DEBUG_PANEL__  })();
 </script>
 """
 
 
-def theme_follower_html(url_mode: str = "") -> str:
+#: Height the follower block needs when the diagnostics panel is on. Zero
+#: otherwise -- an inert block must not take space.
+DEBUG_PANEL_HEIGHT = 132
+
+
+def theme_debug_enabled(environ: "dict[str, str] | None" = None) -> bool:
+    """Whether to render the visible diagnostics panel.
+
+    Off unless ``LEX_THEME_DEBUG`` is set to something truthy. Accepts the usual
+    spellings rather than only ``1``, because an operator who writes ``true`` and
+    sees nothing happen will reasonably conclude the feature is broken.
+    """
+    import os
+
+    raw = (environ if environ is not None else os.environ).get("LEX_THEME_DEBUG", "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def theme_follower_html(url_mode: str = "", debug: bool = False) -> str:
     """The script that makes a Streamlit page follow a theme change.
 
     A running Streamlit script cannot repaint itself -- the theme arrives as a
@@ -203,8 +274,10 @@ def theme_follower_html(url_mode: str = "") -> str:
     Known cost, stated rather than hidden: the reload discards in-progress widget
     state on the page. That is the price of Streamlit's boot-time theming.
     """
-    return _FOLLOWER_HTML.replace("__KEY__", _js_literal(THEME_STORAGE_KEY)).replace(
-        "__URL_MODE__", _js_literal(url_mode or "")
+    return (
+        _FOLLOWER_HTML.replace("__KEY__", _js_literal(THEME_STORAGE_KEY))
+        .replace("__URL_MODE__", _js_literal(url_mode or ""))
+        .replace("__DEBUG_PANEL__", _DEBUG_PANEL_JS if debug else "")
     )
 
 
