@@ -366,3 +366,30 @@ the page:
 
 Harness after the change: 8/8, covering the direct call, the storage route, the
 pre-render ordering, and a mixed burst reloading once.
+
+### Batch 1ad addendum 4 — the measurement was lying (scenario 1.272)
+
+The bug that made every earlier fix in this batch look ineffective.
+
+```
+'rgba(0, 0, 0, 0)'  ->  old measurement says "dark"
+```
+
+Four zeroes pass a `length < 3` guard and compute a Rec. 601 luma of 0 — pure
+black. So any page whose measured element painted no background of its own
+reported **dark**. A light page asked to become dark then hit
+`if (!now || now === mode) return;` and stopped, while logging that the page was
+already correct.
+
+Every previous round of debugging was downstream of a measurement that was
+confidently wrong, which is why shortening the delivery chain changed nothing.
+
+| Fix | Why |
+|---|---|
+| Guard on **alpha**, not component count | `rgba(0,0,0,0)` has four components — one *more* than the old guard required |
+| Several candidate elements, in order | Which element carries the theme background is Streamlit's business and has moved between versions |
+| OS preference as last resort | With no theme in the URL, that is what Streamlit itself follows — a reasoned answer, not a guess |
+
+Harness: 10/10, including the exact regression (transparent `.stApp` on a light
+page must still reload) and the inverse (transparent everywhere with an OS
+preference of dark, told dark, must stay put).

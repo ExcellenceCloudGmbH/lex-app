@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.271.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.272.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -172,6 +172,37 @@ class TestCluster1ad_StreamlitThemeFollower:
         assert "window.parent.__lexThemeFollow(mode)" in shim
         # Storage is still written, so the pre-render ordering keeps working.
         assert "window.localStorage.setItem(_themeStorageKey, mode)" in shim
+
+
+    def test_01_272_transparent_background_is_not_read_as_dark(self):
+        """Scenario 1.272: a transparent background yields no answer, not "dark".
+
+        This was the bug that made theme sync appear completely dead. The
+        measurement parsed ``rgba(0, 0, 0, 0)`` into four zeroes, passed the
+        ``length < 3`` check, and computed a luma of 0 -- pure black. So any page
+        whose measured element painted nothing of its own reported "dark". On a
+        light page asked to become dark, the follower then saw ``now === mode``
+        and returned. A silent no-op, every single time, with a log line claiming
+        the page was already correct.
+
+        A transparent colour carries no information. The guard must be on alpha,
+        not on component count, and the fallbacks must be tried in order:
+        another element that does paint, then the OS preference -- which is what
+        Streamlit itself follows when the URL names no theme.
+        """
+        html = theme_follower_html()
+
+        # Alpha zero is rejected explicitly. Component count cannot catch it:
+        # rgba(0,0,0,0) has four components, one more than the old guard needed.
+        assert "parseFloat(parts[3]) === 0" in html
+
+        # More than one candidate element, because which one carries the theme
+        # background is Streamlit's business and has moved between versions.
+        for selector in (".stApp", "stAppViewContainer", "d.body", "d.documentElement"):
+            assert selector in html, f"missing background candidate: {selector}"
+
+        # And a reasoned last resort rather than a guess.
+        assert "prefers-color-scheme: dark" in html
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

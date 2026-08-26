@@ -64,20 +64,57 @@ _FOLLOWER_HTML = """<script>
     if (host.__lexThemeFollowerInstalled) return;
     host.__lexThemeFollowerInstalled = true;
 
-    /** What is on screen right now, or "" if we cannot tell. */
-    function currentMode() {
-      // The URL wins when it specifies a mode: we put it there last time.
-      if (URL_MODE) return URL_MODE;
-      // Otherwise Streamlit is following the OS or a config default, and the
-      // only honest way to learn which is to look at what it painted.
+    /** Light/dark from one element's own background, or "" if it has none. */
+    function paintedMode(el) {
+      if (!el) return "";
       try {
-        var el = host.document.querySelector(".stApp") || host.document.body;
         var parts = host.getComputedStyle(el).backgroundColor.match(/[\\d.]+/g);
         if (!parts || parts.length < 3) return "";
+        // A fully transparent background carries NO information, and this is the
+        // case that has to be rejected explicitly: `rgba(0, 0, 0, 0)` parses to
+        // four zeroes, which reads as pure black and would answer "dark" for any
+        // page whose element simply paints nothing. That answer is worse than no
+        // answer -- it makes a light page look already-correct, so the follower
+        // no-ops and the theme silently never changes.
+        if (parts.length > 3 && parseFloat(parts[3]) === 0) return "";
         // Rec. 601 luma. Streamlit's two themes sit at the extremes, so the
         // midpoint is a safe cut -- this is not trying to be a colour library.
         var luma = 0.299 * +parts[0] + 0.587 * +parts[1] + 0.114 * +parts[2];
         return luma < 128 ? "dark" : "light";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    /** What is on screen right now, or "" if we genuinely cannot tell. */
+    function currentMode() {
+      // The URL wins when it specifies a mode: we put it there last time.
+      if (URL_MODE) return URL_MODE;
+
+      // Otherwise Streamlit is following the OS or a config default, and the
+      // honest way to learn which is to look at what it painted. Which element
+      // carries the theme background is Streamlit's business and has moved
+      // between versions, so try the plausible ones and take the first that
+      // actually paints.
+      var d;
+      try { d = host.document; } catch (e) { return ""; }
+      var candidates = [
+        d.querySelector(".stApp"),
+        d.querySelector('[data-testid="stAppViewContainer"]'),
+        d.querySelector('[data-testid="stMain"]'),
+        d.body,
+        d.documentElement
+      ];
+      for (var i = 0; i < candidates.length; i++) {
+        var painted = paintedMode(candidates[i]);
+        if (painted) return painted;
+      }
+
+      // Nothing opaque anywhere. With no theme in the URL Streamlit follows the
+      // OS preference, so ask the OS -- a reasoned answer rather than a guess,
+      // and better than refusing outright.
+      try {
+        return host.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       } catch (e) {
         return "";
       }

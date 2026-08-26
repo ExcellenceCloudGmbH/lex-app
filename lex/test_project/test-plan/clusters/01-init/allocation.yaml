@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.271
+    scenarios: 1.261-1.272
     status: complete
     tests:
-      pass: 14
+      pass: 15
       skip: 0
       xfail: 0
     note: >-
@@ -347,3 +347,13 @@ letters:
       not replaced - it is the only way in for a writer with no handle to the page (the relay
       iframe, a sibling tab, and a shim that reports before the follower has rendered, which the
       install-time read covers). Harness after the change: 8/8 across both routes.
+      1.272 is the bug that made all of this look dead. The background measurement parsed
+      "rgba(0, 0, 0, 0)" into four zeroes, passed a "length < 3" guard, and computed luma 0 -
+      pure black - so ANY page whose measured element painted nothing reported "dark". A light
+      page asked to become dark then saw now === mode and returned: a silent no-op every time,
+      with a log line asserting the page was already correct. Three earlier fixes in this batch
+      were all downstream of a measurement that was confidently wrong. The guard is now on ALPHA
+      rather than component count, several candidate elements are tried in order because which
+      one carries the theme background is Streamlit's business and has moved between versions,
+      and the last resort is the OS preference - which is what Streamlit follows when the URL
+      names no theme. Harness: 10/10, including the exact regression.
