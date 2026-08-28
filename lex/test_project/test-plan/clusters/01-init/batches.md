@@ -227,3 +227,18 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+## Batch 1ab — `lex.tools.ai_worktree` compatibility shim
+
+| Field | Value |
+|---|---|
+| Scenario range | 1.223–1.228 |
+| Type | U (unit) |
+| Files covered | `lex/tools/ai_worktree.py` |
+| Test file | `lex/test_project/tests/init/test_1ab_ai_worktree_shim.py` |
+| Test classes | `TestCluster01ab_MissingDependency`, `TestCluster01ab_AttributeDelegation`, `TestCluster01ab_DirectoryDelegation` |
+| Fixtures | none (pure-Python, sys.modules patching) |
+| Status | ✅ Complete — 6 pass / 0 fail |
+| Note | Coverage task for PR #729. Shim exposes three behaviours: (1) missing-package ImportError with recovery hint, (2) `__getattr__` delegation to real module, (3) `__dir__` delegation. Tests mock `lex_mcp` via `sys.modules` injection so they run without the package installed. |

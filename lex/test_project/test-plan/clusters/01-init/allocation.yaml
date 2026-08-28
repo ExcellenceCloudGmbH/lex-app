@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 228
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -283,3 +283,15 @@ letters:
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
 
+  ab:
+    title: '`lex.tools.ai_worktree` compatibility shim'
+    scenarios: 1.223-1.228
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Shim re-exports lex_mcp.ai_worktree via __getattr__ / __dir__. Covers missing-dependency
+      ImportError with recovery hint, attribute delegation, and directory delegation.
+      Adds lex/tools/ai_worktree.py (new file from feat/ai-command-passthrough).
