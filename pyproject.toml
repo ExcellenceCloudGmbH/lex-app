@@ -48,4 +48,7 @@ include = ["lex*", "migrations_logic*"]
 # does not call setup_test_environment() a second time (which raises
 # RuntimeError since Django 4.2+).
 addopts = "-p no:django"
+markers = [
+    "mcp_tools: Cluster 16 — MCP server tools (embed, verify-assets, mode-invoke, env-file)",
+]
 

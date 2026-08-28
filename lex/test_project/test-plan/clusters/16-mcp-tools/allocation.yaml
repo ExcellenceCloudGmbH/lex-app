@@ -1,0 +1,55 @@
+cluster: 16
+slug: mcp_tools
+title: MCP Server Tools
+max_scenario: 65
+letters:
+  a:
+    title: embed-view URL building and path classification
+    scenarios: 16.1-16.27
+    status: complete
+    tests:
+      pass: 27
+      skip: 0
+      xfail: 0
+    note: >
+      Covers _classify_path (all view-type branches), _build_title (resource /
+      container / fallback), _resolve_frontend_url (4-level priority chain),
+      _csp_origins (frontend always included, extra origins, dedup), and
+      _build_embed_url (embed flag, #embed fragment, optional params).
+  b:
+    title: MCP mode resolution and asset verification
+    scenarios: 16.28-16.45
+    status: complete
+    tests:
+      pass: 18
+      skip: 0
+      xfail: 0
+    note: >
+      Covers _read_env_file_value (found/missing/quoted/comments/absent file),
+      resolve_active_mcp_mode (all six priority levels), and verify_directory
+      (None source, missing file restored, identical file ok, drifted file
+      overwritten, explicit skipped_reason).
+  c:
+    title: MCP mode-switch invocation from outside the server
+    scenarios: 16.46-16.57
+    status: complete
+    tests:
+      pass: 12
+      skip: 0
+      xfail: 0
+    note: >
+      Covers _normalise_mode (all modes, case/whitespace, invalid), InvokeSwitchResult.ok
+      (true/false/defaults), and invoke_switch_to_mode (invalid mode raises before I/O,
+      fallback strategy when lex_mcp absent, stop_server=False leaves server_stopped False).
+  d:
+    title: .env file management
+    scenarios: 16.58-16.65
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >
+      Covers update_env_file: creates file, updates key in-place, appends new key,
+      preserves comments, handles multiple values, removes legacy COPILOT_GITHUB_TOKEN
+      when GITHUB_TOKEN is written, ensures trailing newline, handles values with spaces.
