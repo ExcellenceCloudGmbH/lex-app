@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 263
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -283,3 +283,24 @@ letters:
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
 
+  ab:
+    title: MCP tool helpers — embed URL/title, mode-invoke, verify-assets, setup-with-ai
+    scenarios: 1.223-1.263
+    status: complete
+    tests:
+      pass: 41
+      skip: 0
+      xfail: 0
+    note: >-
+      scenarios 1.223–1.263; covers _resolve_frontend_url priority chain,
+      _classify_path view-type detection, _build_embed_url param generation,
+      _build_title resource naming, _normalise_mode validation,
+      InvokeSwitchResult.ok, invoke_switch_to_mode noop path,
+      _read_env_file_value (.env parsing), resolve_active_mcp_mode precedence
+      (explicit > override > .env > default), verify_directory
+      (skipped/restore/match), VerifyAIAssetsResult.ok aggregate,
+      _read_mode_from_mcp_json mcp.json extraction, LEX_MCP_LOCAL_SERVER_NAME
+      constant, LEX_APP_EMBEDDED_DIRECTORY_NAMES, update_env_file write + update.
+      embed.py tests inject sys.modules stubs for the mcp SDK (not installed in CI).
+      Source files: lex/mcp_server/tools/embed.py, lex/tools/mcp_mode_invoke.py,
+      lex/tools/verify_ai_assets.py, lex/tools/setup_with_ai.py.
