@@ -227,3 +227,20 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — MCP tools infrastructure ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.256 |
+| Type | U |
+| Files covered | `lex/mcp_server/tools/embed.py`, `lex/tools/mcp_mode_invoke.py`, `lex/tools/setup_with_ai.py`, `lex/tools/verify_ai_assets.py` |
+| Test file | `lex/test_project/tests/init/test_1ab_mcp_tools_infrastructure.py` |
+| Test classes | `TestCluster01ab_EmbedPathClassification`, `TestCluster01ab_EmbedTitleBuilding`, `TestCluster01ab_FrontendUrlResolution`, `TestCluster01ab_CspOrigins`, `TestCluster01ab_NormalizeMcpMode`, `TestCluster01ab_NormalizeAiEnvironments`, `TestCluster01ab_UpdateEnvFile`, `TestCluster01ab_NormaliseMode`, `TestCluster01ab_InvokeSwitchResult`, `TestCluster01ab_InvokeSwitchFallback`, `TestCluster01ab_ResolveActiveMcpMode`, `TestCluster01ab_VerifyDirectory` |
+| Fixtures | `tempfile.TemporaryDirectory`, `sys.modules` stubs for `lex.mcp_server.config` / `mcp` SDK (not installed on this branch) |
+| Tests landed | **34 pass / 0 fail** |
+| Coverage gain | embed URL routing, mode-switch invocation, env-file update, asset-directory verification |
+| Prereqs | none |
+| Status | ✅ Complete — regression coverage for PR #703 (`fix/mcp-server-fastmcp4-port`). |

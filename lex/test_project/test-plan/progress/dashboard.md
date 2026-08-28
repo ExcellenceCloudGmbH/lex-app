@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 27 | 222 | 116 | 0 | 0 |
+| 1. Init — Project Bootstrap | 28 | 256 | 150 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -32,6 +32,7 @@
 |---|---|---|---|---|---|---|---|
 | 1a | `lex setup` — scaffolding | 1.1-1.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1aa | Embedded Streamlit token renewal (issuer expiry + proxy adoption) | 1.217-1.222 | complete | 6 | 0 | 0 | follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly newer auth_token rather than discarding it while the stored one is still valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted a-z. Renumbered from z/1.201-1.206 on merge |
+| 1ab | MCP tools infrastructure — embed URL routing, mode switching, AI-setup helpers, asset verification | 1.223-1.256 | complete | 34 | 0 | 0 | covers lex/mcp_server/tools/embed.py (_classify_path, _build_title, _resolve_frontend_url, _csp_origins), lex/tools/mcp_mode_invoke.py (_normalise_mode, InvokeSwitchResult.ok, invoke_switch_to_mode fallback path), lex/tools/setup_with_ai.py (normalize_mcp_mode, normalize_ai_environments, update_env_file), lex/tools/verify_ai_assets.py (resolve_active_mcp_mode precedence chain, verify_directory restoration). Added as regression coverage for PR #703 (fix/mcp-server-fastmcp4-port). |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
