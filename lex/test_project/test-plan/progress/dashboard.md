@@ -19,7 +19,7 @@
 | 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
-| 10. API Layer | 13 | 71 | 21 | 0 | 0 |
+| 10. API Layer | 14 | 80 | 48 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 10 | 48 | 16 | 0 | 0 |
 | 13. Export Endpoint | 7 | 37 | 7 | 0 | 0 |
@@ -214,6 +214,7 @@
 | 10l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 10m | Calculation-log tree pagination + N+1 fix | 10.61-10.66 | complete | 6 | 0 | 0 | scenarios 10.61–10.66; `CalculationLogTreeView` now paginates (limit/offset) and resolves child ids in one query (`assertNumQueries(3)` pins N+1 gone) instead of loading every row  |
 | 10n |  | 10.67-10.69 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 10o | MCP embed-view tool — URL construction and view-type classification | 10.72-10.80 | complete | 27 | 0 | 0 | Unit tests for lex/mcp_server/tools/embed.py pure helpers (_classify_path, _build_embed_url, _resolve_frontend_url, _csp_origins) and async _embed_view_inner; stubs isolate fastmcp / mcp_server sibling modules that live on an unmerged branch. All 27 pass. |
 
 ## 11. Stress & Performance (`stress`)
 

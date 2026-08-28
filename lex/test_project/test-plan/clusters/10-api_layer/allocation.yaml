@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 71
+max_scenario: 80
 letters:
   a:
     title: ''
@@ -127,3 +127,16 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  o:
+    title: MCP embed-view tool — URL construction and view-type classification
+    scenarios: 10.72-10.80
+    status: complete
+    tests:
+      pass: 27
+      skip: 0
+      xfail: 0
+    note: >-
+      Unit tests for lex/mcp_server/tools/embed.py pure helpers (_classify_path,
+      _build_embed_url, _resolve_frontend_url, _csp_origins) and async
+      _embed_view_inner; stubs isolate fastmcp / mcp_server sibling modules that
+      live on an unmerged branch. All 27 pass.
