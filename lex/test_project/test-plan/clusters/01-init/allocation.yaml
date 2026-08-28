@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 227
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -282,4 +282,12 @@ letters:
       adopts a strictly newer auth_token rather than discarding it while the stored one is still
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
-
+  ab:
+    title: MCP mode alignment + embed token hygiene regressions
+    scenarios: 1.223-1.227
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: scenarios 1.223–1.227; ai-verify alignment invokes switch primitives when runtime mode drifts from project .env, skips alignment for mode=all, invoke_switch_to_mode rejects unsupported modes, _read_dotenv_value unquotes dotenv values, and lex_embed_view keeps auth_token out of model-visible narration.

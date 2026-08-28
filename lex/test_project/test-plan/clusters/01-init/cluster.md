@@ -200,3 +200,19 @@ does not remove user launch configurations.
 **Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
 
 **Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.
+
+---
+
+### 1ab. MCP mode alignment + embed token hygiene
+
+**What it tests:** AI verification treats the project `.env` `LEX_MCP_MODE` as source-of-truth for runtime alignment when requested, setup helpers parse dotenv mode values robustly, and MCP embed narration never exposes iframe bootstrap tokens.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.223 | ai-verify aligns runtime mode when drifted | with `align_mcp_mode=True`, mismatched runtime mode in `mcp.json` triggers `invoke_switch_to_mode` to the project `.env` mode before verification |
+| 1.224 | `mode=all` skips runtime switch | no mode switch is invoked when verifying all mode payloads because there is no single runtime target |
+| 1.225 | unknown mode rejected early | `invoke_switch_to_mode` raises `ValueError` for unsupported mode names before side effects |
+| 1.226 | dotenv helper parsing stability | `_read_dotenv_value` ignores comments and returns unquoted values for quoted assignments |
+| 1.227 | embed narration keeps token secret | `lex_embed_view` structured payload carries `auth_token` bootstrap URL, while model-visible narration uses a clean URL without the token |
+
+**Scenario range:** 1.223 – 1.227. **Test file:** `lex/test_project/tests/init/test_1ab_ai_mode_and_embed_contracts.py`. **Type:** U. **Status:** ✅ 5 pass.
