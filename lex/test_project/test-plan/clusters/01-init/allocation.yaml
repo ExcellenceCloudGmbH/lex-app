@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 226
+max_scenario: 228
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -285,7 +285,7 @@ letters:
 
   ab:
     title: '`lex.tools.ai_worktree` compatibility shim'
-    scenarios: 1.223-1.226
+    scenarios: 1.223-1.228
     status: complete
     tests:
       pass: 6

@@ -234,7 +234,7 @@
 
 | Field | Value |
 |---|---|
-| Scenario range | 1.223–1.226 |
+| Scenario range | 1.223–1.228 |
 | Type | U (unit) |
 | Files covered | `lex/tools/ai_worktree.py` |
 | Test file | `lex/test_project/tests/init/test_1ab_ai_worktree_shim.py` |

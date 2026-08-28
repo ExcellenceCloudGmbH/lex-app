@@ -188,8 +188,8 @@ class TestCluster01ab_AttributeDelegation(_ShimTestBase):
             "shim __getattr__ must return the same object as the real module",
         )
 
-    def test_1_225b_getattr_resolves_constant(self):
-        """Scenario 1.225b: scalar constants are forwarded without copying.
+    def test_1_226_getattr_resolves_constant(self):
+        """Scenario 1.226: scalar constants are forwarded without copying.
 
         Given ``lex_mcp.ai_worktree`` exports ``WORKTREE_VERSION``,
         When accessed via the shim,
@@ -199,8 +199,8 @@ class TestCluster01ab_AttributeDelegation(_ShimTestBase):
 
         self.assertEqual(shim.WORKTREE_VERSION, self._ai_worktree_mod.WORKTREE_VERSION)
 
-    def test_1_225c_getattr_unknown_name_raises_attribute_error(self):
-        """Scenario 1.225c: unknown attribute raises ``AttributeError``.
+    def test_1_227_getattr_unknown_name_raises_attribute_error(self):
+        """Scenario 1.227: unknown attribute raises ``AttributeError``.
 
         Given ``lex_mcp.ai_worktree`` does not have ``totally_unknown``,
         When that name is accessed on the shim,
@@ -214,7 +214,7 @@ class TestCluster01ab_AttributeDelegation(_ShimTestBase):
 
 
 # ---------------------------------------------------------------------------
-# 1.226 — Directory delegation
+# 1.228 — Directory delegation
 # ---------------------------------------------------------------------------
 
 class TestCluster01ab_DirectoryDelegation(_ShimTestBase):
@@ -225,8 +225,8 @@ class TestCluster01ab_DirectoryDelegation(_ShimTestBase):
     partial list that hides the actual API.
     """
 
-    def test_1_226_dir_matches_real_module(self):
-        """Scenario 1.226: ``dir()`` on the shim returns what the real
+    def test_1_228_dir_matches_real_module(self):
+        """Scenario 1.228: ``dir()`` on the shim returns what the real
         module's ``dir()`` returns.
 
         Given the real module exposes ``launch_ai_worktree``,

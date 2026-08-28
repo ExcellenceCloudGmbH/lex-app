@@ -9,7 +9,7 @@ suite_tally: "6 pass / 0 fail"
 
 Coverage task for PR ExcellenceCloudGmbH/lex-app#729 (`feat/ai-command-passthrough`).
 
-Batch **1ab** (scenarios 1.223–1.226) — see
+Batch **1ab** (scenarios 1.223–1.228) — see
 [`clusters/01-init/batches.md`](../clusters/01-init/batches.md).
 
 Adds `lex/tools/ai_worktree.py` (compatibility shim, re-export from
