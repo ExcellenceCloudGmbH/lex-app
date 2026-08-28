@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 227
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -282,4 +282,12 @@ letters:
       adopts a strictly newer auth_token rather than discarding it while the stored one is still
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
-
+  ab:
+    title: MCP embed + AI setup/verify tooling contracts
+    scenarios: 1.223-1.227
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: 'coverage batch for PR #703; pins embed URL token redaction, mode validation, verify-mode alignment, and setup project-root targeting across `lex/mcp_server/tools/embed.py`, `lex/tools/mcp_mode_invoke.py`, `lex/tools/setup_with_ai.py`, and `lex/tools/verify_ai_assets.py`.'
