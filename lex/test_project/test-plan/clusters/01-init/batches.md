@@ -227,3 +227,19 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — AI tooling shims + MCP embed URL helpers ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.248 |
+| Type | U |
+| Files covered | `lex/tools/setup_with_ai.py` (`DEFAULT_LEX_MCP_MODE`, `SUPPORTED_MCP_MODES`, `_installed_mode_roster`, `normalize_mcp_mode`, `resolve_submitted_mcp_mode`, `_resolve_environment_alias`), `lex/tools/mcp_mode_invoke.py` (shim re-exports), `lex/tools/verify_ai_assets.py` (shim `__getattr__`/`__dir__`), `lex/mcp_server/tools/embed.py` (`_classify_path`, `_build_title`, `_resolve_frontend_url`, `_build_embed_url`) |
+| Test file | `lex/test_project/tests/init/test_1ab_ai_tools_and_mcp_embed.py` |
+| Test classes | `TestCluster01ab_SetupWithAIPureFunctions`, `TestCluster01ab_McpModeInvokeShim`, `TestCluster01ab_VerifyAiAssetsShim`, `TestCluster01ab_EmbedHelpers` |
+| Fixtures | none — `lex_mcp` and `fastmcp` mocked via `sys.modules` injection; `embed.py` loaded with `importlib.util.spec_from_file_location` |
+| Tests landed | **26 pass / 0 fail** |
+| Coverage gain | setup_with_ai mode normalisation + override gate; shim re-export identity for both mcp_mode_invoke and verify_ai_assets; embed URL path classification and title generation |
+| Status | ✅ Complete — 2026-08-21 |
