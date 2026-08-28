@@ -227,3 +227,19 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — MCP embed URL helpers, mode resolution, env-file I/O, and asset verification ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.237 |
+| Type | U |
+| Files covered | `lex/mcp_server/tools/embed.py` (`_resolve_frontend_url`, `_csp_origins`, `_classify_path`, `_build_title`, `_build_embed_url`); `lex/tools/setup_with_ai.py` (`normalize_mcp_mode`, `normalize_ai_environments`, `update_env_file`); `lex/tools/verify_ai_assets.py` (`_read_env_file_value`, `_read_override_mode`, `_read_mode_from_mcp_json`, `resolve_active_mcp_mode`, `verify_directory`); `lex/tools/mcp_mode_invoke.py` (`_normalise_mode`, `InvokeSwitchResult`, `invoke_switch_to_mode` fallback) |
+| Test file | `lex/test_project/tests/init/test_1ab_mcp_embed_and_mode_tools.py` |
+| Test classes | `TestCluster01ab_McpEmbedAndModeTools` (1.223 frontend URL from setting; 1.224 env-var fallback chain; 1.225 path classification rules; 1.226 embed URL params & fragment; 1.227 title formatting; 1.228 CSP origins; 1.229 normalize_mcp_mode; 1.230 normalize_ai_environments expands "all"; 1.231 update_env_file adds/updates; 1.232 _read_env_file_value parsed/quoted; 1.233 mode resolution precedence; 1.234 verify_directory restores missing file; 1.235 _normalise_mode rejects unknown; 1.236 InvokeSwitchResult.ok; 1.237 invoke_switch_to_mode fallback) |
+| Fixtures | `tempfile.TemporaryDirectory`; `unittest.mock.patch`; no database models |
+| Tests landed | **15 pass / 0 fail** |
+| Coverage gain | MCP embed URL construction, mode resolution precedence, env-file R/W, asset verification file restore |
+| Status | ✅ Complete — coverage task for PR #703 |
