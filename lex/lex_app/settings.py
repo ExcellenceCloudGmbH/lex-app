@@ -576,6 +576,41 @@ LEX_WORKER_IDLE_SHUTDOWN_SECONDS = float(
     os.getenv("LEX_WORKER_IDLE_SHUTDOWN_SECONDS", "30")
 )
 
+# ---------------------------------------------------------------------------
+# Bitemporal activation catch-up
+#
+# A future-dated history row schedules a timer for its own activation. Both
+# timer backends are volatile — the in-process one (used whenever Celery is off,
+# i.e. most instances) is lost on every restart with nothing to rehydrate it, so
+# pending activations were silently dropped and the data never became current.
+#
+# The meta row is the durable record: SCHEDULED plus the history row's
+# valid_from says what should already have happened. The reconcile loop reads
+# that and finishes the job, which turns a missed timer into a latency problem
+# instead of silent data loss. See lex/core/services/activation_reconcile.py.
+#
+# Interval is the worst-case activation lateness. Lower it if a scheduled change
+# must be visible promptly; there is no correctness reason to.
+# ---------------------------------------------------------------------------
+LEX_ACTIVATION_RECONCILE_ENABLED = (
+    os.getenv("LEX_ACTIVATION_RECONCILE_ENABLED", "true").strip().lower() == "true"
+)
+LEX_ACTIVATION_RECONCILE_INTERVAL_SECONDS = float(
+    os.getenv("LEX_ACTIVATION_RECONCILE_INTERVAL_SECONDS", "60")
+)
+# Do not replay activations older than this. A long-dormant instance coming back
+# should not silently apply a year of backdated changes in one pass; anything
+# older is reported and left for a human.
+LEX_ACTIVATION_RECONCILE_MAX_AGE_DAYS = int(
+    os.getenv("LEX_ACTIVATION_RECONCILE_MAX_AGE_DAYS", "30")
+)
+# Per-process attempt cap so a permanently-broken record cannot be retried on
+# every pass forever. Resets on restart, which is when a retry is most likely to
+# succeed anyway.
+LEX_ACTIVATION_RECONCILE_MAX_ATTEMPTS = int(
+    os.getenv("LEX_ACTIVATION_RECONCILE_MAX_ATTEMPTS", "5")
+)
+
 if LEX_TASK_RECOVERY_ENABLED:
     # django-celery-beat's DatabaseScheduler ingests CELERY_BEAT_SCHEDULE at
     # startup via update_from_dict, so this entry lands as a PeriodicTask row
