@@ -178,6 +178,20 @@
 
 ---
 
+### Batch 1ae — Streamlit theme parity — tokens, native theme config, CLI wiring ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.274 – 1.299 |
+| Type | U + I |
+| Files covered | `lex/lex_app/streamlit/theme/{tokens,mapping,config_writer}.py`, `lex/bin/lex.py` (`_safe_theme_flags`), `lex/.streamlit/config.toml` (generated) |
+| Phase 2 scope | Streamlit floor `>=1.58` only — the planned CSS layer was **dropped**; the native theme surface already covers the sidebar and dataframe header, and automatic CSS injection has no public hook (the `runpy` shim would break Streamlit's AST magic). Shipped theme therefore touches **no** Streamlit internals. See the design doc §7. |
+| Test file | `lex/test_project/tests/init/test_1y_streamlit_theme.py` |
+| Test classes | `TestCluster1y_Tokens`, `_Mapping`, `_StreamlitContract`, `_ConfigWriter`, `_Fonts`, `_LaunchFlags`, `_CommittedConfig` |
+| Fixtures | none (pure data transforms; `tmp_path` for the file write) |
+| Tests landed | **41 pass / 0 fail** |
+| Coverage gain | Streamlit theme parity phase 1 — token source of truth, native theme mapping, CLI + file delivery, drift guard |
+| Status | ✅ Complete — see the allocation note. Phase 1 of the design (`docs/superpowers/specs/2026-07-30-streamlit-theme-parity-design.md`); phases 2–4 (CSS layer, live host handshake, cross-repo tokens.json) are separate. |
 ### Batch 1y — IDE-aware setup run configurations ✅
 
 | Property | Value |
@@ -194,15 +208,15 @@
 
 ---
 
-### Batch 1z — Streamlit auth proxy: iframe re-auth breakout (refused-to-connect fix) ✅
+### Batch 1ae — Streamlit auth proxy: iframe re-auth breakout (refused-to-connect fix) ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.211 – 1.216 |
+| Scenario range | 1.274 – 1.279 |
 | Type | U |
 | Files covered | `lex/proxy.py` (`_unauthenticated_response`, `_is_iframe_document_request`) |
 | Test file | `lex/test_project/tests/init/test_1z_proxy_iframe_breakout.py` |
-| Test classes | `TestCluster01z_ProxyIframeBreakout` (1.211 iframe → 401 frame-breakout not IdP redirect, 1.212 `<frame>` also breaks out, 1.213 top-level HTML still redirects to `/auth/login`, 1.214 no `Sec-Fetch-*` keeps redirect, 1.215 non-HTML → 401 JSON, 1.216 `_is_iframe_document_request` case-insensitive + scoped) |
+| Test classes | `TestCluster01z_ProxyIframeBreakout` (1.274 iframe → 401 frame-breakout not IdP redirect, 1.275 `<frame>` also breaks out, 1.276 top-level HTML still redirects to `/auth/login`, 1.277 no `Sec-Fetch-*` keeps redirect, 1.278 non-HTML → 401 JSON, 1.279 `_is_iframe_document_request` case-insensitive + scoped) |
 | Fixtures | none — minimal ASGI `Request` builder + `patch.object(proxy, "PUBLIC_URL", "")` |
 | Tests landed | **6 pass / 0 fail** (`python -m lex pytest`) |
 | Coverage gain | proxy deny-branch routing: `Sec-Fetch-Dest: iframe`/`frame` document loads break out to a top-level login instead of redirecting the frame into Keycloak's un-frameable login page (`frame-ancestors 'self'` → "refused to connect"); the top-level redirect and API-401 paths stay unchanged |
@@ -216,7 +230,7 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.217 – 1.222 |
+| Scenario range | 1.280 – 1.285 |
 | Type | U |
 | Files covered | `lex/authentication/views/token_views.py` (`StreamlitTokenView.post`, `_access_token_expiry`), `lex/proxy.py` (`_persist_jwt_to_session_if_needed`) |
 | Test file | `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py` |
@@ -226,7 +240,7 @@
 | Coverage gain | the renewal path of the embedded Streamlit auth flow |
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
-| Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+| Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.283 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
 
 ## Batch 1ac — Widget-host manifest construction and validation
 
@@ -423,3 +437,40 @@ present-and-skipped: no production page carries it, and no later edit to a
 runtime guard can leak a debug box into a dashboard. 1.273 also pins that the
 follower is byte-identical in both variants — diagnostics observe the mechanism,
 they never alter it.
+
+## Batch 1af — The mode switch and the branded theme compose (2026-08-28)
+
+- **Scenario:** 1.300
+- **Status:** complete (2 pass)
+- **Source under test:** `lex/lex_app/streamlit/theme/` (batch 1ae) +
+  `lex/streamlit_theme.py` (batch 1ad)
+- **Test file:** `lex/test_project/tests/init/test_1af_theme_switch_preserves_brand.py`
+
+Found by merging the two theme branches, not by either one alone.
+
+Batch **1ae** brands Streamlit at launch from LEX design tokens. Batch **1ad**
+switches mode at runtime by reloading with `?embed_options=light_theme|dark_theme`.
+Read separately, 1ad looks like it *destroys* 1ae — the URL option seems to select
+Streamlit's built-in palette, which would discard the branding on every follow.
+
+It doesn't. In the 1.58 bundle the URL option is a preference **signal**, and the
+resolver prefers the custom variant of that mode:
+
+```js
+Light: ["Custom Theme Light", "Light"]   // custom first, built-in as fallback
+Dark:  ["Custom Theme Dark",  "Dark"]
+```
+
+`Custom Theme Light`/`Custom Theme Dark` exist **only** when the config supplies
+both `[theme.light]` and `[theme.dark]`. A config with only the flat `[theme]`
+section produces one unnamed custom theme that this table cannot reach — so the
+switch would fall through to the built-in and the brand would vanish.
+
+**So 1ad is safe because 1ae populates both mode sections** — a dependency neither
+batch states. The config is generated, so collapsing it to a single flat section
+would read as a harmless simplification: the theme would still look right until
+someone switched mode.
+
+Second half pins that the two mode vocabularies stay distinct — `"dark"`
+internally, `"dark_theme"` in the URL — because Streamlit drops an unrecognised
+embed option without complaint.

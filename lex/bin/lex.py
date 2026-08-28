@@ -1,6 +1,7 @@
 # lex/bin/lex.py
 import asyncio
 import io
+import logging
 import os
 import platform
 import subprocess
@@ -316,6 +317,79 @@ def flower(ctx):
 
     _run_celery_command(build_flower_command(settings, ctx.args))
 
+# Defaults for the two coupled ports. Streamlit itself listens on
+# STREAMLIT_PORT; the auth proxy listens on PUBLIC_PORT (what the browser hits)
+# and forwards to Streamlit. `lex/proxy.py` reads its target from UPSTREAM.
+_DEFAULT_PUBLIC_PORT = "8501"
+_DEFAULT_STREAMLIT_PORT = "8080"
+
+
+def _cli_option(args, option):
+    """Return the caller's value for ``--<option>``, or None if absent.
+
+    Accepts both ``--opt=value`` and ``--opt value``.
+    """
+    flag = "--" + option
+    for index, arg in enumerate(args):
+        if arg == flag and index + 1 < len(args):
+            return args[index + 1]
+        if arg.startswith(flag + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _resolve_streamlit_ports(streamlit_args):
+    """Resolve the ports for a `lex streamlit` launch, honouring the caller.
+
+    Returns ``(public_port, streamlit_port, port_flags, upstream_url)``.
+
+    Previously the hardcoded ports were appended AFTER the caller's arguments,
+    so ``lex streamlit run app.py --server.port 9000`` silently kept 8080 and
+    the command was simply unusable on a machine where 8080 was taken. Now a
+    supplied port wins and we only append the flags the caller omitted.
+
+    The two ports are coupled through the proxy: ``--server.port`` is the
+    proxy's UPSTREAM, so moving Streamlit without repointing UPSTREAM would
+    leave the proxy forwarding to a dead port. The returned ``upstream_url``
+    keeps them consistent.
+    """
+    given_public = _cli_option(streamlit_args, "browser.serverPort")
+    given_streamlit = _cli_option(streamlit_args, "server.port")
+
+    public_port = given_public or _DEFAULT_PUBLIC_PORT
+    streamlit_port = given_streamlit or _DEFAULT_STREAMLIT_PORT
+
+    port_flags = []
+    if given_public is None:
+        port_flags += ["--browser.serverPort", public_port]
+    if given_streamlit is None:
+        port_flags += ["--server.port", streamlit_port]
+
+    return public_port, streamlit_port, port_flags, "http://localhost:%s" % streamlit_port
+
+
+def _safe_theme_flags(streamlit_args, tokens=None):
+    """Theme flags for a Streamlit launch — never raises.
+
+    The LEX theme is a presentation concern: if it cannot be built, Streamlit
+    must still start (unthemed) rather than the command failing. Mirrors the
+    design's degradation ladder — live handshake -> config theme -> Streamlit
+    default, never to broken.
+    """
+    try:
+        from lex.lex_app.streamlit.theme.config_writer import compose_launch_flags
+        from lex.lex_app.streamlit.theme.tokens import TOKENS
+
+        return compose_launch_flags(list(streamlit_args), TOKENS if tokens is None else tokens)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "LEX Streamlit theme could not be applied; launching with "
+            "Streamlit's default theme.",
+            exc_info=True,
+        )
+        return []
+
+
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
@@ -352,15 +426,30 @@ def streamlit(ctx):
         if not os.path.isabs(streamlit_app_path):
             streamlit_args[file_index] = f"{LEX_APP_PACKAGE_ROOT}/{streamlit_app_path}"
 
+    public_port, streamlit_port, port_flags, upstream_url = _resolve_streamlit_ports(
+        streamlit_args
+    )
+    # The proxy forwards to Streamlit, so it has to follow --server.port. An
+    # explicitly-set UPSTREAM still wins (setdefault), which is how a deployment
+    # points the proxy at a non-local Streamlit.
+    os.environ.setdefault("UPSTREAM", upstream_url)
+
     def run_uvicorn():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        uvicorn.run("proxy:app", host="0.0.0.0", port=8501, loop="asyncio")
+        uvicorn.run("proxy:app", host="0.0.0.0", port=int(public_port), loop="asyncio")
 
     t = threading.Thread(target=run_uvicorn, daemon=True)
     t.start()
 
-    streamlit_main(streamlit_args + ["--browser.serverPort", "8501", "--server.port", "8080"])
+    # Theme flags, then only the port flags the caller did NOT supply. Any
+    # --theme.* the caller passed is already excluded by _safe_theme_flags, so
+    # both kinds of customer override survive.
+    streamlit_main(
+        streamlit_args
+        + _safe_theme_flags(streamlit_args)
+        + port_flags
+    )
 
 
 @lex.command(name="pytest", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))

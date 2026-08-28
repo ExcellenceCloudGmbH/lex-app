@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 260
+max_scenario: 300
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -366,3 +366,66 @@ letters:
       present-and-skipped, so no production page carries it and no future edit to a runtime guard
       can leak a debug box into a dashboard. The scenario also pins that the follower is identical
       in both variants - diagnostics must observe the mechanism, never alter it.
+  ae:
+    title: Streamlit theme parity — tokens, native theme config, CLI wiring
+    scenarios: 1.274-1.299
+    status: complete
+    tests:
+      pass: 41
+      skip: 0
+      xfail: 0
+    note: Streamlit pages now carry the real lex brand. Design tokens are vendored as pure Python
+      (tokens.py) and mapped onto Streamlit 1.58's native theme keys (mapping.py) — ~120 keys exist,
+      so the navy sidebar, dataframe header, chart palettes, radii and fonts are all reachable through
+      the PUBLIC config API rather than CSS. config_writer.py renders that one mapping two ways — CLI
+      flags (primary — a config.toml resolves relative to CWD, so only flags theme every launch
+      identically) and a generated .streamlit/config.toml (fallback for a bare `streamlit run`). The
+      committed config was hand-written with every value drifted (primaryColor `#08BCC2` vs the real
+      `#14b4b4`, grey sidebar vs navy, "sans serif" vs Inter, no dark mode); 1.293 makes that
+      unrepeatable by asserting the file is byte-identical to the generator. Fonts point at the
+      frontend's OWN Google Fonts stylesheet via Streamlit's "<family>:<url>" form, so the two
+      surfaces agree both connected (both Inter) and air-gapped (both fall back) — bundling a woff2
+      for Streamlit alone was rejected because the frontend does not bundle one either. 4 keys
+      (chart ramps + showSidebarBorder) are global-only with no per-mode twin, pinned by 1.280b since
+      Streamlit rejects unrecognised options outright. A broken theme never blocks a launch (1.292).
+      Verified against real Streamlit — flags and generated TOML both accepted, launch survives a
+      deliberately broken token module. Also fixes `lex streamlit` silently overriding a
+      caller-supplied port — the hardcoded ports were appended AFTER the caller's args, so a
+      custom port was ignored and the command was unusable wherever 8080 was already taken.
+      The proxy's UPSTREAM now follows `--server.port`, so it cannot forward to a dead port
+      (1.295-1.298). CLI flag values are emitted BARE — reusing the TOML encoder
+      quoted them, so every colour arrived as `"#14b4b4"` and Streamlit silently skipped it as
+      invalid; the theme applied nowhere while every shape-level check passed. 1.299 now asserts
+      the values Streamlit actually RESOLVES. Streamlit's CLI cannot express list options at all,
+      lists ARE expressible on the CLI (Streamlit json.loads them) so they stay JSON while
+      scalars go bare, and the sequential/diverging ramps need EXACTLY 10 stops or Streamlit
+      discards them for its own defaults — another silent skip (1.299c/1.299d).
+      RENUMBERED ON MERGE 2026-08-28 - this branch claimed letter z and scenarios 1.211-1.236,
+      and both landed on lex-app-v2 while it was open. Letter z is now the iframe-breakout batch
+      (1.211-1.216) and aa took 1.217-1.222, so a duplicate z key here would have silently
+      dropped one of them from the YAML. Kept as ae/1.274-1.299 so no scenario id means two
+      different things. Second renumber for this batch - the first, to letter z, is in its own
+      history, which is how the collision happened twice.
+  af:
+    title: The mode switch and the branded theme compose
+    scenarios: 1.300
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Found while merging 1ae (launch-time branding from LEX tokens) into 1ad (runtime mode switch
+      via ?embed_options). Read separately, 1ad looks like it destroys 1ae: the URL option appears
+      to select Streamlit's BUILT-IN light/dark, which would discard the brand on every theme
+      follow. Verified in the Streamlit 1.58 bundle that it does not - the URL option is a
+      preference SIGNAL, and the resolver prefers the custom variant of that mode
+      (Light -> ["Custom Theme Light", "Light"], Dark -> ["Custom Theme Dark", "Dark"]). But those
+      custom variants exist only when the config supplies BOTH [theme.light] and [theme.dark]; a
+      config carrying only the flat [theme] section yields one unnamed custom theme that table
+      cannot reach, and the switch would fall through to the built-in. So 1ad is safe BECAUSE 1ae
+      populates both mode sections - a dependency neither batch states. Pinned here because the
+      config is generated and collapsing it to one section would look harmless: the theme would
+      still be right until someone switched mode. Second half guards the two mode vocabularies
+      staying distinct ("dark" internally vs "dark_theme" in the URL), since Streamlit drops an
+      unrecognised embed option silently.

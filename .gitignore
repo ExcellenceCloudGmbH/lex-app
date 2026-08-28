@@ -9,3 +9,9 @@ lex/_version.py
 .lex-ai-reports/
 build/
 /build
+
+# superpowers brainstorm scratch (visual companion mockups)
+.superpowers/
+
+# git worktrees (repo convention: .claude/worktrees/lex_<feature>)
+.claude/worktrees/
