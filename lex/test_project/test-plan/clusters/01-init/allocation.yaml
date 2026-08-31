@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 300
+max_scenario: 301
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -408,10 +408,10 @@ letters:
       history, which is how the collision happened twice.
   af:
     title: The mode switch and the branded theme compose
-    scenarios: 1.300
+    scenarios: 1.300-1.301
     status: complete
     tests:
-      pass: 2
+      pass: 5
       skip: 0
       xfail: 0
     note: >-
@@ -429,3 +429,16 @@ letters:
       still be right until someone switched mode. Second half guards the two mode vocabularies
       staying distinct ("dark" internally vs "dark_theme" in the URL), since Streamlit drops an
       unrecognised embed option silently.
+      1.301 adds a THIRD theme mechanism, taken selectively from
+      origin/feat/lex-brand-tokens-and-theme-handshake: lex_view(theme=) pushes the host's mode
+      DOWN into an embedded lex-app iframe (?theme= boot fallback plus a host->iframe `theme`
+      postMessage on load). Exact inverse authority to 1ad - there the Streamlit author decides,
+      here lex-app does - and they coexist because the envelopes differ by source tag
+      ("lex-app-host" down, "lex-app" up) and neither listens to the other, so no loop. Only the
+      SENDING half was taken, and only because the rest of that branch is superseded: its
+      733-line design_system/lex_tokens.py predates the 787-line version that landed on
+      lex-app-v2 via #686 with a CI freshness gate, so merging the branch whole would have been a
+      54-line regression. DOCUMENTED GAP, asserted rather than implied: the React app reads
+      neither ?theme= nor the postMessage, so lex_view(theme=) is currently inert on the frontend
+      while looking like it works - it validates its input, appears in the URL, and does nothing.
+      Delete that third assertion and replace it with an effect test when the consumer lands.

@@ -474,3 +474,29 @@ someone switched mode.
 Second half pins that the two mode vocabularies stay distinct — `"dark"`
 internally, `"dark_theme"` in the URL — because Streamlit drops an unrecognised
 embed option without complaint.
+
+### Batch 1af addendum — `lex_view(theme=)`, the third mechanism (scenario 1.301)
+
+Taken **selectively** from `origin/feat/lex-brand-tokens-and-theme-handshake`,
+because most of that branch is superseded:
+
+| Part of that branch | Taken? | Why |
+|---|---|---|
+| `_lex_view_component` theme handshake (+32) | **yes** | genuinely new; not on `lex-app-v2` |
+| `embed.py` `theme=` parameter (+13) | **yes** | same |
+| `lex_view callbacks.md` theme section | **yes** | documents the above |
+| `design_system/lex_tokens.py` (733 lines) | **no** | `lex-app-v2` has 787 lines via #686, with a CI freshness gate — merging would be a 54-line regression |
+| `.streamlit/config.toml` (+13) | **no** | batch 1ae's generated config is authoritative and byte-asserted |
+| `tools/ai_faq.py`, `setup_with_ai.py`, CI workflow | **no** | superseded by #686 |
+
+Direction matters. `lex_view(theme=)` pushes the host's mode **down** into an
+embedded lex-app iframe. The theme follower (1ad) has lex-app own the mode and
+Streamlit follow — the exact inverse authority. They coexist because the
+envelopes differ by source tag (`lex-app-host` downward, `lex-app` upward) and
+neither side listens to the other, so there is no loop.
+
+**Documented gap, asserted not implied:** the React app reads neither `?theme=`
+nor the inbound `theme` message, so `lex_view(theme=)` is inert on the frontend
+today — while reading as if it works: it validates its input, appears in the URL,
+and has no effect. The third assertion in 1.301 records that; it should be
+deleted and replaced with an effect test when the consumer lands.
