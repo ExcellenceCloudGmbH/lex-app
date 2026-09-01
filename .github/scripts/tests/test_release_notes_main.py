@@ -135,3 +135,52 @@ def test_the_success_path_writes_the_appended_body(monkeypatch):
     assert notes.ADDENDUM_MARKER in written
     assert "grouping shows the name" in written
     assert "- something" in written                       # original body preserved
+
+
+# ── _digest_for: the branch-to-flag wiring ──────────────────────────────
+#
+# The tests above replace `_digest_for` wholesale, so none of them exercise
+# its own logic. These do: they stub out git/gh at the boundary and drive the
+# three branches directly, so the `built["frontend_recorded"] = ...` line —
+# the only place a real release sets the flag the changelog marker reads —
+# has coverage of its own instead of relying on the changelog tests' hand
+# -built dicts.
+
+def _stub_backend(monkeypatch):
+    """Neutralise the backend half of _digest_for — git and gh are not under test."""
+    monkeypatch.setattr(cli, "_all_tags", lambda tag: ["v2.1.8", "v2.1.7"])
+    monkeypatch.setattr(cli.digest, "collect_commits", lambda *a, **kw: [])
+    monkeypatch.setattr(cli.digest, "enrich_with_prs", lambda commits: commits)
+
+
+def test_digest_for_flags_an_unresolvable_frontend_range(monkeypatch):
+    _stub_backend(monkeypatch)
+    monkeypatch.setattr(cli.ranges, "frontend_range", lambda prev, tag: None)
+
+    built = cli._digest_for("v2.1.8")
+
+    assert built["frontend_recorded"] is False
+
+
+def test_digest_for_flags_a_resolved_range_with_no_pac_checkout(monkeypatch):
+    _stub_backend(monkeypatch)
+    monkeypatch.setattr(
+        cli.ranges, "frontend_range",
+        lambda prev, tag: cli.ranges.Range(from_sha="aaa", to_sha="bbb"),
+    )
+
+    built = cli._digest_for("v2.1.8", pac_checkout=None)
+
+    assert built["frontend_recorded"] is False
+
+
+def test_digest_for_records_a_resolved_range_with_a_pac_checkout(monkeypatch, tmp_path):
+    _stub_backend(monkeypatch)
+    monkeypatch.setattr(
+        cli.ranges, "frontend_range",
+        lambda prev, tag: cli.ranges.Range(from_sha="aaa", to_sha="bbb"),
+    )
+
+    built = cli._digest_for("v2.1.8", pac_checkout=tmp_path)
+
+    assert built["frontend_recorded"] is True
