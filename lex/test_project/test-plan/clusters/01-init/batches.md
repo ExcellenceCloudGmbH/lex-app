@@ -648,3 +648,23 @@ the URL — with following off, nothing puts it back.
 
 The eager-frames script (batch 1ai) is deliberately **not** gated on this. It
 governs *when* component frames load and has nothing to do with the theme.
+
+### Batch 1ad addendum 7 — light on first load (scenario 1.275)
+
+Reported as *"both are always dark at first"*. Neither product chose it —
+Streamlit falls back to `prefers-color-scheme` by design, and react-admin resolves
+`defaultTheme || (prefersDarkMode && darkTheme ? 'dark' : 'light')`, so merely
+*supplying* a `darkTheme` handed lex-app's default to the OS.
+
+The follower now treats "nothing agreed yet" as **light** rather than leaving the
+page on Streamlit's own default. lex-app sets `defaultTheme="light"` on both
+`<Admin>` and `<AdminContext>` (frontend F12.48), so the two agree on first paint.
+
+Cost: at most one reload, and only where the page was about to be the wrong
+colour — on a light machine the measured mode already matches and `follow()`
+returns without acting.
+
+Verified against DOM doubles that it **terminates**: the reloaded page
+re-evaluates with the mode now in its URL and stops. No loop.
+
+A stored choice still wins on both sides. This decides the first load only.

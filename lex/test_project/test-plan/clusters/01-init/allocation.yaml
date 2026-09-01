@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.274
+    scenarios: 1.261-1.275
     status: complete
     tests:
-      pass: 17
+      pass: 18
       skip: 0
       xfail: 0
     note: >-
@@ -382,6 +382,18 @@ letters:
       embed_options, once following is off. The eager-frames script (1ai) is deliberately NOT
       gated on this - it governs when component frames load, not the theme, so switching theme
       sync off must not bring back load-on-scroll.
+      1.275 fixes "both are always dark at first". Neither product chose it: Streamlit falls back
+      to prefers-color-scheme by design, and react-admin's ThemeProvider resolves
+      defaultTheme || (prefersDarkMode && darkTheme ? 'dark' : 'light'), so merely SUPPLYING a
+      darkTheme handed lex-app's first-load default to the OS. A dark-OS user got a dark app and
+      a dark dashboard having never asked for either. The follower now treats "nothing agreed
+      yet" as light instead of leaving the page on Streamlit's own default, and lex-app sets
+      defaultTheme="light" on both <Admin> and <AdminContext> (frontend F12.48) so the two
+      products agree on first paint. Costs at most one reload, and only where the page was about
+      to be the wrong colour - on a light machine the measured mode already matches and follow()
+      returns without acting. Verified against DOM doubles that it TERMINATES: the reloaded page
+      re-evaluates with the mode now in its URL and stops, so there is no reload loop. A stored
+      choice still wins on both sides; this decides the first load only.
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299

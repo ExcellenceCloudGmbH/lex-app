@@ -23,6 +23,15 @@ THEME_STORAGE_KEY = "lex.theme.mode"
 LIGHT = "light"
 DARK = "dark"
 
+#: What a page shows when nobody has expressed a preference.
+#:
+#: Light, to agree with lex-app, which sets ``defaultTheme="light"`` for the same
+#: reason: left alone, both products fall back to the OS preference, so a
+#: dark-OS user was handed a dark app and a dark dashboard without ever choosing
+#: one. A stored choice still wins on both sides -- this decides the FIRST load
+#: only.
+DEFAULT_MODE = LIGHT
+
 
 def embed_theme_from_params(values: Iterable[object]) -> str:
     """Read a mode out of raw ``embed_options`` values.
@@ -99,6 +108,7 @@ _FOLLOWER_HTML = """<script>
   (function () {
     var KEY = __KEY__;
     var URL_MODE = __URL_MODE__;
+    var DEFAULT_MODE = __DEFAULT_MODE__;
 
     // This runs in a srcdoc iframe: same origin as the Streamlit server, so it
     // shares this origin's localStorage and may read, listen on and navigate its
@@ -216,9 +226,18 @@ _FOLLOWER_HTML = """<script>
     // A change that landed while this page was loading -- including one an
     // embedded widget announced before this block rendered, which is the common
     // ordering, and the reason the shim writes storage as well as calling in.
+    //
+    // With nothing agreed yet, fall back to DEFAULT_MODE rather than to nothing.
+    // Doing nothing leaves Streamlit on its own default, which is the OS
+    // preference -- so every dark-OS user got a dark page having never chosen
+    // one, and lex-app's own default is light. This costs a single reload, and
+    // only where the page was about to be the wrong colour: on a light machine
+    // the measured mode already matches and follow() returns without acting.
     // Deferred one frame so the app's styles have painted before we measure them.
     host.requestAnimationFrame(function () {
-      try { follow(host.localStorage.getItem(KEY)); } catch (e) {}
+      var stored = null;
+      try { stored = host.localStorage.getItem(KEY); } catch (e) {}
+      follow(stored || DEFAULT_MODE);
     });
 
     // On `host`, not `window`: see the lifetime note above. `storage` fires in
@@ -307,6 +326,7 @@ def theme_follower_html(url_mode: str = "", debug: bool = False) -> str:
         _FOLLOWER_HTML.replace("__KEY__", _js_literal(THEME_STORAGE_KEY))
         .replace("__URL_MODE__", _js_literal(url_mode or ""))
         .replace("__DEBUG_PANEL__", _DEBUG_PANEL_JS if debug else "")
+        .replace("__DEFAULT_MODE__", _js_literal(DEFAULT_MODE))
     )
 
 

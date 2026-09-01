@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.274.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.275.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -33,6 +33,8 @@ import pytest
 
 from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
+    DEFAULT_MODE,
+    LIGHT,
     THEME_STORAGE_KEY,
     theme_debug_enabled,
     theme_follow_enabled,
@@ -271,6 +273,30 @@ class TestCluster1ad_StreamlitThemeFollower:
         # Every spelling an operator reaching for the escape hatch would try.
         for value in ("0", "false", "FALSE", "no", "off", "Off"):
             assert theme_follow_enabled({"LEX_THEME_FOLLOW": value}) is False, value
+
+
+    def test_01_275_an_undecided_page_defaults_to_light(self):
+        """Scenario 1.275: no preference means light, not the OS.
+
+        Left alone, both products fall back to ``prefers-color-scheme``: Streamlit
+        by design, and lex-app because react-admin's ThemeProvider resolves
+        ``defaultTheme || (prefersDarkMode && darkTheme ? 'dark' : 'light')``.
+        So a dark-OS user was handed a dark app and a dark dashboard having never
+        chosen either. Reported as "both are always dark at first".
+
+        The two defaults must agree, or the widgets and the page they sit in
+        disagree on the first paint. lex-app sets ``defaultTheme="light"``; this
+        is the same decision on the Streamlit side.
+
+        A stored choice still wins on both sides — this decides the FIRST load
+        only, which is what makes it a default rather than a lock.
+        """
+        assert DEFAULT_MODE == LIGHT
+
+        js = theme_follower_html("")
+        assert 'var DEFAULT_MODE = "light";' in js
+        # Applied where nothing has been agreed, rather than left to Streamlit.
+        assert "follow(stored || DEFAULT_MODE);" in js
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:
