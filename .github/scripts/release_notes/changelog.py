@@ -47,7 +47,13 @@ def render(digest: dict, *, date: str, repo: str) -> str:
     """Render one release section. Returns the heading alone if nothing shipped."""
     version = digest["tag"].lstrip("v")
     parts = [f"## [{version}] - {date}", ""]
-    if digest.get("frontend_recorded", True) is False:
+    # Any falsy value marks a gap, including None. "Not yet recorded" IS an
+    # unknown, so erring toward a visible marker keeps a lost range
+    # recoverable; erring toward silence loses it permanently, which is the
+    # failure this marker exists to prevent. A missing key still means
+    # recorded — that is what `.get(..., True)` carries, and it is what stops
+    # historical re-renders sprouting false gaps.
+    if not digest.get("frontend_recorded", True):
         parts.extend([GAP_MARKER, ""])
 
     shippable = [c for c in digest["changes"] if c["type"] not in EXCLUDED_TYPES]

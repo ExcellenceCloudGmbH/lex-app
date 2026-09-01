@@ -181,6 +181,14 @@ def test_absent_flag_means_recorded():
     assert changelog.GAP_MARKER not in out
 
 
+def test_an_unknown_frontend_flag_is_treated_as_a_gap():
+    # `None` means "we do not know", which is what the marker records.
+    out = changelog.render(
+        _gap_digest(frontend_recorded=None), date="2026-09-01", repo="o/r"
+    )
+    assert changelog.GAP_MARKER in out
+
+
 def test_marker_sits_directly_under_the_version_heading():
     out = changelog.render(
         _gap_digest(frontend_recorded=False), date="2026-09-01", repo="o/r"
