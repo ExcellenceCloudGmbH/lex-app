@@ -1,0 +1,9 @@
+## [2.1.8] - 2026-09-01
+
+> **Frontend changes for this release are not yet recorded.**
+
+### Breaking
+- **backend** reject a naive anchor with 400 ([ccc3333](https://github.com/ExcellenceCloudGmbH/lex-app/commit/ccc3333)) (#725)
+
+### Added
+- **backend** schedule activations without a timer ([aaa1111](https://github.com/ExcellenceCloudGmbH/lex-app/commit/aaa1111)) (#695)

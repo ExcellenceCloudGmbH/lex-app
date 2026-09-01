@@ -1,0 +1,16 @@
+{
+  "tag": "v2.1.8",
+  "previous_tag": "v2.1.7",
+  "frontend_recorded": false,
+  "changes": [
+    {"sha": "aaa1111", "component": "backend", "type": "feat", "scope": "calc",
+     "breaking": false, "subject": "schedule activations without a timer",
+     "pr_number": 695, "internal": false},
+    {"sha": "ccc3333", "component": "backend", "type": "fix", "scope": "as_of",
+     "breaking": true, "subject": "reject a naive anchor with 400",
+     "pr_number": 725, "internal": false},
+    {"sha": "ddd4444", "component": "backend", "type": "ci", "scope": "gate",
+     "breaking": false, "subject": "unbreak the prerelease gate",
+     "pr_number": 722, "internal": true}
+  ]
+}

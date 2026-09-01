@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -259,3 +260,47 @@ def test_a_rerender_replaces_a_marked_section_without_leaving_the_marker():
 
     assert changelog.GAP_MARKER not in updated
     assert updated.count("## [2.1.8]") == 1
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def _fixture(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def test_changelog_rendering_matches_the_golden_file():
+    got = changelog.render(
+        _fixture("digest_v2.1.8.json"),
+        date="2026-09-01", repo="ExcellenceCloudGmbH/lex-app",
+    )
+    expected = (FIXTURES / "changelog_v2.1.8.md").read_text(encoding="utf-8")
+    assert got == expected
+
+
+def test_gapped_changelog_rendering_matches_the_golden_file():
+    got = changelog.render(
+        _fixture("digest_v2.1.8_gap.json"),
+        date="2026-09-01", repo="ExcellenceCloudGmbH/lex-app",
+    )
+    expected = (FIXTURES / "changelog_v2.1.8_gap.md").read_text(encoding="utf-8")
+    assert got == expected
+
+
+def test_the_golden_files_encode_the_properties_we_care_about():
+    plain = (FIXTURES / "changelog_v2.1.8.md").read_text(encoding="utf-8")
+    gapped = (FIXTURES / "changelog_v2.1.8_gap.md").read_text(encoding="utf-8")
+
+    # Provenance is the point in the technical tier.
+    assert "**frontend**" in plain
+    # Internal work is excluded from both tiers' output.
+    assert "unbreak the prerelease gate" not in plain
+    assert "unbreak the prerelease gate" not in gapped
+    # A breaking change gets its own section, ahead of the rest.
+    assert "### Breaking" in plain
+    # The marker appears only in the gapped rendering...
+    assert changelog.GAP_MARKER not in plain
+    assert changelog.GAP_MARKER in gapped
+    # ...and above every content section, so a reader cannot mistake the
+    # sections below it for a complete account of the release.
+    assert gapped.index(changelog.GAP_MARKER) < gapped.index("### Breaking")
