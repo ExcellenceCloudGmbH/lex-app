@@ -127,3 +127,21 @@ def test_frontend_range_is_none_when_a_recorded_sha_is_blank():
         return _json.dumps({"sha": shas[ref]}) if ref in shas else None
 
     assert ranges.frontend_range("v2.1.5", "v2.1.6", show=show) is None
+
+
+def test_bundle_commit_at_returns_the_sha():
+    def fake_run(ref: str) -> str | None:
+        assert ref == "v2.1.6"
+        return "a388985a1111111111111111111111111111aaaa"
+
+    got = ranges.bundle_commit_at("v2.1.6", run=fake_run)
+    assert got == "a388985a1111111111111111111111111111aaaa"
+
+
+def test_bundle_commit_at_returns_none_when_no_bundle_history():
+    assert ranges.bundle_commit_at("v1.0.0", run=lambda ref: None) is None
+
+
+def test_bundle_commit_at_treats_blank_output_as_none():
+    assert ranges.bundle_commit_at("v2.1.6", run=lambda ref: "") is None
+    assert ranges.bundle_commit_at("v2.1.6", run=lambda ref: "   ") is None

@@ -72,6 +72,39 @@ def git_show(ref: str, path: str) -> str | None:
     return result.stdout
 
 
+# The directory whose last-changing commit identifies a vendored bundle. Used
+# as the key into the historical provenance map, because pre-manifest tags
+# carry no manifest and one cannot be added to a tag that already exists.
+BUNDLE_PATH = "lex/react/build"
+
+
+def _run_rev_list(ref: str) -> str | None:
+    """The last commit touching BUNDLE_PATH as of `ref`, or None."""
+    result = subprocess.run(
+        ["git", "rev-list", "-1", ref, "--", BUNDLE_PATH],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def bundle_commit_at(
+    ref: str, *, run: Callable[[str], str | None] = _run_rev_list
+) -> str | None:
+    """The lex-app commit that last changed the vendored bundle as of `ref`.
+
+    None when the ref predates the bundle or git cannot answer. `run` is
+    injectable so tests need no repository history.
+    """
+    sha = run(ref)
+    if sha is None:
+        return None
+    return sha.strip() or None
+
+
 def frontend_sha_at(ref: str, *, show: Callable[[str, str], str | None] = git_show) -> str | None:
     """The PAC SHA recorded in the manifest as of `ref`, or None."""
     blob = show(ref, MANIFEST_PATH)
