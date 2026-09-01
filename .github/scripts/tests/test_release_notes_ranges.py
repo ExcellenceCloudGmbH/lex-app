@@ -253,3 +253,161 @@ def test_bundle_commit_at_is_quiet_on_a_full_clone(capsys):
     )
 
     assert "shallow" not in capsys.readouterr().err
+
+
+_FULL_A = "a388985a1111111111111111111111111111aaaa"
+_PAC_A = "1a2b3c4d5e6f70811111111111111111111bbbb"
+
+
+def test_frontend_sha_at_falls_back_to_the_side_car():
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {_FULL_A: {"pac_sha": _PAC_A, "method": "hash-proof"}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got == _PAC_A
+
+
+def test_in_tree_manifest_wins_over_the_side_car():
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: '{"sha": "fromtree"}',
+        history=lambda: {_FULL_A: {"pac_sha": _PAC_A}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got == "fromtree"
+
+
+def test_side_car_is_matched_by_abbreviated_key():
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {"a388985a": {"pac_sha": _PAC_A}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got == _PAC_A
+
+
+def test_side_car_miss_returns_none():
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {"deadbeef1111": {"pac_sha": _PAC_A}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got is None
+
+
+def test_side_car_is_ignored_when_the_bundle_commit_is_unknown():
+    got = ranges.frontend_sha_at(
+        "v1.0.0",
+        show=lambda ref, path: None,
+        history=lambda: {_FULL_A: {"pac_sha": _PAC_A}},
+        bundle=lambda ref: None,
+    )
+    assert got is None
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [{}, {"pac_sha": ""}, {"pac_sha": None}, "not-a-dict", None],
+)
+def test_side_car_entries_that_say_nothing_are_none(entry):
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {_FULL_A: entry},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got is None
+
+
+# ── Hardening: the table is hand-authored, so bad keys are a live risk ──
+
+def test_an_empty_key_cannot_answer_for_every_ref():
+    # "".startswith("") is True, so an empty key would silently answer for
+    # any ref. Task 4 writes this file by hand from shell output.
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {"": {"pac_sha": _PAC_A}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got is None
+
+
+@pytest.mark.parametrize("short_key", ["a", "a3", "a388", "a38898"])
+def test_keys_below_gits_minimum_abbreviation_are_ignored(short_key):
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {short_key: {"pac_sha": _PAC_A}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got is None
+
+
+def test_the_longest_matching_key_wins():
+    # A more specific entry must not be shadowed by a vaguer one, whatever
+    # order the JSON happens to be written in.
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {
+            "a388985a": {"pac_sha": "vague"},
+            "a388985a1111": {"pac_sha": "specific"},
+        },
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got == "specific"
+
+
+@pytest.mark.parametrize(
+    "contaminated",
+    [
+        "a388985a1111111111111111111111111111aaaa\nb499096b2222222222222222222222222222bbbb",
+        "a388985a",                                   # abbreviated
+        "A388985A1111111111111111111111111111AAAA",   # uppercase
+        "zzz8985a1111111111111111111111111111aaaa",   # not hex
+    ],
+)
+def test_a_bundle_key_that_is_not_a_full_sha_is_refused(contaminated):
+    # bundle_commit_at promises a full 40-char sha. Multi-line output from a
+    # dropped `-1` would still satisfy startswith() and return a WRONG
+    # pac_sha, so the key is validated before any lookup.
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {"a388985a1111": {"pac_sha": _PAC_A}},
+        bundle=lambda ref: contaminated,
+    )
+    assert got is None
+
+
+def test_load_history_returns_empty_on_a_missing_file(tmp_path):
+    assert ranges.load_history(path=tmp_path / "nope.json") == {}
+
+
+def test_load_history_returns_empty_on_unparseable_json(tmp_path):
+    bad = tmp_path / "frontend-history.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert ranges.load_history(path=bad) == {}
+
+
+def test_load_history_returns_empty_when_the_top_level_is_not_an_object(tmp_path):
+    bad = tmp_path / "frontend-history.json"
+    bad.write_text("[1, 2, 3]", encoding="utf-8")
+    assert ranges.load_history(path=bad) == {}
+
+
+def test_frontend_range_forwards_the_new_seams():
+    # Without forwarding, a frontend_range test would silently read the real
+    # committed frontend-history.json instead of its fake.
+    got = ranges.frontend_range(
+        "v2.1.5", "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {_FULL_A: {"pac_sha": _PAC_A}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got == ranges.Range(from_sha=_PAC_A, to_sha=_PAC_A)

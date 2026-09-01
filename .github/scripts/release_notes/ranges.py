@@ -150,19 +150,88 @@ def bundle_commit_at(
     return sha
 
 
-def frontend_sha_at(ref: str, *, show: Callable[[str, str], str | None] = git_show) -> str | None:
-    """The PAC SHA recorded in the manifest as of `ref`, or None."""
-    blob = show(ref, MANIFEST_PATH)
-    if blob is None:
-        return None
+# Provenance for tags that predate the manifest. Committed, append-only, and
+# frozen once the backfill lands. Each entry records how it was established so
+# an inference is never stored looking like a proof.
+HISTORY_PATH = Path(__file__).resolve().parent / "frontend-history.json"
+
+# git's minimum unambiguous abbreviation. The table is hand-authored, so a
+# shorter key — or an empty one — would answer for refs it knows nothing
+# about, since `key.startswith("")` is always true.
+MIN_HISTORY_KEY = 7
+
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def load_history(*, path: Path = HISTORY_PATH) -> dict:
+    """The bundle-commit -> {pac_sha, method} map. Empty on any problem.
+
+    A corrupt or missing lookup table must never break drafting: the caller
+    treats an empty map exactly as it treats an absent manifest, which omits
+    the frontend section rather than guessing.
+    """
     try:
-        sha = json.loads(blob)["sha"]
-    except (json.JSONDecodeError, KeyError, TypeError):
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _history_entry(table: dict, key: str) -> dict | None:
+    """The entry for `key` — exact match first, then longest usable prefix.
+
+    Longest wins so a specific entry cannot be shadowed by a vaguer one
+    whichever order the JSON happens to be written in.
+    """
+    entry = table.get(key)
+    if entry is None:
+        candidates = [
+            (k, v) for k, v in table.items()
+            if isinstance(k, str) and len(k) >= MIN_HISTORY_KEY and key.startswith(k)
+        ]
+        if candidates:
+            entry = max(candidates, key=lambda kv: len(kv[0]))[1]
+    return entry if isinstance(entry, dict) else None
+
+
+def frontend_sha_at(
+    ref: str,
+    *,
+    show: Callable[[str, str], str | None] = git_show,
+    history: Callable[[], dict] = load_history,
+    bundle: Callable[[str], str | None] = bundle_commit_at,
+) -> str | None:
+    """The PAC SHA that produced the bundle at `ref`, or None.
+
+    In-tree manifest first — it is written by the job that built the bundle
+    and is therefore correct by construction. The committed side-car answers
+    for tags that predate the manifest, which no in-tree file can ever do: a
+    file cannot be added to a tag that already exists.
+    """
+    blob = show(ref, MANIFEST_PATH)
+    if blob is not None:
+        try:
+            sha = json.loads(blob)["sha"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            sha = None
+        # A blank or null sha is exactly as untruthful as a missing one, and
+        # the manifest was hand-written before provenance was automated.
+        if sha:
+            return sha
+
+    table = history()
+    if not table:
         return None
-    # A blank or null SHA is exactly as untruthful as a missing one, and the
-    # manifest is hand-written today, so a typo can produce it. Collapse both
-    # to None rather than letting `Range(to_sha="")` reach a renderer.
-    return sha or None
+    key = bundle(ref)
+    # bundle_commit_at promises a full 40-character sha. Anything else is
+    # contamination — multi-line output would still satisfy startswith() and
+    # return a wrong pac_sha, which is the one outcome this module forbids.
+    if not key or not _FULL_SHA_RE.match(key):
+        return None
+    entry = _history_entry(table, key)
+    if entry is None:
+        return None
+    return entry.get("pac_sha") or None
 
 
 def frontend_range(
@@ -170,6 +239,8 @@ def frontend_range(
     current_tag: str,
     *,
     show: Callable[[str, str], str | None] = git_show,
+    history: Callable[[], dict] = load_history,
+    bundle: Callable[[str], str | None] = bundle_commit_at,
 ) -> Range | None:
     """The frontend commit range, or None when it cannot be established.
 
@@ -177,12 +248,12 @@ def frontend_range(
     SHA at both ends there is no truthful frontend range, and inventing one
     would produce notes about changes that may not be in the shipped bundle.
     """
-    to_sha = frontend_sha_at(current_tag, show=show)
+    to_sha = frontend_sha_at(current_tag, show=show, history=history, bundle=bundle)
     if to_sha is None:
         return None
     if previous_tag is None:
         return Range(from_sha=None, to_sha=to_sha)
-    from_sha = frontend_sha_at(previous_tag, show=show)
+    from_sha = frontend_sha_at(previous_tag, show=show, history=history, bundle=bundle)
     if from_sha is None:
         return None
     return Range(from_sha=from_sha, to_sha=to_sha)
