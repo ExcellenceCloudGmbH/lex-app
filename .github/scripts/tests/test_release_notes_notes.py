@@ -350,3 +350,18 @@ def test_an_oversized_digest_is_trimmed_into_budget():
     # Still describes every change, just more briefly.
     for i in range(20):
         assert f"fix {i}" in prompt
+
+
+def test_fallback_body_is_visible_in_rendered_markdown():
+    digest = {"tag": "v2.1.8", "previous_tag": "v2.1.7", "changes": [
+        {"sha": "abc1234", "component": "backend", "type": "fix", "scope": None,
+         "breaking": False, "subject": "a fix", "pr_number": 1, "internal": False},
+    ]}
+    body = notes.fallback(digest, reason="ValueError: boom")
+
+    # The machine marker stays for tooling...
+    assert notes.FAILURE_MARKER in body
+    # ...but a human reading the rendered release must also see it.
+    assert notes.FAILURE_NOTICE in body
+    assert not notes.FAILURE_NOTICE.startswith("<!--")
+    assert "boom" in body

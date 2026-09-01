@@ -15,6 +15,12 @@ from typing import Callable
 
 FAILURE_MARKER = "<!-- lex:notes-draft-failed -->"
 
+# The marker above is an HTML comment, so it renders as nothing. A release
+# whose note failed to draft must say so where a human will actually see it.
+FAILURE_NOTICE = (
+    "> ⚠️ **Automatic release-note drafting failed — this body needs a human rewrite.**"
+)
+
 # Used only when docs/releases/RELEASE_NOTES_2.1.3_github.md is unavailable.
 # The real file is richer and should win; this exists so a missing style
 # reference degrades the prose instead of killing the release note.
@@ -232,6 +238,8 @@ def fallback(digest: dict, *, reason: str) -> str:
     """A usable body for when drafting fails. Never raises."""
     lines = [
         FAILURE_MARKER,
+        "",
+        FAILURE_NOTICE,
         "",
         f"Automatic release-note drafting failed ({reason}).",
         "The changes below are the raw digest — please rewrite this section",
