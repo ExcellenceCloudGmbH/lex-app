@@ -170,6 +170,46 @@ def cmd_render_changelog(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify_frontend(args: argparse.Namespace) -> int:
+    """Report whether frontend provenance resolves. Never fails.
+
+    Runs at the prerelease gate, where a human is already reviewing and can
+    still act. It deliberately does not touch CHANGELOG.md: that file has no
+    section for this tag yet — `render-changelog` writes the marker at publish.
+    """
+    previous = ranges.previous_release_tag(args.tag, tags=_all_tags(args.tag))
+    if ranges.frontend_range(previous, args.tag) is not None:
+        print(f"Frontend provenance resolves for {args.tag}.", file=sys.stderr)
+        return 0
+
+    missing = [
+        ref for ref in (previous, args.tag)
+        if ref is not None and ranges.frontend_sha_at(ref) is None
+    ]
+    detail = ", ".join(missing) or "an unknown end of the range"
+    print(
+        f"::warning title=Frontend notes unavailable::No frontend provenance for "
+        f"{detail}. This release note will omit frontend changes. Repair later with: "
+        f"python -m release_notes backfill --tag {args.tag} --force"
+    )
+    print(f"Frontend provenance missing for: {detail}", file=sys.stderr)
+    return 0
+
+
+def cmd_list_gaps(args: argparse.Namespace) -> int:
+    """Print versions whose changelog section carries the gap marker.
+
+    Reads CHANGELOG.md rather than a side file so this work queue cannot
+    disagree with the record it is derived from. Ordering follows the
+    changelog's own newest-first layout and is not otherwise guaranteed.
+    """
+    if not CHANGELOG_PATH.exists():
+        return 0
+    for version in changelog.find_gaps(CHANGELOG_PATH.read_text(encoding="utf-8")):
+        print(version)
+    return 0
+
+
 def cmd_append_frontend_note(args: argparse.Namespace) -> int:
     """Add a frontend addendum to a published release body.
 
@@ -249,6 +289,18 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--pac-checkout", default=None)
     add.add_argument("--dry-run", action="store_true")
     add.set_defaults(func=cmd_append_frontend_note)
+
+    verify = sub.add_parser(
+        "verify-frontend",
+        help="Report whether frontend provenance resolves for a tag. Never fails.",
+    )
+    verify.add_argument("--tag", required=True)
+    verify.set_defaults(func=cmd_verify_frontend)
+
+    gaps = sub.add_parser(
+        "list-gaps", help="Versions whose changelog carries the frontend gap marker."
+    )
+    gaps.set_defaults(func=cmd_list_gaps)
 
     return parser
 
