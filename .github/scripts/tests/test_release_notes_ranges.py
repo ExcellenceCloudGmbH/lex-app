@@ -15,6 +15,19 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from release_notes import ranges  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_side_car(tmp_path, monkeypatch):
+    """Point HISTORY_PATH at a file that does not exist.
+
+    Tests that pass only `show=` fall through to the real `load_history()`, so
+    without this they would start reading the committed frontend-history.json
+    the moment Task 4 creates it — turning "no provenance" assertions into
+    failures for a reason that has nothing to do with the behaviour under test.
+    Tests that want history inject `history=` explicitly and are unaffected.
+    """
+    monkeypatch.setattr(ranges, "HISTORY_PATH", tmp_path / "absent-history.json")
+
+
 @pytest.mark.parametrize(
     "tag",
     ["v2.1.6", "v2.0.0rc215", "v10.0.1", "v2.0.0rc1"],
@@ -256,7 +269,7 @@ def test_bundle_commit_at_is_quiet_on_a_full_clone(capsys):
 
 
 _FULL_A = "a388985a1111111111111111111111111111aaaa"
-_PAC_A = "1a2b3c4d5e6f70811111111111111111111bbbb"
+_PAC_A = "1a2b3c4d5e6f708111111111111111111111bbbb"
 
 
 def test_frontend_sha_at_falls_back_to_the_side_car():
@@ -277,6 +290,20 @@ def test_in_tree_manifest_wins_over_the_side_car():
         bundle=lambda ref: _FULL_A,
     )
     assert got == "fromtree"
+
+
+def test_the_in_tree_manifest_short_circuits_the_side_car():
+    calls = []
+
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: '{"sha": "fromtree"}',
+        history=lambda: calls.append("history") or {_FULL_A: {"pac_sha": _PAC_A}},
+        bundle=lambda ref: calls.append("bundle") or _FULL_A,
+    )
+
+    assert got == "fromtree"
+    assert calls == []      # neither seam touched — no subprocess in production
 
 
 def test_side_car_is_matched_by_abbreviated_key():
@@ -348,6 +375,17 @@ def test_keys_below_gits_minimum_abbreviation_are_ignored(short_key):
     assert got is None
 
 
+def test_a_key_of_exactly_the_minimum_length_is_accepted():
+    # Pins the >= boundary: with `>` this returns None.
+    got = ranges.frontend_sha_at(
+        "v2.1.6",
+        show=lambda ref, path: None,
+        history=lambda: {_FULL_A[:7]: {"pac_sha": _PAC_A}},
+        bundle=lambda ref: _FULL_A,
+    )
+    assert got == _PAC_A
+
+
 def test_the_longest_matching_key_wins():
     # A more specific entry must not be shadowed by a vaguer one, whatever
     # order the JSON happens to be written in.
@@ -398,6 +436,12 @@ def test_load_history_returns_empty_on_unparseable_json(tmp_path):
 def test_load_history_returns_empty_when_the_top_level_is_not_an_object(tmp_path):
     bad = tmp_path / "frontend-history.json"
     bad.write_text("[1, 2, 3]", encoding="utf-8")
+    assert ranges.load_history(path=bad) == {}
+
+
+def test_load_history_returns_empty_on_invalid_utf8(tmp_path):
+    bad = tmp_path / "frontend-history.json"
+    bad.write_bytes(b'{"a": \xff\xfe}')
     assert ranges.load_history(path=bad) == {}
 
 

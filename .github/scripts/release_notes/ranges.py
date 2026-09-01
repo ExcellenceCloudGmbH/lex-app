@@ -163,16 +163,24 @@ MIN_HISTORY_KEY = 7
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def load_history(*, path: Path = HISTORY_PATH) -> dict:
+def load_history(*, path: Path | None = None) -> dict:
     """The bundle-commit -> {pac_sha, method} map. Empty on any problem.
 
     A corrupt or missing lookup table must never break drafting: the caller
     treats an empty map exactly as it treats an absent manifest, which omits
     the frontend section rather than guessing.
+
+    `path` defaults to the module-level `HISTORY_PATH` looked up here, at call
+    time, rather than being bound as the parameter's default value — matching
+    how `_run_rev_list`/`_is_shallow` read `REPO_ROOT`. A default of
+    `path: Path = HISTORY_PATH` would freeze today's `HISTORY_PATH` into this
+    function's signature at import time, so `monkeypatch.setattr(ranges,
+    "HISTORY_PATH", ...)` would silently do nothing.
     """
+    target = HISTORY_PATH if path is None else path
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
