@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 308
+max_scenario: 310
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -579,3 +579,35 @@ letters:
       left open all day is a worse and quieter bug than the one it fixes. Harness after the fix:
       6/6, including the exact regression (a frame hidden AFTER the first sweep) driven through an
       attribute mutation with no insertion.
+  aj:
+    title: Streamlit sidebar chrome in lex-app's language
+    scenarios: 1.309-1.310
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      The Streamlit sidebar was a teal link floating in an empty navy column - no branding, no
+      indication of who is signed in, and a log-out styled as the most prominent thing on screen
+      (teal is this palette's accent, which reads as "primary action", and logging out is not
+      one). It now carries the same chrome as lex-app's sidenav: brand lockup, signed-in user with
+      an initials avatar on the active-item tint, hairlines, and a log-out row weighted like a
+      navigation item. Identity sits in the SIDEBAR rather than a top bar, the reverse of lex-app
+      and on purpose - lex-app puts the user menu top-right because its sidenav is full of
+      navigation, while a Streamlit page has no top bar of ours and a mostly empty sidebar.
+      Two boundaries, both asserted because both are invisible when crossed. It owns the CONTAINER
+      only: the author's streamlit_structure.main() content is not styled, wrapped or reordered
+      (1.310), since two components deciding a page's navigation means the author's loses quietly
+      depending on call order. And it depends on NO Streamlit internals - no data-testid, no
+      emotion class - so an upgrade cannot break it by renaming something, which is the failure
+      mode stActiveTheme and stCustomComponentV1 are pinned against elsewhere in this cluster.
+      Accepted cost of that second boundary, named rather than discovered: the log-out row is not
+      truly bottom-pinned, because pinning needs those selectors. It is last in call order
+      instead, which puts it at the bottom without touching Streamlit's layout.
+      1.309 covers the genuine hazard rather than the styling: the display name arrives from the
+      identity provider and is rendered through unsafe_allow_html, so a hostile
+      preferred_username would execute in the session of whoever opened the dashboard. Name,
+      subtitle and the sign-out href are all escaped. Colours are derived from the vendored
+      lex_tokens (NAVY, TEAL) rather than retyped, so the sidebar cannot drift from the product it
+      imitates - silently, in the one place a user sees both side by side.

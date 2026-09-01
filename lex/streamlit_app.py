@@ -12,6 +12,7 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from lex.lex_app.streamlit.eager_frames import eager_frames_js
+from lex.lex_app.streamlit.sidebar import logout_row_html, render_identity
 from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
     embed_theme_from_params,
@@ -423,19 +424,7 @@ def render_logout_link() -> None:
         # JWT: we can't revoke upstream header; just clear local session_state on landing
         href = f"{base_path}/?logout=1"
 
-    st.sidebar.markdown(
-        f"""
-        <a href="{href}" target="_top" style="
-            display:inline-block;
-            padding:0.45rem 0.8rem;
-            border-radius:0.5rem;
-            border:1px solid rgba(49,51,63,0.25);
-            text-decoration:none;
-            font-weight:600;
-        ">Logout</a>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.sidebar.markdown(logout_row_html(href), unsafe_allow_html=True)
 
 
 # -------------------------
@@ -671,6 +660,12 @@ if __name__ == "__main__":
             exec(f"import {repo_name}._streamlit_structure as streamlit_structure")
         except Exception:
             streamlit_structure = None
+
+        # The sidebar's own chrome, before anything the app renders. Streamlit
+        # lays the sidebar out in call order, so this is what puts the brand
+        # lockup and the signed-in user at the TOP -- above the author's
+        # navigation, which is left entirely alone.
+        render_identity(st, st.session_state)
 
         reset_streamlit_form_context()
         params = st.query_params

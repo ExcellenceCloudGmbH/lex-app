@@ -730,3 +730,41 @@ Those were the ones still waiting for a scroll.
 
 Harness after the fix: **6/6**, including the exact regression — a frame hidden
 *after* the first sweep, driven through an attribute mutation with no insertion.
+
+## Batch 1aj — Streamlit sidebar chrome (2026-09-01)
+
+- **Scenarios:** 1.309-1.310
+- **Status:** complete (11 pass)
+- **Source under test:** `lex/lex_app/streamlit/sidebar.py`, wired from `lex/streamlit_app.py`
+- **Test file:** `lex/test_project/tests/init/test_1aj_streamlit_sidebar_chrome.py`
+
+The sidebar was a teal link floating in an empty navy column. Teal is this
+palette's accent — it reads as *primary action*, and logging out is not one.
+
+It now carries lex-app's chrome: brand lockup, signed-in user with an initials
+avatar on the active-item tint, hairlines, and a log-out row weighted like a
+navigation item. Identity sits in the **sidebar** rather than a top bar — the
+reverse of lex-app, and deliberate: lex-app puts the user menu top-right because
+its sidenav is full of navigation, while a Streamlit page has no top bar of ours
+and a mostly empty sidebar.
+
+**Two boundaries, both asserted, because both are invisible when crossed:**
+
+| Boundary | Why it needs a test |
+|---|---|
+| Owns the **container** only | Two components deciding a page's navigation means the author's loses quietly, depending on call order |
+| Depends on **no Streamlit internals** | No `data-testid`, no emotion class — an upgrade renaming one would break this by looking slightly wrong rather than by raising |
+
+**Accepted cost of the second, named rather than discovered:** the log-out row is
+not truly bottom-pinned, because pinning needs exactly those selectors. It is
+last in call order instead, which puts it at the bottom without touching
+Streamlit's layout.
+
+1.309 covers the real hazard rather than the styling: the display name comes from
+the identity provider and is rendered through `unsafe_allow_html`, so a hostile
+`preferred_username` would execute in the session of whoever opened the
+dashboard. Name, subtitle and the sign-out href are all escaped.
+
+Colours derive from the vendored `lex_tokens` (`NAVY`, `TEAL`) rather than being
+retyped, so the sidebar cannot drift from the product it imitates — silently, in
+the one place a user sees both side by side.
