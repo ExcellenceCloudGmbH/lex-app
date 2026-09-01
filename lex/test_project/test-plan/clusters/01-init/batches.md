@@ -826,3 +826,31 @@ exactly one:
 | It is a `data-testid` | Streamlit's own testing surface — far more stable than a generated emotion class |
 | It sets layout only | Asserted: no colour, visibility, or `!important`. A rule that did would fail *invisibly* and unattributably |
 | It degrades | If it stops matching, the block sits in normal flow — where it would be anyway. Failure mode is "not pinned", not "broken" |
+
+### Batch 1aj addendum 3 — one logo per background (scenario 1.312)
+
+The previous round *named* this limit; this fixes it. `st.logo` fills two slots
+with different backgrounds, and both were getting the dark file:
+
+| Slot | Background | Variant |
+|---|---|---|
+| Sidebar | brand-navy in either mode | `dark-lex-logo.svg` — white wordmark |
+| App upper-left (sidebar **collapsed**) | follows the page theme | `lex-logo.svg` — navy wordmark, via `icon_image` |
+
+Reported as the collapsed logo being nearly invisible, which is exactly what a
+white wordmark on a light page looks like.
+
+**Two files rather than one adaptive SVG, on purpose.** An SVG can switch fills
+on `prefers-color-scheme` — but that follows the *operating system*, while both
+products deliberately default to light regardless of it. A dark-OS user on a
+light page would get white on white: the same class of mismatch this cluster
+spent 1.261–1.276 removing.
+
+The test asserts the **fills**, not the filenames. The names differ by one word,
+the files by three hex values, and swapping them yields a logo invisible on
+exactly one surface — which no reviewer would catch and a filename assertion
+would happily pass.
+
+**Residual, still stated:** collapsed *and* dark gives navy on dark. `st.logo`
+takes one image per slot, and choosing between them would mean reading a
+client-side theme from Python.

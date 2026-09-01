@@ -20,7 +20,7 @@ And one that is a genuine hazard rather than a style point: the display name
 comes from the identity provider, so it is untrusted input rendered through
 ``unsafe_allow_html``.
 
-Cluster 01-init, batch 1aj, scenarios 1.309-1.311.
+Cluster 01-init, batch 1aj, scenarios 1.309-1.312.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1aj_streamlit_sidebar_chrome.py
@@ -30,6 +30,7 @@ import pytest
 
 from lex.lex_app.design_system import lex_tokens
 from lex.lex_app.streamlit.sidebar import (
+    _LOGO_COLLAPSED_PATH,
     _LOGO_PATH,
     NAV_ACCENT,
     NAV_SURFACE,
@@ -246,6 +247,81 @@ class TestCluster1aj_BrandLockup:
         assert _LOGO_PATH.is_file(), f"logo not vendored at {_LOGO_PATH}"
         assert _LOGO_PATH.read_bytes().lstrip().startswith(b"<svg"), "not an SVG"
         assert logo_is_available()
+
+    def test_01_312_each_slot_gets_the_variant_its_background_needs(self):
+        """Scenario 1.312: dark logo for the sidebar, light one for the corner.
+
+        ``st.logo`` fills two slots with different backgrounds. The sidebar is
+        brand-navy in either mode, so it takes the white wordmark. The app's
+        upper-left -- where the mark moves when the sidebar is COLLAPSED --
+        follows the page theme, so it takes the navy one.
+
+        Passing only the dark file is what made the collapsed logo nearly
+        invisible: a white wordmark on a light page, which is how this was
+        reported.
+        """
+        calls = []
+
+        class FakeSt:
+            def logo(self, image, **kwargs):
+                calls.append((image, kwargs))
+
+        render_logo(FakeSt())
+
+        assert len(calls) == 1
+        image, kwargs = calls[0]
+        assert image.endswith("dark-lex-logo.svg"), "the sidebar slot needs the dark variant"
+        assert kwargs["icon_image"].endswith("lex-logo.svg"), (
+            "the collapsed slot needs the light variant"
+        )
+
+    def test_01_312_the_two_variants_are_not_swapped(self):
+        """Scenario 1.312 (second half): check the pixels, not the filenames.
+
+        The names differ by one word, the files differ by three hex values, and
+        swapping them produces a logo that is invisible on exactly one surface --
+        a change no reviewer would catch and no test asserting filenames would
+        either. So assert what each file actually contains.
+        """
+        dark = _LOGO_PATH.read_text()
+        light = _LOGO_COLLAPSED_PATH.read_text()
+
+        # Dark variant: white wordmark, for the navy sidebar.
+        assert "#FFFFFF" in dark
+        assert "#282f63" not in dark
+
+        # Light variant: navy wordmark, for a light page.
+        assert "#282f63" in light
+        assert "#FFFFFF" not in light
+
+        # Both carry the brand accent, which is what makes them the same mark.
+        assert "#24b6bb" in dark and "#24b6bb" in light
+
+    def test_01_312_a_missing_light_variant_still_renders_the_sidebar_logo(
+        self, monkeypatch
+    ):
+        """Scenario 1.312 (third half): the second file is an enhancement.
+
+        The sidebar is the slot that matters and the one that is always right.
+        If the collapsed variant is missing, ``st.logo`` should still be called
+        with the dark one rather than skipped -- losing the sidebar logo to fix
+        the collapsed corner would be the wrong trade.
+        """
+        import lex.lex_app.streamlit.sidebar as sb
+
+        monkeypatch.setattr(
+            sb, "_LOGO_COLLAPSED_PATH", sb._LOGO_COLLAPSED_PATH.with_name("gone.svg")
+        )
+        calls = []
+
+        class FakeSt:
+            def logo(self, image, **kwargs):
+                calls.append((image, kwargs))
+
+        sb.render_logo(FakeSt())
+        assert len(calls) == 1
+        assert calls[0][0].endswith("dark-lex-logo.svg")
+        assert "icon_image" not in calls[0][1]
 
     def test_01_311_it_goes_in_streamlits_logo_slot_not_our_markup(self):
         """Scenario 1.311 (second half): ``st.logo``, not a hand-placed image.

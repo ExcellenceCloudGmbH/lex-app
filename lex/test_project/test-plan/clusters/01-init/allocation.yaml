@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 311
+max_scenario: 312
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -581,10 +581,10 @@ letters:
       attribute mutation with no insertion.
   aj:
     title: Streamlit sidebar chrome in lex-app's language
-    scenarios: 1.309-1.311
+    scenarios: 1.309-1.312
     status: complete
     tests:
-      pass: 18
+      pass: 21
       skip: 0
       xfail: 0
     note: >-
@@ -639,6 +639,20 @@ letters:
       would be anyway - so the failure mode is "not pinned", not "broken". 1.310 pins both halves
       of that bargain, including that the rule may not touch colour, visibility or !important:
       a rule that did would fail invisibly and unattributably.
+      1.312 fixes the residual the previous scenario had only NAMED: st.logo fills two slots with
+      different backgrounds, and both were getting the dark file. The sidebar is brand-navy in
+      either mode so it takes the white wordmark; the app's upper-left - where the mark moves when
+      the sidebar is COLLAPSED - follows the page theme, so it takes the navy one (#282f63) via
+      icon_image. Reported as the collapsed logo being nearly invisible, which is exactly white on
+      a light page. Two files rather than one adaptive SVG on purpose: an SVG can switch fills on
+      prefers-color-scheme, but that follows the OPERATING SYSTEM while both products deliberately
+      default to light regardless of it, so a dark-OS user on a light page would get white on
+      white - the same class of mismatch this cluster spent 1.261-1.276 removing. The test asserts
+      the FILLS rather than the filenames: the names differ by one word, the files by three hex
+      values, and swapping them yields a logo invisible on exactly one surface - which no reviewer
+      would catch and a filename assertion would happily pass. Residual, still stated: collapsed
+      AND dark gives navy on dark; st.logo takes one image per slot and choosing would mean
+      reading a client-side theme from Python.
       Writing this scenario surfaced a real packaging bug, unrelated to the logo and older:
       lex.lex_app.streamlit._widget_host_component was absent from [tool.setuptools.package-data],
       so the widget-host shim's frontend/ would NOT ship in a wheel and lex_widgets() would fail

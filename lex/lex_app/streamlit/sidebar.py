@@ -27,14 +27,26 @@ from typing import Optional
 
 from lex.lex_app.design_system import lex_tokens
 
-#: The same logo lex-app's sidenav renders (`assets/images/dark-lex-logo.svg`
-#: there, imported by CustomSidebar). The DARK variant -- white wordmark, teal
-#: accent -- because this surface is navy in both modes.
+_ASSETS = Path(__file__).resolve().parents[2] / "assets"
+
+#: For the SIDEBAR, which is brand-navy in both light and dark. The dark variant
+#: -- white wordmark, teal accent -- the same file lex-app's own sidenav imports.
 #:
-#: Vendored into ``lex/assets/``, which is already declared as package data, so
-#: it ships in the wheel rather than being fetched from the frontend build at
-#: runtime: those filenames carry content hashes and change on every rebuild.
-_LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "dark-lex-logo.svg"
+#: Vendored into ``lex/assets/``, already declared as package data, so it ships
+#: in the wheel rather than being fetched from the frontend build at runtime:
+#: those filenames carry content hashes and change on every rebuild.
+_LOGO_PATH = _ASSETS / "dark-lex-logo.svg"
+
+#: For the APP'S UPPER-LEFT, which is where ``st.logo`` puts the mark when the
+#: sidebar is COLLAPSED -- and that surface follows the page theme rather than
+#: being navy. The light variant: teal accent, navy wordmark (#282f63).
+#:
+#: Two files rather than one adaptive SVG on purpose. An SVG can switch fills on
+#: ``prefers-color-scheme``, but that follows the OPERATING SYSTEM, and both
+#: products deliberately default to light regardless of it -- so a dark-OS user
+#: on a light page would get a white wordmark on white. Matching the product
+#: default is right where matching the OS is not.
+_LOGO_COLLAPSED_PATH = _ASSETS / "lex-logo.svg"
 
 #: Rendered width, matching what lex-app's sidebar uses.
 _LOGO_WIDTH_PX = 140
@@ -51,7 +63,7 @@ NAV_ACTIVE_BG = "rgba(20,180,180,0.16)"
 
 
 def logo_is_available() -> bool:
-    """Whether the vendored logo is on disk.
+    """Whether the sidebar logo is on disk.
 
     Guarded because ``st.logo`` raises on a missing file, and a packaging
     mistake should cost the logo rather than the page.
@@ -71,16 +83,24 @@ def render_logo(st_module) -> None:
     under the collapse button with the header's whitespace above it, and no
     amount of negative margin fixes that honestly.
 
-    Known limit, worth stating: ``st.logo`` also renders in the app's upper-left
-    corner when the sidebar is COLLAPSED, and that surface follows the page
-    theme. This is the dark variant -- a white wordmark -- so on a light page
-    with the sidebar collapsed it will be hard to see. The sidebar is navy in
-    both modes, so the common case is right; fixing the other one means choosing
-    a variant from the client's theme, which is not knowable here.
+    Two variants, because the two slots have different backgrounds. The sidebar
+    is brand-navy in either mode, so it takes the white wordmark. The upper-left
+    corner -- where ``st.logo`` moves the mark when the sidebar is COLLAPSED --
+    follows the page theme, so it takes the navy one. Passing only the dark file
+    is what made the collapsed logo nearly invisible: white on a light page.
+
+    Residual case, stated rather than implied: collapsed AND the page switched to
+    dark gives a navy wordmark on a dark surface. ``st.logo`` takes one image per
+    slot, and choosing between them would mean reading a client-side theme from
+    Python. Matching the product default -- light, on both surfaces -- is the
+    honest half to get right.
     """
     if not logo_is_available():
         return
-    st_module.logo(str(_LOGO_PATH), size="medium")
+    kwargs = {"size": "medium"}
+    if _LOGO_COLLAPSED_PATH.is_file():
+        kwargs["icon_image"] = str(_LOGO_COLLAPSED_PATH)
+    st_module.logo(str(_LOGO_PATH), **kwargs)
 
 
 def _initials(name: str) -> str:
