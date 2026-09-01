@@ -41,6 +41,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Same reason as the gate: without PAC on disk the frontend range cannot
+      # be read, and render-changelog would mark this release as having
+      # unrecorded frontend changes.
+      - name: Checkout the frontend repository
+        uses: actions/checkout@v4
+        with:
+          repository: ExcellenceCloudGmbH/process-admin-general-client
+          token: ${{ secrets.LEX_PACKAGES_TOKEN }}
+          path: pac
+          fetch-depth: 0
+
       - name: Render and prepend the entry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,7 +60,13 @@ jobs:
           set -euo pipefail
           DATE=$(git log -1 --format=%cs "refs/tags/$TAG")
           PYTHONPATH=.github/scripts python -m release_notes render-changelog \
-            --tag "$TAG" --date "$DATE"
+            --tag "$TAG" --date "$DATE" --pac-checkout ./pac
+
+      # The Commit step below runs `git add`/`git pull --rebase` in this
+      # workspace. `pac/` is an untracked directory inside it; removing it
+      # first keeps the commit and any rebase operating on lex-app alone.
+      - name: Remove the frontend checkout before committing
+        run: rm -rf pac
 
       - name: Commit
         env:
