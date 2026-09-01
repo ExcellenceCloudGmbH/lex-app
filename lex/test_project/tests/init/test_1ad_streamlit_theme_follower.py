@@ -248,26 +248,29 @@ class TestCluster1ad_StreamlitThemeFollower:
             assert "__DEBUG" not in html, "unreplaced marker would ship to the browser"
 
 
-    def test_01_274_following_is_off_unless_asked_for(self):
-        """Scenario 1.274: a page does not lose its theme control by default.
+    def test_01_274_following_is_on_but_escapable(self):
+        """Scenario 1.274: on by default, and switchable off per deployment.
 
-        Following works by reloading with ``?embed_options=<mode>_theme``. That
-        parameter sits at the TOP of Streamlit's own precedence -- above the
-        stored theme and above Streamlit's theme menu -- so a page that follows
-        has, from the user's side, simply lost its theme control: the menu stops
-        responding, and nothing in the app file can override it either, because
-        a query parameter is not something app code gets a say in.
+        The two surfaces are meant to read as one product, so lex-app decides the
+        mode and Streamlit matches -- that is the intended default.
 
-        Reported as exactly that: "the streamlit is always in dark mode, you
-        cannot change it". Matching two surfaces is worth that trade only when
-        someone asked for it, so it is opt-in and the default is off.
+        It has a cost that must stay visible rather than being discovered: a
+        following page reloads with ``?embed_options=<mode>_theme``, which is the
+        top of Streamlit's precedence, so **Streamlit's own theme menu stops
+        having any effect** and the app file cannot override it either. This was
+        reported once as "always in dark mode, you cannot change it", so the
+        opt-out is part of the contract and is tested, not just documented.
         """
-        for value in ({}, {"LEX_THEME_FOLLOW": ""}, {"LEX_THEME_FOLLOW": "0"},
-                      {"LEX_THEME_FOLLOW": "false"}, {"LEX_THEME_FOLLOW": "no"}):
-            assert theme_follow_enabled(value) is False, value
+        # On unless explicitly switched off -- including when the variable is
+        # present but blank, which is what an unfilled deployment template
+        # produces and must not read as "disabled".
+        for value in ({}, {"LEX_THEME_FOLLOW": ""}, {"LEX_THEME_FOLLOW": "   "},
+                      {"LEX_THEME_FOLLOW": "1"}, {"LEX_THEME_FOLLOW": "true"}):
+            assert theme_follow_enabled(value) is True, value
 
-        for value in ("1", "true", "TRUE", "yes", "on"):
-            assert theme_follow_enabled({"LEX_THEME_FOLLOW": value}) is True, value
+        # Every spelling an operator reaching for the escape hatch would try.
+        for value in ("0", "false", "FALSE", "no", "off", "Off"):
+            assert theme_follow_enabled({"LEX_THEME_FOLLOW": value}) is False, value
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

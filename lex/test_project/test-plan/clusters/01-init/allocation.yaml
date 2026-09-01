@@ -366,19 +366,22 @@ letters:
       present-and-skipped, so no production page carries it and no future edit to a runtime guard
       can leak a debug box into a dashboard. The scenario also pins that the follower is identical
       in both variants - diagnostics must observe the mechanism, never alter it.
-      1.274 turns the whole feature OFF by default, after the user reported "the streamlit is
-      always in dark mode, you cannot change it". That is a direct consequence of how following
-      works: it reloads with ?embed_options=<mode>_theme, and that parameter is the TOP of
-      Streamlit's own precedence - above the stored theme and above Streamlit's theme menu. So a
-      followed page has lost its theme control from the user's side: the menu stops responding,
-      and _streamlit_structure cannot override it either, because a query parameter is not
-      something app code gets a say in. Verified the launch flags were NOT the cause first - the
-      1ae CLI flags emit backgroundColor #ffffff with proper theme.light/theme.dark blocks and no
-      base override. Matching two surfaces is worth surrendering the theme menu only where
-      somebody asked for it, so LEX_THEME_FOLLOW=1 opts in and the default is off. A page already
-      pinned is freed by opening it once without embed_options; with following off nothing puts
-      it back. The eager-frames script (1ai) is deliberately NOT gated on this - it governs when
-      component frames load and has nothing to do with the theme.
+      1.274 makes following switchable, after the user reported "the streamlit is always in dark
+      mode, you cannot change it". Cause: following reloads with ?embed_options=<mode>_theme, and
+      that parameter is the TOP of Streamlit's own precedence - above the stored theme and above
+      Streamlit's theme menu - so on a following page the menu has no effect and
+      _streamlit_structure cannot override it either, a query parameter being outside what app
+      code can influence. Verified the launch flags were NOT the cause first: the 1ae CLI flags
+      emit backgroundColor #ffffff with proper theme.light/theme.dark blocks and no base override.
+      Default is ON by product decision - the two surfaces are meant to read as one, so lex-app
+      decides the mode and Streamlit matches, rather than branded widgets sitting on a mismatched
+      page. LEX_THEME_FOLLOW=0 opts out where a page needs its own theme control. The escape hatch
+      is TESTED rather than only documented, in every spelling an operator would reach for, and a
+      blank value reads as ON because an unfilled deployment template must not silently disable a
+      default. A page pinned by an earlier follow is freed by opening it once without
+      embed_options, once following is off. The eager-frames script (1ai) is deliberately NOT
+      gated on this - it governs when component frames load, not the theme, so switching theme
+      sync off must not bring back load-on-scroll.
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299

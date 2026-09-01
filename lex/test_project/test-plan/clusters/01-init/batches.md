@@ -615,7 +615,7 @@ height, which only happens after ready.
 Behaviour verified against DOM doubles (7 cases). No JS runner in this repo, so
 that harness is not in CI — the Python scenarios pin the structural properties.
 
-### Batch 1ad addendum 6 — following is now opt-in (scenario 1.274)
+### Batch 1ad addendum 6 — following is switchable (scenario 1.274)
 
 Reported: *"the streamlit is always in dark mode, you cannot change it."*
 
@@ -630,12 +630,18 @@ Ruled out first: the launch flags merged in 1ae are **not** the cause — they e
 `backgroundColor=#ffffff` with proper `theme.light`/`theme.dark` blocks and no
 `base` override.
 
-Matching the two surfaces is worth surrendering the theme menu only where someone
-asked for it:
+**Default is on**, by product decision: the two surfaces are meant to read as one,
+so lex-app decides the mode and Streamlit matches — rather than branded widgets
+sitting on a mismatched page. The cost above is the accepted trade, and it is
+stated in the API docstring rather than left to be discovered.
 
 ```bash
-LEX_THEME_FOLLOW=1   # opt in; default is off
+LEX_THEME_FOLLOW=0   # opt out where a page needs its own theme control
 ```
+
+The escape hatch is **tested**, not just documented — in every spelling an
+operator would reach for, and a blank value reads as *on*, because an unfilled
+deployment template must not silently disable a default.
 
 A page already pinned is freed by opening it once **without** `embed_options` in
 the URL — with following off, nothing puts it back.

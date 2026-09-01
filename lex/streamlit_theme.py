@@ -241,27 +241,32 @@ DEBUG_PANEL_HEIGHT = 132
 
 
 def theme_follow_enabled(environ: "dict[str, str] | None" = None) -> bool:
-    """Whether a Streamlit page should follow lex-app's theme. OFF by default.
+    """Whether a Streamlit page should follow lex-app's theme. ON by default.
 
-    Following works by reloading with ``?embed_options=<mode>_theme``, and that
-    parameter is the TOP of Streamlit's own precedence: it outranks the stored
-    theme and Streamlit's theme menu alike. So a page that follows has, from the
-    user's side, simply lost its theme control -- the menu stops doing anything
-    and nothing in the app file can override it, because a query parameter is
-    not something app code gets a say in.
+    Following works by reloading with ``?embed_options=<mode>_theme``. That
+    parameter is the top of Streamlit's own precedence -- it outranks the stored
+    theme and Streamlit's theme menu alike -- so the cost is real and worth
+    stating plainly: **on a following page, Streamlit's own theme menu stops
+    having any effect**, and the app file cannot override it either, because a
+    query parameter is not something app code gets a say in.
 
-    That is a fair trade only where someone asked for the two surfaces to match.
-    It is not a reasonable default, so it is opt-in::
+    That is the deliberate trade. The two surfaces are meant to be one product,
+    so lex-app decides the mode and Streamlit matches it, rather than a dashboard
+    showing branded widgets on a mismatched page.
 
-        LEX_THEME_FOLLOW=1
+    Opt out per deployment when a page needs its own theme control::
 
-    A page that has already been pinned is freed by opening it once without
-    ``embed_options`` in the URL; with following off, nothing puts it back.
+        LEX_THEME_FOLLOW=0
+
+    A page pinned by an earlier follow is freed by opening it once without
+    ``embed_options`` in the URL, once following is off.
     """
     import os
 
     raw = (environ if environ is not None else os.environ).get("LEX_THEME_FOLLOW", "")
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    if raw.strip() == "":
+        return True
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def theme_debug_enabled(environ: "dict[str, str] | None" = None) -> bool:
