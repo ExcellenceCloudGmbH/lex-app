@@ -614,3 +614,31 @@ height, which only happens after ready.
 
 Behaviour verified against DOM doubles (7 cases). No JS runner in this repo, so
 that harness is not in CI — the Python scenarios pin the structural properties.
+
+### Batch 1ad addendum 6 — following is now opt-in (scenario 1.274)
+
+Reported: *"the streamlit is always in dark mode, you cannot change it."*
+
+That is a direct consequence of how following works. It reloads with
+`?embed_options=<mode>_theme`, and in Streamlit's resolver the URL is checked
+**first** — above the stored theme, and above Streamlit's own theme menu. So a
+followed page has lost its theme control from the user's side: the menu stops
+responding, and `_streamlit_structure` cannot override it either, because a query
+parameter is not something app code gets a say in.
+
+Ruled out first: the launch flags merged in 1ae are **not** the cause — they emit
+`backgroundColor=#ffffff` with proper `theme.light`/`theme.dark` blocks and no
+`base` override.
+
+Matching the two surfaces is worth surrendering the theme menu only where someone
+asked for it:
+
+```bash
+LEX_THEME_FOLLOW=1   # opt in; default is off
+```
+
+A page already pinned is freed by opening it once **without** `embed_options` in
+the URL — with following off, nothing puts it back.
+
+The eager-frames script (batch 1ai) is deliberately **not** gated on this. It
+governs *when* component frames load and has nothing to do with the theme.

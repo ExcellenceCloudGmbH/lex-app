@@ -16,6 +16,7 @@ from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
     embed_theme_from_params,
     theme_debug_enabled,
+    theme_follow_enabled,
     theme_follower_html,
 )
 
@@ -622,15 +623,23 @@ def render_theme_follower() -> None:
     """
     import streamlit.components.v1 as components
 
-    debug = theme_debug_enabled()
-    # One block, two page-level scripts. They are unrelated concerns kept in
-    # separate modules, but each `components.html` is another iframe, and the
-    # eager-frames script exists precisely because frames are not free.
-    components.html(
-        theme_follower_html(_url_embed_theme(), debug=debug)
-        + f"<script>{eager_frames_js()}</script>",
-        height=DEBUG_PANEL_HEIGHT if debug else 0,
-    )
+    # Theme following is OPT-IN. It works by reloading with
+    # ?embed_options=<mode>_theme, which sits at the top of Streamlit's own
+    # precedence — above the stored theme and above Streamlit's theme menu. A
+    # page that follows has therefore lost its theme control: the menu stops
+    # working and the app file cannot override it either, because a query
+    # parameter is not something app code gets a say in. Worth it when someone
+    # asked the two surfaces to match; not worth imposing by default.
+    follow = theme_follow_enabled()
+    debug = follow and theme_debug_enabled()
+
+    # The eager-frames script is unconditional: it is about WHEN component
+    # frames load, and has nothing to do with the theme.
+    body = f"<script>{eager_frames_js()}</script>"
+    if follow:
+        body = theme_follower_html(_url_embed_theme(), debug=debug) + body
+
+    components.html(body, height=DEBUG_PANEL_HEIGHT if debug else 0)
 
 
 # Form-safe logout control (won't break no matter what streamlit_structure.main() does).

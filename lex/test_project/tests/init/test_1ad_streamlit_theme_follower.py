@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.273.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.274.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -35,6 +35,7 @@ from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
     THEME_STORAGE_KEY,
     theme_debug_enabled,
+    theme_follow_enabled,
     embed_theme_from_params,
     theme_follower_html,
 )
@@ -245,6 +246,28 @@ class TestCluster1ad_StreamlitThemeFollower:
             assert "host.__lexThemeFollow = follow;" in html
             assert 'host.addEventListener("storage"' in html
             assert "__DEBUG" not in html, "unreplaced marker would ship to the browser"
+
+
+    def test_01_274_following_is_off_unless_asked_for(self):
+        """Scenario 1.274: a page does not lose its theme control by default.
+
+        Following works by reloading with ``?embed_options=<mode>_theme``. That
+        parameter sits at the TOP of Streamlit's own precedence -- above the
+        stored theme and above Streamlit's theme menu -- so a page that follows
+        has, from the user's side, simply lost its theme control: the menu stops
+        responding, and nothing in the app file can override it either, because
+        a query parameter is not something app code gets a say in.
+
+        Reported as exactly that: "the streamlit is always in dark mode, you
+        cannot change it". Matching two surfaces is worth that trade only when
+        someone asked for it, so it is opt-in and the default is off.
+        """
+        for value in ({}, {"LEX_THEME_FOLLOW": ""}, {"LEX_THEME_FOLLOW": "0"},
+                      {"LEX_THEME_FOLLOW": "false"}, {"LEX_THEME_FOLLOW": "no"}):
+            assert theme_follow_enabled(value) is False, value
+
+        for value in ("1", "true", "TRUE", "yes", "on"):
+            assert theme_follow_enabled({"LEX_THEME_FOLLOW": value}) is True, value
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

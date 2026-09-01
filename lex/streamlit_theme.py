@@ -240,6 +240,30 @@ __DEBUG_PANEL__  })();
 DEBUG_PANEL_HEIGHT = 132
 
 
+def theme_follow_enabled(environ: "dict[str, str] | None" = None) -> bool:
+    """Whether a Streamlit page should follow lex-app's theme. OFF by default.
+
+    Following works by reloading with ``?embed_options=<mode>_theme``, and that
+    parameter is the TOP of Streamlit's own precedence: it outranks the stored
+    theme and Streamlit's theme menu alike. So a page that follows has, from the
+    user's side, simply lost its theme control -- the menu stops doing anything
+    and nothing in the app file can override it, because a query parameter is
+    not something app code gets a say in.
+
+    That is a fair trade only where someone asked for the two surfaces to match.
+    It is not a reasonable default, so it is opt-in::
+
+        LEX_THEME_FOLLOW=1
+
+    A page that has already been pinned is freed by opening it once without
+    ``embed_options`` in the URL; with following off, nothing puts it back.
+    """
+    import os
+
+    raw = (environ if environ is not None else os.environ).get("LEX_THEME_FOLLOW", "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def theme_debug_enabled(environ: "dict[str, str] | None" = None) -> bool:
     """Whether to render the visible diagnostics panel.
 
