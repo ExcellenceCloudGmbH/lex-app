@@ -668,3 +668,40 @@ Verified against DOM doubles that it **terminates**: the reloaded page
 re-evaluates with the mode now in its URL and stops. No loop.
 
 A stored choice still wins on both sides. This decides the first load only.
+
+### Batch 1ad addendum 8 — cooperate with Streamlit's theme menu (scenario 1.276)
+
+The user opened Streamlit's Settings dialog, saw **Choose app theme → "Use system
+setting"**, and said *"I think this is overriding the streamlit behaviour."*
+
+That was the root cause, and everything in this batch before it was downstream of
+it. Following used `?embed_options=<mode>_theme`, which sits at the top of
+Streamlit's resolver — so the menu not only stopped applying, it stopped
+**saving**:
+
+```js
+Cae = e => { if (!Pa() || (Rw(), xg() || Sg())) return; /* persist */ }
+//                              ^^^^^^^^^^^^^ a URL theme is present
+```
+
+The follower now writes the key the **menu itself** writes:
+
+```
+stActiveTheme-<pathname>-v2   ->   JSON "Light" | "Dark" | "System"
+```
+
+so the two cannot disagree. The menu keeps working, shows the truth, and a choice
+made there persists. A reload is still required — Streamlit reads the theme at
+boot — but the URL is left alone, which is the whole difference.
+
+**1.272 was rewritten, not deleted.** The luma measurement it pinned is *gone*
+rather than fixed: the mode is now read from Streamlit's selection instead of
+inferred from pixels, and "System"/unset both mean the OS decides, which
+`prefers-color-scheme` answers exactly. Its job now is to stop anyone
+reintroducing measurement.
+
+A URL that already pins a theme makes the follower **stand down** and log how to
+clear it — earlier versions put those parameters there, and a pinned tab would
+otherwise spend its one reload per load, forever.
+
+Harness after the rewrite: 8/8.

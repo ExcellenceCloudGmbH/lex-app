@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.275.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.276.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -179,124 +179,85 @@ class TestCluster1ad_StreamlitThemeFollower:
         assert "window.localStorage.setItem(_themeStorageKey, mode)" in shim
 
 
-    def test_01_272_transparent_background_is_not_read_as_dark(self):
-        """Scenario 1.272: a transparent background yields no answer, not "dark".
+    def test_01_272_the_mode_is_read_from_streamlit_not_guessed(self):
+        """Scenario 1.272: the current mode is asked for, never inferred.
 
-        This was the bug that made theme sync appear completely dead. The
-        measurement parsed ``rgba(0, 0, 0, 0)`` into four zeroes, passed the
-        ``length < 3`` check, and computed a luma of 0 -- pure black. So any page
-        whose measured element painted nothing of its own reported "dark". On a
-        light page asked to become dark, the follower then saw ``now === mode``
-        and returned. A silent no-op, every single time, with a log line claiming
-        the page was already correct.
+        This scenario used to pin a fix to a luma heuristic: the follower
+        classified the rendered background, and ``rgba(0, 0, 0, 0)`` parsed to
+        four zeroes, which reads as pure black -- so a light page whose element
+        painted nothing reported "dark" and the follower silently did nothing,
+        every time.
 
-        A transparent colour carries no information. The guard must be on alpha,
-        not on component count, and the fallbacks must be tried in order:
-        another element that does paint, then the OS preference -- which is what
-        Streamlit itself follows when the URL names no theme.
+        The heuristic is gone rather than fixed. Streamlit already stores which
+        theme is selected, so the question has an exact answer:
+
+            stActiveTheme-<pathname>-v2  ->  "Light" | "Dark" | "System"
+
+        with "System" and unset both meaning the OS decides, which
+        ``prefers-color-scheme`` answers exactly. The regression guard is that
+        nobody reintroduces measurement -- a future "improvement" that inspects
+        pixels brings the whole bug class back with it.
         """
-        html = theme_follower_html()
+        js = theme_follower_html()
 
-        # Alpha zero is rejected explicitly. Component count cannot catch it:
-        # rgba(0,0,0,0) has four components, one more than the old guard needed.
-        assert "parseFloat(parts[3]) === 0" in html
+        # Read from Streamlit's own store, scoped the way Streamlit scopes it.
+        assert '"stActiveTheme-" + host.location.pathname + "-v"' in js
+        assert "prefers-color-scheme: dark" in js
 
-        # More than one candidate element, because which one carries the theme
-        # background is Streamlit's business and has moved between versions.
-        for selector in (".stApp", "stAppViewContainer", "d.body", "d.documentElement"):
-            assert selector in html, f"missing background candidate: {selector}"
+        # And measurement is not merely unused -- it is absent from the CODE.
+        # Checked with comments stripped: the note above the replacement explains
+        # what the luma heuristic did, and a naive substring search finds that
+        # prose rather than any surviving call.
+        code = "\n".join(
+            line for line in js.splitlines()
+            if not line.strip().startswith(("//", "*", "/*"))
+        )
+        for gone in ("getComputedStyle", "backgroundColor", "luma", "querySelector"):
+            assert gone not in code, f"the mode is being inferred again, via {gone}"
 
-        # And a reasoned last resort rather than a guess.
-        assert "prefers-color-scheme: dark" in html
+    def test_01_276_it_writes_the_menu_rather_than_overriding_it(self):
+        """Scenario 1.276: sync cooperates with Streamlit's theme menu.
 
+        The previous mechanism reloaded with ``?embed_options=<mode>_theme``.
+        That parameter is the top of Streamlit's resolver, so the Settings menu
+        stopped applying -- and stopped SAVING, because Streamlit's own writer
+        refuses while a URL theme is present::
 
-    def test_01_273_diagnostics_are_off_and_weightless_by_default(self):
-        """Scenario 1.273: the diagnostics panel costs nothing unless asked for.
+            Cae = e => { if (!Pa() || (Rw(), xg() || Sg())) return; ... }
 
-        A theme problem spans three browsing contexts, so the panel exists to
-        make one screenshot sufficient. But it renders into a block on the page,
-        and a block that is accidentally always on would put a debug box at the
-        bottom of every production dashboard.
-
-        Two properties: the flag defaults off for every spelling of "not set",
-        and when off the emitted script contains no panel code to run.
+        Reported as "always in dark mode, you cannot change it". Writing the key
+        the menu itself writes means the two cannot disagree: the menu keeps
+        working, shows the truth, and a choice made there persists.
         """
-        for value in ({}, {"LEX_THEME_DEBUG": ""}, {"LEX_THEME_DEBUG": "0"},
-                      {"LEX_THEME_DEBUG": "false"}, {"LEX_THEME_DEBUG": "no"}):
-            assert theme_debug_enabled(value) is False, value
+        js = theme_follower_html()
 
-        # Accepts the spellings an operator actually types -- someone who writes
-        # "true" and sees nothing would reasonably call the feature broken.
-        for value in ("1", "true", "TRUE", "yes", "on"):
-            assert theme_debug_enabled({"LEX_THEME_DEBUG": value}) is True, value
+        # Writes Streamlit's own preference, as the value Streamlit stores.
+        assert 'host.localStorage.setItem(' in js
+        assert 'JSON.stringify(mode === "dark" ? "Dark" : "Light")' in js
 
-        # Spliced, not gated: when off, the panel code is ABSENT rather than
-        # present-and-skipped. A runtime guard would ship this to every page and
-        # would only have to be edited wrong once to surface in production.
-        off = theme_follower_html("", debug=False)
-        assert "lex-theme diagnostics" not in off
-        assert "setInterval" not in off, "an inert page must not schedule work"
+        # And it never MUTATES the URL. The string "embed_options" does still
+        # appear -- in the stand-down message that tells a user how to unpin a
+        # tag an earlier version left behind -- so the property to assert is the
+        # absence of URL writing, not the absence of the word.
+        for writer in ("searchParams", "location.replace", "location.href =",
+                       "history.pushState", "history.replaceState"):
+            assert writer not in js, f"the URL is being rewritten again, via {writer}"
+        # A reload is still needed -- Streamlit reads the theme at boot -- but a
+        # reload preserves the URL, which is the whole difference.
+        assert "host.location.reload()" in js
 
-        on = theme_follower_html("", debug=True)
-        assert on.count("lex-theme diagnostics") == 1
-        assert len(on) > len(off), "the panel should add code, not replace it"
-        assert DEBUG_PANEL_HEIGHT > 0, "an on panel needs room or it renders clipped"
+    def test_01_276_a_url_pinned_theme_makes_it_stand_down(self):
+        """Scenario 1.276 (second half): don't fight a parameter we cannot beat.
 
-        # Whichever variant is emitted, the follower itself is unchanged --
-        # diagnostics must observe the mechanism, never alter it.
-        for html in (off, on):
-            assert "host.__lexThemeFollow = follow;" in html
-            assert 'host.addEventListener("storage"' in html
-            assert "__DEBUG" not in html, "unreplaced marker would ship to the browser"
-
-
-    def test_01_274_following_is_on_but_escapable(self):
-        """Scenario 1.274: on by default, and switchable off per deployment.
-
-        The two surfaces are meant to read as one product, so lex-app decides the
-        mode and Streamlit matches -- that is the intended default.
-
-        It has a cost that must stay visible rather than being discovered: a
-        following page reloads with ``?embed_options=<mode>_theme``, which is the
-        top of Streamlit's precedence, so **Streamlit's own theme menu stops
-        having any effect** and the app file cannot override it either. This was
-        reported once as "always in dark mode, you cannot change it", so the
-        opt-out is part of the contract and is tested, not just documented.
+        A theme in the page's URL outranks the key this writes. Without standing
+        down, every load would see a mismatch it can never resolve and spend its
+        one reload trying -- a reload per load, forever. Earlier versions of this
+        follower PUT such a parameter there, so a tab can still carry one; the
+        log line says how to clear it rather than leaving the user stuck.
         """
-        # On unless explicitly switched off -- including when the variable is
-        # present but blank, which is what an unfilled deployment template
-        # produces and must not read as "disabled".
-        for value in ({}, {"LEX_THEME_FOLLOW": ""}, {"LEX_THEME_FOLLOW": "   "},
-                      {"LEX_THEME_FOLLOW": "1"}, {"LEX_THEME_FOLLOW": "true"}):
-            assert theme_follow_enabled(value) is True, value
-
-        # Every spelling an operator reaching for the escape hatch would try.
-        for value in ("0", "false", "FALSE", "no", "off", "Off"):
-            assert theme_follow_enabled({"LEX_THEME_FOLLOW": value}) is False, value
-
-
-    def test_01_275_an_undecided_page_defaults_to_light(self):
-        """Scenario 1.275: no preference means light, not the OS.
-
-        Left alone, both products fall back to ``prefers-color-scheme``: Streamlit
-        by design, and lex-app because react-admin's ThemeProvider resolves
-        ``defaultTheme || (prefersDarkMode && darkTheme ? 'dark' : 'light')``.
-        So a dark-OS user was handed a dark app and a dark dashboard having never
-        chosen either. Reported as "both are always dark at first".
-
-        The two defaults must agree, or the widgets and the page they sit in
-        disagree on the first paint. lex-app sets ``defaultTheme="light"``; this
-        is the same decision on the Streamlit side.
-
-        A stored choice still wins on both sides — this decides the FIRST load
-        only, which is what makes it a default rather than a lock.
-        """
-        assert DEFAULT_MODE == LIGHT
-
-        js = theme_follower_html("")
-        assert 'var DEFAULT_MODE = "light";' in js
-        # Applied where nothing has been agreed, rather than left to Streamlit.
-        assert "follow(stored || DEFAULT_MODE);" in js
+        pinned = theme_follower_html("dark")
+        assert "Standing" in pinned
+        assert "without that parameter" in pinned
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

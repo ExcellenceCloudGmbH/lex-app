@@ -303,7 +303,7 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.275
+    scenarios: 1.261-1.276
     status: complete
     tests:
       pass: 18
@@ -394,6 +394,22 @@ letters:
       returns without acting. Verified against DOM doubles that it TERMINATES: the reloaded page
       re-evaluates with the mode now in its URL and stops, so there is no reload loop. A stored
       choice still wins on both sides; this decides the first load only.
+      1.276 REPLACES the mechanism, after the user pointed at Streamlit's own Settings dialog and
+      said "I think this is overriding the streamlit behaviour". They were right, and it was the
+      root cause the previous five scenarios had all been downstream of. Following used
+      ?embed_options=<mode>_theme, which sits at the top of Streamlit's resolver - so the theme
+      menu stopped applying AND stopped saving, because Streamlit's own writer bails out while a
+      URL theme is present (Cae = e => { if (!Pa() || (Rw(), xg() || Sg())) return; ... }). The
+      follower now writes the key the MENU writes - stActiveTheme-<pathname>-v2, JSON
+      "Light"/"Dark" - so the two cannot disagree: the menu keeps working, shows the truth, and a
+      choice made there persists. A reload is still needed because Streamlit reads the theme at
+      boot, but the URL is untouched. 1.272 was rewritten rather than deleted: the luma
+      measurement it pinned is GONE, not fixed, because the selection is now read from Streamlit
+      instead of inferred from pixels - "System" and unset both mean the OS decides, which
+      prefers-color-scheme answers exactly. Its regression guard is that nobody reintroduces
+      measurement. A URL that already pins a theme makes the follower stand down entirely and log
+      how to clear it, since earlier versions put those parameters there and a pinned tab would
+      otherwise burn its one reload per load forever. Harness after the rewrite: 8/8.
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299
