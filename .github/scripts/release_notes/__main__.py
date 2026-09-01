@@ -40,6 +40,39 @@ def _all_tags(tag: str) -> list[str]:
     return result.stdout.splitlines()
 
 
+def _release_tags_in_order() -> list[str]:
+    """Every release tag in this repository, oldest first."""
+    result = subprocess.run(
+        ["git", "tag", "--sort=creatordate"],
+        cwd=ranges.REPO_ROOT, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "Could not list tags: "
+            f"{result.stderr.strip() or 'git exited ' + str(result.returncode)}"
+        )
+    return [t for t in result.stdout.splitlines() if ranges.is_release_tag(t)]
+
+
+def _tag_span(start: str, end: str, *, tags: list[str]) -> list[str]:
+    """The inclusive run of release tags from `start` to `end`, oldest first."""
+    for tag in (start, end):
+        if tag not in tags:
+            raise SystemExit(
+                f"{tag!r} is not a release tag in this repository. Backfill only "
+                "spans tags matching vX.Y.Z or vX.Y.ZrcN."
+            )
+    i, j = tags.index(start), tags.index(end)
+    if i > j:
+        raise SystemExit(f"{start!r} is newer than {end!r} — pass them oldest first.")
+    return tags[i:j + 1]
+
+
+def _already_rendered(existing: str, tag: str) -> bool:
+    """True when the changelog already carries a section for `tag`."""
+    return f"## [{tag.lstrip('v')}]" in existing
+
+
 def _pac_log(pac_checkout: Path):
     """A `run_log` bound to a PAC working copy instead of this repository."""
 
@@ -241,6 +274,51 @@ def cmd_list_gaps(args: argparse.Namespace) -> int:
     return 0
 
 
+def _render_one(tag: str, pac_checkout: Path | None) -> str:
+    """The changelog section for `tag`, dated from the tag's own commit."""
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%as", tag],
+        cwd=ranges.REPO_ROOT, capture_output=True, text=True,
+    )
+    date = result.stdout.strip() or "unknown"
+    repo = os.environ.get("GITHUB_REPOSITORY", "ExcellenceCloudGmbH/lex-app")
+    return changelog.render(
+        _digest_for(tag, pac_checkout=pac_checkout), date=date, repo=repo
+    )
+
+
+def cmd_backfill(args: argparse.Namespace) -> int:
+    """Render changelog sections for a span of tags.
+
+    Also the repair path for a single release: `--tag T --force` re-renders one
+    tag, which `changelog.prepend` replaces in place — clearing that version's
+    gap marker while leaving other versions' markers untouched.
+    """
+    if not args.start or not args.end:
+        raise SystemExit("pass either --tag T, or both --from A and --to B.")
+
+    tags = _tag_span(args.start, args.end, tags=_release_tags_in_order())
+    pac = _pac_arg(args)
+    existing = CHANGELOG_PATH.read_text(encoding="utf-8") if CHANGELOG_PATH.exists() else ""
+
+    for tag in tags:
+        if args.skip_existing and _already_rendered(existing, tag):
+            print(f"{tag}: already rendered, skipping.", file=sys.stderr)
+            continue
+        section = _render_one(tag, pac)
+        if args.dry_run:
+            print(f"----- {tag} -----")
+            sys.stdout.write(section)
+            continue
+        existing = changelog.prepend(existing or None, section)
+        CHANGELOG_PATH.write_text(existing, encoding="utf-8")
+        print(f"{tag}: written.", file=sys.stderr)
+
+    if args.dry_run:
+        print(f"Dry run — {len(tags)} tag(s) rendered, nothing written.", file=sys.stderr)
+    return 0
+
+
 def cmd_append_frontend_note(args: argparse.Namespace) -> int:
     """Add a frontend addendum to a published release body.
 
@@ -338,11 +416,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.set_defaults(func=cmd_check_manifest)
 
+    back = sub.add_parser(
+        "backfill",
+        help="Render changelog sections for a span of tags, or repair one with --force.",
+    )
+    # Not `required`: `--tag T` is shorthand for `--from T --to T`, expanded in
+    # `main` before the command runs.
+    back.add_argument("--from", dest="start", default=None)
+    back.add_argument("--to", dest="end", default=None)
+    back.add_argument("--tag", dest="single", default=None,
+                     help="Shorthand for --from T --to T.")
+    back.add_argument("--pac-checkout", default=None)
+    back.add_argument("--skip-existing", action="store_true",
+                     help="Leave tags already present in CHANGELOG.md untouched.")
+    back.add_argument("--force", action="store_true",
+                     help="Re-render even when a section exists (replaces it).")
+    back.add_argument("--dry-run", action="store_true",
+                     help="Print sections without writing.")
+    back.set_defaults(func=cmd_backfill)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    single = getattr(args, "single", None)
+    if single:
+        args.start = args.end = single
     return args.func(args)
 
 
