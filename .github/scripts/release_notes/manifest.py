@@ -30,6 +30,6 @@ def validate(blob: str | None) -> str | None:
     sha = data.get("sha")
     if not isinstance(sha, str) or not sha.strip():
         return "manifest has no 'sha'"
-    if not SHA_RE.match(sha):
+    if not SHA_RE.fullmatch(sha):
         return f"manifest 'sha' is not a 40-character lowercase hex commit: {sha!r}"
     return None

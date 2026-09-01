@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -56,4 +57,18 @@ def test_missing_or_empty_sha_is_reported(blob):
 )
 def test_sha_must_be_forty_lowercase_hex(sha):
     reason = manifest.validate('{"sha": "%s"}' % sha)
+    assert reason is not None and "40" in reason
+
+
+@pytest.mark.parametrize(
+    "sha",
+    [
+        VALID_SHA + "\n",          # jq -Rs . over `git rev-parse` preserves this
+        VALID_SHA + " ",
+        "\n" + VALID_SHA,
+        VALID_SHA + "\nextra",
+    ],
+)
+def test_a_sha_with_surrounding_whitespace_or_trailing_content_is_rejected(sha):
+    reason = manifest.validate('{"sha": %s}' % json.dumps(sha))
     assert reason is not None and "40" in reason
