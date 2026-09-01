@@ -892,3 +892,27 @@ And the window expires, so sync doesn't work once per tab and then quietly stop.
 
 Harness reproduces the loop directly — agreement `dark`, widgets reporting
 `light`, twelve loads — and asserts it terminates in at most two: **5/5**.
+
+### Batch 1aj addendum 4 — sizing and alignment
+
+Both slots marked up: bigger in the sidebar, and the collapsed one lined up with
+the page text.
+
+**Size** comes from `st.logo`'s own `size="large"` rather than CSS — a native API
+beats a rule that has to survive Streamlit's markup.
+
+**Alignment can't**, because each slot sits flush against a different edge:
+
+| Slot | Was | Now |
+|---|---|---|
+| Sidebar | further left than the navigation it heads | inset to match the nav items |
+| App header (sidebar collapsed) | against the window edge, while the page text began well inside it | inset to the content column |
+
+Both are pure inset corrections, so they join the bottom-pin under the same
+**layout-only** limit — which the scenario now asserts across *every* rule in the
+block, not just the pin. That limit is what keeps the whole selector dependency
+cheap to lose: if it stops matching, the logo is merely back where Streamlit put
+it.
+
+The content inset is one named constant, in `rem` — an inset in `px` wouldn't
+track text scaling, and lining up with text is the entire point.

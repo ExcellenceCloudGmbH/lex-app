@@ -97,7 +97,7 @@ def render_logo(st_module) -> None:
     """
     if not logo_is_available():
         return
-    kwargs = {"size": "medium"}
+    kwargs = {"size": "large"}
     if _LOGO_COLLAPSED_PATH.is_file():
         kwargs["icon_image"] = str(_LOGO_COLLAPSED_PATH)
     st_module.logo(str(_LOGO_PATH), **kwargs)
@@ -213,19 +213,47 @@ def logout_row_html(href: str) -> str:
 #: sits in normal flow directly under the navigation, which is where it would be
 #: without this rule at all. So the failure mode is "not pinned", not "broken" --
 #: which is the only reason reaching for a selector is acceptable here.
-_PIN_TO_BOTTOM_CSS = """
+#: Left inset of Streamlit's main content column in ``layout="wide"``.
+#:
+#: The one number here worth being able to change in a hurry. When the sidebar is
+#: COLLAPSED the logo moves into the app header, where it sat hard against the
+#: left edge while the page's own text began a good deal further in -- so the two
+#: did not line up. Matching this inset is what puts the logo on the same line as
+#: the content beneath it.
+_CONTENT_INSET = "3.5rem"
+
+_CHROME_CSS = f"""
 <style>
-  section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"] {
+  /* Account block to the foot of the panel. */
+  section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"] {{
     display: flex;
     flex-direction: column;
     min-height: calc(100vh - 12rem);
-  }
+  }}
   section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]
-    div:has(> div[data-lex-account]) {
+    div:has(> div[data-lex-account]) {{
     margin-top: auto;
-  }
+  }}
+
+  /* Sidebar logo: line it up with the navigation beneath it, which is indented
+     from the panel edge. Left alone it sat further left than everything it
+     heads, which is what read as "not aligned". */
+  section[data-testid="stSidebar"] [data-testid="stLogo"] {{
+    margin-left: 0.5rem;
+    margin-bottom: 0.25rem;
+  }}
+
+  /* Collapsed logo, in the app header: line it up with the content column
+     instead of the window edge. */
+  header [data-testid="stLogo"] {{
+    margin-left: {_CONTENT_INSET};
+  }}
 </style>
 """
+
+#: Kept under its old name because the test-plan scenario refers to it, and
+#: because the bottom-pin is still the part that earns the selector dependency.
+_PIN_TO_BOTTOM_CSS = _CHROME_CSS
 
 
 def render_account(st_module, session_state, logout_href: Optional[str] = None) -> None:

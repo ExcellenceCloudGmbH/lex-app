@@ -37,6 +37,8 @@ from lex.lex_app.streamlit.sidebar import (
     _display_name,
     _initials,
     identity_html,
+    _CHROME_CSS,
+    _CONTENT_INSET,
     _PIN_TO_BOTTOM_CSS,
     logo_is_available,
     logout_row_html,
@@ -130,13 +132,16 @@ class TestCluster1aj_SidebarChrome:
         A rule that changed colour, size or visibility would fail differently:
         invisibly, and in a way nobody could attribute to a Streamlit upgrade.
         """
-        css = _PIN_TO_BOTTOM_CSS
+        css = _CHROME_CSS
         assert 'data-testid="stSidebarUserContent"' in css
 
-        # Layout only -- nothing that could hide or restyle the block.
+        # Layout only -- nothing that could hide or restyle anything. This holds
+        # for EVERY rule in the block, not just the pin: the logo alignment added
+        # later obeys the same limit, which is what keeps the whole dependency
+        # cheap to lose.
         for forbidden in ("display: none", "visibility:", "color:", "background",
                           "opacity", "!important"):
-            assert forbidden not in css, f"the pin does more than layout: {forbidden}"
+            assert forbidden not in css, f"the chrome CSS does more than layout: {forbidden}"
 
         # And the markup it targets is ours, not Streamlit's.
         assert "data-lex-account" in css
@@ -393,3 +398,34 @@ class TestCluster1aj_BrandLockup:
             assert f'"{dotted}" = ["frontend/**/*"]' in pyproject, (
                 f"{dotted} ships a frontend/ that would be absent from the wheel"
             )
+
+    def test_01_312_the_logo_is_sized_and_aligned_in_both_slots(self):
+        """Scenario 1.312 (fourth half): bigger, and lined up with its neighbours.
+
+        Size comes from ``st.logo``'s own parameter rather than CSS -- a native
+        API beats a rule that has to survive Streamlit's markup.
+
+        Alignment cannot: each slot sits flush against a different edge. In the
+        sidebar the logo was further left than the navigation it heads; in the
+        app header, when the sidebar is COLLAPSED, it sat against the window edge
+        while the page's own text began well inside it. Both are pure inset
+        corrections, so they fall under the same layout-only limit as the
+        bottom-pin and degrade the same way -- if the selector stops matching,
+        the logo is merely back where Streamlit put it.
+        """
+        calls = []
+
+        class FakeSt:
+            def logo(self, image, **kwargs):
+                calls.append((image, kwargs))
+
+        render_logo(FakeSt())
+        assert calls[0][1]["size"] == "large", "size belongs to st.logo, not to CSS"
+
+        css = _CHROME_CSS
+        assert 'section[data-testid="stSidebar"] [data-testid="stLogo"]' in css
+        assert 'header [data-testid="stLogo"]' in css
+        # The collapsed logo lines up with the content column, so the inset it
+        # uses has to be the one the content uses.
+        assert _CONTENT_INSET in css
+        assert _CONTENT_INSET.endswith("rem"), "an inset in px will not track text scaling"

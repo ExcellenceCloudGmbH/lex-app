@@ -600,7 +600,7 @@ letters:
     scenarios: 1.309-1.312
     status: complete
     tests:
-      pass: 21
+      pass: 22
       skip: 0
       xfail: 0
     note: >-
@@ -669,6 +669,16 @@ letters:
       would catch and a filename assertion would happily pass. Residual, still stated: collapsed
       AND dark gives navy on dark; st.logo takes one image per slot and choosing would mean
       reading a client-side theme from Python.
+      Sizing and alignment, after the user marked both slots up. Size is st.logo's own `size`
+      parameter (large) rather than CSS - a native API beats a rule that has to survive
+      Streamlit's markup. Alignment cannot be: each slot sits flush against a different edge. In
+      the sidebar the logo was further left than the navigation it heads; in the app header, when
+      the sidebar is COLLAPSED, it sat against the window edge while the page's own text began
+      well inside it. Both are pure inset corrections and join the existing bottom-pin under the
+      same layout-only limit, which the scenario now asserts across EVERY rule in the block rather
+      than just the pin - that limit is what keeps the whole selector dependency cheap to lose.
+      The content inset is a single named constant in rem, since an inset in px would not track
+      text scaling and the whole point is lining up with text.
       Writing this scenario surfaced a real packaging bug, unrelated to the logo and older:
       lex.lex_app.streamlit._widget_host_component was absent from [tool.setuptools.package-data],
       so the widget-host shim's frontend/ would NOT ship in a wheel and lex_widgets() would fail
