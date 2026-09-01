@@ -290,9 +290,12 @@ def _render_one(tag: str, pac_checkout: Path | None) -> str:
 def cmd_backfill(args: argparse.Namespace) -> int:
     """Render changelog sections for a span of tags.
 
-    Also the repair path for a single release: `--tag T --force` re-renders one
-    tag, which `changelog.prepend` replaces in place — clearing that version's
-    gap marker while leaving other versions' markers untouched.
+    A tag that already has a section is skipped, so re-running an interrupted
+    backfill is idempotent and costs no `gh api` calls for work already done.
+
+    `--tag T --force` is the repair path: it re-renders one release, which
+    `changelog.prepend` replaces in place — clearing that version's gap marker
+    while leaving other versions' markers untouched.
     """
     if not args.start or not args.end:
         raise SystemExit("pass either --tag T, or both --from A and --to B.")
@@ -302,8 +305,9 @@ def cmd_backfill(args: argparse.Namespace) -> int:
     existing = CHANGELOG_PATH.read_text(encoding="utf-8") if CHANGELOG_PATH.exists() else ""
 
     for tag in tags:
-        if args.skip_existing and _already_rendered(existing, tag):
-            print(f"{tag}: already rendered, skipping.", file=sys.stderr)
+        if _already_rendered(existing, tag) and not args.force:
+            print(f"{tag}: already rendered, skipping (use --force to replace).",
+                  file=sys.stderr)
             continue
         section = _render_one(tag, pac)
         if args.dry_run:
@@ -427,10 +431,8 @@ def build_parser() -> argparse.ArgumentParser:
     back.add_argument("--tag", dest="single", default=None,
                      help="Shorthand for --from T --to T.")
     back.add_argument("--pac-checkout", default=None)
-    back.add_argument("--skip-existing", action="store_true",
-                     help="Leave tags already present in CHANGELOG.md untouched.")
     back.add_argument("--force", action="store_true",
-                     help="Re-render even when a section exists (replaces it).")
+                     help="Replace a section that already exists (the repair path).")
     back.add_argument("--dry-run", action="store_true",
                      help="Print sections without writing.")
     back.set_defaults(func=cmd_backfill)

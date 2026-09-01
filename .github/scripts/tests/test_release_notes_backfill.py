@@ -83,7 +83,8 @@ def test_backfill_dry_run_writes_nothing(monkeypatch, capsys, tmp_path):
     assert "2.1.6" in capsys.readouterr().out
 
 
-def test_backfill_skip_existing_leaves_a_rendered_tag_alone(monkeypatch, tmp_path):
+def test_backfill_skips_an_already_rendered_tag_by_default(monkeypatch, tmp_path):
+    # Skip is the default so a re-run is idempotent and costs no gh api calls.
     path = _no_write_env(
         monkeypatch, tmp_path,
         existing="# Changelog\n\n## [2.1.6] - 2026-07-23\n\n### Fixed\n- keep me\n",
@@ -93,10 +94,29 @@ def test_backfill_skip_existing_leaves_a_rendered_tag_alone(monkeypatch, tmp_pat
         cli, "_render_one", lambda tag, pac: calls.append(tag) or "## [x] - y\n"
     )
 
-    cli.main(["backfill", "--from", "v2.1.6", "--to", "v2.1.6", "--skip-existing"])
+    cli.main(["backfill", "--tag", "v2.1.6"])
 
-    assert calls == []                                   # never rendered
-    assert "keep me" in path.read_text(encoding="utf-8")  # never rewritten
+    assert calls == []                                    # never rendered
+    assert "keep me" in path.read_text(encoding="utf-8")   # never rewritten
+
+
+def test_force_overrides_the_default_skip(monkeypatch, tmp_path):
+    # Without this, --force would be decorative: the default already replaced.
+    path = _no_write_env(
+        monkeypatch, tmp_path,
+        existing="# Changelog\n\n## [2.1.6] - 2026-07-23\n\n### Fixed\n- stale\n",
+    )
+    calls = []
+    monkeypatch.setattr(
+        cli, "_render_one",
+        lambda tag, pac: calls.append(tag) or "## [2.1.6] - 2026-07-23\n\n### Fixed\n- fresh\n",
+    )
+
+    cli.main(["backfill", "--tag", "v2.1.6", "--force"])
+
+    assert calls == ["v2.1.6"]                             # did render
+    text = path.read_text(encoding="utf-8")
+    assert "fresh" in text and "stale" not in text
 
 
 def test_backfill_force_replaces_an_existing_section(monkeypatch, tmp_path):
