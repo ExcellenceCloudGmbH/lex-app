@@ -83,9 +83,13 @@ def _run_rev_list(ref: str) -> str:
     """Raw `git rev-list` output for BUNDLE_PATH as of `ref`.
 
     Returns stdout unmodified — normalising is the caller's job, matching
-    `git_show`. Returns "" when git cannot answer, and reports why: a bad ref
-    or a shallow clone exits non-zero with a message naming the problem, and
-    discarding it turns a misconfiguration into a silent empty result.
+    `git_show`. Returns "" when git exits non-zero, and reports why: a bad ref
+    exits 128 with a message that names the problem, and discarding it turns a
+    misconfiguration into a silent empty result.
+
+    A shallow clone is NOT caught here: it exits 0 and returns the clone's
+    boundary commit, because a grafted parentless commit appears to add every
+    file it contains. `bundle_commit_at` warns about that separately.
     """
     result = subprocess.run(
         ["git", "rev-list", "-1", ref, "--", BUNDLE_PATH],
@@ -101,8 +105,27 @@ def _run_rev_list(ref: str) -> str:
     return result.stdout
 
 
+def _is_shallow() -> bool:
+    """True when this clone lacks full history.
+
+    `git rev-list -1 <ref> -- <path>` reports the clone's own starting commit
+    as having introduced every file, so in a shallow clone the bundle commit
+    resolves to HEAD rather than to the commit that actually changed it.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() == "true"
+
+
 def bundle_commit_at(
-    ref: str, *, run: Callable[[str], str] = _run_rev_list
+    ref: str,
+    *,
+    run: Callable[[str], str | None] = _run_rev_list,
+    shallow: Callable[[], bool] = _is_shallow,
 ) -> str | None:
     """The lex-app commit that last changed the vendored bundle as of `ref`.
 
@@ -110,13 +133,21 @@ def bundle_commit_at(
     possibly-abbreviated table key against this value, so an abbreviated
     result here would silently miss.
 
-    None when the ref predates the bundle or git cannot answer. `run` is
-    injectable so tests need no repository history.
+    None when the ref predates the bundle or git cannot answer. `run` and
+    `shallow` are injectable so tests need no repository history.
     """
     sha = run(ref)
     if sha is None:
         return None
-    return sha.strip() or None
+    sha = sha.strip() or None
+    if sha and shallow():
+        print(
+            f"Warning: shallow clone — the bundle commit resolved at {ref!r} "
+            f"({sha[:8]}) is this clone's starting commit, not the commit that "
+            "changed the bundle. Re-run with fetch-depth: 0 for a true answer.",
+            file=sys.stderr,
+        )
+    return sha
 
 
 def frontend_sha_at(ref: str, *, show: Callable[[str, str], str | None] = git_show) -> str | None:

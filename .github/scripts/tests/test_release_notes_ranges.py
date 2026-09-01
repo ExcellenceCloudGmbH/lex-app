@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -188,25 +189,67 @@ def test_run_rev_list_reports_and_returns_empty_on_git_failure(monkeypatch, caps
     assert "bad revision" in err
 
 
-def _has_bundle_history() -> bool:
-    """True when this clone actually contains the vendored-bundle history.
+def test_bundle_commit_at_resolves_the_real_bundle_commit(tmp_path, monkeypatch):
+    """Drives the real git runner against a purpose-built repository.
 
-    scripts_tests.yml checks out at the default depth of 1, and the newest
-    bundle commit is ~120 commits behind HEAD, so the real runner has nothing
-    to find there. Skipping is honest; asserting would fail in CI for a reason
-    that has nothing to do with this code.
+    Hermetic rather than asserting against this checkout's own history: the
+    suite runs under `actions/checkout@v4` at depth 1, where rev-list returns
+    the graft boundary and any assertion on shape alone passes on a wrong SHA.
+    Building the history removes the dependency on the environment entirely.
     """
-    return bool(ranges.bundle_commit_at("HEAD"))
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True
+        ).stdout.strip()
 
+    git("init", "-q", ".")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "test")
 
-@pytest.mark.skipif(
-    not _has_bundle_history(),
-    reason="shallow clone — no lex/react/build history present",
-)
-def test_bundle_commit_at_returns_a_full_sha_on_the_real_path():
-    # Exercises the production runner, not an injected fake. Task 3's prefix
-    # lookup depends on this being the full 40 characters. The argv-pinning
-    # test above is what guards this in CI, where history is absent.
+    bundle_dir = tmp_path / ranges.BUNDLE_PATH
+    bundle_dir.mkdir(parents=True)
+
+    # TWO bundle commits, so that dropping `-1` yields multi-line output and
+    # the exact-SHA assertion below catches it. One commit would not.
+    (bundle_dir / "app.js").write_text("v1", encoding="utf-8")
+    git("add", "-A"); git("commit", "-qm", "bundle 1")
+
+    (bundle_dir / "app.js").write_text("v2", encoding="utf-8")
+    git("add", "-A"); git("commit", "-qm", "bundle 2")
+    expected = git("rev-parse", "HEAD")
+
+    # A later commit that does not touch the bundle.
+    (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+    git("add", "-A"); git("commit", "-qm", "unrelated")
+    head = git("rev-parse", "HEAD")
+
+    monkeypatch.setattr(ranges, "REPO_ROOT", tmp_path)
+
     got = ranges.bundle_commit_at("HEAD")
-    assert got is not None
-    assert len(got) == 40
+
+    assert got == expected          # the newest BUNDLE commit, exactly
+    assert got != head              # not the tip, not a graft artifact
+    assert len(got) == 40           # full sha, which the Task 3 lookup needs
+
+
+def test_bundle_commit_at_warns_on_a_shallow_clone(capsys):
+    got = ranges.bundle_commit_at(
+        "HEAD",
+        run=lambda ref: "a388985a1111111111111111111111111111aaaa\n",
+        shallow=lambda: True,
+    )
+
+    assert got == "a388985a1111111111111111111111111111aaaa"   # still returned
+    err = capsys.readouterr().err
+    assert "shallow" in err
+    assert "fetch-depth" in err
+
+
+def test_bundle_commit_at_is_quiet_on_a_full_clone(capsys):
+    ranges.bundle_commit_at(
+        "HEAD",
+        run=lambda ref: "a388985a1111111111111111111111111111aaaa\n",
+        shallow=lambda: False,
+    )
+
+    assert "shallow" not in capsys.readouterr().err
