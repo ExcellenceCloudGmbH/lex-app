@@ -145,3 +145,52 @@ def test_bundle_commit_at_returns_none_when_no_bundle_history():
 def test_bundle_commit_at_treats_blank_output_as_none():
     assert ranges.bundle_commit_at("v2.1.6", run=lambda ref: "") is None
     assert ranges.bundle_commit_at("v2.1.6", run=lambda ref: "   ") is None
+
+
+def test_run_rev_list_pins_the_git_invocation(monkeypatch):
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stdout = "a388985a1111111111111111111111111111aaaa\n"
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["cwd"] = kwargs.get("cwd")
+        return Result()
+
+    monkeypatch.setattr(ranges.subprocess, "run", fake_run)
+
+    out = ranges._run_rev_list("v2.1.6")
+
+    # Pinned because dropping -1 returns EVERY bundle commit, and the
+    # downstream prefix lookup would still match the first line — a wrong
+    # answer that looks right.
+    assert seen["argv"] == ["git", "rev-list", "-1", "v2.1.6", "--", ranges.BUNDLE_PATH]
+    assert seen["cwd"] == ranges.REPO_ROOT
+    assert out == "a388985a1111111111111111111111111111aaaa\n"   # raw, unnormalised
+
+
+def test_run_rev_list_reports_and_returns_empty_on_git_failure(monkeypatch, capsys):
+    class Result:
+        returncode = 128
+        stdout = ""
+        stderr = "fatal: bad revision 'v99.99.99'\n"
+
+    monkeypatch.setattr(ranges.subprocess, "run", lambda argv, **kw: Result())
+
+    out = ranges._run_rev_list("v99.99.99")
+
+    assert out == ""
+    err = capsys.readouterr().err
+    assert "v99.99.99" in err
+    assert "bad revision" in err
+
+
+def test_bundle_commit_at_returns_a_full_sha_on_the_real_path():
+    # Exercises the production runner, not an injected fake. Task 3's prefix
+    # lookup depends on this being the full 40 characters.
+    got = ranges.bundle_commit_at("HEAD")
+    assert got is not None
+    assert len(got) == 40

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -78,8 +79,14 @@ def git_show(ref: str, path: str) -> str | None:
 BUNDLE_PATH = "lex/react/build"
 
 
-def _run_rev_list(ref: str) -> str | None:
-    """The last commit touching BUNDLE_PATH as of `ref`, or None."""
+def _run_rev_list(ref: str) -> str:
+    """Raw `git rev-list` output for BUNDLE_PATH as of `ref`.
+
+    Returns stdout unmodified — normalising is the caller's job, matching
+    `git_show`. Returns "" when git cannot answer, and reports why: a bad ref
+    or a shallow clone exits non-zero with a message naming the problem, and
+    discarding it turns a misconfiguration into a silent empty result.
+    """
     result = subprocess.run(
         ["git", "rev-list", "-1", ref, "--", BUNDLE_PATH],
         cwd=REPO_ROOT,
@@ -87,14 +94,21 @@ def _run_rev_list(ref: str) -> str | None:
         text=True,
     )
     if result.returncode != 0:
-        return None
-    return result.stdout.strip() or None
+        detail = result.stderr.strip() or f"git exited {result.returncode}"
+        print(f"Could not resolve the bundle commit at {ref!r}: {detail}",
+              file=sys.stderr)
+        return ""
+    return result.stdout
 
 
 def bundle_commit_at(
-    ref: str, *, run: Callable[[str], str | None] = _run_rev_list
+    ref: str, *, run: Callable[[str], str] = _run_rev_list
 ) -> str | None:
     """The lex-app commit that last changed the vendored bundle as of `ref`.
+
+    The **full 40-character** SHA. The historical-provenance lookup matches a
+    possibly-abbreviated table key against this value, so an abbreviated
+    result here would silently miss.
 
     None when the ref predates the bundle or git cannot answer. `run` is
     injectable so tests need no repository history.
