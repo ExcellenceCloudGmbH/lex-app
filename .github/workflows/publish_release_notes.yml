@@ -44,6 +44,11 @@ jobs:
       # Same reason as the gate: without PAC on disk the frontend range cannot
       # be read, and render-changelog would mark this release as having
       # unrecorded frontend changes.
+      #
+      # Deliberately NOT continue-on-error: `_pac_log` runs git with
+      # cwd=./pac and no guard, so a broken checkout raises inside
+      # render-changelog anyway. Failing here gives a clear message instead of
+      # a traceback one step later. Same TOKEN CAVEAT as the gate.
       - name: Checkout the frontend repository
         uses: actions/checkout@v4
         with:
