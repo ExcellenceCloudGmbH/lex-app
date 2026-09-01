@@ -56,7 +56,18 @@ from lex.lex_app.streamlit.widgets.spec import (
 )
 
 #: Route on the lex-app frontend that renders a manifest.
-HOST_PATH = "/embed/widgets"
+#: The widget host page. A real file in the SPA build, not an app route.
+#:
+#: ``/embed/widgets`` still works and renders the same widgets, but it is served
+#: by index.html — the admin app's entry, which imports ag-grid at module scope
+#: and declares every Resource, so a Calculate button costs ~6 MB of JS to parse.
+#: embed.html is a second Vite entry that mounts the widgets in <AdminContext>
+#: alone: measured 1563 KB raw / 517 KB gzipped against 6281 / 1895, a 75% cut,
+#: paid once per frame and there are N frames on a dashboard.
+#:
+#: Served without a URL route because ``serve_react`` returns any file that
+#: exists before falling back to the SPA shell.
+HOST_PATH = "/embed.html"
 
 #: Height for the log inside the page-level dialog. Generous on purpose -- the
 #: whole reason the dialog exists is that the log is unreadable when it is

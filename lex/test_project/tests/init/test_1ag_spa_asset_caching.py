@@ -126,9 +126,14 @@ class TestCluster1ag_SpaAssetCaching:
         for path in ("index.html", "config.js"):
             assert "no-store" in _serve(path, build), path
 
-        # An unknown route falls back to the shell and inherits its policy --
-        # the SPA route the widget host itself is served from.
+        # An unknown route falls back to the shell and inherits its policy.
         assert "no-store" in _serve("embed/widgets", build)
+
+        # embed.html is a REAL file (a second Vite entry), not a route, so it
+        # takes the file branch -- and like index.html it names hashed assets,
+        # so it must not be pinned either.
+        (build / "embed.html").write_text("<!doctype html><title>widgets</title>")
+        assert "no-store" in _serve("embed.html", build)
 
         # In assets/ but unhashed: not pinned, because a correction could never
         # reach a browser that had cached it.
