@@ -84,6 +84,25 @@ def test_verify_frontend_never_writes_to_the_changelog(monkeypatch, capsys, tmp_
     assert path.read_text(encoding="utf-8") == "# Changelog\n"
 
 
+def test_verify_frontend_survives_a_git_failure(monkeypatch, capsys):
+    # _all_tags exits on a shallow clone or an unfetched tag. The gate must
+    # still pass — and must say why it could not check.
+    def boom(tag):
+        raise SystemExit(
+            f"Could not list tags reachable from {tag!r}: fatal: bad object"
+        )
+
+    monkeypatch.setattr(cli, "_all_tags", boom)
+
+    rc = cli.main(["verify-frontend", "--tag", "v2.1.8"])
+
+    out = capsys.readouterr().out
+    assert rc == 0                      # never blocks, even when git cannot answer
+    assert "::warning" in out
+    assert "v2.1.8" in out
+    assert "bad object" in out          # the underlying git error is surfaced
+
+
 def test_list_gaps_prints_marked_versions(monkeypatch, capsys, tmp_path):
     path = tmp_path / "CHANGELOG.md"
     path.write_text(

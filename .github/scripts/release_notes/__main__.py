@@ -177,7 +177,22 @@ def cmd_verify_frontend(args: argparse.Namespace) -> int:
     still act. It deliberately does not touch CHANGELOG.md: that file has no
     section for this tag yet — `render-changelog` writes the marker at publish.
     """
-    previous = ranges.previous_release_tag(args.tag, tags=_all_tags(args.tag))
+    try:
+        previous = ranges.previous_release_tag(args.tag, tags=_all_tags(args.tag))
+    except SystemExit as exc:
+        # `_all_tags` exits on a git failure — a shallow clone, or a tag not
+        # fetched. That is a reason to warn, not to block: this command must
+        # never fail. Naming the git error keeps the misconfiguration visible
+        # rather than trading a hard exit for silence.
+        print(
+            f"::warning title=Frontend notes unavailable::Could not list tags for "
+            f"{args.tag} ({exc}). Frontend provenance was not checked, so the release "
+            f"note may omit frontend changes. Repair later with: "
+            f"python -m release_notes backfill --tag {args.tag} --force"
+        )
+        print(f"Could not list tags for {args.tag}: {exc}", file=sys.stderr)
+        return 0
+
     if ranges.frontend_range(previous, args.tag) is not None:
         print(f"Frontend provenance resolves for {args.tag}.", file=sys.stderr)
         return 0
