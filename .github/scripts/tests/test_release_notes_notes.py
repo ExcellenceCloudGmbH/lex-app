@@ -365,3 +365,31 @@ def test_fallback_body_is_visible_in_rendered_markdown():
     assert notes.FAILURE_NOTICE in body
     assert not notes.FAILURE_NOTICE.startswith("<!--")
     assert "boom" in body
+
+
+def test_append_addendum_preserves_the_original_body():
+    body = "## Main changes\n\n- **New sidebar.** More room for your data.\n"
+    out = notes.append_addendum(body, "### Frontend changes\n\n- a fix\n")
+
+    assert body.rstrip() in out          # human prose survives verbatim
+    assert "a fix" in out
+    assert notes.ADDENDUM_MARKER in out
+
+
+def test_append_addendum_is_idempotent():
+    body = "## Main changes\n\n- something\n"
+    once = notes.append_addendum(body, "### Frontend changes\n\n- a fix\n")
+    twice = notes.append_addendum(once, "### Frontend changes\n\n- a fix\n")
+
+    assert once == twice
+    assert twice.count(notes.ADDENDUM_MARKER) == 1
+
+
+def test_append_addendum_never_drops_content_on_a_second_different_call():
+    body = "## Main changes\n\n- something\n"
+    once = notes.append_addendum(body, "### Frontend changes\n\n- first\n")
+    # A later call with different text must not silently replace the first.
+    twice = notes.append_addendum(once, "### Frontend changes\n\n- second\n")
+
+    assert "first" in twice
+    assert "second" not in twice          # refuses rather than overwrites

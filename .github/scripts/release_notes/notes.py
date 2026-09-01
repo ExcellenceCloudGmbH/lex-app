@@ -21,6 +21,24 @@ FAILURE_NOTICE = (
     "> ⚠️ **Automatic release-note drafting failed — this body needs a human rewrite.**"
 )
 
+# Marks a frontend addendum added after publication. Its presence makes the
+# append idempotent, which matters because the alternative — rewriting the body
+# — would destroy prose a human reviewed and edited.
+ADDENDUM_MARKER = "<!-- lex:frontend-addendum -->"
+
+
+def append_addendum(body: str, addendum: str, *, marker: str = ADDENDUM_MARKER) -> str:
+    """Append `addendum` to a published release body, exactly once.
+
+    Returns `body` unchanged when an addendum is already present. Refusing is
+    deliberate: a second, different addendum means someone is trying to correct
+    a correction, and doing that automatically would silently discard the first.
+    """
+    if marker in body:
+        return body
+    return f"{body.rstrip()}\n\n{marker}\n\n{addendum.strip()}\n"
+
+
 # Used only when docs/releases/RELEASE_NOTES_2.1.3_github.md is unavailable.
 # The real file is richer and should win; this exists so a missing style
 # reference degrades the prose instead of killing the release note.

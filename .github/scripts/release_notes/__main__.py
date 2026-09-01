@@ -163,6 +163,53 @@ def cmd_render_changelog(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_append_frontend_note(args: argparse.Namespace) -> int:
+    """Add a frontend addendum to a published release body.
+
+    The addendum is mechanical rather than model-drafted: it lists the frontend
+    subjects from the digest. Re-drafting prose here would clash in tone with a
+    body a human has already edited, and cost a model call to say what the
+    digest already says plainly.
+    """
+    built = _digest_for(args.tag, pac_checkout=_pac_arg(args))
+    frontend = [c for c in built["changes"] if c["component"] == "frontend"]
+    if not frontend:
+        print(f"{args.tag}: no frontend changes to append.", file=sys.stderr)
+        return 0
+
+    addendum = "\n".join(
+        ["### Frontend changes (added after publication)", ""]
+        + [f"- {c['subject']}" for c in frontend]
+    )
+
+    read = subprocess.run(
+        ["gh", "release", "view", args.tag, "--json", "body", "-q", ".body"],
+        cwd=ranges.REPO_ROOT, capture_output=True, text=True,
+    )
+    if read.returncode != 0:
+        print(f"Could not read release {args.tag}: {read.stderr.strip()}", file=sys.stderr)
+        return 1
+
+    updated = notes.append_addendum(read.stdout, addendum)
+    if updated == read.stdout:
+        print(f"{args.tag}: an addendum is already present, leaving it alone.", file=sys.stderr)
+        return 0
+
+    if args.dry_run:
+        sys.stdout.write(updated)
+        return 0
+
+    write = subprocess.run(
+        ["gh", "release", "edit", args.tag, "--notes-file", "-"],
+        cwd=ranges.REPO_ROOT, input=updated, capture_output=True, text=True,
+    )
+    if write.returncode != 0:
+        print(f"Could not update release {args.tag}: {write.stderr.strip()}", file=sys.stderr)
+        return 1
+    print(f"{args.tag}: frontend addendum appended.", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -186,6 +233,15 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "render-changelog":
             p.add_argument("--date", required=True, help="ISO date, e.g. 2026-08-05")
         p.set_defaults(func=handler)
+
+    add = sub.add_parser(
+        "append-frontend-note",
+        help="Append a frontend addendum to a published release body. Never rewrites it.",
+    )
+    add.add_argument("--tag", required=True)
+    add.add_argument("--pac-checkout", default=None)
+    add.add_argument("--dry-run", action="store_true")
+    add.set_defaults(func=cmd_append_frontend_note)
 
     return parser
 
