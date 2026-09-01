@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 310
+max_scenario: 311
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -581,10 +581,10 @@ letters:
       attribute mutation with no insertion.
   aj:
     title: Streamlit sidebar chrome in lex-app's language
-    scenarios: 1.309-1.310
+    scenarios: 1.309-1.311
     status: complete
     tests:
-      pass: 11
+      pass: 15
       skip: 0
       xfail: 0
     note: >-
@@ -611,3 +611,19 @@ letters:
       subtitle and the sign-out href are all escaped. Colours are derived from the vendored
       lex_tokens (NAVY, TEAL) rather than retyped, so the sidebar cannot drift from the product it
       imitates - silently, in the one place a user sees both side by side.
+      1.311 swaps the text wordmark for lex-app's REAL logo - the same dark-lex-logo.svg its
+      sidenav imports, white wordmark on teal, which is what a navy surface needs. Vendored into
+      lex/assets/ (already declared package data) rather than referenced from the frontend build,
+      whose filenames carry content hashes and change on every rebuild - a reference would break
+      at the next deploy and show a broken image in the one place branding matters. Rendered as a
+      base64 <img> rather than inlined <svg> markup, because the file carries its own <style>
+      block with entirely generic class names (.cls-1/.cls-2/.cls-3); inlined, that stylesheet is
+      GLOBAL and would repaint any element on the author's dashboard using those names - a bizarre
+      bug to be handed and a hard one to trace back to a logo. A missing asset degrades to the
+      wordmark rather than taking the sidebar down.
+      Writing this scenario surfaced a real packaging bug, unrelated to the logo and older:
+      lex.lex_app.streamlit._widget_host_component was absent from [tool.setuptools.package-data],
+      so the widget-host shim's frontend/ would NOT ship in a wheel and lex_widgets() would fail
+      to find its component on any non-editable install. An editable install reads the source
+      tree, which hides it completely. Now declared, and 1.311 asserts the rule rather than the
+      instance: every _*_component that ships a frontend/ must be declared.

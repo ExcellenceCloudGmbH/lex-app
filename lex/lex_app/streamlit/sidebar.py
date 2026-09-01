@@ -21,10 +21,25 @@ mode-invariant.
 
 from __future__ import annotations
 
+import base64
 import html
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from lex.lex_app.design_system import lex_tokens
+
+#: The same logo lex-app's sidenav renders (`assets/images/dark-lex-logo.svg`
+#: there, imported by CustomSidebar). The DARK variant -- white wordmark, teal
+#: accent -- because this surface is navy in both modes.
+#:
+#: Vendored into ``lex/assets/``, which is already declared as package data, so
+#: it ships in the wheel rather than being fetched from the frontend build at
+#: runtime: those filenames carry content hashes and change on every rebuild.
+_LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "dark-lex-logo.svg"
+
+#: Rendered width, matching what lex-app's sidebar uses.
+_LOGO_WIDTH_PX = 140
 
 #: Sidebar palette, matching lex-app's `NAV` constants in CustomSidebar.tsx.
 #: Derived from the vendored tokens where one exists, so the two cannot drift.
@@ -35,6 +50,46 @@ NAV_DIM = "rgba(223,231,238,0.6)"
 NAV_HOVER = "rgba(255,255,255,0.06)"
 NAV_BORDER = "rgba(255,255,255,0.10)"
 NAV_ACTIVE_BG = "rgba(20,180,180,0.16)"
+
+
+@lru_cache(maxsize=1)
+def _logo_data_uri() -> Optional[str]:
+    """The logo as a base64 ``data:`` URI, or None if it is not on disk.
+
+    Base64 in an ``<img>`` rather than inlined ``<svg>`` markup, deliberately.
+    The file carries its own ``<style>`` block with generic class names::
+
+        .cls-1 { fill: #24b6bb; }  .cls-2, .cls-3 { fill: #FFFFFF; }
+
+    Inlined as markup, that stylesheet is global to the page -- it would repaint
+    any element on the author's dashboard that happened to use those class
+    names. An ``<img>`` gives the SVG its own document, so the styles cannot
+    escape. It also costs no request, unlike pointing at the frontend build,
+    whose filenames carry content hashes and change on every rebuild.
+    """
+    try:
+        raw = _LOGO_PATH.read_bytes()
+    except OSError:
+        return None
+    return "data:image/svg+xml;base64," + base64.b64encode(raw).decode("ascii")
+
+
+def _brand_lockup_html() -> str:
+    """The logo, or a wordmark if the asset is missing.
+
+    A packaging mistake should cost the logo, not the sidebar. The fallback is
+    the same lockup this had before the real asset was vendored.
+    """
+    uri = _logo_data_uri()
+    if uri:
+        return (
+            f'<img src="{uri}" alt="Excellence Cloud" width="{_LOGO_WIDTH_PX}" '
+            f'style="display:block;height:auto;max-width:100%;" />'
+        )
+    return (
+        f'<span style="color:{NAV_TEXT};font-size:12px;letter-spacing:1.4px;">EXCELLENCE'
+        f' <span style="color:{NAV_ACCENT};">CLOUD</span></span>'
+    )
 
 
 def _initials(name: str) -> str:
@@ -92,8 +147,7 @@ def identity_html(name: str, subtitle: Optional[str] = None) -> str:
     return f"""
 <div style="margin:-0.5rem -0.25rem 0;">
   <div style="display:flex;align-items:center;gap:8px;padding:2px 6px 12px;">
-    <span style="color:{NAV_TEXT};font-size:12px;letter-spacing:1.4px;">EXCELLENCE
-      <span style="color:{NAV_ACCENT};">CLOUD</span></span>
+    {_brand_lockup_html()}
   </div>
   <div style="height:1px;background:{NAV_BORDER};"></div>
   <div style="display:flex;align-items:center;gap:10px;padding:12px 6px;">

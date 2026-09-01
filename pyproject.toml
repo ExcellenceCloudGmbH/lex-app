@@ -41,6 +41,10 @@ include = ["lex*", "migrations_logic*"]
 "lex.react" = ["**/*"]
 "lex.assets" = ["**/*"]
 "lex.lex_app.streamlit._lex_view_component" = ["frontend/**/*"]
+# The widget-host shim is a static asset too, and was missing here: an editable
+# install reads it from the source tree, so the gap only shows up in a built
+# wheel -- where lex_widgets() would fail to find its component frontend.
+"lex.lex_app.streamlit._widget_host_component" = ["frontend/**/*"]
 
 [tool.pytest.ini_options]
 # The lex CLI bootstraps Django and calls setup_test_environment() before
