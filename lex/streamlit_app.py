@@ -12,7 +12,7 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from lex.lex_app.streamlit.eager_frames import eager_frames_js
-from lex.lex_app.streamlit.sidebar import logout_row_html, render_identity
+from lex.lex_app.streamlit.sidebar import render_account, render_logo
 from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
     embed_theme_from_params,
@@ -404,11 +404,12 @@ def handle_logout_landing() -> None:
         st.stop()
 
 
-def render_logout_link() -> None:
-    """
-    Form-safe logout control:
-    - Not a Streamlit widget (so it won't break inside st.form()).
-    - Works regardless of whatever streamlit_structure.main() renders.
+def _logout_href() -> str:
+    """Where the log-out control points.
+
+    Split out from the old ``render_logout_link`` so the URL and the markup are
+    separate concerns: the account block at the bottom of the sidebar now owns
+    the rendering, and only needs the destination.
     """
     base_url = _current_base_url()
     base_path = _base_path()
@@ -419,12 +420,9 @@ def render_logout_link() -> None:
 
     auth_method = st.session_state.get("auth_method", "session")
     if auth_method == "session":
-        href = f"{base_path}/oauth2/sign_out?rd={rd}"
-    else:
-        # JWT: we can't revoke upstream header; just clear local session_state on landing
-        href = f"{base_path}/?logout=1"
-
-    st.sidebar.markdown(logout_row_html(href), unsafe_allow_html=True)
+        return f"{base_path}/oauth2/sign_out?rd={rd}"
+    # JWT: we cannot revoke upstream; just clear local session_state on landing.
+    return f"{base_path}/?logout=1"
 
 
 # -------------------------
@@ -661,11 +659,10 @@ if __name__ == "__main__":
         except Exception:
             streamlit_structure = None
 
-        # The sidebar's own chrome, before anything the app renders. Streamlit
-        # lays the sidebar out in call order, so this is what puts the brand
-        # lockup and the signed-in user at the TOP -- above the author's
-        # navigation, which is left entirely alone.
-        render_identity(st, st.session_state)
+        # The logo only, and early: st.logo renders into Streamlit's header
+        # slot, which sits ABOVE even the page navigation. Who is signed in goes
+        # to the bottom instead -- see the `finally` below.
+        render_logo(st)
 
         reset_streamlit_form_context()
         params = st.query_params
@@ -729,8 +726,14 @@ if __name__ == "__main__":
         # app's own navigation. In `finally` so a failure in main() still leaves
         # the user a way out -- the property the original placement was
         # protecting by rendering first.
-        if LOGOUT_ENABLED:
-            render_logout_link()
+        # Identity and the way out, together and last, so they sit at the
+        # bottom beneath whatever navigation the app declared. In `finally` so a
+        # failure in main() still leaves the user a way out.
+        render_account(
+            st,
+            st.session_state,
+            logout_href=_logout_href() if LOGOUT_ENABLED else None,
+        )
 
         # Zero-height and inert; also in `finally` so theme following survives a
         # failure in main(). A page stuck on the wrong theme after an error is a

@@ -796,3 +796,33 @@ completely.
 
 Now declared, and 1.311 asserts the *rule* rather than the instance: every
 `_*_component` that ships a `frontend/` must appear in package-data.
+
+### Batch 1aj addendum 2 — ordering (scenarios 1.310/1.311)
+
+Marked up on a screenshot: logo to the very top, identity and log out to the
+bottom. Streamlit's sidebar is:
+
+```
+stSidebarContent -> [ stSidebarHeader   (logo, collapse button) ]
+                    [ stSidebarNav      (st.navigation's list)  ]
+                    [ stSidebarUserContent                      ]
+```
+
+So `st.logo` already lands above even the page navigation — the logo appearing
+mid-sidebar was a **stale module**, not a placement bug: `_streamlit_structure.py`
+is watched and reloads, while `sidebar.py` is an installed package held in
+memory. Only identity actually had to move.
+
+It is now one **account block** — identity and the way out belong together —
+rendered after `main()`, so the app's navigation sits above it with neither side
+coordinating.
+
+**One selector, and its bargain.** Call order alone puts that block under the nav,
+not at the foot of the panel, and pinning genuinely needs a selector. So there is
+exactly one:
+
+| | |
+|---|---|
+| It is a `data-testid` | Streamlit's own testing surface — far more stable than a generated emotion class |
+| It sets layout only | Asserted: no colour, visibility, or `!important`. A rule that did would fail *invisibly* and unattributably |
+| It degrades | If it stops matching, the block sits in normal flow — where it would be anyway. Failure mode is "not pinned", not "broken" |

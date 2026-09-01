@@ -36,8 +36,10 @@ from lex.lex_app.streamlit.sidebar import (
     _display_name,
     _initials,
     identity_html,
+    _PIN_TO_BOTTOM_CSS,
     logo_is_available,
     logout_row_html,
+    render_account,
     render_logo,
 )
 
@@ -99,23 +101,99 @@ class TestCluster1aj_SidebarChrome:
         for nav in ("<nav", "page_link", "<ul", "<li"):
             assert nav not in markup, f"the sidebar is rendering navigation: {nav}"
 
-    def test_01_310_it_depends_on_no_streamlit_internals(self):
-        """Scenario 1.310 (second half): no Streamlit selectors anywhere.
+    def test_01_310_the_content_markup_depends_on_no_streamlit_internals(self):
+        """Scenario 1.310 (second half): the content reaches into nothing.
 
-        Everything is our own markup with inline styles. Reaching into
-        Streamlit's DOM -- ``[data-testid=...]``, an emotion class, ``.st-``
-        anything -- would work until an upgrade renamed it, and then fail by
-        looking slightly wrong rather than by raising.
-
-        The cost of that boundary is accepted and worth naming: the log-out row
-        cannot be truly bottom-pinned, because pinning needs those selectors. It
-        is last in call order instead, which puts it at the bottom without
-        touching Streamlit's layout.
+        Everything rendered is our own markup with inline styles, so a Streamlit
+        upgrade that renames a class cannot change how any of it looks.
         """
         markup = identity_html("A B") + logout_row_html("/out")
 
-        for internal in ('data-testid', 'stSidebar', 'emotion-cache', 'class="st-'):
+        for internal in ("data-testid", "stSidebar", "emotion-cache", 'class="st-'):
             assert internal not in markup, f"depends on a Streamlit internal: {internal}"
+
+    def test_01_310_exactly_one_selector_is_used_and_it_degrades(self):
+        """Scenario 1.310 (third half): the bottom-pin, and its blast radius.
+
+        Bottom-pinning genuinely cannot be done without a selector -- call order
+        alone puts the account block under the navigation, not at the foot of the
+        panel. So there is exactly one, and this pins both halves of that
+        bargain:
+
+        * it is a ``data-testid``, Streamlit's own testing surface, which is far
+          more stable than a generated emotion class;
+        * it only ever sets layout. If it stops matching, the block sits in
+          normal flow -- where it would be anyway -- so the failure mode is "not
+          pinned", not "broken".
+
+        A rule that changed colour, size or visibility would fail differently:
+        invisibly, and in a way nobody could attribute to a Streamlit upgrade.
+        """
+        css = _PIN_TO_BOTTOM_CSS
+        assert 'data-testid="stSidebarUserContent"' in css
+
+        # Layout only -- nothing that could hide or restyle the block.
+        for forbidden in ("display: none", "visibility:", "color:", "background",
+                          "opacity", "!important"):
+            assert forbidden not in css, f"the pin does more than layout: {forbidden}"
+
+        # And the markup it targets is ours, not Streamlit's.
+        assert "data-lex-account" in css
+
+    def test_01_310_the_account_block_is_identity_and_logout_together(self):
+        """Scenario 1.310 (fourth half): one block, rendered last.
+
+        Identity and the way out are one thing -- an account block -- and they
+        belong at the foot of the panel, not split across it. Rendering them
+        together after ``main()`` also means the app's own navigation sits above
+        them without either side coordinating.
+
+        The logo is deliberately NOT here: it goes through ``st.logo`` into the
+        header slot, which sits above even Streamlit's page navigation.
+        """
+        rendered = []
+
+        class FakeSt:
+            class sidebar:
+                @staticmethod
+                def markdown(html, **kwargs):
+                    rendered.append(html)
+
+        render_account(
+            FakeSt(),
+            {"user_info": {"name": "Hazem Sahbani", "email": "h@example.com"}},
+            logout_href="/oauth2/sign_out",
+        )
+
+        joined = "".join(rendered)
+        assert "Hazem Sahbani" in joined
+        assert "Log out" in joined
+        assert "<img" not in joined, "the logo belongs in st.logo's slot, not here"
+
+        # Identity above the log-out, within the one block.
+        body = rendered[-1]
+        assert body.index("Hazem Sahbani") < body.index("Log out")
+
+    def test_01_310_no_logout_row_when_logout_is_disabled(self):
+        """Scenario 1.310 (fifth half): identity still renders without it.
+
+        ``?is_logout_enabled=false`` exists for embeds where the host owns the
+        session. Losing the row must not lose the identity with it -- the block
+        is who you are, and only sometimes also the way out.
+        """
+        rendered = []
+
+        class FakeSt:
+            class sidebar:
+                @staticmethod
+                def markdown(html, **kwargs):
+                    rendered.append(html)
+
+        render_account(FakeSt(), {"user_info": {"name": "Hazem Sahbani"}}, logout_href=None)
+
+        joined = "".join(rendered)
+        assert "Hazem Sahbani" in joined
+        assert "Log out" not in joined
 
     @pytest.mark.parametrize(
         "name,expected",

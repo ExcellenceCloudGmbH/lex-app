@@ -182,17 +182,53 @@ def logout_row_html(href: str) -> str:
 """.strip()
 
 
-def render_identity(st_module, session_state) -> None:
-    """Render the lockup and identity at the TOP of the sidebar.
+#: Pins our account block to the bottom of the sidebar's content area.
+#:
+#: This is the one place that touches a Streamlit selector, and it is a
+#: ``data-testid`` rather than a generated class -- those are Streamlit's own
+#: testing surface and have been stable for years, where an emotion class is
+#: regenerated on every build.
+#:
+#: It degrades to nothing. If the selector ever stops matching, the block simply
+#: sits in normal flow directly under the navigation, which is where it would be
+#: without this rule at all. So the failure mode is "not pinned", not "broken" --
+#: which is the only reason reaching for a selector is acceptable here.
+_PIN_TO_BOTTOM_CSS = """
+<style>
+  section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"] {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 12rem);
+  }
+  section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]
+    div:has(> div[data-lex-account]) {
+    margin-top: auto;
+  }
+</style>
+"""
 
-    Call order is what places it: Streamlit lays the sidebar out in the order
-    blocks are created, so this has to run before ``main()``. Nothing here
-    reserves space or repositions anything -- the author's own sidebar content
-    simply follows.
+
+def render_account(st_module, session_state, logout_href: Optional[str] = None) -> None:
+    """Render who is signed in, and the way out, at the BOTTOM of the sidebar.
+
+    Together and last, which is both an ordering and a grouping decision. The
+    two belong to each other -- an account block -- and Streamlit lays the
+    sidebar out in call order, so rendering them after ``main()`` puts them
+    below whatever navigation the app declared.
+
+    The logo is NOT here. It goes through ``st.logo`` into the header slot at
+    the very top, above even Streamlit's page navigation:
+
+        stSidebarContent -> [ stSidebarHeader (logo, collapse) ]
+                            [ stSidebarNav ]
+                            [ stSidebarUserContent  <- this ]
     """
-    render_logo(st_module)
+    st_module.sidebar.markdown(_PIN_TO_BOTTOM_CSS, unsafe_allow_html=True)
     st_module.sidebar.markdown(
-        identity_html(_display_name(session_state), subtitle=_role_subtitle(session_state)),
+        f'<div data-lex-account="1">'
+        f"{identity_html(_display_name(session_state), subtitle=_role_subtitle(session_state))}"
+        f'{logout_row_html(logout_href) if logout_href else ""}'
+        f"</div>",
         unsafe_allow_html=True,
     )
 

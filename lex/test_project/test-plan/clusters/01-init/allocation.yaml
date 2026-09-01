@@ -584,7 +584,7 @@ letters:
     scenarios: 1.309-1.311
     status: complete
     tests:
-      pass: 15
+      pass: 18
       skip: 0
       xfail: 0
     note: >-
@@ -627,6 +627,18 @@ letters:
       app's upper-left when the sidebar is COLLAPSED, and that surface follows the page theme, so
       a white wordmark is hard to see on a light page there; choosing a variant would mean
       guessing a client-side value server-side, which is the trap this session already fell into.
+      ORDERING, after the user marked it up: logo to the very top, identity and log-out to the
+      bottom. Streamlit's sidebar is stSidebarHeader (logo + collapse) -> stSidebarNav -> 
+      stSidebarUserContent, so st.logo already lands above even the page navigation and identity
+      only had to move. It is now one ACCOUNT block - identity and the way out belong to each
+      other - rendered after main(), so the app's own navigation sits above it without either
+      side coordinating. Call order alone puts that under the nav rather than at the foot of the
+      panel, and pinning genuinely needs a selector, so there is exactly ONE: a data-testid
+      (Streamlit's testing surface, far more stable than a generated emotion class) that sets
+      layout and nothing else. If it stops matching the block sits in normal flow - where it
+      would be anyway - so the failure mode is "not pinned", not "broken". 1.310 pins both halves
+      of that bargain, including that the rule may not touch colour, visibility or !important:
+      a rule that did would fail invisibly and unattributably.
       Writing this scenario surfaced a real packaging bug, unrelated to the logo and older:
       lex.lex_app.streamlit._widget_host_component was absent from [tool.setuptools.package-data],
       so the widget-host shim's frontend/ would NOT ship in a wheel and lex_widgets() would fail
