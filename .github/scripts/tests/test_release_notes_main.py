@@ -184,3 +184,39 @@ def test_digest_for_records_a_resolved_range_with_a_pac_checkout(monkeypatch, tm
     built = cli._digest_for("v2.1.8", pac_checkout=tmp_path)
 
     assert built["frontend_recorded"] is True
+
+
+# ── check-manifest: the PR-guard subcommand ─────────────────────────────
+
+def test_check_manifest_passes_on_a_valid_manifest(monkeypatch, tmp_path):
+    root = tmp_path
+    (root / "lex" / "react" / "build").mkdir(parents=True)
+    (root / cli.ranges.MANIFEST_PATH).write_text(
+        '{"sha": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"}', encoding="utf-8"
+    )
+    monkeypatch.setattr(cli.ranges, "REPO_ROOT", root)
+
+    assert cli.main(["check-manifest"]) == 0
+
+
+def test_check_manifest_fails_when_absent(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli.ranges, "REPO_ROOT", tmp_path)
+
+    rc = cli.main(["check-manifest"])
+
+    assert rc == 1
+    assert "::error" in capsys.readouterr().out
+
+
+def test_check_manifest_fails_on_a_blank_sha(monkeypatch, tmp_path, capsys):
+    root = tmp_path
+    (root / "lex" / "react" / "build").mkdir(parents=True)
+    (root / cli.ranges.MANIFEST_PATH).write_text('{"sha": ""}', encoding="utf-8")
+    monkeypatch.setattr(cli.ranges, "REPO_ROOT", root)
+
+    rc = cli.main(["check-manifest"])
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "::error" in out
+    assert "sha" in out

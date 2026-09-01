@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from release_notes import changelog, digest, notes, ranges
+from release_notes import changelog, digest, manifest, notes, ranges
 
 EXEMPLAR_PATH = ranges.REPO_ROOT / "docs/releases/RELEASE_NOTES_2.1.3_github.md"
 CHANGELOG_PATH = ranges.REPO_ROOT / "CHANGELOG.md"
@@ -170,6 +170,22 @@ def cmd_render_changelog(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check_manifest(args: argparse.Namespace) -> int:
+    """Validate the on-disk provenance manifest. Non-zero when invalid.
+
+    Unlike `verify-frontend`, this is *meant* to fail: it runs as a PR guard,
+    where the correct outcome for an untrustworthy manifest is a blocked merge.
+    """
+    path = ranges.REPO_ROOT / ranges.MANIFEST_PATH
+    blob = path.read_text(encoding="utf-8") if path.exists() else None
+    reason = manifest.validate(blob)
+    if reason is None:
+        print(f"{ranges.MANIFEST_PATH}: OK", file=sys.stderr)
+        return 0
+    print(f"::error title=Invalid frontend manifest::{ranges.MANIFEST_PATH}: {reason}")
+    return 1
+
+
 def cmd_verify_frontend(args: argparse.Namespace) -> int:
     """Report whether frontend provenance resolves. Never fails.
 
@@ -316,6 +332,11 @@ def build_parser() -> argparse.ArgumentParser:
         "list-gaps", help="Versions whose changelog carries the frontend gap marker."
     )
     gaps.set_defaults(func=cmd_list_gaps)
+
+    check = sub.add_parser(
+        "check-manifest", help="Validate lex/react/build/.frontend-version.json."
+    )
+    check.set_defaults(func=cmd_check_manifest)
 
     return parser
 
