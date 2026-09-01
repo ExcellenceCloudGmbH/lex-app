@@ -705,3 +705,28 @@ clear it — earlier versions put those parameters there, and a pinned tab would
 otherwise spend its one reload per load, forever.
 
 Harness after the rewrite: 8/8.
+
+### Batch 1ai addendum — the frames the first fix missed (scenario 1.308)
+
+Reported after the first version: *"some iframes load when we scroll to them."*
+**Partial** success is the shape of a race, not a wrong mechanism.
+
+Streamlit flips a component frame between hidden and shown by swapping the
+emotion **class** — an attribute change, not a DOM insertion. The observer
+watched `childList` only:
+
+```
+frame exists, not yet display:none  ->  first sweep checks it, skips it
+Streamlit swaps the class           ->  attribute change, no callback
+                                    ->  never looked at again
+```
+
+Those were the ones still waiting for a scroll.
+
+| Change | Why |
+|---|---|
+| `attributes: true` with `attributeFilter: ["class", "style"]` | The class swap is the signal. Filtered, because *every* attribute would fire on each `height` write Streamlit makes as components report in |
+| Bounded backstop re-sweep | Covers orderings not yet thought of — after two rounds of exactly that, worth paying for. Bounded, because an unbounded timer on a dashboard left open all day is a worse and quieter bug than the one it fixes |
+
+Harness after the fix: **6/6**, including the exact regression — a frame hidden
+*after* the first sweep, driven through an attribute mutation with no insertion.

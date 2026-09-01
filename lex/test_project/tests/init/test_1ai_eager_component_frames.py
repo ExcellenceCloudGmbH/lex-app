@@ -27,7 +27,7 @@ effective. Anything that keeps a frame open too long, or fails to restore it,
 breaks Streamlit's own sizing rather than the widget's, which is much harder to
 attribute.
 
-Cluster 01-init, batch 1ai, scenarios 1.306-1.307.
+Cluster 01-init, batch 1ai, scenarios 1.306-1.308.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ai_eager_component_frames.py
@@ -103,6 +103,49 @@ class TestCluster1ai_EagerComponentFrames:
         assert _MAX_WAIT_MS <= 120000, "too long — a dead component would hold the frame"
         # Detached: stop polling something that is gone.
         assert "!frame.isConnected" in js
+
+    def test_01_308_a_frame_hidden_after_the_first_sweep_is_still_caught(self):
+        """Scenario 1.308: watch attribute changes, not only insertions.
+
+        Reported after the first fix: "some iframes load when we scroll to
+        them". Partial success, which is the shape of a race rather than a wrong
+        mechanism.
+
+        Streamlit flips a component frame between hidden and shown by swapping
+        the emotion class -- an ATTRIBUTE change, not a DOM insertion. The
+        observer watched ``childList`` only, so a frame that existed but was not
+        yet ``display: none`` when the first sweep ran was checked once, skipped,
+        and never looked at again. No insertion, no callback, no second chance.
+        Those were the ones still waiting for a scroll.
+
+        The filter is deliberate: ``class`` and ``style`` only. Observing every
+        attribute would fire on each ``height`` write Streamlit makes as
+        components report in -- a callback per component per resize, to learn
+        nothing.
+        """
+        js = eager_frames_js()
+        assert "attributes: true" in js
+        assert '"class", "style"' in js or '"class","style"' in js
+        assert "childList: true" in js, "insertions still matter for a rerun"
+
+    def test_01_308_a_bounded_backstop_covers_what_the_observer_misses(self):
+        """Scenario 1.308 (second half): re-sweep while the page settles, then stop.
+
+        The observer covers the orderings we know about. This covers the ones we
+        have not thought of -- which, after two rounds of exactly that, is worth
+        paying for.
+
+        Bounded on purpose. An unbounded timer on a dashboard left open all day
+        is a worse bug than the one it fixes, and a silent one.
+        """
+        from lex.lex_app.streamlit.eager_frames import _SETTLE_FOR_MS, _SWEEP_EVERY_MS
+
+        js = eager_frames_js()
+        assert "host.clearInterval(settle)" in js, "the backstop must stop itself"
+
+        assert _SWEEP_EVERY_MS >= 100, "sweeping faster than this buys nothing"
+        assert _SETTLE_FOR_MS <= 60000, "a page is not still settling after a minute"
+        assert _SETTLE_FOR_MS // _SWEEP_EVERY_MS <= 200, "too many sweeps for a backstop"
 
     def test_01_307_it_installs_once_and_survives_reruns(self):
         """Scenario 1.307 (second half): one installation, but a live sweep.

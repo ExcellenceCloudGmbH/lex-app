@@ -38,6 +38,11 @@ _COMPONENT_FRAME = 'iframe[data-testid="stCustomComponentV1"]'
 #: that never reports ready leaves nothing of ours behind.
 _MAX_WAIT_MS = 30000
 
+#: Backstop re-sweep, for orderings the MutationObserver does not cover. Stops
+#: on its own so a dashboard left open is not polling for the rest of the day.
+_SWEEP_EVERY_MS = 250
+_SETTLE_FOR_MS = 15000
+
 _EAGER_FRAMES_JS = """
     // ── Load component frames without waiting for a scroll ───────────────
     (function () {
@@ -47,6 +52,8 @@ _EAGER_FRAMES_JS = """
 
       var SELECTOR = '__SELECTOR__';
       var MAX_WAIT = __MAX_WAIT__;
+      var SWEEP_EVERY_MS = __SWEEP_EVERY__;
+      var SETTLE_FOR_MS = __SETTLE_FOR__;
 
       function release(frame, timer) {
         // Remove OUR properties only, so Streamlit's own styling is untouched.
@@ -90,20 +97,47 @@ _EAGER_FRAMES_JS = """
       }
 
       sweep();
-      // Streamlit rebuilds the element tree on every rerun, so new frames keep
-      // appearing; a one-shot sweep would only ever catch the first render.
+
+      // Watching ATTRIBUTES as well as insertions, which is the difference
+      // between "most frames" and "all of them".
+      //
+      // Streamlit flips a component frame between hidden and shown by swapping
+      // the emotion class, not by inserting an element:
+      //
+      //     styled('iframe')(({componentReady}) => ({display: componentReady ? 'initial' : 'none'}))
+      //
+      // So a frame that already existed but was not YET display:none when the
+      // first sweep ran got checked once, skipped, and never looked at again --
+      // no insertion, no callback. Those are the ones that still waited for a
+      // scroll. `class` and `style` only: observing every attribute would fire
+      // on each height update Streamlit writes as components report in.
       try {
         new MutationObserver(sweep).observe(host.document.body, {
           childList: true,
           subtree: true,
+          attributes: true,
+          attributeFilter: ["class", "style"],
         });
       } catch (e) {}
+
+      // Backstop. The observer covers the cases we know about; this covers the
+      // ordering we have not thought of, for as long as a page is still
+      // settling. Cheap -- a querySelectorAll over a handful of iframes -- and
+      // it stops on its own, so a long-lived dashboard is not polling forever.
+      var sweeps = 0;
+      var settle = host.setInterval(function () {
+        sweep();
+        if (++sweeps * SWEEP_EVERY_MS >= SETTLE_FOR_MS) host.clearInterval(settle);
+      }, SWEEP_EVERY_MS);
     })();
 """
 
 
 def eager_frames_js() -> str:
     """The script, ready to embed in a page-level component block."""
-    return _EAGER_FRAMES_JS.replace("__SELECTOR__", _COMPONENT_FRAME).replace(
-        "__MAX_WAIT__", str(_MAX_WAIT_MS)
+    return (
+        _EAGER_FRAMES_JS.replace("__SELECTOR__", _COMPONENT_FRAME)
+        .replace("__MAX_WAIT__", str(_MAX_WAIT_MS))
+        .replace("__SWEEP_EVERY__", str(_SWEEP_EVERY_MS))
+        .replace("__SETTLE_FOR__", str(_SETTLE_FOR_MS))
     )

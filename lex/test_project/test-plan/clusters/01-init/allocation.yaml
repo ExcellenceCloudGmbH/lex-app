@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 307
+max_scenario: 308
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -543,10 +543,10 @@ letters:
       endpoint down. Also applied to model-styling, the same class of per-user metadata.
   ai:
     title: Component frames load without being scrolled to
-    scenarios: 1.306-1.307
+    scenarios: 1.306-1.308
     status: complete
     tests:
-      pass: 4
+      pass: 6
       skip: 0
       xfail: 0
     note: >-
@@ -568,3 +568,14 @@ letters:
       (7 cases: nudge, leave-visible-alone, release-on-ready, release-on-timeout,
       release-on-detach, pick up frames from a later rerun, install once) - no JS runner in this
       repo, so that harness is not in CI.
+      1.308 fixes what the first version missed: "some iframes load when we scroll to them".
+      Partial success is the shape of a race, not a wrong mechanism. Streamlit flips a component
+      frame between hidden and shown by swapping the emotion CLASS, an attribute change rather
+      than a DOM insertion, and the observer watched childList only - so a frame that existed but
+      was not yet display:none when the first sweep ran was checked once, skipped, and never
+      looked at again. Now observes attributes with a class/style filter (every attribute would
+      fire on each height write Streamlit makes as components report in), plus a bounded backstop
+      sweep for orderings not yet thought of - bounded because an unbounded timer on a dashboard
+      left open all day is a worse and quieter bug than the one it fixes. Harness after the fix:
+      6/6, including the exact regression (a frame hidden AFTER the first sweep) driven through an
+      attribute mutation with no insertion.
