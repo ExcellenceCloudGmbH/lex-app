@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 301
+max_scenario: 303
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -442,3 +442,33 @@ letters:
       neither ?theme= nor the postMessage, so lex_view(theme=) is currently inert on the frontend
       while looking like it works - it validates its input, appears in the URL, and does nothing.
       Delete that third assertion and replace it with an effect test when the consumer lands.
+  ag:
+    title: SPA assets are cacheable, and responses are compressed
+    scenarios: 1.302-1.303
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      User report - "the loading speed, it seems that it's taking way too long". Measured rather
+      than guessed: the built SPA is ONE chunk of 6281 KB (1895 KB gzipped), and lex/react/views.py
+      serve_react stamped EVERY file it served with "no-store, no-cache, must-revalidate,
+      max-age=0". no-store is the strongest form - the browser may keep no copy at all - so
+      nothing was reused between page loads and nothing was shared between a page and the iframes
+      inside it. A Streamlit page with three lex-app widgets therefore re-fetched ~24 MB on every
+      load (6.3 x (3+1)), and the same again on the next one; thirteen widgets would be ~86 MB.
+      Hashed assets are content-addressed, so they are safe to cache forever and same-origin
+      iframes share one HTTP cache: assets matching -<hash>. now get
+      "public, max-age=31536000, immutable". Everything else keeps no-store, and that half is
+      tested just as hard, because inverting the split is WORSE than the original bug - a pinned
+      index.html names hashed bundles that a deploy has replaced, giving a blank app with 404s and
+      no way to publish a correction. The hash is required rather than inferred from the directory
+      for the same reason. GZipMiddleware added for the cold-cache path (6.3 MB -> 1.9 MB), pinned
+      near the top of MIDDLEWARE since it compresses on the way out.
+      NOT fixed here, and the next real win: the 6 MB chunk itself. src/index.tsx imports ag-grid
+      at the entry and /embed/widgets is registered INSIDE <Admin> beside six <Resource>
+      declarations, so a Calculate button loads AG Grid Enterprise, ten ra-* enterprise packages,
+      moment and a markdown editor. Route-level React.lazy cannot help (the entry and <Admin> load
+      first); it needs a separate Vite entry mounting <AdminContext> only. Its own import graph is
+      78 modules.

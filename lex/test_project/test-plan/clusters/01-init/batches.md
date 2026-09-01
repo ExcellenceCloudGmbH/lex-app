@@ -500,3 +500,44 @@ nor the inbound `theme` message, so `lex_view(theme=)` is inert on the frontend
 today — while reading as if it works: it validates its input, appears in the URL,
 and has no effect. The third assertion in 1.301 records that; it should be
 deleted and replaced with an effect test when the consumer lands.
+
+## Batch 1ag — SPA assets are cacheable, and responses are compressed (2026-08-28)
+
+- **Scenarios:** 1.302-1.303
+- **Status:** complete (4 pass)
+- **Source under test:** `lex/react/views.py` (`serve_react`), `lex/lex_app/settings.py` (MIDDLEWARE)
+- **Test file:** `lex/test_project/tests/init/test_1ag_spa_asset_caching.py`
+
+Reported as "the loading speed... taking way too long". Measured, not guessed.
+
+The built SPA is **one chunk of 6281 KB** (1895 KB gzipped), and `serve_react`
+stamped **every** file with `no-store, no-cache, must-revalidate, max-age=0`.
+`no-store` is the strongest form — the browser may keep no copy at all — so
+nothing was reused across loads and nothing shared between a page and its
+iframes:
+
+| Page | Re-downloaded per load |
+|---|---|
+| main app + 1 widget iframe | 12.3 MB |
+| main app + 3 widget iframes | 24.5 MB |
+| main app + 13 widget iframes | 85.9 MB |
+
+Hashed assets are content-addressed, so they are safe to cache forever and
+same-origin iframes share one HTTP cache. `assets/…-<hash>.<ext>` now gets
+`public, max-age=31536000, immutable`.
+
+**The other half is tested just as hard**, because inverting the split is worse
+than the original bug: a pinned `index.html` names hashed bundles a deploy has
+replaced — blank app, 404s, no way to publish a correction. The hash is *required*
+rather than inferred from the directory for the same reason.
+
+`GZipMiddleware` added for the cold-cache path (6.3 MB → 1.9 MB), pinned near the
+top of `MIDDLEWARE` since it compresses on the way out.
+
+**Not fixed here — the next real win.** The 6 MB chunk itself. `src/index.tsx`
+imports `ag-grid` at the entry, and `/embed/widgets` is registered *inside*
+`<Admin>` beside six `<Resource>` declarations — so a Calculate button loads AG
+Grid Enterprise, ten `ra-*` enterprise packages, `moment` and a markdown editor.
+Route-level `React.lazy` cannot help, because the entry and `<Admin>` load first.
+It needs a separate Vite entry mounting `<AdminContext>` only (no `AdminUI`, no
+resources). The embed route's own import graph is **78 modules**.
