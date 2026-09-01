@@ -371,9 +371,11 @@ def test_append_addendum_preserves_the_original_body():
     body = "## Main changes\n\n- **New sidebar.** More room for your data.\n"
     out = notes.append_addendum(body, "### Frontend changes\n\n- a fix\n")
 
-    assert body.rstrip() in out          # human prose survives verbatim
+    # Assert the exact joint, not a substring: `body.rstrip() in out` is true
+    # whether or not the implementation rstrips, so it cannot pin the contract.
+    assert out.startswith(body.rstrip() + "\n\n" + notes.ADDENDUM_MARKER + "\n\n")
+    assert out.endswith("- a fix\n")
     assert "a fix" in out
-    assert notes.ADDENDUM_MARKER in out
 
 
 def test_append_addendum_is_idempotent():
