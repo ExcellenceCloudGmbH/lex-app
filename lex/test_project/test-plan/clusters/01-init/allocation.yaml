@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 303
+max_scenario: 305
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -472,3 +472,28 @@ letters:
       moment and a markdown editor. Route-level React.lazy cannot help (the entry and <Admin> load
       first); it needs a separate Vite entry mounting <AdminContext> only. Its own import graph is
       78 modules.
+  ah:
+    title: Per-user metadata responses are briefly cacheable
+    scenarios: 1.304-1.305
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Follow-up to 1ag, from the user's network log: 171 requests for one Streamlit page, with
+      api/model-structure fetched five to six times. Nothing was looping - each embedded lex-app
+      frame is its own JS realm with its own query cache, so six widget blocks meant six
+      independent runtimes each legitimately wanting the tree once, concurrently. That endpoint is
+      also expensive to produce: it deepcopies the structure, then INSTANTIATES every model class
+      and evaluates its list permission, per request. The browser HTTP cache is shared across
+      same-origin frames, so "private, max-age=30" collapses N fetches to one with no client-side
+      coordination and no shared-state machinery. private is load-bearing rather than tidy: the
+      tree is pruned to the requesting user's permissions, so a shared cache serving it onward
+      would disclose which models another user can see - a confidentiality bug, not a performance
+      one, which is why 1.304 asserts it directly. Vary is extended rather than overwritten
+      because DRF sets it for content negotiation and clobbering it misbehaves only under a cache.
+      The window is a staleness budget for permission changes, so
+      LEX_METADATA_CACHE_SECONDS=0 disables it outright; 1.305 pins that 0 means no-store rather
+      than falling back to the default, and that a blank or malformed value cannot take the
+      endpoint down. Also applied to model-styling, the same class of per-user metadata.

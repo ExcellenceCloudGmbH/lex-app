@@ -1,10 +1,57 @@
 import copy
+import os
 
 from lex.process_admin.models.ModelCollection import ModelCollection
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
+
+#: How long a browser may reuse a metadata response, in seconds. ``0`` disables.
+#:
+#: These endpoints describe the SHAPE of the project -- which models exist, what
+#: they are called, which serializers they expose -- so they change on deploy,
+#: not as users work. They are also expensive: pruning the tree instantiates
+#: every model class and evaluates its list permission, per request.
+#:
+#: The cost that matters is repetition. Each embedded lex-app frame is its own
+#: JS realm with its own query cache, so a Streamlit page with six widget blocks
+#: asked for the whole tree six times, concurrently, on every load. The browser
+#: HTTP cache IS shared across same-origin frames, so a short window collapses
+#: that to one request without any client-side coordination.
+#:
+#: The window is the staleness budget for a permission change: with the default,
+#: a revoked permission stops being reflected in the tree for at most this long.
+#: Set ``LEX_METADATA_CACHE_SECONDS=0`` where that is unacceptable.
+_METADATA_CACHE_SECONDS_DEFAULT = 30
+
+
+def _metadata_cache_seconds() -> int:
+    raw = os.getenv("LEX_METADATA_CACHE_SECONDS")
+    if raw is None or raw.strip() == "":
+        return _METADATA_CACHE_SECONDS_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _METADATA_CACHE_SECONDS_DEFAULT
+
+
+def _cache_per_user(response, seconds: int | None = None):
+    """Let ONE browser reuse this response briefly; never a shared cache.
+
+    ``private`` is not optional here: the tree is pruned to the requesting
+    user's permissions, so a proxy or CDN caching it would serve one user's
+    visible models to another. ``Vary: Cookie`` says the same thing to anything
+    that ignores ``private``.
+    """
+    seconds = _metadata_cache_seconds() if seconds is None else seconds
+    if seconds <= 0:
+        response["Cache-Control"] = "no-store"
+        return response
+    response["Cache-Control"] = f"private, max-age={seconds}"
+    existing = response.get("Vary")
+    response["Vary"] = f"{existing}, Cookie" if existing else "Cookie"
+    return response
 
 
 class ModelStructureObtainView(APIView):
@@ -123,7 +170,7 @@ class ModelStructureObtainView(APIView):
 
         annotate(structure)
 
-        return Response(structure)
+        return _cache_per_user(Response(structure))
 
 
 class ModelStylingObtainView(APIView):
@@ -164,7 +211,7 @@ class ModelStylingObtainView(APIView):
                 # happens if key not in container
                 pass
 
-        return Response(user_dependent_model_styling)
+        return _cache_per_user(Response(user_dependent_model_styling))
 
 
 class Overview(APIView):

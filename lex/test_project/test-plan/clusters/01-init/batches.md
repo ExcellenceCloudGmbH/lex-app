@@ -541,3 +541,36 @@ Grid Enterprise, ten `ra-*` enterprise packages, `moment` and a markdown editor.
 Route-level `React.lazy` cannot help, because the entry and `<Admin>` load first.
 It needs a separate Vite entry mounting `<AdminContext>` only (no `AdminUI`, no
 resources). The embed route's own import graph is **78 modules**.
+
+## Batch 1ah — Per-user metadata is briefly cacheable (2026-08-28)
+
+- **Scenarios:** 1.304-1.305
+- **Status:** complete (9 pass)
+- **Source under test:** `lex/api/views/ModelStructureObtainView.py`
+- **Test file:** `lex/test_project/tests/init/test_1ah_metadata_cache_headers.py`
+
+From the network log after batch 1ag landed: **171 requests** for one Streamlit
+page, with `api/model-structure` fetched **five to six times**.
+
+Nothing was looping. Each embedded lex-app frame is its own JS realm with its own
+query cache, so six widget blocks meant six independent runtimes each wanting the
+tree once. And that endpoint is expensive to *produce* — it deepcopies the
+structure, then instantiates every model class and evaluates its list permission,
+per request.
+
+The browser HTTP cache **is** shared across same-origin frames, so
+`private, max-age=30` collapses N fetches into one — no client-side coordination,
+no shared-state machinery.
+
+| Header | Why |
+|---|---|
+| `private` | The tree is permission-pruned. A shared cache serving it onward would disclose which models another user can see — a confidentiality bug, not a performance one |
+| `max-age=30` | A staleness budget for permission changes, not a guess |
+| `Vary: …, Cookie` | Extended, never overwritten — DRF sets `Vary` for content negotiation, and clobbering it misbehaves only under a cache |
+
+`LEX_METADATA_CACHE_SECONDS=0` disables it. 1.305 pins that `0` means `no-store`
+rather than silently falling back to the default (which would read as disabled
+while still caching), and that a blank or malformed value cannot take the
+endpoint down — it is an env var, so it will eventually be both.
+
+Also applied to `model-styling`, the same class of per-user metadata.
