@@ -854,3 +854,41 @@ would happily pass.
 **Residual, still stated:** collapsed *and* dark gives navy on dark. `st.logo`
 takes one image per slot, and choosing between them would mean reading a
 client-side theme from Python.
+
+### Batch 1ad addendum 9 — the reload loop (scenario 1.277)
+
+Reported as the page flipping between light and dark without stopping. The guard
+was on the wrong object:
+
+```js
+if (host.__lexThemeReloading) return;
+host.__lexThemeReloading = true;
+host.location.reload();          // destroys the window holding that flag
+```
+
+That stopped a second reload *within* one load and nothing across them. Two
+independent inputs feed `follow()` — the stored agreement, and a widget reporting
+its own palette — so when they disagree, each load flips the other way.
+
+They disagree precisely when the widget frames can't see lex-app's storage
+(third-party frames get partitioned storage) and fall back to the light default
+while the agreement key says dark.
+
+**The ledger now lives in `sessionStorage`** — it survives a reload and is scoped
+to the tab, which is the lifetime a cross-reload guard actually needs. It records
+what was last reloaded *for*, so a contradiction is recognisable rather than
+merely repeatable. Bounded to two reloads per episode, then it refuses and says
+why.
+
+**The guard must not become the bug in turn**, so `follow()` now knows how it
+heard:
+
+| Reason | Treatment |
+|---|---|
+| `storage` | A fresh, deliberate change made elsewhere — clears the ledger, always honoured |
+| `install` / `widget` | Re-reads of existing state — the two that can argue |
+
+And the window expires, so sync doesn't work once per tab and then quietly stop.
+
+Harness reproduces the loop directly — agreement `dark`, widgets reporting
+`light`, twelve loads — and asserts it terminates in at most two: **5/5**.

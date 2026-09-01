@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.276.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.277.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -168,7 +168,11 @@ class TestCluster1ad_StreamlitThemeFollower:
         that reports before the follower has rendered).
         """
         html = theme_follower_html("dark")
-        assert "host.__lexThemeFollow = follow;" in html
+        # A wrapper rather than `follow` itself, so a widget's report is tagged
+        # as such: the oscillation guard in 1.277 has to tell a re-read of
+        # existing state from a deliberate change.
+        assert "host.__lexThemeFollow = function" in html
+        assert 'follow(mode, "widget")' in html
 
         shim = (
             pathlib.Path(__file__).resolve().parents[3]
@@ -258,6 +262,65 @@ class TestCluster1ad_StreamlitThemeFollower:
         pinned = theme_follower_html("dark")
         assert "Standing" in pinned
         assert "without that parameter" in pinned
+
+
+    def test_01_277_a_reload_loop_is_structurally_impossible(self):
+        """Scenario 1.277: the guard against reloading survives the reload.
+
+        Reported as the page flipping back and forth between light and dark
+        without stopping -- the worst thing this file can do to a page, and
+        caused by the guard being on the wrong object::
+
+            if (host.__lexThemeReloading) return;
+            host.__lexThemeReloading = true;
+            host.location.reload();          // destroys the window holding it
+
+        That stopped a second reload WITHIN one load and nothing across them.
+        Two independent inputs feed ``follow()`` -- the stored agreement and a
+        widget reporting its own palette -- so when they disagree, each load
+        flips the other way, forever.
+
+        The ledger lives in ``sessionStorage``: it survives a reload and is
+        scoped to the tab, which is exactly the lifetime a cross-reload guard
+        needs. Recording what was last reloaded FOR is what makes a
+        contradiction recognisable rather than merely repeatable.
+        """
+        js = theme_follower_html()
+
+        assert "sessionStorage" in js, "the guard cannot live on a window it destroys"
+        assert "lex.theme.reloads" in js
+        # A contradiction is detected by comparing targets, not just counting.
+        assert "previous.to !== mode" in js
+        assert "NOT reloading again" in js, "and it says so, rather than going quiet"
+
+    def test_01_277_a_deliberate_change_is_never_refused(self):
+        """Scenario 1.277 (second half): the guard must not become the bug.
+
+        A cross-reload guard that cannot tell "these two disagree" from "the user
+        just changed their mind" would break theme sync to fix the loop --
+        trading a visible failure for a silent one.
+
+        A ``storage`` event IS a fresh, deliberate change made somewhere else, so
+        it clears the ledger and is always honoured. The install-time read and a
+        widget's report are re-reads of existing state, and are the two that can
+        argue with each other.
+        """
+        js = theme_follower_html()
+
+        for reason in ('"install"', '"storage"', '"widget"'):
+            assert reason in js, f"follow() cannot distinguish its inputs: {reason}"
+        assert 'if (reason === "storage") forgetReloads();' in js
+
+    def test_01_277_the_guard_expires(self):
+        """Scenario 1.277 (third half): it stops guarding once the page settles.
+
+        A permanent refusal would be its own bug -- theme sync would work once
+        per tab and then quietly stop for the rest of the session. The window
+        bounds the episode, not the tab.
+        """
+        js = theme_follower_html()
+        assert "LEDGER_WINDOW_MS" in js
+        assert "Date.now() - v.at > LEDGER_WINDOW_MS" in js
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

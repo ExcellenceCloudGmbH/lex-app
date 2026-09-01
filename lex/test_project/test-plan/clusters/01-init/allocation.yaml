@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.276
+    scenarios: 1.261-1.277
     status: complete
     tests:
-      pass: 18
+      pass: 21
       skip: 0
       xfail: 0
     note: >-
@@ -410,6 +410,22 @@ letters:
       measurement. A URL that already pins a theme makes the follower stand down entirely and log
       how to clear it, since earlier versions put those parameters there and a pinned tab would
       otherwise burn its one reload per load forever. Harness after the rewrite: 8/8.
+      1.277 fixes a RELOAD LOOP - the page flipping between light and dark without stopping,
+      which is the worst thing this file can do to a page. The guard lived on `host`, and
+      location.reload() destroys that window: it stopped a second reload WITHIN one load and
+      nothing across them. Two independent inputs feed follow() - the stored agreement, and a
+      widget reporting its own palette - so when those disagree each load flips the other way.
+      They disagree exactly when the widget frames cannot see lex-app's storage (third-party
+      frames get partitioned storage) and fall back to the light default while the agreement key
+      says dark. The ledger now lives in sessionStorage, which survives a reload and is scoped to
+      the tab - the lifetime a cross-reload guard actually needs - and records what was last
+      reloaded FOR, so a contradiction is recognisable rather than merely repeatable. Bounded to
+      two reloads per episode, then it refuses and says why. The guard must not become the bug in
+      turn, so follow() now knows HOW it heard: a storage event is a fresh deliberate change made
+      elsewhere and clears the ledger, while the install read and a widget report are re-reads of
+      existing state and are the two that can argue. The window expires, so sync does not work
+      once per tab and then quietly stop. Harness reproduces the loop directly - agreement=dark
+      with widgets reporting light, twelve loads - and asserts it terminates in at most two: 5/5.
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299

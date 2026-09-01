@@ -181,14 +181,79 @@ _FOLLOWER_HTML = """<script>
       }
     }
 
-    function follow(mode) {
+    // ── Oscillation guard ────────────────────────────────────────────────
+    // `location.reload()` destroys the window, so a flag on it resets every
+    // load: it stops a second reload WITHIN one load and nothing across them.
+    // Two independent inputs feed follow() -- the stored agreement, and a widget
+    // reporting its own palette -- and when those disagree each load flips the
+    // other way. That is a reload loop, and it is the worst thing this file can
+    // do to a page.
+    //
+    // sessionStorage survives a reload and is per-tab, which is exactly the
+    // lifetime the guard needs. Recording what we last reloaded FOR lets a
+    // contradiction be recognised rather than acted on.
+    var LEDGER_KEY = "lex.theme.reloads";
+    var LEDGER_WINDOW_MS = 15000;
+    var LEDGER_MAX = 2;
+
+    function ledger() {
+      try {
+        var raw = host.sessionStorage.getItem(LEDGER_KEY);
+        var v = raw ? JSON.parse(raw) : null;
+        if (!v || typeof v.n !== "number") return null;
+        // Outside the window this is a new episode, not an oscillation.
+        return Date.now() - v.at > LEDGER_WINDOW_MS ? null : v;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function noteReload(mode) {
+      try {
+        var prev = ledger();
+        host.sessionStorage.setItem(LEDGER_KEY, JSON.stringify({
+          n: (prev ? prev.n : 0) + 1, at: Date.now(), to: mode
+        }));
+      } catch (e) {}
+    }
+
+    function forgetReloads() {
+      try { host.sessionStorage.removeItem(LEDGER_KEY); } catch (e) {}
+    }
+
+    /**
+     * @param mode    "light" or "dark"
+     * @param reason  "install" | "storage" | "widget" -- how we heard about it.
+     *                A `storage` event is a fresh, deliberate change made
+     *                somewhere else, so it clears the ledger and is always
+     *                honoured; the other two are re-reads of existing state and
+     *                are the ones that can argue with each other.
+     */
+    function follow(mode, reason) {
       if (mode !== "light" && mode !== "dark") return;
       var now = effectiveMode();
-      console.info("[lex-theme] asked for", mode, "; showing", now || "(unknown)",
+      console.info("[lex-theme] asked for", mode, "(" + (reason || "?") + ")",
+                   "; showing", now || "(unknown)",
                    "; menu is", selection() || "(unset -> system)");
       if (!now || now === mode) return;     // already right, or unknowable
-      if (host.__lexThemeReloading) return; // one reload per change
+
+      if (reason === "storage") forgetReloads();
+
+      var previous = ledger();
+      if (previous && (previous.n >= LEDGER_MAX || previous.to !== mode)) {
+        host.__lexThemeReloading = true;    // stop asking for the rest of this load
+        console.warn(
+          "[lex-theme] NOT reloading again. This page already reloaded for '" +
+          previous.to + "' and is now being asked for '" + mode + "' while showing '" +
+          now + "'. Two sources disagree about the theme, and reloading again would " +
+          "just flip it back. Leaving the page as it is."
+        );
+        return;
+      }
+
+      if (host.__lexThemeReloading) return; // one reload per load
       host.__lexThemeReloading = true;
+      noteReload(mode);
       try {
         // Exactly what the Settings menu would write, so the two cannot disagree.
         host.localStorage.setItem(
@@ -206,7 +271,7 @@ _FOLLOWER_HTML = """<script>
 
     // Published so a writer already inside this frame tree -- the widget-host
     // shim -- can call in directly rather than going through a storage event.
-    host.__lexThemeFollow = follow;
+    host.__lexThemeFollow = function (mode) { follow(mode, "widget"); };
 
     // A mode agreed before this block rendered, which is the common ordering.
     // With nothing agreed, fall back to DEFAULT_MODE rather than leaving the
@@ -214,13 +279,13 @@ _FOLLOWER_HTML = """<script>
     host.requestAnimationFrame(function () {
       var stored = null;
       try { stored = host.localStorage.getItem(KEY); } catch (e) {}
-      follow(stored || DEFAULT_MODE);
+      follow(stored || DEFAULT_MODE, "install");
     });
 
     // `storage` fires in every OTHER window of this origin, which is how a
     // writer without a handle to this page gets through.
     host.addEventListener("storage", function (ev) {
-      if (ev.key === KEY) follow(ev.newValue);
+      if (ev.key === KEY) follow(ev.newValue, "storage");
     });
 
     console.info("[lex-theme] follower ready; showing", effectiveMode(),
