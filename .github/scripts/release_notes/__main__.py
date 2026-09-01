@@ -60,11 +60,16 @@ def _digest_for(tag: str, *, pac_checkout: Path | None = None) -> dict:
     backend = digest.enrich_with_prs(digest.collect_commits(previous, tag))
 
     frontend: list[digest.Commit] = []
+    frontend_recorded = True
     fe_range = ranges.frontend_range(previous, tag)
     if fe_range is None:
-        print("No frontend manifest at one or both ends — omitting the frontend section.",
+        # Unresolvable is NOT the same as "no frontend changes", and the
+        # changelog must not let a reader confuse them.
+        frontend_recorded = False
+        print("No frontend provenance at one or both ends — omitting the frontend section.",
               file=sys.stderr)
     elif pac_checkout is None:
+        frontend_recorded = False
         print(f"Frontend range {fe_range.from_sha}..{fe_range.to_sha} resolved, but no PAC "
               "checkout was supplied — omitting the frontend section.", file=sys.stderr)
     else:
@@ -74,7 +79,9 @@ def _digest_for(tag: str, *, pac_checkout: Path | None = None) -> dict:
         print(f"Frontend: {len(frontend)} commits in "
               f"{fe_range.from_sha}..{fe_range.to_sha}", file=sys.stderr)
 
-    return digest.build_digest(tag, previous, backend, frontend)
+    built = digest.build_digest(tag, previous, backend, frontend)
+    built["frontend_recorded"] = frontend_recorded
+    return built
 
 
 def _pac_arg(args: argparse.Namespace) -> Path | None:
