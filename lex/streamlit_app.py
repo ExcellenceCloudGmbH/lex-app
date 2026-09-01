@@ -11,6 +11,7 @@ import requests
 import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
+from lex.lex_app.streamlit.eager_frames import eager_frames_js
 from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
     embed_theme_from_params,
@@ -622,8 +623,12 @@ def render_theme_follower() -> None:
     import streamlit.components.v1 as components
 
     debug = theme_debug_enabled()
+    # One block, two page-level scripts. They are unrelated concerns kept in
+    # separate modules, but each `components.html` is another iframe, and the
+    # eager-frames script exists precisely because frames are not free.
     components.html(
-        theme_follower_html(_url_embed_theme(), debug=debug),
+        theme_follower_html(_url_embed_theme(), debug=debug)
+        + f"<script>{eager_frames_js()}</script>",
         height=DEBUG_PANEL_HEIGHT if debug else 0,
     )
 

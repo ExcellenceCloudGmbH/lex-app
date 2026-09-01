@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 305
+max_scenario: 307
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -497,3 +497,30 @@ letters:
       LEX_METADATA_CACHE_SECONDS=0 disables it outright; 1.305 pins that 0 means no-store rather
       than falling back to the default, and that a blank or malformed value cannot take the
       endpoint down. Also applied to model-styling, the same class of per-user metadata.
+  ai:
+    title: Component frames load without being scrolled to
+    scenarios: 1.306-1.307
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      User report - "the components trigger when I scroll to them". The cause is in Streamlit
+      1.58, not in the widgets: ComponentInstance renders every custom component's frame as
+      styled('iframe')(({componentReady}) => ({display: componentReady ? 'initial' : 'none'})),
+      so the frame is display:none until the code INSIDE it calls setComponentReady() - which it
+      can only do once loaded. Browsers deprioritise hidden frames and commonly defer off-screen
+      ones outright, so nothing fetches until scrolling changes visibility; Streamlit's skeleton
+      placeholder is what was on screen. loading="eager" on our inner iframe cannot reach this,
+      because that frame lives INSIDE the hidden one. Fix holds the frame open across its load -
+      display:block, height:0, rendered but occupying nothing - and releases it the moment
+      Streamlit writes a height, which only happens after ready. Deliberately inline and NOT
+      !important: inline already beats the emotion class, and staying beatable is what lets
+      Streamlit take the element back. 1.307 covers the part that makes this safe rather than
+      merely effective - all three exits (ready, timeout, detached) go through one release path,
+      because a frame left holding our styles would be permanently zero-height AFTER loading,
+      i.e. an invisible widget instead of a slow one. Behaviour verified against DOM doubles
+      (7 cases: nudge, leave-visible-alone, release-on-ready, release-on-timeout,
+      release-on-detach, pick up frames from a later rerun, install once) - no JS runner in this
+      repo, so that harness is not in CI.

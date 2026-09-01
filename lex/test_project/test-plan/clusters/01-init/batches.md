@@ -574,3 +574,43 @@ while still caching), and that a blank or malformed value cannot take the
 endpoint down — it is an env var, so it will eventually be both.
 
 Also applied to `model-styling`, the same class of per-user metadata.
+
+## Batch 1ai — Component frames load without being scrolled to (2026-08-28)
+
+- **Scenarios:** 1.306-1.307
+- **Status:** complete (4 pass)
+- **Source under test:** `lex/lex_app/streamlit/eager_frames.py`, wired from `lex/streamlit_app.py`
+- **Test file:** `lex/test_project/tests/init/test_1ai_eager_component_frames.py`
+
+Reported as "the components trigger when I scroll to them". The cause is
+Streamlit's, not ours — `ComponentInstance` in 1.58:
+
+```js
+styled('iframe')(({ componentReady }) => ({
+  display: componentReady ? 'initial' : 'none',
+}))
+<iframe data-testid="stCustomComponentV1" height={frameHeight ?? 0} ... />
+```
+
+A component's frame is `display: none` until the code **inside** it calls
+`setComponentReady()` — which it can only do once loaded. Browsers deprioritise
+hidden frames and commonly defer off-screen ones outright, so nothing fetches
+until scrolling changes visibility. Streamlit's skeleton placeholder is what was
+on screen.
+
+`loading="eager"` on our inner iframe never had a chance: that frame lives
+*inside* the hidden one.
+
+The fix holds the frame open across its load — `display: block; height: 0`,
+rendered but occupying nothing — and releases it the moment Streamlit writes a
+height, which only happens after ready.
+
+| Property | Why |
+|---|---|
+| Targets `stCustomComponentV1` only | A blanket iframe selector would force layout on elements hidden on purpose |
+| Inline, never `!important` | Inline already beats the emotion class; `!important` would pin the frame at zero height *after* it loaded |
+| One `release()` for all three exits | Ready, timeout, and detached. A frame left holding our styles is an **invisible** widget — worse than a slow one |
+| MutationObserver | Streamlit rebuilds the tree each rerun; a one-shot sweep would only ever catch the first render |
+
+Behaviour verified against DOM doubles (7 cases). No JS runner in this repo, so
+that harness is not in CI — the Python scenarios pin the structural properties.
