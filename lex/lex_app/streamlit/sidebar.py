@@ -21,9 +21,7 @@ mode-invariant.
 
 from __future__ import annotations
 
-import base64
 import html
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -52,44 +50,37 @@ NAV_BORDER = "rgba(255,255,255,0.10)"
 NAV_ACTIVE_BG = "rgba(20,180,180,0.16)"
 
 
-@lru_cache(maxsize=1)
-def _logo_data_uri() -> Optional[str]:
-    """The logo as a base64 ``data:`` URI, or None if it is not on disk.
+def logo_is_available() -> bool:
+    """Whether the vendored logo is on disk.
 
-    Base64 in an ``<img>`` rather than inlined ``<svg>`` markup, deliberately.
-    The file carries its own ``<style>`` block with generic class names::
-
-        .cls-1 { fill: #24b6bb; }  .cls-2, .cls-3 { fill: #FFFFFF; }
-
-    Inlined as markup, that stylesheet is global to the page -- it would repaint
-    any element on the author's dashboard that happened to use those class
-    names. An ``<img>`` gives the SVG its own document, so the styles cannot
-    escape. It also costs no request, unlike pointing at the frontend build,
-    whose filenames carry content hashes and change on every rebuild.
+    Guarded because ``st.logo`` raises on a missing file, and a packaging
+    mistake should cost the logo rather than the page.
     """
-    try:
-        raw = _LOGO_PATH.read_bytes()
-    except OSError:
-        return None
-    return "data:image/svg+xml;base64," + base64.b64encode(raw).decode("ascii")
+    return _LOGO_PATH.is_file()
 
 
-def _brand_lockup_html() -> str:
-    """The logo, or a wordmark if the asset is missing.
+def render_logo(st_module) -> None:
+    """Put the logo in Streamlit's own logo slot.
 
-    A packaging mistake should cost the logo, not the sidebar. The fallback is
-    the same lockup this had before the real asset was vendored.
+    ``st.logo`` renders into the header slot Streamlit reserves for exactly
+    this -- top of the sidebar, on the same line as the collapse control, which
+    is where lex-app puts its own logo too.
+
+    Hand-placing an ``<img>`` in the sidebar's user content is what made it look
+    misplaced: that content area begins *below* the header, so the image landed
+    under the collapse button with the header's whitespace above it, and no
+    amount of negative margin fixes that honestly.
+
+    Known limit, worth stating: ``st.logo`` also renders in the app's upper-left
+    corner when the sidebar is COLLAPSED, and that surface follows the page
+    theme. This is the dark variant -- a white wordmark -- so on a light page
+    with the sidebar collapsed it will be hard to see. The sidebar is navy in
+    both modes, so the common case is right; fixing the other one means choosing
+    a variant from the client's theme, which is not knowable here.
     """
-    uri = _logo_data_uri()
-    if uri:
-        return (
-            f'<img src="{uri}" alt="Excellence Cloud" width="{_LOGO_WIDTH_PX}" '
-            f'style="display:block;height:auto;max-width:100%;" />'
-        )
-    return (
-        f'<span style="color:{NAV_TEXT};font-size:12px;letter-spacing:1.4px;">EXCELLENCE'
-        f' <span style="color:{NAV_ACCENT};">CLOUD</span></span>'
-    )
+    if not logo_is_available():
+        return
+    st_module.logo(str(_LOGO_PATH), size="medium")
 
 
 def _initials(name: str) -> str:
@@ -145,12 +136,8 @@ def identity_html(name: str, subtitle: Optional[str] = None) -> str:
     )
 
     return f"""
-<div style="margin:-0.5rem -0.25rem 0;">
-  <div style="display:flex;align-items:center;gap:8px;padding:2px 6px 12px;">
-    {_brand_lockup_html()}
-  </div>
-  <div style="height:1px;background:{NAV_BORDER};"></div>
-  <div style="display:flex;align-items:center;gap:10px;padding:12px 6px;">
+<div style="margin:-0.25rem -0.25rem 0;">
+  <div style="display:flex;align-items:center;gap:10px;padding:2px 6px 12px;">
     <div style="width:34px;height:34px;border-radius:50%;background:{NAV_ACTIVE_BG};
                 color:{NAV_ACCENT};display:flex;align-items:center;justify-content:center;
                 font-size:13px;font-weight:500;flex:0 0 34px;">{safe_initials}</div>
@@ -160,7 +147,7 @@ def identity_html(name: str, subtitle: Optional[str] = None) -> str:
       {subtitle_markup}
     </div>
   </div>
-  <div style="height:1px;background:{NAV_BORDER};margin-bottom:4px;"></div>
+  <div style="height:1px;background:{NAV_BORDER};margin-bottom:2px;"></div>
 </div>
 """.strip()
 
@@ -203,6 +190,7 @@ def render_identity(st_module, session_state) -> None:
     reserves space or repositions anything -- the author's own sidebar content
     simply follows.
     """
+    render_logo(st_module)
     st_module.sidebar.markdown(
         identity_html(_display_name(session_state), subtitle=_role_subtitle(session_state)),
         unsafe_allow_html=True,

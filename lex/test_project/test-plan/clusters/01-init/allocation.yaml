@@ -615,12 +615,18 @@ letters:
       sidenav imports, white wordmark on teal, which is what a navy surface needs. Vendored into
       lex/assets/ (already declared package data) rather than referenced from the frontend build,
       whose filenames carry content hashes and change on every rebuild - a reference would break
-      at the next deploy and show a broken image in the one place branding matters. Rendered as a
-      base64 <img> rather than inlined <svg> markup, because the file carries its own <style>
-      block with entirely generic class names (.cls-1/.cls-2/.cls-3); inlined, that stylesheet is
-      GLOBAL and would repaint any element on the author's dashboard using those names - a bizarre
-      bug to be handed and a hard one to trace back to a logo. A missing asset degrades to the
-      wordmark rather than taking the sidebar down.
+      at the next deploy and show a broken image in the one place branding matters.
+      Placed by st.logo rather than by us. The first attempt hand-placed an <img> in the sidebar's
+      USER CONTENT and the user reported it misplaced: that area begins BELOW Streamlit's header,
+      so the image landed under the collapse control with the header's whitespace above it, and no
+      negative margin fixes that honestly. st.logo renders into the header slot Streamlit reserves
+      for exactly this - top of the sidebar, on the collapse control's line, which is where
+      lex-app puts its logo too. The scenario asserts the SLOT rather than a measurement. Guarded
+      on the file existing, because st.logo raises on a missing path and a packaging mistake
+      should cost the logo rather than the page. Known limit, stated: st.logo also renders in the
+      app's upper-left when the sidebar is COLLAPSED, and that surface follows the page theme, so
+      a white wordmark is hard to see on a light page there; choosing a variant would mean
+      guessing a client-side value server-side, which is the trap this session already fell into.
       Writing this scenario surfaced a real packaging bug, unrelated to the logo and older:
       lex.lex_app.streamlit._widget_host_component was absent from [tool.setuptools.package-data],
       so the widget-host shim's frontend/ would NOT ship in a wheel and lex_widgets() would fail

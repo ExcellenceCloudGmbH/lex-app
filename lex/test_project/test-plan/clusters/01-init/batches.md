@@ -778,8 +778,14 @@ needs.
 | Decision | Why |
 |---|---|
 | Vendored into `lex/assets/` | Already declared package data. Referencing the frontend build instead would break at the next deploy — those filenames carry content hashes |
-| Base64 `<img>`, not inlined `<svg>` | The file carries its own `<style>` with generic names (`.cls-1`, `.cls-2`, `.cls-3`). Inlined, that stylesheet is **global** and would repaint any element on the author's dashboard using those names |
-| Falls back to the wordmark | A packaging mistake should cost the logo, not the sidebar |
+| Placed by `st.logo`, not by us | Reported as misplaced when hand-placed: the sidebar's *user content* begins below Streamlit's header, so the image sat under the collapse control with the header's whitespace above it. `st.logo` renders into the header slot — top of the sidebar, on the collapse control's line, exactly where lex-app puts its own |
+| Guarded on the file existing | `st.logo` raises on a missing path; a packaging mistake should cost the logo, not the page |
+
+**Known limit, stated rather than discovered:** `st.logo` also renders in the
+app's upper-left when the sidebar is **collapsed**, and that surface follows the
+page theme — so this white wordmark is hard to see on a light page there.
+Choosing a variant would mean guessing a client-side value server-side, which is
+the trap this session already fell into once.
 
 **It also surfaced an older packaging bug**, unrelated to the logo:
 `lex.lex_app.streamlit._widget_host_component` was missing from

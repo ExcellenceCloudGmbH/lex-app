@@ -33,12 +33,12 @@ from lex.lex_app.streamlit.sidebar import (
     _LOGO_PATH,
     NAV_ACCENT,
     NAV_SURFACE,
-    _brand_lockup_html,
-    _logo_data_uri,
     _display_name,
     _initials,
     identity_html,
+    logo_is_available,
     logout_row_html,
+    render_logo,
 )
 
 pytestmark = pytest.mark.init
@@ -92,11 +92,9 @@ class TestCluster1aj_SidebarChrome:
         """
         markup = identity_html("Hazem Sahbani", subtitle="h@example.com")
 
-        # Identity and branding, yes. Branding is asserted by the lockup rather
-        # than the word: it is the real logo now, so the wordmark text only
-        # appears on the missing-asset fallback path.
+        # Identity, yes. Branding is no longer here at all -- the logo goes
+        # through st.logo's own slot, which 1.311 covers.
         assert "Hazem Sahbani" in markup
-        assert 'alt="Excellence Cloud"' in markup or "EXCELLENCE" in markup
         # Navigation, no.
         for nav in ("<nav", "page_link", "<ul", "<li"):
             assert nav not in markup, f"the sidebar is rendering navigation: {nav}"
@@ -154,13 +152,13 @@ class TestCluster1aj_SidebarChrome:
 
 
 class TestCluster1aj_BrandLockup:
-    """The real logo, shipped and isolated."""
+    """The real logo, shipped and placed by Streamlit rather than by hand."""
 
-    def test_01_311_the_real_logo_is_vendored_and_renders(self):
-        """Scenario 1.311: the sidebar shows lex-app's own logo asset.
+    def test_01_311_the_real_logo_is_vendored(self):
+        """Scenario 1.311: the sidebar uses lex-app's own logo asset.
 
         The same file lex-app's sidenav imports -- the DARK variant, white
-        wordmark on teal accent, which is what this navy surface needs.
+        wordmark on teal, which is what a navy surface needs.
 
         Vendored into the package rather than fetched from the frontend build at
         runtime: those filenames carry content hashes and change on every
@@ -169,46 +167,56 @@ class TestCluster1aj_BrandLockup:
         """
         assert _LOGO_PATH.is_file(), f"logo not vendored at {_LOGO_PATH}"
         assert _LOGO_PATH.read_bytes().lstrip().startswith(b"<svg"), "not an SVG"
+        assert logo_is_available()
 
-        markup = _brand_lockup_html()
-        assert 'src="data:image/svg+xml;base64,' in markup
-        assert 'alt="Excellence Cloud"' in markup
+    def test_01_311_it_goes_in_streamlits_logo_slot_not_our_markup(self):
+        """Scenario 1.311 (second half): ``st.logo``, not a hand-placed image.
 
-    def test_01_311_the_logo_cannot_restyle_the_page(self):
-        """Scenario 1.311 (second half): as an image, not inlined markup.
+        Streamlit reserves a header slot for exactly this -- top of the sidebar,
+        on the same line as the collapse control, which is where lex-app puts
+        its logo too.
 
-        The file carries its own stylesheet with entirely generic class names::
-
-            .cls-1 { fill: #24b6bb; }   .cls-2, .cls-3 { fill: #FFFFFF; }
-
-        Inlined as ``<svg>`` markup that stylesheet is GLOBAL -- it would repaint
-        any element on the author's dashboard using those names, which is a
-        bizarre bug to be handed and a hard one to trace back to a logo. An
-        ``<img>`` gives the SVG its own document.
+        Hand-placing an ``<img>`` in the sidebar's USER CONTENT is what made it
+        look misplaced: that area begins below the header, so the image landed
+        under the collapse button with the header's whitespace above it. No
+        amount of negative margin fixes that honestly, which is why this asserts
+        the slot rather than a measurement.
         """
-        markup = _brand_lockup_html()
-        assert "<svg" not in markup, "inlined SVG leaks its <style> into the page"
-        assert ".cls-" not in markup
-        assert "<img" in markup
+        calls = []
 
-    def test_01_311_a_missing_asset_costs_the_logo_not_the_sidebar(self, monkeypatch):
-        """Scenario 1.311 (third half): degrade to the wordmark.
+        class FakeSt:
+            def logo(self, image, **kwargs):
+                calls.append((image, kwargs))
 
-        A packaging mistake should not take the sidebar down with it. This is
-        not hypothetical -- writing this batch turned up that the widget-host
-        component's own static frontend was absent from package-data, which an
-        editable install hides completely.
+        render_logo(FakeSt())
+        assert len(calls) == 1, "the logo did not go through st.logo"
+        assert calls[0][0].endswith("dark-lex-logo.svg")
+
+        # And the identity markup no longer carries it.
+        markup = identity_html("Hazem Sahbani", "h@example.com")
+        assert "<img" not in markup
+        assert "base64" not in markup
+
+    def test_01_311_a_missing_asset_costs_the_logo_not_the_page(self, monkeypatch):
+        """Scenario 1.311 (third half): skip the call rather than raise.
+
+        ``st.logo`` raises on a missing file, so an unguarded call would take
+        the whole page down over a packaging mistake. Not hypothetical: writing
+        this batch turned up that the widget-host component's own frontend was
+        absent from package-data, which an editable install hides completely.
         """
         import lex.lex_app.streamlit.sidebar as sb
 
-        _logo_data_uri.cache_clear()
         monkeypatch.setattr(sb, "_LOGO_PATH", sb._LOGO_PATH.with_name("does-not-exist.svg"))
-        try:
-            markup = sb._brand_lockup_html()
-            assert "<img" not in markup
-            assert "EXCELLENCE" in markup      # the wordmark fallback
-        finally:
-            _logo_data_uri.cache_clear()
+
+        called = []
+
+        class FakeSt:
+            def logo(self, *a, **k):
+                called.append(a)
+
+        sb.render_logo(FakeSt())
+        assert called == [], "st.logo was called with a file that does not exist"
 
     def test_01_311_every_static_asset_directory_is_declared_package_data(self):
         """Scenario 1.311 (fourth half): the assets actually ship.
@@ -222,11 +230,9 @@ class TestCluster1aj_BrandLockup:
         root = _LOGO_PATH.resolve().parents[1]          # the `lex` package
         pyproject = (root.parent / "pyproject.toml").read_text()
 
-        # The logo's home, already declared.
         assert '"lex.assets" = ["**/*"]' in pyproject
 
-        # Every component that ships a `frontend/` directory must be declared.
-        for component in sorted(p for p in (root / "lex_app/streamlit").glob("_*_component")):
+        for component in sorted((root / "lex_app/streamlit").glob("_*_component")):
             if not (component / "frontend").is_dir():
                 continue
             dotted = f"lex.lex_app.streamlit.{component.name}"
