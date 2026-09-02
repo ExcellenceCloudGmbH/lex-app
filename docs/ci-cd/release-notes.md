@@ -190,16 +190,19 @@ without `--dry-run`. The original text is untouched; the frontend detail is appe
 
 ## Commands
 
-| Command | Does |
-|---|---|
-| `list-gaps` | which releases are missing frontend notes |
-| `backfill --from A --to B` | write entries for a range; skips ones already written |
-| `backfill --tag T --force` | rewrite one release's entry — the repair path |
-| `verify-frontend --tag T` | check a release before publishing; never fails |
-| `append-frontend-note --tag T` | add frontend detail to an already-published release body |
-| `check-manifest` | validate the provenance file; runs in the bundle-PR guard |
+| Command | Does | `--pac-checkout` | `--dry-run` |
+|---|---|---|---|
+| `list-gaps` | which releases are missing frontend notes | — | — |
+| `backfill --from A --to B` | write entries for a range; skips ones already written | yes | yes |
+| `backfill --tag T --force` | rewrite one release's entry — the repair path | yes | yes |
+| `verify-frontend --tag T` | check a release before publishing; never fails | — | — |
+| `append-frontend-note --tag T` | add frontend detail to an already-published release body | yes | yes |
+| `check-manifest` | validate the provenance file; runs in the bundle-PR guard | — | — |
 
-All accept `--pac-checkout PATH`. Add `--dry-run` to see the result without writing.
+The flags are not universal, so the columns above are worth trusting over habit.
+`verify-frontend` needs no PAC checkout because it only asks whether the provenance
+*resolves* — a question answered entirely from this repo's manifest and side-car.
+Reading the frontend commit log is a separate step, and that one does need PAC.
 
 ---
 
