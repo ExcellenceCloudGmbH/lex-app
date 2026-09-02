@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -141,3 +142,165 @@ def test_prepend_leaves_other_versions_untouched_when_replacing():
     assert "- old" in doc          # the untouched older release survives
     assert "- newer" in doc
     assert "- new\n" not in doc
+
+
+def _gap_digest(**over):
+    base = {
+        "tag": "v2.1.8",
+        "previous_tag": "v2.1.7",
+        "changes": [
+            {
+                "sha": "abc1234", "component": "backend", "type": "fix",
+                "scope": None, "breaking": False,
+                "subject": "stop the grid dropping rows",
+                "pr_number": 900, "internal": False,
+            }
+        ],
+    }
+    base.update(over)
+    return base
+
+
+def test_marker_is_written_when_frontend_is_unrecorded():
+    out = changelog.render(
+        _gap_digest(frontend_recorded=False), date="2026-09-01", repo="o/r"
+    )
+    assert changelog.GAP_MARKER in out
+
+
+def test_no_marker_when_frontend_is_recorded():
+    out = changelog.render(
+        _gap_digest(frontend_recorded=True), date="2026-09-01", repo="o/r"
+    )
+    assert changelog.GAP_MARKER not in out
+
+
+def test_absent_flag_means_recorded():
+    # Callers that never resolved a frontend range at all must not be marked —
+    # otherwise every historical re-render would sprout a false gap.
+    out = changelog.render(_gap_digest(), date="2026-09-01", repo="o/r")
+    assert changelog.GAP_MARKER not in out
+
+
+def test_an_unknown_frontend_flag_is_treated_as_a_gap():
+    # `None` means "we do not know", which is what the marker records.
+    out = changelog.render(
+        _gap_digest(frontend_recorded=None), date="2026-09-01", repo="o/r"
+    )
+    assert changelog.GAP_MARKER in out
+
+
+def test_marker_sits_directly_under_the_version_heading():
+    out = changelog.render(
+        _gap_digest(frontend_recorded=False), date="2026-09-01", repo="o/r"
+    ).splitlines()
+    assert out[0].startswith("## [2.1.8]")
+    assert out[1] == ""
+    assert out[2] == changelog.GAP_MARKER
+    assert out[3] == ""          # blank line, or the blockquote glues to the next block
+
+
+def test_the_marker_survives_a_release_with_no_shippable_changes():
+    # A release of pure internal work still renders a heading. If the frontend
+    # range was unresolvable, that fact must not be lost just because there
+    # were no user-facing entries to list.
+    out = changelog.render(
+        _gap_digest(frontend_recorded=False, changes=[]),
+        date="2026-09-01", repo="o/r",
+    )
+    assert changelog.GAP_MARKER in out
+
+
+def test_find_gaps_lists_only_marked_versions():
+    text = (
+        "# Changelog\n\n"
+        "## [2.1.8] - 2026-09-01\n\n" + changelog.GAP_MARKER + "\n\n"
+        "### Fixed\n- **backend** a\n\n"
+        "## [2.1.7] - 2026-08-14\n\n"
+        "### Fixed\n- **backend** b\n\n"
+        "## [2.1.6] - 2026-07-23\n\n" + changelog.GAP_MARKER + "\n"
+    )
+    assert changelog.find_gaps(text) == ["2.1.8", "2.1.6"]
+
+
+def test_find_gaps_is_empty_when_nothing_is_marked():
+    text = "# Changelog\n\n## [2.1.7] - 2026-08-14\n\n### Fixed\n- **backend** b\n"
+    assert changelog.find_gaps(text) == []
+
+
+def test_find_gaps_ignores_a_marker_before_any_heading():
+    # A marker in the preamble belongs to no version and must not be reported
+    # as one, or `list-gaps` would emit a bogus work item.
+    text = "# Changelog\n\n" + changelog.GAP_MARKER + "\n\n## [2.1.7] - 2026-08-14\n"
+    assert changelog.find_gaps(text) == []
+
+
+def test_find_gaps_reports_a_version_once_even_with_a_duplicated_marker():
+    text = (
+        "## [2.1.8] - 2026-09-01\n\n"
+        + changelog.GAP_MARKER + "\n"
+        + changelog.GAP_MARKER + "\n"
+    )
+    assert changelog.find_gaps(text) == ["2.1.8"]
+
+
+def test_a_rerender_replaces_a_marked_section_without_leaving_the_marker():
+    # `prepend` already replaces a same-version section. A gap that has since
+    # been repaired must not keep its marker.
+    marked = changelog.render(
+        _gap_digest(frontend_recorded=False), date="2026-09-01", repo="o/r"
+    )
+    existing = changelog.prepend(None, marked)
+    assert changelog.GAP_MARKER in existing
+
+    repaired = changelog.render(
+        _gap_digest(frontend_recorded=True), date="2026-09-01", repo="o/r"
+    )
+    updated = changelog.prepend(existing, repaired)
+
+    assert changelog.GAP_MARKER not in updated
+    assert updated.count("## [2.1.8]") == 1
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def _fixture(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def test_changelog_rendering_matches_the_golden_file():
+    got = changelog.render(
+        _fixture("digest_v2.1.8.json"),
+        date="2026-09-01", repo="ExcellenceCloudGmbH/lex-app",
+    )
+    expected = (FIXTURES / "changelog_v2.1.8.md").read_text(encoding="utf-8")
+    assert got == expected
+
+
+def test_gapped_changelog_rendering_matches_the_golden_file():
+    got = changelog.render(
+        _fixture("digest_v2.1.8_gap.json"),
+        date="2026-09-01", repo="ExcellenceCloudGmbH/lex-app",
+    )
+    expected = (FIXTURES / "changelog_v2.1.8_gap.md").read_text(encoding="utf-8")
+    assert got == expected
+
+
+def test_the_golden_files_encode_the_properties_we_care_about():
+    plain = (FIXTURES / "changelog_v2.1.8.md").read_text(encoding="utf-8")
+    gapped = (FIXTURES / "changelog_v2.1.8_gap.md").read_text(encoding="utf-8")
+
+    # Provenance is the point in the technical tier.
+    assert "**frontend**" in plain
+    # Internal work is excluded from both tiers' output.
+    assert "unbreak the prerelease gate" not in plain
+    assert "unbreak the prerelease gate" not in gapped
+    # A breaking change gets its own section, ahead of the rest.
+    assert "### Breaking" in plain
+    # The marker appears only in the gapped rendering...
+    assert changelog.GAP_MARKER not in plain
+    assert changelog.GAP_MARKER in gapped
+    # ...and above every content section, so a reader cannot mistake the
+    # sections below it for a complete account of the release.
+    assert gapped.index(changelog.GAP_MARKER) < gapped.index("### Breaking")

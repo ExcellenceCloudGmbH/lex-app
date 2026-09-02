@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -72,19 +73,173 @@ def git_show(ref: str, path: str) -> str | None:
     return result.stdout
 
 
-def frontend_sha_at(ref: str, *, show: Callable[[str, str], str | None] = git_show) -> str | None:
-    """The PAC SHA recorded in the manifest as of `ref`, or None."""
-    blob = show(ref, MANIFEST_PATH)
-    if blob is None:
+# The directory whose last-changing commit identifies a vendored bundle. Used
+# as the key into the historical provenance map, because pre-manifest tags
+# carry no manifest and one cannot be added to a tag that already exists.
+BUNDLE_PATH = "lex/react/build"
+
+
+def _run_rev_list(ref: str) -> str:
+    """Raw `git rev-list` output for BUNDLE_PATH as of `ref`.
+
+    Returns stdout unmodified — normalising is the caller's job, matching
+    `git_show`. Returns "" when git exits non-zero, and reports why: a bad ref
+    exits 128 with a message that names the problem, and discarding it turns a
+    misconfiguration into a silent empty result.
+
+    A shallow clone is NOT caught here: it exits 0 and returns the clone's
+    boundary commit, because a grafted parentless commit appears to add every
+    file it contains. `bundle_commit_at` warns about that separately.
+    """
+    result = subprocess.run(
+        ["git", "rev-list", "-1", ref, "--", BUNDLE_PATH],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"git exited {result.returncode}"
+        print(f"Could not resolve the bundle commit at {ref!r}: {detail}",
+              file=sys.stderr)
+        return ""
+    return result.stdout
+
+
+def _is_shallow() -> bool:
+    """True when this clone lacks full history.
+
+    `git rev-list -1 <ref> -- <path>` reports the clone's own starting commit
+    as having introduced every file, so in a shallow clone the bundle commit
+    resolves to HEAD rather than to the commit that actually changed it.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() == "true"
+
+
+def bundle_commit_at(
+    ref: str,
+    *,
+    run: Callable[[str], str | None] = _run_rev_list,
+    shallow: Callable[[], bool] = _is_shallow,
+) -> str | None:
+    """The lex-app commit that last changed the vendored bundle as of `ref`.
+
+    The **full 40-character** SHA. The historical-provenance lookup matches a
+    possibly-abbreviated table key against this value, so an abbreviated
+    result here would silently miss.
+
+    None when the ref predates the bundle or git cannot answer. `run` and
+    `shallow` are injectable so tests need no repository history.
+    """
+    sha = run(ref)
+    if sha is None:
         return None
+    sha = sha.strip() or None
+    if sha and shallow():
+        print(
+            f"Warning: shallow clone — the bundle commit resolved at {ref!r} "
+            f"({sha[:8]}) is this clone's starting commit, not the commit that "
+            "changed the bundle. Re-run with fetch-depth: 0 for a true answer.",
+            file=sys.stderr,
+        )
+    return sha
+
+
+# Provenance for tags that predate the manifest. Committed, append-only, and
+# frozen once the backfill lands. Each entry records how it was established so
+# an inference is never stored looking like a proof.
+HISTORY_PATH = Path(__file__).resolve().parent / "frontend-history.json"
+
+# git's minimum unambiguous abbreviation. The table is hand-authored, so a
+# shorter key — or an empty one — would answer for refs it knows nothing
+# about, since `key.startswith("")` is always true.
+MIN_HISTORY_KEY = 7
+
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def load_history(*, path: Path | None = None) -> dict:
+    """The bundle-commit -> {pac_sha, method} map. Empty on any problem.
+
+    A corrupt or missing lookup table must never break drafting: the caller
+    treats an empty map exactly as it treats an absent manifest, which omits
+    the frontend section rather than guessing.
+
+    `path` defaults to the module-level `HISTORY_PATH` looked up here, at call
+    time, rather than being bound as the parameter's default value — matching
+    how `_run_rev_list`/`_is_shallow` read `REPO_ROOT`. A default of
+    `path: Path = HISTORY_PATH` would freeze today's `HISTORY_PATH` into this
+    function's signature at import time, so `monkeypatch.setattr(ranges,
+    "HISTORY_PATH", ...)` would silently do nothing.
+    """
+    target = HISTORY_PATH if path is None else path
     try:
-        sha = json.loads(blob)["sha"]
-    except (json.JSONDecodeError, KeyError, TypeError):
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _history_entry(table: dict, key: str) -> dict | None:
+    """The entry for `key` — exact match first, then longest usable prefix.
+
+    Longest wins so a specific entry cannot be shadowed by a vaguer one
+    whichever order the JSON happens to be written in.
+    """
+    entry = table.get(key)
+    if entry is None:
+        candidates = [
+            (k, v) for k, v in table.items()
+            if isinstance(k, str) and len(k) >= MIN_HISTORY_KEY and key.startswith(k)
+        ]
+        if candidates:
+            entry = max(candidates, key=lambda kv: len(kv[0]))[1]
+    return entry if isinstance(entry, dict) else None
+
+
+def frontend_sha_at(
+    ref: str,
+    *,
+    show: Callable[[str, str], str | None] = git_show,
+    history: Callable[[], dict] = load_history,
+    bundle: Callable[[str], str | None] = bundle_commit_at,
+) -> str | None:
+    """The PAC SHA that produced the bundle at `ref`, or None.
+
+    In-tree manifest first — it is written by the job that built the bundle
+    and is therefore correct by construction. The committed side-car answers
+    for tags that predate the manifest, which no in-tree file can ever do: a
+    file cannot be added to a tag that already exists.
+    """
+    blob = show(ref, MANIFEST_PATH)
+    if blob is not None:
+        try:
+            sha = json.loads(blob)["sha"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            sha = None
+        # A blank or null sha is exactly as untruthful as a missing one, and
+        # the manifest was hand-written before provenance was automated.
+        if sha:
+            return sha
+
+    table = history()
+    if not table:
         return None
-    # A blank or null SHA is exactly as untruthful as a missing one, and the
-    # manifest is hand-written today, so a typo can produce it. Collapse both
-    # to None rather than letting `Range(to_sha="")` reach a renderer.
-    return sha or None
+    key = bundle(ref)
+    # bundle_commit_at promises a full 40-character sha. Anything else is
+    # contamination — multi-line output would still satisfy startswith() and
+    # return a wrong pac_sha, which is the one outcome this module forbids.
+    if not key or not _FULL_SHA_RE.match(key):
+        return None
+    entry = _history_entry(table, key)
+    if entry is None:
+        return None
+    return entry.get("pac_sha") or None
 
 
 def frontend_range(
@@ -92,6 +247,8 @@ def frontend_range(
     current_tag: str,
     *,
     show: Callable[[str, str], str | None] = git_show,
+    history: Callable[[], dict] = load_history,
+    bundle: Callable[[str], str | None] = bundle_commit_at,
 ) -> Range | None:
     """The frontend commit range, or None when it cannot be established.
 
@@ -99,12 +256,12 @@ def frontend_range(
     SHA at both ends there is no truthful frontend range, and inventing one
     would produce notes about changes that may not be in the shipped bundle.
     """
-    to_sha = frontend_sha_at(current_tag, show=show)
+    to_sha = frontend_sha_at(current_tag, show=show, history=history, bundle=bundle)
     if to_sha is None:
         return None
     if previous_tag is None:
         return Range(from_sha=None, to_sha=to_sha)
-    from_sha = frontend_sha_at(previous_tag, show=show)
+    from_sha = frontend_sha_at(previous_tag, show=show, history=history, bundle=bundle)
     if from_sha is None:
         return None
     return Range(from_sha=from_sha, to_sha=to_sha)

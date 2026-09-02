@@ -350,3 +350,48 @@ def test_an_oversized_digest_is_trimmed_into_budget():
     # Still describes every change, just more briefly.
     for i in range(20):
         assert f"fix {i}" in prompt
+
+
+def test_fallback_body_is_visible_in_rendered_markdown():
+    digest = {"tag": "v2.1.8", "previous_tag": "v2.1.7", "changes": [
+        {"sha": "abc1234", "component": "backend", "type": "fix", "scope": None,
+         "breaking": False, "subject": "a fix", "pr_number": 1, "internal": False},
+    ]}
+    body = notes.fallback(digest, reason="ValueError: boom")
+
+    # The machine marker stays for tooling...
+    assert notes.FAILURE_MARKER in body
+    # ...but a human reading the rendered release must also see it.
+    assert notes.FAILURE_NOTICE in body
+    assert not notes.FAILURE_NOTICE.startswith("<!--")
+    assert "boom" in body
+
+
+def test_append_addendum_preserves_the_original_body():
+    body = "## Main changes\n\n- **New sidebar.** More room for your data.\n"
+    out = notes.append_addendum(body, "### Frontend changes\n\n- a fix\n")
+
+    # Assert the exact joint, not a substring: `body.rstrip() in out` is true
+    # whether or not the implementation rstrips, so it cannot pin the contract.
+    assert out.startswith(body.rstrip() + "\n\n" + notes.ADDENDUM_MARKER + "\n\n")
+    assert out.endswith("- a fix\n")
+    assert "a fix" in out
+
+
+def test_append_addendum_is_idempotent():
+    body = "## Main changes\n\n- something\n"
+    once = notes.append_addendum(body, "### Frontend changes\n\n- a fix\n")
+    twice = notes.append_addendum(once, "### Frontend changes\n\n- a fix\n")
+
+    assert once == twice
+    assert twice.count(notes.ADDENDUM_MARKER) == 1
+
+
+def test_append_addendum_never_drops_content_on_a_second_different_call():
+    body = "## Main changes\n\n- something\n"
+    once = notes.append_addendum(body, "### Frontend changes\n\n- first\n")
+    # A later call with different text must not silently replace the first.
+    twice = notes.append_addendum(once, "### Frontend changes\n\n- second\n")
+
+    assert "first" in twice
+    assert "second" not in twice          # refuses rather than overwrites

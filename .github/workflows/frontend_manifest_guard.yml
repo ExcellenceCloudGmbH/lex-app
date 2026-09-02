@@ -49,3 +49,13 @@ jobs:
           echo '   "built_at": "<ISO 8601 UTC>"}'
           echo "Without it, release notes cannot report frontend changes truthfully."
           exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate the manifest contents
+        run: |
+          set -euo pipefail
+          PYTHONPATH=.github/scripts python -m release_notes check-manifest

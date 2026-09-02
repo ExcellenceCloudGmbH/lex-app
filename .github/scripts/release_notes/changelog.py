@@ -21,6 +21,12 @@ Entries are generated from commits and pull requests at release time; see
 # Types that are real work but not changes to the shipped product.
 EXCLUDED_TYPES = frozenset({"docs", "test", "ci", "chore", "build"})
 
+# Written into a release's section when the frontend range could not be
+# resolved. It is the durable record of the gap: visible to a human reading
+# the changelog, and greppable by `list-gaps`, so no separate state file can
+# drift away from reality.
+GAP_MARKER = "> **Frontend changes for this release are not yet recorded.**"
+
 # Order matters: it is the order sections appear. `other` joins Changed so
 # that non-conforming commits are reported rather than silently dropped.
 _SECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
@@ -41,6 +47,14 @@ def render(digest: dict, *, date: str, repo: str) -> str:
     """Render one release section. Returns the heading alone if nothing shipped."""
     version = digest["tag"].lstrip("v")
     parts = [f"## [{version}] - {date}", ""]
+    # Any falsy value marks a gap, including None. "Not yet recorded" IS an
+    # unknown, so erring toward a visible marker keeps a lost range
+    # recoverable; erring toward silence loses it permanently, which is the
+    # failure this marker exists to prevent. A missing key still means
+    # recorded — that is what `.get(..., True)` carries, and it is what stops
+    # historical re-renders sprouting false gaps.
+    if not digest.get("frontend_recorded", True):
+        parts.extend([GAP_MARKER, ""])
 
     shippable = [c for c in digest["changes"] if c["type"] not in EXCLUDED_TYPES]
 
@@ -102,3 +116,20 @@ def prepend(existing: str | None, section: str) -> str:
         rest = existing[len(marker):].lstrip("\n")
         return f"{marker}\n\n{section}\n{rest}"
     return f"{section}\n{existing}"
+
+
+def find_gaps(existing: str, *, marker: str = GAP_MARKER) -> list[str]:
+    """Versions whose section carries the gap marker, newest first.
+
+    Reads the changelog rather than a side file so the work queue cannot
+    disagree with the record it is derived from.
+    """
+    gaps: list[str] = []
+    current: str | None = None
+    for line in existing.splitlines():
+        if line.startswith("## ["):
+            current = line[len("## ["):].split("]", 1)[0]
+        elif current and marker in line:
+            gaps.append(current)
+            current = None
+    return gaps
