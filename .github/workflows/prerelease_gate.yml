@@ -287,7 +287,23 @@ jobs:
             exit 0
           fi
 
+          # `notes.draft()` guarantees a usable body, so a SOFT failure — a
+          # model response its validator rejected — still exits 0 and still
+          # writes drafted.md. It marks itself with lex:notes-draft-failed.
+          # Reading that marker is the only thing separating a real draft from
+          # a fallback here; without it a soft failure gets stamped as a
+          # success and, per the note below, becomes permanent. v2.1.9 is the
+          # run that proved this wire was missing.
+          DRAFT_OK=no
+          if [ "$DRAFT_OUTCOME" = "success" ] && [ -s drafted.md ] \
+             && ! grep -q 'lex:notes-draft-failed' drafted.md; then
+            DRAFT_OK=yes
+          fi
+
           if [ "$DRAFT_OUTCOME" = "success" ] && [ -s drafted.md ]; then
+            # Keep the drafter's body whichever it is: its fallback carries the
+            # raw digest and the specific reason, which beats our generic
+            # notice. Only the success CLAIM is withheld.
             cp drafted.md note.md
           else
             # Loud, not silent. The reviewer sees this on the page they are
@@ -308,14 +324,16 @@ jobs:
             printf '%s\n' "$BODY"
             printf '\n---\n\n'
             cat note.md
-            if [ "$DRAFT_OUTCOME" = "success" ]; then
+            if [ "$DRAFT_OK" = "yes" ]; then
               printf '\n<!-- lex:notes-drafted tag=%s -->\n' "$TAG"
             fi
           } > combined.md
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file combined.md
 
-          if [ "$DRAFT_OUTCOME" = "success" ]; then
+          if [ "$DRAFT_OK" = "yes" ]; then
             echo "Drafted release notes onto $TAG — review and edit before promoting."
+          elif [ "$DRAFT_OUTCOME" = "success" ]; then
+            echo "::warning title=Release note needs a human rewrite::The drafter ran but its output was rejected, so $TAG carries the raw digest. No marker was stamped, so re-running this job will try again."
           else
             echo "::warning::Drafting failed for $TAG; posted a failure notice on the release instead."
           fi

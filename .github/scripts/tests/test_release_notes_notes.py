@@ -395,3 +395,129 @@ def test_append_addendum_never_drops_content_on_a_second_different_call():
 
     assert "first" in twice
     assert "second" not in twice          # refuses rather than overwrites
+
+
+# ── Heading tolerance ─────────────────────────────────────────────────
+#
+# v2.1.9 drafted 14 usable lines and threw them away: `validate` matched
+# "## Main changes" as a case- and level-sensitive substring, and the model
+# had emitted a variant. The heading it chose is a formatting detail, not a
+# reason to discard the note — so recognise the variants, and rewrite them to
+# the canonical form so the published body stays consistent either way.
+
+HEADING_VARIANTS = [
+    ("wrong case",        "## Main Changes"),
+    ("all caps",          "## MAIN CHANGES"),
+    ("deeper level",      "### Main changes"),
+    ("shallower level",   "# Main changes"),
+    ("bold pseudo",       "**Main changes**"),
+    ("trailing colon",    "## Main changes:"),
+    ("extra spacing",     "##   Main   changes"),
+]
+
+
+@pytest.mark.parametrize("label,heading", HEADING_VARIANTS, ids=[c[0] for c in HEADING_VARIANTS])
+def test_validation_accepts_recognisable_heading_variants(label, heading):
+    body = f"{heading}\n\n- **A change.** It does something.\n"
+    assert notes.validate(body) is None, f"{label} was rejected"
+
+
+@pytest.mark.parametrize("label,heading", HEADING_VARIANTS, ids=[c[0] for c in HEADING_VARIANTS])
+def test_normalize_rewrites_variants_to_the_canonical_heading(label, heading):
+    body = f"{heading}\n\n- **A change.** It does something.\n"
+    out = notes.normalize(body)
+    assert "## Main changes" in out, f"{label} was not canonicalised"
+    assert heading not in out.replace("## Main changes", ""), f"{label} left a stray heading"
+
+
+def test_normalize_leaves_canonical_output_untouched():
+    assert notes.normalize(GOOD) == GOOD
+
+
+def test_normalize_does_not_touch_bold_runs_inside_list_items():
+    # "- **New sidebar.** ..." is an entry, not a heading. Rewriting it would
+    # corrupt every note we produce.
+    body = "## Main changes\n\n- **Main changes.** A trap.\n"
+    assert notes.normalize(body) == body
+
+
+def test_validation_still_rejects_prose_with_no_heading_at_all():
+    assert notes.validate("Some prose with no headings at all.") is not None
+
+
+def test_validation_still_rejects_an_empty_section_when_the_heading_is_a_variant():
+    bad = "### Main Changes\n\n### Bug Fixes\n\n- **A fix.** Text.\n"
+    assert notes.validate(bad) is not None
+
+
+# ── Retry on a shape failure ──────────────────────────────────────────
+
+
+def test_draft_retries_once_when_the_first_response_is_malformed():
+    responses = ["I cannot help with that.", GOOD]
+    prompts = []
+
+    def model(prompt: str) -> str:
+        prompts.append(prompt)
+        return responses[len(prompts) - 1]
+
+    out = notes.draft(_digest(), exemplar="X", model=model)
+    assert len(prompts) == 2, "should have re-asked"
+    assert notes.FAILURE_MARKER not in out
+    assert "New sidebar" in out
+
+
+def test_the_retry_prompt_tells_the_model_what_was_wrong():
+    prompts = []
+
+    def model(prompt: str) -> str:
+        prompts.append(prompt)
+        return "I cannot help with that."
+
+    notes.draft(_digest(), exemplar="X", model=model)
+    assert len(prompts) == 2
+    assert "no recognised section heading" in prompts[1]
+    assert "no recognised section heading" not in prompts[0]
+
+
+def test_draft_falls_back_after_two_malformed_responses():
+    calls = []
+
+    def model(prompt: str) -> str:
+        calls.append(prompt)
+        return "still not a release note"
+
+    out = notes.draft(_digest(), exemplar="X", model=calls and model or model)
+    assert notes.FAILURE_MARKER in out
+
+
+def test_draft_does_not_retry_a_transport_error():
+    # A 410 from a retired endpoint will not recover, and a second call costs
+    # real money. Only shape failures are worth re-asking.
+    calls = []
+
+    def boom(prompt: str) -> str:
+        calls.append(prompt)
+        raise RuntimeError("410 github_models_retirement_brownout")
+
+    out = notes.draft(_digest(), exemplar="X", model=boom)
+    assert len(calls) == 1, "a transport error must not be retried"
+    assert notes.FAILURE_MARKER in out
+
+
+def test_build_prompt_accepts_a_retry_reason_and_omits_it_by_default():
+    plain = notes.build_prompt(_digest(), exemplar="X")
+    assert "PREVIOUS ATTEMPT" not in plain.upper()
+    retried = notes.build_prompt(_digest(), exemplar="X", retry_reason="empty section: ## Bug fixes")
+    assert "empty section: ## Bug fixes" in retried
+
+
+def test_the_retry_suffix_is_counted_against_the_prompt_byte_budget():
+    # A retry must never be the thing that pushes a prompt over the limit.
+    fat = [{"sha": f"{i:07d}", "component": "backend", "type": "fix", "scope": "x",
+            "breaking": False, "subject": f"change {i}", "pr_number": i,
+            "detail": "y" * 4000} for i in range(60)]
+    retried = notes.build_prompt(_digest(changes=fat), exemplar="X",
+                                 retry_reason="no recognised section heading")
+    assert len(retried.encode("utf-8")) <= notes.MAX_PROMPT_BYTES
+    assert "no recognised section heading" in retried

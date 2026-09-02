@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 import urllib.request
 from typing import Callable
 
@@ -63,7 +64,49 @@ FALLBACK_EXEMPLAR = """\
 **Upgrade note:** run database migrations on upgrade. No configuration changes needed.
 """
 
+_RETRY_SUFFIX = """
+
+Your PREVIOUS ATTEMPT at this note was rejected: {reason}.
+Use only the headings listed above, spelled exactly as shown, and put at least
+one entry under every heading you write. Omit a heading you have nothing for
+rather than leaving it empty.
+"""
+
 REQUIRED_HEADINGS = ("## Main changes", "## Optimizations", "## Bug fixes")
+
+# A heading is a formatting detail; the model choosing "## Main Changes" or
+# "### Main changes" is not a reason to discard an otherwise good note. v2.1.9
+# drafted 14 usable lines and threw them all away over exactly that. So:
+# recognise the variants, and rewrite them to the canonical spelling so the
+# published body stays consistent whichever one arrives.
+_CANONICAL = {h.lstrip("# ").casefold(): h for h in REQUIRED_HEADINGS}
+
+# ATX headings at any level. A fully-bold line counts too — models reach for
+# it when asked for a heading — but `[^*]+?` and the anchored `\*\*` keep it to
+# lines that are ONE bold run, so "**Upgrade note:** run migrations" and
+# "- **Main changes.** a trap" are left alone.
+_ATX_RE = re.compile(r"^[ \t]{0,3}\#{1,6}[ \t]*(?P<text>.+?)[ \t]*:?[ \t]*$")
+_BOLD_RE = re.compile(r"^[ \t]{0,3}\*\*(?P<text>[^*]+?)\*\*[ \t]*:?[ \t]*$")
+
+
+def _heading_key(line: str) -> str | None:
+    """Canonical lookup key for `line`, or None if it is not a heading."""
+    match = _ATX_RE.match(line) or _BOLD_RE.match(line)
+    if match is None:
+        return None
+    return " ".join(match.group("text").split()).rstrip(":").casefold()
+
+
+def normalize(text: str) -> str:
+    """Rewrite recognised heading variants to their canonical spelling."""
+    out = []
+    for line in text.splitlines(keepends=True):
+        canonical = _CANONICAL.get(_heading_key(line))
+        if canonical is None:
+            out.append(line)
+        else:
+            out.append(canonical + line[len(line.rstrip("\r\n")):])
+    return "".join(out)
 
 # ── Transports ────────────────────────────────────────────────────────
 #
@@ -197,7 +240,7 @@ Return only the markdown release note. No preamble, no explanation.
 MAX_PROMPT_BYTES = 60_000
 
 
-def build_prompt(digest: dict, *, exemplar: str) -> str:
+def build_prompt(digest: dict, *, exemplar: str, retry_reason: str | None = None) -> str:
     """Assemble the model prompt from the digest and a style exemplar.
 
     Entries carry the author's PR body in "detail". That is the material the
@@ -206,28 +249,33 @@ def build_prompt(digest: dict, *, exemplar: str) -> str:
     about automatic session renewal that nobody had verified.
     """
     changes = digest["changes"]
+    # The retry suffix counts against the budget. Adding it afterwards would
+    # let a retry of an already-near-budget prompt quietly overflow, which is
+    # the one case where a retry must not make things worse.
+    suffix = "" if retry_reason is None else _RETRY_SUFFIX.format(reason=retry_reason)
+    budget = MAX_PROMPT_BYTES - len(suffix.encode("utf-8"))
+
     prompt = _INSTRUCTIONS.format(
         exemplar=exemplar, tag=digest["tag"],
         digest=json.dumps(changes, indent=2),
     )
 
-    if len(prompt.encode("utf-8")) <= MAX_PROMPT_BYTES:
-        return prompt
+    if len(prompt.encode("utf-8")) > budget:
+        # Over budget: shorten details, longest first, so one enormous PR body
+        # cannot crowd out every other change. Internal entries already have none.
+        trimmed = [dict(c) for c in changes]
+        for limit in (2000, 1000, 400, 0):
+            for entry in trimmed:
+                if len(entry.get("detail", "")) > limit:
+                    entry["detail"] = entry["detail"][:limit].rstrip() + "…[truncated]" if limit else ""
+            prompt = _INSTRUCTIONS.format(
+                exemplar=exemplar, tag=digest["tag"],
+                digest=json.dumps(trimmed, indent=2),
+            )
+            if len(prompt.encode("utf-8")) <= budget:
+                break
 
-    # Over budget: shorten details, longest first, so one enormous PR body
-    # cannot crowd out every other change. Internal entries already have none.
-    trimmed = [dict(c) for c in changes]
-    for limit in (2000, 1000, 400, 0):
-        for entry in trimmed:
-            if len(entry.get("detail", "")) > limit:
-                entry["detail"] = entry["detail"][:limit].rstrip() + "…[truncated]" if limit else ""
-        prompt = _INSTRUCTIONS.format(
-            exemplar=exemplar, tag=digest["tag"],
-            digest=json.dumps(trimmed, indent=2),
-        )
-        if len(prompt.encode("utf-8")) <= MAX_PROMPT_BYTES:
-            break
-    return prompt
+    return prompt + suffix
 
 
 def validate(text: str) -> str | None:
@@ -235,19 +283,22 @@ def validate(text: str) -> str | None:
     if not text or not text.strip():
         return "empty response"
 
-    present = [h for h in REQUIRED_HEADINGS if h in text]
-    if not present:
+    lines = text.splitlines()
+    found = [
+        (i, _CANONICAL[key])
+        for i, line in enumerate(lines)
+        if (key := _heading_key(line)) in _CANONICAL
+    ]
+    if not found:
         return "no recognised section heading"
 
     # A heading followed immediately by another heading, or by nothing, means
-    # the model emitted an empty section.
-    for heading in present:
-        body = text.split(heading, 1)[1]
-        for other in REQUIRED_HEADINGS:
-            if other != heading and other in body:
-                body = body.split(other, 1)[0]
-        if not body.strip():
-            return f"empty section: {heading}"
+    # the model emitted an empty section. Bounding each section by the NEXT
+    # recognised heading is what makes this work for variants too.
+    for n, (index, canonical) in enumerate(found):
+        end = found[n + 1][0] if n + 1 < len(found) else len(lines)
+        if not "\n".join(lines[index + 1:end]).strip():
+            return f"empty section: {canonical}"
 
     return None
 
@@ -280,16 +331,23 @@ def draft(digest: dict, *, exemplar: str, model: Callable[[str], str]) -> str:
             "**Upgrade note:** no action needed.\n"
         )
 
-    prompt = build_prompt(digest, exemplar=exemplar)
-    try:
-        text = model(prompt)
-    except Exception as exc:
-        return fallback(digest, reason=f"{type(exc).__name__}: {exc}")
+    # A malformed response is re-asked once, carrying the reason: v2.1.9 threw
+    # away 14 usable lines over a heading variant, and one re-ask costs far
+    # less than a hand-written note. A transport error is NOT retried — a
+    # retired endpoint will not recover, and the second call still bills.
+    problem = None
+    for _attempt in (1, 2):
+        prompt = build_prompt(digest, exemplar=exemplar, retry_reason=problem)
+        try:
+            text = model(prompt)
+        except Exception as exc:
+            return fallback(digest, reason=f"{type(exc).__name__}: {exc}")
 
-    problem = validate(text)
-    if problem is not None:
-        return fallback(digest, reason=problem)
-    return text
+        text = normalize(text)
+        problem = validate(text)
+        if problem is None:
+            return text
+    return fallback(digest, reason=problem)
 
 
 def _post(url: str, *, headers: dict, json_body: dict) -> dict:
