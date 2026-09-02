@@ -227,3 +227,19 @@
 | Prereqs | batch 1z (the breakout response this reacts to) |
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | the breakout batch made the expiry a graceful re-login; this removes the re-login. Two defects had to be fixed for renewal to be possible at all: the token endpoint never published an expiry (the only code returning one, `_generate_new_token`, is unreachable **and** self-signs HS256, which the RS256/JWKS proxy would reject), and `_persist_jwt_to_session_if_needed` returned early whenever the stored token was still valid — so a token renewed *before* expiry, which is the only time renewal can arrive, was discarded and the session died at the original deadline anyway. 1.220 is the gate on that second one: it fails against the pre-fix proxy. A refresh token was deliberately **not** given to the embedded path — it would have to travel through the iframe URL into access logs, history and `Referer` headers. |
+
+---
+
+### Batch 1ab — `lex-mcp-local` onboarding shims and cold-start fallbacks ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.223 – 1.229 |
+| Type | U |
+| Files covered | `lex/tools/mcp_mode_invoke.py`, `lex/tools/verify_ai_assets.py`, `lex/tools/setup_with_ai.py` (`SUPPORTED_MCP_MODES`/`MODE_OVERRIDE_FIELD` cold-start fallback, `normalize_mcp_mode`, `resolve_submitted_mcp_mode`) |
+| Test file | `lex/test_project/tests/init/test_1ab_ai_onboarding_shims.py` |
+| Test classes | `TestCluster01ab_ShimsWithoutLexMcpLocal` (1.223, 1.225 — actionable `ImportError` naming both `lex ai-update` and `lex setup-with-ai` when lex-mcp-local is absent, exercised against the real absent package), `TestCluster01ab_ShimsWithFakeLexMcpLocal` (1.224, 1.226 — re-export + `__getattr__`/`__dir__` delegation once lex-mcp-local is present, via a minimal fake `lex_mcp` package injected through `sys.modules`), `TestCluster01ab_SetupWithAIColdStartFallback` (1.227 — pinned roster used when `lex_mcp.ai_setup` is genuinely unavailable), `TestCluster01ab_SetupWithAIModeGating` (1.228 `normalize_mcp_mode`, 1.229 `resolve_submitted_mcp_mode` override-acknowledgement gate) |
+| Fixtures | none — `sys.modules` injection of a fake `lex_mcp` package/submodules for the "present" scenarios; the "absent" scenarios use the real (not-installed) state of this environment |
+| Tests landed | **7 pass / 0 fail** (`python -m lex pytest`) |
+| Coverage gain | the two shim modules' actionable-`ImportError` contract and re-export/delegation behaviour; `setup_with_ai`'s cold-start mode-roster fallback and the setup form's mode-picker override gate |
+| Status | ✅ Complete (2026-09-02). `lex/mcp_server/tools/embed.py` — the fourth file named in this coverage task (PR #733 / issue #736) — is not covered by a new test: it cannot be imported in this checkout at all (`lex.mcp_server.config` / `lex.mcp_server.registry` do not exist yet; see `AGENTS.md` "One trap in `lex/mcp_server`"), and its specific regression in that PR (vendored `mcp.server.fastmcp` → standalone `fastmcp`, `add_tool(fn, name=...)` → `add_tool(Tool.from_function(...))`) is already covered generically, without importing the module, by the existing `lex/tests/unit/infra/test_mcp_server_sdk_compat.py`. |

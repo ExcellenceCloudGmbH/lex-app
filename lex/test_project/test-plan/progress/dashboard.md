@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 27 | 222 | 116 | 0 | 0 |
+| 1. Init — Project Bootstrap | 28 | 229 | 123 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
@@ -32,6 +32,7 @@
 |---|---|---|---|---|---|---|---|
 | 1a | `lex setup` — scaffolding | 1.1-1.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1aa | Embedded Streamlit token renewal (issuer expiry + proxy adoption) | 1.217-1.222 | complete | 6 | 0 | 0 | follow-up to the iframe breakout (batch z) - makes the expiry dead end avoidable rather than merely graceful. StreamlitTokenView now publishes expires_in/expires_at/refresh_interval (previously only returned by dead code that self-signed HS256, which the RS256/JWKS proxy would reject) and 401s instead of KeyError-ing when the session has no OIDC token; the proxy adopts a strictly newer auth_token rather than discarding it while the stored one is still valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted a-z. Renumbered from z/1.201-1.206 on merge |
+| 1ab | `lex-mcp-local` onboarding shims and cold-start fallbacks | 1.223-1.229 | complete | 7 | 0 | 0 | coverage task for PR #733 / issue #736. mcp_mode_invoke.py and verify_ai_assets.py are compatibility shims delegating to lex-mcp-local (lex_mcp.mode_switch / lex_mcp.ai_assets); covers their actionable ImportError contract and __getattr__/__dir__ delegation via a fake lex_mcp injected through sys.modules. setup_with_ai.py's SUPPORTED_MCP_MODES/ MODE_OVERRIDE_FIELD cold-start fallback and its normalize_mcp_mode/resolve_submitted_mcp_mode mode-picker override gate are also covered. lex/mcp_server/tools/embed.py (the fourth file in the coverage task) is not covered here: it cannot be imported in this checkout at all (lex.mcp_server.config / lex.mcp_server.registry do not exist yet), and its specific regression is already covered generically by the existing static lex/tests/unit/infra/test_mcp_server_sdk_compat.py. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
