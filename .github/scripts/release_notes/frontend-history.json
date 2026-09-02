@@ -1,17 +1,17 @@
 {
   "e56f7557efc79375c5cbca5eda616f81be54a15b": {
     "pac_sha": "1cab9e55914c1e14638d0dd5a309624479fc138e",
-    "method": "date-window",
-    "note": "bundle committed 2026-06-30 11:09; PAC 1cab9e5 landed 11:06, 3 min earlier. Covers v2.0.0rc221, v2.1.1, v2.1.2."
+    "method": "hash-proof",
+    "note": "Rebuilt PAC at 1cab9e5; emitted index-CKNybHCu.js, index-isLX8XQ_.css, index.es-CwT_fAGC.js, purify.es-Bf0oSh3b.js — identical to the committed bundle. Covers v2.0.0rc221, v2.1.1, v2.1.2."
   },
   "d56c70e76075a83b1616d50b8633d96fc19c4a67": {
     "pac_sha": "7a728deb452ae08f7cd79c9bcb688f7f98a01d35",
-    "method": "date-window",
-    "note": "bundle committed 2026-07-14 14:27; PAC 7a728de landed 14:18, 9 min earlier. Covers v2.1.3."
+    "method": "hash-proof",
+    "note": "Rebuilt PAC at 7a728de; emitted index-ERs9gjKT.js, index-D2gIUd9e.css, index.es-DQgFoVYG.js — identical to the committed bundle. Covers v2.1.3."
   },
   "a388985a87325ea3922550aade75af3f71c06fcf": {
     "pac_sha": "22c16f913663c5a4841e6c623c7cb50cc3667be6",
-    "method": "date-window",
-    "note": "bundle committed 2026-07-22 13:46; PAC 22c16f9 merged 13:38, 8 min earlier. Covers v2.1.4 through v2.1.7 and any release until a new bundle lands."
+    "method": "hash-proof",
+    "note": "Rebuilt PAC at 22c16f9; emitted index-BD1SQUOi.js, index-isLX8XQ_.css, index.es-Cta2lik9.js, purify.es-Bf0oSh3b.js — identical to the committed bundle. Covers v2.1.4 through v2.1.7 and any release until a new bundle lands."
   }
 }
