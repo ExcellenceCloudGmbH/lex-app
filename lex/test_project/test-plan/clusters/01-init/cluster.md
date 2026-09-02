@@ -200,3 +200,21 @@ does not remove user launch configurations.
 **Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
 
 **Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.
+
+### 1ab. `lex-mcp-local` onboarding shims and cold-start fallbacks ✅
+
+**What it tests:** `lex/tools/mcp_mode_invoke.py` and `lex/tools/verify_ai_assets.py` are compatibility shims that delegate to the separately-released `lex-mcp-local` package; `lex/tools/setup_with_ai.py` keeps a "cold-start fallback" for the mode roster it must render before that package is known to be installed.
+
+**Why a regression matters:** a shim that raised a bare `ModuleNotFoundError` — instead of an actionable message naming `lex ai-update` (stale install) and `lex setup-with-ai` (no install at all) — would leave an operator with no next step. A cold-start roster that silently falls out of step with the installed package's roster is the exact regression this closes: the pinned literal sat at six modes for three releases while the installed package shipped nine.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.223 | mcp_mode_invoke, lex-mcp-local absent | importing the shim raises an `ImportError` naming both `lex ai-update` and `lex setup-with-ai` |
+| 1.224 | mcp_mode_invoke, lex-mcp-local present | `invoke_switch_to_mode`/`InvokeSwitchResult` are the exact objects re-exported (not re-implemented); `SUPPORTED_MCP_MODES` derives from `lex_mcp.payload.MODE_TO_PACKAGE`; unlisted attributes resolve via `__getattr__`/`__dir__` |
+| 1.225 | verify_ai_assets, lex-mcp-local absent | same actionable `ImportError` contract as 1.223 |
+| 1.226 | verify_ai_assets, lex-mcp-local present | re-exported functions work end-to-end; attributes outside `__all__` resolve via `__getattr__`/`__dir__` |
+| 1.227 | setup_with_ai cold start | `SUPPORTED_MCP_MODES`/`MODE_OVERRIDE_FIELD` equal the module's pinned fallback constants when `lex_mcp.ai_setup` is genuinely unavailable |
+| 1.228 | `normalize_mcp_mode` input handling | unknown/blank falls back to the default mode; a valid mode is lower-cased and trimmed |
+| 1.229 | `resolve_submitted_mcp_mode` override gate | a non-default pick reverts to the default mode unless the override-acknowledgement field is present and non-blank |
+
+**Scenario range:** 1.223 – 1.229. **Test file:** `lex/test_project/tests/init/test_1ab_ai_onboarding_shims.py`. **Type:** U. **Status:** ✅ 7 pass (2026-09-02). Coverage task for PR #733 / issue #736. `lex/mcp_server/tools/embed.py` (the fourth file named in that task) is not covered by a new test here — it cannot be imported in this checkout (`lex.mcp_server.config` / `lex.mcp_server.registry` do not exist yet), and its specific regression is already covered generically by the existing `lex/tests/unit/infra/test_mcp_server_sdk_compat.py`.

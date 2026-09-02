@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 229
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -282,4 +282,23 @@ letters:
       adopts a strictly newer auth_token rather than discarding it while the stored one is still
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
+  ab:
+    title: '`lex-mcp-local` onboarding shims and cold-start fallbacks'
+    scenarios: 1.223-1.229
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      coverage task for PR #733 / issue #736. mcp_mode_invoke.py and verify_ai_assets.py are
+      compatibility shims delegating to lex-mcp-local (lex_mcp.mode_switch / lex_mcp.ai_assets);
+      covers their actionable ImportError contract and __getattr__/__dir__ delegation via a fake
+      lex_mcp injected through sys.modules. setup_with_ai.py's SUPPORTED_MCP_MODES/
+      MODE_OVERRIDE_FIELD cold-start fallback and its normalize_mcp_mode/resolve_submitted_mcp_mode
+      mode-picker override gate are also covered. lex/mcp_server/tools/embed.py (the fourth file
+      in the coverage task) is not covered here: it cannot be imported in this checkout at all
+      (lex.mcp_server.config / lex.mcp_server.registry do not exist yet), and its specific
+      regression is already covered generically by the existing static
+      lex/tests/unit/infra/test_mcp_server_sdk_compat.py.
 
