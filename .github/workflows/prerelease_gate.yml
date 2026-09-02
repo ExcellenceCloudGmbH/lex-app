@@ -208,17 +208,15 @@ jobs:
       # hard failure here would skip it via the default `if: success()` — so a
       # token problem would silently cost us a working warning as well.
       #
-      # TOKEN CAVEAT: LEX_PACKAGES_TOKEN is used because it exists.
-      # FRONTEND_REPO_TOKEN is what frontend_build.yml documents as mandatory
-      # for reading this repo, but it has never been configured — which is why
-      # that workflow has failed its secrets preflight since rc218. If this
-      # checkout fails, that is the first thing to check.
+      # FRONTEND_REPO_TOKEN is the credential documented for reading PAC:
+      # the default GITHUB_TOKEN is scoped to lex-app alone and cannot read
+      # a different private repo. Configured 2026-09-02.
       - name: Checkout the frontend repository
         uses: actions/checkout@v4
         continue-on-error: true
         with:
           repository: ExcellenceCloudGmbH/process-admin-general-client
-          token: ${{ secrets.LEX_PACKAGES_TOKEN }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: pac
           fetch-depth: 0   # a commit RANGE is the input; a shallow clone cannot answer
 

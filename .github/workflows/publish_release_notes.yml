@@ -48,12 +48,12 @@ jobs:
       # Deliberately NOT continue-on-error: `_pac_log` runs git with
       # cwd=./pac and no guard, so a broken checkout raises inside
       # render-changelog anyway. Failing here gives a clear message instead of
-      # a traceback one step later. Same TOKEN CAVEAT as the gate.
+      # a traceback one step later. Uses FRONTEND_REPO_TOKEN, as the gate does.
       - name: Checkout the frontend repository
         uses: actions/checkout@v4
         with:
           repository: ExcellenceCloudGmbH/process-admin-general-client
-          token: ${{ secrets.LEX_PACKAGES_TOKEN }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: pac
           fetch-depth: 0
 

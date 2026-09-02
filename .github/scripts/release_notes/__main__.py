@@ -106,11 +106,22 @@ def _digest_for(tag: str, *, pac_checkout: Path | None = None) -> dict:
         print(f"Frontend range {fe_range.from_sha}..{fe_range.to_sha} resolved, but no PAC "
               "checkout was supplied — omitting the frontend section.", file=sys.stderr)
     else:
-        frontend = digest.collect_commits(
-            fe_range.from_sha, fe_range.to_sha, run_log=_pac_log(pac_checkout)
-        )
-        print(f"Frontend: {len(frontend)} commits in "
-              f"{fe_range.from_sha}..{fe_range.to_sha}", file=sys.stderr)
+        try:
+            frontend = digest.collect_commits(
+                fe_range.from_sha, fe_range.to_sha, run_log=_pac_log(pac_checkout)
+            )
+        except Exception as exc:
+            # A PAC checkout that exists but cannot be read — a failed clone, a
+            # wrong path, a shallow copy missing the range — must not take a
+            # release down. It is the same situation as an unresolvable range,
+            # so it gets the same answer: record a gap and carry on. Without
+            # this, `git` raising here kills render-changelog outright.
+            frontend_recorded = False
+            print(f"Could not read the frontend range from {pac_checkout}: {exc}. "
+                  "Recording a gap instead.", file=sys.stderr)
+        else:
+            print(f"Frontend: {len(frontend)} commits in "
+                  f"{fe_range.from_sha}..{fe_range.to_sha}", file=sys.stderr)
 
     built = digest.build_digest(tag, previous, backend, frontend)
     built["frontend_recorded"] = frontend_recorded

@@ -220,3 +220,30 @@ def test_check_manifest_fails_on_a_blank_sha(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "::error" in out
     assert "sha" in out
+
+
+def test_digest_for_records_a_gap_when_the_pac_checkout_cannot_be_read(
+    monkeypatch, tmp_path
+):
+    # A PAC directory that exists but is unreadable used to raise straight out
+    # of render-changelog and fail the publish job. It must degrade to a gap,
+    # the same as an unresolvable range.
+    monkeypatch.setattr(cli, "_all_tags", lambda tag: ["v2.1.8", "v2.1.7"])
+    monkeypatch.setattr(cli.digest, "enrich_with_prs", lambda commits: commits)
+    monkeypatch.setattr(
+        cli.ranges, "frontend_range",
+        lambda prev, tag: cli.ranges.Range(from_sha="aaa", to_sha="bbb"),
+    )
+
+    def collect(*args, **kwargs):
+        # Only the frontend call passes run_log; the backend call must succeed.
+        if "run_log" in kwargs:
+            raise FileNotFoundError("no such directory: ./pac")
+        return []
+
+    monkeypatch.setattr(cli.digest, "collect_commits", collect)
+
+    built = cli._digest_for("v2.1.8", pac_checkout=tmp_path)
+
+    assert built["frontend_recorded"] is False
+    assert built["changes"] == []
