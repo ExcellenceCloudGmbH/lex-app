@@ -197,6 +197,39 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The frontend half of the digest is read from PAC's git log, so PAC has
+      # to be on disk. Nothing has ever passed --pac-checkout, which is the
+      # only reason every release note so far has had an empty frontend
+      # section. `path:` keeps this additive — the lex-app checkout above is
+      # untouched.
+      #
+      # continue-on-error, for a mechanical reason rather than tidiness: the
+      # next step reads only lex-app's own tags and never touches PAC, but a
+      # hard failure here would skip it via the default `if: success()` — so a
+      # token problem would silently cost us a working warning as well.
+      #
+      # FRONTEND_REPO_TOKEN is the credential documented for reading PAC:
+      # the default GITHUB_TOKEN is scoped to lex-app alone and cannot read
+      # a different private repo. Configured 2026-09-02.
+      - name: Checkout the frontend repository
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: ExcellenceCloudGmbH/process-admin-general-client
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          path: pac
+          fetch-depth: 0   # a commit RANGE is the input; a shallow clone cannot answer
+
+      # Reports, never fails — a missing range must not turn a release red.
+      # Runs before drafting so the person promoting the prerelease sees the
+      # warning while they can still act on it.
+      - name: Verify frontend provenance
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=.github/scripts python -m release_notes verify-frontend --tag "$TAG"
+
       - name: Draft the note
         id: draft
         continue-on-error: true
@@ -228,7 +261,8 @@ jobs:
           # empty note and stamps the idempotence marker — turning a loud
           # failure into a silent one that also blocks any retry.
           set -euo pipefail
-          PYTHONPATH=.github/scripts python -m release_notes draft-notes --tag "$TAG" > drafted.md
+          PYTHONPATH=.github/scripts python -m release_notes draft-notes \
+            --tag "$TAG" --pac-checkout ./pac > drafted.md
           test -s drafted.md
           echo "Drafted $(wc -l < drafted.md) lines."
 
