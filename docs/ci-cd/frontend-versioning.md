@@ -63,7 +63,7 @@ latest
 or
 
 ```
-1.10.0
+1.12.0
 ```
 
 **`latest`** takes whatever is newest on PyPI at the moment the release is built. It is the
