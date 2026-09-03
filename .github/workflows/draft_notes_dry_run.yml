@@ -1,0 +1,116 @@
+# Draft a release note for any tag, print it, and change nothing.
+#
+# Until this existed there was no way to see what the drafter writes without
+# publishing a prerelease: the only drafting path triggers on `release:
+# prereleased`, so every change to the prompt was shipped untested and its
+# output first seen by whoever was promoting a release. v2.1.7, v2.1.8 and
+# v2.1.9 each published a failed draft for that reason.
+#
+# This job writes nothing. It edits no release, commits nothing, and needs no
+# credential beyond reading PAC and calling a model.
+name: Draft release notes (dry run)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to draft for (e.g. v2.1.4). Must exist."
+        required: true
+        type: string
+      provider:
+        description: "Model provider. `auto` takes the first whose key is set."
+        required: false
+        default: auto
+        type: choice
+        options: [auto, anthropic, gemini, openai, github-models]
+      model:
+        description: "Override the provider's default model. Optional."
+        required: false
+        type: string
+
+jobs:
+  draft:
+    name: "Draft ${{ inputs.tag }} (writes nothing)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      models: read
+      pull-requests: read   # digest._lookup_pr; without it PR enrichment 403s
+                            # and the digest degrades to raw commit subjects.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # a commit RANGE is the input; a shallow clone cannot answer
+          # The tools come from the default branch for the same reason the
+          # real gate takes them from there: drafting `v2.1.4` must use
+          # today's prompt, not the one that existed when the tag was cut.
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout the frontend repository
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: ExcellenceCloudGmbH/process-admin-general-client
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          path: pac
+          fetch-depth: 0
+
+      - name: Report what the frontend resolves to
+        env:
+          TAG: ${{ inputs.tag }}
+        run: PYTHONPATH=.github/scripts python -m release_notes verify-frontend --tag "$TAG"
+
+      - name: Draft the note
+        id: draft
+        env:
+          TAG: ${{ inputs.tag }}
+          LEX_NOTES_PROVIDER: ${{ inputs.provider }}
+          LEX_NOTES_MODEL: ${{ inputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=.github/scripts python -m release_notes draft-notes \
+            --tag "$TAG" --pac-checkout ./pac > drafted.md
+          echo "Drafted $(wc -l < drafted.md) lines."
+
+      # The point of the job: the note where a human can read it, plus an
+      # explicit verdict. `notes.draft()` always returns a usable body, so the
+      # marker is the only thing separating a real draft from a fallback.
+      - name: Show the note
+        if: ${{ always() }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -uo pipefail
+          {
+            if [ ! -s drafted.md ]; then
+              printf '## No note was produced for `%s`\n\n' "$TAG"
+              printf 'The drafting step did not write a body. See the step log above.\n'
+            elif grep -q 'lex:notes-draft-failed' drafted.md; then
+              printf '## Drafting FAILED for `%s`\n\n' "$TAG"
+              printf 'The model answered but its output was rejected, so this is the\n'
+              printf 'fallback body. The reason is in it, verbatim:\n\n'
+              printf '```markdown\n'; cat drafted.md; printf '\n```\n'
+            else
+              printf '## Draft for `%s`\n\n' "$TAG"
+              printf 'Rendered, then the raw markdown:\n\n---\n\n'
+              cat drafted.md
+              printf '\n\n---\n\n<details><summary>Raw markdown</summary>\n\n'
+              printf '```markdown\n'; cat drafted.md; printf '\n```\n\n</details>\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the note as an artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: drafted-note-${{ inputs.tag }}
+          path: drafted.md
+          if-no-files-found: warn
