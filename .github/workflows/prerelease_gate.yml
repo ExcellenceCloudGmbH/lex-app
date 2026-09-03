@@ -219,6 +219,12 @@ jobs:
           token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: pac
           fetch-depth: 0   # a commit RANGE is the input; a shallow clone cannot answer
+          fetch-tags: true   # the range is a pair of PAC TAGS now, not shas.
+                             # fetch-depth: 0 brings branch history but does
+                             # not guarantee tags; without them
+                             # `git log v1.10.0..v1.11.0` fails with a bad
+                             # revision, degrading every release to a gap
+                             # for a reason nobody would look for.
 
       # Reports, never fails — a missing range must not turn a release red.
       # Runs before drafting so the person promoting the prerelease sees the

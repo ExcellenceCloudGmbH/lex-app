@@ -79,7 +79,13 @@ def _pac_log(pac_checkout: Path):
     def run_log(from_ref: str | None, to_ref: str) -> str:
         spec = f"{from_ref}..{to_ref}" if from_ref else to_ref
         result = subprocess.run(
-            ["git", "log", "--no-merges", f"--pretty=%h{digest._FIELD_SEP}%s", spec],
+            # Same format as digest._run_log, deliberately: a frontend commit's
+            # body is the author's explanation just as much as a backend one's,
+            # and asking for only %s left every frontend entry as a bare
+            # subject line while backend entries carried real detail.
+            ["git", "log", "--no-merges",
+             f"--pretty=%h{digest._FIELD_SEP}%s{digest._FIELD_SEP}%b{digest._RECORD_SEP}",
+             spec],
             cwd=pac_checkout, check=True, capture_output=True, text=True,
         )
         return result.stdout.strip()

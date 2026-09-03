@@ -256,6 +256,27 @@ def frontend_range(
     SHA at both ends there is no truthful frontend range, and inventing one
     would produce notes about changes that may not be in the shipped bundle.
     """
+    # The pin wins, and only when BOTH ends have one. Two pins are two exact
+    # versions, so the range is known before anything is built — no manifest,
+    # no side-car, and no way for it to fail after a release has already
+    # shipped, which is what retires the gap machinery for new releases.
+    #
+    # One pin is deliberately not enough: the release that INTRODUCES the pin
+    # has none at its previous tag, and inventing a starting point would
+    # attribute every frontend commit in PAC's history to that one release.
+    previous_version = (
+        frontend_version_at(previous_tag, show=show) if previous_tag else None
+    )
+    current_version = frontend_version_at(current_tag, show=show)
+    if previous_version and current_version:
+        # These carry PAC TAGS rather than SHAs. The field names under-describe
+        # that, but renaming them touches every historical call site for no
+        # behavioural gain — `git log` treats a tag and a sha alike.
+        return Range(
+            from_sha=pac_tag_for(previous_version),
+            to_sha=pac_tag_for(current_version),
+        )
+
     to_sha = frontend_sha_at(current_tag, show=show, history=history, bundle=bundle)
     if to_sha is None:
         return None
@@ -265,3 +286,40 @@ def frontend_range(
     if from_sha is None:
         return None
     return Range(from_sha=from_sha, to_sha=to_sha)
+
+
+# ── The pin, once the frontend is a published dependency ─────────────
+#
+# The pin IS the provenance record, so only an exact version counts. A range
+# (">=1.10.0") or a wildcard ("1.10.*") resolves to different revisions at
+# different times, which is not provenance — it is the same ambiguity this
+# design removes, wearing a version number.
+PIN_RE = re.compile(r"^lex-frontend==(?P<version>\d+\.\d+\.\d+[A-Za-z0-9.]*)$")
+
+REQUIREMENTS_PATH = "requirements.txt"
+
+
+def frontend_version_at(ref: str, *, show=git_show) -> str | None:
+    """The pinned frontend version as of `ref`, or None.
+
+    None is the normal answer for every tag cut before the pin existed, and it
+    is what sends `frontend_range` to the manifest and side-car path instead.
+    """
+    blob = show(ref, REQUIREMENTS_PATH)
+    if not blob:
+        return None
+    for line in blob.splitlines():
+        match = PIN_RE.fullmatch(line.strip())
+        if match:
+            return match["version"]
+    return None
+
+
+def pac_tag_for(version: str) -> str:
+    """The PAC tag that published `version`.
+
+    Publishing derives the tag from package.json's version, so the mapping is
+    exactly this one prefix — see .github/workflows/publish-frontend.yml in
+    process-admin-general-client.
+    """
+    return f"v{version}"

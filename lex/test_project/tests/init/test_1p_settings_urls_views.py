@@ -176,6 +176,59 @@ class TestCluster01p_SettingsConstants(TestCase):
             "REACT_APP_BUILD_PATH must resolve — serves the SPA",
         )
 
+    def test_1_223_react_build_path_prefers_the_installed_frontend_package(self):
+        """1.223: an installed ``lex-frontend`` wins over the in-tree bundle.
+
+        The pinned wheel is the release's frontend identity. If the committed
+        copy won, an instance would serve whatever happened to be in the tree
+        rather than the version its release pinned — which is the whole point
+        of pinning it.
+        """
+        from lex.lex_app import settings as lex_settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sentinel = Path(tmp)
+            (sentinel / "index.html").write_text("<!doctype html>")
+
+            class _FakePackage:
+                @staticmethod
+                def build_path():
+                    return sentinel
+
+            resolved = lex_settings._resolve_react_build_path(package=_FakePackage)
+            self.assertEqual(Path(resolved), sentinel)
+
+    def test_1_224_react_build_path_falls_back_to_the_in_tree_bundle(self):
+        """1.224: no installed package means the committed bundle is used.
+
+        This is what lets the pin land before anything is published, and what
+        keeps a source checkout runnable.
+        """
+        from lex.lex_app import settings as lex_settings
+
+        resolved = lex_settings._resolve_react_build_path(package=None)
+        self.assertTrue(
+            resolved.endswith("react/build"),
+            f"expected the in-tree bundle, got {resolved}",
+        )
+
+    def test_1_225_a_broken_frontend_package_falls_back_rather_than_crashing(self):
+        """1.225: a package that cannot locate its bundle must not stop boot.
+
+        ``_resolve_react_build_path`` runs at import time, so an exception here
+        takes the whole instance down. Serving the in-tree bundle is strictly
+        better than not starting.
+        """
+        from lex.lex_app import settings as lex_settings
+
+        class _BrokenPackage:
+            @staticmethod
+            def build_path():
+                raise FileNotFoundError("the frontend bundle is missing")
+
+        resolved = lex_settings._resolve_react_build_path(package=_BrokenPackage)
+        self.assertTrue(resolved.endswith("react/build"))
+
 
 # ---------------------------------------------------------------------
 # 1.131–1.134 — urls.py named routes

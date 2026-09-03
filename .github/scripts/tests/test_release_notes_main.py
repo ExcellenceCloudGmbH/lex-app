@@ -280,3 +280,46 @@ def test_draft_uses_the_facts_the_digest_carries():
         return "## Bug fixes\n\n- **A fix.** Text.\n"
     notes.draft(d, exemplar="X", model=model)
     assert "A COMPUTED FACT" in seen["prompt"]
+
+
+def test_the_pac_log_asks_for_commit_bodies_too(tmp_path, monkeypatch):
+    """Frontend commits deserve the same detail as backend ones.
+
+    The commit-body work gave `digest._run_log` a `%b`, but `_pac_log` is a
+    separate invocation and kept `%h%s` — so every frontend entry reached the
+    drafter as a bare subject line while backend entries carried the author's
+    explanation.
+    """
+    from release_notes import __main__ as main, digest
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        class R:
+            stdout = ""
+        return R()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    main._pac_log(tmp_path)("v1.10.0", "v1.11.0")
+
+    pretty = [a for a in seen["argv"] if a.startswith("--pretty=")][0]
+    assert "%b" in pretty, "frontend commits must carry their bodies too"
+    assert digest._RECORD_SEP in pretty, "multi-line bodies need a record separator"
+    assert "v1.10.0..v1.11.0" in seen["argv"], "the tag range must pass through"
+
+
+def test_the_pac_log_parses_bodies_into_commits(tmp_path, monkeypatch):
+    from release_notes import __main__ as main, digest
+
+    raw = ("aaa1111\x1ffix(grid): stop dropping rows\x1fThe grid dropped the last "
+           "row on every page.\x1e")
+
+    def fake_run(argv, **kwargs):
+        class R:
+            stdout = raw
+        return R()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    got = digest.collect_commits("v1.10.0", "v1.11.0", run_log=main._pac_log(tmp_path))
+    assert got[0].body.startswith("The grid dropped the last row")

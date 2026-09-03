@@ -28,15 +28,35 @@ So to describe a release we need commits from both. The backend half is easy —
 own git log. The frontend half needs one extra fact: **which PAC commit produced the bundle we're
 shipping.**
 
-That fact is recorded in a small file next to the bundle:
+That fact is a version pin. Once the frontend is published as a package,
+`requirements.txt` carries one line:
+
+```
+lex-frontend==1.10.0
+```
+
+The frontend is published from PAC as a versioned package — an npm package and a Python wheel,
+from one version number — and lex-app depends on the wheel like any other dependency. So "which
+frontend is in v2.3.0?" is answered by:
+
+```bash
+git show v2.3.0:requirements.txt | grep lex-frontend
+```
+
+Two pins, at two tags, give a range of PAC **tags**, and the frontend half of the note is
+`git log` between them.
+
+**Releases cut before the pin** are served by a committed side-car mapping each pre-pin bundle to
+the PAC revision that built it, alongside a manifest written beside the bundle:
 
 ```
 lex/react/build/.frontend-version.json
 {"repo": "…/process-admin-general-client", "branch": "…", "sha": "22c16f9…", "built_at": "…"}
 ```
 
-Two of those — the one in the previous release and the one in this release — give a range of PAC
-commits. That range is the frontend half of the note.
+Those three side-car entries were established by rebuilding each candidate and comparing the
+compiled output, which is content-addressed — so the attribution is proven rather than inferred.
+The side-car never grows again.
 
 ---
 
@@ -78,6 +98,11 @@ Now it says so:
 
 Nothing breaks. The release ships. The marker is a note-to-self that something is worth going back
 for — and because it lives in `CHANGELOG.md`, you can find every one of them with a command.
+
+**This can no longer happen for a release cut after the pin landed.** A pin resolves before
+anything is built, or the build fails — there is no state where a release ships successfully and
+its frontend identity turns out to be unknown afterwards. The marker, and the repair commands that
+go with it, now apply only to the older releases.
 
 ---
 

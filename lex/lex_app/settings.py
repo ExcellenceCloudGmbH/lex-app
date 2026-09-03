@@ -230,9 +230,40 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
                 + ", ".join(_missing_redis)
             )
 
-REACT_APP_BUILD_PATH = (
-    Path(__file__).resolve().parent.parent / Path("react/build")
-).as_posix()
+def _resolve_react_build_path(package="unset") -> str:
+    """Where the single-page app is served from.
+
+    The pinned ``lex-frontend`` wheel is the release's frontend identity, so an
+    installed one wins. The in-tree bundle at ``lex/react/build`` remains the
+    fallback, which is what lets a source checkout run and what let this change
+    land before anything had been published.
+
+    A package that is installed but cannot find its own bundle falls back too:
+    raising here happens at import time and takes the whole instance down,
+    which is strictly worse than serving the committed copy.
+
+    ``package`` is injected by tests; ``"unset"`` means "import it yourself".
+    """
+    if package == "unset":
+        try:
+            import lex_frontend as package  # type: ignore[no-redef]
+        except ImportError:
+            package = None
+
+    if package is not None:
+        try:
+            return Path(package.build_path()).as_posix()
+        except Exception as exc:  # noqa: BLE001 - see the docstring
+            print(
+                f"lex-frontend is installed but its bundle could not be located "
+                f"({exc}); falling back to the in-tree bundle.",
+                file=sys.stderr,
+            )
+
+    return (Path(__file__).resolve().parent.parent / Path("react/build")).as_posix()
+
+
+REACT_APP_BUILD_PATH = _resolve_react_build_path()
 repo_name = derive_repo_name(PROJECT_ROOT, os.getcwd())
 LEGACY_MEDIA_ROOT = os.path.join(NEW_BASE_DIR, f"{repo_name}/")
 LOG_FILE_PATH = os.path.join(NEW_BASE_DIR, f"{repo_name}/{repo_name}.log")
