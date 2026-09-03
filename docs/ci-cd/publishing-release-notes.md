@@ -1,7 +1,15 @@
-# Publishing release notes to the help centre
+# Publishing release notes outside GitHub
 
-When a release is published on GitHub, its note is also published to quackback as a help-centre
-article. Nothing to run by hand.
+When a release is published on GitHub, its note also goes to two other places. Nothing to run by
+hand.
+
+| Destination | Audience | Shape |
+|---|---|---|
+| **quackback** help centre | customers | a full article — the note as written |
+| **Linear Pulse** | colleagues | a project update — headlines and what to do |
+
+Both take the **approved** body: the one on the GitHub release after a human has reviewed and
+possibly edited it. Neither can fail a release.
 
 ## What gets published
 
@@ -78,3 +86,51 @@ auth  Authorization: Bearer qb_...
 
 If quackback changes that schema, `release_notes/quackback.py` is the only place to update, and its
 tests pin the request shape.
+
+
+---
+
+# Linear Pulse
+
+## Why it is a project update
+
+Pulse is a feed of **project and initiative updates** — not a surface you can post to directly. A
+release reaches it as a status update on the **LEX App** project, which is what the code creates.
+
+Linear also has a native releases feature with its own release notes. It is not used here: the
+workspace has **no release pipelines configured**, so there is nothing for such a note to attach to.
+If pipelines are set up later, that becomes a second option worth revisiting.
+
+## The format is deliberately different
+
+The quackback article is read once, in full, by someone who went looking for it. A Pulse entry is
+skimmed in a feed by colleagues who did not. So it:
+
+- leads with the version and links straight back out to the full note;
+- keeps one line per change — the bolded lead the house style already writes as a summary, with the
+  explanation after it dropped;
+- states the frontend version, or says explicitly that it was not recorded, because omitting the
+  line would read as "no frontend change" — a different thing;
+- pulls the upgrade note out on its own, even when it is prose rather than bullets;
+- adds an unmissable warning when the release needs database migrations.
+
+A release with nothing user-facing says so first, rather than leading with its internal section.
+
+## Re-running does not post twice
+
+Each entry carries a hidden `lex:release <tag>` marker. A re-run finds its own previous entry and
+updates it in place. Colleagues read this feed — two entries for one release is noise.
+
+## Configuration
+
+| Name | Kind | Notes |
+|---|---|---|
+| `LINEAR_API_KEY` | **secret** | a Linear personal API key |
+| `LINEAR_PROJECT_ID` | variable | the LEX App project id |
+
+A GitHub Actions job has no MCP server, so this uses Linear's GraphQL API directly — which is why a
+key is needed here even though the MCP works interactively. Linear sends the key **bare** in the
+`Authorization` header, with no `Bearer` prefix.
+
+Missing configuration reports `skipped` rather than failing, so this is safe to merge before the
+settings exist.
