@@ -269,26 +269,19 @@ _FOLLOWER_HTML = """<script>
                    "; menu is", selection() || "(unset -> system)");
       if (!now || now === mode) return;     // already right, or unknowable
 
-      // A widget REPORTING its own palette is an observation, not a command.
+      // Every input may ACT. What differs is whether it may FORGET.
       //
-      // Reloading on it is what interrupted people mid-use: the widget frames
-      // cannot see lex-app's storage (third-party frames get partitioned
-      // storage) so they report the light default while the agreement says
-      // dark, disagree forever, and every expiry of the ledger below started a
-      // fresh episode -- a reload every fifteen seconds, indefinitely.
+      // A `widget` report is the carrier of the change in a same-site
+      // deployment: lex-app writes its preference, the widget frame reads it
+      // (same origin, so it can), and tells us. Refusing to act on that -- which
+      // an earlier version of this function did, to stop mid-use reloads --
+      // silences the only messenger and theme following stops entirely.
       //
-      // The report is not wasted: the shim has already written it to the
-      // agreement key, so the next NATURAL load picks it up. What it must not
-      // do is take the page out from under someone who is working.
-      if (reason === "widget") {
-        console.info(
-          "[lex-theme] a widget reports '" + mode + "' while this page shows '" +
-          now + "'. Recorded, not acted on -- reloading here would interrupt the " +
-          "page. It will apply on the next load."
-        );
-        return;
-      }
-
+      // But it must not clear the loop memory below. A widget re-asserts its
+      // palette on every rerun, so treating each assertion as fresh news would
+      // wipe the record of a contradiction several times a minute and let a
+      // bounded loop restart forever. Only a `storage` event that no widget
+      // claimed is a genuinely new decision made somewhere else.
       if (reason === "storage") {
         // A deliberate change outranks every refusal below -- including one this
         // load already made. Otherwise the escape hatch we tell people about in

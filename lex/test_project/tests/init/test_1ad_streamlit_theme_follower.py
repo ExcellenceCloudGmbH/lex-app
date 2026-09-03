@@ -331,41 +331,46 @@ class TestCluster1ad_StreamlitThemeFollower:
         assert "LEDGER_WINDOW_MS" in js
         assert "Date.now() - v.at > LEDGER_WINDOW_MS" in js
 
-    def test_01_278_a_widget_report_never_reloads_the_page(self):
-        """Scenario 1.278: a widget reporting its palette does not reload the page.
+    def test_01_278_a_widget_report_may_act_but_may_not_forget(self):
+        """Scenario 1.278: the messenger is not silenced, only distrusted.
 
-        Reported as "Streamlit reloads after a moment, so I'll be using it and it
-        reloads by itself" -- the loop from 1.277, bounded but not gone. Bounding
-        it stopped the *flipping*; it did not stop the page being taken away from
-        someone mid-scroll every time an episode restarted.
+        This scenario shipped inverted and broke theme following outright.
+        Reported as "theme switch isn't working": a light Streamlit page hosting
+        a dark widget, with nothing able to reconcile them.
 
-        The fix is not a bigger bound, it is the realisation that the three
-        inputs to ``follow()`` are not equals:
+        The reasoning that produced it: a widget re-asserting its palette on
+        every rerun was reloading the page mid-use, so a widget report was
+        reclassified as "an observation, not a command" and refused a reload
+        entirely. That is true of the *re-assertion* and false of the *report*.
 
-        * ``install`` -- the page is booting anyway, so reloading costs nothing
-        * ``storage`` -- somebody just changed the theme; acting is the point
-        * ``widget`` -- an embedded frame is *describing itself*
+        In a same-site deployment the widget frame IS the messenger. lex-app
+        writes its preference, the frame reads it (same origin, so unlike the
+        cross-site case it genuinely can), and tells the shim. Silencing that
+        silences the only carrier -- and the relay cannot cover for it, because
+        the shim has already written the same value and a `storage` event does
+        not fire for an unchanged one. The change is swallowed whole.
 
-        Only the third arrives while the page is in use, and it is the one that
-        is merely an observation. A widget saying "I am light" is not a request
-        for the whole dashboard to reload; it is a fact about a frame. The report
-        is still recorded by the shim, so the next natural load picks it up.
-
-        This is also why the disagreement was permanent rather than transient:
-        widget frames are cross-site and get partitioned storage, so they cannot
-        read the agreement and will report the default forever.
+        So every input may ACT. What a widget report may not do is **forget**:
+        it must not clear the loop memory, because an assertion arriving several
+        times a minute would wipe the record of a contradiction and let a
+        bounded loop restart forever. That distinction -- act versus forget -- is
+        the one that carries both requirements at once.
         """
         js = theme_follower_html()
 
-        assert 'if (reason === "widget") {' in js, (
-            "the input that fires while the page is in use must be special-cased"
-        )
-        # It has to return BEFORE anything that can reload -- being last in the
-        # function would make the special case decorative.
-        widget_branch = js.index('if (reason === "widget") {')
+        # No early return that stops a widget report before the reload path.
         reload_call = js.index("host.location.reload()")
-        assert widget_branch < reload_call
-        assert "not acted on" in js, "and it says what it did instead of going quiet"
+        for refusal in ('if (reason === "widget") {', 'if (reason !== "storage") return'):
+            assert refusal not in js[:reload_call], (
+                f"a widget report is refused before it can act: {refusal}"
+            )
+
+        # Forgetting is gated on `storage` alone.
+        forget_at = js.index("forgetReloads();")
+        gate = js.rindex('if (reason === "storage")', 0, forget_at)
+        assert forget_at - gate < 400, (
+            "clearing the loop memory is not gated on a genuine external change"
+        )
 
     def test_01_279_a_known_contradiction_is_not_forgotten(self):
         """Scenario 1.279: the stand-down outlives the window that detected it.
@@ -540,4 +545,4 @@ class TestCluster1ad_ThemeFollowerBehaviour:
         )
         # Guard the guard: a harness that silently stopped running its cases
         # would pass forever.
-        assert result.stdout.count("  ok   ") >= 18, result.stdout
+        assert result.stdout.count("  ok   ") >= 19, result.stdout

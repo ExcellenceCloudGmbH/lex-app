@@ -98,8 +98,7 @@ const stKey = p => `stActiveTheme-${p}-v2`;
     if (!tab.reloading) host.__lexThemeFollow("light");   // a widget announces itself
   }
   check("terminates", tab.reloads <= 2, `reloaded ${tab.reloads} times over 12 loads`);
-  check("widget reports never reload", tab.reloads === 1, `got ${tab.reloads}`);
-  check("says why", tab.logs.some(([, m]) => m.includes("not acted on")));
+  check("says why", tab.logs.some(([lvl, m]) => lvl === "warn" && m.includes("NOT reloading")));
 }
 
 // ── 3. Someone is USING the page: no reload may happen mid-session. ──────
@@ -189,6 +188,29 @@ const stKey = p => `stActiveTheme-${p}-v2`;
   for (const fn of (tab.listeners.storage || [])) fn({ key: KEY, newValue: "light" });
   check("honoured", tab.reloads === before + 1, `got ${tab.reloads - before}`);
   check("wrote Light", tab.local.getItem(stKey("/")) === '"Light"',
+        String(tab.local.getItem(stKey("/"))));
+}
+
+// ── 9. The change ARRIVES as a widget report. It must be acted on. ──────
+{
+  console.log("\n9. same-site: lex-app switches to dark, a widget carries the news");
+  const tab = makeTab();
+  tab.local.setItem(KEY, "light");
+  run(js, tab);                              // boot: page settles light
+  const host = run(js, tab);
+  const before = tab.reloads;
+
+  // lex-app writes its preference; the widget frame shares that origin, reads
+  // it, and tells the shim. This is the ONLY messenger in a same-site
+  // deployment -- the relay's own write is a no-op because the shim already
+  // wrote the same value, and storage events do not fire for unchanged values.
+  host.__lexThemeSelfReport = { mode: "dark", at: Date.now() };
+  tab.local.setItem(KEY, "dark");
+  for (const fn of (tab.listeners.storage || [])) fn({ key: KEY, newValue: "dark" });
+  host.__lexThemeFollow("dark");
+
+  check("the page follows", tab.reloads === before + 1, `got ${tab.reloads - before}`);
+  check("wrote Dark", tab.local.getItem(stKey("/")) === '"Dark"',
         String(tab.local.getItem(stKey("/"))));
 }
 
