@@ -193,6 +193,15 @@ _FOLLOWER_HTML = """<script>
     // lifetime the guard needs. Recording what we last reloaded FOR lets a
     // contradiction be recognised rather than acted on.
     var LEDGER_KEY = "lex.theme.reloads";
+    //: Set once a contradiction has been seen, and never expired. The ledger
+    //: below is windowed so a normal change is not mistaken for a loop; THIS is
+    //: what stops a permanent disagreement restarting the loop every window.
+    //: Cleared only by a deliberate change arriving over `storage`.
+    var STANDOWN_KEY = "lex.theme.standown";
+    //: How long after a widget marks a write we still recognise the resulting
+    //: `storage` event as that widget's own. Generous: the event is dispatched
+    //: within the same task, so this only has to survive scheduling.
+    var SELF_REPORT_MS = 3000;
     var LEDGER_WINDOW_MS = 15000;
     var LEDGER_MAX = 2;
 
@@ -218,7 +227,30 @@ _FOLLOWER_HTML = """<script>
     }
 
     function forgetReloads() {
-      try { host.sessionStorage.removeItem(LEDGER_KEY); } catch (e) {}
+      try {
+        host.sessionStorage.removeItem(LEDGER_KEY);
+        host.sessionStorage.removeItem(STANDOWN_KEY);
+      } catch (e) {}
+    }
+
+    /**
+     * True when this storage change is a widget in THIS page describing itself.
+     *
+     * The shim writes the agreed key and, being a same-origin document, that
+     * write reaches this page as a `storage` event -- the same shape as a real
+     * change made in another tab. Without this, silencing the direct
+     * `__lexThemeFollow` route accomplished nothing: the identical report simply
+     * arrived by the other road and reloaded the page anyway.
+     */
+    function isSelfReport(mode) {
+      var report;
+      try { report = host.__lexThemeSelfReport; } catch (e) { return false; }
+      if (!report || report.mode !== mode) return false;
+      return (Date.now() - report.at) <= SELF_REPORT_MS;
+    }
+
+    function standingDown() {
+      try { return host.sessionStorage.getItem(STANDOWN_KEY); } catch (e) { return null; }
     }
 
     /**
@@ -237,10 +269,51 @@ _FOLLOWER_HTML = """<script>
                    "; menu is", selection() || "(unset -> system)");
       if (!now || now === mode) return;     // already right, or unknowable
 
-      if (reason === "storage") forgetReloads();
+      // A widget REPORTING its own palette is an observation, not a command.
+      //
+      // Reloading on it is what interrupted people mid-use: the widget frames
+      // cannot see lex-app's storage (third-party frames get partitioned
+      // storage) so they report the light default while the agreement says
+      // dark, disagree forever, and every expiry of the ledger below started a
+      // fresh episode -- a reload every fifteen seconds, indefinitely.
+      //
+      // The report is not wasted: the shim has already written it to the
+      // agreement key, so the next NATURAL load picks it up. What it must not
+      // do is take the page out from under someone who is working.
+      if (reason === "widget") {
+        console.info(
+          "[lex-theme] a widget reports '" + mode + "' while this page shows '" +
+          now + "'. Recorded, not acted on -- reloading here would interrupt the " +
+          "page. It will apply on the next load."
+        );
+        return;
+      }
+
+      if (reason === "storage") {
+        // A deliberate change outranks every refusal below -- including one this
+        // load already made. Otherwise the escape hatch we tell people about in
+        // the stand-down message ("change the theme in lex-app or Streamlit's
+        // menu") would be closed by the very refusal that suggests it.
+        forgetReloads();
+        host.__lexThemeReloading = false;
+      }
+
+      var stood = standingDown();
+      if (stood) {
+        host.__lexThemeReloading = true;
+        console.warn(
+          "[lex-theme] standing down for this tab: a contradiction was already " +
+          "seen (" + stood + "). Reloading again would only flip it back. Change " +
+          "the theme in lex-app or Streamlit's menu to clear this."
+        );
+        return;
+      }
 
       var previous = ledger();
       if (previous && (previous.n >= LEDGER_MAX || previous.to !== mode)) {
+        // Sticky: a contradiction does not resolve itself, so remembering it for
+        // only the window would let a fresh episode start every window forever.
+        try { host.sessionStorage.setItem(STANDOWN_KEY, mode + "/" + now); } catch (e) {}
         host.__lexThemeReloading = true;    // stop asking for the rest of this load
         console.warn(
           "[lex-theme] NOT reloading again. This page already reloaded for '" +
@@ -285,7 +358,11 @@ _FOLLOWER_HTML = """<script>
     // `storage` fires in every OTHER window of this origin, which is how a
     // writer without a handle to this page gets through.
     host.addEventListener("storage", function (ev) {
-      if (ev.key === KEY) follow(ev.newValue, "storage");
+      if (ev.key !== KEY) return;
+      // Route, not authority: the same event carries both a person changing the
+      // theme in another tab and a widget in this page announcing its own. Only
+      // the first is a reason to reload.
+      follow(ev.newValue, isSelfReport(ev.newValue) ? "widget" : "storage");
     });
 
     console.info("[lex-theme] follower ready; showing", effectiveMode(),

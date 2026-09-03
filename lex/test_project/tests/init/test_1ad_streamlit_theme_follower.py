@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.277.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.280.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -28,6 +28,9 @@ Run:
 
 import json
 import pathlib
+import shutil
+import subprocess
+import tempfile
 
 import pytest
 
@@ -309,7 +312,8 @@ class TestCluster1ad_StreamlitThemeFollower:
 
         for reason in ('"install"', '"storage"', '"widget"'):
             assert reason in js, f"follow() cannot distinguish its inputs: {reason}"
-        assert 'if (reason === "storage") forgetReloads();' in js
+        assert 'if (reason === "storage") {' in js
+        assert "forgetReloads();" in js
 
     def test_01_277_the_guard_expires(self):
         """Scenario 1.277 (third half): it stops guarding once the page settles.
@@ -317,10 +321,87 @@ class TestCluster1ad_StreamlitThemeFollower:
         A permanent refusal would be its own bug -- theme sync would work once
         per tab and then quietly stop for the rest of the session. The window
         bounds the episode, not the tab.
+
+        The window is what stops a normal change being mistaken for a loop. It is
+        deliberately NOT what stops a loop resuming -- see 1.279, where an
+        expiring memory of a contradiction turned out to be the whole reason the
+        page kept reloading while someone was working.
         """
         js = theme_follower_html()
         assert "LEDGER_WINDOW_MS" in js
         assert "Date.now() - v.at > LEDGER_WINDOW_MS" in js
+
+    def test_01_278_a_widget_report_never_reloads_the_page(self):
+        """Scenario 1.278: a widget reporting its palette does not reload the page.
+
+        Reported as "Streamlit reloads after a moment, so I'll be using it and it
+        reloads by itself" -- the loop from 1.277, bounded but not gone. Bounding
+        it stopped the *flipping*; it did not stop the page being taken away from
+        someone mid-scroll every time an episode restarted.
+
+        The fix is not a bigger bound, it is the realisation that the three
+        inputs to ``follow()`` are not equals:
+
+        * ``install`` -- the page is booting anyway, so reloading costs nothing
+        * ``storage`` -- somebody just changed the theme; acting is the point
+        * ``widget`` -- an embedded frame is *describing itself*
+
+        Only the third arrives while the page is in use, and it is the one that
+        is merely an observation. A widget saying "I am light" is not a request
+        for the whole dashboard to reload; it is a fact about a frame. The report
+        is still recorded by the shim, so the next natural load picks it up.
+
+        This is also why the disagreement was permanent rather than transient:
+        widget frames are cross-site and get partitioned storage, so they cannot
+        read the agreement and will report the default forever.
+        """
+        js = theme_follower_html()
+
+        assert 'if (reason === "widget") {' in js, (
+            "the input that fires while the page is in use must be special-cased"
+        )
+        # It has to return BEFORE anything that can reload -- being last in the
+        # function would make the special case decorative.
+        widget_branch = js.index('if (reason === "widget") {')
+        reload_call = js.index("host.location.reload()")
+        assert widget_branch < reload_call
+        assert "not acted on" in js, "and it says what it did instead of going quiet"
+
+    def test_01_279_a_known_contradiction_is_not_forgotten(self):
+        """Scenario 1.279: the stand-down outlives the window that detected it.
+
+        The other half of "it reloads by itself". Even with widget reports
+        silenced, a windowed memory is the wrong shape for this fact: a
+        contradiction between two sources does not heal on a timer, so letting
+        the ledger expire meant a fresh episode could begin every window --
+        forever, at whatever interval the window happens to be.
+
+        So the two memories have different lifetimes on purpose:
+
+        * the **ledger** expires, so a deliberate change fifteen minutes later is
+          not mistaken for the tail of an old loop (1.277)
+        * the **stand-down** does not, because "these two disagree" stays true
+          until something changes it
+
+        What clears it is a ``storage`` event -- a real, deliberate change made
+        somewhere else. That keeps the escape hatch the user actually has (switch
+        the theme in lex-app, or in Streamlit's own menu) working.
+        """
+        js = theme_follower_html()
+
+        assert "lex.theme.standown" in js
+        # Sticky: nothing in the script may expire it on a timer.
+        standown_lines = [ln for ln in js.splitlines() if "STANDOWN_KEY" in ln]
+        assert standown_lines, "the stand-down key is not used"
+        assert not any("WINDOW" in ln for ln in standown_lines), (
+            "a stand-down that expires is the bug it exists to fix"
+        )
+        # And a deliberate change still clears it, or the escape hatch is gone.
+        forget = js[js.index("function forgetReloads"):]
+        forget = forget[: forget.index("}\n\n")]
+        assert "STANDOWN_KEY" in forget and "LEDGER_KEY" in forget, (
+            "a deliberate change must clear both memories, not just one"
+        )
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:
@@ -407,3 +488,56 @@ class TestCluster1ad_ThemeFollowerEncoding:
         line = next(ln for ln in html.splitlines() if "var URL_MODE" in ln)
         literal = line.split("=", 1)[1].strip().rstrip(";")
         assert json.loads(literal) == mode, "JavaScript would see a different value"
+
+
+class TestCluster1ad_ThemeFollowerBehaviour:
+    """The follower's *logic*, not its text.
+
+    Every other class here asserts on the emitted script as a string, which is
+    all a Python test can do -- and it is not enough for the one failure this
+    file keeps producing. No property of a string proves a page settles.
+
+    So the script is run against a DOM double that models the only distinction
+    that matters for a reload loop: state that survives ``location.reload()``
+    (``localStorage``, ``sessionStorage``) and state that does not (the window,
+    its listeners, every flag on it). Eight cases, including both roads a widget
+    report travels and the two real changes that must still be honoured.
+
+    Skipped rather than failed when there is no JS runtime: this is a Python
+    repository, and a missing ``node`` is a fact about the machine, not a defect
+    in the code under test. It is wired into pytest anyway because the previous
+    version of this harness was hand-run, lived in a temporary directory, and
+    was gone by the next session -- which is why the loop it had already proved
+    fixed came back in a different form.
+    """
+
+    def test_01_280_the_follower_settles(self):
+        """Scenario 1.280: run the follower and watch it stop.
+
+        Case 7 is the one that earns this class. Silencing the direct
+        ``__lexThemeFollow`` route (1.278) looked like a complete fix and was
+        not: the shim writes the agreed key *before* calling the page, and a
+        same-origin iframe's write is delivered to its parent as a ``storage``
+        event -- indistinguishable from a person changing the theme in another
+        tab. The identical report simply arrived by the other road and reloaded
+        the page anyway.
+        """
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("no JS runtime on this machine; the follower's logic is unproven here")
+
+        harness = pathlib.Path(__file__).parent / "harness" / "theme_follower_harness.mjs"
+        with tempfile.TemporaryDirectory() as tmp:
+            script = pathlib.Path(tmp) / "follower.html"
+            script.write_text(theme_follower_html(), encoding="utf-8")
+            result = subprocess.run(
+                [node, str(harness), str(script)],
+                capture_output=True, text=True, timeout=60,
+            )
+
+        assert result.returncode == 0, (
+            "the follower does not settle:\n" + result.stdout + result.stderr
+        )
+        # Guard the guard: a harness that silently stopped running its cases
+        # would pass forever.
+        assert result.stdout.count("  ok   ") >= 18, result.stdout
