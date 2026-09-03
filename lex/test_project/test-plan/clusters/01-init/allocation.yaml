@@ -628,7 +628,7 @@ letters:
     scenarios: 1.309-1.313
     status: complete
     tests:
-      pass: 24
+      pass: 25
       skip: 0
       xfail: 0
     note: >-
@@ -664,6 +664,16 @@ letters:
       many pages the author declared, so a smaller nav leaves the block floating mid-panel and a
       larger one grows a scrollbar in a sidebar with no reason to scroll. `min-height: 100%` on a
       flex column asks for the same thing knowing nothing, and grows instead of clipping.
+      Its third half comes from READING Streamlit 1.58's styles rather than assuming them.
+      stSidebarContent is `position: relative; height: 100%; overflow: auto` - a scroll container,
+      and not a flex container until this CSS makes it one. Its header carries
+      `height: theme.sizes.headerHeight`, which is a fixed height on a block and merely a starting
+      point on a flex item: the default flex-shrink:1 would have handed the column permission to
+      squash the logo on a short sidebar, and the navigation below it is the author's and no more
+      ours to compress. Both are held at `flex: 0 0 auto`. The account block is the only thing that
+      flexes and may only GROW (`1 0 auto`) - letting it shrink would squeeze the way out of the
+      app on exactly the sidebar that is already too full, while the real scroll container sits one
+      level up and would have handled it.
       One test-authoring fix rides along, because the same mistake was made three times in this
       cluster: assertions that forbid a property were tripping on COMMENTS explaining why that
       property was rejected. _rules_only() strips comments before asserting, so documenting a

@@ -1012,6 +1012,17 @@ a scrollbar in a sidebar with no reason to scroll. `min-height: 100%` on a flex
 column asks for the same thing knowing nothing, and grows instead of clipping when
 the content genuinely overflows.
 
+**And the pin may not squash its neighbours** — read from Streamlit's own styles,
+not assumed. `stSidebarContent` is `position: relative; height: 100%; overflow:
+auto`: a *scroll* container, and not a flex container until this CSS makes it one.
+Its header carries `height: theme.sizes.headerHeight` — a fixed height on a block,
+a starting point on a flex item, where the default `flex-shrink: 1` would let the
+column take it back and squash the logo on a short sidebar. The navigation below
+is the author's and no more ours to compress. Both are held at `flex: 0 0 auto`;
+the account block alone flexes, and only *grows* (`1 0 auto`). Letting it shrink
+would squeeze the way out of the app on exactly the sidebar that is already too
+full, while the real scroll container sits one level up and would have handled it.
+
 **One test-authoring fix rides along.** Three times in this cluster, an assertion
 forbidding a property tripped on a *comment* explaining why that property was
 rejected — training the author to write worse comments to keep the suite green.

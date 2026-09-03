@@ -199,6 +199,36 @@ class TestCluster1aj_SidebarChrome:
             )
         assert css.count("flex-direction: column") >= 2
 
+    def test_01_313_only_the_account_block_gives_up_space(self):
+        """Scenario 1.313 (third half): the pin may not squash its neighbours.
+
+        Read from Streamlit 1.58's own styles rather than guessed. ``stSidebarContent``
+        is ``position: relative; height: 100%; overflow: auto`` -- a *scroll*
+        container, and not a flex container until we make it one. Its header is::
+
+            {{ display: flex, ..., height: theme.sizes.headerHeight }}
+
+        A fixed ``height`` on a block is a fixed height. On a flex item it is a
+        starting point, and the default ``flex-shrink: 1`` lets the column take it
+        back -- so making the panel a flex column, which the pin requires, hands
+        it permission to squash the logo on a short sidebar. The navigation below
+        it is the author's, and no more ours to compress.
+
+        The account block is the only thing that flexes, and it may only *grow*:
+        ``flex: 1 0 auto``. Letting it shrink would squeeze the way out of the app
+        on exactly the sidebar that is already too full, while the real scroll
+        container sits one level up and would have handled it.
+        """
+        css = _rules_only(_CHROME_CSS)
+
+        for testid in ("stSidebarHeader", "stSidebarNav"):
+            assert f'data-testid="{testid}"' in css, (
+                f"{testid} is free to shrink once the panel is a flex column"
+            )
+        assert "flex: 0 0 auto" in css, "the header and nav are not held at their size"
+        assert "flex: 1 0 auto" in css, "the account block may grow, never shrink"
+        assert "flex: 1 1 auto" not in css
+
     def test_01_313_the_panel_height_is_not_a_guess(self):
         """Scenario 1.313 (second half): no constant stands in for the nav.
 

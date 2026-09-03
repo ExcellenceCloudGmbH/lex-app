@@ -247,13 +247,24 @@ _CHROME_CSS = f"""
     flex-direction: column;
     min-height: 100%;
   }}
+  /* Only the user content may take the slack. Streamlit gives the header a fixed
+     `height`, which a flex item is free to shrink below by default -- turning
+     this pin into a squashed logo on a short sidebar. The navigation is the
+     author's and is not ours to compress either. */
+  section[data-testid="stSidebar"] [data-testid="stSidebarHeader"],
+  section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {{
+    flex: 0 0 auto;
+  }}
+  /* `1 0 auto`, not `1 1 auto`: grow into an empty panel, but never shrink below
+     the content's own height. stSidebarContent is the scroll container
+     (`overflow: auto`), so a tall sidebar should make IT scroll rather than
+     squeeze the block that holds the way out. */
   section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"],
   section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div,
   section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
     display: flex;
     flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
+    flex: 1 0 auto;
   }}
   /* `:has(div[...])` is a DESCENDANT match on purpose. `> div[data-lex-account]`
      matched the innermost wrapper Streamlit puts around our markup -- which is
