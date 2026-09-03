@@ -73,14 +73,16 @@ jobs:
       - name: Remove the frontend checkout before committing
         run: rm -rf pac
 
-      # The help centre gets the body a human approved, not the drafted one —
-      # by now it has been reviewed and possibly edited on the release itself.
+      # Two destinations, two formats, one source: the body a human approved
+      # on the release itself. quackback gets a help-centre article for
+      # customers; Linear Pulse gets a project update for colleagues, which is
+      # what makes it appear in their feed.
       #
-      # continue-on-error is belt and braces: the script already exits 0 on
-      # every failure path. The note is public on GitHub by the time this runs,
-      # so a help centre one article behind is a nuisance while a red release
-      # is an incident.
-      - name: Publish the note to quackback
+      # continue-on-error is belt and braces — the script already exits 0 on
+      # every failure path and reports each destination separately. By the time
+      # this runs the note is public on GitHub, so a missing feed entry is a
+      # nuisance while a red release is an incident.
+      - name: Publish the note to quackback and Linear Pulse
         if: ${{ always() && github.event_name == 'release' }}
         continue-on-error: true
         env:
@@ -88,8 +90,10 @@ jobs:
           QUACKBACK_API_KEY: ${{ secrets.QUACKBACK_API_KEY }}
           QUACKBACK_BASE_URL: ${{ vars.QUACKBACK_BASE_URL }}
           QUACKBACK_CATEGORY_ID: ${{ vars.QUACKBACK_CATEGORY_ID }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_PROJECT_ID: ${{ vars.LINEAR_PROJECT_ID }}
         run: |
-          python .github/scripts/publish_to_quackback.py \
+          python .github/scripts/publish_release_note_externally.py \
             --tag "${{ github.event.release.tag_name }}" \
             --repo "$GITHUB_REPOSITORY"
 
