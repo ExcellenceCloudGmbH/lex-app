@@ -35,7 +35,10 @@
 
 Plus `pyproject.toml:41` (`"lex.react" = ["**/*"]`), which packages the bundle into the wheel.
 
-**Version decision.** Resume PAC's existing line at **`1.10.0`**. It is iterative, which is what the 2026-09-02 catch-up decided; it does not collide with lex-app's `2.x`, which is why `2.0.0` was rejected for the frontend; and it reuses the line already in the repo rather than inventing a third numbering. `package.json` becomes the single source of truth and the tag is derived from it — the current `0.2.0`-versus-`v1.9.0` split is precisely the failure this designs out.
+**Version decision.** Resume PAC's existing line at **`1.12.0`**. The highest existing tag is
+`v1.11.2` (2025-11-20), so `1.10.0` and `1.11.x` are taken — an earlier draft of this plan said
+`1.10.0`, which Task 4's already-tagged check would have correctly refused. Substitute `1.12.0`
+wherever a task below writes `1.10.0`. It is iterative, which is what the 2026-09-02 catch-up decided; it does not collide with lex-app's `2.x`, which is why `2.0.0` was rejected for the frontend; and it reuses the line already in the repo rather than inventing a third numbering. `package.json` becomes the single source of truth and the tag is derived from it — the current `0.2.0`-versus-`v1.9.0` split is precisely the failure this designs out.
 
 **Honest scoping note.** The npm package is not on lex-app's critical path — the wheel is what lex-app installs. npm publishing earns its place by giving the version line an immutable artifact, `npm view` history, and something the `lex-components` work can consume. Do not let an npm problem block the wheel.
 
