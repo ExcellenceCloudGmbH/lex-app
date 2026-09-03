@@ -39,7 +39,7 @@ name: Showcase Tests (Business View)
 #    OIDC_RP_CLIENT_UUID
 #
 #  Optional:
-#    SHOWCASE_REPORT_FROM_NAME    sender display name
+#    SHOWCASE_REPORT_FROM_NAME    sender display name (repo var, optional)
 #    SHOWCASE_BRAND (repo var)    brand shown on the report
 #
 #  Read docs/ci-cd/showcase-ci.md for the stakeholder guide.
@@ -397,7 +397,12 @@ jobs:
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           SHOWCASE_REPORT_RECIPIENTS: ${{ secrets.SHOWCASE_REPORT_RECIPIENTS }}
           SHOWCASE_REPORT_FROM: ${{ secrets.SHOWCASE_REPORT_FROM }}
-          SHOWCASE_REPORT_FROM_NAME: ${{ secrets.SHOWCASE_REPORT_FROM_NAME }}
+          # A repo VAR with a default, matching SHOWCASE_BRAND below. It was a
+          # secret nobody ever created, and an unset secret expands to the empty
+          # string — so the key arrived present-but-empty and the script's
+          # "Platform Health" default could never fire. Every report went out
+          # with a blank sender name. A display name is not a secret anyway.
+          SHOWCASE_REPORT_FROM_NAME: ${{ vars.SHOWCASE_REPORT_FROM_NAME || 'Platform Health' }}
           SHOWCASE_BRAND: ${{ vars.SHOWCASE_BRAND || 'Excellence Cloud' }}
         run: |
           python .github/scripts/send_showcase_email.py \
