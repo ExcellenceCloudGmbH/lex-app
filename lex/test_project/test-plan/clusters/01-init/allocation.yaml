@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.277
+    scenarios: 1.261-1.280
     status: complete
     tests:
-      pass: 21
+      pass: 24
       skip: 0
       xfail: 0
     note: >-
@@ -426,6 +426,34 @@ letters:
       existing state and are the two that can argue. The window expires, so sync does not work
       once per tab and then quietly stop. Harness reproduces the loop directly - agreement=dark
       with widgets reporting light, twelve loads - and asserts it terminates in at most two: 5/5.
+      1.278-1.280 finish the job 1.277 only bounded. Reported as "streamlit reloads after a
+      moment, so I'll be using it and it reloads by itself" - the flipping had stopped, the
+      INTERRUPTIONS had not, because a bounded loop still restarts every time the ledger's window
+      expires and a real contradiction never heals. Two things were wrong with the model. First,
+      follow()'s three inputs are not equals: install fires while the page is booting anyway and
+      storage means somebody just chose something, but `widget` is an embedded frame DESCRIBING
+      ITSELF, and it is the only one that arrives mid-use. A widget saying "I am light" is an
+      observation, not a request to reload the dashboard - so it is now recorded and never acted
+      on. Second, the memory of a contradiction was windowed like the ledger; it is now sticky for
+      the tab, cleared only by a genuine `storage` change, since "these two disagree" stays true
+      until something changes it.
+      Silencing the direct route looked like a complete fix and was not, which is the point of
+      1.280. The shim writes the agreed key BEFORE calling the page, and a same-origin iframe's
+      write is delivered to its parent as a `storage` event - indistinguishable from a person
+      switching theme in another tab. The identical report simply took the other road and reloaded
+      the page anyway. The shim now marks the write as its own (__lexThemeSelfReport) and the
+      follower treats route as route, not authority. A deliberate storage change, conversely, now
+      outranks every refusal including one this load already made - otherwise the escape hatch the
+      stand-down message advertises would be closed by the refusal that suggests it.
+      1.280 also fixes how this batch is tested. No property of a STRING proves a page settles, so
+      the follower's logic was only ever covered by a hand-run DOM double that lived in a temp
+      directory and was gone by the next session - which is why the loop it had already proved
+      fixed came back wearing different clothes. The harness now lives in the repo
+      (tests/init/harness/theme_follower_harness.mjs), runs under pytest when node is present and
+      skips when it is not, and models the one distinction that matters: state that survives
+      location.reload() versus state that does not. Eight cases, 18 checks. Case 7 - the shim's
+      storage road - fails against the pre-fix script and passes after, which is the whole reason
+      to have it.
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299
@@ -597,10 +625,10 @@ letters:
       attribute mutation with no insertion.
   aj:
     title: Streamlit sidebar chrome in lex-app's language
-    scenarios: 1.309-1.312
+    scenarios: 1.309-1.313
     status: complete
     tests:
-      pass: 22
+      pass: 24
       skip: 0
       xfail: 0
     note: >-
@@ -618,9 +646,28 @@ letters:
       depending on call order. And it depends on NO Streamlit internals - no data-testid, no
       emotion class - so an upgrade cannot break it by renaming something, which is the failure
       mode stActiveTheme and stCustomComponentV1 are pinned against elsewhere in this cluster.
-      Accepted cost of that second boundary, named rather than discovered: the log-out row is not
-      truly bottom-pinned, because pinning needs those selectors. It is last in call order
-      instead, which puts it at the bottom without touching Streamlit's layout.
+      The second boundary was later traded, deliberately and once. Call order puts the account
+      block under the navigation, not at the FOOT of the panel, and the user asked twice for the
+      foot - so the batch now spends exactly one Streamlit dependency on it (1.313). The terms are
+      written down: data-testid, which is Streamlit's own testing surface rather than a generated
+      emotion class, and layout properties only, so the failure mode when an upgrade breaks it is
+      "not pinned" - where the block would have been anyway - and never "restyled" or "hidden".
+      The first attempt at that pin matched and did nothing, which is why 1.313 exists rather than
+      an assertion that the selector is present. `div:has(> div[data-lex-account])` bound to the
+      innermost wrapper Streamlit puts around markdown output; that element is not a flex child of
+      the column, so margin-top:auto had no free space to consume. Live CSS, inert result, no
+      error - invisible to any test asserting the selector exists. So 1.313 asserts the two things
+      the pin actually needs and the broken version failed: a DESCENDANT match, since Streamlit's
+      wrapping depth is not ours to predict, and an unbroken flex column from the panel down.
+      Its second half removes a magic number. Reserving the header and nav with
+      `min-height: calc(100vh - 9rem)` is right for exactly one app - the nav's height is however
+      many pages the author declared, so a smaller nav leaves the block floating mid-panel and a
+      larger one grows a scrollbar in a sidebar with no reason to scroll. `min-height: 100%` on a
+      flex column asks for the same thing knowing nothing, and grows instead of clipping.
+      One test-authoring fix rides along, because the same mistake was made three times in this
+      cluster: assertions that forbid a property were tripping on COMMENTS explaining why that
+      property was rejected. _rules_only() strips comments before asserting, so documenting a
+      rejected approach no longer fails the test that rejects it.
       1.309 covers the genuine hazard rather than the styling: the display name arrives from the
       identity provider and is rendered through unsafe_allow_html, so a hostile
       preferred_username would execute in the session of whoever opened the dashboard. Name,

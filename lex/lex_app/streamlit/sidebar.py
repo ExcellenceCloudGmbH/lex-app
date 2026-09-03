@@ -224,15 +224,48 @@ _CONTENT_INSET = "3.5rem"
 
 _CHROME_CSS = f"""
 <style>
-  /* Account block to the foot of the panel. */
-  section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"] {{
+  /* ── Account block to the foot of the panel ─────────────────────────────
+     Call order alone cannot do this: our block renders after the navigation,
+     so it sits directly under it with the empty panel below. Pushing it down
+     needs `margin-top: auto`, and that needs two things to be true.
+
+     First, an unbroken flex column from the panel to the block. Streamlit's
+     sidebar is
+       stSidebarContent > [stSidebarHeader] [stSidebarNav] [stSidebarUserContent]
+     and the user content wraps every element again:
+       stSidebarUserContent > ... > stVerticalBlock > <element> > .stMarkdown
+                            > [data-testid=stMarkdownContainer] > OUR div
+
+     Second, room to push into. `min-height: 100%` rather than a fixed
+     `calc(100vh - <header + nav>)`: the navigation's height depends on how many
+     pages the author declared, so any constant is wrong for every app but one --
+     too small and the block floats mid-panel, too large and the sidebar grows a
+     scrollbar. `min-height` also grows rather than clips when the content is
+     genuinely taller than the panel. */
+  section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {{
     display: flex;
     flex-direction: column;
-    min-height: calc(100vh - 12rem);
+    min-height: 100%;
   }}
-  section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"]
-    div:has(> div[data-lex-account]) {{
+  section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"],
+  section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div,
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }}
+  /* `:has(div[...])` is a DESCENDANT match on purpose. `> div[data-lex-account]`
+     matched the innermost wrapper Streamlit puts around our markup -- which is
+     not a flex child of the column, so `auto` had nothing to consume and the
+     block simply stayed where it was. Two depths are listed because Streamlit
+     wraps a lone markdown block differently from one among several. */
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"]
+    > div:has(div[data-lex-account]),
+  section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"]
+    > div:has(div[data-lex-account]) {{
     margin-top: auto;
+    flex: 0 0 auto;
   }}
 
   /* Sidebar logo: line it up with the navigation beneath it, which is indented

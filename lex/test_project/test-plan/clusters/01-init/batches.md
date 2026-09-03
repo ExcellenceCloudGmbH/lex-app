@@ -265,7 +265,7 @@ with no Streamlit at all.
 
 ## Batch 1ad — Streamlit theme follower
 
-- **Scenarios:** 1.261-1.268
+- **Scenarios:** 1.261-1.280
 - **Status:** complete (11 pass)
 - **Source under test:** `lex/streamlit_theme.py`, wired by `lex/streamlit_app.py`
   (`render_theme_follower`) and `lex/proxy.py` (`/_lex/theme-relay`)
@@ -289,9 +289,18 @@ What the scenarios protect:
 | 1.267 | The script uses `parent`, never `top` — `top` is cross-origin when lex-app embeds Streamlit and throws on every access |
 | 1.268 | The mode is encoded as data, including against `</script>` |
 
-**Known gap:** the script's own logic (measure background → compare → reload once)
-is covered by a hand-run DOM-double harness, not by CI, because this repository has
-no JS runtime. Seven cases pass. Worth relocating to the frontend repo's vitest.
+**Closed gap (was: known gap).** The script's own logic — read the agreement,
+compare, decide — cannot be proved by any assertion about a string, so it was
+covered by a DOM-double harness run by hand. That harness lived in a temp
+directory and was gone by the next session, and the reload loop it had already
+proved fixed came back in a different form. It now lives at
+`lex/test_project/tests/init/harness/theme_follower_harness.mjs` and runs under
+pytest (scenario 1.280) when `node` is on the machine, skipping when it is not —
+a missing JS runtime is a fact about the machine, not a defect in the code.
+
+It models the one distinction a reload loop turns on: state that survives
+`location.reload()` (`localStorage`, `sessionStorage`) and state that does not
+(the window, its listeners, every flag on it). Eight cases, 18 checks.
 
 ### Batch 1ad addendum — the in-frame path (scenario 1.269)
 
@@ -733,7 +742,7 @@ Harness after the fix: **6/6**, including the exact regression — a frame hidde
 
 ## Batch 1aj — Streamlit sidebar chrome (2026-09-01)
 
-- **Scenarios:** 1.309-1.310
+- **Scenarios:** 1.309-1.313
 - **Status:** complete (11 pass)
 - **Source under test:** `lex/lex_app/streamlit/sidebar.py`, wired from `lex/streamlit_app.py`
 - **Test file:** `lex/test_project/tests/init/test_1aj_streamlit_sidebar_chrome.py`
@@ -916,3 +925,94 @@ it.
 
 The content inset is one named constant, in `rem` — an inset in `px` wouldn't
 track text scaling, and lining up with text is the entire point.
+
+
+### Batch 1ad addendum — the reloads that were left (scenarios 1.278-1.280)
+
+1.277 bounded the loop. Reported again anyway:
+
+> Streamlit reloads after a moment, so I'll be using it and it reloads by itself.
+
+Bounding stopped the *flipping*. It did not stop the *interruptions* — a bounded
+episode still restarts every time the ledger's window expires, and the
+contradiction that starts it never heals on its own.
+
+**The three inputs to `follow()` are not equals.** That is the whole fix:
+
+| Reason | What it is | Reload? |
+|---|---|---|
+| `install` | the page is booting anyway | yes — costs nothing |
+| `storage` | somebody just chose a theme | yes — acting is the point |
+| `widget` | an embedded frame describing *itself* | **no** |
+
+Only the third arrives while someone is using the page, and it is the one that is
+merely an observation. A widget saying "I am light" is not a request to reload the
+dashboard. The report is still written to the agreed key, so the next natural load
+picks it up.
+
+It is also why the disagreement was *permanent*: widget frames are cross-site and
+get partitioned storage, so they cannot read lex-app's real preference and report
+its **default** — forever. Which is why the memory of a contradiction is now
+sticky for the tab rather than windowed like the ledger. The ledger still expires,
+so a deliberate change an hour later is not mistaken for the tail of an old loop;
+"these two disagree" does not expire, because it stays true until something
+changes it.
+
+**Silencing the direct route looked complete and was not.** The shim writes the
+agreed key *before* calling the page, and a same-origin iframe's write reaches its
+parent as a `storage` event — the same shape as a person switching theme in
+another tab. The identical report simply took the other road:
+
+```
+widget → shim → localStorage.setItem(...)  ──storage event──▶  follower  (reloads!)
+              └─────────── __lexThemeFollow(...) ───────────▶  follower  (silenced)
+```
+
+The shim now marks the write as its own before making it, and the follower reads
+route as route, not as authority. Conversely a genuine `storage` change now
+outranks *every* refusal below it, including one this load already made —
+otherwise the escape hatch the stand-down message advertises ("change the theme in
+lex-app or Streamlit's menu") would be closed by the refusal that suggests it.
+
+Case 7 of the harness is this exact path. It fails against the pre-fix script and
+passes after, which is the only reason to have it.
+
+### Batch 1aj addendum 5 — the bottom pin, for real (scenario 1.313)
+
+The account block was asked to the foot of the sidebar twice. The first attempt
+shipped CSS that matched and did nothing:
+
+```css
+div:has(> div[data-lex-account]) { margin-top: auto; }   /* live, and inert */
+```
+
+The child combinator bound to the innermost wrapper Streamlit puts around markdown
+output. That element is not a flex child of the column, so `auto` had no free space
+to consume. No error, no warning, and invisible to a test asserting the selector is
+present — which is what the batch had.
+
+So 1.313 asserts the two things the pin actually needs, both of which the broken
+version failed:
+
+- a **descendant** match, since Streamlit's wrapping depth is not ours to predict;
+- an unbroken **flex column** from the panel down, or `margin-top: auto` resolves
+  to zero however well the selector matches.
+
+**This spends a Streamlit dependency**, reversing the batch's original "no
+internals" boundary. Named rather than discovered: call order cannot put a block
+at the foot of a panel, and the foot is what was asked for. The terms are the same
+ones the rest of this cluster uses — `data-testid`, not a generated emotion class —
+under the layout-only limit, so a Streamlit upgrade can only ever make it *not
+pinned*.
+
+**And no magic number.** `min-height: calc(100vh - 9rem)` reserved the header and
+nav with a constant that is right for exactly one app: the nav's height is however
+many pages the author declared. Smaller nav → the block floats mid-panel; larger →
+a scrollbar in a sidebar with no reason to scroll. `min-height: 100%` on a flex
+column asks for the same thing knowing nothing, and grows instead of clipping when
+the content genuinely overflows.
+
+**One test-authoring fix rides along.** Three times in this cluster, an assertion
+forbidding a property tripped on a *comment* explaining why that property was
+rejected — training the author to write worse comments to keep the suite green.
+`_rules_only()` strips comments before asserting.

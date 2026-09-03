@@ -20,11 +20,13 @@ And one that is a genuine hazard rather than a style point: the display name
 comes from the identity provider, so it is untrusted input rendered through
 ``unsafe_allow_html``.
 
-Cluster 01-init, batch 1aj, scenarios 1.309-1.312.
+Cluster 01-init, batch 1aj, scenarios 1.309-1.313.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1aj_streamlit_sidebar_chrome.py
 """
+
+import re
 
 import pytest
 
@@ -47,6 +49,18 @@ from lex.lex_app.streamlit.sidebar import (
 )
 
 pytestmark = pytest.mark.init
+
+def _rules_only(css: str) -> str:
+    """The CSS with its comments removed.
+
+    Assertions here are about what the browser is told, and a comment is not
+    that. Without this, explaining a rejected approach in a comment -- "not
+    `calc(100vh - <nav>)`, because..." -- fails the test that forbids it, which
+    trains you to write worse comments to keep the suite green.
+    """
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+
+
 
 
 class TestCluster1aj_SidebarChrome:
@@ -141,10 +155,68 @@ class TestCluster1aj_SidebarChrome:
         # cheap to lose.
         for forbidden in ("display: none", "visibility:", "color:", "background",
                           "opacity", "!important"):
-            assert forbidden not in css, f"the chrome CSS does more than layout: {forbidden}"
+            assert forbidden not in _rules_only(css), (
+                f"the chrome CSS does more than layout: {forbidden}"
+            )
 
         # And the markup it targets is ours, not Streamlit's.
         assert "data-lex-account" in css
+
+    def test_01_313_the_pin_matches_the_element_that_can_actually_move(self):
+        """Scenario 1.313: the pin lands on a flex child, not on a wrapper.
+
+        Reported as "put logout and user to the bottom of the sidebar" -- a
+        second time, because the first attempt shipped a selector that matched
+        and still did nothing::
+
+            div:has(> div[data-lex-account]) { margin-top: auto; }
+
+        The child combinator matched the innermost wrapper Streamlit puts around
+        markdown output. That element is not a flex child of the column, so
+        ``auto`` had no free space to consume and the block stayed exactly where
+        it rendered. Nothing errored; the CSS was live and inert -- which is why
+        no test asserting "the selector exists" caught it.
+
+        So assert the two things the pin actually needs, both of which the broken
+        version failed:
+
+        * a **descendant** match, since Streamlit's wrapping depth is not ours to
+          predict;
+        * an unbroken flex column from the panel down, or ``margin-top: auto``
+          resolves to zero however well it matches.
+        """
+        css = _CHROME_CSS
+
+        assert ":has(div[data-lex-account])" in css
+        assert ":has(> div[data-lex-account])" not in css, (
+            "a child match binds to Streamlit's wrapper depth, which is not ours"
+        )
+
+        # The chain: panel -> content -> user content -> vertical block.
+        for testid in ("stSidebarContent", "stSidebarUserContent", "stVerticalBlock"):
+            assert f'data-testid="{testid}"' in css, (
+                f"{testid} is not made a flex column; the pin has nothing to push into"
+            )
+        assert css.count("flex-direction: column") >= 2
+
+    def test_01_313_the_panel_height_is_not_a_guess(self):
+        """Scenario 1.313 (second half): no constant stands in for the nav.
+
+        The first working version reserved the header and navigation with
+        ``min-height: calc(100vh - 9rem)``. That number is right for exactly one
+        app: the navigation's height is however many pages the author declared,
+        so a smaller nav leaves the block floating mid-panel and a larger one
+        grows a scrollbar in a sidebar that had no reason to scroll.
+
+        ``min-height: 100%`` on a flex column asks for the same thing without
+        knowing anything -- and it grows instead of clipping when the content is
+        genuinely taller than the panel, which a viewport calculation does not.
+        """
+        css = _rules_only(_CHROME_CSS)
+
+        assert "min-height: 100%" in css
+        assert "100vh" not in css, "the panel's height is measured, not assumed"
+        assert "calc(" not in css
 
     def test_01_310_the_account_block_is_identity_and_logout_together(self):
         """Scenario 1.310 (fourth half): one block, rendered last.
