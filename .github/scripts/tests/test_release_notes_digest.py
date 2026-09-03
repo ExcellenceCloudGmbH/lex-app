@@ -276,3 +276,60 @@ def test_html_comments_and_trailers_are_stripped_from_the_body():
     assert "template comment" not in detail
     assert "Co-Authored-By" not in detail
     assert "Generated with" not in detail
+
+
+# ── Commit bodies as detail ───────────────────────────────────────────
+#
+# `detail` came only from a PR body, so a commit landed without a PR gave the
+# drafter nothing but its subject line. Every timezone commit in v2.1.4 is like
+# that: no PR, and the whole story — root cause, who was affected, what to run
+# — sitting in the commit body, unread. The 2.1.x backfill had to be written by
+# hand largely because of this.
+
+def test_collect_commits_reads_the_commit_body():
+    raw = (
+        "aaa1111\x1ffix(tz): adopt aware UTC\x1fRoot cause: the session zone moved.\n"
+        "Only user-typed datetimes are affected.\x1e"
+        "bbb2222\x1ffeat(cli): add lex ai-worktree\x1fA second chat needs its own checkout.\x1e"
+    )
+    got = digest.collect_commits("v1", "v2", run_log=lambda a, b: raw)
+    assert [c.sha for c in got] == ["aaa1111", "bbb2222"]
+    assert "Only user-typed datetimes are affected." in got[0].body
+    assert got[1].body.startswith("A second chat needs its own checkout.")
+
+
+def test_collect_commits_still_parses_records_with_no_body():
+    raw = "aaa1111\x1ffix(tz): adopt aware UTC\x1e"
+    got = digest.collect_commits("v1", "v2", run_log=lambda a, b: raw)
+    assert got[0].subject == "fix(tz): adopt aware UTC"
+    assert got[0].body == ""
+
+
+def test_the_git_log_invocation_asks_for_the_body():
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        class R: stdout = ""
+        return R()
+
+    digest._run_log("v1", "v2", run=fake_run)
+    pretty = [a for a in seen["argv"] if a.startswith("--pretty=")][0]
+    assert "%b" in pretty, "the body must be requested, or detail stays empty"
+    assert "--no-merges" in seen["argv"]
+
+
+def test_a_pr_body_still_wins_over_the_commit_body():
+    # The PR body is the author writing for readers; the commit body is the
+    # author writing for reviewers. Prefer the former when both exist.
+    c = digest.Commit(sha="aaa1111", subject="fix(x): y",
+                      pr_number=1, pr_title="fix(x): y",
+                      pr_body="PR EXPLANATION", body="COMMIT EXPLANATION")
+    entry = digest._entry(c, "backend")
+    assert "PR EXPLANATION" in entry["detail"]
+
+
+def test_the_commit_body_is_used_when_there_is_no_pr_body():
+    c = digest.Commit(sha="aaa1111", subject="fix(x): y", body="COMMIT EXPLANATION")
+    entry = digest._entry(c, "backend")
+    assert "COMMIT EXPLANATION" in entry["detail"]

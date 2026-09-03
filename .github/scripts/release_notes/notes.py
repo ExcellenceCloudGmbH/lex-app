@@ -189,6 +189,20 @@ Where an entry has no detail, say only what the subject supports. Do not
 invent specifics to fill the gap — a thin bullet is better than a confident
 wrong one.
 
+SOMETHING AN EARLIER RELEASE SHIPPED MAY HAVE BEEN REMOVED
+A release can roll back what a previous one introduced. If the digest contains
+reverts or removals of a capability customers were told about, that is the most
+important thing in the note and it goes first. Say plainly that it was rolled back,
+what is no longer there, and which release introduced it. Do not speculate about
+why, and do not soften it — a customer who reads about a feature in one release
+and silently loses it in the next has been misled by our notes, not by the
+change.
+
+WHEN A CHANGE CAME FROM A CUSTOMER
+If a detail says a change was reported by a customer, lead the bullet with the
+symptom they reported, in their terms, before anything else. It is the clearest
+evidence you have that the change is user-facing at all.
+
 FORMAT
 Use only these headings, in this order, and only when you have entries for them:
 "## Main changes" (new capability), "## Optimizations" (existing things now
@@ -214,8 +228,15 @@ WRITING
 - Every statement must trace to a digest entry. Do not infer capabilities that
   are not there, and do not soften or inflate what an entry says.
 - No class names, file paths, commit hashes, PR numbers or internal jargon.
-- End with a line starting "**Upgrade note:**" — any action needed on upgrade,
-  or that none is.
+- End with "**Upgrade note:**". One line is right for most releases. When the
+  release facts below name a migration, a command an operator must run, or a
+  configuration change, it becomes a short section instead, and states:
+  who is affected, what to run, and what goes wrong if it is run incorrectly.
+  Where a mistake is not symmetric — one direction damages data and the other
+  merely leaves work undone — say which is which and which way to err.
+- Take every claim in the upgrade note from the release facts. Never infer a
+  migration from prose: a note that told customers to expect a migration that
+  had shipped two releases earlier is why these facts are computed for you.
 
 Match the tone of this previous release note:
 
@@ -240,7 +261,51 @@ Return only the markdown release note. No preamble, no explanation.
 MAX_PROMPT_BYTES = 60_000
 
 
-def build_prompt(digest: dict, *, exemplar: str, retry_reason: str | None = None) -> str:
+def _interface_line(digest: dict) -> str:
+    """What to say about the interface — and what not to say.
+
+    "We could not work out what the interface did" and "the interface did not
+    change" look identical in a note unless the difference is stated. Removing
+    that ambiguity is the whole point of the provenance work, so it must reach
+    the prose and not stop at the changelog.
+    """
+    if not digest.get("frontend_recorded", True):
+        return (
+            "The interface changes for this release could not be determined. Do NOT "
+            "write that the interface is unchanged, and do not describe interface "
+            "work. Say only what the entries below support."
+        )
+    count = digest.get("frontend_commits")
+    if count == 0:
+        return (
+            "The interface did not change in this release. State that explicitly, "
+            "in one short sentence, so a reader is not left wondering."
+        )
+    if count:
+        return (
+            f"{count} interface change(s) are included in the entries below, "
+            "already mixed in with the rest. Group them by what they mean to a user."
+        )
+    return ""
+
+
+def _context_block(digest: dict, facts_block: str | None) -> str:
+    parts = []
+    line = _interface_line(digest)
+    if line:
+        parts.append("THE INTERFACE\n" + line)
+    if facts_block and facts_block.strip():
+        parts.append(
+            "RELEASE FACTS\nComputed from the diff, not inferred. The upgrade "
+            "note must agree with these.\n" + facts_block.strip()
+        )
+    if not parts:
+        return ""
+    return "\n\n" + "\n\n".join(parts) + "\n"
+
+
+def build_prompt(digest: dict, *, exemplar: str, retry_reason: str | None = None,
+                 facts_block: str | None = None) -> str:
     """Assemble the model prompt from the digest and a style exemplar.
 
     Entries carry the author's PR body in "detail". That is the material the
@@ -275,7 +340,8 @@ def build_prompt(digest: dict, *, exemplar: str, retry_reason: str | None = None
             if len(prompt.encode("utf-8")) <= budget:
                 break
 
-    return prompt + suffix
+    facts = facts_block if facts_block is not None else digest.get("facts")
+    return prompt + _context_block(digest, facts) + suffix
 
 
 def validate(text: str) -> str | None:
@@ -323,9 +389,14 @@ def fallback(digest: dict, *, reason: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def draft(digest: dict, *, exemplar: str, model: Callable[[str], str]) -> str:
+def draft(digest: dict, *, exemplar: str, model: Callable[[str], str],
+          facts_block: str | None = None) -> str:
     """Draft the note, degrading to a fallback body on any failure."""
-    if not digest["changes"]:
+    # Nothing shippable is the same answer as nothing at all, and it is worth
+    # reaching without a model call: asking one to write a customer note from
+    # 34 release-tooling commits invites it to promote our machinery into a
+    # feature, which is what INTERNAL_SCOPES exists to prevent.
+    if not digest["changes"] or all(c.get("internal") for c in digest["changes"]):
         return (
             "No user-facing changes in this release.\n\n"
             "**Upgrade note:** no action needed.\n"
@@ -337,7 +408,10 @@ def draft(digest: dict, *, exemplar: str, model: Callable[[str], str]) -> str:
     # retired endpoint will not recover, and the second call still bills.
     problem = None
     for _attempt in (1, 2):
-        prompt = build_prompt(digest, exemplar=exemplar, retry_reason=problem)
+        prompt = build_prompt(
+            digest, exemplar=exemplar, retry_reason=problem,
+            facts_block=facts_block,
+        )
         try:
             text = model(prompt)
         except Exception as exc:

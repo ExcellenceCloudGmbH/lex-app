@@ -81,6 +81,32 @@ for — and because it lives in `CHANGELOG.md`, you can find every one of them w
 
 ---
 
+## What the drafter is told
+
+The prose is written by a model, so what reaches its prompt decides the quality of the note.
+Three kinds of context go in, and each one exists because a note came out wrong without it.
+
+**The author's own explanation.** Each entry carries a `detail` — the pull request body, or the
+commit message body when there was no pull request. That second half matters more than it sounds:
+every timezone change in `v2.1.4` landed without a pull request, so the drafter used to see nothing
+but one-line subjects while the root cause, who was affected and what to run sat unread in the
+commit messages.
+
+**Release facts, computed from the diff.** Whether the release adds a migration, whether it adds a
+command an operator has to run, and whether it introduces new configuration. A model cannot work
+these out from prose, and it should not try — `v2.1.3`'s note told customers to expect a migration
+that had actually shipped two releases earlier. These are now handed over as facts, and the upgrade
+note has to agree with them.
+
+**Whether the interface changed.** Not just *what* changed but which of three answers applies: it
+changed and here is how, it genuinely did not change, or we could not determine it. The drafter is
+told to state the middle case explicitly and forbidden from claiming it in the third — which is the
+same distinction the gap marker draws in the changelog, carried through into the prose.
+
+A release whose every entry is internal never reaches the model at all. It returns "no user-facing
+changes" directly, because asking a model to write a customer note from thirty-four release-tooling
+commits invites it to promote our own machinery into a feature.
+
 ## Backfill: fixing things after the fact
 
 **Backfill re-generates a release's changelog entry.** That's all it is. It's used for two jobs.
