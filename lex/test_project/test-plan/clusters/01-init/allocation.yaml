@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 222
+max_scenario: 229
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -282,4 +282,26 @@ letters:
       adopts a strictly newer auth_token rather than discarding it while the stored one is still
       valid, which silently defeated any renewal. First two-letter batch id - cluster 1 exhausted
       a-z. Renumbered from z/1.201-1.206 on merge
+  ab:
+    title: Ignored client-role self-cleanup (client-admin platform role, LEX-5)
+    scenarios: 1.223-1.229
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      IGNORED_CLIENT_ROLES swaps the abandoned release-manager for the platform-internal
+      client-admin role (init.py:49); the sync only ever ADDS Policy - <role> entries via
+      Keycloak's import endpoint, so a policy minted by an older lex-app for a role that later
+      became ignored would persist forever without an explicit cleanup. Adds
+      strip_ignored_role_policies (in-memory: drops the ignored-role policy from auth_config and
+      detaches its name from every permission's config.applyPolicies) and
+      delete_stale_ignored_role_policies (live: finds Policy - <ignored role> via
+      get_client_authz_policies and deletes it via delete_client_authz_policy once nothing
+      references it, run after import_authorization_settings succeeds so Keycloak's
+      referential-integrity check on the policy delete passes). 1.223 ignore-set contents, 1.224
+      stale policy removed from config, 1.225 reference detached from a permission's
+      applyPolicies, 1.226 no-op when nothing stale, 1.227 live delete by id, 1.228 no-op when
+      nothing live, 1.229 missing-id fail-fast.
 

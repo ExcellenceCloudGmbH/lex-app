@@ -200,3 +200,23 @@ does not remove user launch configurations.
 **Why a regression matters:** silent. Without a published expiry the caller has nothing to schedule against; if the proxy keeps the older token, every renewal is discarded and the session still dies at the original expiry — no error anywhere, just a user sent back to the login page mid-work.
 
 **Scenario range:** 1.217 – 1.222. **Test file:** `lex/test_project/tests/init/test_1aa_embedded_token_renewal.py`. **Type:** U. **Status:** ✅ 6 pass.
+
+---
+
+### 1ab. Ignored client-role self-cleanup (`client-admin` platform role, LEX-5) ✅
+
+**What it tests:** `lex init` builds tenant authz from every role found on the Keycloak client; roles in `IGNORED_CLIENT_ROLES` get no `Policy - <role>`. The sync only ever ADDS policies via Keycloak's import endpoint — it never deletes an entry just because it's missing from the re-imported payload — so a policy minted by an older lex-app for a role that later became ignored (here: the new platform-internal `client-admin` role, replacing the abandoned `release-manager`) would persist forever without an explicit cleanup step.
+
+**Why a regression matters:** a stale `Policy - client-admin` silently grants tenant-app authorization to a role that is meant to be platform-internal only — exactly the authorization leak LEX-5 exists to close.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.223 | ignore-set contents | `client-admin` is in `IGNORED_CLIENT_ROLES`; the superseded `release-manager` is not |
+| 1.224 | stale policy removed from config | a pre-existing `Policy - client-admin` is dropped from `auth_config['policies']` |
+| 1.225 | reference detached from permission | a permission's `config.applyPolicies` has `Policy - client-admin` removed, other applied policies survive in order |
+| 1.226 | no-op when nothing stale | a config with no ignored-role policy is left byte-for-byte unchanged |
+| 1.227 | live delete by id | a live `Policy - client-admin` found via `get_client_authz_policies` is deleted via `delete_client_authz_policy` using its id |
+| 1.228 | no-op when nothing live | no matching live policy → `delete_client_authz_policy` is never called |
+| 1.229 | missing-id fail-fast | a matching live policy record without an `id` raises `CommandError` (mirrors `delete_resources_individual`'s permission-id check) |
+
+**Scenario range:** 1.223 – 1.229. **Test file:** `lex/test_project/tests/init/test_1ab_ignored_role_policy_cleanup.py`. **Type:** U. **Status:** ✅ 7 pass. Source: `lex/lex_app/management/commands/init.py` (`IGNORED_CLIENT_ROLES`, `strip_ignored_role_policies`, `delete_stale_ignored_role_policies`). Design: `local_wiki/projects/admin-role-separation-5/README.md`. The live-delete-after-import ordering (so Keycloak's referential-integrity check on the policy delete passes) is not verified against a live Keycloak instance.

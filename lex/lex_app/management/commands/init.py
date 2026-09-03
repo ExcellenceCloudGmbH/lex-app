@@ -46,7 +46,7 @@ KEYCLOAK_ENV_VARS = [
 ]
 
 DEFAULT_CLIENT_ROLES = ("admin", "standard", "view-only")
-IGNORED_CLIENT_ROLES = frozenset({"manage-client", "uma_protection"})
+IGNORED_CLIENT_ROLES = frozenset({"manage-client", "uma_protection", "client-admin"})
 DEFAULT_SCOPE_POLICY_MAPPING = {
     "list": ["Policy - admin", "Policy - standard", "Policy - view-only"],
     "read": ["Policy - admin", "Policy - standard", "Policy - view-only"],
@@ -1041,6 +1041,92 @@ class KeycloakSyncManager:
 
         return ordered_role_names, newly_created_policy_names
 
+    def strip_ignored_role_policies(self, auth_config: Dict) -> None:
+        """Remove ``Policy - <role>`` config entries for IGNORED_CLIENT_ROLES.
+
+        Older lex-app versions minted a client-role policy for every role
+        found on the Keycloak client, including roles that are
+        platform-internal and must never grant tenant-app authorization
+        (``IGNORED_CLIENT_ROLES``). ``get_client_roles`` already excludes
+        these roles going forward, but the sync only ever ADDS policies via
+        import — it never removes what's missing from a re-imported
+        payload — so a policy minted by an older lex-app persists in the
+        exported config forever unless something strips it here.
+
+        This mutates *auth_config* in place: drops the ignored-role policy
+        itself, and detaches its name from every permission's
+        ``config.applyPolicies`` so no dangling reference survives the
+        re-import. Safe/no-op when no such policy exists (the normal case).
+        """
+        ignored_policy_names = {f"Policy - {role_name}" for role_name in IGNORED_CLIENT_ROLES}
+
+        policies = auth_config.get("policies", [])
+        remaining_policies = [p for p in policies if p.get("name") not in ignored_policy_names]
+        removed_count = len(policies) - len(remaining_policies)
+        auth_config["policies"] = remaining_policies
+
+        detached_count = 0
+        for policy in remaining_policies:
+            config = policy.get("config")
+            if not isinstance(config, dict) or "applyPolicies" not in config:
+                continue
+
+            apply_policy_names = self._parse_json_maybe(
+                config.get("applyPolicies", "[]"),
+                f"policy.config.applyPolicies for {policy.get('name')}",
+            )
+            updated_apply_policy_names = [
+                p for p in apply_policy_names if p not in ignored_policy_names
+            ]
+            if updated_apply_policy_names == apply_policy_names:
+                continue
+
+            config["applyPolicies"] = json.dumps(updated_apply_policy_names)
+            detached_count += 1
+
+        if removed_count:
+            logger.info(
+                "   ✓ Removed %s stale ignored-role policy/policies from config: %s",
+                removed_count,
+                ", ".join(sorted(ignored_policy_names)),
+            )
+        if detached_count:
+            logger.info(
+                "   ✓ Detached ignored-role policy reference(s) from %s permission(s)",
+                detached_count,
+            )
+
+    def delete_stale_ignored_role_policies(self) -> None:
+        """Delete any live Keycloak policy named ``Policy - <role>`` for IGNORED_CLIENT_ROLES.
+
+        Must run *after* ``import_authorization_settings`` has succeeded:
+        that import already pushed the detached ``applyPolicies``
+        references (see ``strip_ignored_role_policies``), so by the time
+        this runs the live policy has no remaining permission referencing
+        it and Keycloak will allow the delete. Fail-fast: any Keycloak
+        admin API error raises. No-op when the policy doesn't exist (the
+        normal case once an instance has healed).
+        """
+        ignored_policy_names = {f"Policy - {role_name}" for role_name in IGNORED_CLIENT_ROLES}
+
+        live_policies = self.kc_manager.admin.get_client_authz_policies(
+            client_id=self.kc_manager.client_uuid
+        )
+        for live_policy in live_policies:
+            policy_name = live_policy.get("name")
+            if policy_name not in ignored_policy_names:
+                continue
+
+            policy_id = live_policy.get("id")
+            if not policy_id:
+                raise CommandError(f"Policy has no id: {live_policy}")
+
+            self.kc_manager.admin.delete_client_authz_policy(
+                client_id=self.kc_manager.client_uuid,
+                policy_id=policy_id,
+            )
+            logger.info(f"  ✓ Deleted stale ignored-role policy: {policy_name}")
+
     def process_model_changes(
         self,
         adds: List[Tuple[str, str]],
@@ -1173,6 +1259,9 @@ class KeycloakSyncManager:
             client_roles = self.get_client_roles()
             self.normalize_role_policy_references(auth_config, client_roles)
 
+            logger.info("Stripping stale ignored-role policies from config...")
+            self.strip_ignored_role_policies(auth_config)
+
             # add resources + permissions
             if to_add_set:
                 managed_policy_names = {f"Policy - {role_name}" for role_name in managed_role_names}
@@ -1284,6 +1373,9 @@ class KeycloakSyncManager:
                 raise CommandError("Keycloak import_authorization_settings returned False")
 
             logger.info("Successfully imported updated authorization settings")
+
+            logger.info("Deleting stale ignored-role policies still live in Keycloak...")
+            self.delete_stale_ignored_role_policies()
 
         except Exception as e:
             had_primary_error = e
