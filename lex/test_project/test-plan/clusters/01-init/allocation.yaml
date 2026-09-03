@@ -454,6 +454,21 @@ letters:
       location.reload() versus state that does not. Eight cases, 18 checks. Case 7 - the shim's
       storage road - fails against the pre-fix script and passes after, which is the whole reason
       to have it.
+      1.278 then shipped INVERTED and broke theme following outright - reported as "theme switch
+      isn't working", a light page hosting a dark widget. Refusing a widget report its reload is
+      true of a RE-ASSERTION and false of a REPORT: in a same-site deployment the widget frame is
+      the only messenger, because lex-app writes its preference, the frame reads it (same origin,
+      so unlike the partitioned cross-site case it genuinely can), and tells the shim - and the
+      relay cannot cover for it, since the shim already wrote that value and `storage` does not
+      fire for an unchanged one. The change was swallowed whole. The error was generalising
+      "widget frames cannot see lex-app's storage" from the cross-site case to every case; it is
+      false when the origins match, which is the deployment we run. The rule is now act-versus-
+      forget: every input may ACT, and only a `storage` event no widget claimed may clear the loop
+      memory. That carries both requirements, where refusing to act carried only one - and the
+      sticky stand-down was what actually stopped the mid-use reloads all along.
+      Harness case 9 covers the gap that let this ship green through a suite added to catch exactly
+      this: no case had a widget report carrying real news. It fails against the broken commit and
+      passes against the fix. 9 cases, 19 checks.
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299

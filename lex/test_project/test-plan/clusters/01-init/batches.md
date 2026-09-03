@@ -977,6 +977,41 @@ lex-app or Streamlit's menu") would be closed by the refusal that suggests it.
 Case 7 of the harness is this exact path. It fails against the pre-fix script and
 passes after, which is the only reason to have it.
 
+**Then 1.278 shipped inverted**, and broke theme following outright — reported as
+"theme switch isn't working", a light page hosting a dark widget.
+
+Refusing a widget report its reload is true of a *re-assertion* and false of a
+*report*. In a **same-site** deployment the widget frame is the only messenger:
+
+```
+lex-app writes preference → widget frame (same origin, CAN read it) → shim → page
+```
+
+The relay cannot cover for it, because the shim already wrote that value and
+`storage` does not fire for an unchanged one. The change was swallowed whole.
+
+The error was generalising "widget frames cannot see lex-app's storage" from the
+partitioned **cross-site** case to every case. It is false when the origins match
+— which is the deployment we actually run.
+
+The rule is now **act versus forget**:
+
+| Input | May reload? | May clear the loop memory? |
+|---|---|---|
+| `install` | yes | no |
+| `storage` (unclaimed) | yes | **yes** |
+| `widget` | yes | **no** |
+
+A widget re-asserts on every rerun, so letting an assertion *forget* wiped the
+record of a contradiction several times a minute and restarted the bounded loop
+— that was the mid-use reloading. Denying the right to forget fixes it; denying
+the right to act does not, and breaks the carrier. The sticky stand-down was what
+actually stopped the reloads all along.
+
+**Why it shipped green through a suite built to catch this:** no harness case had
+a widget report carrying real *news* — every case re-asserted a disagreement.
+Case 9 adds it, and fails against the broken commit.
+
 ### Batch 1aj addendum 5 — the bottom pin, for real (scenario 1.313)
 
 The account block was asked to the foot of the sidebar twice. The first attempt
