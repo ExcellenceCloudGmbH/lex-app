@@ -22,6 +22,7 @@ mode-invariant.
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -133,6 +134,33 @@ def _display_name(session_state) -> str:
     return "Signed in"
 
 
+def _one_line(markup: str) -> str:
+    """Collapse markup to a single line before handing it to Streamlit.
+
+    ``st.markdown(..., unsafe_allow_html=True)`` runs the string through a
+    MARKDOWN parser first, and markdown has opinions about whitespace that HTML
+    does not:
+
+    * a blank line ends an HTML block, and
+    * a line indented four spaces is a code block.
+
+    Pretty-printed markup satisfies both. When an optional piece is omitted --
+    a user with no subtitle -- its placeholder leaves a whitespace-only line,
+    markdown reads that as blank, closes the HTML block, and renders the next
+    indented ``</div>`` as literal text in a code box.
+
+    Found by running the real thing rather than reasoning about it: the failure
+    is invisible whenever the optional piece happens to be present, which it was
+    for every account anyone had looked at.
+
+    Joined with a SPACE, not with nothing: HTML attributes are separated by
+    whitespace, so welding the lines together would turn ``target="_top"`` and
+    ``style="..."`` into one unparseable attribute. A space is harmless inside a
+    ``;``-separated style attribute and correct between attributes.
+    """
+    return re.sub(r"\s*\n\s*", " ", markup).strip()
+
+
 def identity_html(name: str, subtitle: Optional[str] = None) -> str:
     """The brand lockup and the signed-in user, as one block of markup.
 
@@ -155,7 +183,7 @@ def identity_html(name: str, subtitle: Optional[str] = None) -> str:
         else ""
     )
 
-    return f"""
+    return _one_line(f"""
 <div style="margin:-0.25rem -0.25rem 0;">
   <div style="display:flex;align-items:center;gap:10px;padding:2px 6px 12px;">
     <div style="width:34px;height:34px;border-radius:50%;background:{NAV_ACTIVE_BG};
@@ -169,7 +197,7 @@ def identity_html(name: str, subtitle: Optional[str] = None) -> str:
   </div>
   <div style="height:1px;background:{NAV_BORDER};margin-bottom:2px;"></div>
 </div>
-""".strip()
+""")
 
 
 def logout_row_html(href: str) -> str:
@@ -183,7 +211,7 @@ def logout_row_html(href: str) -> str:
     ``target="_top"`` because the sign-out is a full navigation: inside a frame
     it would otherwise replace the widget rather than the page.
     """
-    return f"""
+    return _one_line(f"""
 <div style="margin:0 -0.25rem;">
   <div style="height:1px;background:{NAV_BORDER};margin-bottom:6px;"></div>
   <a href="{html.escape(href, quote=True)}" target="_top"
@@ -199,7 +227,7 @@ def logout_row_html(href: str) -> str:
     <span>Log out</span>
   </a>
 </div>
-""".strip()
+""").strip()
 
 
 #: Pins our account block to the bottom of the sidebar's content area.

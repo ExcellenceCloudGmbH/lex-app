@@ -640,10 +640,10 @@ letters:
       attribute mutation with no insertion.
   aj:
     title: Streamlit sidebar chrome in lex-app's language
-    scenarios: 1.309-1.313
+    scenarios: 1.309-1.314
     status: complete
     tests:
-      pass: 25
+      pass: 26
       skip: 0
       xfail: 0
     note: >-
@@ -689,6 +689,18 @@ letters:
       flexes and may only GROW (`1 0 auto`) - letting it shrink would squeeze the way out of the
       app on exactly the sidebar that is already too full, while the real scroll container sits one
       level up and would have handled it.
+      1.314 is the batch's first finding from RUNNING the component rather than reasoning about
+      it, and it had been shipping broken. st.markdown(unsafe_allow_html=True) parses MARKDOWN
+      first, and markdown has opinions about whitespace that HTML does not: a blank line ends an
+      HTML block and a four-space indent is a code block. The pretty-printed markup satisfied
+      both - so whenever the optional subtitle was omitted, its placeholder left a whitespace-only
+      line, markdown closed the HTML block there and rendered the following indented `</div>` as
+      literal text in a code box, in the sidebar, to the user. Invisible in every screenshot taken
+      until then because every account anyone had looked at HAD an email for the subtitle. Both
+      builders now emit a single line, joined with a SPACE rather than welded - HTML attributes are
+      whitespace-separated, so joining with nothing turns `target="_top"` and `style="..."` into one
+      unparseable attribute, which is the bug the obvious fix would have introduced. The scenario
+      asserts no builder emits a newline at all, removing the class rather than the instance.
       One test-authoring fix rides along, because the same mistake was made three times in this
       cluster: assertions that forbid a property were tripping on COMMENTS explaining why that
       property was rejected. _rules_only() strips comments before asserting, so documenting a

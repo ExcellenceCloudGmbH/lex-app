@@ -742,7 +742,7 @@ Harness after the fix: **6/6**, including the exact regression — a frame hidde
 
 ## Batch 1aj — Streamlit sidebar chrome (2026-09-01)
 
-- **Scenarios:** 1.309-1.313
+- **Scenarios:** 1.309-1.314
 - **Status:** complete (11 pass)
 - **Source under test:** `lex/lex_app/streamlit/sidebar.py`, wired from `lex/streamlit_app.py`
 - **Test file:** `lex/test_project/tests/init/test_1aj_streamlit_sidebar_chrome.py`
@@ -1062,3 +1062,30 @@ full, while the real scroll container sits one level up and would have handled i
 forbidding a property tripped on a *comment* explaining why that property was
 rejected — training the author to write worse comments to keep the suite green.
 `_rules_only()` strips comments before asserting.
+
+
+### Batch 1aj addendum 6 — what running it found (scenario 1.314)
+
+Every earlier scenario in this batch asserts on markup as a *string*. Rendering
+the component in a real Streamlit page — no lex-app, no auth, just `st.logo` +
+`st.navigation` + `render_account` — found something no string assertion would:
+
+`st.markdown(..., unsafe_allow_html=True)` parses **markdown first**, and
+markdown has opinions about whitespace that HTML does not:
+
+- a blank line ends an HTML block
+- a four-space indent is a code block
+
+The pretty-printed markup satisfied both. With no subtitle, the placeholder left
+a whitespace-only line; markdown read it as blank, closed the HTML block, and
+rendered the following indented `</div>` **as literal text in a code box** — in
+the sidebar, to the user.
+
+It was invisible in every screenshot taken until then because every account
+anyone had looked at *had* an email to put in the subtitle.
+
+Both builders now emit one line. Joined with a **space**, not welded: HTML
+attributes are whitespace-separated, so joining with nothing turns
+`target="_top"` and `style="..."` into a single unparseable attribute — the bug
+the obvious fix introduces. The scenario asserts no builder emits a newline at
+all, so no future edit can reintroduce a blank line or an indent.

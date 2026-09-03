@@ -20,7 +20,7 @@ And one that is a genuine hazard rather than a style point: the display name
 comes from the identity provider, so it is untrusted input rendered through
 ``unsafe_allow_html``.
 
-Cluster 01-init, batch 1aj, scenarios 1.309-1.313.
+Cluster 01-init, batch 1aj, scenarios 1.309-1.314.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1aj_streamlit_sidebar_chrome.py
@@ -161,6 +161,42 @@ class TestCluster1aj_SidebarChrome:
 
         # And the markup it targets is ours, not Streamlit's.
         assert "data-lex-account" in css
+
+    def test_01_314_the_markup_survives_streamlits_markdown_parser(self):
+        """Scenario 1.314: no newline reaches ``unsafe_allow_html``.
+
+        ``st.markdown(..., unsafe_allow_html=True)`` runs the string through a
+        MARKDOWN parser before any HTML is honoured, and markdown has opinions
+        about whitespace that HTML does not: a blank line ends an HTML block,
+        and a four-space indent is a code block.
+
+        Pretty-printed markup satisfies both. When the optional subtitle is
+        omitted its placeholder leaves a whitespace-only line -- markdown reads
+        that as blank, closes the HTML block, and renders the following indented
+        ``</div>`` as literal text in a code box, in the sidebar, to the user.
+
+        Invisible in every screenshot taken until now, because every account
+        anyone had looked at HAD an email to put in the subtitle. It took
+        rendering the real component with the optional piece missing.
+
+        The fix removes the class rather than the instance: no builder emits a
+        newline at all, so no future edit can reintroduce a blank line or an
+        indent for markdown to interpret.
+        """
+        with_subtitle = identity_html("Hazem Sahbani", subtitle="h@example.com")
+        without = identity_html("Hazem Sahbani", subtitle=None)
+        logout = logout_row_html("/logout")
+
+        for label, markup in (("identity", with_subtitle), ("identity/no subtitle", without),
+                              ("logout", logout)):
+            assert "\n" not in markup, f"{label} hands markdown a newline to interpret"
+
+        # Joined with a space, not welded: attributes are whitespace-separated,
+        # and `target="_top"style=` is one unparseable attribute.
+        assert 'target="_top" style=' in logout, "attributes were welded together"
+
+        # And the omitted piece leaves no orphan.
+        assert without.count("<div") == without.count("</div>")
 
     def test_01_313_the_pin_matches_the_element_that_can_actually_move(self):
         """Scenario 1.313: the pin lands on a flex child, not on a wrapper.
