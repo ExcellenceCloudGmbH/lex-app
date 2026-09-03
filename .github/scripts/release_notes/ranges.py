@@ -256,6 +256,27 @@ def frontend_range(
     SHA at both ends there is no truthful frontend range, and inventing one
     would produce notes about changes that may not be in the shipped bundle.
     """
+    # The pin wins, and only when BOTH ends have one. Two pins are two exact
+    # versions, so the range is known before anything is built — no manifest,
+    # no side-car, and no way for it to fail after a release has already
+    # shipped, which is what retires the gap machinery for new releases.
+    #
+    # One pin is deliberately not enough: the release that INTRODUCES the pin
+    # has none at its previous tag, and inventing a starting point would
+    # attribute every frontend commit in PAC's history to that one release.
+    previous_version = (
+        frontend_version_at(previous_tag, show=show) if previous_tag else None
+    )
+    current_version = frontend_version_at(current_tag, show=show)
+    if previous_version and current_version:
+        # These carry PAC TAGS rather than SHAs. The field names under-describe
+        # that, but renaming them touches every historical call site for no
+        # behavioural gain — `git log` treats a tag and a sha alike.
+        return Range(
+            from_sha=pac_tag_for(previous_version),
+            to_sha=pac_tag_for(current_version),
+        )
+
     to_sha = frontend_sha_at(current_tag, show=show, history=history, bundle=bundle)
     if to_sha is None:
         return None
@@ -265,3 +286,49 @@ def frontend_range(
     if from_sha is None:
         return None
     return Range(from_sha=from_sha, to_sha=to_sha)
+
+
+# ── The frontend version, once the frontend is a published package ───
+#
+# `frontend-version.txt` says which frontend a release ships: an exact version,
+# or `latest`. An exact version IS the provenance record — it identifies one
+# published artifact, readable from the tag with `git show`.
+#
+# `latest` deliberately is not. It resolves to whatever was newest on the day
+# the release was built, which nothing in the tag records, so it reports as a
+# gap rather than a guess. The resolved version is written into the bundle and
+# onto the GitHub release by the publish workflow; pin the file when you need a
+# release you can attribute from git alone.
+VERSION_RE = re.compile(r"^(?P<version>\d+\.\d+\.\d+[A-Za-z0-9.]*)$")
+
+SPEC_PATH = "frontend-version.txt"
+LATEST = "latest"
+
+
+def frontend_version_at(ref: str, *, show=git_show) -> str | None:
+    """The frontend version a release pinned, or None.
+
+    None covers three cases that are all "cannot be established from git":
+    the file is absent (every tag before this mechanism), it says `latest`, or
+    it holds something that is not a version.
+    """
+    blob = show(ref, SPEC_PATH)
+    if not blob:
+        return None
+    for line in blob.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        match = VERSION_RE.fullmatch(line)
+        return match["version"] if match else None
+    return None
+
+
+def pac_tag_for(version: str) -> str:
+    """The PAC tag that published `version`.
+
+    Publishing derives the tag from package.json's version, so the mapping is
+    exactly this one prefix — see .github/workflows/publish-frontend.yml in
+    process-admin-general-client.
+    """
+    return f"v{version}"
