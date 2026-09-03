@@ -26,6 +26,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # ASCII unit separator: cannot appear in a commit subject, unlike any
 # punctuation a human might type.
 _FIELD_SEP = "\x1f"
+# Bodies are multi-line, so records need a terminator of their own. A record
+# with only two fields still parses, which keeps injected two-field fixtures
+# working and makes a body genuinely optional rather than required.
+_RECORD_SEP = "\x1e"
 
 _SUBJECT_RE = re.compile(
     r"^(?P<type>" + "|".join(CONVENTIONAL_TYPES) + r")"
@@ -69,6 +73,7 @@ class Commit:
 
     sha: str
     subject: str
+    body: str = ""
     pr_number: int | None = None
     pr_title: str | None = None
     pr_body: str | None = None
@@ -161,7 +166,7 @@ def _entry(commit: Commit, component: str) -> dict:
         "internal": internal,
         # Internal changes are omitted from the note, so their bodies would be
         # pure prompt cost. They keep their line in the changelog either way.
-        "detail": "" if internal else summarise_body(commit.pr_body),
+        "detail": "" if internal else summarise_body(commit.pr_body or commit.body),
     }
 
 
@@ -198,16 +203,24 @@ def build_digest(
     return {"tag": tag, "previous_tag": previous_tag, "changes": changes}
 
 
-def _run_log(from_ref: str | None, to_ref: str) -> str:
+def _run_log(from_ref: str | None, to_ref: str, *, run=subprocess.run) -> str:
     spec = f"{from_ref}..{to_ref}" if from_ref else to_ref
-    result = subprocess.run(
-        ["git", "log", "--no-merges", f"--pretty=%h{_FIELD_SEP}%s", spec],
+    result = run(
+        ["git", "log", "--no-merges",
+         f"--pretty=%h{_FIELD_SEP}%s{_FIELD_SEP}%b{_RECORD_SEP}", spec],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
     return result.stdout.strip()
+
+
+def _records(raw: str) -> list[str]:
+    """Split git output into records, tolerating the older line-per-commit form."""
+    if _RECORD_SEP in raw:
+        return [r.strip("\n") for r in raw.split(_RECORD_SEP) if r.strip()]
+    return [line for line in raw.splitlines() if line.strip()]
 
 
 def collect_commits(
@@ -219,11 +232,13 @@ def collect_commits(
     """Read `from_ref..to_ref` into Commit records."""
     raw = run_log(from_ref, to_ref)
     commits: list[Commit] = []
-    for line in raw.splitlines():
+    for line in _records(raw):
         if _FIELD_SEP not in line:
             continue
-        sha, subject = line.split(_FIELD_SEP, 1)
-        commits.append(Commit(sha=sha.strip(), subject=subject.strip()))
+        parts = line.split(_FIELD_SEP)
+        sha, subject = parts[0], parts[1] if len(parts) > 1 else ""
+        body = parts[2] if len(parts) > 2 else ""
+        commits.append(Commit(sha=sha.strip(), subject=subject.strip(), body=body.strip()))
     return commits
 
 

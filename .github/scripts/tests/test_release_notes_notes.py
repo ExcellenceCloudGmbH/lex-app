@@ -521,3 +521,92 @@ def test_the_retry_suffix_is_counted_against_the_prompt_byte_budget():
                                  retry_reason="no recognised section heading")
     assert len(retried.encode("utf-8")) <= notes.MAX_PROMPT_BYTES
     assert "no recognised section heading" in retried
+
+
+# ── Prompt context: facts, the interface, and rollbacks ───────────────
+#
+# Everything below is context the 2.1.x backfill needed and the prompt could
+# not previously see. Each case is a note that came out wrong, or could not be
+# written at all, without it.
+
+def test_the_prompt_carries_the_release_facts_when_given():
+    prompt = notes.build_prompt(_digest(), exemplar="X", facts_block="- FACT ONE\n- FACT TWO")
+    assert "FACT ONE" in prompt and "FACT TWO" in prompt
+
+
+def test_the_prompt_omits_the_facts_section_when_there_are_none():
+    assert "RELEASE FACTS" not in notes.build_prompt(_digest(), exemplar="X")
+
+
+def test_the_prompt_says_the_interface_did_not_change_when_it_did_not():
+    d = _digest(); d["frontend_recorded"] = True; d["frontend_commits"] = 0
+    prompt = notes.build_prompt(d, exemplar="X")
+    assert "did not change" in prompt
+
+
+def test_the_prompt_refuses_to_claim_an_unchanged_interface_when_unknown():
+    # A gap must never be reported to a customer as "nothing changed" — that is
+    # the exact ambiguity the provenance work exists to remove.
+    d = _digest(); d["frontend_recorded"] = False
+    prompt = notes.build_prompt(d, exemplar="X")
+    assert "could not be determined" in prompt
+    assert "did not change" not in prompt
+
+
+def test_the_prompt_reports_how_many_interface_changes_there_are():
+    d = _digest(); d["frontend_recorded"] = True; d["frontend_commits"] = 87
+    assert "87" in notes.build_prompt(d, exemplar="X")
+
+
+@pytest.mark.parametrize("rule", [
+    "rolled back",          # a release that removes what an earlier one shipped
+    "Upgrade note",         # the closing section
+    "reported by a customer",  # provenance worth leading with
+])
+def test_the_prompt_teaches_the_rules_the_backfill_needed(rule):
+    # Whitespace-normalised: a rule must not pass or fail on where it wraps.
+    prompt = " ".join(notes.build_prompt(_digest(), exemplar="X").lower().split())
+    assert rule.lower() in prompt, f"prompt does not mention: {rule}"
+
+
+def test_draft_short_circuits_when_every_change_is_internal():
+    # v2.1.9 had 34 commits, all release tooling. Asking a model to write a
+    # customer note from that invites it to promote our machinery into a
+    # feature, which is the failure INTERNAL_SCOPES already exists to prevent.
+    called = []
+    d = _digest(changes=[
+        {"sha": "1111111", "component": "backend", "type": "feat", "scope": "release-notes",
+         "breaking": False, "subject": "backfill a span of tags", "pr_number": None,
+         "internal": True, "detail": ""},
+    ])
+    out = notes.draft(d, exemplar="X", model=lambda p: called.append(p) or GOOD)
+    assert called == [], "the model must not be called for a wholly internal release"
+    assert "no user-facing changes" in out.lower()
+    assert notes.FAILURE_MARKER not in out
+
+
+def test_a_release_with_one_shippable_change_still_calls_the_model():
+    d = _digest(changes=[
+        {"sha": "1111111", "component": "backend", "type": "feat", "scope": "release-notes",
+         "breaking": False, "subject": "internal thing", "pr_number": None,
+         "internal": True, "detail": ""},
+        {"sha": "2222222", "component": "backend", "type": "fix", "scope": "grid",
+         "breaking": False, "subject": "a real user fix", "pr_number": None,
+         "internal": False, "detail": "The grid dropped rows."},
+    ])
+    called = []
+    notes.draft(d, exemplar="X", model=lambda p: called.append(p) or GOOD)
+    assert len(called) == 1
+
+
+def test_build_prompt_falls_back_to_the_facts_the_digest_carries():
+    # draft() and build_prompt() must agree: a caller that builds a prompt
+    # directly should not silently lose the computed facts.
+    d = _digest(); d["facts"] = "- A COMPUTED FACT"
+    assert "A COMPUTED FACT" in notes.build_prompt(d, exemplar="X")
+
+
+def test_an_explicit_facts_block_still_overrides_the_digest():
+    d = _digest(); d["facts"] = "- FROM DIGEST"
+    out = notes.build_prompt(d, exemplar="X", facts_block="- EXPLICIT")
+    assert "EXPLICIT" in out and "FROM DIGEST" not in out

@@ -247,3 +247,36 @@ def test_digest_for_records_a_gap_when_the_pac_checkout_cannot_be_read(
 
     assert built["frontend_recorded"] is False
     assert built["changes"] == []
+
+
+# ── Production wiring for the new prompt context ──────────────────────
+
+def test_digest_for_records_the_frontend_commit_count_and_the_facts(monkeypatch, tmp_path):
+    """The two pieces of context the drafter cannot compute for itself."""
+    from release_notes import __main__ as main, digest as digest_mod, ranges, facts
+
+    monkeypatch.setattr(main, "_previous_tag_for", lambda tag: "v1.0.0", raising=False)
+    monkeypatch.setattr(ranges, "frontend_range", lambda p, c, **k: None)
+    monkeypatch.setattr(digest_mod, "collect_commits", lambda a, b, **k: [])
+    monkeypatch.setattr(facts, "collect", lambda a, b, **k: {
+        "migrations": ["0007_x"], "commands": [], "env_vars": [],
+        "needs_migration": True,
+    })
+
+    built = main._digest_for("v1.0.1", pac_checkout=None)
+    assert built["frontend_commits"] == 0
+    assert "0007_x" in built["facts"]
+
+
+def test_draft_uses_the_facts_the_digest_carries():
+    from release_notes import notes
+    seen = {}
+    d = {"tag": "v1", "previous_tag": "v0", "facts": "- A COMPUTED FACT",
+         "changes": [{"sha": "1", "component": "backend", "type": "fix", "scope": "grid",
+                      "breaking": False, "subject": "x", "pr_number": None,
+                      "internal": False, "detail": "y"}]}
+    def model(prompt):
+        seen["prompt"] = prompt
+        return "## Bug fixes\n\n- **A fix.** Text.\n"
+    notes.draft(d, exemplar="X", model=model)
+    assert "A COMPUTED FACT" in seen["prompt"]

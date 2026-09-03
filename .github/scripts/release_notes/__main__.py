@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from release_notes import changelog, digest, manifest, notes, ranges
+from release_notes import changelog, digest, facts, manifest, notes, ranges
 
 EXEMPLAR_PATH = ranges.REPO_ROOT / "docs/releases/RELEASE_NOTES_2.1.3_github.md"
 CHANGELOG_PATH = ranges.REPO_ROOT / "CHANGELOG.md"
@@ -125,6 +125,14 @@ def _digest_for(tag: str, *, pac_checkout: Path | None = None) -> dict:
 
     built = digest.build_digest(tag, previous, backend, frontend)
     built["frontend_recorded"] = frontend_recorded
+    # The count is what lets the drafter say "the interface did not change"
+    # instead of leaving a reader to guess. Only meaningful alongside the flag
+    # above: zero commits and an unresolved range are different answers.
+    built["frontend_commits"] = len(frontend)
+    # Migrations, new operator commands and new configuration, computed from
+    # the diff. A model cannot infer these from prose, and a note that guessed
+    # one wrong is why they are handed over as facts.
+    built["facts"] = facts.render(facts.collect(previous, tag)) if previous else ""
     return built
 
 
