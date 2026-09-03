@@ -28,17 +28,23 @@ So to describe a release we need commits from both. The backend half is easy —
 own git log. The frontend half needs one extra fact: **which PAC commit produced the bundle we're
 shipping.**
 
-That fact is recorded in a small file next to the bundle:
+That fact is a version number. `frontend-version.txt` in the repository root says which frontend
+a release ships — an exact version, or `latest`. The release pipeline installs it and copies it
+into `lex/react/build/` before building the wheel. See
+[`frontend-versioning.md`](frontend-versioning.md) for how that works.
 
-```
-lex/react/build/.frontend-version.json
-{"repo": "…/process-admin-general-client", "branch": "…", "sha": "22c16f9…", "built_at": "…"}
-```
+For the notes, two of those versions — the previous release's and this one's — give a range of
+frontend releases, and the frontend half of the note is the log between them.
 
-Two of those — the one in the previous release and the one in this release — give a range of PAC
-commits. That range is the frontend half of the note.
+**A release that said `latest` cannot be attributed from git**, because nothing in the tag records
+what "latest" meant that day. Those report a gap rather than a guess. The resolved version is still
+recorded inside the shipped bundle and on the GitHub release, so it is recoverable by hand — it is
+just not something the notes can read.
 
----
+**Releases cut before this mechanism** are served by a committed side-car mapping each old bundle
+to the frontend revision that built it. Those three entries were established by rebuilding each
+candidate and comparing the compiled output, which is content-addressed — so the attribution is
+proven rather than inferred. The side-car never grows again.
 
 ## The two moments in a release
 
@@ -78,6 +84,11 @@ Now it says so:
 
 Nothing breaks. The release ships. The marker is a note-to-self that something is worth going back
 for — and because it lives in `CHANGELOG.md`, you can find every one of them with a command.
+
+**This can no longer happen for a release cut after the pin landed.** A pin resolves before
+anything is built, or the build fails — there is no state where a release ships successfully and
+its frontend identity turns out to be unknown afterwards. The marker, and the repair commands that
+go with it, now apply only to the older releases.
 
 ---
 

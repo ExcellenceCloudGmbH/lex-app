@@ -195,6 +195,42 @@ jobs:
           echo '__version__ = "${{ steps.version.outputs.VERSION }}"' > lex/_version.py
           cat lex/_version.py
 
+      # The frontend is published separately, as lex-frontend on PyPI, and is
+      # installed here so it ships inside the lex-app wheel exactly as it does
+      # today. Which version comes from frontend-version.txt: an exact version,
+      # or `latest` (the default).
+      #
+      # This runs BEFORE the build, because the bundle has to be in the tree
+      # for setuptools to package it — see "lex.react" in pyproject.toml.
+      - name: Vendor the published frontend
+        id: frontend
+        run: |
+          set -euo pipefail
+          VERSION=$(python .github/scripts/vendor_frontend.py --print-version | tail -1)
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # `latest` is not recoverable from a git tag, so the resolved version is
+      # recorded where it survives: inside the bundle (and so inside the wheel)
+      # by the script above, and on the release itself here. Without this an
+      # unpinned release is unattributable six months later, which is the
+      # problem the provenance work exists to prevent.
+      - name: Record the frontend version on the release
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          FRONTEND: ${{ steps.frontend.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          BODY=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+          if printf '%s' "$BODY" | grep -q 'lex:frontend-version'; then
+            echo "Already recorded on $TAG — leaving it alone."
+            exit 0
+          fi
+          printf '%s\n\n<!-- lex:frontend-version %s -->\n' "$BODY" "$FRONTEND" > body.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file body.md
+          echo "Recorded lex-frontend $FRONTEND on $TAG."
+
       - name: Build sdist and wheel
         run: python -m build
 

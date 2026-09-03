@@ -455,3 +455,61 @@ def test_frontend_range_forwards_the_new_seams():
         bundle=lambda ref: _FULL_A,
     )
     assert got == ranges.Range(from_sha=_PAC_A, to_sha=_PAC_A)
+
+
+# ── Pin-based resolution ──────────────────────────────────────────────
+#
+# Once the frontend is a pinned dependency, provenance is two lines of text at
+# two tags. These pin the precedence: a pin at BOTH ends wins outright, and
+# anything less falls back to the pre-pin machinery rather than guessing.
+
+def _pins(mapping):
+    """A `show` that serves a frontend-version.txt per ref."""
+    def show(ref, path):
+        if path != "frontend-version.txt":
+            return None
+        return f"{mapping[ref]}\n" if ref in mapping else "latest\n"
+    return show
+
+
+def test_pins_at_both_ends_resolve_to_a_pac_tag_range():
+    got = ranges.frontend_range(
+        "v2.2.0", "v2.3.0",
+        show=_pins({"v2.2.0": "1.10.0", "v2.3.0": "1.11.0"}),
+    )
+    assert (got.from_sha, got.to_sha) == ("v1.10.0", "v1.11.0")
+
+
+def test_an_unchanged_pin_resolves_to_an_empty_range_not_a_gap():
+    # "The frontend did not change" is a real answer and must report as one.
+    # Before the pin it was indistinguishable from a lost range.
+    got = ranges.frontend_range(
+        "v2.2.0", "v2.2.1",
+        show=_pins({"v2.2.0": "1.10.0", "v2.2.1": "1.10.0"}),
+    )
+    assert (got.from_sha, got.to_sha) == ("v1.10.0", "v1.10.0")
+
+
+def test_a_pin_on_only_one_end_falls_back_to_the_side_car():
+    # The release that INTRODUCES the pin has none at its previous tag. It must
+    # use the old path rather than inventing a starting point — which would
+    # attribute every frontend commit in PAC's history to that one release.
+    called = []
+    ranges.frontend_range(
+        "v2.1.9", "v2.2.0",
+        show=_pins({"v2.2.0": "1.10.0"}),
+        history=lambda: called.append("history") or {},
+        bundle=lambda ref, **k: called.append(ref) or None,
+    )
+    assert called, "expected the side-car path to be consulted"
+
+
+def test_no_pin_at_either_end_leaves_historical_behaviour_untouched():
+    got = ranges.frontend_range(
+        "v2.1.3", "v2.1.4",
+        show=_pins({}),
+        history=lambda: {"a" * 40: {"pac_sha": "b" * 40}},
+        bundle=lambda ref, **k: "a" * 40,
+    )
+    assert got is not None
+    assert got.from_sha == "b" * 40
