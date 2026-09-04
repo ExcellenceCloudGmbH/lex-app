@@ -22,6 +22,8 @@ mode-invariant.
 from __future__ import annotations
 
 import html
+
+from lex.streamlit_theme import _js_literal
 import re
 from pathlib import Path
 from typing import Optional
@@ -365,3 +367,85 @@ def _role_subtitle(session_state) -> Optional[str]:
         return None
     email = email.strip()
     return None if email == _display_name(session_state) else email
+
+
+#: Query parameter lex-app adds when it frames a Streamlit page.
+#:
+#: An explicit contract rather than an inference. `is_logout_enabled=false` and
+#: `auth_token` both happen to correlate today, but they mean other things, and
+#: a signal that is true by coincidence stops being true the moment either is
+#: used somewhere else.
+EMBED_PARAM = "lex_embed"
+
+
+def embedded_in_lex_app(query_params) -> bool:
+    """Whether this page is being rendered inside lex-app's own chrome."""
+    value = query_params.get(EMBED_PARAM)
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+_HIDE_SIDEBAR_RULES = """
+  section[data-testid="stSidebar"],
+  [data-testid="stSidebarCollapsedControl"],
+  [data-testid="stExpandSidebarButton"] {
+    display: none !important;
+  }
+  [data-testid="stAppViewContainer"] > section:first-of-type {
+    margin-left: 0 !important;
+  }
+"""
+
+
+#: Removes the sidebar outright, rather than collapsing it.
+#:
+#: A guest surface has no business drawing navigation chrome: lex-app already
+#: provides a sidenav, a logo, the signed-in user and a way out, immediately to
+#: the left of the frame. A second sidebar inside it is the same furniture
+#: twice, and the inner one navigates a different app.
+#:
+#: `display: none` on the panel AND on the control that would expand it again --
+#: collapsing leaves a button that reopens a panel the host never wanted, which
+#: is a worse end state than not having it. The content column's left offset
+#: goes with it, or the page keeps a gutter for furniture that is not there.
+HIDE_SIDEBAR_CSS = f"<style>{_HIDE_SIDEBAR_RULES}</style>"
+
+
+
+
+
+def hide_sidebar_when_framed_js() -> str:
+    """Hide the sidebar when this page turns out to be inside someone's frame.
+
+    The fallback for the flash-free path. :func:`embedded_in_lex_app` reads a
+    parameter, which is exact and costs no repaint -- but only once the frontend
+    that adds it has shipped. Framing is knowable from the page itself and needs
+    nobody's cooperation, so it covers every deployment in between.
+
+    It is also true more generally: a Streamlit page inside ANY frame has a host
+    supplying the chrome around it. Being wrong here costs a hidden sidebar on a
+    page somebody deliberately framed themselves, which is the same thing they
+    would have asked for.
+    """
+    return (
+        "<script>\n"
+        "  (function () {\n"
+        "    var host = window.parent;\n"
+        "    if (!host || host === window) return;\n"
+        "    // `top`, not `parent`: this script's parent is the Streamlit page,\n"
+        "    // and the question is whether THAT page is itself framed.\n"
+        "    var framed;\n"
+        "    try { framed = host.top !== host; }\n"
+        "    catch (e) { framed = true; }   // cross-origin top: framed by definition\n"
+        "    if (!framed) return;\n"
+        "    if (host.__lexSidebarHidden) return;\n"
+        "    host.__lexSidebarHidden = true;\n"
+        "    var style = host.document.createElement('style');\n"
+        "    style.textContent = " + _js_literal(_HIDE_SIDEBAR_RULES) + ";\n"
+        "    host.document.head.appendChild(style);\n"
+        "    console.info('[lex-sidebar] this page is framed, so its sidebar is hidden: "
+        "the host already provides navigation, a logo and the signed-in user.');\n"
+        "  })();\n"
+        "</script>"
+    )

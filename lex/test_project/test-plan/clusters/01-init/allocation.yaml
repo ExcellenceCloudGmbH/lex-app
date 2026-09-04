@@ -754,10 +754,10 @@ letters:
       attribute mutation with no insertion.
   aj:
     title: Streamlit sidebar chrome in lex-app's language
-    scenarios: 1.309-1.314
+    scenarios: 1.309-1.315
     status: complete
     tests:
-      pass: 26
+      pass: 28
       skip: 0
       xfail: 0
     note: >-
@@ -819,6 +819,27 @@ letters:
       cluster: assertions that forbid a property were tripping on COMMENTS explaining why that
       property was rejected. _rules_only() strips comments before asserting, so documenting a
       rejected approach no longer fails the test that rejects it.
+      1.315 removes the sidebar entirely when lex-app frames the page, on the user's instruction
+      that "when streamlit is being embedded in lex-app, the sidebar should never exists". lex-app
+      already draws a sidenav, the logo, the signed-in user and a way out immediately to the left
+      of the frame; a second sidebar inside it is the same furniture twice, and the inner one
+      navigates a different app. Gone rather than collapsed - collapsing leaves a control that
+      reopens a panel the host never wanted - and the expand control and the content column's left
+      offset go with it, or the page keeps a gutter for furniture that is not there. Decided in
+      Python, not only in CSS, so the chrome is never BUILT: a hidden logo is still an st.logo call
+      and a hidden account block still renders a display name into the page. EMBEDDED is read
+      BEFORE the try, because the finally consults it - computing it inside would have made an
+      early failure raise NameError from the cleanup path and bury the real error.
+      The signal is an explicit `lex_embed=true` (added in StreamlitIframe.tsx) rather than an
+      inference: is_logout_enabled=false and auth_token both correlate with being framed today, but
+      they mean other things, and a signal that is true by coincidence stops being true the moment
+      either is used elsewhere. A framing check (host.top !== host, where a cross-origin throw IS
+      the answer) is the fallback that works before that frontend ships - not a hypothetical gap in
+      this project. Both paths share ONE definition of the rules, learned the hard way in this very
+      change: the first version extracted them with a regex that matched the file's FIRST style
+      block, shipped the account-block layout as the hide rules, and logged "sidebar is hidden"
+      over a fully visible sidebar. Verified in a real cross-origin frame: sidebar gone, content
+      flush to the left edge, and standalone unchanged (sidebar, logo and account all present).
       1.309 covers the genuine hazard rather than the styling: the display name arrives from the
       identity provider and is rendered through unsafe_allow_html, so a hostile
       preferred_username would execute in the session of whoever opened the dashboard. Name,

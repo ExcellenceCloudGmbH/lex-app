@@ -20,18 +20,24 @@ And one that is a genuine hazard rather than a style point: the display name
 comes from the identity provider, so it is untrusted input rendered through
 ``unsafe_allow_html``.
 
-Cluster 01-init, batch 1aj, scenarios 1.309-1.314.
+Cluster 01-init, batch 1aj, scenarios 1.309-1.315.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1aj_streamlit_sidebar_chrome.py
 """
 
+import json
 import re
 
 import pytest
 
 from lex.lex_app.design_system import lex_tokens
 from lex.lex_app.streamlit.sidebar import (
+    EMBED_PARAM,
+    _HIDE_SIDEBAR_RULES,
+    HIDE_SIDEBAR_CSS,
+    embedded_in_lex_app,
+    hide_sidebar_when_framed_js,
     _LOGO_COLLAPSED_PATH,
     _LOGO_PATH,
     NAV_ACCENT,
@@ -197,6 +203,78 @@ class TestCluster1aj_SidebarChrome:
 
         # And the omitted piece leaves no orphan.
         assert without.count("<div") == without.count("</div>")
+
+    def test_01_315_a_framed_page_has_no_sidebar_at_all(self):
+        """Scenario 1.315: a guest surface draws no host furniture.
+
+        When lex-app frames a Streamlit page, lex-app is already drawing a
+        sidenav, the logo, the signed-in user and a way out -- immediately to the
+        left of the frame. A second sidebar inside it is the same furniture
+        twice, and the inner one navigates a different app.
+
+        Gone, not collapsed. Collapsing leaves a control that reopens a panel the
+        host never wanted, which is a worse end state than not having one; the
+        expand control is hidden with it. The content column's left offset goes
+        too, or the page keeps a gutter for furniture that is not there.
+
+        The signal is an explicit parameter rather than an inference.
+        ``is_logout_enabled=false`` and ``auth_token`` both happen to correlate
+        with being framed today, but they mean other things, and a signal that is
+        true by coincidence stops being true the moment either is used elsewhere.
+        """
+        assert EMBED_PARAM == "lex_embed"
+
+        assert embedded_in_lex_app({"lex_embed": "true"})
+        assert embedded_in_lex_app({"lex_embed": ["1"]}), "Streamlit hands back lists"
+        assert not embedded_in_lex_app({})
+        assert not embedded_in_lex_app({"lex_embed": "false"})
+
+        css = _rules_only(HIDE_SIDEBAR_CSS)
+        assert 'section[data-testid="stSidebar"]' in css
+        assert "display: none" in css
+        # The control that would bring it back goes too.
+        assert "stSidebarCollapsedControl" in css or "stExpandSidebarButton" in css
+        # And no gutter is left behind.
+        assert "margin-left: 0" in css
+
+    def test_01_315_framing_is_the_fallback_until_the_frontend_ships(self):
+        """Scenario 1.315 (second half): work before the parameter arrives.
+
+        The parameter is exact and costs no repaint, but only once the frontend
+        that sends it has been rebuilt and deployed. Whether this page sits
+        inside a frame is knowable from the page itself and needs nobody's
+        cooperation, so it covers every deployment in between -- which in this
+        project is not a hypothetical gap.
+
+        It asks about ``top``, not ``parent``: this script's parent is the
+        Streamlit page, and the question is whether THAT page is framed. A
+        cross-origin ``top`` throws on access, and throwing IS the answer -- only
+        a framed page can fail that read.
+
+        Both paths share one definition of the rules, because two copies of a
+        stylesheet drift and the drift is invisible until someone is looking at
+        the wrong surface. That already happened once here: the first version
+        extracted the rules with a regex that matched the file's FIRST style
+        block, shipped the account-block layout as the hide rules, and logged
+        "sidebar is hidden" over a fully visible sidebar.
+        """
+        js = hide_sidebar_when_framed_js()
+
+        assert "host.top !== host" in js
+        assert "catch (e) { framed = true; }" in js, (
+            "a cross-origin top must count as framed, not as an error"
+        )
+        # One definition, shared. Decode the embedded literal rather than
+        # pattern-matching escaped text: the rules travel through _js_literal,
+        # which JSON-escapes the quotes, so asserting on the raw selector would
+        # fail for the wrong reason and asserting on the escaped form would pin
+        # the escaping instead of the rules.
+        embedded = json.loads(js[js.index('style.textContent = ') + 20 : js.index(";\n", js.index("style.textContent"))])
+        assert 'section[data-testid="stSidebar"]' in embedded
+        assert "display: none" in embedded
+        assert embedded == _HIDE_SIDEBAR_RULES, "the two paths have drifted apart"
+        # Installed once, however many reruns recreate this frame.
+        assert "__lexSidebarHidden" in js
 
     def test_01_313_the_pin_matches_the_element_that_can_actually_move(self):
         """Scenario 1.313: the pin lands on a flex child, not on a wrapper.

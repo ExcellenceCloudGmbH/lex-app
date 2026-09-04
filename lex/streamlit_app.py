@@ -12,7 +12,13 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from lex.lex_app.streamlit.eager_frames import eager_frames_js
-from lex.lex_app.streamlit.sidebar import render_account, render_logo
+from lex.lex_app.streamlit.sidebar import (
+    HIDE_SIDEBAR_CSS,
+    embedded_in_lex_app,
+    hide_sidebar_when_framed_js,
+    render_account,
+    render_logo,
+)
 from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
     embed_theme_from_params,
@@ -623,6 +629,11 @@ def render_theme_follower() -> None:
     # The eager-frames script is unconditional: it is about WHEN component
     # frames load, and has nothing to do with the theme.
     body = f"<script>{eager_frames_js()}</script>"
+    # Unconditional too, and for the same reason: whether this page is inside
+    # someone's frame is not a theme question. It is the fallback for the
+    # parameter above, which is exact and flash-free but only once the frontend
+    # that sends it has shipped -- framing is knowable without anyone's help.
+    body = hide_sidebar_when_framed_js() + body
     if follow:
         body = theme_follower_html(_url_embed_theme(), debug=debug) + body
 
@@ -653,16 +664,35 @@ LOGOUT_ENABLED = _logout_qp is None or str(_logout_qp).lower() not in (
 if __name__ == "__main__":
     from lex.lex_app.settings import repo_name
 
+    # ── Framed by lex-app: no sidebar at all ────────────────────────────
+    # Not "collapsed", and not "empty" -- gone. lex-app already draws a sidenav,
+    # the logo, the signed-in user and a way out, immediately to the left of this
+    # frame. A second sidebar inside it is the same furniture twice, and the
+    # inner one navigates a different app.
+    #
+    # Decided here rather than in CSS alone so the chrome is never BUILT: a
+    # hidden logo is still an st.logo call, and a hidden account block still
+    # renders a display name into the page. A guest surface should not construct
+    # host furniture, not merely avoid showing it.
+    #
+    # Read BEFORE the try, because the `finally` below consults it. Computing it
+    # inside would mean an early failure in main() raised NameError from the
+    # cleanup path and buried the real error underneath it.
+    EMBEDDED = embedded_in_lex_app(st.query_params)
+
     try:
         try:
             exec(f"import {repo_name}._streamlit_structure as streamlit_structure")
         except Exception:
             streamlit_structure = None
 
-        # The logo only, and early: st.logo renders into Streamlit's header
-        # slot, which sits ABOVE even the page navigation. Who is signed in goes
-        # to the bottom instead -- see the `finally` below.
-        render_logo(st)
+        if EMBEDDED:
+            st.markdown(HIDE_SIDEBAR_CSS, unsafe_allow_html=True)
+        else:
+            # The logo only, and early: st.logo renders into Streamlit's header
+            # slot, which sits ABOVE even the page navigation. Who is signed in
+            # goes to the bottom instead -- see the `finally` below.
+            render_logo(st)
 
         reset_streamlit_form_context()
         params = st.query_params
@@ -729,11 +759,12 @@ if __name__ == "__main__":
         # Identity and the way out, together and last, so they sit at the
         # bottom beneath whatever navigation the app declared. In `finally` so a
         # failure in main() still leaves the user a way out.
-        render_account(
-            st,
-            st.session_state,
-            logout_href=_logout_href() if LOGOUT_ENABLED else None,
-        )
+        if not EMBEDDED:
+            render_account(
+                st,
+                st.session_state,
+                logout_href=_logout_href() if LOGOUT_ENABLED else None,
+            )
 
         # Zero-height and inert; also in `finally` so theme following survives a
         # failure in main(). A page stuck on the wrong theme after an error is a
