@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.282
+    scenarios: 1.261-1.289
     status: complete
     tests:
-      pass: 25
+      pass: 20
       skip: 0
       xfail: 0
     note: >-
@@ -485,10 +485,31 @@ letters:
       default. Confirmed by A/B against a real page at visibilityState "hidden": before, the theme
       key stayed null and the page stayed on the OS default; after, it wrote "Light" and corrected
       itself. Nothing in that path needs a frame - it reads storage and a media query.
-      Harness case 10 covers the strip and fails against the stand-down version. 10 cases, 23
-      checks. Note for the next person: three of this batch's assertions have now tripped on the
-      script's own COMMENTS rather than its code, and one of the checks written for this very fix
-      did it again - grep the emitted JS, not the source, and strip comments first.
+      1.283-1.289 REPLACE the mechanism after the user said the result was "slow and unreliable,
+      I can easily break it" - which was correct, and structural rather than incidental. Every
+      version until now wrote Streamlit's stored theme key and RELOADED, on the premise that
+      Streamlit resolves its theme once at boot. The premise was false: Streamlit's own menu
+      changes the theme live, through React state rather than storage - measured dark to light
+      with no navigation. The reload was the whole problem. Slow, because a change cost a full page
+      load and two when the page booted wrong; unreliable, because the ledger, the sticky
+      stand-down, self-report marking and the one-reload flag existed ONLY to make reloading
+      survivable, addressed nothing the user wanted, and could each get stuck. Deleting the reload
+      does not fix those bugs, it makes them unreachable - scenarios 1.277-1.280 are retired along
+      with the DOM-double harness, which modelled reload semantics that no longer exist.
+      The new flow is one-directional, which is what removes the arguing: Streamlit hands every
+      declared component its resolved theme in the RENDER event ({base, backgroundColor, ...}) and
+      re-fires it on every change; the shim forwards it down to the widget frames; and lex-app
+      still drives the page by clicking Streamlit's OWN theme control instead of writing storage.
+      Nothing reports upward any more, so there is nothing to contradict. The shim had listened for
+      RENDER since it was written, read `args`, and thrown `theme` away - every part of the old
+      design was reconstructing, badly, a value already being handed over for free.
+      Verified end to end against a real Streamlit page with the real shim: Streamlit's menu ->
+      page -> widget in ~1s with no reload, and lex.theme.mode -> driver -> page -> widget in ~1s
+      with no reload, menuEverVisible false and popoverLeftOpen false. The menu-DOM dependency is
+      the accepted cost, and it fails HARMLESSLY - the theme is left alone with a log, since
+      nothing reloads or overrides. 1.285 pins that the mask is removed on both exit paths, because
+      a mask left behind would hide the real menu from the user permanently.
+
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299

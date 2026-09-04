@@ -265,7 +265,7 @@ with no Streamlit at all.
 
 ## Batch 1ad — Streamlit theme follower
 
-- **Scenarios:** 1.261-1.282
+- **Scenarios:** 1.261-1.289
 - **Status:** complete (11 pass)
 - **Source under test:** `lex/streamlit_theme.py`, wired by `lex/streamlit_app.py`
   (`render_theme_follower`) and `lex/proxy.py` (`/_lex/theme-relay`)
@@ -1132,3 +1132,54 @@ Nothing in that path needs a frame — it reads storage and a media query.
 **Note for the next person.** Three assertions in this batch have now tripped on
 the script's own *comments* rather than its code, and a check written for this
 very fix did it again. Grep the emitted JS, and strip comments first.
+
+
+### Batch 1ad — the mechanism replaced (scenarios 1.283-1.289)
+
+> "It's slow and unreliable, I can easily break it."
+
+Correct, and structural. Every version until now wrote Streamlit's stored theme
+key and **reloaded**, on the premise that Streamlit resolves its theme once at
+boot so a reload was unavoidable.
+
+**The premise was false.** Streamlit's own menu changes the theme *live* — dark
+to light with no navigation — because it goes through React state, not storage.
+
+The reload was the whole problem. Slow: a change cost a full page load, two when
+the page booted wrong. Unreliable: the ledger, the sticky stand-down, self-report
+marking and the one-reload flag existed *only* to make reloading survivable.
+None of them addressed the theme; each could get stuck. Deleting the reload does
+not fix those bugs — it makes them unreachable. Scenarios 1.277-1.280 and the
+DOM-double harness are retired with it.
+
+The new flow is **one-directional**, which is what removes the arguing:
+
+```
+lex-app theme change
+        │  clicks Streamlit's OWN theme control (live, no reload)
+        ▼
+Streamlit page theme changes
+        │  RENDER event carries {base: "light"|"dark", ...}
+        ▼
+      shim ──postMessage──▶ widget frames
+```
+
+Nothing reports upward any more, so there is nothing to contradict.
+
+**The shim had listened for RENDER since it was written, read `args`, and thrown
+`theme` away.** Every part of the old design was reconstructing, badly, a value
+Streamlit was already handing over for free on every render.
+
+Verified end to end against a real Streamlit page with the real shim:
+
+| path | result |
+|---|---|
+| Streamlit menu → page → widget | ~1s, no reload |
+| `lex.theme.mode` → driver → page → widget | ~1s, no reload |
+| `menuEverVisible` | `false` |
+| `popoverLeftOpen` | `false` |
+
+The menu-DOM dependency is the accepted cost, and it fails **harmlessly**: the
+theme is left alone with a log, because nothing reloads or overrides. 1.285 pins
+that the mask is removed on both exit paths — a mask left behind would hide the
+real menu from the user permanently, which is worse than the flash it prevents.

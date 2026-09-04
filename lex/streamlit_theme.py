@@ -105,23 +105,64 @@ _FOLLOWER_HTML = """<script>
     var DEFAULT_MODE = __DEFAULT_MODE__;
     var URL_MODE = __URL_MODE__;
 
-    // This runs in a srcdoc iframe: same origin as the Streamlit server, so it
-    // shares this origin's localStorage and may read and reload its parent.
-    // `parent`, not `top` -- when lex-app embeds Streamlit, `top` is lex-app's
-    // page on another origin and every access to it throws.
+    // Runs in a component iframe, same origin as the Streamlit server, so it may
+    // read and drive its parent. `parent`, not `top` -- when lex-app embeds
+    // Streamlit, `top` is lex-app's page on another origin and throws.
     var host = window.parent;
     if (!host || host === window) return;
+    if (host.__lexThemeDriverInstalled) return;
+    host.__lexThemeDriverInstalled = true;
 
-    // A theme pinned in the page's own URL outranks everything below, including
-    // the key this script writes. Stand down rather than fight it: without this,
-    // every load would see a mismatch it can never resolve and spend its one
-    // reload on it. Earlier versions of this follower PUT such a parameter
-    // there, so a tab can still be carrying one.
+    // ── Why this drives Streamlit's own control ──────────────────────────
+    // Every previous version wrote Streamlit's stored theme key and RELOADED,
+    // on the premise that Streamlit resolves its theme once at boot so a reload
+    // was unavoidable. The premise was false. Streamlit's own menu changes the
+    // theme LIVE -- measured: dark -> light with no navigation -- because it
+    // goes through Streamlit's React state rather than storage.
+    //
+    // The reload was the whole problem. It made a theme change cost a full page
+    // load (two, when the page booted wrong and had to be corrected), and every
+    // piece of machinery this file used to carry -- an oscillation ledger, a
+    // sticky stand-down, self-report marking, a one-reload-per-load flag --
+    // existed only to make reloading survivable. None of it addressed the user's
+    // problem; all of it was a source of new ones.
+    //
+    // Driving the control deletes that entire class. Nothing reloads, so a wrong
+    // decision costs nothing and is corrected by the next report instead of
+    // fighting it.
+    var MENU_BUTTON = '[data-testid="stMainMenuButton"]';
+    var POPOVER = '[data-testid="stMainMenuPopover"]';
+
+    function itemFor(mode) {
+      return '[data-testid="stMainMenuItem-theme-' +
+             (mode === "dark" ? "Dark" : "Light") + '"]';
+    }
+
     /**
-     * Remove a theme pin from the page's own URL, keeping every other option.
+     * The mode Streamlit is actually showing.
      *
-     * Returns true when one was found and removed.
+     * Published by the widget-host shim, which receives the real theme object in
+     * Streamlit's own RENDER event -- a first-class API, exact, and free. The
+     * stored key is the fallback for a page with no widgets on it.
      */
+    function currentMode() {
+      if (host.__lexThemeCurrent === "light" || host.__lexThemeCurrent === "dark") {
+        return host.__lexThemeCurrent;
+      }
+      try {
+        var raw = host.localStorage.getItem(
+          "stActiveTheme-" + host.location.pathname + "-v2"
+        );
+        var sel = raw ? JSON.parse(raw) : null;
+        if (sel === "Light") return "light";
+        if (sel === "Dark") return "dark";
+        return host.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      } catch (e) {
+        return "";
+      }
+    }
+
+    /** Remove a theme pin an older version of this script left in the URL. */
     function stripUrlThemePin() {
       try {
         var url = new URL(host.location.href);
@@ -144,281 +185,96 @@ _FOLLOWER_HTML = """<script>
       }
     }
 
-    // A theme pinned in the page's own URL outranks everything below, including
-    // Streamlit's own menu. Earlier versions of THIS script put it there, so a
-    // tab, a bookmark or a shared link can still be carrying one.
-    //
-    // Standing down was the wrong response. It turned my own past mistake into a
-    // permanent, silent, per-URL failure: theme following simply never worked
-    // again in that tab, and the only evidence was one console.info nobody had a
-    // reason to look for. "The switch never works" is what that looks like from
-    // the outside.
-    //
-    // So clean up after ourselves instead. The parameter goes, every other embed
-    // option stays, and the ordinary logic below takes over -- reloading if it
-    // needs to, onto the corrected URL. One load, self-healed, no user action.
+    /**
+     * Click Streamlit's theme control, without the menu being seen.
+     *
+     * The popover only exists in the DOM while it is open, so it has to be
+     * opened. React renders it a frame or two later, which is long enough to
+     * flash -- so it is hidden for the duration and revealed again afterwards,
+     * with a timeout that restores visibility even if nothing ever appears.
+     */
+    function drive(mode) {
+      var doc = host.document;
+      var button = doc.querySelector(MENU_BUTTON);
+      if (!button) return false;
+
+      var mask = doc.createElement("style");
+      mask.textContent = POPOVER + "{opacity:0 !important;pointer-events:none !important}";
+      doc.head.appendChild(mask);
+
+      var settled = false;
+      function finish() {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        try { mask.remove(); } catch (e) {}
+      }
+
+      var observer = new host.MutationObserver(function () {
+        var item = doc.querySelector(itemFor(mode));
+        if (!item) return;
+        item.click();
+        // Close it again: a radio group stays open after a choice.
+        var open = doc.querySelector(POPOVER);
+        if (open && doc.querySelector(MENU_BUTTON)) doc.querySelector(MENU_BUTTON).click();
+        host.setTimeout(finish, 60);
+      });
+      observer.observe(doc.body, { childList: true, subtree: true });
+      host.setTimeout(function () {
+        if (!settled) {
+          console.warn(
+            "[lex-theme] Streamlit's theme control did not appear, so the theme " +
+            "was left alone. This is safe -- nothing is reloaded or overridden -- " +
+            "but it means a Streamlit upgrade may have renamed " +
+            'data-testid="stMainMenuItem-theme-<Mode>".'
+          );
+        }
+        finish();
+      }, 2000);
+
+      button.click();
+      return true;
+    }
+
+    function apply(mode, reason) {
+      if (mode !== "light" && mode !== "dark") return;
+      var now = currentMode();
+      console.info("[lex-theme] asked for", mode, "(" + (reason || "?") + ")",
+                   "; showing", now || "(unknown)");
+      if (now === mode) return;
+      drive(mode);
+    }
+
     if (URL_MODE) {
+      // A theme pinned in the URL outranks Streamlit's own menu, so the control
+      // this drives would stop persisting. Earlier versions of this script put
+      // that parameter there, so clean up rather than stand down.
       if (stripUrlThemePin()) {
         console.info(
-          "[lex-theme] removed a stale embed_options=" + URL_MODE + "_theme from " +
-          "this URL. An older version of this sync put it there, and while it is " +
-          "present it outranks both this sync and Streamlit's own theme menu -- " +
-          "which is why the switch appeared to do nothing. Following normally now."
+          "[lex-theme] removed a stale embed_options=" + URL_MODE + "_theme an " +
+          "older version of this sync left in the URL; while present it outranks " +
+          "Streamlit's own theme menu."
         );
-      } else {
-        console.warn(
-          "[lex-theme] this URL pins embed_options=" + URL_MODE + "_theme and it " +
-          "could not be removed, so the theme cannot be followed here. Open the " +
-          "page once without that parameter."
-        );
-        return;
       }
     }
 
-    // Guard AND listener both belong to `host`. Streamlit destroys and recreates
-    // this iframe across reruns while the page persists, so a flag on the page
-    // with a listener on this window would survive exactly one render.
-    if (host.__lexThemeFollowerInstalled) return;
-    host.__lexThemeFollowerInstalled = true;
+    // Published so the shim can hand us the theme Streamlit gave it.
+    host.__lexThemeApply = function (mode) { apply(mode, "widget"); };
 
-    // ── Streamlit's OWN theme preference ─────────────────────────────────
-    // Cooperating with it rather than overriding it, which is the whole point
-    // of this version. The previous approach reloaded with
-    // ?embed_options=<mode>_theme; that sits above everything in Streamlit's
-    // resolver, so the Settings menu stopped applying AND stopped saving --
-    // Streamlit's own writer bails out while a URL theme is present:
-    //
-    //     Cae = e => { if (!Pa() || (Rw(), xg() || Sg())) return; ... }
-    //
-    // Writing this key instead means the menu keeps working, shows the truth,
-    // and a choice made there persists. Key shape and version are Streamlit's:
-    //     `stActiveTheme-${location.pathname}-v2`  ->  JSON "Light"|"Dark"|"System"
-    var STREAMLIT_THEME_VERSION = 2;
-
-    function activeThemeKey() {
-      return "stActiveTheme-" + host.location.pathname + "-v" + STREAMLIT_THEME_VERSION;
-    }
-
-    /** Streamlit's stored selection: "Light", "Dark", "System", or null. */
-    function selection() {
-      try {
-        var raw = host.localStorage.getItem(activeThemeKey());
-        return raw ? JSON.parse(raw) : null;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    /**
-     * The mode actually on screen.
-     *
-     * Read, not measured. The previous version classified the rendered
-     * background by luma, which misread a transparent element as pure black and
-     * so reported "dark" for a light page -- a silent no-op every time. Asking
-     * Streamlit what it selected removes that whole class of bug: "System" and
-     * unset both mean the OS decides, and the OS is a question with an exact
-     * answer.
-     */
-    function effectiveMode() {
-      var sel = selection();
-      if (sel === "Light") return "light";
-      if (sel === "Dark") return "dark";
-      try {
-        return host.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-      } catch (e) {
-        return "";
-      }
-    }
-
-    // ── Oscillation guard ────────────────────────────────────────────────
-    // `location.reload()` destroys the window, so a flag on it resets every
-    // load: it stops a second reload WITHIN one load and nothing across them.
-    // Two independent inputs feed follow() -- the stored agreement, and a widget
-    // reporting its own palette -- and when those disagree each load flips the
-    // other way. That is a reload loop, and it is the worst thing this file can
-    // do to a page.
-    //
-    // sessionStorage survives a reload and is per-tab, which is exactly the
-    // lifetime the guard needs. Recording what we last reloaded FOR lets a
-    // contradiction be recognised rather than acted on.
-    var LEDGER_KEY = "lex.theme.reloads";
-    //: Set once a contradiction has been seen, and never expired. The ledger
-    //: below is windowed so a normal change is not mistaken for a loop; THIS is
-    //: what stops a permanent disagreement restarting the loop every window.
-    //: Cleared only by a deliberate change arriving over `storage`.
-    var STANDOWN_KEY = "lex.theme.standown";
-    //: How long after a widget marks a write we still recognise the resulting
-    //: `storage` event as that widget's own. Generous: the event is dispatched
-    //: within the same task, so this only has to survive scheduling.
-    var SELF_REPORT_MS = 3000;
-    var LEDGER_WINDOW_MS = 15000;
-    var LEDGER_MAX = 2;
-
-    function ledger() {
-      try {
-        var raw = host.sessionStorage.getItem(LEDGER_KEY);
-        var v = raw ? JSON.parse(raw) : null;
-        if (!v || typeof v.n !== "number") return null;
-        // Outside the window this is a new episode, not an oscillation.
-        return Date.now() - v.at > LEDGER_WINDOW_MS ? null : v;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    function noteReload(mode) {
-      try {
-        var prev = ledger();
-        host.sessionStorage.setItem(LEDGER_KEY, JSON.stringify({
-          n: (prev ? prev.n : 0) + 1, at: Date.now(), to: mode
-        }));
-      } catch (e) {}
-    }
-
-    function forgetReloads() {
-      try {
-        host.sessionStorage.removeItem(LEDGER_KEY);
-        host.sessionStorage.removeItem(STANDOWN_KEY);
-      } catch (e) {}
-    }
-
-    /**
-     * True when this storage change is a widget in THIS page describing itself.
-     *
-     * The shim writes the agreed key and, being a same-origin document, that
-     * write reaches this page as a `storage` event -- the same shape as a real
-     * change made in another tab. Without this, silencing the direct
-     * `__lexThemeFollow` route accomplished nothing: the identical report simply
-     * arrived by the other road and reloaded the page anyway.
-     */
-    function isSelfReport(mode) {
-      var report;
-      try { report = host.__lexThemeSelfReport; } catch (e) { return false; }
-      if (!report || report.mode !== mode) return false;
-      return (Date.now() - report.at) <= SELF_REPORT_MS;
-    }
-
-    function standingDown() {
-      try { return host.sessionStorage.getItem(STANDOWN_KEY); } catch (e) { return null; }
-    }
-
-    /**
-     * @param mode    "light" or "dark"
-     * @param reason  "install" | "storage" | "widget" -- how we heard about it.
-     *                A `storage` event is a fresh, deliberate change made
-     *                somewhere else, so it clears the ledger and is always
-     *                honoured; the other two are re-reads of existing state and
-     *                are the ones that can argue with each other.
-     */
-    function follow(mode, reason) {
-      if (mode !== "light" && mode !== "dark") return;
-      var now = effectiveMode();
-      console.info("[lex-theme] asked for", mode, "(" + (reason || "?") + ")",
-                   "; showing", now || "(unknown)",
-                   "; menu is", selection() || "(unset -> system)");
-      if (!now || now === mode) return;     // already right, or unknowable
-
-      // Every input may ACT. What differs is whether it may FORGET.
-      //
-      // A `widget` report is the carrier of the change in a same-site
-      // deployment: lex-app writes its preference, the widget frame reads it
-      // (same origin, so it can), and tells us. Refusing to act on that -- which
-      // an earlier version of this function did, to stop mid-use reloads --
-      // silences the only messenger and theme following stops entirely.
-      //
-      // But it must not clear the loop memory below. A widget re-asserts its
-      // palette on every rerun, so treating each assertion as fresh news would
-      // wipe the record of a contradiction several times a minute and let a
-      // bounded loop restart forever. Only a `storage` event that no widget
-      // claimed is a genuinely new decision made somewhere else.
-      if (reason === "storage") {
-        // A deliberate change outranks every refusal below -- including one this
-        // load already made. Otherwise the escape hatch we tell people about in
-        // the stand-down message ("change the theme in lex-app or Streamlit's
-        // menu") would be closed by the very refusal that suggests it.
-        forgetReloads();
-        host.__lexThemeReloading = false;
-      }
-
-      var stood = standingDown();
-      if (stood) {
-        host.__lexThemeReloading = true;
-        console.warn(
-          "[lex-theme] standing down for this tab: a contradiction was already " +
-          "seen (" + stood + "). Reloading again would only flip it back. Change " +
-          "the theme in lex-app or Streamlit's menu to clear this."
-        );
-        return;
-      }
-
-      var previous = ledger();
-      if (previous && (previous.n >= LEDGER_MAX || previous.to !== mode)) {
-        // Sticky: a contradiction does not resolve itself, so remembering it for
-        // only the window would let a fresh episode start every window forever.
-        try { host.sessionStorage.setItem(STANDOWN_KEY, mode + "/" + now); } catch (e) {}
-        host.__lexThemeReloading = true;    // stop asking for the rest of this load
-        console.warn(
-          "[lex-theme] NOT reloading again. This page already reloaded for '" +
-          previous.to + "' and is now being asked for '" + mode + "' while showing '" +
-          now + "'. Two sources disagree about the theme, and reloading again would " +
-          "just flip it back. Leaving the page as it is."
-        );
-        return;
-      }
-
-      if (host.__lexThemeReloading) return; // one reload per load
-      host.__lexThemeReloading = true;
-      noteReload(mode);
-      try {
-        // Exactly what the Settings menu would write, so the two cannot disagree.
-        host.localStorage.setItem(
-          activeThemeKey(),
-          JSON.stringify(mode === "dark" ? "Dark" : "Light")
-        );
-        // Streamlit reads the theme at boot, so a reload is still required --
-        // but the URL is left alone, so this is the only cost and the menu
-        // survives it.
-        host.location.reload();
-      } catch (e) {
-        host.__lexThemeReloading = false;
-      }
-    }
-
-    // Published so a writer already inside this frame tree -- the widget-host
-    // shim -- can call in directly rather than going through a storage event.
-    host.__lexThemeFollow = function (mode) { follow(mode, "widget"); };
-
-    // A mode agreed before this block rendered, which is the common ordering.
-    // With nothing agreed, fall back to DEFAULT_MODE rather than leaving the
-    // page on Streamlit's own default, which is the OS preference.
-    //
-    // Called directly, NOT through requestAnimationFrame. rAF does not fire
-    // while a document is not being rendered -- a background tab, a minimised
-    // window, a hidden pane -- so the install-time correction simply never ran
-    // for anyone whose Streamlit page finished loading unfocused. That is the
-    // normal case for this product: people open lex-app and the dashboard
-    // together and look at one of them. The page then sat on Streamlit's own
-    // default until something else happened to poke it, which from the outside
-    // is indistinguishable from the sync being broken.
-    //
-    // Nothing here needs a frame: it reads storage and a media query, neither of
-    // which depends on layout.
+    // Called directly, NOT through requestAnimationFrame: rAF does not fire
+    // while a document is not being rendered, so a page that finished loading
+    // unfocused -- the normal case, with lex-app and the dashboard side by side
+    // -- never ran its first correction at all.
     var stored = null;
     try { stored = host.localStorage.getItem(KEY); } catch (e) {}
-    follow(stored || DEFAULT_MODE, "install");
+    apply(stored || DEFAULT_MODE, "install");
 
-    // `storage` fires in every OTHER window of this origin, which is how a
-    // writer without a handle to this page gets through.
+    // A deliberate change made in lex-app, in any window of this origin.
     host.addEventListener("storage", function (ev) {
-      if (ev.key !== KEY) return;
-      // Route, not authority: the same event carries both a person changing the
-      // theme in another tab and a widget in this page announcing its own. Only
-      // the first is a reason to reload.
-      follow(ev.newValue, isSelfReport(ev.newValue) ? "widget" : "storage");
+      if (ev.key === KEY) apply(ev.newValue, "storage");
     });
 
-    console.info("[lex-theme] follower ready; showing", effectiveMode(),
-                 "; menu", selection() || "(unset -> system)");
+    console.info("[lex-theme] driver ready; showing", currentMode());
 __DEBUG_PANEL__  })();
 </script>
 """

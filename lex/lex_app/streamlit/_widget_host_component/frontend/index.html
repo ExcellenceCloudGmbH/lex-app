@@ -80,9 +80,46 @@
       );
     }
 
+    // ── The theme, straight from Streamlit ───────────────────────────────
+    // Streamlit hands every declared component its resolved theme in the RENDER
+    // event -- `{base: "light"|"dark", backgroundColor, textColor, ...}` -- and
+    // re-fires it whenever the theme changes, live, with no reload.
+    //
+    // This shim has listened for RENDER since it was written, read `args`, and
+    // thrown `theme` away. Everything the theme sync used to do -- a follower
+    // reading storage, a cross-origin relay iframe, an oscillation ledger, a
+    // page reload -- was reconstructing, badly, a value that was already being
+    // handed over on every render.
+    let _mode = null;
+
+    function publishTheme(theme) {
+      const base = theme && theme.base;
+      if (base !== "light" && base !== "dark") return;
+      if (base === _mode) return;
+      _mode = base;
+
+      // Tell the page, so the driver knows what is actually showing without
+      // having to infer it from storage.
+      try { window.parent.__lexThemeCurrent = base; } catch (e) {}
+
+      sendTheme();
+    }
+
+    function sendTheme() {
+      if (!_hostReady || !_mode) return;
+      const frame = document.getElementById("frame");
+      if (!frame || !frame.contentWindow) return;
+      frame.contentWindow.postMessage(
+        { source: "lex-app-host", version: PROTOCOL_VERSION, type: "theme",
+          payload: { mode: _mode } },
+        _expectedOrigin || "*"
+      );
+    }
+
     // ── Lifecycle: render ────────────────────────────────────────────────
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (ev) => {
       const args = (ev.detail && ev.detail.args) || {};
+      publishTheme(ev.detail && ev.detail.theme);
       _expectedOrigin = args.expected_origin || null;
       _themeStorageKey = args.theme_storage_key || null;
       _manifest = args.manifest || null;
@@ -103,6 +140,7 @@
 
       // A rerun may carry a changed manifest for an already-ready host.
       sendManifest();
+      sendTheme();
 
       if (!_lastHeight) {
         const initial = args.min_height || 200;
@@ -129,6 +167,7 @@
       if (data.type === "widget_host_ready") {
         _hostReady = true;
         sendManifest();
+        sendTheme();
         return;
       }
 
@@ -152,74 +191,15 @@
       }
 
       if (data.type === "theme") {
-        // The widget reports the palette it is wearing. This document is served
-        // BY the Streamlit server, so it shares the Streamlit page's origin and
-        // storage -- writing the key here raises a `storage` event in the page,
-        // where the theme follower is already listening.
+        // Ignored, deliberately, and kept as a branch so an older widget bundle
+        // reporting upward is dropped rather than falling through to the
+        // unknown-envelope warning.
         //
-        // Deliberately not routed through setComponentValue: that would cost a
-        // Python rerun to accomplish something no Python code needs to see, and
-        // the author's `on_status` branch would have to learn to ignore it.
-        //
-        // This is the path that works when lex-app and Streamlit are different
-        // SITES. The relay iframe cannot help there -- browsers give a
-        // cross-site frame partitioned storage, so its write lands somewhere the
-        // standalone page never reads.
-        const mode = (data.payload || {}).mode;
-        if (mode !== "light" && mode !== "dark") return;
-        if (!_themeStorageKey) {
-          console.warn("[lex-theme] widget reported", mode, "but no storage key was supplied");
-          return;
-        }
-        // Storage first, for readers with no handle to this page: sibling tabs
-        // on this origin, and a follower that has not rendered yet (its initial
-        // read picks this up).
-        //
-        // But tell the page it was US, before the write. This frame is
-        // same-origin with the page and a different document, so the write below
-        // fires a `storage` event IN the page -- which is indistinguishable from
-        // somebody deliberately changing the theme in another tab unless we say
-        // so. It is not the same thing: a widget describing its own palette is an
-        // observation, and in the cross-site case it is reporting lex-app's
-        // DEFAULT (partitioned storage hides the real preference from it), so
-        // acting on it would reload the page under someone who is using it.
-        try {
-          window.parent.__lexThemeSelfReport = { mode: mode, at: Date.now() };
-        } catch (e) {}
-        try {
-          if (window.localStorage.getItem(_themeStorageKey) !== mode) {
-            window.localStorage.setItem(_themeStorageKey, mode);
-          }
-        } catch (e) {
-          console.warn("[lex-theme] storage unavailable", e);
-        }
-
-        // Then call the page directly. Same origin, and we are already inside
-        // its frame tree, so this needs no storage event to be delivered and no
-        // guess about whether one was. It is the shorter path and the one that
-        // reports what happened.
-        try {
-          // Leave a record on the page regardless of which route we take, so the
-          // diagnostics panel can distinguish "the widget never spoke" from
-          // "it spoke and the page declined". Those look identical otherwise.
-          var at = Date.now();
-          window.parent.__lexThemeLastReport = {
-            mode: mode,
-            route: typeof window.parent.__lexThemeFollow === "function" ? "direct" : "storage",
-            ago: function () { return Math.round((Date.now() - at) / 1000); }
-          };
-          if (typeof window.parent.__lexThemeFollow === "function") {
-            console.info("[lex-theme] widget reports", mode, "- telling the page directly");
-            window.parent.__lexThemeFollow(mode);
-          } else {
-            console.info(
-              "[lex-theme] widget reports", mode,
-              "- stored, but the page has no follower yet; it will read this on install"
-            );
-          }
-        } catch (e) {
-          console.warn("[lex-theme] could not reach the page's follower", e);
-        }
+        // The direction is now one-way: Streamlit tells this shim the theme in
+        // its RENDER event, and the shim tells the frame. A frame reporting its
+        // own palette back up is what used to fight the page -- it could not see
+        // lex-app's real preference across a site boundary, so it announced a
+        // default and the two argued until something reloaded.
         return;
       }
 

@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.282.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.289.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -135,328 +135,143 @@ class TestCluster1ad_StreamlitThemeFollower:
         assert "top." not in html.replace("window.top", "")
 
 
-    def test_01_270_guard_and_listener_share_one_lifetime(self):
-        """Scenario 1.270: the listener is attached to the object being guarded.
 
-        Streamlit destroys and recreates a component iframe across reruns, while
-        the Streamlit page persists. So a flag on the page paired with a listener
-        on the iframe's own window survives exactly one render: the next iframe
-        sees the flag and returns early, and the iframe that held the listener is
-        already gone. Nothing is listening, nothing is logged, and the theme
-        simply stops following after the first interaction.
+    def test_01_283_nothing_reloads_the_page(self):
+        """Scenario 1.283: the reload is gone, and with it a whole bug family.
 
-        Both must live on the same object. Since the flag has to be on the page
-        (that is what makes it idempotent across reruns), the listener goes there
-        too.
-        """
-        html = theme_follower_html("dark")
-        assert "host.__lexThemeFollowerInstalled" in html
-        assert "host.addEventListener(" in html
-        assert "window.addEventListener(" not in html, (
-            "listener attached to the component iframe, which Streamlit recreates"
-        )
+        Every earlier version of this file wrote Streamlit's stored theme key and
+        reloaded, on the premise that Streamlit resolves its theme once at boot.
+        The premise was false. Streamlit's own menu changes the theme LIVE --
+        measured, dark to light with no navigation -- because it goes through
+        Streamlit's React state rather than storage.
 
+        The reload was the entire problem the user reported: "it's slow and
+        unreliable, I can easily break it." Slow because a change cost a full
+        page load, and two when the page booted wrong and had to be corrected.
+        Unreliable because an oscillation ledger, a sticky stand-down,
+        self-report marking and a one-reload-per-load flag were all needed to
+        make reloading survivable -- none of which addressed the theme, and all
+        of which could get stuck.
 
-    def test_01_271_follower_publishes_a_direct_entry_point(self):
-        """Scenario 1.271: a writer inside the frame tree can skip the storage hop.
-
-        The embedded path used to be widget -> shim -> localStorage -> storage
-        event -> follower -> reload. Every link there is silent when it breaks,
-        and three of them were only reachable by guessing. The shim is already
-        inside the page's frame tree and same-origin with it, so it can call the
-        follower outright.
-
-        The storage route is not removed -- it is the only way in for a writer
-        with no handle to the page (the relay iframe, a sibling tab, and a shim
-        that reports before the follower has rendered).
-        """
-        html = theme_follower_html("dark")
-        # A wrapper rather than `follow` itself, so a widget's report is tagged
-        # as such: the oscillation guard in 1.277 has to tell a re-read of
-        # existing state from a deliberate change.
-        assert "host.__lexThemeFollow = function" in html
-        assert 'follow(mode, "widget")' in html
-
-        shim = (
-            pathlib.Path(__file__).resolve().parents[3]
-            / "lex_app/streamlit/_widget_host_component/frontend/index.html"
-        ).read_text()
-        assert "window.parent.__lexThemeFollow(mode)" in shim
-        # Storage is still written, so the pre-render ordering keeps working.
-        assert "window.localStorage.setItem(_themeStorageKey, mode)" in shim
-
-
-    def test_01_272_the_mode_is_read_from_streamlit_not_guessed(self):
-        """Scenario 1.272: the current mode is asked for, never inferred.
-
-        This scenario used to pin a fix to a luma heuristic: the follower
-        classified the rendered background, and ``rgba(0, 0, 0, 0)`` parsed to
-        four zeroes, which reads as pure black -- so a light page whose element
-        painted nothing reported "dark" and the follower silently did nothing,
-        every time.
-
-        The heuristic is gone rather than fixed. Streamlit already stores which
-        theme is selected, so the question has an exact answer:
-
-            stActiveTheme-<pathname>-v2  ->  "Light" | "Dark" | "System"
-
-        with "System" and unset both meaning the OS decides, which
-        ``prefers-color-scheme`` answers exactly. The regression guard is that
-        nobody reintroduces measurement -- a future "improvement" that inspects
-        pixels brings the whole bug class back with it.
+        Deleting the reload does not fix those bugs. It makes them unreachable.
         """
         js = theme_follower_html()
 
-        # Read from Streamlit's own store, scoped the way Streamlit scopes it.
-        assert '"stActiveTheme-" + host.location.pathname + "-v"' in js
-        assert "prefers-color-scheme: dark" in js
+        assert "location.reload" not in js, "the reload is back"
+        for gone in ("LEDGER", "STANDOWN", "isSelfReport", "__lexThemeReloading"):
+            assert gone not in js, f"machinery for surviving reloads is back: {gone}"
 
-        # And measurement is not merely unused -- it is absent from the CODE.
-        # Checked with comments stripped: the note above the replacement explains
-        # what the luma heuristic did, and a naive substring search finds that
-        # prose rather than any surviving call.
-        code = "\n".join(
-            line for line in js.splitlines()
-            if not line.strip().startswith(("//", "*", "/*"))
-        )
-        for gone in ("getComputedStyle", "backgroundColor", "luma", "querySelector"):
-            assert gone not in code, f"the mode is being inferred again, via {gone}"
+    def test_01_284_it_drives_streamlits_own_control(self):
+        """Scenario 1.284: use the control, do not reimplement it.
 
-    def test_01_276_it_writes_the_menu_rather_than_overriding_it(self):
-        """Scenario 1.276: sync cooperates with Streamlit's theme menu.
+        Clicking Streamlit's own theme item goes through Streamlit's state, so
+        the change applies instantly, persists by Streamlit's own code, and
+        cannot drift from whatever key or value format a future version adopts.
+        Writing storage reimplemented all three, badly.
 
-        The previous mechanism reloaded with ``?embed_options=<mode>_theme``.
-        That parameter is the top of Streamlit's resolver, so the Settings menu
-        stopped applying -- and stopped SAVING, because Streamlit's own writer
-        refuses while a URL theme is present::
-
-            Cae = e => { if (!Pa() || (Rw(), xg() || Sg())) return; ... }
-
-        Reported as "always in dark mode, you cannot change it". Writing the key
-        the menu itself writes means the two cannot disagree: the menu keeps
-        working, shows the truth, and a choice made there persists.
+        The testids are Streamlit's own testing surface, and the dependency
+        fails HARMLESSLY: if the control is not found the theme is left alone,
+        with a log saying so. Nothing reloads, nothing is overridden, nothing
+        loops -- which is the property the old design could never offer.
         """
         js = theme_follower_html()
 
-        # Writes Streamlit's own preference, as the value Streamlit stores.
-        assert 'host.localStorage.setItem(' in js
-        assert 'JSON.stringify(mode === "dark" ? "Dark" : "Light")' in js
+        assert "stMainMenuItem-theme-" in js
+        assert "stMainMenuButton" in js
+        # It must say something when the control is missing, rather than failing mute.
+        assert "did not appear" in js
 
-        # And it never PUTS a theme in the URL. It may now REMOVE one an older
-        # version left behind (1.281), so "never touches the URL" is no longer
-        # the property -- "never pins a theme there" is, and that is the one that
-        # mattered all along.
-        for writer in ("location.replace", "location.href =", "history.pushState"):
-            assert writer not in js, f"the URL is being navigated again, via {writer}"
-        assert 'searchParams.append("embed_options", v)' in js, (
-            "the strip must re-add the options it kept"
-        )
-        assert '"light_theme")' not in js.replace('part === "light_theme"', "")
-        assert "_theme\")" not in js.replace('=== "light_theme"', "").replace(
-            '=== "dark_theme"', ""
-        ), "a theme is being written into the URL somewhere"
-        # A reload is still needed -- Streamlit reads the theme at boot -- but a
-        # reload preserves the URL, which is the whole difference.
-        assert "host.location.reload()" in js
+    def test_01_285_the_menu_is_never_seen(self):
+        """Scenario 1.285: driving the control must not flash the menu open.
 
-    def test_01_281_a_stale_url_pin_is_removed_rather_than_obeyed(self):
-        """Scenario 1.281: clean up after ourselves instead of giving up.
+        The theme item only exists in the DOM while the menu is open, so opening
+        it is unavoidable. React renders the popover a frame or two later, which
+        is long enough to be seen.
 
-        A theme in the page's URL outranks the key this writes AND Streamlit's
-        own menu, so it cannot simply be fought. The previous answer was to stand
-        down and log how to clear it.
+        It is masked for the duration and revealed again after -- including when
+        nothing ever appears, because a mask left behind would hide the real menu
+        from the user permanently. Confirmed live: ``menuEverVisible: false``,
+        ``popoverLeftOpen: false``.
+        """
+        js = theme_follower_html()
 
-        That was wrong, and it is the likeliest thing behind "the switch never
-        works". Earlier versions of this very script PUT that parameter in the
-        URL. Standing down turned our own past mistake into a permanent, silent,
-        per-URL failure -- theme following never worked again in that tab, and
-        the only evidence was one ``console.info`` nobody had a reason to read.
-        A bookmark, a pinned tab or a shared link carries it forever.
+        assert "stMainMenuPopover" in js
+        assert "opacity:0" in js
 
-        We put it there, so we remove it: the theme values go, every other embed
-        option survives, and the ordinary logic takes over on the corrected URL.
-        Self-healing in one load, with no user action and no lost options.
+        # Revealed again on BOTH exit paths -- the click, and the give-up
+        # timeout. A mask left behind would hide the real menu from the user for
+        # the rest of the page's life, which is a worse bug than the flash.
+        assert "host.setTimeout(finish, 60)" in js, "not revealed after a successful click"
+        assert "finish();" in js, "not revealed when the control never appears"
+        # The only early return happens before the mask exists.
+        before_mask = js[: js.index("doc.head.appendChild(mask)")]
+        assert "return false;" in before_mask
+
+    def test_01_286_the_showing_mode_comes_from_streamlit_itself(self):
+        """Scenario 1.286: ask Streamlit, do not infer.
+
+        The shim receives Streamlit's real resolved theme in the RENDER event --
+        ``{base: "light"|"dark", ...}`` -- and publishes it to the page. This
+        reads that.
+
+        Three earlier versions inferred it instead: by measuring the rendered
+        background (which read a transparent element as black and so reported
+        "dark" for a light page), then by parsing a storage key whose name and
+        version we had to guess. Streamlit hands the answer over on every render,
+        for free, and has since before any of this was written.
+
+        The storage read survives only as a fallback for a page with no widgets,
+        where nothing is receiving RENDER.
+        """
+        js = theme_follower_html()
+
+        assert "__lexThemeCurrent" in js
+        assert "stActiveTheme-" in js, "the no-widget fallback is gone"
+        # And never by measuring pixels again.
+        for banned in ("getComputedStyle", "backgroundColor", "luma"):
+            assert banned not in js, f"the mode is being inferred again, via {banned}"
+
+    def test_01_287_the_entry_points_and_their_guard_share_one_lifetime(self):
+        """Scenario 1.287: install guard, entry point and listener all on `host`.
+
+        Streamlit destroys and recreates this component iframe on every rerun
+        while the page persists. A guard on the page with a listener on this
+        window would survive exactly one render; an entry point published here
+        would vanish from under the shim that calls it.
+        """
+        js = theme_follower_html()
+
+        for on_host in ("host.__lexThemeDriverInstalled",
+                        "host.__lexThemeApply",
+                        'host.addEventListener("storage"'):
+            assert on_host in js, f"{on_host} does not belong to the page"
+
+    def test_01_288_a_stale_url_pin_is_still_removed(self):
+        """Scenario 1.288: clean up the parameter older versions left behind.
+
+        A theme pinned in the URL outranks Streamlit's own menu, so the control
+        this drives would apply but stop persisting. Earlier versions of this
+        script put that parameter there, so it is removed rather than obeyed --
+        every other embed option survives.
         """
         pinned = theme_follower_html("dark")
 
         assert "stripUrlThemePin" in pinned
-        assert "removed a stale embed_options=" in pinned
-        # Other embed options are not collateral damage.
         assert "kept.push(part)" in pinned
         assert 'searchParams.append("embed_options", v)' in pinned
-        # Standing down survives only as the last resort, when removal fails.
-        assert "could not be removed" in pinned
 
-    def test_01_282_the_first_correction_does_not_wait_to_be_looked_at(self):
-        """Scenario 1.282: install must not depend on the page being visible.
+    def test_01_289_the_first_correction_does_not_wait_to_be_looked_at(self):
+        """Scenario 1.289: install must not depend on the page being visible.
 
-        The install-time correction ran inside ``requestAnimationFrame``. rAF
-        does not fire while a document is not being rendered -- a background tab,
-        a minimised window, an unfocused pane -- so for anyone whose Streamlit
-        page finished loading unfocused, the correction simply never happened.
-
-        That is the normal case for this product. People open lex-app and the
-        dashboard side by side and look at one of them; the other loads in the
-        background. The page then sat on Streamlit's own default until something
-        else happened to poke it, which from the outside is indistinguishable
-        from the sync being broken.
-
-        Confirmed against a real Streamlit page with ``visibilityState:
-        "hidden"``: before, the theme key stayed ``null`` and the page stayed on
-        the OS default; after, it wrote ``"Light"`` and corrected itself.
-
-        Nothing in the install path needs a frame -- it reads storage and a media
-        query, neither of which depends on layout.
+        It ran inside ``requestAnimationFrame``, which does not fire while a
+        document is not being rendered. Anyone whose Streamlit page finished
+        loading unfocused never got the first correction -- the normal case, with
+        lex-app and the dashboard open side by side.
         """
         js = theme_follower_html()
 
-        assert "requestAnimationFrame(" not in js, (
-            "the first correction is gated on the page being rendered"
-        )
-        # Still an install-time call, just an unconditional one.
-        assert 'follow(stored || DEFAULT_MODE, "install");' in js
-
-
-    def test_01_277_a_reload_loop_is_structurally_impossible(self):
-        """Scenario 1.277: the guard against reloading survives the reload.
-
-        Reported as the page flipping back and forth between light and dark
-        without stopping -- the worst thing this file can do to a page, and
-        caused by the guard being on the wrong object::
-
-            if (host.__lexThemeReloading) return;
-            host.__lexThemeReloading = true;
-            host.location.reload();          // destroys the window holding it
-
-        That stopped a second reload WITHIN one load and nothing across them.
-        Two independent inputs feed ``follow()`` -- the stored agreement and a
-        widget reporting its own palette -- so when they disagree, each load
-        flips the other way, forever.
-
-        The ledger lives in ``sessionStorage``: it survives a reload and is
-        scoped to the tab, which is exactly the lifetime a cross-reload guard
-        needs. Recording what was last reloaded FOR is what makes a
-        contradiction recognisable rather than merely repeatable.
-        """
-        js = theme_follower_html()
-
-        assert "sessionStorage" in js, "the guard cannot live on a window it destroys"
-        assert "lex.theme.reloads" in js
-        # A contradiction is detected by comparing targets, not just counting.
-        assert "previous.to !== mode" in js
-        assert "NOT reloading again" in js, "and it says so, rather than going quiet"
-
-    def test_01_277_a_deliberate_change_is_never_refused(self):
-        """Scenario 1.277 (second half): the guard must not become the bug.
-
-        A cross-reload guard that cannot tell "these two disagree" from "the user
-        just changed their mind" would break theme sync to fix the loop --
-        trading a visible failure for a silent one.
-
-        A ``storage`` event IS a fresh, deliberate change made somewhere else, so
-        it clears the ledger and is always honoured. The install-time read and a
-        widget's report are re-reads of existing state, and are the two that can
-        argue with each other.
-        """
-        js = theme_follower_html()
-
-        for reason in ('"install"', '"storage"', '"widget"'):
-            assert reason in js, f"follow() cannot distinguish its inputs: {reason}"
-        assert 'if (reason === "storage") {' in js
-        assert "forgetReloads();" in js
-
-    def test_01_277_the_guard_expires(self):
-        """Scenario 1.277 (third half): it stops guarding once the page settles.
-
-        A permanent refusal would be its own bug -- theme sync would work once
-        per tab and then quietly stop for the rest of the session. The window
-        bounds the episode, not the tab.
-
-        The window is what stops a normal change being mistaken for a loop. It is
-        deliberately NOT what stops a loop resuming -- see 1.279, where an
-        expiring memory of a contradiction turned out to be the whole reason the
-        page kept reloading while someone was working.
-        """
-        js = theme_follower_html()
-        assert "LEDGER_WINDOW_MS" in js
-        assert "Date.now() - v.at > LEDGER_WINDOW_MS" in js
-
-    def test_01_278_a_widget_report_may_act_but_may_not_forget(self):
-        """Scenario 1.278: the messenger is not silenced, only distrusted.
-
-        This scenario shipped inverted and broke theme following outright.
-        Reported as "theme switch isn't working": a light Streamlit page hosting
-        a dark widget, with nothing able to reconcile them.
-
-        The reasoning that produced it: a widget re-asserting its palette on
-        every rerun was reloading the page mid-use, so a widget report was
-        reclassified as "an observation, not a command" and refused a reload
-        entirely. That is true of the *re-assertion* and false of the *report*.
-
-        In a same-site deployment the widget frame IS the messenger. lex-app
-        writes its preference, the frame reads it (same origin, so unlike the
-        cross-site case it genuinely can), and tells the shim. Silencing that
-        silences the only carrier -- and the relay cannot cover for it, because
-        the shim has already written the same value and a `storage` event does
-        not fire for an unchanged one. The change is swallowed whole.
-
-        So every input may ACT. What a widget report may not do is **forget**:
-        it must not clear the loop memory, because an assertion arriving several
-        times a minute would wipe the record of a contradiction and let a
-        bounded loop restart forever. That distinction -- act versus forget -- is
-        the one that carries both requirements at once.
-        """
-        js = theme_follower_html()
-
-        # No early return that stops a widget report before the reload path.
-        reload_call = js.index("host.location.reload()")
-        for refusal in ('if (reason === "widget") {', 'if (reason !== "storage") return'):
-            assert refusal not in js[:reload_call], (
-                f"a widget report is refused before it can act: {refusal}"
-            )
-
-        # Forgetting is gated on `storage` alone.
-        forget_at = js.index("forgetReloads();")
-        gate = js.rindex('if (reason === "storage")', 0, forget_at)
-        assert forget_at - gate < 400, (
-            "clearing the loop memory is not gated on a genuine external change"
-        )
-
-    def test_01_279_a_known_contradiction_is_not_forgotten(self):
-        """Scenario 1.279: the stand-down outlives the window that detected it.
-
-        The other half of "it reloads by itself". Even with widget reports
-        silenced, a windowed memory is the wrong shape for this fact: a
-        contradiction between two sources does not heal on a timer, so letting
-        the ledger expire meant a fresh episode could begin every window --
-        forever, at whatever interval the window happens to be.
-
-        So the two memories have different lifetimes on purpose:
-
-        * the **ledger** expires, so a deliberate change fifteen minutes later is
-          not mistaken for the tail of an old loop (1.277)
-        * the **stand-down** does not, because "these two disagree" stays true
-          until something changes it
-
-        What clears it is a ``storage`` event -- a real, deliberate change made
-        somewhere else. That keeps the escape hatch the user actually has (switch
-        the theme in lex-app, or in Streamlit's own menu) working.
-        """
-        js = theme_follower_html()
-
-        assert "lex.theme.standown" in js
-        # Sticky: nothing in the script may expire it on a timer.
-        standown_lines = [ln for ln in js.splitlines() if "STANDOWN_KEY" in ln]
-        assert standown_lines, "the stand-down key is not used"
-        assert not any("WINDOW" in ln for ln in standown_lines), (
-            "a stand-down that expires is the bug it exists to fix"
-        )
-        # And a deliberate change still clears it, or the escape hatch is gone.
-        forget = js[js.index("function forgetReloads"):]
-        forget = forget[: forget.index("}\n\n")]
-        assert "STANDOWN_KEY" in forget and "LEDGER_KEY" in forget, (
-            "a deliberate change must clear both memories, not just one"
-        )
+        assert "requestAnimationFrame(" not in js
+        assert 'apply(stored || DEFAULT_MODE, "install");' in js
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:
@@ -545,54 +360,3 @@ class TestCluster1ad_ThemeFollowerEncoding:
         assert json.loads(literal) == mode, "JavaScript would see a different value"
 
 
-class TestCluster1ad_ThemeFollowerBehaviour:
-    """The follower's *logic*, not its text.
-
-    Every other class here asserts on the emitted script as a string, which is
-    all a Python test can do -- and it is not enough for the one failure this
-    file keeps producing. No property of a string proves a page settles.
-
-    So the script is run against a DOM double that models the only distinction
-    that matters for a reload loop: state that survives ``location.reload()``
-    (``localStorage``, ``sessionStorage``) and state that does not (the window,
-    its listeners, every flag on it). Eight cases, including both roads a widget
-    report travels and the two real changes that must still be honoured.
-
-    Skipped rather than failed when there is no JS runtime: this is a Python
-    repository, and a missing ``node`` is a fact about the machine, not a defect
-    in the code under test. It is wired into pytest anyway because the previous
-    version of this harness was hand-run, lived in a temporary directory, and
-    was gone by the next session -- which is why the loop it had already proved
-    fixed came back in a different form.
-    """
-
-    def test_01_280_the_follower_settles(self):
-        """Scenario 1.280: run the follower and watch it stop.
-
-        Case 7 is the one that earns this class. Silencing the direct
-        ``__lexThemeFollow`` route (1.278) looked like a complete fix and was
-        not: the shim writes the agreed key *before* calling the page, and a
-        same-origin iframe's write is delivered to its parent as a ``storage``
-        event -- indistinguishable from a person changing the theme in another
-        tab. The identical report simply arrived by the other road and reloaded
-        the page anyway.
-        """
-        node = shutil.which("node")
-        if node is None:
-            pytest.skip("no JS runtime on this machine; the follower's logic is unproven here")
-
-        harness = pathlib.Path(__file__).parent / "harness" / "theme_follower_harness.mjs"
-        with tempfile.TemporaryDirectory() as tmp:
-            script = pathlib.Path(tmp) / "follower.html"
-            script.write_text(theme_follower_html(), encoding="utf-8")
-            result = subprocess.run(
-                [node, str(harness), str(script)],
-                capture_output=True, text=True, timeout=60,
-            )
-
-        assert result.returncode == 0, (
-            "the follower does not settle:\n" + result.stdout + result.stderr
-        )
-        # Guard the guard: a harness that silently stopped running its cases
-        # would pass forever.
-        assert result.stdout.count("  ok   ") >= 23, result.stdout
