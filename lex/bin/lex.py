@@ -417,7 +417,11 @@ def _warn_if_sessions_are_not_durable() -> None:
     rule, change it in both places.
     """
     public_url = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").rstrip("/")
-    is_https = public_url.startswith("https://")
+    # Lowercased, because proxy.py derives the same fact through
+    # ``httpx.URL(...).scheme``, which normalises case. Comparing
+    # case-sensitively here let ``HTTPS://host`` pass the pre-check and then
+    # raise at import -- the pre-check disagreeing with the rule it mirrors.
+    is_https = public_url.lower().startswith("https://")
     has_secret = bool(
         os.getenv("SESSION_SECRET")
         or os.getenv("SESSION_KEY")
@@ -442,14 +446,41 @@ def _warn_if_sessions_are_not_durable() -> None:
     replicas = os.getenv("LEX_PROXY_REPLICAS", "1") or "1"
     has_redis = bool(os.getenv("TOKEN_REDIS_URL") or os.getenv("REDIS_URL"))
     try:
-        replicated = int(replicas) > 1
+        replicated = int(replicas.strip()) > 1
     except ValueError:
+        # Matches proxy.py's `_env_int`, which warns and falls back to 1 rather
+        # than raising. The two must agree or this pre-check stops being one.
+        click.echo(
+            f"Warning: LEX_PROXY_REPLICAS={replicas!r} is not an integer; assuming 1.",
+            err=True,
+        )
         replicated = False
     if replicated and not has_redis:
         raise click.ClickException(
             f"LEX_PROXY_REPLICAS={replicas} but no TOKEN_REDIS_URL/REDIS_URL is set. "
             "The token store would be process-local, so a request routed to another "
             "replica would find no session and return 401."
+        )
+
+    # proxy.py raises on these too, and its raise lands in the worker thread
+    # where it kills only the proxy. Mirror every rule, not just the first two.
+    samesite = (os.getenv("SESSION_SAMESITE") or "").strip().lower()
+    if samesite and samesite not in {"lax", "strict", "none"}:
+        raise click.ClickException(
+            f"SESSION_SAMESITE must be one of lax|strict|none, got {samesite!r}."
+        )
+
+    https_only_raw = (os.getenv("SESSION_HTTPS_ONLY") or "").strip().lower()
+    https_only = (
+        https_only_raw in ("1", "true", "yes", "y", "on") if https_only_raw else is_https
+    )
+    effective_samesite = samesite or ("none" if is_https else "lax")
+    if effective_samesite == "none" and not https_only:
+        raise click.ClickException(
+            "SESSION_SAMESITE=none requires Secure cookies, but SESSION_HTTPS_ONLY is false. "
+            "Browsers discard such cookies, so no session would ever be established. Serve "
+            "the proxy over HTTPS, or set SESSION_SAMESITE=lax and keep the frontend and "
+            "Streamlit on one registrable domain."
         )
 
     if not has_secret:
@@ -516,40 +547,49 @@ def streamlit(ctx):
 
     _warn_if_sessions_are_not_durable()
 
+    # `uvicorn.run()` would install signal handlers, which only the main thread
+    # may do; modern uvicorn no-ops that off-thread, but it also gives us no
+    # handle on the server, so there is no way to ask it to stop. Building the
+    # Server here keeps that handle, which is what makes the shutdown below
+    # possible: setting `should_exit` lets `serve()` return normally, so its
+    # lifespan shutdown runs -- closing the pooled upstream client and sending
+    # every open WebSocket a real close frame instead of having the daemon
+    # thread killed from under them.
+    proxy_server = uvicorn.Server(
+        uvicorn.Config("proxy:app", host="0.0.0.0", port=int(proxy_port), loop="asyncio")
+    )
+
     def run_uvicorn():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        # uvicorn.run() installs signal handlers, which only the main thread may
-        # do -- this runs in a worker thread, so `Server.run()` is used directly
-        # with that step disabled. Previously the attempt was swallowed and the
-        # server had no shutdown path at all: on exit the daemon thread was
-        # simply killed, dropping every open WebSocket without a close frame.
-        config = uvicorn.Config(
-            "proxy:app", host="0.0.0.0", port=int(proxy_port), loop="asyncio"
-        )
-        server = uvicorn.Server(config)
-        server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
-        loop.run_until_complete(server.serve())
+        loop.run_until_complete(proxy_server.serve())
 
     t = threading.Thread(target=run_uvicorn, daemon=True)
     t.start()
 
-    streamlit_main(
-        streamlit_args
-        + [
-            "--browser.serverPort", proxy_port,
-            "--server.port", "8080",
-            # Streamlit keeps a disconnected session -- st.session_state,
-            # uploaded files -- for this long, and resumes it if the same client
-            # reconnects carrying its session id. The default is 120s, which is
-            # shorter than a Keycloak round trip that has to show a login form,
-            # so a re-auth would come back to an evicted session and land the
-            # user on the first page with their work gone. Defence in depth:
-            # with renewal working the document should never reload at all, but
-            # a network blip or a proxy restart still drops the socket.
-            "--server.disconnectedSessionTTL", str(disconnected_session_ttl),
-        ]
-    )
+    try:
+        streamlit_main(
+            streamlit_args
+            + [
+                "--browser.serverPort", proxy_port,
+                "--server.port", "8080",
+                # Streamlit keeps a disconnected session -- st.session_state,
+                # uploaded files -- for this long, and resumes it if the same
+                # client reconnects carrying its session id. The default is
+                # 120s, which is shorter than a Keycloak round trip that has to
+                # show a login form, so a re-auth came back to an evicted
+                # session and landed the user on the first page with their work
+                # gone. Defence in depth: with renewal working the document
+                # should never reload, but a blip still drops the socket.
+                "--server.disconnectedSessionTTL", str(disconnected_session_ttl),
+            ]
+        )
+    finally:
+        # Streamlit has stopped, so let the proxy finish properly rather than
+        # dying with the process. Bounded: a hung shutdown must not stop the
+        # command exiting.
+        proxy_server.should_exit = True
+        t.join(timeout=float(os.getenv("LEX_PROXY_SHUTDOWN_TIMEOUT", "5")))
 
 
 @lex.command(name="pytest", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))

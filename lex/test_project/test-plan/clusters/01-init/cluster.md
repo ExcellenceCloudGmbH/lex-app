@@ -288,4 +288,19 @@ does not remove user launch configurations.
 | 1.275 | the session window outlasts a login | `--server.disconnectedSessionTTL` is passed and exceeds Streamlit's 120s default |
 | 1.276 | the CLI fails readably | `lex streamlit`'s pre-flight raises a `ClickException` rather than letting the proxy thread die alone |
 
-**Scenario range:** 1.247 – 1.276. **Test file:** `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py`. **Type:** U. **Status:** ✅ 30 pass, 29 subtests. **27 of 30 fail against the pre-fix tree**; 1.254, 1.255 and 1.271 pass by design as guards. Measured and explicitly not a cause: JWT validation at 0.045 ms/request — 16 ms across all 365 chunks. Recorded **BUG-029** (a pre-existing cluster-1 flake) while running this batch.
+**Scenario range:** 1.247 – 1.286. **Test file:** `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py`. **Type:** U. **Status:** ✅ 40 pass, 31 subtests. **27 of the first 30 fail against the pre-fix tree**; 1.254, 1.255 and 1.271 pass by design as guards. Measured and explicitly not a cause: JWT validation at 0.045 ms/request — 16 ms across all 365 chunks. Recorded **BUG-029** (a pre-existing cluster-1 flake) while running this batch.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.277 | the strip hands over every credential | the `auth_token` redirect re-issues `st_access`, so it never delivers fewer credentials than the response it replaces |
+| 1.278 | a bodiless response yields nothing | a 304 relays with no body chunk — `b""` would make GZip attach a body to it |
+| 1.279 | a mid-body failure is not a truncated 200 | the error propagates, so the browser sees a network error rather than a half-delivered chunk |
+| 1.280 | a probe with a body is not a 500 | `Content-Length` is never forwarded; httpx recomputes it from the real body |
+| 1.281 | the pooled client is per event loop | two successive loops get different clients |
+| 1.282 | the single-flight lock is per event loop | contended acquisition on a second loop does not raise |
+| 1.283 | a malformed integer setting does not stop the proxy | `LEX_PROXY_REPLICAS=auto` warns and defaults to 1 |
+| 1.284 | the bundle follows `baseUrlPath` | the mount moves to `/app/static`, and is not also left at `/static` |
+| 1.285 | the pre-flight mirrors the cookie rules | `SameSite=none` without `Secure`, and an invalid value, both fail on the main thread |
+| 1.286 | the https test agrees on both sides | `HTTPS://host` is recognised as a deployment by the CLI, as it is by the proxy |
+
+**Scenarios 1.277 – 1.286** were added after an adversarial review of the first pass. All ten defects they pin lived in the *new* code, and four would have reproduced one of the three original symptoms by a different route — which is the argument for reviewing a fix as hard as the bug.

@@ -1,8 +1,8 @@
 ---
 date: 2026-09-04
 clusters: [1]
-tests_added: 30
-suite_tally: "1ad: 30 pass / 0 fail, 29 subtests; init cluster: 353 pass / 13 skip / 119 subtests on a clean run (BUG-029 makes it intermittent)"
+tests_added: 40
+suite_tally: "1ad: 40 pass / 0 fail, 31 subtests; init cluster: 353 pass / 13 skip / 119 subtests on a clean run (BUG-029 makes it intermittent)"
 ---
 
 # Batch 1ad — Streamlit's asset bundle served ungated, and session durability
@@ -67,3 +67,34 @@ symptom is what made them hard to find.
   missing `lex_app_historicalsimpleitem` table. It reproduces with this batch's file
   excluded and predates it. Left unmarked deliberately — an xfail would hide a flake that
   currently stops cluster 1 gating a release.
+
+## The review found ten more defects, all in the new code
+
+Worth writing down, because the shape repeats. Three independent finder angles over
+`lex/proxy.py`, `lex/bin/lex.py` and the React shell turned up ten further bugs — **every one
+of them in the fix**, not in what it replaced. Scenarios 1.277–1.286 pin them; the
+[batch entry](../../clusters/01-init/batches.md) lists each.
+
+Four would have reproduced one of the three original symptoms by a different route:
+
+- the `auth_token` strip redirect set only the session cookie, so it handed over *fewer*
+  credentials than the response it replaced — and the deployments where that matters (Safari
+  ITP, third-party-cookie blocking) are exactly the ones the change targets;
+- the `/static` mount ignored `--server.baseUrlPath`, which would drop every asset back into
+  the authenticated catch-all and restore the 401 storm, with the bundle present so nothing
+  warned;
+- a mid-body upstream failure became a truncated `200`, i.e. a silent `SyntaxError` in a Vite
+  chunk — the same class of error, now unreportable;
+- and in the shell, `authError` was left ungated where `isAuthLoading` had been gated, so a
+  transient renewal failure unmounted a live dashboard every 15 s.
+
+Two lessons for the next pass:
+
+1. **A test double that cannot take the production path proves nothing about it.** 1.278 (an
+   empty chunk on a 304) was reachable *only* through the buffered branch every stub takes;
+   real `aiter_raw()` yields zero chunks. 1.257 had the same problem in the first pass, and the
+   fix there was to make the stub stream.
+2. **Mirrored logic drifts immediately.** `_warn_if_sessions_are_not_durable` was written to
+   duplicate proxy.py's import-time rules deliberately, and shipped covering two of five — with
+   a case-sensitive https test where proxy.py's normalises. 1.285 and 1.286 exist to keep the
+   two in step, because the docstring saying "keep these in sync" did not.

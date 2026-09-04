@@ -338,7 +338,25 @@ class RedisTokenStore(TokenStore):
 
 #: Replica count, when the deployment knows it. >1 makes an in-memory token
 #: store incorrect rather than merely fragile.
-PROXY_REPLICAS = int(os.getenv("LEX_PROXY_REPLICAS", "1") or "1")
+def _env_int(name: str, default: int) -> int:
+    """An int from the environment, or ``default`` with a warning.
+
+    Not a bare ``int()``: a typo in a deployment variable must not raise at
+    import, because this module is imported inside the uvicorn worker thread --
+    where the traceback kills only the proxy and leaves Streamlit serving, which
+    reads as "the dashboard is broken" rather than "fix your env".
+    """
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("%s=%r is not an integer; using %d", name, raw, default)
+        return default
+
+
+PROXY_REPLICAS = _env_int("LEX_PROXY_REPLICAS", 1)
 
 
 def _build_token_store() -> TokenStore:
@@ -512,7 +530,11 @@ async def _ensure_valid_access_token(session: Dict[str, Any]) -> Optional[Dict[s
 _JWKS_CACHE: Optional[Dict[str, Any]] = None
 _JWKS_CACHE_TIME: float = 0.0
 _JWKS_CACHE_TTL: int = int(os.getenv("JWKS_CACHE_TTL", "3600"))
-_JWKS_LOCK = asyncio.Lock()
+
+
+def _jwks_lock() -> asyncio.Lock:
+    """Per-loop, for the reason given at ``_loop_lock``."""
+    return _loop_lock("jwks")
 
 #: How long to wait before retrying after a failed refresh, when stale keys
 #: are still being served.
@@ -541,6 +563,10 @@ def _fetch_jwks_blocking() -> None:
     global _JWKS_CACHE, _JWKS_CACHE_TIME
 
     if not KEYCLOAK_URL or not KEYCLOAK_REALM:
+        # Stamp the clock anyway. Without it `_jwks_is_fresh()` stays False
+        # forever, so every single request pays a lock round-trip, an
+        # asyncio.to_thread hop and a log line -- on the dev default, forever.
+        _JWKS_CACHE_TIME = time.time() - _JWKS_CACHE_TTL + _JWKS_RETRY_BACKOFF_SECONDS
         logger.warning("JWKS fetch skipped: KEYCLOAK_URL or KEYCLOAK_REALM not set")
         return
 
@@ -551,10 +577,13 @@ def _fetch_jwks_blocking() -> None:
             _JWKS_CACHE = resp.json()
             _JWKS_CACHE_TIME = time.time()
     except Exception as exc:
+        # Back off in BOTH cases. Doing it only when keys were cached meant a
+        # cold cache re-ran the whole 10s fetch for every queued request: the
+        # single-flight lock serialises them, each re-checks `_jwks_is_fresh()`,
+        # still False, so N waiting requests cost N x 10s against a Keycloak
+        # that is blackholed rather than refusing.
+        _JWKS_CACHE_TIME = time.time() - _JWKS_CACHE_TTL + _JWKS_RETRY_BACKOFF_SECONDS
         if _JWKS_CACHE:
-            # Push the clock forward so we do not hammer a struggling Keycloak
-            # on every request, but keep serving the keys we have.
-            _JWKS_CACHE_TIME = time.time() - _JWKS_CACHE_TTL + _JWKS_RETRY_BACKOFF_SECONDS
             logger.warning("JWKS refresh from %s failed (%s); keeping cached keys", _jwks_url(), exc)
         else:
             logger.error("JWKS fetch from %s failed and no keys are cached: %s", _jwks_url(), exc)
@@ -577,7 +606,7 @@ async def _ensure_jwks_ready() -> None:
     """
     if _jwks_is_fresh():
         return
-    async with _JWKS_LOCK:
+    async with _jwks_lock():
         # Single-flight: 107 concurrent chunk requests must not become 107
         # concurrent fetches. The re-check covers the ones that queued here.
         if _jwks_is_fresh():
@@ -1207,7 +1236,27 @@ async def ws_proxy(websocket: WebSocket):
 # arrives.
 _UPSTREAM_TIMEOUT = httpx.Timeout(float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", "30")))
 _UPSTREAM_CLIENT: Optional[httpx.AsyncClient] = None
-_UPSTREAM_CLIENT_LOCK = asyncio.Lock()
+_UPSTREAM_CLIENT_LOOP: Optional[Any] = None
+
+# Locks are created per event loop, not at import. An `asyncio.Lock()` built at
+# module scope looks loop-agnostic because an *uncontended* acquire never binds
+# it -- but the first CONTENDED acquire does, and a contended acquire on another
+# loop then raises "is bound to a different event loop". That is: it breaks only
+# under the concurrency the single-flight was written for.
+_LOOP_LOCKS: "Dict[Tuple[int, str], asyncio.Lock]" = {}
+
+
+def _loop_lock(name: str) -> asyncio.Lock:
+    key = (id(asyncio.get_running_loop()), name)
+    lock = _LOOP_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _LOOP_LOCKS[key] = lock
+    return lock
+
+
+def _get_upstream_lock() -> asyncio.Lock:
+    return _loop_lock("upstream_client")
 
 
 async def _get_upstream_client() -> httpx.AsyncClient:
@@ -1217,28 +1266,60 @@ async def _get_upstream_client() -> httpx.AsyncClient:
     mounted or driven without a lifespan (Starlette's ``TestClient`` runs one
     only as a context manager). ``lifespan`` closes whatever this created.
     """
-    global _UPSTREAM_CLIENT
+    global _UPSTREAM_CLIENT, _UPSTREAM_CLIENT_LOOP
+    loop = asyncio.get_running_loop()
+
+    # `is_closed` says nothing about WHICH loop the pooled connections belong
+    # to. Handing back a client whose keep-alive sockets were opened on a loop
+    # that has since finished raises "unable to perform operation on
+    # <TCPTransport closed=True>; the handler is closed" -- and a module-level
+    # singleton outlives any number of loops (two asyncio.run calls, two
+    # TestClient lifecycles, a re-created loop in a host process).
     client = _UPSTREAM_CLIENT
-    if client is not None and not client.is_closed:
+    if client is not None and not client.is_closed and _UPSTREAM_CLIENT_LOOP is loop:
         return client
-    async with _UPSTREAM_CLIENT_LOCK:
-        if _UPSTREAM_CLIENT is None or _UPSTREAM_CLIENT.is_closed:
+
+    if client is not None and _UPSTREAM_CLIENT_LOOP is not loop:
+        # Belongs to a dead or foreign loop: abandon it rather than awaiting
+        # aclose(), which would itself touch that loop's transports.
+        _UPSTREAM_CLIENT = None
+
+    async with _get_upstream_lock():
+        if (
+            _UPSTREAM_CLIENT is None
+            or _UPSTREAM_CLIENT.is_closed
+            or _UPSTREAM_CLIENT_LOOP is not loop
+        ):
             _UPSTREAM_CLIENT = httpx.AsyncClient(
                 **_upstream_http_client_kwargs(_UPSTREAM_TIMEOUT)
             )
+            _UPSTREAM_CLIENT_LOOP = loop
         return _UPSTREAM_CLIENT
+
+
+async def _warm_jwks_quietly() -> None:
+    """Prime the JWKS cache without letting a failure escape into startup."""
+    with suppress(Exception):
+        await _ensure_jwks_ready()
 
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
     """Own the pooled client's lifetime, and warm the JWKS before traffic."""
-    # Best-effort: a Keycloak that is not up yet must not stop the proxy
-    # booting, it just means the first request warms the cache instead.
-    with suppress(Exception):
-        await _ensure_jwks_ready()
+    # Warm the JWKS in the BACKGROUND, never awaited here. uvicorn runs lifespan
+    # startup before it creates the listener, so awaiting a 10s httpx timeout
+    # would keep the port closed for 10s -- while `lex streamlit` has already
+    # pointed the browser at it. That reads to the user as the dashboard being
+    # down, which is the failure this file is trying to remove, not add.
+    warmup = asyncio.ensure_future(_warm_jwks_quietly())
     try:
         yield
     finally:
+        if not warmup.done():
+            warmup.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await warmup
+
         global _UPSTREAM_CLIENT
         client = _UPSTREAM_CLIENT
         _UPSTREAM_CLIENT = None
@@ -1274,16 +1355,46 @@ async def _iter_upstream(upstream_resp: httpx.Response):
     *decoded* -- so ``_build_proxied_response`` drops the encoding header in
     that case, keeping the invariant that the bytes always match the headers
     describing them.
+
+    A failure part-way through the body cannot become an HTTP status: the
+    response head has already been sent. Truncating silently is the worst
+    option, because a half-delivered Vite chunk surfaces as a ``SyntaxError``
+    or ``Failed to fetch dynamically imported module`` -- indistinguishable
+    from the bug this module exists to fix, and not retryable. Raising instead
+    makes the server drop the connection, which the browser *does* report as a
+    network error.
     """
     if upstream_resp.is_stream_consumed:
-        yield upstream_resp.content
+        # Never yield an empty chunk: for a 304/204/HEAD it would reach
+        # GZipMiddleware as a body, skip its `minimum_size` guard, and attach a
+        # gzip header (and 10 bytes) to a response that must have none --
+        # uvicorn then raises "Response content longer than Content-Length".
+        # Real ``aiter_raw()`` yields zero chunks there; this branch has to
+        # match, because it is the branch every test double takes.
+        if upstream_resp.content:
+            yield upstream_resp.content
         return
-    async for chunk in upstream_resp.aiter_raw():
-        yield chunk
+
+    try:
+        async for chunk in upstream_resp.aiter_raw():
+            yield chunk
+    except Exception:
+        # `.request` itself raises when unset, and a diagnostic that can raise
+        # would replace the real error with its own.
+        with suppress(Exception):
+            logger.warning(
+                "Upstream body failed mid-stream; dropping the connection so the client "
+                "sees a network error rather than a truncated 200"
+            )
+        raise
 
 
 #: Dropped from both directions: meaningful only for a single hop.
 _HOP_BY_HOP = frozenset({
+    # Content-Length included: httpx recomputes it from the body we actually
+    # pass, and a forwarded value beats httpx's own -- so any mismatch between
+    # the two becomes a LocalProtocolError instead of a request.
+    "content-length",
     "host",
     "connection",
     "keep-alive",
@@ -1358,9 +1469,17 @@ async def public_proxy(request: Request):
     if request.url.query:
         url = url.copy_with(query=request.url.query.encode("utf-8"))
 
+    # Forward the real body, and let `_forwardable_request_headers` drop
+    # Content-Length. Sending content=b"" while forwarding the client's
+    # Content-Length made httpx raise LocalProtocolError ("Too little data for
+    # declared Content-Length") for any probe that carried a body -- which is
+    # neither ConnectError nor TimeoutException, so the readiness endpoint
+    # answered 500.
+    body = await request.body()
+
     try:
         upstream_resp = await _upstream_send(
-            request.method, url, content=b"", headers=_forwardable_request_headers(request)
+            request.method, url, content=body, headers=_forwardable_request_headers(request)
         )
     except httpx.ConnectError:
         return JSONResponse(
@@ -1453,6 +1572,23 @@ async def proxy(request: Request):
     ):
         stripped = RedirectResponse(url=_current_relative_path(request), status_code=303)
         stripped.headers["Referrer-Policy"] = "no-referrer"
+        # The redirect must hand over EVERY credential the response it replaces
+        # would have. Without st_access it delivers strictly fewer: where the
+        # SessionMiddleware cookie is unusable in the frame -- Safari ITP, or any
+        # third-party-cookie blocking, which reaches even SameSite=None -- the
+        # follow-up request would arrive with no auth_token (we just stripped
+        # it), no session cookie and no st_access, and get a frame breakout. The
+        # proxy would have discarded the one credential that still worked.
+        if SET_ST_ACCESS_COOKIE and jwt_token:
+            stripped.set_cookie(
+                "st_access",
+                jwt_token,
+                httponly=True,
+                secure=SESSION_HTTPS_ONLY,
+                samesite=SESSION_SAMESITE,
+                max_age=ST_ACCESS_COOKIE_MAX_AGE,
+                path="/",
+            )
         return stripped
 
     # 4) Deny
@@ -1556,15 +1692,33 @@ async def proxy(request: Request):
 #:    ``useExternalAuthToken``, ...) -- no identity, no tenant data.
 PUBLIC_PROXY_PATHS = frozenset({"/_stcore/health", "/_stcore/host-config"})
 
-#: One year, matching Streamlit's own contract for content-addressed files.
-STATIC_ASSET_MAX_AGE = int(os.getenv("STATIC_ASSET_MAX_AGE", str(365 * 24 * 60 * 60)))
+#: Streamlit's ``--server.baseUrlPath``, normalised to ``""`` or ``"/name"``.
+#: ``lex streamlit`` passes the flag through from ``ctx.args``, so the proxy has
+#: to be told separately -- it cannot read Streamlit's own config from here.
+def _normalise_base_url_path(raw: str) -> str:
+    trimmed = (raw or "").strip().strip("/")
+    return f"/{trimmed}" if trimmed else ""
 
-STATIC_GZIP_MIN_SIZE = int(os.getenv("STATIC_GZIP_MIN_SIZE", "500"))
+
+STREAMLIT_BASE_URL_PATH = _normalise_base_url_path(
+    os.getenv("LEX_STREAMLIT_BASE_URL_PATH") or os.getenv("STREAMLIT_SERVER_BASE_URL_PATH") or ""
+)
+
+#: Set false to proxy assets upstream instead of serving them here. The escape
+#: hatch for a split deployment, where the bundle in this interpreter is not
+#: necessarily the one the upstream's index.html names. Costs the 401-flood
+#: protection and the compression, so it is opt-out, not a default.
+SERVE_STATIC_LOCALLY = _env_bool("LEX_SERVE_STATIC_LOCALLY", True)
+
+#: One year, matching Streamlit's own contract for content-addressed files.
+STATIC_ASSET_MAX_AGE = _env_int("STATIC_ASSET_MAX_AGE", 365 * 24 * 60 * 60)
+
+STATIC_GZIP_MIN_SIZE = _env_int("STATIC_GZIP_MIN_SIZE", 500)
 # 6, not zlib's 9. Measured over Streamlit 1.61's 365 shipped JS chunks:
 # level 1 = 2.89x in 138 ms, level 6 = 3.33x in 346 ms, level 9 = 3.34x in
 # 450 ms. Level 9 buys 0.3% more compression for 30% more CPU, and this
 # process shares a GIL with the Streamlit script runner, so 6 is the knee.
-STATIC_GZIP_LEVEL = int(os.getenv("STATIC_GZIP_LEVEL", "6"))
+STATIC_GZIP_LEVEL = _env_int("STATIC_GZIP_LEVEL", 6)
 
 
 def _streamlit_static_dir() -> Optional[str]:
@@ -1596,6 +1750,14 @@ def _build_static_routes() -> List[Any]:
     ``/static`` upstream, authenticated -- rather than breaking startup. A
     missing bundle is logged loudly by ``_assert_static_bundle_present()``.
     """
+    if not SERVE_STATIC_LOCALLY:
+        logger.warning(
+            "LEX_SERVE_STATIC_LOCALLY=false: Streamlit's asset bundle will be proxied "
+            "upstream behind authentication. Cold starts will be slower and an expired "
+            "credential will surface as 'Failed to fetch dynamically imported module'."
+        )
+        return []
+
     static_dir = _streamlit_static_dir()
     if not static_dir:
         return []
@@ -1623,10 +1785,24 @@ def _build_static_routes() -> List[Any]:
     nested = os.path.join(static_dir, "static")
     routes: List[Any] = []
 
+    # Streamlit serves its whole app under `--server.baseUrlPath` when set, so
+    # the browser asks for `/<base>/static/js/...`. Mounting only at `/static`
+    # would miss every one of those, drop them into the authenticated catch-all,
+    # and silently restore the 401 storm -- with the bundle present, so nothing
+    # would warn. `_assert_static_bundle_present` covers a missing directory,
+    # not a mismatched prefix, which is why the prefix is read here.
+    prefix = STREAMLIT_BASE_URL_PATH
+
     # Streamlit's own layout is static/static/{js,css,media}; index.html points
-    # at "./static/js/...". Mount the inner directory at /static.
+    # at "./static/js/...". Mount the inner directory at <prefix>/static.
     if os.path.isdir(nested):
-        routes.append(Mount("/static", app=_PublicStreamlitStatic(directory=nested), name="lex_static"))
+        routes.append(
+            Mount(
+                f"{prefix}/static",
+                app=_PublicStreamlitStatic(directory=nested),
+                name="lex_static",
+            )
+        )
 
     # Top-level singletons index.html asks for by name.
     for filename in ("favicon.png", "manifest.json"):
@@ -1639,7 +1815,7 @@ def _build_static_routes() -> List[Any]:
             _apply_asset_cache_headers(response, _name)
             return response
 
-        routes.append(Route(f"/{filename}", _serve, methods=["GET", "HEAD"]))
+        routes.append(Route(f"{prefix}/{filename}", _serve, methods=["GET", "HEAD"]))
 
     return routes
 
@@ -1672,10 +1848,35 @@ def _assert_static_bundle_present() -> None:
     )
 
 
+def _warn_if_upstream_is_not_colocated() -> None:
+    """Warn when the bundle served here may not be the one upstream references.
+
+    The chunk filenames are content hashes and ``index.html`` -- which names
+    them -- comes from ``UPSTREAM``. Serving this interpreter's wheel is only
+    guaranteed correct when both are the same process, which is what
+    ``lex streamlit`` does. Point ``UPSTREAM`` at another container running a
+    different Streamlit and every chunk 404s: the same dynamic-import failures,
+    now unconditional. Cheap to detect, impossible to fix silently.
+    """
+    host = httpx.URL(UPSTREAM).host
+    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return
+    logger.warning(
+        "UPSTREAM=%s is not local, but Streamlit's asset bundle is served from THIS "
+        "interpreter's wheel. If that container runs a different Streamlit version, its "
+        "index.html will name chunk hashes this process does not have and every asset "
+        "will 404. Keep the two in lockstep, or set LEX_SERVE_STATIC_LOCALLY=false to "
+        "proxy assets upstream instead.",
+        UPSTREAM,
+    )
+
+
 # -----------------------------------------------------------------------------
 # Routing / app
 # -----------------------------------------------------------------------------
 _assert_static_bundle_present()
+if SERVE_STATIC_LOCALLY:
+    _warn_if_upstream_is_not_colocated()
 
 routes = [
     Route("/auth/login", login, methods=["GET"]),

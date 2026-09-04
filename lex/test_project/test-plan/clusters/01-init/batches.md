@@ -264,14 +264,33 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.247 – 1.276 |
+| Scenario range | 1.247 – 1.286 |
 | Type | U |
 | Files covered | `lex/proxy.py` (`_streamlit_static_dir`, `_build_static_routes`, `_apply_asset_cache_headers`, `_assert_static_bundle_present`, `PUBLIC_PROXY_PATHS`, `public_proxy`, `_get_upstream_client`, `_upstream_send`, `_iter_upstream`, `_build_proxied_response`, `_ensure_jwks_ready`, `_fetch_jwks_blocking`, `_get_jwks`, `_safe_next_path`, `_login_path`, `_login_url`, `_current_relative_path`, `_query_without_auth_token`, `_is_document_request`, `login`, `auth_callback`, `proxy`, and the `SESSION_SECRET` / `SESSION_SAMESITE` / `_build_token_store` startup guards), `lex/bin/lex.py` (`streamlit` launch args, `_warn_if_sessions_are_not_durable`) |
 | Test file | `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py` |
-| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276) |
+| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286) |
 | Fixtures | none — Starlette `TestClient` over the real `proxy.app`, a streaming stub (`_RawStream`) over the `_upstream_send` seam, and `_reimport_proxy_with` to exercise import-time guards |
-| Tests landed | **30 pass / 0 fail**, 29 subtests |
+| Tests landed | **40 pass / 0 fail**, 31 subtests |
 | Coverage gain | the asset path, which had none: what is public, what stays gated, and what the proxy does to a response on the way back. Plus the JWKS availability path, the login return path, and every startup guard |
 | Prereqs | batches 1z (breakout), 1aa (embedded renewal), 1ac (idle survival) — same auth path |
-| Status | ✅ Complete — **27 of 30 fail against the pre-fix tree**. The three that pass (1.254 the authenticated boundary, 1.255 the WebSocket deny, 1.271 the permitted configurations still boot) are deliberate guards: they assert behaviour this change must *not* alter, and would be the first things to break if the public allowlist ever widened |
+| Status | ✅ Complete — **27 of the first 30 fail against the pre-fix tree**. The three that pass (1.254 the authenticated boundary, 1.255 the WebSocket deny, 1.271 the permitted configurations still boot) are deliberate guards: they assert behaviour this change must *not* alter, and would be the first things to break if the public allowlist ever widened |
 | Note | The three reports that prompted this — "session timeout resets my state", "starting Streamlit takes forever", "TypeErrors coming out of nowhere" — are one causal chain, and the arithmetic is the explanation. Streamlit 1.61 ships **365** JS chunks and names **107** in eager `modulepreload` tags, and the proxy authenticated all of them through a single catch-all whose deny happened before it looked at the path. So one credential-less moment is a hundred simultaneous 401s; a *lazily* imported chunk that 401s surfaces as `TypeError: Failed to fetch dynamically imported module` because Vite's dynamic `import()` has no other vocabulary for an HTTP error (hence `DownloadButton` and `DataFrame`, both lazy chunks, in the screenshots); and stripping `Content-Encoding` — which the old code had to do, having read the *decoded* body — inflated the eager set to 1.77 MB where 0.42 MB was enough. Two further defects had the same shape: `_get_jwks_sync` fetched inline with a **sync** client on the event loop *and* returned `None` on failure while holding valid keys, so one Keycloak blip after the hourly TTL lapse rejected every token in the cluster; and `SESSION_SECRET`/`TOKEN_STORE` both defaulted to per-process values, making a restart or a second replica indistinguishable from an expiry. Measured and explicitly **not** a cause: JWT validation at 0.045 ms/request, 16 ms across all 365 chunks. |
+
+#### 1ad follow-up — scenarios 1.277–1.286
+
+An adversarial review of the first pass (three independent finder angles over `lex/proxy.py`, `lex/bin/lex.py` and the React shell) found **ten further defects in the fix itself**, and these scenarios pin each one. Worth recording because the pattern repeats: every one lived in the *new* code, and four of them would have reproduced one of the three original symptoms by a different route.
+
+| Scenario | Defect it pins |
+| --- | --- |
+| 1.277 | the `auth_token` strip redirect set only the session cookie, so it handed over **fewer** credentials than the response it replaced — fatal wherever the frame cannot use that cookie (Safari ITP, third-party blocking), which is exactly the deployment the change targets |
+| 1.278 | a bodiless 304 yielded `b""`, which reaches GZipMiddleware as a body, skips its `minimum_size` guard, and gets a gzip header attached — uvicorn then raises "Response content longer than Content-Length". Real `aiter_raw()` yields zero chunks, so **only the test doubles took this branch** |
+| 1.279 | `stream=True` moved body-read failures outside the `try`, turning a mid-body upstream death into a truncated `200` — a silent `SyntaxError` in a Vite chunk rather than a retryable status |
+| 1.280 | `public_proxy` forwarded the client's `Content-Length` while sending an empty body, so a probe carrying a body answered 500 |
+| 1.281 | the pooled client was handed across event loops; `is_closed` says nothing about which loop its sockets belong to |
+| 1.282 | module-level `asyncio.Lock()`s bind on their first **contended** acquire, so they failed only under the concurrency the single-flight was written for |
+| 1.283 | a non-numeric `LEX_PROXY_REPLICAS` raised at import — in the uvicorn worker thread, killing the proxy while Streamlit kept serving |
+| 1.284 | the `/static` mount ignored `--server.baseUrlPath`, silently restoring the 401 storm with the bundle present so nothing warned |
+| 1.285 | the CLI pre-flight mirrored two of five import-time rules, so the SameSite raises still died in the worker thread — the failure it exists to prevent |
+| 1.286 | the pre-flight's `startswith("https://")` disagreed with proxy.py's case-normalising `httpx.URL(...).scheme`, so `HTTPS://host` passed the readable check and raised later |
+
+Two more were fixed without a scenario: the lifespan JWKS warmup was awaited, and uvicorn runs lifespan startup **before** creating the listener, so it kept port 8501 closed for up to 10s while `lex streamlit` had already pointed the browser at it (now a background task); and `_reimport_proxy_with` restored `sys.modules["lex.proxy"]` but not the `lex.proxy` **package attribute**, leaving a later `from lex import proxy` bound to a throwaway module with a different `TOKEN_STORE`.
