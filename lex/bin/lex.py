@@ -406,6 +406,65 @@ def flower(ctx):
 
     _run_celery_command(build_flower_command(settings, ctx.args))
 
+def _warn_if_sessions_are_not_durable() -> None:
+    """Fail on the main thread rather than inside the uvicorn worker.
+
+    ``lex/proxy.py`` is the authority on these rules and raises on import. But
+    it is imported *in the proxy thread*, where a RuntimeError would kill only
+    uvicorn and leave Streamlit running and unreachable -- a confusing failure.
+    Checking the same environment here turns it into a readable CLI error.
+    Deliberately duplicated, and small enough to stay in step; if you change a
+    rule, change it in both places.
+    """
+    public_url = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").rstrip("/")
+    is_https = public_url.startswith("https://")
+    has_secret = bool(
+        os.getenv("SESSION_SECRET")
+        or os.getenv("SESSION_KEY")
+        or os.getenv("SESSION_SECRET_KEY")
+    )
+    allow_ephemeral = (
+        os.getenv("LEX_ALLOW_EPHEMERAL_SESSION_SECRET", "").strip().lower()
+        in ("1", "true", "yes", "y", "on")
+    )
+
+    if not has_secret and is_https and not allow_ephemeral:
+        raise click.ClickException(
+            "SESSION_SECRET is not set, but STREAMLIT_URL/BASE_URL is https, so this "
+            "looks like a real deployment. Session cookies would be signed with a "
+            "random per-process value: every restart, and every request that lands on "
+            "another replica, would silently log all users out and reset their "
+            "dashboard state. Set SESSION_SECRET to a fixed value shared by all "
+            "replicas, or set LEX_ALLOW_EPHEMERAL_SESSION_SECRET=true to proceed "
+            "anyway (single-process development only)."
+        )
+
+    replicas = os.getenv("LEX_PROXY_REPLICAS", "1") or "1"
+    has_redis = bool(os.getenv("TOKEN_REDIS_URL") or os.getenv("REDIS_URL"))
+    try:
+        replicated = int(replicas) > 1
+    except ValueError:
+        replicated = False
+    if replicated and not has_redis:
+        raise click.ClickException(
+            f"LEX_PROXY_REPLICAS={replicas} but no TOKEN_REDIS_URL/REDIS_URL is set. "
+            "The token store would be process-local, so a request routed to another "
+            "replica would find no session and return 401."
+        )
+
+    if not has_secret:
+        click.echo(
+            "Warning: SESSION_SECRET is not set; sessions will not survive a restart.",
+            err=True,
+        )
+    if not has_redis:
+        click.echo(
+            "Warning: no TOKEN_REDIS_URL/REDIS_URL set; the token store is in-memory "
+            "and will not survive a restart.",
+            err=True,
+        )
+
+
 @lex.command(name="streamlit", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
 @click.pass_context
 def streamlit(ctx):
@@ -443,6 +502,9 @@ def streamlit(ctx):
             streamlit_args[file_index] = f"{LEX_APP_PACKAGE_ROOT}/{streamlit_app_path}"
 
     proxy_port = os.environ.setdefault("LEX_PROXY_PORT", "8501")
+    disconnected_session_ttl = os.environ.setdefault(
+        "LEX_STREAMLIT_DISCONNECTED_SESSION_TTL", "600"
+    )
 
     # Shared secret for the proxy's /auth/token endpoint, which is how the
     # dashboard renews the access token it was handed at connect time. Minted
@@ -452,15 +514,42 @@ def streamlit(ctx):
     # are separate module objects and cannot share a Python-level constant.
     os.environ.setdefault("LEX_INTERNAL_AUTH_SECRET", secrets.token_urlsafe(32))
 
+    _warn_if_sessions_are_not_durable()
+
     def run_uvicorn():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        uvicorn.run("proxy:app", host="0.0.0.0", port=int(proxy_port), loop="asyncio")
+        # uvicorn.run() installs signal handlers, which only the main thread may
+        # do -- this runs in a worker thread, so `Server.run()` is used directly
+        # with that step disabled. Previously the attempt was swallowed and the
+        # server had no shutdown path at all: on exit the daemon thread was
+        # simply killed, dropping every open WebSocket without a close frame.
+        config = uvicorn.Config(
+            "proxy:app", host="0.0.0.0", port=int(proxy_port), loop="asyncio"
+        )
+        server = uvicorn.Server(config)
+        server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+        loop.run_until_complete(server.serve())
 
     t = threading.Thread(target=run_uvicorn, daemon=True)
     t.start()
 
-    streamlit_main(streamlit_args + ["--browser.serverPort", proxy_port, "--server.port", "8080"])
+    streamlit_main(
+        streamlit_args
+        + [
+            "--browser.serverPort", proxy_port,
+            "--server.port", "8080",
+            # Streamlit keeps a disconnected session -- st.session_state,
+            # uploaded files -- for this long, and resumes it if the same client
+            # reconnects carrying its session id. The default is 120s, which is
+            # shorter than a Keycloak round trip that has to show a login form,
+            # so a re-auth would come back to an evicted session and land the
+            # user on the first page with their work gone. Defence in depth:
+            # with renewal working the document should never reload at all, but
+            # a network blip or a proxy restart still drops the socket.
+            "--server.disconnectedSessionTTL", str(disconnected_session_ttl),
+        ]
+    )
 
 
 @lex.command(name="pytest", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))

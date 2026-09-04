@@ -88,8 +88,35 @@ PUBLIC_IS_HTTPS = (PUBLIC_URL_OBJ.scheme == "https") if PUBLIC_URL_OBJ else Fals
 UPSTREAM = (os.environ.get("UPSTREAM") or os.environ.get("STREAMLIT_UPSTREAM") or "http://localhost:8080").rstrip("/")
 
 SESSION_SECRET = os.environ.get("SESSION_SECRET") or os.environ.get("SESSION_KEY") or os.environ.get("SESSION_SECRET_KEY")
+
+#: Escape hatch for the one legitimate case: a single-process dev run where
+#: nobody minds being logged out by a restart.
+ALLOW_EPHEMERAL_SESSION_SECRET = _env_bool(
+    "LEX_ALLOW_EPHEMERAL_SESSION_SECRET", not PUBLIC_IS_HTTPS
+)
+
 if not SESSION_SECRET:
+    if not ALLOW_EPHEMERAL_SESSION_SECRET:
+        # A random per-process secret is not a weak secret, it is a *different*
+        # secret in every process. Every session cookie signed before a restart
+        # becomes undecodable after it, and cookies signed by one replica are
+        # rejected by the next -- so users are thrown back to a login they did
+        # nothing to deserve. That is indistinguishable from "session timeout
+        # resets my state", and it is not a timeout at all.
+        raise RuntimeError(
+            "SESSION_SECRET is not set. The proxy would sign session cookies with a "
+            "random per-process value, so every restart -- and every request that "
+            "lands on a different replica -- would silently log all users out and "
+            "reset their dashboard state. Set SESSION_SECRET to a fixed secret "
+            "shared by every replica. To run without one anyway (single-process "
+            "development only), set LEX_ALLOW_EPHEMERAL_SESSION_SECRET=true."
+        )
     SESSION_SECRET = "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32)
+    logger.warning(
+        "SESSION_SECRET is not set; using a random per-process value. Sessions will "
+        "not survive a restart and cannot be shared across replicas. Do not deploy "
+        "like this."
+    )
 
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", PUBLIC_IS_HTTPS)
 
@@ -309,12 +336,46 @@ class RedisTokenStore(TokenStore):
         await self._r.expire(self._key(sid), TOKEN_IDLE_TTL_SECONDS)
 
 
+#: Replica count, when the deployment knows it. >1 makes an in-memory token
+#: store incorrect rather than merely fragile.
+PROXY_REPLICAS = int(os.getenv("LEX_PROXY_REPLICAS", "1") or "1")
+
+
 def _build_token_store() -> TokenStore:
+    """Redis when configured, else in-memory -- which is only safe unreplicated.
+
+    The store holds the refresh tokens that keep dashboards alive. In-memory it
+    is process-local, so a restart drops every one, and with more than one
+    replica a request routed elsewhere finds no ``sid`` and 401s. Both surface
+    to the user as a session that expired for no reason.
+    """
     if TOKEN_REDIS_URL:
         try:
             return RedisTokenStore(TOKEN_REDIS_URL)
         except Exception as e:
-            print(f"[proxy] Redis token store disabled: {e}. Falling back to in-memory store.")
+            if PROXY_REPLICAS > 1:
+                raise RuntimeError(
+                    f"Redis token store could not be initialised ({e}) and "
+                    f"LEX_PROXY_REPLICAS={PROXY_REPLICAS}. An in-memory store is "
+                    "process-local, so sessions established on one replica would 401 "
+                    "on every other. Fix TOKEN_REDIS_URL/REDIS_URL, or run one replica."
+                ) from e
+            logger.warning(
+                "Redis token store disabled: %s. Falling back to in-memory: sessions "
+                "will not survive a restart.", e
+            )
+    elif PROXY_REPLICAS > 1:
+        raise RuntimeError(
+            f"LEX_PROXY_REPLICAS={PROXY_REPLICAS} but no TOKEN_REDIS_URL/REDIS_URL is "
+            "set. The token store would be process-local, so a request routed to "
+            "another replica would find no session and return 401. Set a shared Redis "
+            "URL, or run one replica with session affinity."
+        )
+    else:
+        logger.warning(
+            "No TOKEN_REDIS_URL/REDIS_URL set; using an in-memory token store. "
+            "Sessions will not survive a proxy restart and cannot be replicated."
+        )
     return MemoryTokenStore()
 
 

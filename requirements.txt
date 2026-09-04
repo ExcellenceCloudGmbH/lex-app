@@ -22,7 +22,7 @@ channels-redis
 uvicorn[standard]
 nest_asyncio
 Office365-REST-Python-Client
-streamlit
+streamlit>=1.61,<1.62
 streamlit-keycloak-lex
 sqlalchemy
 django_redis
