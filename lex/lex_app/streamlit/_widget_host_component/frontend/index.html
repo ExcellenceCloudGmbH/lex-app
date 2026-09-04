@@ -120,6 +120,15 @@
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (ev) => {
       const args = (ev.detail && ev.detail.args) || {};
       publishTheme(ev.detail && ev.detail.theme);
+      // A rerun is a free chance to re-check the agreement. The page may have
+      // drifted from it -- theme changed in Streamlit's own menu, or a drive()
+      // that timed out -- and a drift can never be corrected by a storage event,
+      // because the agreed value has not changed.
+      try {
+        if (typeof window.parent.__lexThemeReconcile === "function") {
+          window.parent.__lexThemeReconcile();
+        }
+      } catch (e) {}
       _expectedOrigin = args.expected_origin || null;
       _themeStorageKey = args.theme_storage_key || null;
       _manifest = args.manifest || null;

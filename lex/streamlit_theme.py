@@ -322,10 +322,47 @@ _FOLLOWER_HTML = """<script>
     try { stored = host.localStorage.getItem(KEY); } catch (e) {}
     apply(stored || DEFAULT_MODE, "install");
 
+    /** Re-read the agreement and conform to it. Cheap: apply() no-ops if already right. */
+    function reconcile(reason) {
+      var agreed = null;
+      try { agreed = host.localStorage.getItem(KEY); } catch (e) {}
+      if (agreed) apply(agreed, reason);
+    }
+
     // A deliberate change made in lex-app, in any window of this origin.
     host.addEventListener("storage", function (ev) {
       if (ev.key === KEY) apply(ev.newValue, "storage");
     });
+
+    // ── ...and a `storage` event is not enough on its own ────────────────
+    // Reported as: "sometimes it doesn't detect the switch. I reload it then it
+    // detects it."
+    //
+    // The agreement is a VALUE, not an event. The relay deliberately writes only
+    // when the value changes, so re-asserting the same mode produces no write
+    // and no event at all. That is correct for the relay and fatal here the
+    // moment this page has DRIFTED from the agreement -- the theme was changed
+    // in Streamlit's own menu, or a drive() timed out -- because from then on
+    // the only thing that could re-sync it is a change to a mode it is already
+    // agreed on, which by definition never arrives. A reload fixed it because
+    // install reads the value directly rather than waiting to be told.
+    //
+    // So re-read it when the user comes back to this page, which is exactly when
+    // they have just changed the theme in the other window. Nothing else needs
+    // to notice; conforming to a value we already hold is not an event we have
+    // to be given.
+    // On `document`, which is where visibilitychange is fired. It does bubble to
+    // `window`, but depending on that is a needless bet when the real target is
+    // one word away.
+    host.document.addEventListener("visibilitychange", function () {
+      if (!host.document.hidden) reconcile("revisit");
+    });
+    // `focus` covers coming back to an already-visible window -- alt-tabbing
+    // between two windows side by side never changes visibility at all, and that
+    // is exactly how these two products are used.
+    host.addEventListener("focus", function () { reconcile("focus"); });
+    // And a rerun is a free opportunity: the page is re-rendering anyway.
+    host.__lexThemeReconcile = function () { reconcile("rerun"); };
 
     if (stored === null || stored === undefined) {
       console.warn(

@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.292
+    scenarios: 1.261-1.293
     status: complete
     tests:
-      pass: 23
+      pass: 24
       skip: 0
       xfail: 0
     note: >-
@@ -538,6 +538,28 @@ letters:
       A floor nothing checks is not a floor, so `lex streamlit` now warns at launch, naming the
       cost and the cure. A warning rather than a refusal - the rest of the app is unaffected, and
       blocking a launch over a theme is the worse trade.
+      CORRECTION to the 1.292 note above: the claim that 1.54 stored the theme under a key with no
+      -v2 suffix is WRONG, and wrong through the same mistake twice - grepping for the literal key
+      when the suffix is built at runtime (`${base}-v${2}`). 1.63 looked identical under that grep
+      and is demonstrably fine. What 1.54 genuinely lacked, measured before the upgrade, is the
+      theme control itself: stMainMenuButton and stThemeSwitcher were both absent (0 occurrences,
+      versus 1 each in 1.58 and 1.63), so drive() had nothing to click. The version floor is still
+      the root cause; one supporting detail was not.
+      1.293 fixes the residue the user reported after upgrading: "sometimes it doesn't detect the
+      switch. I reload it then it detects it." The agreement is a VALUE, and the relay writes only
+      when the value changes - correct on its own terms, since an unchanged write wakes every tab
+      for nothing. But a page that has DRIFTED from the agreement can then never be told to come
+      back: drift happens ordinarily (the theme is changed in Streamlit's own menu, or one drive()
+      times out) and from then on the only thing that could re-sync it is a change to a mode it is
+      already agreed on, which never arrives. A reload fixed it because install reads the value
+      directly rather than waiting to be told - which is the shape of the whole bug: conforming to
+      a value we already hold does not require an event. It now re-reads on return to the page.
+      `focus` is the one that matters, since two windows side by side never change visibility when
+      you alt-tab between them, and that is exactly how these products are used; visibilitychange
+      covers a genuinely backgrounded tab (and is registered on `document`, where it is actually
+      fired, rather than relying on it bubbling to `window`); a Streamlit rerun is a free third
+      opportunity. Verified against a drifted page: agreement light, page dark, no event possible,
+      then "drove to light (focus)" and the page went white.
 
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring

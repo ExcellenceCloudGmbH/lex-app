@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.292.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.293.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -368,6 +368,50 @@ class TestCluster1ad_StreamlitThemeFollower:
         # Never cry wolf over something unparseable.
         for junk in ("", "nonsense", "dev", None):
             assert streamlit_version_shortfall(junk) == ""
+
+
+    def test_01_293_a_drifted_page_reconciles_without_being_told(self):
+        """Scenario 1.293: the agreement is a value, so re-read it, don't wait.
+
+        Reported as: "sometimes it doesn't detect the switch. I reload it then it
+        detects it."
+
+        The relay writes the agreed key only when the value CHANGES -- correct on
+        its own terms, since an unchanged write wakes every tab for nothing. But
+        it means a page that has DRIFTED from the agreement can never be told to
+        come back. Drift happens two ordinary ways: the theme is changed in
+        Streamlit's own menu, or one ``drive()`` times out. From then on the only
+        thing that could re-sync the page is a change to a mode it is already
+        agreed on, which by definition never arrives.
+
+        A reload fixed it because install reads the value directly instead of
+        waiting to be told -- which is the whole shape of the bug: conforming to
+        a value we already hold does not require an event.
+
+        So it re-reads on return to the page. ``focus`` is the one that matters:
+        two windows open side by side never change visibility when you alt-tab
+        between them, and that is exactly how these products are used.
+        ``visibilitychange`` covers a genuinely backgrounded tab, and a Streamlit
+        rerun is taken as a free third opportunity.
+
+        Verified against a drifted page: agreement "light", page dark, no event
+        possible -- then ``drove to light (focus)`` and the page went white.
+        """
+        js = theme_follower_html()
+
+        assert "function reconcile" in js
+        # Re-reads the stored value rather than trusting an event payload.
+        assert "host.localStorage.getItem(KEY)" in js
+
+        # visibilitychange is fired at the document, not the window.
+        assert 'host.document.addEventListener("visibilitychange"' in js, (
+            "registered on the wrong target; it would work only by bubbling"
+        )
+        assert 'host.addEventListener("focus"' in js
+        assert "host.__lexThemeReconcile" in js, "a rerun is a free re-check"
+
+        # A backgrounded tab must not be driven; it is not being looked at.
+        assert "if (!host.document.hidden) reconcile" in js
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:
