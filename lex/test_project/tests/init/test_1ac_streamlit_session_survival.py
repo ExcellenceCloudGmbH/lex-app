@@ -70,21 +70,22 @@ def _session_cookie(sid: str = "sid-1", email: str = "u@example.com") -> str:
 
 
 class _CapturingUpstream:
-    """Stands in for the Streamlit upstream, recording what the proxy forwarded."""
+    """Stands in for the Streamlit upstream, recording what the proxy forwarded.
+
+    Patched over ``proxy._upstream_send``, the single seam through which every
+    proxied HTTP request leaves. It used to stand in for ``httpx.AsyncClient``
+    itself, which stopped working once the proxy started reusing one pooled
+    client for the process instead of building one per request -- a stub bound
+    to the class would have been cached as the real upstream. Patching the seam
+    also keeps the stub honest about what it observes: the forwarding decisions,
+    not httpx's calling convention. What these tests assert is unchanged.
+    """
 
     last_headers: dict = {}
 
-    def __init__(self, **kwargs):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    async def request(self, method, url, content=None, headers=None):
-        _CapturingUpstream.last_headers = {k.lower(): v for k, v in (headers or {}).items()}
+    @classmethod
+    async def send(cls, method, url, *, content=None, headers=None):
+        cls.last_headers = {k.lower(): v for k, v in (headers or {}).items()}
         return httpx.Response(200, content=b"upstream-ok")
 
 
@@ -245,7 +246,7 @@ class TestCluster01ac_ProxyRenewalChannel(SimpleTestCase):
 
         with patch.object(proxy, "validate_jwt_token", lambda t: {"sub": "u1", "exp": cookie_exp}), \
              patch.object(proxy, "_ensure_valid_access_token", _tokens), \
-             patch.object(proxy.httpx, "AsyncClient", _CapturingUpstream):
+             patch.object(proxy, "_upstream_send", _CapturingUpstream.send):
             self.client.cookies.update({"st_access": _token(cookie_exp), "session": _session_cookie()})
             response = self.client.get("/dashboard")
 
@@ -277,7 +278,7 @@ class TestCluster01ac_ProxyRenewalChannel(SimpleTestCase):
         with patch.object(proxy, "validate_jwt_token", lambda t: {"sub": "handoff", "exp": _epoch(900)}), \
              patch.object(proxy, "_ensure_valid_access_token", _tokens), \
              patch.object(proxy, "PERSIST_JWT_AUTH_TO_SESSION", False), \
-             patch.object(proxy.httpx, "AsyncClient", _CapturingUpstream):
+             patch.object(proxy, "_upstream_send", _CapturingUpstream.send):
             self.client.cookies.update({"session": _session_cookie()})
             response = self.client.get(f"/dashboard?auth_token={handoff}")
 
