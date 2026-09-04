@@ -412,33 +412,86 @@ async def _ensure_valid_access_token(session: Dict[str, Any]) -> Optional[Dict[s
 _JWKS_CACHE: Optional[Dict[str, Any]] = None
 _JWKS_CACHE_TIME: float = 0.0
 _JWKS_CACHE_TTL: int = int(os.getenv("JWKS_CACHE_TTL", "3600"))
+_JWKS_LOCK = asyncio.Lock()
+
+#: How long to wait before retrying after a failed refresh, when stale keys
+#: are still being served.
+_JWKS_RETRY_BACKOFF_SECONDS = int(os.getenv("JWKS_RETRY_BACKOFF_SECONDS", "30"))
 
 
-def _get_jwks_sync() -> Optional[Dict[str, Any]]:
+def _jwks_url() -> str:
+    return f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
+
+
+def _jwks_is_fresh() -> bool:
+    return bool(_JWKS_CACHE) and (time.time() - _JWKS_CACHE_TIME) < _JWKS_CACHE_TTL
+
+
+def _fetch_jwks_blocking() -> None:
+    """Refresh the JWKS cache. Blocking -- only ever called in a worker thread.
+
+    On failure the previous keys are **kept**. Returning nothing here used to
+    mean returning ``None`` to ``_get_signing_key``, which made
+    ``validate_jwt_token`` reject every token it was handed -- so a Keycloak
+    blip that happened to land after the TTL lapsed would 401 every request in
+    the cluster, including all 365 asset chunks, from keys that were still
+    perfectly valid. Signing keys rotate on the order of months; stale ones are
+    overwhelmingly better than none.
+    """
     global _JWKS_CACHE, _JWKS_CACHE_TIME
 
-    if _JWKS_CACHE and (time.time() - _JWKS_CACHE_TIME) < _JWKS_CACHE_TTL:
-        return _JWKS_CACHE
-
     if not KEYCLOAK_URL or not KEYCLOAK_REALM:
-        print("[proxy] JWKS fetch skipped: KEYCLOAK_URL or KEYCLOAK_REALM not set")
-        return None
+        logger.warning("JWKS fetch skipped: KEYCLOAK_URL or KEYCLOAK_REALM not set")
+        return
 
-    certs_url = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
     try:
         with httpx.Client(timeout=10.0, verify=OIDC_VERIFY_SSL) as client:
-            resp = client.get(certs_url)
+            resp = client.get(_jwks_url())
             resp.raise_for_status()
             _JWKS_CACHE = resp.json()
             _JWKS_CACHE_TIME = time.time()
-            return _JWKS_CACHE
-    except Exception as e:
-        print(f"[proxy] Failed to fetch JWKS from {certs_url}: {e}")
-        return None
+    except Exception as exc:
+        if _JWKS_CACHE:
+            # Push the clock forward so we do not hammer a struggling Keycloak
+            # on every request, but keep serving the keys we have.
+            _JWKS_CACHE_TIME = time.time() - _JWKS_CACHE_TTL + _JWKS_RETRY_BACKOFF_SECONDS
+            logger.warning("JWKS refresh from %s failed (%s); keeping cached keys", _jwks_url(), exc)
+        else:
+            logger.error("JWKS fetch from %s failed and no keys are cached: %s", _jwks_url(), exc)
+
+
+async def _ensure_jwks_ready() -> None:
+    """Warm/refresh the JWKS cache without blocking the event loop.
+
+    ``validate_jwt_token`` is synchronous and called from async handlers, and
+    it used to fetch the JWKS inline with a **sync** ``httpx.Client``. That is
+    a blocking call on the event loop: for up to 10 seconds nothing else in
+    this process could make progress -- not the other in-flight asset
+    requests, and not the WebSocket pumps, so a badly timed refresh could drop
+    a live dashboard's connection and lose its session state. It fired on the
+    first request after boot and again every time ``JWKS_CACHE_TTL`` (1h)
+    lapsed.
+
+    Awaiting this first keeps the fetch on a worker thread and keeps
+    ``validate_jwt_token`` a pure, synchronous, patchable function.
+    """
+    if _jwks_is_fresh():
+        return
+    async with _JWKS_LOCK:
+        # Single-flight: 107 concurrent chunk requests must not become 107
+        # concurrent fetches. The re-check covers the ones that queued here.
+        if _jwks_is_fresh():
+            return
+        await asyncio.to_thread(_fetch_jwks_blocking)
+
+
+def _get_jwks() -> Optional[Dict[str, Any]]:
+    """The cached JWKS. Never fetches -- see ``_ensure_jwks_ready``."""
+    return _JWKS_CACHE
 
 
 def _get_signing_key(token: str):
-    jwks_data = _get_jwks_sync()
+    jwks_data = _get_jwks()
     if not jwks_data:
         return None
     from jwt import PyJWKSet
@@ -820,6 +873,10 @@ def _upstream_ws_url_and_origin(client_ws_url: str) -> Tuple[str, str]:
 
 
 async def ws_proxy(websocket: WebSocket):
+    # Off-loop JWKS warmup: a blocking fetch here would stall every other
+    # in-flight request and the existing WebSocket pumps.
+    await _ensure_jwks_ready()
+
     scope_session = websocket.scope.get("session") or {}
     user_payload: Optional[Dict[str, Any]] = None
     auth_method = "none"
@@ -984,7 +1041,11 @@ async def _get_upstream_client() -> httpx.AsyncClient:
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
-    """Own the pooled client's lifetime, and close it on shutdown."""
+    """Own the pooled client's lifetime, and warm the JWKS before traffic."""
+    # Best-effort: a Keycloak that is not up yet must not stop the proxy
+    # booting, it just means the first request warms the cache instead.
+    with suppress(Exception):
+        await _ensure_jwks_ready()
     try:
         yield
     finally:
@@ -1111,6 +1172,9 @@ async def public_proxy(request: Request):
 # HTTP proxy
 # -----------------------------------------------------------------------------
 async def proxy(request: Request):
+    # Off-loop JWKS warmup before any synchronous validate_jwt_token below.
+    await _ensure_jwks_ready()
+
     user_payload: Optional[Dict[str, Any]] = None
     auth_method = "none"
 
