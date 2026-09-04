@@ -1,3 +1,5 @@
+import html
+import json
 import logging
 import os
 import threading
@@ -9,6 +11,7 @@ from typing import Optional, Dict
 import jwt
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 logger = logging.getLogger(__name__)
@@ -16,14 +19,44 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # -------------------------
-# Token refresh: config
+# Token lifecycle: config
 # -------------------------
-TOKEN_SKEW_SECONDS = 10          # refresh 10s before exp
+# Streamlit reads request headers off the WebSocket handshake that opened the
+# session -- ``st.context.headers`` resolves the session's *client*, and that
+# socket stays open for as long as the tab does. Every credential the auth proxy
+# injects is therefore a snapshot taken at connect time: it ages while the user
+# reads a chart, and re-reading the headers cannot produce a newer one because
+# no new handshake has happened.
+#
+# Keeping an idle dashboard alive means renewing ahead of expiry through a
+# channel that is still live. That channel is the proxy's ``/auth/token``
+# endpoint: it holds the refresh token, it is the only component allowed to
+# spend it, and it will hand back a currently-valid access token for the same
+# session at any moment. Renewing before expiry also keeps Keycloak's SSO idle
+# clock from running out, so the tab survives being left alone.
+TOKEN_SKEW_SECONDS = 10          # treat a token as spent this long before exp
+RENEW_LEAD_SECONDS = 60          # renew this long *before* exp, never after it
 REFRESH_MIN_INTERVAL = 15        # floor sleep
 REFRESH_MAX_BACKOFF = 300        # cap backoff to 5 minutes
-_TOKEN_REFRESH_LOCK = threading.Lock()
+RENEW_POLL_SECONDS = 5           # stop/liveness granularity while sleeping
+RENEWAL_GRACE_SECONDS = 120      # ride out a failing renewal this long before
+                                 # asking anyone to re-authenticate
+_TOKEN_REFRESH_LOCK = threading.RLock()
 
-st.set_page_config(layout="wide")
+# Under ``lex streamlit`` the proxy runs in this very process on 8501 while
+# Streamlit serves 8080 (see lex/bin/lex.py), so this is a loopback call.
+PROXY_INTERNAL_URL = (
+    os.getenv("LEX_PROXY_INTERNAL_URL")
+    or f"http://127.0.0.1:{os.getenv('LEX_PROXY_PORT', '8501')}"
+).rstrip("/")
+INTERNAL_AUTH_HEADER = "x-lex-internal-auth"
+
+# Guarded so the module can be imported (by tests, by tooling) without
+# Streamlit commands firing at import time. Streamlit executes this file with
+# ``__name__ == "__main__"``, so the app itself is unaffected.
+if __name__ == "__main__":
+    st.set_page_config(layout="wide")
+
 
 def _oidc_token_endpoint() -> str:
     base = (os.getenv("KEYCLOAK_URL") or "").rstrip("/")
@@ -41,14 +74,6 @@ def _decode_exp_no_verify(token: str) -> int:
 
 def _now() -> int:
     return int(time.time())
-
-
-def _compute_next_refresh_at(exp: int, expires_in: int | None) -> int:
-    if exp:
-        return max(_now() + REFRESH_MIN_INTERVAL, exp - TOKEN_SKEW_SECONDS)
-    if expires_in:
-        return _now() + max(REFRESH_MIN_INTERVAL, int(expires_in) - TOKEN_SKEW_SECONDS)
-    return _now() + REFRESH_MIN_INTERVAL
 
 
 def _post_refresh(refresh_token: str) -> dict | None:
@@ -75,16 +100,20 @@ def _post_refresh(refresh_token: str) -> dict | None:
         return None
 
 
+def _store_tokens(access: str, refresh: str | None = None, expires_in=None) -> None:
+    """Record a token set, keeping the refresh token when the response omits it."""
+    with _TOKEN_REFRESH_LOCK:
+        st.session_state.access_token = access or ""
+        if refresh is not None:
+            st.session_state.refresh_token = refresh
+        st.session_state.token_exp = _decode_exp_no_verify(access) if access else 0
+        st.session_state.expires_in = expires_in
+
+
 def _update_tokens_from_response(tok: dict) -> None:
     access = tok.get("access_token") or ""
     refresh = tok.get("refresh_token") or st.session_state.get("refresh_token") or ""
-    expires_in = tok.get("expires_in")
-    exp = _decode_exp_no_verify(access) if access else 0
-
-    st.session_state.access_token = access
-    st.session_state.refresh_token = refresh
-    st.session_state.token_exp = exp
-    st.session_state.expires_in = expires_in
+    _store_tokens(access, refresh, tok.get("expires_in"))
 
 
 def _token_exp_from_state_or_decode(access: str) -> int:
@@ -107,130 +136,242 @@ def _is_token_valid(access: str, skew_seconds: int = TOKEN_SKEW_SECONDS) -> bool
     return _now() < (exp - skew_seconds)
 
 
-def _sync_tokens_from_headers(h: Dict[str, str]) -> None:
-    token_from_header = (bearer_from_headers(h) or "").strip()
-    current_access = (st.session_state.get("access_token") or "").strip()
-    if token_from_header and (token_from_header != current_access or not st.session_state.get("token_exp")):
-        st.session_state.access_token = token_from_header
-        st.session_state.token_exp = _decode_exp_no_verify(token_from_header)
-        st.session_state.expires_in = None
+def _live_headers() -> Dict[str, str]:
+    """Headers of the session's *current* client connection.
 
+    Re-read rather than cached: a dropped WebSocket that reconnects, or an
+    embedded iframe re-sourced with a fresh ``auth_token``, arrives as a new
+    handshake through the proxy and therefore carries a newer credential.
+    """
+    try:
+        return normalize_headers(getattr(st.context, "headers", {}) or {})
+    except Exception:
+        return {}
+
+
+def _adopt_header_token(h: Dict[str, str]) -> bool:
+    """Take the handshake's access token, but only when it is genuinely newer.
+
+    The guard matters more than it looks. The headers are frozen for the life of
+    a connection, so once a renewal has landed in session state the header copy
+    is *older* than what we hold. Adopting it on inequality alone -- as this used
+    to -- silently reverted every renewal on the next rerun and put the session
+    straight back on the expired token it had just escaped.
+    """
+    token_from_header = (bearer_from_headers(h) or "").strip()
+    if not token_from_header:
+        return False
+
+    with _TOKEN_REFRESH_LOCK:
+        current = (st.session_state.get("access_token") or "").strip()
+        if token_from_header == current:
+            return False
+
+        header_exp = _decode_exp_no_verify(token_from_header)
+        current_exp = int(st.session_state.get("token_exp") or 0) if current else 0
+        if current and current_exp and header_exp and header_exp <= current_exp:
+            return False
+
+        st.session_state.access_token = token_from_header
+        st.session_state.token_exp = header_exp
+        st.session_state.expires_in = None
+        return True
+
+
+def _sync_tokens_from_headers(h: Dict[str, str]) -> None:
+    _adopt_header_token(h)
+
+    # The refresh token is only ever a fallback for deployments without the
+    # proxy; adopting the handshake copy is harmless because we never spend it
+    # while the proxy is answering.
     rt_hdr = (h.get("x-streamlit-refresh-token") or "").strip()
-    if rt_hdr:
+    if rt_hdr and rt_hdr != (st.session_state.get("refresh_token") or ""):
         st.session_state.refresh_token = rt_hdr
 
 
+def _pull_token_from_proxy(cookie_header: str) -> bool:
+    """Ask the proxy for a currently-valid access token for this browser session.
+
+    The proxy refreshes on our behalf, so this succeeds even when the token we
+    hold has already expired. Returns ``False`` when there is no proxy to ask,
+    no session cookie to present, or the session itself is gone.
+    """
+    secret = os.getenv("LEX_INTERNAL_AUTH_SECRET") or ""
+    if not secret or not cookie_header:
+        return False
+
+    try:
+        resp = requests.get(
+            f"{PROXY_INTERNAL_URL}/auth/token",
+            headers={"Cookie": cookie_header, INTERNAL_AUTH_HEADER: secret},
+            timeout=10,
+        )
+    except Exception as e:
+        log.warning("Token pull from proxy failed: %s", e)
+        return False
+
+    if resp.status_code != 200:
+        log.warning("Token pull from proxy returned %s", resp.status_code)
+        return False
+
+    try:
+        data = resp.json()
+    except Exception:
+        return False
+
+    access = (data.get("access_token") or "").strip()
+    if not access:
+        return False
+
+    # Keep whatever refresh token we already hold: the proxy deliberately does
+    # not return one, because spending it must stay single-writer.
+    _store_tokens(access, refresh=None, expires_in=None)
+    return True
+
+
+def renew_access_token() -> bool:
+    """Obtain a fresh access token, in order of decreasing authority."""
+    with _TOKEN_REFRESH_LOCK:
+        # Someone else may have renewed while we waited for the lock; renewal
+        # involves network round trips, so re-checking here keeps a rerun from
+        # blocking behind a refresh that has already delivered.
+        if _is_token_valid(st.session_state.get("access_token") or ""):
+            return True
+
+        h = _live_headers()
+
+        # 1) A reconnected socket or a re-sourced iframe may already have
+        #    delivered a newer credential in the handshake.
+        if _adopt_header_token(h) and _is_token_valid(st.session_state.get("access_token") or ""):
+            return True
+
+        # 2) The proxy: sole owner of the refresh token, always current.
+        if _pull_token_from_proxy(h.get("cookie", "")):
+            return True
+
+        # 3) No proxy answering (plain ``streamlit run``, or it is down). Only
+        #    then do we spend our own copy of the refresh token -- with the
+        #    proxy silent there is nobody to race for the rotation.
+        refresh = (st.session_state.get("refresh_token") or "").strip()
+        if refresh:
+            tok = _post_refresh(refresh)
+            if tok and tok.get("access_token"):
+                _update_tokens_from_response(tok)
+                return True
+
+        return False
+
+
 def ensure_valid_access_token(allow_refresh: bool = True) -> bool:
+    """True when session state holds a usable access token, renewing if needed."""
     access = (st.session_state.get("access_token") or "").strip()
     if _is_token_valid(access):
         return True
 
-    refresh = (st.session_state.get("refresh_token") or "").strip()
-    if allow_refresh and refresh:
-        with _TOKEN_REFRESH_LOCK:
-            access = (st.session_state.get("access_token") or "").strip()
-            if _is_token_valid(access):
-                return True
-            tok = _post_refresh(refresh)
-            if tok and tok.get("access_token"):
-                _update_tokens_from_response(tok)
-                return _is_token_valid(st.session_state.get("access_token") or "", skew_seconds=0)
+    if allow_refresh and renew_access_token():
+        return _is_token_valid(st.session_state.get("access_token") or "", skew_seconds=0)
 
     # Final strict check without skew to avoid dropping a token that is still valid for a few seconds.
     return _is_token_valid(st.session_state.get("access_token") or "", skew_seconds=0)
 
 
-def _invalidate_local_auth(reason: str) -> None:
-    logger.warning(reason)
-    st.session_state.authenticated = False
-    st.session_state.auth_method = ""
-    st.session_state.user_id = ""
-    st.session_state.user_email = ""
-    st.session_state.user_username = ""
-    st.session_state.access_token = ""
-    st.session_state.refresh_token = ""
-    st.session_state.token_exp = 0
-    st.session_state.expires_in = None
-    st.session_state.keycloak_context_token = ""
-    st.session_state.permissions = []
-    st.session_state.user_info = {"sub": "", "email": "", "preferred_username": ""}
+def _session_is_live(session_id: str) -> bool:
+    """False once Streamlit has torn this session down.
+
+    Without it the refresher outlives the browser tab: it only ever consulted a
+    session-state flag, which nothing sets when a user simply closes the page,
+    so every abandoned session left a thread renewing tokens forever.
+    """
+    if not session_id:
+        return True
+    try:
+        from streamlit import runtime
+
+        if not runtime.exists():
+            return False
+        return runtime.get_instance().is_active_session(session_id)
+    except Exception:
+        return True
 
 
-def _token_refresher(stop_key: str = "stop_token_refresher") -> None:
-    backoff = 5
-    while not st.session_state.get(stop_key, False):
-        access = st.session_state.get("access_token") or ""
-        refresh = st.session_state.get("refresh_token") or ""
-        exp = st.session_state.get("token_exp") or _decode_exp_no_verify(access)
+def _refresher_should_stop(session_id: str, stop_key: str) -> bool:
+    return bool(st.session_state.get(stop_key, False)) or not _session_is_live(session_id)
+
+
+def _seconds_until_renewal() -> int:
+    exp = int(st.session_state.get("token_exp") or 0)
+    if not exp:
         expires_in = st.session_state.get("expires_in")
+        if expires_in:
+            return max(REFRESH_MIN_INTERVAL, int(expires_in) - RENEW_LEAD_SECONDS)
+        return REFRESH_MIN_INTERVAL
+    return max(REFRESH_MIN_INTERVAL, exp - RENEW_LEAD_SECONDS - _now())
 
-        next_at = _compute_next_refresh_at(exp, expires_in)
-        sleep_for = max(1, next_at - _now())
 
-        end_at = _now() + sleep_for
-        while _now() < end_at:
-            if st.session_state.get(stop_key, False):
+def _token_refresher(session_id: str, stop_key: str = "stop_token_refresher") -> None:
+    """Renew ahead of every expiry for as long as the session exists.
+
+    This runs for session *and* jwt auth alike. Skipping it for proxy-managed
+    sessions was the original mistake: the proxy can only deliver a token at
+    handshake time, so "the proxy will handle it" meant nothing handled it, and
+    an idle tab expired on schedule.
+    """
+    backoff = 5
+    try:
+        while True:
+            if _refresher_should_stop(session_id, stop_key):
                 return
-            time.sleep(min(1.0, end_at - _now()))
 
-        if st.session_state.get(stop_key, False):
-            return
+            end_at = _now() + _seconds_until_renewal()
+            while _now() < end_at:
+                if _refresher_should_stop(session_id, stop_key):
+                    return
+                time.sleep(min(RENEW_POLL_SECONDS, max(1, end_at - _now())))
 
-        if not refresh:
-            backoff = min(REFRESH_MAX_BACKOFF, backoff * 2)
-            time.sleep(backoff)
-            continue
+            if _refresher_should_stop(session_id, stop_key):
+                return
 
-        with _TOKEN_REFRESH_LOCK:
-            # Another thread/run may have refreshed while we were sleeping.
-            latest_access = st.session_state.get("access_token") or ""
-            if _is_token_valid(latest_access):
+            if renew_access_token():
                 backoff = 5
+                st.session_state.token_renewal_failed = False
                 continue
 
-            refresh = st.session_state.get("refresh_token") or ""
-            if refresh:
-                tok = _post_refresh(refresh)
-                if tok and tok.get("access_token"):
-                    _update_tokens_from_response(tok)
-                    backoff = 5
-                    continue
-
-        backoff = min(REFRESH_MAX_BACKOFF, backoff * 2)
-        time.sleep(backoff)
+            # Renewal can fail transiently (proxy restarting, IdP blip). Back off
+            # and retry rather than tearing the session down on the first miss.
+            st.session_state.token_renewal_failed = True
+            backoff = min(REFRESH_MAX_BACKOFF, backoff * 2)
+            slept = 0
+            while slept < backoff:
+                if _refresher_should_stop(session_id, stop_key):
+                    return
+                time.sleep(min(RENEW_POLL_SECONDS, backoff - slept))
+                slept += RENEW_POLL_SECONDS
+    except Exception as e:
+        # Session state torn down from under us, or an unexpected fault. Exiting
+        # is right: a thread that cannot reach its session has nothing to renew.
+        log.info("Token refresher for session %s stopping: %s", session_id or "?", e)
 
 
 def start_token_refresh_thread_if_needed() -> None:
-    # Session auth is proxy-managed; local refresh can race with proxy refresh-token rotation.
-    if (st.session_state.get("auth_method") or "").strip().lower() == "session":
-        st.session_state.stop_token_refresher = True
-        old_th = st.session_state.get("token_refresher_thread")
-        if old_th and getattr(old_th, "is_alive", lambda: False)():
-            old_th.join(timeout=1.0)
-        st.session_state.token_refresher_started = False
-        st.session_state.token_refresher_thread = None
-        return
+    ctx = get_script_run_ctx()
+    session_id = getattr(ctx, "session_id", "") or ""
 
     th = st.session_state.get("token_refresher_thread")
     if th and getattr(th, "is_alive", lambda: False)():
+        # Re-bind: the session may have been served by a new ScriptRunner since
+        # the thread started.
+        add_script_run_ctx(th, ctx)
         st.session_state.token_refresher_started = True
-        return
-    st.session_state.token_refresher_started = False
-
-    if not st.session_state.get("refresh_token"):
-        headers = getattr(st.context, "headers", {}) or {}
-        h = normalize_headers(headers)
-        rt = h.get("x-streamlit-refresh-token") or ""
-        if rt:
-            st.session_state.refresh_token = rt
-
-    if not st.session_state.get("refresh_token"):
-        st.session_state.token_refresher_thread = None
         return
 
     st.session_state.stop_token_refresher = False
-    th = threading.Thread(target=_token_refresher, name="token_refresher", daemon=True)
-    add_script_run_ctx(th, get_script_run_ctx())
+    th = threading.Thread(
+        target=_token_refresher,
+        name="token_refresher",
+        args=(session_id,),
+        daemon=True,
+    )
+    add_script_run_ctx(th, ctx)
     th.start()
 
     st.session_state.token_refresher_started = True
@@ -301,8 +442,10 @@ def get_user_info(access_token: str):
 
 
 def sync_keycloak_context_from_access_token() -> None:
-    allow_refresh = (st.session_state.get("auth_method") or "").strip().lower() != "session"
-    if not ensure_valid_access_token(allow_refresh=allow_refresh):
+    # Renewal is allowed for every auth method now. Exempting ``session`` used to
+    # be the safe choice because Streamlit would have spent the same refresh
+    # token as the proxy; it no longer does -- it asks the proxy instead.
+    if not ensure_valid_access_token():
         return
 
     access_token = (st.session_state.get("access_token") or "").strip()
@@ -329,11 +472,14 @@ def sync_keycloak_context_from_access_token() -> None:
 
         kc_manager = KeycloakManager()
         permissions = kc_manager.get_uma_permissions(access_token)
-        st.session_state.permissions = permissions if isinstance(permissions, list) else []
     except Exception as e:
+        # Keep the permissions we already resolved. Blanking them on a failed
+        # lookup silently demotes the user to "no access" mid-session, which
+        # reads as a broken dashboard rather than a transient Keycloak blip.
         logger.error(f"Failed to get UMA permissions via KeycloakManager: {e}")
-        st.session_state.permissions = []
+        return
 
+    st.session_state.permissions = permissions if isinstance(permissions, list) else []
     st.session_state.keycloak_context_token = access_token
 
 
@@ -429,6 +575,57 @@ def render_logout_link() -> None:
     )
 
 
+def _within_renewal_grace() -> bool:
+    """True while a failing renewal is still plausibly transient.
+
+    A proxy restart or an IdP hiccup should never be visible to someone reading
+    a chart, so a failed renewal buys silence for a while and the refresher keeps
+    retrying underneath. Past the grace window the failure is structural --
+    Keycloak's SSO max lifetime, a revoked session -- and no amount of retrying
+    substitutes for signing in again.
+    """
+    if not st.session_state.get("token_renewal_failed"):
+        st.session_state.renewal_failing_since = 0
+        return True
+
+    since = int(st.session_state.get("renewal_failing_since") or 0)
+    if not since:
+        st.session_state.renewal_failing_since = _now()
+        return True
+    return (_now() - since) < RENEWAL_GRACE_SECONDS
+
+
+def render_session_recovery() -> None:
+    """Get the session renewed, preferring the paths the user never sees.
+
+    Embedded, the parent shell renews by re-sourcing the iframe with a fresh
+    ``auth_token``; it is already listening for ``lex-auth-required`` because the
+    proxy's iframe-breakout page posts exactly this message. Standalone there is
+    no shell to ask, and a Streamlit component iframe is sandboxed without
+    ``allow-top-navigation``, so the sign-in link -- a user gesture, always
+    permitted -- is the honest fallback rather than a redirect that would be
+    silently blocked.
+    """
+    login_url = f"{_current_base_url()}{_base_path()}/auth/login"
+    login_js = json.dumps(login_url)
+
+    components.html(
+        "<script>(function(){var u=" + login_js + ";"
+        "var m={type:'lex-auth-required',login:u,source:'streamlit'};"
+        "try{window.parent.postMessage(m,'*');}catch(e){}"
+        "try{if(window.top!==window.parent){window.top.postMessage(m,'*');}}catch(e){}"
+        "})();</script>",
+        height=0,
+    )
+
+    st.warning("⏳ Renewing your session…")
+    st.markdown(
+        f'<a href="{html.escape(login_url, quote=True)}" target="_top" rel="noopener">'
+        "Sign in again</a> if this message does not clear.",
+        unsafe_allow_html=True,
+    )
+
+
 # -------------------------
 # Session state initialization
 # -------------------------
@@ -463,22 +660,31 @@ def init_session_state() -> None:
         st.session_state.token_refresher_thread = None
     if "stop_token_refresher" not in st.session_state:
         st.session_state.stop_token_refresher = False
+    if "token_renewal_failed" not in st.session_state:
+        st.session_state.token_renewal_failed = False
+    if "reauth_requested" not in st.session_state:
+        st.session_state.reauth_requested = False
 
 
 # -------------------------
 # Authentication
 # -------------------------
 def authenticate_from_proxy_or_jwt() -> None:
+    """Establish identity from the proxy's headers and keep the token current.
+
+    Identity and token freshness are deliberately decoupled. The proxy already
+    authenticated the request; whether the credential it handed over has since
+    aged out is a renewal problem, not an identity problem, and answering it
+    with "Missing user information" both misdescribed the failure and made it
+    unrecoverable.
+    """
     headers = getattr(st.context, "headers", {}) or {}
     h = normalize_headers(headers)
     _sync_tokens_from_headers(h)
 
     if st.session_state.authenticated:
-        allow_refresh = (st.session_state.get("auth_method") or "").strip().lower() != "session"
-        if not ensure_valid_access_token(allow_refresh=allow_refresh):
-            _invalidate_local_auth("Access token expired and refresh failed; forcing re-authentication.")
-            return
         start_token_refresh_thread_if_needed()
+        st.session_state.token_renewal_failed = not ensure_valid_access_token()
         sync_keycloak_context_from_access_token()
         return
 
@@ -530,12 +736,8 @@ def authenticate_from_proxy_or_jwt() -> None:
         }
 
         _sync_tokens_from_headers(h)
-        allow_refresh = (st.session_state.get("auth_method") or "").strip().lower() != "session"
-        if not ensure_valid_access_token(allow_refresh=allow_refresh):
-            _invalidate_local_auth("Authenticated identity received without a valid access token.")
-            return
-
         start_token_refresh_thread_if_needed()
+        st.session_state.token_renewal_failed = not ensure_valid_access_token()
         sync_keycloak_context_from_access_token()
 
         logger.info(
@@ -577,27 +779,32 @@ def reset_streamlit_form_context() -> None:
 # -------------------------
 # App bootstrap
 # -------------------------
-init_session_state()
-
-# If user clicked logout link and landed on ?logout=1, we clear session_state safely and stop.
-handle_logout_landing()
-
-authenticate_from_proxy_or_jwt()
-
-if not st.session_state.authenticated:
-    st.error("❌ Authentication Error: Missing user information.")
-    st.info("Please access this application through the main portal.")
-    st.stop()
-
-# Form-safe logout control (won't break no matter what streamlit_structure.main() does)
-_logout_qp = st.query_params.get("is_logout_enabled")
-if _logout_qp is None or str(_logout_qp).lower() not in ("0", "false", "no", "n", "off"):
-    render_logout_link()
-
-# -------------------------
-# Main app
-# -------------------------
 if __name__ == "__main__":
+    init_session_state()
+
+    # If user clicked logout link and landed on ?logout=1, we clear session_state safely and stop.
+    handle_logout_landing()
+
+    authenticate_from_proxy_or_jwt()
+
+    if not st.session_state.authenticated:
+        # No identity on the connection at all: the request never carried the
+        # proxy's headers. This is the one situation the message below actually
+        # describes -- an expired token is a renewal problem, handled just after,
+        # not by claiming the user information is missing.
+        st.error("❌ Authentication Error: Missing user information.")
+        st.info("Please access this application through the main portal.")
+        st.stop()
+
+    if not _within_renewal_grace():
+        render_session_recovery()
+        st.stop()
+
+    # Form-safe logout control (won't break no matter what streamlit_structure.main() does)
+    _logout_qp = st.query_params.get("is_logout_enabled")
+    if _logout_qp is None or str(_logout_qp).lower() not in ("0", "false", "no", "n", "off"):
+        render_logout_link()
+
     from lex.lex_app.settings import repo_name
 
     try:

@@ -19,6 +19,7 @@ Run: python -m lex pytest lex/test_project/tests/init/test_1z_proxy_iframe_break
 from __future__ import annotations
 
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from django.test import SimpleTestCase
@@ -105,19 +106,31 @@ class TestCluster01z_ProxyIframeBreakout(SimpleTestCase):
     # -- 1.213 ---------------------------------------------------------
     def test_1_213_top_level_html_still_redirects_to_login(self) -> None:
         """
-        Scenario 1.213: a top-level HTML navigation still redirects to the login route.
+        Scenario 1.213: a top-level HTML navigation still redirects to the login route,
+        now carrying where to come back to.
         Given: no valid identity and a top-level document load (Sec-Fetch-Dest: document, Accept: text/html)
         When: the proxy builds the unauthenticated response
-        Then: it redirects to /auth/login -- unchanged behaviour, since a top-level page can render the IdP.
+        Then: it redirects to /auth/login -- still a redirect, since a top-level page can render
+              the IdP -- with ?next= naming the path that was being asked for.
+
+        The ``next`` parameter is the addition. Without it ``auth_callback`` can only send the
+        user to ``/`` after the OIDC round trip, which for an embedded dashboard means being
+        dropped on the app's first page having lost the work in progress. The target stays
+        *relative* so it cannot be broken by a misconfigured STREAMLIT_URL/BASE_URL.
         """
         resp = proxy._unauthenticated_response(
             _request({"accept": "text/html", "sec-fetch-dest": "document"})
         )
 
         self.assertIsInstance(resp, RedirectResponse, msg="top-level navigation must redirect to login")
+        location = resp.headers["location"]
+        self.assertTrue(
+            location.startswith("/auth/login"),
+            msg=f"top-level redirect target must be the relative login route, got {location!r}",
+        )
         self.assertEqual(
-            resp.headers["location"], "/auth/login",
-            msg="top-level redirect target must be the login route",
+            parse_qs(urlparse(location).query).get("next"), ["/dashboard"],
+            msg="the login redirect must carry the originally-requested path as ?next=",
         )
 
     # -- 1.214 ---------------------------------------------------------

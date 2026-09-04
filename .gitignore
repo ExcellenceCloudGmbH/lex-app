@@ -9,3 +9,16 @@ lex/_version.py
 .lex-ai-reports/
 build/
 /build
+
+# Written by the test suite itself, so an ordinary `lex pytest` run would
+# otherwise leave the working tree dirty -- and a `git add -A` then sweeps them
+# into a commit. `test_uploads/` comes from the serializers cluster's FileField
+# (tests/serializers/models.py), `test_reports/` from the stress harness
+# (tests/stress/_stress_test_case.py, LEX_STRESS_REPORT_DIR).
+test_uploads/
+test_reports/
+
+# macOS writes these constantly. Five are already tracked; ignoring the rest
+# stops new ones appearing in diffs. Untracking the existing five is a separate
+# call, since it touches files outside any one change.
+.DS_Store

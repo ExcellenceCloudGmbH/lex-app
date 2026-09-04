@@ -243,3 +243,76 @@
 | Tests landed | **7 pass / 0 fail** |
 | Coverage gain | the LEX-5 admin-role-separation self-cleanup: `client-admin` replaces the abandoned `release-manager` in `IGNORED_CLIENT_ROLES`; a policy minted by an older lex-app for a now-ignored role is stripped from the in-memory `auth_config` (and detached from any permission's `applyPolicies`) before re-import, then deleted live from Keycloak once nothing references it |
 | Status | ✅ Complete. Design: `local_wiki/projects/admin-role-separation-5/README.md`. The sync only ever ADDS `Policy - <role>` entries via Keycloak's `/authz/resource-server/import` endpoint (verified against the existing `ensure_client_role_policies`/`sync_standard_client_role_permissions` pattern — it never deletes what's absent from a re-imported payload), so the live delete of the stale policy is a separate step, run **after** `import_authorization_settings` succeeds so the detached `applyPolicies` reference has already landed in Keycloak and the policy-delete's referential-integrity check passes. Not independently verified against a live Keycloak instance (no cluster access from this change) — the live-delete ordering assumption is grounded in Keycloak's documented policy/permission referential-integrity behavior, not an in-repo test. |
+
+### Batch 1ac — Streamlit session survival across an idle period ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.230 – 1.246 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`internal_token`, `proxy` + `ws_proxy` credential precedence, `_jwt_user_payload`, `_session_user_payload`), `lex/streamlit_app.py` (`_adopt_header_token`, `_sync_tokens_from_headers`, `_pull_token_from_proxy`, `renew_access_token`, `authenticate_from_proxy_or_jwt`, `sync_keycloak_context_from_access_token`, `_token_refresher`, `start_token_refresh_thread_if_needed`, `_within_renewal_grace`), `lex/bin/lex.py` (`streamlit` — mints the shared secret) |
+| Test file | `lex/test_project/tests/init/test_1ac_streamlit_session_survival.py` |
+| Test classes | `TestCluster01ac_ProxyRenewalChannel` (1.230–1.235, 1.246), `TestCluster01ac_StreamlitTokenLifecycle` (1.236–1.245) |
+| Fixtures | none — Starlette `TestClient` over the real `proxy.app`, a hand-signed SessionMiddleware cookie, capturing stand-ins for the HTTP and WebSocket upstreams, and a dict-backed `st.session_state` |
+| Tests landed | **17 pass / 0 fail**; whole `init` cluster **315 pass / 13 skip, 87 subtests pass** |
+| Coverage gain | the renewal path of a *running* dashboard, which had none: the pull endpoint and its secret guard, credential precedence on both the HTTP and WebSocket paths, and the Streamlit-side token lifecycle including the identity/expiry split |
+| Prereqs | batches 1z (breakout) and 1aa (embedded renewal) — same auth path |
+| Status | ✅ Complete — 14 of 17 scenarios fail against the pre-fix tree (the two pre-existing correct behaviours, 1.235 and 1.237, are kept as guards) |
+| Note | Root cause was a lifetime mismatch nobody had named: `st.context.headers` is the handshake request, frozen for the life of a socket that Streamlit keeps open for hours, while the access token it carries lives minutes. Session auth then had local refresh *deliberately* disabled on the reasoning that the proxy manages it — true of the proxy's own traffic, but the proxy can only deliver a credential at handshake time, so nothing renewed the running script's copy. Three secondary defects compounded it: `auth_callback` sets `st_access` on every login and the cookie was consulted before the session, so a normal login reached Streamlit as `jwt` with `refresh_token: None`; `_sync_tokens_from_headers` adopted the header token on mere inequality, reverting each renewal on the next rerun; and the expiry path called `_invalidate_local_auth`, wiping identity and rendering "Missing user information" about headers that were present — sticky, because the next rerun re-read the same frozen headers. Renewal now pulls from the proxy, so the refresh token still has exactly one writer. |
+
+### Batch 1ad — Streamlit's asset bundle served ungated, and session durability ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.247 – 1.292 |
+| Type | U |
+| Files covered | `lex/proxy.py` (`_streamlit_static_dir`, `_build_static_routes`, `_apply_asset_cache_headers`, `_assert_static_bundle_present`, `PUBLIC_PROXY_PATHS`, `public_proxy`, `_get_upstream_client`, `_upstream_send`, `_iter_upstream`, `_build_proxied_response`, `_ensure_jwks_ready`, `_fetch_jwks_blocking`, `_get_jwks`, `_safe_next_path`, `_login_path`, `_login_url`, `_current_relative_path`, `_query_without_auth_token`, `_is_document_request`, `login`, `auth_callback`, `proxy`, and the `SESSION_SECRET` / `SESSION_SAMESITE` / `_build_token_store` startup guards), `lex/bin/lex.py` (`streamlit` launch args, `_warn_if_sessions_are_not_durable`) |
+| Test file | `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py` |
+| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286), `TestCluster01ad_RenewalDelivery` (1.287–1.292) |
+| Fixtures | none — Starlette `TestClient` over the real `proxy.app`, a streaming stub (`_RawStream`) over the `_upstream_send` seam, and `_reimport_proxy_with` to exercise import-time guards |
+| Tests landed | **46 pass / 0 fail**, 33 subtests |
+| Coverage gain | the asset path, which had none: what is public, what stays gated, and what the proxy does to a response on the way back. Plus the JWKS availability path, the login return path, and every startup guard |
+| Prereqs | batches 1z (breakout), 1aa (embedded renewal), 1ac (idle survival) — same auth path |
+| Status | ✅ Complete — **27 of the first 30 fail against the pre-fix tree**. The three that pass (1.254 the authenticated boundary, 1.255 the WebSocket deny, 1.271 the permitted configurations still boot) are deliberate guards: they assert behaviour this change must *not* alter, and would be the first things to break if the public allowlist ever widened |
+| Note | The three reports that prompted this — "session timeout resets my state", "starting Streamlit takes forever", "TypeErrors coming out of nowhere" — are one causal chain, and the arithmetic is the explanation. Streamlit 1.61 ships **365** JS chunks and names **107** in eager `modulepreload` tags, and the proxy authenticated all of them through a single catch-all whose deny happened before it looked at the path. So one credential-less moment is a hundred simultaneous 401s; a *lazily* imported chunk that 401s surfaces as `TypeError: Failed to fetch dynamically imported module` because Vite's dynamic `import()` has no other vocabulary for an HTTP error (hence `DownloadButton` and `DataFrame`, both lazy chunks, in the screenshots); and stripping `Content-Encoding` — which the old code had to do, having read the *decoded* body — inflated the eager set to 1.77 MB where 0.42 MB was enough. Two further defects had the same shape: `_get_jwks_sync` fetched inline with a **sync** client on the event loop *and* returned `None` on failure while holding valid keys, so one Keycloak blip after the hourly TTL lapse rejected every token in the cluster; and `SESSION_SECRET`/`TOKEN_STORE` both defaulted to per-process values, making a restart or a second replica indistinguishable from an expiry. Measured and explicitly **not** a cause: JWT validation at 0.045 ms/request, 16 ms across all 365 chunks. |
+
+#### 1ad follow-up — scenarios 1.277–1.286
+
+An adversarial review of the first pass (three independent finder angles over `lex/proxy.py`, `lex/bin/lex.py` and the React shell) found **ten further defects in the fix itself**, and these scenarios pin each one. Worth recording because the pattern repeats: every one lived in the *new* code, and four of them would have reproduced one of the three original symptoms by a different route.
+
+| Scenario | Defect it pins |
+| --- | --- |
+| 1.277 | the `auth_token` strip redirect set only the session cookie, so it handed over **fewer** credentials than the response it replaced — fatal wherever the frame cannot use that cookie (Safari ITP, third-party blocking), which is exactly the deployment the change targets |
+| 1.278 | a bodiless 304 yielded `b""`, which reaches GZipMiddleware as a body, skips its `minimum_size` guard, and gets a gzip header attached — uvicorn then raises "Response content longer than Content-Length". Real `aiter_raw()` yields zero chunks, so **only the test doubles took this branch** |
+| 1.279 | `stream=True` moved body-read failures outside the `try`, turning a mid-body upstream death into a truncated `200` — a silent `SyntaxError` in a Vite chunk rather than a retryable status |
+| 1.280 | `public_proxy` forwarded the client's `Content-Length` while sending an empty body, so a probe carrying a body answered 500 |
+| 1.281 | the pooled client was handed across event loops; `is_closed` says nothing about which loop its sockets belong to |
+| 1.282 | module-level `asyncio.Lock()`s bind on their first **contended** acquire, so they failed only under the concurrency the single-flight was written for |
+| 1.283 | a non-numeric `LEX_PROXY_REPLICAS` raised at import — in the uvicorn worker thread, killing the proxy while Streamlit kept serving |
+| 1.284 | the `/static` mount ignored `--server.baseUrlPath`, silently restoring the 401 storm with the bundle present so nothing warned |
+| 1.285 | the CLI pre-flight mirrored two of five import-time rules, so the SameSite raises still died in the worker thread — the failure it exists to prevent |
+| 1.286 | the pre-flight's `startswith("https://")` disagreed with proxy.py's case-normalising `httpx.URL(...).scheme`, so `HTTPS://host` passed the readable check and raised later |
+
+Two more were fixed without a scenario: the lifespan JWKS warmup was awaited, and uvicorn runs lifespan startup **before** creating the listener, so it kept port 8501 closed for up to 10s while `lex streamlit` had already pointed the browser at it (now a background task); and `_reimport_proxy_with` restored `sys.modules["lex.proxy"]` but not the `lex.proxy` **package attribute**, leaving a later `from lex import proxy` bound to a throwaway module with a different `TOKEN_STORE`.
+
+#### 1ad follow-up 2 — scenarios 1.287–1.290: the channel the other fixes needed
+
+Freezing the iframe `src` is what stops a renewal destroying the Streamlit session. But it also removed the only way a renewed token could **reach** the proxy: `?auth_token=` in the iframe URL. So the two halves were mutually exclusive — deliver the token and lose the state, or keep the state and let the session die at the access token's own lifetime (~5 min, Keycloak's default), with the shell holding a fresh token it had nowhere to put.
+
+Verified directly before fixing: bootstrap with a 3-second token, wait, and the next request is a **401** even though a valid renewal is sitting in React state. The only credential the proxy would accept was `?auth_token=`, i.e. an iframe reload.
+
+`POST /auth/adopt` is the missing third option, and it reuses rather than replaces what was already there — `_persist_jwt_to_session_if_needed`'s strictly-newer adoption, whose comment already named the frontend as the intended source.
+
+| Scenario | Asserts |
+| --- | --- |
+| 1.287 | a strictly newer token POSTed from the shell is adopted, and the session then outlives the token it was bootstrapped with |
+| 1.288 | a foreign `Origin`, and no `Origin` at all, are both refused — the endpoint is credentialed so it can never answer `*`, and an unset `REACT_APP_URL` must close it rather than open it |
+| 1.289 | the token is still JWKS-validated: junk is 401, absent is 400. This is what stops the endpoint being a way to install arbitrary identity |
+| 1.290 | the CORS preflight succeeds for the allowed origin naming POST, and is refused for any other — without it the browser never sends the request, and the failure would be invisible except as a session that quietly stops renewing |
+
+| 1.291 | `DOMAIN_HOSTED` alone permits adoption, with no extra variable set — the reason the allowlist is derived rather than declared |
+| 1.292 | `DOMAIN_HOSTED=localhost` (the development default) yields the shell's real dev origins, not a trusted `https://localhost` |
+
+The allowlist is **derived, not declared**, and that was the point: `settings.py` refuses to start without `DOMAIN_HOSTED` whenever `DEPLOYMENT_ENVIRONMENT` is set, and Django already builds `CORS_ORIGIN_WHITELIST` from it identically. A new *required* variable would have made the failure mode a dashboard that renews for five minutes and then quietly stops, with nothing in the logs — the class of bug this whole batch exists to remove.
+
+The token travels in a request **body**, so unlike the bootstrap it never reaches the address bar, history, or a `Referer` — which also makes this strictly better than the mechanism `token_views.py` originally documented.

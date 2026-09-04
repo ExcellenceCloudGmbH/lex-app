@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 229
+max_scenario: 292
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -305,3 +305,50 @@ letters:
       applyPolicies, 1.226 no-op when nothing stale, 1.227 live delete by id, 1.228 no-op when
       nothing live, 1.229 missing-id fail-fast.
 
+  ac:
+    title: Streamlit session survival across an idle period (frozen-handshake fix)
+    scenarios: 1.230-1.246
+    status: complete
+    tests:
+      pass: 17
+      skip: 0
+      xfail: 0
+    note: >-
+      the third and last batch on this auth path (z made expiry graceful, aa let the embedded
+      caller renew, ac stops the session expiring at all). Root cause: Streamlit reads request
+      headers off the *websocket handshake*, so every credential the proxy injects is a snapshot
+      that ages while the socket stays open - and session auth had local refresh deliberately
+      disabled, leaving nothing to renew it. Adds proxy /auth/token (secret-guarded pull, proxy
+      stays sole refresh authority so nothing races the rotation), reorders credential precedence
+      so the renewable session outranks the short-lived st_access cookie on both the HTTP and WS
+      paths, and on the Streamlit side stops the frozen header token overwriting a renewed one,
+      renews ahead of expiry for session auth too, and decouples identity from token freshness -
+      the "Missing user information" screen was reporting an expired token as a missing user, and
+      re-entered itself on every rerun. 14 of 17 fail against the pre-fix tree.
+  ad:
+    title: Streamlit asset bundle served ungated + session durability guards
+    scenarios: 1.247-1.292
+    status: complete
+    tests:
+      pass: 46
+      skip: 0
+      xfail: 0
+    note: >-
+      the fourth batch on this auth path, and the one that explains the other three reports. The
+      proxy authenticated every request through one catch-all route, and Streamlit 1.61 ships 365
+      code-split JS chunks with 107 named in eager modulepreload tags - so one credential-less
+      moment produced a 401 flood, and a lazily-imported chunk that 401s reaches the browser as
+      "TypeError: Failed to fetch dynamically imported module", which is how an expired credential
+      was reaching customers as a type error. Serves Streamlit's own bundle from the proxy process
+      (located via streamlit.file_util.get_static_dir so hashes cannot drift from the index.html
+      naming them), makes only /_stcore/health and /_stcore/host-config publicly proxied, and keeps
+      everything else gated - the boundary scenarios matter as much as the public ones. Also: one
+      pooled httpx client instead of one per request; raw streaming that preserves Content-Encoding
+      (measured 1.77 MB -> 0.42 MB on the eager set, 4.17x); the JWKS fetch moved off the event
+      loop with single-flight and stale-key retention (a failed refresh used to reject every token
+      in the cluster); ?next= carried through login->callback with a strict open-redirect guard;
+      the bootstrap auth_token stripped out of the URL; and startup refusal for the configurations
+      that silently log everyone out - no SESSION_SECRET on https, replicas without a shared token
+      store, SameSite=None without Secure. 27 of 30 fail against the pre-fix tree; the 3 that pass
+      (1.254 boundary, 1.255 WS deny, 1.271 permitted configs still boot) are guards asserting what
+      the change must not break. Recorded BUG-029 (pre-existing cluster-1 flake) while running it. Scenarios 1.277-1.286 were added after an adversarial review of the first pass found ten further defects in it: the auth_token strip handed over fewer credentials than the response it replaced (no st_access, fatal wherever the frame cannot use the session cookie); JWKS backed off only when keys were already cached, so a cold cache cost every queued request its own 10s fetch; a bodiless 304 yielded an empty chunk that made GZip attach a body to it; a mid-body upstream failure became a truncated 200, i.e. a silent SyntaxError in a Vite chunk; the pooled client and the module-level locks were reusable across event loops; public_proxy forwarded a Content-Length it was not sending; the /static mount ignored baseUrlPath, silently restoring the 401 storm; a non-numeric LEX_PROXY_REPLICAS raised at import; the lifespan JWKS warmup delayed the port bind by up to 10s; and the CLI pre-check mirrored two of five import-time rules with a case-sensitive https test. Scenarios 1.287-1.290 then close the gap those fixes exposed: freezing the iframe src stops a renewal destroying the Streamlit session, but it also meant the renewed token had no way to REACH the proxy, since ?auth_token= in the iframe URL was the only channel that existed - so an embedded session still died at the access token's own lifetime with the shell holding a fresh token it could not deliver. POST /auth/adopt is that channel: token in the body rather than a URL, CORS-scoped to the configured frontend origin, JWKS-validated like every other credential, and adopted through the strictly-newer logic PR 723 already built for exactly this. The CORS allowlist is DERIVED from DOMAIN_HOSTED (1.291-1.292) rather than declared in a new variable: settings.py already refuses to start without it whenever DEPLOYMENT_ENVIRONMENT is set and Django builds CORS_ORIGIN_WHITELIST from it the same way, so it is guaranteed present - and a new required variable would have made the failure mode a dashboard that renews for five minutes and then quietly stops.
