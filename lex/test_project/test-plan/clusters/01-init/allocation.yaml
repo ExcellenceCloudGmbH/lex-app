@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.289
+    scenarios: 1.261-1.291
     status: complete
     tests:
-      pass: 20
+      pass: 22
       skip: 0
       xfail: 0
     note: >-
@@ -509,6 +509,20 @@ letters:
       the accepted cost, and it fails HARMLESSLY - the theme is left alone with a log, since
       nothing reloads or overrides. 1.285 pins that the mask is removed on both exit paths, because
       a mask left behind would hide the real menu from the user permanently.
+      1.290-1.291 fix the diagnostics, which the rewrite had silently broken: the debug panel still
+      called four functions that no longer existed, so it would have thrown on first paint - in the
+      one situation it exists for, when someone is already stuck. A diagnostic that breaks exactly
+      when it is needed is worse than none, because its silence reads as "nothing to report". The
+      panel now reports each LINK of the chain separately, because from the outside every break
+      looks identical ("the switch does nothing") and only the link that failed distinguishes them.
+      1.291 names the one break the page cannot otherwise report: lex-app and Streamlit are
+      separate ORIGINS, so lex-app's storage is not this page's storage, and the only bridge is the
+      hidden /_lex/theme-relay frame. A browser that partitions third-party storage - Brave's
+      shields, Safari, strict Firefox - blocks that write, the agreed key stays empty forever, and
+      every theme change is dropped in silence. That is now a console.warn on every load, WITHOUT
+      the debug flag, since nobody who does not already suspect it would think to turn diagnostics
+      on. Standing hypothesis for the report that survived the rewrite; unconfirmed, because the
+      failure lives in a browser profile that cannot be reached from here.
 
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring

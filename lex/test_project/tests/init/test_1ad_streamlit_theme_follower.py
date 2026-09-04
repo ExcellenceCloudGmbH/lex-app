@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.289.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.291.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -272,6 +272,61 @@ class TestCluster1ad_StreamlitThemeFollower:
 
         assert "requestAnimationFrame(" not in js
         assert 'apply(stored || DEFAULT_MODE, "install");' in js
+
+
+    def test_01_290_the_diagnostics_describe_the_chain_that_exists(self):
+        """Scenario 1.290: the debug panel must not outlive the code it reports on.
+
+        Rewriting the mechanism (1.283-1.289) left the panel calling four
+        functions that no longer existed. It would have thrown on first paint --
+        in the one situation it exists for, when someone is already stuck and
+        reaching for a diagnostic.
+
+        A diagnostic that breaks exactly when it is needed is worse than none,
+        because its silence reads as "nothing to report".
+        """
+        panel = theme_follower_html(debug=True)
+        plain = theme_follower_html(debug=False)
+
+        for dead in ("effectiveMode(", "selection()", "__lexThemeReloading", "activeThemeKey("):
+            assert dead not in panel, f"the panel calls a function that no longer exists: {dead}"
+
+        # It reports each link separately, because from the outside every break
+        # looks the same -- "the switch does nothing".
+        for link in ("lex-app wrote the agreed mode here",
+                     "Streamlit told the shim its theme",
+                     "Streamlit's theme control",
+                     "this page is showing"):
+            assert link in panel, f"the chain is not fully reported: {link}"
+
+        # Spliced, not shipped inert: a page that did not ask must not carry the
+        # panel. Assert on something only the panel has -- the driver itself
+        # legitimately uses createElement (for the popover mask) and names
+        # LEX_THEME_DEBUG (in the warning that tells you to turn it on).
+        assert "setInterval(paint" not in plain
+        assert "lex-theme chain" not in plain
+
+    def test_01_291_a_silent_relay_is_reported_without_the_debug_flag(self):
+        """Scenario 1.291: say so when lex-app has never reached this origin.
+
+        lex-app and Streamlit are separate origins, so lex-app's storage is not
+        this page's storage. The only bridge is the hidden ``/_lex/theme-relay``
+        frame, and a browser that partitions third-party storage -- Brave's
+        shields, Safari, strict Firefox -- blocks its write. The key then stays
+        empty forever and every theme change is silently dropped.
+
+        That is indistinguishable from every other break unless the page says so,
+        and it must say so WITHOUT the debug flag: someone who does not already
+        suspect this has no reason to turn diagnostics on.
+        """
+        js = theme_follower_html()
+
+        assert "has never written" in js
+        assert "theme-relay" in js
+        assert "partitions third-party storage" in js, (
+            "the likeliest cause is not named, so the log does not help"
+        )
+        assert "console.warn(" in js, "a silent chain must not be reported at info level"
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

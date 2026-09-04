@@ -60,9 +60,9 @@ _DEBUG_PANEL_JS = """    // ── Visible diagnostics ────────�
     // code, and a future edit to a runtime guard cannot leak a debug box into a
     // production dashboard.
     //
-    // The console is the natural home for this, but a theme problem crosses
-    // three browsing contexts and is usually reported with a screenshot. A panel
-    // in the page turns one screenshot into the whole picture.
+    // It shows the whole chain, in order, because the failure is always ONE link
+    // and from the outside every break looks identical -- "the switch does
+    // nothing". A screenshot of this box says which one.
     var box = document.createElement("pre");
     box.style.cssText =
       "margin:0;padding:8px 10px;font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;" +
@@ -70,8 +70,8 @@ _DEBUG_PANEL_JS = """    // ── Visible diagnostics ────────�
       "color:inherit;background:rgba(128,128,128,.08)";
     document.body.appendChild(box);
 
-    function line(label, value) {
-      return label + ": " + value + "\\n";
+    function line(n, label, value) {
+      return n + ". " + label + ": " + value + "\\n";
     }
 
     function paint() {
@@ -79,19 +79,28 @@ _DEBUG_PANEL_JS = """    // ── Visible diagnostics ────────�
       try { agreed = host.localStorage.getItem(KEY); }
       catch (e) { storageErr = " (unreadable: " + e.name + ")"; }
 
-      var report = host.__lexThemeLastReport;
+      var shimSaid = host.__lexThemeCurrent;
+      var control = null;
+      try { control = host.document.querySelector(MENU_BUTTON) ? "found" : "MISSING"; }
+      catch (e) { control = "unreadable"; }
 
       box.textContent =
-        "lex-theme diagnostics (LEX_THEME_DEBUG)\\n" +
-        line("page showing", effectiveMode() || "unknown") +
-        line("streamlit menu", (selection() || "(unset)") + "   key " + activeThemeKey()) +
-        line("url pins a theme", URL_MODE ? URL_MODE + " -- sync stood down" : "no") +
-        line("agreed with lex-app", (agreed === null || agreed === undefined
-              ? "(nothing yet)" : agreed) + storageErr) +
-        line("widget last reported", report
-              ? report.mode + " via " + report.route + ", " + report.ago() + "s ago"
-              : "(nothing yet -- no widget has announced a theme)") +
-        line("reload already used", host.__lexThemeReloading ? "yes" : "no");
+        "lex-theme chain (LEX_THEME_DEBUG) -- origin " + host.location.origin + "\\n" +
+        line(1, "lex-app wrote the agreed mode here",
+             (agreed === null || agreed === undefined
+               ? "NO -- nothing on this origin. The relay has never delivered. " +
+                 "lex-app is on a DIFFERENT origin, so it reaches this one only " +
+                 "through the hidden /_lex/theme-relay frame; a browser that " +
+                 "partitions third-party storage (Brave shields, Safari, strict " +
+                 "Firefox) blocks that write and this stays empty forever."
+               : agreed) + storageErr) +
+        line(2, "Streamlit told the shim its theme",
+             shimSaid ? shimSaid : "NO -- no widget host on this page, or the shim " +
+                                   "has not rendered yet") +
+        line(3, "Streamlit's theme control", control) +
+        line(4, "this page is showing", currentMode() || "unknown") +
+        line(5, "url pins a theme", URL_MODE ? URL_MODE + " (stripped on load)" : "no") +
+        line(6, "last action", host.__lexThemeLastAction || "none yet");
     }
 
     paint();
@@ -241,7 +250,8 @@ _FOLLOWER_HTML = """<script>
       var now = currentMode();
       console.info("[lex-theme] asked for", mode, "(" + (reason || "?") + ")",
                    "; showing", now || "(unknown)");
-      if (now === mode) return;
+      if (now === mode) { host.__lexThemeLastAction = "already " + mode; return; }
+      host.__lexThemeLastAction = "drove to " + mode + " (" + reason + ")";
       drive(mode);
     }
 
@@ -274,7 +284,19 @@ _FOLLOWER_HTML = """<script>
       if (ev.key === KEY) apply(ev.newValue, "storage");
     });
 
-    console.info("[lex-theme] driver ready; showing", currentMode());
+    if (stored === null || stored === undefined) {
+      console.warn(
+        "[lex-theme] driver ready, but lex-app has never written '" + KEY + "' on " +
+        host.location.origin + ". lex-app runs on a different origin and reaches " +
+        "this one only through the hidden /_lex/theme-relay frame, so either that " +
+        "frame never loaded or this browser partitions third-party storage (Brave " +
+        "shields, Safari, strict Firefox), which blocks the write. Until then the " +
+        "theme here is whatever Streamlit's own menu says. Set LEX_THEME_DEBUG=1 " +
+        "for the full chain."
+      );
+    } else {
+      console.info("[lex-theme] driver ready; agreed", stored, "; showing", currentMode());
+    }
 __DEBUG_PANEL__  })();
 </script>
 """
