@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 292
+max_scenario: 295
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -327,10 +327,10 @@ letters:
       re-entered itself on every rerun. 14 of 17 fail against the pre-fix tree.
   ad:
     title: Streamlit asset bundle served ungated + session durability guards
-    scenarios: 1.247-1.292
+    scenarios: 1.247-1.295
     status: complete
     tests:
-      pass: 46
+      pass: 49
       skip: 0
       xfail: 0
     note: >-
@@ -352,6 +352,6 @@ letters:
       SameSite=None without Secure. The session key is DERIVED from DJANGO_SECRET_KEY (stable in
       terraform state, identical on every replica) rather than demanded as a new variable: an
       earlier revision refused to boot without SESSION_SECRET and bricked a running instance,
-      which is a worse failure than the fragility it guarded against. 27 of 30 fail against the pre-fix tree; the 3 that pass
+      which is a worse failure than the fragility it guarded against. 1.293-1.295 fix a regression the pooling change introduced and production found: Streamlit sits behind uvicorn, whose keep-alive timeout is 5s, so a pooled connection handed out after that fails with RemoteProtocolError before a byte is exchanged - observed in a prod log exactly 5s after the previous request, on a /media fetch, i.e. a document download that simply failed. The per-request client this replaced could never hit it. Pool expiry now undercuts the upstream's, one retry covers the race, and the error class answers 502 instead of escaping as an unhandled ASGI exception. 27 of 30 fail against the pre-fix tree; the 3 that pass
       (1.254 boundary, 1.255 WS deny, 1.271 permitted configs still boot) are guards asserting what
       the change must not break. Recorded BUG-029 (pre-existing cluster-1 flake) while running it. Scenarios 1.277-1.286 were added after an adversarial review of the first pass found ten further defects in it: the auth_token strip handed over fewer credentials than the response it replaced (no st_access, fatal wherever the frame cannot use the session cookie); JWKS backed off only when keys were already cached, so a cold cache cost every queued request its own 10s fetch; a bodiless 304 yielded an empty chunk that made GZip attach a body to it; a mid-body upstream failure became a truncated 200, i.e. a silent SyntaxError in a Vite chunk; the pooled client and the module-level locks were reusable across event loops; public_proxy forwarded a Content-Length it was not sending; the /static mount ignored baseUrlPath, silently restoring the 401 storm; a non-numeric LEX_PROXY_REPLICAS raised at import; the lifespan JWKS warmup delayed the port bind by up to 10s; and the CLI pre-check mirrored two of five import-time rules with a case-sensitive https test. Scenarios 1.287-1.290 then close the gap those fixes exposed: freezing the iframe src stops a renewal destroying the Streamlit session, but it also meant the renewed token had no way to REACH the proxy, since ?auth_token= in the iframe URL was the only channel that existed - so an embedded session still died at the access token's own lifetime with the shell holding a fresh token it could not deliver. POST /auth/adopt is that channel: token in the body rather than a URL, CORS-scoped to the configured frontend origin, JWKS-validated like every other credential, and adopted through the strictly-newer logic PR 723 already built for exactly this. The CORS allowlist is DERIVED from DOMAIN_HOSTED (1.291-1.292) rather than declared in a new variable: settings.py already refuses to start without it whenever DEPLOYMENT_ENVIRONMENT is set and Django builds CORS_ORIGIN_WHITELIST from it the same way, so it is guaranteed present - and a new required variable would have made the failure mode a dashboard that renews for five minutes and then quietly stops.

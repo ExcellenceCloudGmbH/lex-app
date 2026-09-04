@@ -2027,3 +2027,135 @@ class TestCluster01ad_RenewalDelivery(SimpleTestCase):
             "http://localhost:3000", module.FRONTEND_ORIGINS,
             msg="the shell's development origin must be trusted, or renewal cannot be tested locally",
         )
+
+
+class TestCluster01ad_StaleConnectionRecovery(SimpleTestCase):
+    """Cluster 1ad: the pooled client must survive the upstream closing a connection."""
+
+    # -- 1.293 ---------------------------------------------------------
+    def test_1_293_a_connection_the_upstream_closed_is_retried(self) -> None:
+        """
+        Scenario 1.293: a request after the upstream's keep-alive expiry still succeeds.
+        Given: one request, then an idle gap long enough for the upstream to close the socket
+        When: a second request reuses the pooled connection
+        Then: it succeeds, having opened a fresh connection.
+
+        This is a regression the pooling change introduced and production found.
+        Streamlit runs behind uvicorn, whose keep-alive timeout is 5s; past that
+        it closes the socket, and a pooled connection handed out afterwards
+        fails with `RemoteProtocolError: Server disconnected without sending a
+        response` before a single byte is exchanged. The per-request client this
+        replaced could never hit it, because it never reused a connection.
+
+        Observed in a production log exactly 5s after the previous request, on a
+        `/media/...` fetch -- i.e. a document download that simply failed.
+        """
+        async def scenario():
+            connections = {"count": 0}
+
+            async def handler(reader, writer):
+                connections["count"] += 1
+                await reader.read(4096)
+                # Answer, then close: a server whose keep-alive has expired.
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+                    b"Connection: keep-alive\r\n\r\nok"
+                )
+                await writer.drain()
+                await asyncio.sleep(0.05)
+                writer.close()
+
+            server = await asyncio.start_server(handler, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            url = httpx.URL(f"http://127.0.0.1:{port}/media/protokoll.zip")
+
+            statuses = []
+            try:
+                with patch.object(proxy, "UPSTREAM", f"http://127.0.0.1:{port}"):
+                    first = await proxy._upstream_send("GET", url, content=b"", headers={})
+                    await first.aread()
+                    await first.aclose()
+                    statuses.append(first.status_code)
+
+                    # Long enough for the handler to have closed the socket.
+                    await asyncio.sleep(0.4)
+
+                    second = await proxy._upstream_send("GET", url, content=b"", headers={})
+                    await second.aread()
+                    await second.aclose()
+                    statuses.append(second.status_code)
+            finally:
+                server.close()
+                await _close_pooled_client()
+
+            return statuses, connections["count"]
+
+        statuses, connections = asyncio.run(scenario())
+
+        self.assertEqual(
+            statuses, [200, 200],
+            msg=f"a request after the upstream's keep-alive expiry must still succeed, got {statuses}",
+        )
+        self.assertEqual(
+            connections, 2,
+            msg=f"the retry must open a fresh connection, saw {connections}",
+        )
+
+    # -- 1.294 ---------------------------------------------------------
+    def test_1_294_the_pool_expires_before_the_upstream_does(self) -> None:
+        """
+        Scenario 1.294: pooled connections are dropped sooner than the upstream drops them.
+        Given: the proxy's upstream client configuration
+        When: its keep-alive expiry is compared to uvicorn's 5s keep-alive timeout
+        Then: the proxy's is shorter.
+
+        The retry in 1.293 is the safety net; this is the part that stops the
+        race happening. Expiring first means the pool rarely offers a connection
+        the upstream has already closed, so the common case costs no extra round
+        trip at all.
+        """
+        self.assertLess(
+            proxy._UPSTREAM_KEEPALIVE_EXPIRY, 5.0,
+            msg=(
+                "pooled connections must expire before uvicorn's 5s keep-alive timeout, "
+                f"got {proxy._UPSTREAM_KEEPALIVE_EXPIRY}s"
+            ),
+        )
+        self.assertEqual(
+            proxy._upstream_http_client_kwargs(proxy._UPSTREAM_TIMEOUT)["limits"].keepalive_expiry,
+            proxy._UPSTREAM_KEEPALIVE_EXPIRY,
+            msg="the configured expiry must actually reach the client",
+        )
+
+    # -- 1.295 ---------------------------------------------------------
+    def test_1_295_an_unreachable_upstream_answers_502_rather_than_escaping(self) -> None:
+        """
+        Scenario 1.295: an httpx failure with no response becomes a 502.
+        Given: an upstream that raises RemoteProtocolError every time
+        When: an authenticated path and a public path are requested
+        Then: both answer 502.
+
+        RemoteProtocolError is neither ConnectError nor TimeoutException, so it
+        escaped both handlers and surfaced as "Exception in ASGI application" --
+        which reaches the browser as a dropped request rather than a status:
+        a `/media` download that fails silently, or an iframe document that
+        never loads. A 502 is at least legible to the client and to whoever
+        reads the log.
+        """
+        async def always_dies(method, url, *, content=None, headers=None):
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+        with patch.object(proxy, "_upstream_send", always_dies):
+            with TestClient(proxy.app, raise_server_exceptions=False) as client:
+                public = client.get("/_stcore/health")
+                with patch.object(
+                    proxy, "validate_jwt_token", lambda _t: {"sub": "u", "exp": 4_000_000_000}
+                ):
+                    gated = client.get("/media/protokoll.zip?auth_token=x", headers={"Accept": "*/*"})
+
+        for label, resp in (("a public path", public), ("an authenticated path", gated)):
+            with self.subTest(path=label):
+                self.assertEqual(
+                    resp.status_code, 502,
+                    msg=f"{label} must answer 502, not escape as an unhandled exception",
+                )

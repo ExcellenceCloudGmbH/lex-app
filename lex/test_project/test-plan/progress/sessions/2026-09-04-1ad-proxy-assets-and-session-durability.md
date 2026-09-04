@@ -1,7 +1,7 @@
 ---
 date: 2026-09-04
 clusters: [1]
-tests_added: 40
+tests_added: 49
 suite_tally: "1ad: 40 pass / 0 fail, 31 subtests; init cluster: 353 pass / 13 skip / 119 subtests on a clean run (BUG-029 makes it intermittent)"
 ---
 
@@ -125,3 +125,29 @@ Both derived, not reused verbatim: the session key is an HMAC of the Django secr
 label, so a leak of one does not hand over the other. And the published `settings.py` fallback is
 excluded from derivation — sharing *that* would give every lex-app instance the same cookie-signing
 key, which is worse than a random per-process value rather than better.
+
+## What production found that review did not
+
+Three rounds of adversarial review found ten bugs in this change. Production then found an
+eleventh that none of the angles had reached, and it is instructive about *why*:
+
+```
+httpx.RemoteProtocolError: Server disconnected without sending a response.
+```
+
+exactly **5 seconds** after the previous upstream request — uvicorn's default keep-alive timeout.
+Streamlit closes the socket at that point, the pool hands the dead connection to the next request,
+and it fails before a byte is exchanged. `RemoteProtocolError` is neither `ConnectError` nor
+`TimeoutException`, so it escaped both handlers as *"Exception in ASGI application"*: a dropped
+request rather than a status. Since `/media/...` is proxied, the user-visible form was
+*"Protokoll downloaden geht nicht"* — a document download that failed for no stated reason.
+
+The reason review missed it is worth naming. Every angle asked *is this code correct?* The bug is
+not in the code; it is in an **interaction with a timeout in another process** that only exists once
+connections are reused. The per-request client this replaced could not have hit it. So a review
+question that would have caught it is not "is the pooling correct" but **"what did the old code get
+for free that the new code now has to earn?"** — the removed-behaviour angle, applied to a
+non-functional property rather than a guard or a validation.
+
+Scenarios 1.293–1.295, all three failing against the deployed tree. 1.293 drives a real socket
+server that answers and then closes, because a mock cannot reproduce a keep-alive race.

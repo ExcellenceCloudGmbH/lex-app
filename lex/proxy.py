@@ -1103,6 +1103,7 @@ def _upstream_http_client_kwargs(timeout: httpx.Timeout) -> Dict[str, Any]:
         "follow_redirects": False,
         "timeout": timeout,
         "trust_env": UPSTREAM_USE_SYSTEM_PROXY,
+        "limits": _UPSTREAM_LIMITS,
     }
 
 
@@ -1265,6 +1266,19 @@ async def ws_proxy(websocket: WebSocket):
 # reuses connections; streaming means the first byte leaves as soon as it
 # arrives.
 _UPSTREAM_TIMEOUT = httpx.Timeout(float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", "30")))
+
+# Keep pooled connections for less time than the upstream will hold them open.
+# Streamlit runs behind uvicorn, whose keep-alive timeout is 5s: past that it
+# closes the socket, and a pooled connection handed out afterwards fails with
+# `RemoteProtocolError: Server disconnected without sending a response` before
+# a single byte is exchanged. Observed in production exactly 5s after the
+# previous request. Expiring first turns that race into a fresh connection.
+_UPSTREAM_KEEPALIVE_EXPIRY = float(os.getenv("UPSTREAM_KEEPALIVE_EXPIRY_SECONDS", "2"))
+_UPSTREAM_LIMITS = httpx.Limits(
+    max_connections=_env_int("UPSTREAM_MAX_CONNECTIONS", 100),
+    max_keepalive_connections=_env_int("UPSTREAM_MAX_KEEPALIVE", 20),
+    keepalive_expiry=_UPSTREAM_KEEPALIVE_EXPIRY,
+)
 _UPSTREAM_CLIENT: Optional[httpx.AsyncClient] = None
 _UPSTREAM_CLIENT_LOOP: Optional[Any] = None
 
@@ -1372,8 +1386,28 @@ async def _upstream_send(
     callers, so a stub here observes exactly the proxy's forwarding decisions.
     """
     client = await _get_upstream_client()
-    request = client.build_request(method, url, content=content, headers=headers)
-    return await client.send(request, stream=True)
+
+    # One retry, and only for failures that happen before any response byte
+    # exists. A pooled connection the upstream has already closed fails this
+    # way, and the request is safe to replay: `content` is bytes rather than a
+    # consumed stream, and nothing has been sent to our own client yet. A
+    # failure *during* the body is a different matter -- the response head has
+    # gone out, so it cannot be retried, and `_iter_upstream` raises instead.
+    last_error: Optional[Exception] = None
+    for attempt in (1, 2):
+        request = client.build_request(method, url, content=content, headers=headers)
+        try:
+            return await client.send(request, stream=True)
+        except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as exc:
+            last_error = exc
+            if attempt == 2:
+                break
+            logger.info(
+                "Upstream connection failed before a response (%s: %s); retrying once on a "
+                "fresh connection", type(exc).__name__, exc,
+            )
+
+    raise last_error  # type: ignore[misc]  # unreachable unless both attempts failed
 
 
 async def _iter_upstream(upstream_resp: httpx.Response):
@@ -1518,6 +1552,17 @@ async def public_proxy(request: Request):
         )
     except httpx.TimeoutException:
         return JSONResponse({"error": f"Upstream timeout: {UPSTREAM}"}, status_code=504)
+    except httpx.HTTPError as exc:
+        # Anything else httpx can raise before a response exists -- notably
+        # RemoteProtocolError from a connection the upstream closed. Left
+        # unhandled it escaped as an unhandled ASGI exception, which reaches
+        # the browser as a dropped request: a failed /media download, or an
+        # iframe document that never loads.
+        logger.warning("Upstream request to %s failed: %s: %s", UPSTREAM, type(exc).__name__, exc)
+        return JSONResponse(
+            {"error": f"Upstream request failed: {type(exc).__name__}"},
+            status_code=502,
+        )
 
     return _build_proxied_response(request, upstream_resp)
 
@@ -1665,6 +1710,17 @@ async def proxy(request: Request):
         return JSONResponse(
             {"error": f"Upstream timeout: {UPSTREAM}"},
             status_code=504,
+        )
+    except httpx.HTTPError as exc:
+        # Anything else httpx can raise before a response exists -- notably
+        # RemoteProtocolError from a connection the upstream closed. Left
+        # unhandled it escaped as an unhandled ASGI exception, which reaches
+        # the browser as a dropped request: a failed /media download, or an
+        # iframe document that never loads.
+        logger.warning("Upstream request to %s failed: %s: %s", UPSTREAM, type(exc).__name__, exc)
+        return JSONResponse(
+            {"error": f"Upstream request failed: {type(exc).__name__}"},
+            status_code=502,
         )
 
     response = _build_proxied_response(request, upstream_resp)
