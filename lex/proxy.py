@@ -1679,29 +1679,70 @@ async def proxy(request: Request):
 # so the worst a replay achieves is re-installing a token the session already
 # had.
 
-#: Origin allowed to POST a renewed credential. The React shell's own origin --
-#: the same value ``lex_view()`` resolves for the reverse direction.
-FRONTEND_ORIGIN = (os.getenv("REACT_APP_URL") or os.getenv("LEX_FRONTEND_URL") or "").rstrip("/")
+#: Localhost origins the React shell runs on in development, mirroring the set
+#: Django already trusts in ``settings.CORS_ORIGIN_WHITELIST``.
+_DEV_FRONTEND_ORIGINS = frozenset({
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+})
+
+
+def _frontend_origins() -> frozenset:
+    """Origins permitted to hand this proxy a renewed credential.
+
+    Derived from ``DOMAIN_HOSTED`` by default, deliberately: it is the instance's
+    own hostname, it already means "where the frontend is" (Django builds
+    ``CORS_ORIGIN_WHITELIST`` from it the same way), and
+    ``lex/lex_app/settings.py`` *refuses to start* without it whenever
+    ``DEPLOYMENT_ENVIRONMENT`` is set. So in any real deployment it is
+    guaranteed present, and this endpoint needs no new variable to be set for
+    renewal to work -- which matters because the failure mode of an unset
+    allowlist is a dashboard that renews for five minutes and then quietly
+    stops.
+
+    ``REACT_APP_URL`` / ``LEX_FRONTEND_URL`` remain an explicit override, for
+    the case where the shell is not on the instance hostname. They are the same
+    pair ``lex_view()`` resolves for the reverse direction.
+    """
+    origins = set()
+
+    override = (os.getenv("REACT_APP_URL") or os.getenv("LEX_FRONTEND_URL") or "").strip().rstrip("/")
+    if override:
+        # Accept a bare host here too, so the two spellings behave alike.
+        origins.add(override if "://" in override else f"https://{override}")
+
+    # DOMAIN_HOSTED is a bare hostname, matching how settings.py consumes it.
+    domain_hosted = (os.getenv("DOMAIN_HOSTED") or "").strip().strip("/")
+    if domain_hosted and not domain_hosted.startswith("localhost"):
+        origins.add(f"https://{domain_hosted}")
+
+    # The standalone (non-embedded) dashboard talking to itself needs no entry.
+    if PUBLIC_URL:
+        origins.add(PUBLIC_URL)
+
+    # Development: DOMAIN_HOSTED is absent or "localhost" while the shell runs
+    # on another port, which is a different *origin* and so still needs CORS.
+    if not PUBLIC_IS_HTTPS:
+        origins |= _DEV_FRONTEND_ORIGINS
+
+    return frozenset(origins)
+
+
+FRONTEND_ORIGINS = _frontend_origins()
 
 
 def _allowed_origin(request: Request) -> Optional[str]:
     """The request's ``Origin`` if it is permitted to adopt, else ``None``.
 
-    Never ``*``: this endpoint is called with credentials, and a wildcard is
-    both refused by browsers alongside ``Allow-Credentials`` and wrong on the
-    merits. An unset ``REACT_APP_URL``/``LEX_FRONTEND_URL`` therefore closes
-    the endpoint rather than opening it.
+    Never ``*``: this endpoint is called with credentials, so a wildcard is both
+    refused by browsers alongside ``Allow-Credentials`` and wrong on the merits.
     """
-    origin = request.headers.get("origin", "").rstrip("/")
+    origin = request.headers.get("origin", "").strip().rstrip("/")
     if not origin:
         return None
-    if FRONTEND_ORIGIN and origin == FRONTEND_ORIGIN:
-        return origin
-    # A same-origin call (the standalone, non-embedded dashboard) needs no
-    # allowlist entry -- it is this proxy talking to itself.
-    if PUBLIC_URL and origin == PUBLIC_URL:
-        return origin
-    return None
+    return origin if origin in FRONTEND_ORIGINS else None
 
 
 def _cors(response: Response, origin: str) -> Response:

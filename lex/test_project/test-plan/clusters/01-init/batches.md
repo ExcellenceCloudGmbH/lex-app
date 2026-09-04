@@ -264,13 +264,13 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.247 – 1.290 |
+| Scenario range | 1.247 – 1.292 |
 | Type | U |
 | Files covered | `lex/proxy.py` (`_streamlit_static_dir`, `_build_static_routes`, `_apply_asset_cache_headers`, `_assert_static_bundle_present`, `PUBLIC_PROXY_PATHS`, `public_proxy`, `_get_upstream_client`, `_upstream_send`, `_iter_upstream`, `_build_proxied_response`, `_ensure_jwks_ready`, `_fetch_jwks_blocking`, `_get_jwks`, `_safe_next_path`, `_login_path`, `_login_url`, `_current_relative_path`, `_query_without_auth_token`, `_is_document_request`, `login`, `auth_callback`, `proxy`, and the `SESSION_SECRET` / `SESSION_SAMESITE` / `_build_token_store` startup guards), `lex/bin/lex.py` (`streamlit` launch args, `_warn_if_sessions_are_not_durable`) |
 | Test file | `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py` |
-| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286), `TestCluster01ad_RenewalDelivery` (1.287–1.290) |
+| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286), `TestCluster01ad_RenewalDelivery` (1.287–1.292) |
 | Fixtures | none — Starlette `TestClient` over the real `proxy.app`, a streaming stub (`_RawStream`) over the `_upstream_send` seam, and `_reimport_proxy_with` to exercise import-time guards |
-| Tests landed | **44 pass / 0 fail**, 33 subtests |
+| Tests landed | **46 pass / 0 fail**, 33 subtests |
 | Coverage gain | the asset path, which had none: what is public, what stays gated, and what the proxy does to a response on the way back. Plus the JWKS availability path, the login return path, and every startup guard |
 | Prereqs | batches 1z (breakout), 1aa (embedded renewal), 1ac (idle survival) — same auth path |
 | Status | ✅ Complete — **27 of the first 30 fail against the pre-fix tree**. The three that pass (1.254 the authenticated boundary, 1.255 the WebSocket deny, 1.271 the permitted configurations still boot) are deliberate guards: they assert behaviour this change must *not* alter, and would be the first things to break if the public allowlist ever widened |
@@ -309,5 +309,10 @@ Verified directly before fixing: bootstrap with a 3-second token, wait, and the 
 | 1.288 | a foreign `Origin`, and no `Origin` at all, are both refused — the endpoint is credentialed so it can never answer `*`, and an unset `REACT_APP_URL` must close it rather than open it |
 | 1.289 | the token is still JWKS-validated: junk is 401, absent is 400. This is what stops the endpoint being a way to install arbitrary identity |
 | 1.290 | the CORS preflight succeeds for the allowed origin naming POST, and is refused for any other — without it the browser never sends the request, and the failure would be invisible except as a session that quietly stops renewing |
+
+| 1.291 | `DOMAIN_HOSTED` alone permits adoption, with no extra variable set — the reason the allowlist is derived rather than declared |
+| 1.292 | `DOMAIN_HOSTED=localhost` (the development default) yields the shell's real dev origins, not a trusted `https://localhost` |
+
+The allowlist is **derived, not declared**, and that was the point: `settings.py` refuses to start without `DOMAIN_HOSTED` whenever `DEPLOYMENT_ENVIRONMENT` is set, and Django already builds `CORS_ORIGIN_WHITELIST` from it identically. A new *required* variable would have made the failure mode a dashboard that renews for five minutes and then quietly stops, with nothing in the logs — the class of bug this whole batch exists to remove.
 
 The token travels in a request **body**, so unlike the bootstrap it never reaches the address bar, history, or a `Referer` — which also makes this strictly better than the mechanism `token_views.py` originally documented.

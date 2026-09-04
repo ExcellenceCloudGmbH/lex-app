@@ -1573,3 +1573,66 @@ class TestCluster01ad_RenewalDelivery(SimpleTestCase):
             msg="the response must name the origin, never '*' -- it is a credentialed request",
         )
         self.assertEqual(refused.status_code, 403, msg="a foreign preflight must be refused")
+
+    # -- 1.291 ---------------------------------------------------------
+    def test_1_291_the_allowlist_derives_from_the_instance_hostname(self) -> None:
+        """
+        Scenario 1.291: DOMAIN_HOSTED alone is enough to permit adoption.
+        Given: only DOMAIN_HOSTED set, as every deployed instance already has
+        When: the proxy resolves which origins may hand it a renewed credential
+        Then: `https://<DOMAIN_HOSTED>` is among them, with no extra variable set.
+
+        This is the whole reason the allowlist is derived rather than declared.
+        `lex/lex_app/settings.py` *refuses to start* without DOMAIN_HOSTED
+        whenever DEPLOYMENT_ENVIRONMENT is set, and Django already builds
+        `CORS_ORIGIN_WHITELIST` from it the same way -- so it is guaranteed
+        present and already means "where the frontend is". Requiring a new
+        variable instead would have made the failure mode a dashboard that
+        renews for five minutes and then quietly stops, with nothing in the
+        logs to say why.
+        """
+        module = _reimport_proxy_with({
+            "DOMAIN_HOSTED": "test-instance-1461.lit.excellence-cloud.de",
+            "STREAMLIT_URL": "https://test-instance-1461-streamlit.lit.excellence-cloud.de",
+            "SESSION_SECRET": "fixed",
+            "REACT_APP_URL": None,
+            "LEX_FRONTEND_URL": None,
+        })
+
+        self.assertIn(
+            "https://test-instance-1461.lit.excellence-cloud.de", module.FRONTEND_ORIGINS,
+            msg=f"the instance hostname must be trusted without extra config; got {sorted(module.FRONTEND_ORIGINS)}",
+        )
+        self.assertNotIn(
+            "*", module.FRONTEND_ORIGINS,
+            msg="a credentialed endpoint must never allow a wildcard origin",
+        )
+
+    # -- 1.292 ---------------------------------------------------------
+    def test_1_292_a_localhost_domain_does_not_become_a_trusted_https_origin(self) -> None:
+        """
+        Scenario 1.292: DOMAIN_HOSTED=localhost yields dev origins, not `https://localhost`.
+        Given: the development default, where DOMAIN_HOSTED is absent or "localhost"
+        When: the allowlist is resolved
+        Then: the shell's actual dev origins are trusted and `https://localhost` is not.
+
+        `settings.py` defaults DOMAIN_HOSTED to "localhost", but the shell runs
+        on another port in development -- a different origin, so still subject
+        to CORS. Deriving `https://localhost` from that default would trust
+        something nothing serves while still failing the real dev setup.
+        """
+        module = _reimport_proxy_with({
+            "DOMAIN_HOSTED": "localhost",
+            "STREAMLIT_URL": "http://localhost:8501",
+            "REACT_APP_URL": None,
+            "LEX_FRONTEND_URL": None,
+        })
+
+        self.assertNotIn(
+            "https://localhost", module.FRONTEND_ORIGINS,
+            msg="the localhost default must not be promoted to a trusted https origin",
+        )
+        self.assertIn(
+            "http://localhost:3000", module.FRONTEND_ORIGINS,
+            msg="the shell's development origin must be trusted, or renewal cannot be tested locally",
+        )
