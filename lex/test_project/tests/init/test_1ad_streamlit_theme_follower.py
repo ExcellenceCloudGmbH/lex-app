@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.280.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.282.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -242,29 +242,79 @@ class TestCluster1ad_StreamlitThemeFollower:
         assert 'host.localStorage.setItem(' in js
         assert 'JSON.stringify(mode === "dark" ? "Dark" : "Light")' in js
 
-        # And it never MUTATES the URL. The string "embed_options" does still
-        # appear -- in the stand-down message that tells a user how to unpin a
-        # tag an earlier version left behind -- so the property to assert is the
-        # absence of URL writing, not the absence of the word.
-        for writer in ("searchParams", "location.replace", "location.href =",
-                       "history.pushState", "history.replaceState"):
-            assert writer not in js, f"the URL is being rewritten again, via {writer}"
+        # And it never PUTS a theme in the URL. It may now REMOVE one an older
+        # version left behind (1.281), so "never touches the URL" is no longer
+        # the property -- "never pins a theme there" is, and that is the one that
+        # mattered all along.
+        for writer in ("location.replace", "location.href =", "history.pushState"):
+            assert writer not in js, f"the URL is being navigated again, via {writer}"
+        assert 'searchParams.append("embed_options", v)' in js, (
+            "the strip must re-add the options it kept"
+        )
+        assert '"light_theme")' not in js.replace('part === "light_theme"', "")
+        assert "_theme\")" not in js.replace('=== "light_theme"', "").replace(
+            '=== "dark_theme"', ""
+        ), "a theme is being written into the URL somewhere"
         # A reload is still needed -- Streamlit reads the theme at boot -- but a
         # reload preserves the URL, which is the whole difference.
         assert "host.location.reload()" in js
 
-    def test_01_276_a_url_pinned_theme_makes_it_stand_down(self):
-        """Scenario 1.276 (second half): don't fight a parameter we cannot beat.
+    def test_01_281_a_stale_url_pin_is_removed_rather_than_obeyed(self):
+        """Scenario 1.281: clean up after ourselves instead of giving up.
 
-        A theme in the page's URL outranks the key this writes. Without standing
-        down, every load would see a mismatch it can never resolve and spend its
-        one reload trying -- a reload per load, forever. Earlier versions of this
-        follower PUT such a parameter there, so a tab can still carry one; the
-        log line says how to clear it rather than leaving the user stuck.
+        A theme in the page's URL outranks the key this writes AND Streamlit's
+        own menu, so it cannot simply be fought. The previous answer was to stand
+        down and log how to clear it.
+
+        That was wrong, and it is the likeliest thing behind "the switch never
+        works". Earlier versions of this very script PUT that parameter in the
+        URL. Standing down turned our own past mistake into a permanent, silent,
+        per-URL failure -- theme following never worked again in that tab, and
+        the only evidence was one ``console.info`` nobody had a reason to read.
+        A bookmark, a pinned tab or a shared link carries it forever.
+
+        We put it there, so we remove it: the theme values go, every other embed
+        option survives, and the ordinary logic takes over on the corrected URL.
+        Self-healing in one load, with no user action and no lost options.
         """
         pinned = theme_follower_html("dark")
-        assert "Standing" in pinned
-        assert "without that parameter" in pinned
+
+        assert "stripUrlThemePin" in pinned
+        assert "removed a stale embed_options=" in pinned
+        # Other embed options are not collateral damage.
+        assert "kept.push(part)" in pinned
+        assert 'searchParams.append("embed_options", v)' in pinned
+        # Standing down survives only as the last resort, when removal fails.
+        assert "could not be removed" in pinned
+
+    def test_01_282_the_first_correction_does_not_wait_to_be_looked_at(self):
+        """Scenario 1.282: install must not depend on the page being visible.
+
+        The install-time correction ran inside ``requestAnimationFrame``. rAF
+        does not fire while a document is not being rendered -- a background tab,
+        a minimised window, an unfocused pane -- so for anyone whose Streamlit
+        page finished loading unfocused, the correction simply never happened.
+
+        That is the normal case for this product. People open lex-app and the
+        dashboard side by side and look at one of them; the other loads in the
+        background. The page then sat on Streamlit's own default until something
+        else happened to poke it, which from the outside is indistinguishable
+        from the sync being broken.
+
+        Confirmed against a real Streamlit page with ``visibilityState:
+        "hidden"``: before, the theme key stayed ``null`` and the page stayed on
+        the OS default; after, it wrote ``"Light"`` and corrected itself.
+
+        Nothing in the install path needs a frame -- it reads storage and a media
+        query, neither of which depends on layout.
+        """
+        js = theme_follower_html()
+
+        assert "requestAnimationFrame(" not in js, (
+            "the first correction is gated on the page being rendered"
+        )
+        # Still an install-time call, just an unconditional one.
+        assert 'follow(stored || DEFAULT_MODE, "install");' in js
 
 
     def test_01_277_a_reload_loop_is_structurally_impossible(self):
@@ -545,4 +595,4 @@ class TestCluster1ad_ThemeFollowerBehaviour:
         )
         # Guard the guard: a harness that silently stopped running its cases
         # would pass forever.
-        assert result.stdout.count("  ok   ") >= 19, result.stdout
+        assert result.stdout.count("  ok   ") >= 23, result.stdout

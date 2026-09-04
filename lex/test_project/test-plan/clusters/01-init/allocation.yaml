@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.280
+    scenarios: 1.261-1.282
     status: complete
     tests:
-      pass: 24
+      pass: 25
       skip: 0
       xfail: 0
     note: >-
@@ -469,6 +469,26 @@ letters:
       Harness case 9 covers the gap that let this ship green through a suite added to catch exactly
       this: no case had a widget report carrying real news. It fails against the broken commit and
       passes against the fix. 9 cases, 19 checks.
+      1.281-1.282 come from finally RUNNING the follower in a real Streamlit page instead of
+      reasoning about the string it emits - after the user reported, for the third time, that the
+      switch never works. Two silent failures, either one sufficient on its own.
+      1.281: a theme in the page's URL outranks both this key and Streamlit's own menu, and the
+      previous answer was to stand down and log how to clear it. Earlier versions of THIS script
+      put that parameter there, so standing down converted our own past mistake into a permanent,
+      per-URL failure carried by any bookmark, pinned tab or shared link - with one console.info
+      as the only evidence. It now strips the theme values and keeps every other embed option, so
+      the page self-heals in one load. Standing down survives only when removal fails.
+      1.282: the install-time correction ran inside requestAnimationFrame, which does not fire
+      while a document is not being rendered. Anyone whose Streamlit page finished loading
+      unfocused - the normal case, since people open lex-app and the dashboard side by side and
+      look at one - never got the first correction at all, and the page sat on Streamlit's own
+      default. Confirmed by A/B against a real page at visibilityState "hidden": before, the theme
+      key stayed null and the page stayed on the OS default; after, it wrote "Light" and corrected
+      itself. Nothing in that path needs a frame - it reads storage and a media query.
+      Harness case 10 covers the strip and fails against the stand-down version. 10 cases, 23
+      checks. Note for the next person: three of this batch's assertions have now tripped on the
+      script's own COMMENTS rather than its code, and one of the checks written for this very fix
+      did it again - grep the emitted JS, not the source, and strip comments first.
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
     scenarios: 1.274-1.299

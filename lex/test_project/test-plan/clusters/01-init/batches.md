@@ -265,7 +265,7 @@ with no Streamlit at all.
 
 ## Batch 1ad — Streamlit theme follower
 
-- **Scenarios:** 1.261-1.280
+- **Scenarios:** 1.261-1.282
 - **Status:** complete (11 pass)
 - **Source under test:** `lex/streamlit_theme.py`, wired by `lex/streamlit_app.py`
   (`render_theme_follower`) and `lex/proxy.py` (`/_lex/theme-relay`)
@@ -1089,3 +1089,46 @@ attributes are whitespace-separated, so joining with nothing turns
 `target="_top"` and `style="..."` into a single unparseable attribute — the bug
 the obvious fix introduces. The scenario asserts no builder emits a newline at
 all, so no future edit can reintroduce a blank line or an indent.
+
+
+### Batch 1ad addendum — what running it found (scenarios 1.281-1.282)
+
+Reported a third time as "the theme is not working, the switch never works."
+Every previous fix in this batch reasoned about the emitted string. This one ran
+the real follower inside a real Streamlit page — `st.navigation`, the generated
+custom theme, no lex-app and no auth, because neither is part of the mechanism.
+
+That immediately established what was **not** wrong: the storage key is exactly
+right (`stActiveTheme-/tree-v2`, matching what Streamlit writes from its own
+menu), the value format is right (`"Dark"`, not `"Custom Theme Dark"`, even with
+a custom theme installed), the follower is same-origin with the page, and
+`__lexThemeFollow('light')` from a widget correctly wrote the key and reloaded.
+
+Then two silent failures, either one sufficient alone:
+
+**1.281 — a stale URL pin disabled the sync permanently.** A theme in the page's
+URL outranks both this key and Streamlit's own menu. The previous answer was to
+stand down and log how to clear it. But *earlier versions of this script put that
+parameter there* — so standing down converted our own past mistake into a
+permanent, per-URL failure, carried by any bookmark, pinned tab or shared link,
+with a single `console.info` as the only evidence. It now strips the theme values
+and keeps every other embed option; the page self-heals in one load.
+
+**1.282 — the first correction waited for a frame that never came.** Install ran
+inside `requestAnimationFrame`, which does not fire while a document is not being
+rendered. Anyone whose Streamlit page finished loading **unfocused** never got the
+correction at all — and that is the normal case here, since people open lex-app
+and the dashboard side by side and look at one of them.
+
+A/B against a real page at `visibilityState: "hidden"`:
+
+| | theme key | page |
+|---|---|---|
+| before | `null` | OS default (dark) |
+| after | `"Light"` | corrected (white) |
+
+Nothing in that path needs a frame — it reads storage and a media query.
+
+**Note for the next person.** Three assertions in this batch have now tripped on
+the script's own *comments* rather than its code, and a check written for this
+very fix did it again. Grep the emitted JS, and strip comments first.

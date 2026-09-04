@@ -36,7 +36,12 @@ function makeTab({ pathname = "/", prefersDark = false } = {}) {
       const host = {
         localStorage: local,
         sessionStorage: session,
-        location: { pathname, reload() { tab.reloads += 1; tab.reloading = true; } },
+        location: {
+          pathname,
+          get href() { return "http://probe" + pathname + tab.search; },
+          reload() { tab.reloads += 1; tab.reloading = true; },
+        },
+        history: { replaceState(_s, _t, url) { tab.search = new URL(url).search; } },
         matchMedia: q => ({ matches: q.includes("dark") ? tab.prefersDark : !tab.prefersDark }),
         addEventListener(name, fn) { (tab.listeners[name] ||= []).push(fn); },
         requestAnimationFrame: fn => fn(),
@@ -211,6 +216,26 @@ const stKey = p => `stActiveTheme-${p}-v2`;
 
   check("the page follows", tab.reloads === before + 1, `got ${tab.reloads - before}`);
   check("wrote Dark", tab.local.getItem(stKey("/")) === '"Dark"',
+        String(tab.local.getItem(stKey("/"))));
+}
+
+// ── 10. A stale URL pin heals instead of disabling the sync forever. ────
+{
+  console.log("\n10. the URL still carries embed_options an older version left");
+  // OS prefers dark, agreement says light: without the strip this page could
+  // never be corrected, which is the whole failure being fixed.
+  const tab = makeTab({ prefersDark: true });
+  tab.search = "?embed=true&embed_options=dark_theme&embed_options=show_toolbar";
+  tab.local.setItem(KEY, "light");
+  const pinnedJs = fs.readFileSync(SRC, "utf8")
+    .match(/<script>([\s\S]*)<\/script>/)[1]
+    .replace('var URL_MODE = "";', 'var URL_MODE = "dark";');
+  run(pinnedJs, tab);
+  check("the pin is gone", !tab.search.includes("_theme"), tab.search);
+  check("other options survive", tab.search.includes("show_toolbar") && tab.search.includes("embed=true"),
+        tab.search);
+  check("and it follows instead of standing down", tab.reloads === 1, `got ${tab.reloads}`);
+  check("adopting the agreed mode", tab.local.getItem(stKey("/")) === '"Light"',
         String(tab.local.getItem(stKey("/"))));
 }
 

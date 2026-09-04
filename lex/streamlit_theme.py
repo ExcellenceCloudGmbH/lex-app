@@ -117,13 +117,62 @@ _FOLLOWER_HTML = """<script>
     // every load would see a mismatch it can never resolve and spend its one
     // reload on it. Earlier versions of this follower PUT such a parameter
     // there, so a tab can still be carrying one.
+    /**
+     * Remove a theme pin from the page's own URL, keeping every other option.
+     *
+     * Returns true when one was found and removed.
+     */
+    function stripUrlThemePin() {
+      try {
+        var url = new URL(host.location.href);
+        var kept = [];
+        var found = false;
+        url.searchParams.getAll("embed_options").forEach(function (value) {
+          String(value).split(",").forEach(function (part) {
+            part = part.trim();
+            if (part === "light_theme" || part === "dark_theme") { found = true; return; }
+            if (part) kept.push(part);
+          });
+        });
+        if (!found) return false;
+        url.searchParams.delete("embed_options");
+        kept.forEach(function (v) { url.searchParams.append("embed_options", v); });
+        host.history.replaceState(null, "", url.toString());
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // A theme pinned in the page's own URL outranks everything below, including
+    // Streamlit's own menu. Earlier versions of THIS script put it there, so a
+    // tab, a bookmark or a shared link can still be carrying one.
+    //
+    // Standing down was the wrong response. It turned my own past mistake into a
+    // permanent, silent, per-URL failure: theme following simply never worked
+    // again in that tab, and the only evidence was one console.info nobody had a
+    // reason to look for. "The switch never works" is what that looks like from
+    // the outside.
+    //
+    // So clean up after ourselves instead. The parameter goes, every other embed
+    // option stays, and the ordinary logic below takes over -- reloading if it
+    // needs to, onto the corrected URL. One load, self-healed, no user action.
     if (URL_MODE) {
-      console.info(
-        "[lex-theme] this page's URL pins embed_options=" + URL_MODE + "_theme, " +
-        "which outranks both this sync and Streamlit's own theme menu. Standing " +
-        "down. Load the page once without that parameter to hand control back."
-      );
-      return;
+      if (stripUrlThemePin()) {
+        console.info(
+          "[lex-theme] removed a stale embed_options=" + URL_MODE + "_theme from " +
+          "this URL. An older version of this sync put it there, and while it is " +
+          "present it outranks both this sync and Streamlit's own theme menu -- " +
+          "which is why the switch appeared to do nothing. Following normally now."
+        );
+      } else {
+        console.warn(
+          "[lex-theme] this URL pins embed_options=" + URL_MODE + "_theme and it " +
+          "could not be removed, so the theme cannot be followed here. Open the " +
+          "page once without that parameter."
+        );
+        return;
+      }
     }
 
     // Guard AND listener both belong to `host`. Streamlit destroys and recreates
@@ -342,11 +391,21 @@ _FOLLOWER_HTML = """<script>
     // A mode agreed before this block rendered, which is the common ordering.
     // With nothing agreed, fall back to DEFAULT_MODE rather than leaving the
     // page on Streamlit's own default, which is the OS preference.
-    host.requestAnimationFrame(function () {
-      var stored = null;
-      try { stored = host.localStorage.getItem(KEY); } catch (e) {}
-      follow(stored || DEFAULT_MODE, "install");
-    });
+    //
+    // Called directly, NOT through requestAnimationFrame. rAF does not fire
+    // while a document is not being rendered -- a background tab, a minimised
+    // window, a hidden pane -- so the install-time correction simply never ran
+    // for anyone whose Streamlit page finished loading unfocused. That is the
+    // normal case for this product: people open lex-app and the dashboard
+    // together and look at one of them. The page then sat on Streamlit's own
+    // default until something else happened to poke it, which from the outside
+    // is indistinguishable from the sync being broken.
+    //
+    // Nothing here needs a frame: it reads storage and a media query, neither of
+    // which depends on layout.
+    var stored = null;
+    try { stored = host.localStorage.getItem(KEY); } catch (e) {}
+    follow(stored || DEFAULT_MODE, "install");
 
     // `storage` fires in every OTHER window of this origin, which is how a
     // writer without a handle to this page gets through.
