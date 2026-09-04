@@ -1,3 +1,7 @@
+## [2.1.10] - 2026-09-04
+
+> **Frontend changes for this release are not yet recorded.**
+
 ## [2.1.9] - 2026-09-04
 
 > **Frontend changes for this release are not yet recorded.**
