@@ -248,3 +248,44 @@ does not remove user launch configurations.
 | 1.245 | a persistent failure surfaces recovery | past the grace window the cause is SSO max lifetime or a revoked session; a successful renewal clears the stamp |
 
 **Scenario range:** 1.230 – 1.246. **Test file:** `lex/test_project/tests/init/test_1ac_streamlit_session_survival.py`. **Type:** U. **Status:** ✅ 17 pass.
+
+### 1ad. Streamlit's asset bundle served ungated, and session durability ✅
+
+**What it tests:** that loading a Streamlit dashboard is fast, quiet, and survives its own credential. Streamlit's frontend is code-split — 1.61 ships 365 JS chunks and names 107 of them in eager `<link rel="modulepreload">` tags — and the proxy in front of it authenticated every request through one catch-all route whose deny ran before it looked at the path. The bundle is therefore served by the proxy itself and never gated: it is package content from the installed wheel, identical for every install, with no tenant data and no identity. Everything else on the same host is the opposite, so half these scenarios exist to hold that line.
+
+**Why a regression matters:** it is all three reports customers filed. Gate the bundle again and a credential-less moment is a hundred 401s, a cold start four times heavier than it needs to be, and — the one they saw — `TypeError: Failed to fetch dynamically imported module`, because Vite reports an HTTP failure on a dynamic `import()` as a type error. Widen the public allowlist by one path instead, and a dashboard becomes readable by anyone who knows the URL.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.247 | a chunk needs no credential | a hashed JS chunk returns 200 with no cookie, no `auth_token`, no `Authorization` |
+| 1.248 | cache headers cut both ways | content-addressed files are `immutable` for a year; `manifest.json` is `no-cache` — a stale manifest names dead hashes and causes the same TypeErrors from a different direction |
+| 1.249 | the bundle is compressed | a gzip-accepting client gets `Content-Encoding: gzip`, and compression actually reduces the bytes |
+| 1.250 | hashes cannot drift | the served directory is exactly `streamlit.file_util.get_static_dir()`, and holds the `index.html` that names the hashes |
+| 1.251 | a missing bundle degrades | an unlocatable bundle adds no routes and raises nothing — a slow authenticated `/static` beats an app that will not boot |
+| 1.252 | bootstrap endpoints are public | `/_stcore/health` and `/_stcore/host-config` reach the upstream with no credential (probes have no session; host-config is read before the WebSocket exists) |
+| 1.253 | the public path asserts no identity | none of the `X-Streamlit-User-*` / `X-Forwarded-User` headers are attached, so nothing downstream can read an anonymous probe as a signed-in user |
+| 1.254 | the boundary holds | `/`, `/media/**`, `/_stcore/upload_file` and an arbitrary app route all still 401 |
+| 1.255 | the socket is not public | an unauthenticated upgrade to `/_stcore/stream` is closed, not accepted |
+| 1.256 | the upstream client is pooled | four sequential requests share one client, not one each |
+| 1.257 | `Content-Encoding` survives | an encoded upstream body is relayed still encoded, so the saving is not thrown away |
+| 1.258 | every cookie survives | two upstream `Set-Cookie` headers both reach the client — losing Streamlit's XSRF cookie breaks the handshake |
+| 1.259 | the referrer is not leaked | proxied responses carry `Referrer-Policy: no-referrer`; the document URL holds a JWT |
+| 1.260 | a failed refresh keeps its keys | stale keys survive an unreachable Keycloak, and the retry is deferred — returning `None` used to reject every token in the cluster |
+| 1.261 | cold cache plus failure | no keys reported, and nothing raised (a raise here would become a 500 instead of an actionable 401) |
+| 1.262 | one fetch, not a hundred | 25 concurrent callers share a single blocking fetch |
+| 1.263 | reading keys never fetches | a cold cache reads as empty rather than blocking the event loop |
+| 1.264 | you come back where you were | `auth_callback` honours the stashed `next` instead of redirecting to `/` |
+| 1.265 | a hostile `next` is refused | `//host`, `https://host`, `http://host`, `/\host`, `\\host`, a bare host and `javascript:` are all rejected; same-origin paths survive intact |
+| 1.266 | the session is not trusted | an off-origin path already in the session still falls back to `/` — validating only on entry is how open redirects survive review |
+| 1.267 | the breakout can recover | the iframe recovery page's sign-in link is absolute, `target="_top"`, and carries the view being recovered |
+| 1.268 | stripping keeps the destination | removing `auth_token` preserves `model`, `pk` and the rest — dropping them would trade one bug for another |
+| 1.269 | only documents are redirected | `document` and `iframe` count; `empty` and `script` do not, so an XHR is served rather than 303'd |
+| 1.270 | a deployment needs a real secret | no `SESSION_SECRET` on https raises, naming the variable |
+| 1.271 | legitimate setups still boot | https with a secret, https with an explicit opt-out, and zero-config local http all start |
+| 1.272 | replicas need a shared store | `LEX_PROXY_REPLICAS>1` without Redis raises; with Redis it boots |
+| 1.273 | an unusable cookie is refused | `SameSite=None` without `Secure` raises (browsers discard such cookies outright), and so does a typo |
+| 1.274 | cross-site frames get a cookie | https defaults to `SameSite=None`; local http stays `lax` |
+| 1.275 | the session window outlasts a login | `--server.disconnectedSessionTTL` is passed and exceeds Streamlit's 120s default |
+| 1.276 | the CLI fails readably | `lex streamlit`'s pre-flight raises a `ClickException` rather than letting the proxy thread die alone |
+
+**Scenario range:** 1.247 – 1.276. **Test file:** `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py`. **Type:** U. **Status:** ✅ 30 pass, 29 subtests. **27 of 30 fail against the pre-fix tree**; 1.254, 1.255 and 1.271 pass by design as guards. Measured and explicitly not a cause: JWT validation at 0.045 ms/request — 16 ms across all 365 chunks. Recorded **BUG-029** (a pre-existing cluster-1 flake) while running this batch.

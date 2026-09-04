@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 246
+max_scenario: 276
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -325,3 +325,30 @@ letters:
       renews ahead of expiry for session auth too, and decouples identity from token freshness -
       the "Missing user information" screen was reporting an expired token as a missing user, and
       re-entered itself on every rerun. 14 of 17 fail against the pre-fix tree.
+  ad:
+    title: Streamlit asset bundle served ungated + session durability guards
+    scenarios: 1.247-1.276
+    status: complete
+    tests:
+      pass: 30
+      skip: 0
+      xfail: 0
+    note: >-
+      the fourth batch on this auth path, and the one that explains the other three reports. The
+      proxy authenticated every request through one catch-all route, and Streamlit 1.61 ships 365
+      code-split JS chunks with 107 named in eager modulepreload tags - so one credential-less
+      moment produced a 401 flood, and a lazily-imported chunk that 401s reaches the browser as
+      "TypeError: Failed to fetch dynamically imported module", which is how an expired credential
+      was reaching customers as a type error. Serves Streamlit's own bundle from the proxy process
+      (located via streamlit.file_util.get_static_dir so hashes cannot drift from the index.html
+      naming them), makes only /_stcore/health and /_stcore/host-config publicly proxied, and keeps
+      everything else gated - the boundary scenarios matter as much as the public ones. Also: one
+      pooled httpx client instead of one per request; raw streaming that preserves Content-Encoding
+      (measured 1.77 MB -> 0.42 MB on the eager set, 4.17x); the JWKS fetch moved off the event
+      loop with single-flight and stale-key retention (a failed refresh used to reject every token
+      in the cluster); ?next= carried through login->callback with a strict open-redirect guard;
+      the bootstrap auth_token stripped out of the URL; and startup refusal for the configurations
+      that silently log everyone out - no SESSION_SECRET on https, replicas without a shared token
+      store, SameSite=None without Secure. 27 of 30 fail against the pre-fix tree; the 3 that pass
+      (1.254 boundary, 1.255 WS deny, 1.271 permitted configs still boot) are guards asserting what
+      the change must not break. Recorded BUG-029 (pre-existing cluster-1 flake) while running it.
