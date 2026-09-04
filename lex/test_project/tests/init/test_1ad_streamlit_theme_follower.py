@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.291.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.292.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -35,6 +35,8 @@ import tempfile
 import pytest
 
 from lex.streamlit_theme import (
+    MINIMUM_STREAMLIT,
+    streamlit_version_shortfall,
     DEBUG_PANEL_HEIGHT,
     DEFAULT_MODE,
     LIGHT,
@@ -327,6 +329,45 @@ class TestCluster1ad_StreamlitThemeFollower:
             "the likeliest cause is not named, so the log does not help"
         )
         assert "console.warn(" in js, "a silent chain must not be reported at info level"
+
+
+    def test_01_292_an_unsupported_streamlit_says_so(self):
+        """Scenario 1.292: enforce the floor that requirements.txt already sets.
+
+        The whole theme sync reads and drives Streamlit's OWN surfaces, and both
+        changed shape after 1.54::
+
+            1.54:  key `stActiveTheme-<pathname>`,    no theme control in the menu
+            1.58:  key `stActiveTheme-<pathname>-v2`, stMainMenuItem-theme-Light|Dark
+
+        On an older build it therefore writes a key nobody reads and looks for a
+        control that does not exist. It fails silently and completely.
+
+        This is not hypothetical. The reported failure -- "the theme is not
+        working, the switch never works", across four rewrites -- was an
+        environment on 1.54 while `requirements.txt` had said `streamlit>=1.58`
+        the whole time. Every probe against a supported build passed, so the
+        mechanism kept looking wrong when the environment was.
+
+        A floor nothing checks is not a floor. It warns rather than refuses: the
+        rest of the app is unaffected, and blocking a launch over a theme would
+        be the worse trade.
+        """
+        assert MINIMUM_STREAMLIT == (1, 58)
+
+        too_old = streamlit_version_shortfall("1.54.0")
+        assert too_old, "the version that actually broke is not caught"
+        # It has to name the cost and the cure, or it is just noise.
+        assert "1.54.0" in too_old and "1.58" in too_old
+        assert "pip install --upgrade" in too_old
+        assert "silently" in too_old
+
+        for fine in ("1.58.0", "1.58.2", "1.60.0", "2.0.0"):
+            assert streamlit_version_shortfall(fine) == "", fine
+
+        # Never cry wolf over something unparseable.
+        for junk in ("", "nonsense", "dev", None):
+            assert streamlit_version_shortfall(junk) == ""
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

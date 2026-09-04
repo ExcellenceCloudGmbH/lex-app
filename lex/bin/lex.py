@@ -417,6 +417,26 @@ def streamlit(ctx):
     os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
 
     from streamlit.web.cli import main as streamlit_main
+
+    # A floor that nothing checks is not a floor. requirements.txt has said
+    # streamlit>=1.58 since the theme work landed, and an environment below it
+    # runs fine in every visible respect while light/dark sync silently cannot
+    # work -- Streamlit stores its theme under a different key and has no theme
+    # control to drive. That cost four rewrites of a mechanism that was correct,
+    # because the symptom ("the switch never works") looks identical to a bug.
+    #
+    # A warning, not a hard stop: the rest of the app is unaffected, and refusing
+    # to launch over a theme would be a worse trade than saying so clearly.
+    try:
+        import streamlit as _st
+        from lex.streamlit_theme import streamlit_version_shortfall
+        _shortfall = streamlit_version_shortfall(getattr(_st, "__version__", ""))
+        if _shortfall:
+            logging.getLogger(__name__).warning("%s", _shortfall)
+            print(f"\n  !  {_shortfall}\n", file=sys.stderr)
+    except Exception:
+        pass   # never let a diagnostic stop a launch
+
     streamlit_args = list(ctx.args)
     if not streamlit_args:
         streamlit_args = ["run", f"{LEX_APP_PACKAGE_ROOT}/streamlit_app.py"]

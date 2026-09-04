@@ -52,6 +52,49 @@ def embed_theme_from_params(values: Iterable[object]) -> str:
     return ""
 
 
+#: The oldest Streamlit whose internals this module is written against.
+#:
+#: Not a preference. The theme sync reads and drives Streamlit's OWN surfaces --
+#: the stored-theme key and the theme control in its menu -- and both changed
+#: shape after this version:
+#:
+#:   1.54:  key `stActiveTheme-<pathname>`,   no theme control in the menu
+#:   1.58:  key `stActiveTheme-<pathname>-v2`, `stMainMenuItem-theme-Light|Dark`
+#:
+#: On an older build the sync therefore writes a key nobody reads and looks for
+#: a control that does not exist. It fails silently and completely, which is
+#: exactly how it presented: "the switch never works", through four rewrites,
+#: while every probe against a supported build passed.
+#:
+#: `requirements.txt` has said `streamlit>=1.58` all along. An unenforced floor
+#: is not a floor -- hence :func:`streamlit_version_shortfall`.
+MINIMUM_STREAMLIT = (1, 58)
+
+
+def streamlit_version_shortfall(installed: str) -> str:
+    """Explain why *installed* is too old, or ``""`` when it is fine.
+
+    Takes the version as a string so it is testable without importing Streamlit,
+    and returns prose rather than a bool because the caller's only useful action
+    is to show a human what to do about it.
+    """
+    try:
+        parts = tuple(int(p) for p in str(installed).split(".")[:2])
+    except (TypeError, ValueError):
+        return ""          # unparseable: say nothing rather than cry wolf
+    if len(parts) < 2 or parts >= MINIMUM_STREAMLIT:
+        return ""
+    want = ".".join(str(p) for p in MINIMUM_STREAMLIT)
+    return (
+        f"Streamlit {installed} is installed, but lex-app needs >= {want} "
+        f"(requirements.txt says so). Below that, Streamlit stores its theme "
+        f"under a different key and has no theme control in its menu, so light/"
+        f"dark sync between lex-app and Streamlit CANNOT work -- it fails "
+        f"silently, with no error and no visible cause. Everything else still "
+        f"runs. Fix with:  pip install --upgrade 'streamlit>={want}'"
+    )
+
+
 #: Spliced into the follower only when diagnostics are on. See
 #: :func:`theme_debug_enabled`.
 _DEBUG_PANEL_JS = """    // ── Visible diagnostics ──────────────────────────────────────────────

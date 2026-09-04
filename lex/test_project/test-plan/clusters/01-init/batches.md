@@ -265,7 +265,7 @@ with no Streamlit at all.
 
 ## Batch 1ad — Streamlit theme follower
 
-- **Scenarios:** 1.261-1.289
+- **Scenarios:** 1.261-1.292
 - **Status:** complete (11 pass)
 - **Source under test:** `lex/streamlit_theme.py`, wired by `lex/streamlit_app.py`
   (`render_theme_follower`) and `lex/proxy.py` (`/_lex/theme-relay`)
@@ -1183,3 +1183,32 @@ The menu-DOM dependency is the accepted cost, and it fails **harmlessly**: the
 theme is left alone with a log, because nothing reloads or overrides. 1.285 pins
 that the mask is removed on both exit paths — a mask left behind would hide the
 real menu from the user permanently, which is worse than the flash it prevents.
+
+
+### Batch 1ad — the actual root cause (scenario 1.292)
+
+Four rewrites of the theme sync, each verified, each reported as still broken.
+The mechanism was never the problem.
+
+**The reporting environment runs Streamlit 1.54. `requirements.txt` has said
+`streamlit>=1.58` since the theme work landed.**
+
+The sync reads and drives Streamlit's *own* surfaces, and both changed shape:
+
+| | 1.54 | 1.58 |
+|---|---|---|
+| stored theme key | `stActiveTheme-<pathname>` | `stActiveTheme-<pathname>-v2` |
+| theme control in menu | *none* | `stMainMenuItem-theme-Light\|Dark` |
+
+So the write-and-reload versions wrote a key 1.54 never reads, and the driver
+looks for a control 1.54 does not have. Silent, total failure — while every
+probe against a supported build passed.
+
+**The lesson is procedural.** I read Streamlit's internals out of `.venv-test`
+(1.58) and never once checked the version the app under test actually runs. A
+version mismatch and a bug present identically from the outside; only the
+environment distinguishes them. Verify the environment before verifying the code.
+
+A floor nothing checks is not a floor, so `lex streamlit` now warns at launch,
+naming the cost and the cure. A warning rather than a refusal — the rest of the
+app is unaffected, and blocking a launch over a theme is the worse trade.

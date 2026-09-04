@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.291
+    scenarios: 1.261-1.292
     status: complete
     tests:
-      pass: 22
+      pass: 23
       skip: 0
       xfail: 0
     note: >-
@@ -523,6 +523,21 @@ letters:
       the debug flag, since nobody who does not already suspect it would think to turn diagnostics
       on. Standing hypothesis for the report that survived the rewrite; unconfirmed, because the
       failure lives in a browser profile that cannot be reached from here.
+      1.292 is the ROOT CAUSE of the whole "switch never works" thread, and it was never the
+      mechanism. The reporting environment runs Streamlit 1.54 while requirements.txt has said
+      streamlit>=1.58 since the theme work landed. The sync reads and drives Streamlit's OWN
+      surfaces, and both changed shape after 1.54: the stored key is `stActiveTheme-<pathname>` in
+      1.54 versus `...-v2` in 1.58, and 1.54 has no theme control in its menu at all (no
+      stThemeSwitcher, no stMainMenuItem-theme-*). So every version of this sync wrote a key nobody
+      read and, after the rewrite, looked for a control that does not exist - failing silently and
+      completely while every probe against a supported build passed. Four rewrites of a mechanism
+      that was correct, because a version mismatch and a bug present identically.
+      The lesson is procedural, not technical: I read Streamlit's internals out of .venv-test
+      (1.58) and never once checked the version the app under test actually runs. Verify the
+      environment before verifying the code.
+      A floor nothing checks is not a floor, so `lex streamlit` now warns at launch, naming the
+      cost and the cure. A warning rather than a refusal - the rest of the app is unaffected, and
+      blocking a launch over a theme is the worse trade.
 
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
