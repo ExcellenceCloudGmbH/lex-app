@@ -8,6 +8,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from inspect import signature
 from typing import Any, Dict, Optional, Tuple, List
+from urllib.parse import urlencode
 
 import httpx
 import jwt  # PyJWT
@@ -91,7 +92,45 @@ if not SESSION_SECRET:
     SESSION_SECRET = "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32)
 
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", PUBLIC_IS_HTTPS)
-SESSION_SAMESITE = (os.getenv("SESSION_SAMESITE") or "lax").lower()  # lax | strict | none
+
+# The Streamlit dashboard is loaded in an <iframe> owned by the React shell. In
+# a cross-site frame the browser compares a cookie's site against the TOP-LEVEL
+# site, so `SameSite=Lax` cookies are withheld from the frame's own requests to
+# its own origin -- every asset, every XHR, the WebSocket handshake. The session
+# and `st_access` cookies then simply are not there, which reaches the user as
+# the 401 flood and, once the handshake credential expires, a dead dashboard.
+#
+# It happens to work today only because the shell and Streamlit sit under one
+# registrable domain (`*.excellence-cloud.de`, and `localhost` in dev). Any
+# customer on their own domain, or any split of the two hosts, breaks it. So
+# default to `none` when we are on HTTPS and can therefore satisfy the `Secure`
+# requirement that `SameSite=None` carries.
+_SESSION_SAMESITE_DEFAULT = "none" if PUBLIC_IS_HTTPS else "lax"
+SESSION_SAMESITE = (os.getenv("SESSION_SAMESITE") or _SESSION_SAMESITE_DEFAULT).lower()
+
+if SESSION_SAMESITE not in {"lax", "strict", "none"}:
+    raise RuntimeError(
+        f"SESSION_SAMESITE must be one of lax|strict|none, got {SESSION_SAMESITE!r}"
+    )
+
+if SESSION_SAMESITE == "none" and not SESSION_HTTPS_ONLY:
+    # Browsers reject `SameSite=None` without `Secure` outright, so this
+    # combination does not degrade -- it silently drops every cookie the proxy
+    # sets, and the dashboard never authenticates at all. Fail where it can be
+    # read rather than in a browser console nobody is watching.
+    raise RuntimeError(
+        "SESSION_SAMESITE=none requires Secure cookies, but SESSION_HTTPS_ONLY is false. "
+        "Browsers discard such cookies, so no session would ever be established. "
+        "Serve the proxy over HTTPS (set STREAMLIT_URL/BASE_URL to an https:// URL, or "
+        "SESSION_HTTPS_ONLY=true behind a TLS-terminating ingress), or set "
+        "SESSION_SAMESITE=lax and keep the shell and Streamlit on one registrable domain."
+    )
+
+if SESSION_SAMESITE == "strict":
+    logger.warning(
+        "SESSION_SAMESITE=strict withholds the proxy's cookies from the embedded "
+        "dashboard iframe entirely; use 'none' (HTTPS) or 'lax' (same registrable domain)."
+    )
 
 OIDC_VERIFY_SSL = _env_bool("OIDC_VERIFY_SSL", True)
 
@@ -579,6 +618,51 @@ def _session_user_payload(session: Dict[str, Any], tokens: Dict[str, Any]) -> Di
 # -----------------------------------------------------------------------------
 # URL helpers
 # -----------------------------------------------------------------------------
+#: Session key holding where to return after the OIDC round trip.
+_NEXT_SESSION_KEY = "lex_post_login_next"
+
+#: Strip a consumed ``auth_token`` out of the address bar with a redirect.
+STRIP_AUTH_TOKEN_FROM_URL = _env_bool("STRIP_AUTH_TOKEN_FROM_URL", True)
+
+
+def _safe_next_path(raw: Optional[str]) -> Optional[str]:
+    """A same-origin, path-only redirect target, or ``None``.
+
+    Deliberately strict: only a single-leading-slash path (plus query and
+    fragment) survives. Anything carrying a scheme, an authority, or a
+    protocol-relative ``//host`` prefix is discarded, because this value ends
+    up in a ``Location`` header after an OIDC round trip -- exactly the shape
+    of an open redirect, and a login flow is the most valuable place to have
+    one.
+    """
+    if not raw:
+        return None
+    candidate = raw.strip()
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return None
+    # Backslashes are treated as slashes by some browsers, so "/\evil.com" and
+    # "/\\evil.com" would escape the origin.
+    if candidate[1:2] == "\\" or "\\" in candidate[:2]:
+        return None
+    return candidate
+
+
+def _current_relative_path(request: Request) -> str:
+    """This request's path and query, with any ``auth_token`` removed."""
+    query = _query_without_auth_token(request)
+    return request.url.path + (f"?{query}" if query else "")
+
+
+def _query_without_auth_token(request: Request) -> str:
+    """The request query string minus ``auth_token``, preserving the rest."""
+    kept = [
+        (key, value)
+        for key, value in request.query_params.multi_items()
+        if key != "auth_token"
+    ]
+    return urlencode(kept)
+
+
 def _external_base_url(request: Request) -> str:
     if PUBLIC_URL:
         return PUBLIC_URL
@@ -589,8 +673,28 @@ def _callback_url(request: Request) -> str:
     return f"{_external_base_url(request)}/auth/callback"
 
 
-def _login_url(request: Request) -> str:
-    return f"{_external_base_url(request)}/auth/login"
+def _login_url(request: Request, next_path: Optional[str] = None) -> str:
+    """The proxy's login entry point, optionally carrying where to come back to.
+
+    Without ``next`` the callback can only land on ``/``, which for an embedded
+    dashboard means the user is dropped on the app's first page having lost
+    whatever they were doing -- the "clicking a button throws me back to the
+    first page" report.
+    """
+    return _external_base_url(request) + _login_path(request, next_path)
+
+
+def _login_path(request: Request, next_path: Optional[str] = None) -> str:
+    """``/auth/login``, optionally with ``?next=``. Relative, for same-origin hops.
+
+    A plain redirect stays relative so it cannot be broken by a misconfigured
+    ``STREAMLIT_URL``/``BASE_URL``; only the frame breakout needs the absolute
+    form, because that URL is handed to script navigating the *top* window.
+    """
+    safe = _safe_next_path(next_path)
+    if not safe:
+        return "/auth/login"
+    return f"/auth/login?{urlencode({'next': safe})}"
 
 
 def _is_iframe_document_request(request: Request) -> bool:
@@ -605,6 +709,18 @@ def _is_iframe_document_request(request: Request) -> bool:
     return request.headers.get("sec-fetch-dest", "").strip().lower() in {"iframe", "frame"}
 
 
+def _is_document_request(request: Request) -> bool:
+    """True for a top-level or framed *document* navigation, not a subresource.
+
+    ``Sec-Fetch-Dest`` is absent on older browsers; falling back to the Accept
+    header keeps behaviour reasonable there.
+    """
+    dest = request.headers.get("sec-fetch-dest", "").strip().lower()
+    if dest:
+        return dest in {"document", "iframe", "frame"}
+    return "text/html" in request.headers.get("accept", "")
+
+
 def _frame_breakout_response(request: Request) -> Response:
     """A 401 that escapes the iframe to a full-page login instead of framing the IdP.
 
@@ -615,7 +731,7 @@ def _frame_breakout_response(request: Request) -> Response:
       3. a user-clickable ``target="_top"`` link, which is always permitted because
          it is a user gesture.
     """
-    login = _login_url(request)
+    login = _login_url(request, _current_relative_path(request))
     login_js = json.dumps(login)  # safe JS string literal
     login_attr = html.escape(login, quote=True)
     body = (
@@ -645,7 +761,7 @@ def _unauthenticated_response(request: Request) -> Response:
     if accepts_html and _is_iframe_document_request(request):
         return _frame_breakout_response(request)
     if accepts_html:
-        return RedirectResponse(url="/auth/login")
+        return RedirectResponse(url=_login_path(request, _current_relative_path(request)))
     return JSONResponse({"error": "Authentication required"}, status_code=401)
 
 
@@ -709,6 +825,16 @@ async def _persist_jwt_to_session_if_needed(request: Request, jwt_token: str, pa
 # Auth routes
 # -----------------------------------------------------------------------------
 async def login(request: Request):
+    # Stashed in the session rather than round-tripped through Keycloak: the
+    # session is already the store authlib keeps the OIDC state in, so it
+    # survives the redirect, and a value that never leaves the server cannot be
+    # tampered with in transit. `_safe_next_path` still re-validates on the way
+    # out, so a poisoned session cannot become an open redirect either.
+    safe = _safe_next_path(request.query_params.get("next"))
+    if safe:
+        request.session[_NEXT_SESSION_KEY] = safe
+    else:
+        request.session.pop(_NEXT_SESSION_KEY, None)
     return await oauth.oidc.authorize_redirect(request, _callback_url(request))
 
 
@@ -720,9 +846,12 @@ async def auth_callback(request: Request):
     email = userinfo.get("email") or ""
 
     await _put_tokens(sid, email, token)
+
+    # Read before the session is written, and re-validated on the way out.
+    next_path = _safe_next_path(request.session.pop(_NEXT_SESSION_KEY, None)) or "/"
     request.session["user"] = {"email": email, "sid": sid}
 
-    resp = RedirectResponse(url="/", status_code=303)
+    resp = RedirectResponse(url=next_path, status_code=303)
 
     # Optional short-lived access cookie
     if SET_ST_ACCESS_COOKIE and token.get("access_token"):
@@ -1133,6 +1262,11 @@ def _build_proxied_response(request: Request, upstream_resp: httpx.Response) -> 
     for cookie in upstream_resp.headers.get_list("set-cookie"):
         response.headers.append("set-cookie", cookie)
 
+    # The embedded iframe's document URL carries ?auth_token=<jwt>. Without
+    # this, every subresource that document requests sends it upstream in a
+    # `Referer` header, and any outbound link leaks it to a third party.
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+
     return response
 
 
@@ -1227,6 +1361,28 @@ async def proxy(request: Request):
             user_payload = _jwt_user_payload(jwt_token, jwt_payload)
             auth_method = "jwt"
             await _persist_jwt_to_session_if_needed(request, jwt_token, jwt_payload, token_source)
+
+    # 3b) The bootstrap ``auth_token`` has now been persisted to a session, so
+    #     the credential no longer needs to be in the URL -- where it sits in
+    #     the address bar, in history, and in the `Referer` of every
+    #     subresource. Redirect to the same place without it.
+    #
+    #     Only for document navigations: an XHR is not in the address bar, and
+    #     redirecting one would surprise its caller. Only when a session was
+    #     actually established, so we never strip the only credential we have.
+    #     No loop is possible -- the target has no ``auth_token``, so a second
+    #     pass cannot re-enter this branch.
+    if (
+        STRIP_AUTH_TOKEN_FROM_URL
+        and user_payload
+        and request.query_params.get("auth_token")
+        and request.method in ("GET", "HEAD")
+        and _is_document_request(request)
+        and (request.session.get("user") or {}).get("sid")
+    ):
+        stripped = RedirectResponse(url=_current_relative_path(request), status_code=303)
+        stripped.headers["Referrer-Policy"] = "no-referrer"
+        return stripped
 
     # 4) Deny
     if not user_payload:
