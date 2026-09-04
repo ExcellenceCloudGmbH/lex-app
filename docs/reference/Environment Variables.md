@@ -22,6 +22,18 @@ Lex App reads its runtime configuration from environment variables — usually l
 | `LEX_INTERNAL_AUTH_SECRET` | Shared secret the dashboard presents when it asks the auth proxy for a fresh access token. `lex streamlit` mints one automatically, because it runs both halves in a single process; set it explicitly only if you run the proxy and Streamlit as separate processes. |
 | `LEX_PROXY_PORT`        | Port the auth proxy listens on. Default `8501`. |
 | `LEX_PROXY_INTERNAL_URL` | Full base URL the dashboard uses to reach the proxy, when it is not `http://127.0.0.1:$LEX_PROXY_PORT`. |
+| `SESSION_SECRET` | Signs the auth proxy's session cookies. **Set this, and use the same value on every replica.** Without it the proxy signs with a random per-process value, so every restart — and every request that lands on a different replica — silently logs all users out and resets their dashboard state. Refused at startup when `STREAMLIT_URL`/`BASE_URL` is `https`. Also read as `SESSION_KEY` / `SESSION_SECRET_KEY`. |
+| `LEX_ALLOW_EPHEMERAL_SESSION_SECRET` | `true` to run without `SESSION_SECRET` on an https deployment anyway. Single-process development only. |
+| `TOKEN_REDIS_URL` | Redis holding the proxy's token store, which is what keeps dashboards renewable. **Required beyond one replica** — in memory it is process-local, so a request routed elsewhere finds no session and returns 401. Falls back to `REDIS_URL`. |
+| `LEX_PROXY_REPLICAS` | How many proxy replicas are running. Anything above `1` requires `TOKEN_REDIS_URL`/`REDIS_URL` and proxy session affinity, and is refused without them. Default `1`. |
+| `SESSION_SAMESITE` | `SameSite` for the proxy's cookies: `lax`, `strict` or `none`. Defaults to `none` on https and `lax` otherwise. A cross-site iframe only receives `none` cookies (browsers compare against the *top-level* site), so `lax` works only while the frontend and the dashboard share one registrable domain. `none` requires `Secure`, and the combination without it is refused at startup because browsers discard such cookies outright. |
+| `SESSION_HTTPS_ONLY` | `true` to mark the proxy's cookies `Secure`. Defaults to whether `STREAMLIT_URL`/`BASE_URL` is https; set it explicitly behind a TLS-terminating ingress. |
+| `LEX_STREAMLIT_DISCONNECTED_SESSION_TTL` | Seconds Streamlit keeps a disconnected session's state so a reconnecting browser resumes it rather than starting over. Default `600`. Streamlit's own default is 120s, which is shorter than a login round trip. |
+| `STRIP_AUTH_TOKEN_FROM_URL` | `true` (default) to redirect the embedded dashboard's first request to the same URL without its `auth_token`, keeping the token out of the address bar, history and `Referer`. |
+| `STATIC_ASSET_MAX_AGE` | `max-age` for Streamlit's content-addressed assets, which the proxy serves itself. Default one year. |
+| `STATIC_GZIP_MIN_SIZE` / `STATIC_GZIP_LEVEL` | Compression floor and zlib level for served assets. Defaults `500` and `6`. |
+| `JWKS_CACHE_TTL` / `JWKS_RETRY_BACKOFF_SECONDS` | How long Keycloak's signing keys are cached (default `3600`), and how long to wait before retrying a failed refresh while continuing to serve the cached keys (default `30`). |
+| `UPSTREAM_TIMEOUT_SECONDS` | Timeout for the proxy's requests to Streamlit. Default `30`. |
 
 ## Keycloak / OIDC
 

@@ -78,7 +78,7 @@ Streamlit dashboards run as a separate process alongside your Lex App applicatio
 
 ## Federated Authentication
 
-When a dashboard is embedded in the Lex App frontend, the user's access token is passed securely to Streamlit via URL parameters. This enables:
+When a dashboard is embedded in the Lex App frontend, the user's access token is handed to the auth proxy on the iframe's first request and immediately exchanged for a session cookie — the proxy then redirects to the same view without it, so the token does not linger in the address bar, in browser history, or in the `Referer` of anything the page loads. This enables:
 
 - **No re-authentication** — the user doesn't need to log in again for Streamlit
 - **Identity traceability** — actions in the dashboard are linked to the user's Keycloak identity
@@ -86,13 +86,29 @@ When a dashboard is embedded in the Lex App frontend, the user's access token is
 
 The token exchange is handled automatically by the `StreamlitIframe` component — no developer configuration needed beyond defining the dashboard methods on your models.
 
+### Loading and caching
+
+A dashboard's frontend is a large, code-split bundle: Streamlit ships several hundred JavaScript chunks and eagerly preloads over a hundred of them on first paint. The auth proxy serves that bundle itself, compressed and marked immutable, and does **not** put it behind authentication — it is package content from the installed Streamlit release, identical for every deployment, with no application data in it. First load is a few hundred kilobytes; afterwards the browser cache serves it.
+
+Everything that *is* specific to your deployment stays authenticated: the dashboard page, the WebSocket carrying its data, uploads, and anything served under `/media/`.
+
+> [!note]
+> If a dashboard ever reports `Failed to fetch dynamically imported module`, it means a lazily-loaded chunk could not be fetched — usually a stale cached page asking for a previous release's files. A hard reload resolves it.
+
 ### Staying signed in
 
 Access tokens are short-lived, and a dashboard is often left open far longer than one lasts. The framework renews ahead of every expiry for as long as the page is open, so a dashboard someone comes back to after lunch keeps working — nothing to configure, and nothing for the user to click.
 
 Renewal always goes through the auth proxy, which is the only component that holds the refresh token. Your dashboard code never sees or manages tokens; read the current user from `st.session_state["user_info"]` and their permissions from `st.session_state["permissions"]` as usual.
 
-Sessions do not live forever: Keycloak's SSO maximum lifetime still applies, and a session revoked in Keycloak stops working immediately. When renewal genuinely can't succeed, the embedded dashboard asks the surrounding app to re-authenticate, and a standalone one offers a sign-in link.
+Sessions do not live forever: Keycloak's SSO maximum lifetime still applies, and a session revoked in Keycloak stops working immediately. When renewal genuinely can't succeed, the embedded dashboard asks the surrounding app to re-authenticate, and a standalone one offers a sign-in link. Either way you are returned to the view you were on, not to the application's first page.
+
+Two deployment settings decide whether a session survives at all, and both are refused at startup rather than degrading quietly, because a session that dies for an invisible reason looks exactly like one that expired:
+
+- `SESSION_SECRET` must be set and identical on every replica. Left unset, the proxy signs cookies with a value unique to each process, so any restart or second replica logs everyone out.
+- `TOKEN_REDIS_URL` (or `REDIS_URL`) is required beyond a single replica, and that replica needs session affinity — Streamlit's own session state is held in the process the browser is connected to.
+
+See [[reference/Environment Variables]] for both, along with `SESSION_SAMESITE`, which has to be `none` whenever the frontend and the dashboard are not on the same registrable domain.
 
 ## In the Frontend
 
