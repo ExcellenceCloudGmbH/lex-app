@@ -98,3 +98,30 @@ Two lessons for the next pass:
    duplicate proxy.py's import-time rules deliberately, and shipped covering two of five — with
    a case-sensitive https test where proxy.py's normalises. 1.285 and 1.286 exist to keep the
    two in step, because the docstring saying "keep these in sync" did not.
+
+## The guard that was worse than the bug
+
+Scenario 1.270 shipped asserting that the proxy **refuses to boot** without `SESSION_SECRET` on an
+https deployment, and it immediately stopped a running instance from starting. That is the most
+useful thing this batch produced, because the mistake is a general one.
+
+The reasoning — *degrading into the symptom is what made the original bug hard to find* — is true of
+a **broken** configuration and false of a **degraded** one. A replica set with no shared token store
+returns 401s to half its traffic: refuse. A `SameSite=None` cookie without `Secure` is discarded by
+browsers, so no session is ever established: refuse. A per-process session key means sessions do not
+survive a restart — and `lex streamlit` runs a single process, so it works perfectly until the next
+redeploy, at which point users are logged out once. Refusing there trades an occasional re-login for
+a dashboard that will not start.
+
+The fix was the same shape as the `DOMAIN_HOSTED` correction one section up, which is why it is worth
+naming as a pattern: **when a fix wants a new required variable, look for an existing one that
+already carries the property.** Three times in this batch the answer was already in the environment.
+
+- `DOMAIN_HOSTED` for the adopt allowlist — mandatory in every deployment, already means "the frontend".
+- `DJANGO_SECRET_KEY` for the session key — terraform `random_password` in state, so stable across
+  restarts and identical on every replica.
+
+Both derived, not reused verbatim: the session key is an HMAC of the Django secret under a fixed
+label, so a leak of one does not hand over the other. And the published `settings.py` fallback is
+excluded from derivation — sharing *that* would give every lex-app instance the same cookie-signing
+key, which is worse than a random per-process value rather than better.

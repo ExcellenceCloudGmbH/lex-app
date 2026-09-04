@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import hmac
 import html
 import json
 import logging
@@ -87,36 +89,64 @@ PUBLIC_IS_HTTPS = (PUBLIC_URL_OBJ.scheme == "https") if PUBLIC_URL_OBJ else Fals
 
 UPSTREAM = (os.environ.get("UPSTREAM") or os.environ.get("STREAMLIT_UPSTREAM") or "http://localhost:8080").rstrip("/")
 
-SESSION_SECRET = os.environ.get("SESSION_SECRET") or os.environ.get("SESSION_KEY") or os.environ.get("SESSION_SECRET_KEY")
+#: The published fallback in ``lex/lex_app/settings.py``. Deriving a
+#: cookie-signing key from *this* would give every lex-app instance in the world
+#: the same one, so it is explicitly excluded -- worse than a random value, not
+#: better.
+_PUBLISHED_DJANGO_SECRET_DEFAULT = "pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
 
-#: Escape hatch for the one legitimate case: a single-process dev run where
-#: nobody minds being logged out by a restart.
-ALLOW_EPHEMERAL_SESSION_SECRET = _env_bool(
-    "LEX_ALLOW_EPHEMERAL_SESSION_SECRET", not PUBLIC_IS_HTTPS
-)
 
-if not SESSION_SECRET:
-    if not ALLOW_EPHEMERAL_SESSION_SECRET:
-        # A random per-process secret is not a weak secret, it is a *different*
-        # secret in every process. Every session cookie signed before a restart
-        # becomes undecodable after it, and cookies signed by one replica are
-        # rejected by the next -- so users are thrown back to a login they did
-        # nothing to deserve. That is indistinguishable from "session timeout
-        # resets my state", and it is not a timeout at all.
-        raise RuntimeError(
-            "SESSION_SECRET is not set. The proxy would sign session cookies with a "
-            "random per-process value, so every restart -- and every request that "
-            "lands on a different replica -- would silently log all users out and "
-            "reset their dashboard state. Set SESSION_SECRET to a fixed secret "
-            "shared by every replica. To run without one anyway (single-process "
-            "development only), set LEX_ALLOW_EPHEMERAL_SESSION_SECRET=true."
-        )
-    SESSION_SECRET = "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32)
-    logger.warning(
-        "SESSION_SECRET is not set; using a random per-process value. Sessions will "
-        "not survive a restart and cannot be shared across replicas. Do not deploy "
-        "like this."
+def _resolve_session_secret() -> Tuple[str, str]:
+    """The key used to sign session cookies, and where it came from.
+
+    Order matters, and each step exists for a reason:
+
+    1. ``SESSION_SECRET`` (or its aliases) -- an explicit choice always wins.
+    2. Derived from ``DJANGO_SECRET_KEY``. Every deployed instance already has
+       one: terraform generates it with ``random_password`` and keeps it in
+       state, so unlike a per-process value it is stable across restarts and
+       identical on every replica -- which is exactly the property session
+       cookies need. Derived rather than used directly, so that a stolen
+       session cookie key does not hand over Django's secret and vice versa.
+       The published settings.py default is excluded: sharing *that* would give
+       every instance the same signing key.
+    3. A random per-process value, with a warning. Sessions then do not survive
+       a restart -- degraded, but a Streamlit dashboard that starts and loses
+       sessions on redeploy beats one that refuses to start at all.
+
+    An earlier version of this raised on step 3 when the public URL was https.
+    That was wrong: it bricked instances that had been running fine, and the
+    single-process ``lex streamlit`` case is genuinely only *degraded* by a
+    per-process key, not broken. The durable fix was to stop needing a new
+    variable, not to demand one.
+    """
+    explicit = (
+        os.environ.get("SESSION_SECRET")
+        or os.environ.get("SESSION_KEY")
+        or os.environ.get("SESSION_SECRET_KEY")
     )
+    if explicit:
+        return explicit, "SESSION_SECRET"
+
+    django_secret = (os.getenv("DJANGO_SECRET_KEY") or "").strip()
+    if django_secret and django_secret != _PUBLISHED_DJANGO_SECRET_DEFAULT:
+        derived = hmac.new(
+            django_secret.encode("utf-8"),
+            b"lex-proxy-session-cookie-v1",
+            hashlib.sha256,
+        ).hexdigest()
+        return derived, "DJANGO_SECRET_KEY"
+
+    logger.warning(
+        "Neither SESSION_SECRET nor a non-default DJANGO_SECRET_KEY is set, so session "
+        "cookies will be signed with a random per-process value. Dashboard sessions will "
+        "not survive a restart and cannot be shared across replicas. Set SESSION_SECRET "
+        "to a fixed value, or DJANGO_SECRET_KEY (which every deployed instance has)."
+    )
+    return "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32), "ephemeral"
+
+
+SESSION_SECRET, SESSION_SECRET_SOURCE = _resolve_session_secret()
 
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", PUBLIC_IS_HTTPS)
 
