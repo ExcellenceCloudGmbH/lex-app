@@ -1656,6 +1656,130 @@ async def proxy(request: Request):
 
 
 # -----------------------------------------------------------------------------
+# Renewal delivery: a fresh bootstrap credential, without touching the iframe
+# -----------------------------------------------------------------------------
+# ``_persist_jwt_to_session_if_needed`` already adopts a strictly-newer token,
+# and its comment names the intended source: "renewal can only arrive as a
+# fresh ``auth_token`` from the frontend". The problem was that the only way to
+# *present* one was the iframe URL -- and re-sourcing the iframe loads a new
+# document, which is a new Streamlit session with an empty ``st.session_state``.
+# So the renewal mechanism and the thing it was protecting were mutually
+# exclusive: deliver the token and lose the state, or keep the state and let
+# the session die at the access token's own lifetime.
+#
+# This is the missing third option. The shell POSTs the renewed token here, the
+# proxy adopts it into the existing session, and the iframe is never touched.
+# The token travels in a request body rather than a URL, so unlike the
+# bootstrap it never reaches the address bar, history, or a ``Referer``.
+#
+# Why this is not a new trust boundary: the token is validated against
+# Keycloak's JWKS exactly as every other credential is, so a caller cannot
+# invent one -- presenting a genuine Keycloak-signed token for a user means
+# already holding that user's credential. And adoption is strictly-newer only,
+# so the worst a replay achieves is re-installing a token the session already
+# had.
+
+#: Origin allowed to POST a renewed credential. The React shell's own origin --
+#: the same value ``lex_view()`` resolves for the reverse direction.
+FRONTEND_ORIGIN = (os.getenv("REACT_APP_URL") or os.getenv("LEX_FRONTEND_URL") or "").rstrip("/")
+
+
+def _allowed_origin(request: Request) -> Optional[str]:
+    """The request's ``Origin`` if it is permitted to adopt, else ``None``.
+
+    Never ``*``: this endpoint is called with credentials, and a wildcard is
+    both refused by browsers alongside ``Allow-Credentials`` and wrong on the
+    merits. An unset ``REACT_APP_URL``/``LEX_FRONTEND_URL`` therefore closes
+    the endpoint rather than opening it.
+    """
+    origin = request.headers.get("origin", "").rstrip("/")
+    if not origin:
+        return None
+    if FRONTEND_ORIGIN and origin == FRONTEND_ORIGIN:
+        return origin
+    # A same-origin call (the standalone, non-embedded dashboard) needs no
+    # allowlist entry -- it is this proxy talking to itself.
+    if PUBLIC_URL and origin == PUBLIC_URL:
+        return origin
+    return None
+
+
+def _cors(response: Response, origin: str) -> Response:
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Vary"] = "Origin"
+    return response
+
+
+async def adopt_token(request: Request):
+    """Adopt a renewed access token into the caller's existing proxy session.
+
+    ``POST {"auth_token": "<jwt>"}`` with ``credentials: 'include'``. Returns
+    204 when the token was taken up, 200 with ``{"adopted": false}`` when the
+    stored one is already at least as fresh -- both are successes from the
+    caller's point of view, and it must not treat the second as an error and
+    retry in a loop.
+    """
+    if request.method == "OPTIONS":
+        origin = _allowed_origin(request)
+        if not origin:
+            return Response(status_code=403)
+        preflight = Response(status_code=204)
+        preflight.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        preflight.headers["Access-Control-Allow-Headers"] = "content-type"
+        preflight.headers["Access-Control-Max-Age"] = "600"
+        return _cors(preflight, origin)
+
+    origin = _allowed_origin(request)
+    if not origin:
+        # No usable Origin means either a same-site call we cannot attribute or
+        # a cross-origin one we do not trust. Refuse rather than guess.
+        return JSONResponse({"error": "origin_not_allowed"}, status_code=403)
+
+    await _ensure_jwks_ready()
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _cors(JSONResponse({"error": "invalid_body"}, status_code=400), origin)
+
+    token = (body or {}).get("auth_token") or ""
+    if not isinstance(token, str) or not token:
+        return _cors(JSONResponse({"error": "missing_auth_token"}, status_code=400), origin)
+
+    payload = validate_jwt_token(token)
+    if not payload:
+        return _cors(JSONResponse({"error": "invalid_token"}, status_code=401), origin)
+
+    before = (request.session.get("user") or {}).get("sid")
+    await _persist_jwt_to_session_if_needed(request, token, payload, "header")
+    after = (request.session.get("user") or {}).get("sid")
+
+    # A changed sid means the token was strictly newer and superseded the stored
+    # one; an unchanged sid means the store already held something at least as
+    # fresh. The caller needs to distinguish neither, but saying so keeps the
+    # endpoint debuggable from a network log.
+    adopted = before != after
+    response = JSONResponse({"adopted": adopted}, status_code=200)
+
+    # Refresh the short-lived access cookie too, so follow-up requests that
+    # cannot repeat the body -- and the next WebSocket handshake -- see the new
+    # credential rather than the one that is about to expire.
+    if SET_ST_ACCESS_COOKIE:
+        response.set_cookie(
+            "st_access",
+            token,
+            httponly=True,
+            secure=SESSION_HTTPS_ONLY,
+            samesite=SESSION_SAMESITE,
+            max_age=ST_ACCESS_COOKIE_MAX_AGE,
+            path="/",
+        )
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return _cors(response, origin)
+
+
+# -----------------------------------------------------------------------------
 # Public assets: Streamlit's own static bundle, served here and never gated
 # -----------------------------------------------------------------------------
 # Streamlit's frontend is code-split: 1.61 ships 365 JS chunks and 4 CSS files,
@@ -1886,6 +2010,9 @@ routes = [
     Route("/auth/logout", oauth2_logout, methods=["GET"]),
     # Must precede the catch-all, or it would be proxied to Streamlit instead.
     Route("/auth/token", internal_token, methods=["GET"]),
+    # Same reason. This is how a renewed credential reaches the proxy without
+    # re-sourcing the iframe -- see the adopt_token docstring.
+    Route("/auth/adopt", adopt_token, methods=["POST", "OPTIONS"]),
     # Same reason, and the ordering is load-bearing: these are the only paths
     # that must answer without a credential. See PUBLIC_PROXY_PATHS.
     *(

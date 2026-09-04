@@ -264,13 +264,13 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.247 – 1.286 |
+| Scenario range | 1.247 – 1.290 |
 | Type | U |
 | Files covered | `lex/proxy.py` (`_streamlit_static_dir`, `_build_static_routes`, `_apply_asset_cache_headers`, `_assert_static_bundle_present`, `PUBLIC_PROXY_PATHS`, `public_proxy`, `_get_upstream_client`, `_upstream_send`, `_iter_upstream`, `_build_proxied_response`, `_ensure_jwks_ready`, `_fetch_jwks_blocking`, `_get_jwks`, `_safe_next_path`, `_login_path`, `_login_url`, `_current_relative_path`, `_query_without_auth_token`, `_is_document_request`, `login`, `auth_callback`, `proxy`, and the `SESSION_SECRET` / `SESSION_SAMESITE` / `_build_token_store` startup guards), `lex/bin/lex.py` (`streamlit` launch args, `_warn_if_sessions_are_not_durable`) |
 | Test file | `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py` |
-| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286) |
+| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286), `TestCluster01ad_RenewalDelivery` (1.287–1.290) |
 | Fixtures | none — Starlette `TestClient` over the real `proxy.app`, a streaming stub (`_RawStream`) over the `_upstream_send` seam, and `_reimport_proxy_with` to exercise import-time guards |
-| Tests landed | **40 pass / 0 fail**, 31 subtests |
+| Tests landed | **44 pass / 0 fail**, 33 subtests |
 | Coverage gain | the asset path, which had none: what is public, what stays gated, and what the proxy does to a response on the way back. Plus the JWKS availability path, the login return path, and every startup guard |
 | Prereqs | batches 1z (breakout), 1aa (embedded renewal), 1ac (idle survival) — same auth path |
 | Status | ✅ Complete — **27 of the first 30 fail against the pre-fix tree**. The three that pass (1.254 the authenticated boundary, 1.255 the WebSocket deny, 1.271 the permitted configurations still boot) are deliberate guards: they assert behaviour this change must *not* alter, and would be the first things to break if the public allowlist ever widened |
@@ -294,3 +294,20 @@ An adversarial review of the first pass (three independent finder angles over `l
 | 1.286 | the pre-flight's `startswith("https://")` disagreed with proxy.py's case-normalising `httpx.URL(...).scheme`, so `HTTPS://host` passed the readable check and raised later |
 
 Two more were fixed without a scenario: the lifespan JWKS warmup was awaited, and uvicorn runs lifespan startup **before** creating the listener, so it kept port 8501 closed for up to 10s while `lex streamlit` had already pointed the browser at it (now a background task); and `_reimport_proxy_with` restored `sys.modules["lex.proxy"]` but not the `lex.proxy` **package attribute**, leaving a later `from lex import proxy` bound to a throwaway module with a different `TOKEN_STORE`.
+
+#### 1ad follow-up 2 — scenarios 1.287–1.290: the channel the other fixes needed
+
+Freezing the iframe `src` is what stops a renewal destroying the Streamlit session. But it also removed the only way a renewed token could **reach** the proxy: `?auth_token=` in the iframe URL. So the two halves were mutually exclusive — deliver the token and lose the state, or keep the state and let the session die at the access token's own lifetime (~5 min, Keycloak's default), with the shell holding a fresh token it had nowhere to put.
+
+Verified directly before fixing: bootstrap with a 3-second token, wait, and the next request is a **401** even though a valid renewal is sitting in React state. The only credential the proxy would accept was `?auth_token=`, i.e. an iframe reload.
+
+`POST /auth/adopt` is the missing third option, and it reuses rather than replaces what was already there — `_persist_jwt_to_session_if_needed`'s strictly-newer adoption, whose comment already named the frontend as the intended source.
+
+| Scenario | Asserts |
+| --- | --- |
+| 1.287 | a strictly newer token POSTed from the shell is adopted, and the session then outlives the token it was bootstrapped with |
+| 1.288 | a foreign `Origin`, and no `Origin` at all, are both refused — the endpoint is credentialed so it can never answer `*`, and an unset `REACT_APP_URL` must close it rather than open it |
+| 1.289 | the token is still JWKS-validated: junk is 401, absent is 400. This is what stops the endpoint being a way to install arbitrary identity |
+| 1.290 | the CORS preflight succeeds for the allowed origin naming POST, and is refused for any other — without it the browser never sends the request, and the failure would be invisible except as a session that quietly stops renewing |
+
+The token travels in a request **body**, so unlike the bootstrap it never reaches the address bar, history, or a `Referer` — which also makes this strictly better than the mechanism `token_views.py` originally documented.

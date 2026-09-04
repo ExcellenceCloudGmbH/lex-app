@@ -288,7 +288,7 @@ does not remove user launch configurations.
 | 1.275 | the session window outlasts a login | `--server.disconnectedSessionTTL` is passed and exceeds Streamlit's 120s default |
 | 1.276 | the CLI fails readably | `lex streamlit`'s pre-flight raises a `ClickException` rather than letting the proxy thread die alone |
 
-**Scenario range:** 1.247 – 1.286. **Test file:** `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py`. **Type:** U. **Status:** ✅ 40 pass, 31 subtests. **27 of the first 30 fail against the pre-fix tree**; 1.254, 1.255 and 1.271 pass by design as guards. Measured and explicitly not a cause: JWT validation at 0.045 ms/request — 16 ms across all 365 chunks. Recorded **BUG-029** (a pre-existing cluster-1 flake) while running this batch.
+**Scenario range:** 1.247 – 1.290. **Test file:** `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py`. **Type:** U. **Status:** ✅ 44 pass, 33 subtests. **27 of the first 30 fail against the pre-fix tree**; 1.254, 1.255 and 1.271 pass by design as guards. Measured and explicitly not a cause: JWT validation at 0.045 ms/request — 16 ms across all 365 chunks. Recorded **BUG-029** (a pre-existing cluster-1 flake) while running this batch.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
@@ -304,3 +304,12 @@ does not remove user launch configurations.
 | 1.286 | the https test agrees on both sides | `HTTPS://host` is recognised as a deployment by the CLI, as it is by the proxy |
 
 **Scenarios 1.277 – 1.286** were added after an adversarial review of the first pass. All ten defects they pin lived in the *new* code, and four would have reproduced one of the three original symptoms by a different route — which is the argument for reviewing a fix as hard as the bug.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.287 | renewal reaches the proxy without an iframe reload | a newer token POSTed to `/auth/adopt` is adopted, and the session outlives its bootstrap token |
+| 1.288 | only the configured frontend may adopt | a foreign `Origin` and a missing one are both 403 |
+| 1.289 | adoption still validates | an unverifiable token is 401, an absent one 400 |
+| 1.290 | the preflight is answerable and scoped | 204 naming POST for the allowed origin, 403 for any other |
+
+**Scenarios 1.287 – 1.290** exist because the earlier fixes created the gap between them: freezing the iframe `src` protects the Streamlit session but removed the only channel a renewed token had. Verified before fixing — an embedded session 401s past its bootstrap token's expiry with a valid renewal sitting unused in the shell.

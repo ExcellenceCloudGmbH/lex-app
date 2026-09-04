@@ -101,6 +101,8 @@ Access tokens are short-lived, and a dashboard is often left open far longer tha
 
 Renewal always goes through the auth proxy, which is the only component that holds the refresh token. Your dashboard code never sees or manages tokens; read the current user from `st.session_state["user_info"]` and their permissions from `st.session_state["permissions"]` as usual.
 
+Renewal is also invisible in a stricter sense: **the dashboard is never reloaded to renew it.** The frontend hands each new token to the proxy over a background request, so nothing in your dashboard re-runs, no widget resets, and `st.session_state` is untouched — a form half-filled in stays half-filled in. Set `REACT_APP_URL` (or `LEX_FRONTEND_URL`) for that handoff to be accepted; without it an embedded dashboard stops renewing once its first token expires.
+
 Sessions do not live forever: Keycloak's SSO maximum lifetime still applies, and a session revoked in Keycloak stops working immediately. When renewal genuinely can't succeed, the embedded dashboard asks the surrounding app to re-authenticate, and a standalone one offers a sign-in link. Either way you are returned to the view you were on, not to the application's first page.
 
 Two deployment settings decide whether a session survives at all, and both are refused at startup rather than degrading quietly, because a session that dies for an invisible reason looks exactly like one that expired:

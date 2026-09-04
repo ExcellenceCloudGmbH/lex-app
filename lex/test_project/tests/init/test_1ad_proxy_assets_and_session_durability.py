@@ -1417,3 +1417,159 @@ class TestCluster01ad_StartupHardening(SimpleTestCase):
                 msg="an uppercase https scheme must be recognised as a deployment",
             ):
                 _warn_if_sessions_are_not_durable()
+
+
+class TestCluster01ad_RenewalDelivery(SimpleTestCase):
+    """Cluster 1ad: how a renewed credential reaches the proxy at all."""
+
+    _SHELL = "https://shell.example.com"
+
+    def _app(self, **env):
+        return _reimport_proxy_with({
+            "STREAMLIT_URL": "http://localhost:8501",
+            "SESSION_SECRET": "fixed",
+            "REACT_APP_URL": self._SHELL,
+            **env,
+        })
+
+    # -- 1.287 ---------------------------------------------------------
+    def test_1_287_a_renewed_token_can_be_adopted_without_touching_the_iframe(self) -> None:
+        """
+        Scenario 1.287: POST /auth/adopt installs a newer token into the live session.
+        Given: a session bootstrapped with a token that is about to expire
+        When: the shell POSTs a strictly newer token from its own origin
+        Then: it is adopted, and requests keep working past the old token's expiry.
+
+        Without this channel renewal is unreachable. `_persist_jwt_to_session_if_needed`
+        already adopts a strictly-newer token -- its comment names the frontend
+        as the source -- but the only way to *present* one was the iframe URL,
+        and re-sourcing the iframe loads a new document, i.e. a new Streamlit
+        session with an empty `st.session_state`. So delivering the token and
+        keeping the state were mutually exclusive, and the embedded session died
+        at the access token's own lifetime either way.
+        """
+        module = self._app()
+        now = int(module.time.time())
+        claims = {"old": {"sub": "u1", "exp": now + 3}, "new": {"sub": "u1", "exp": now + 3600}}
+
+        def _validate(tok):
+            found = claims.get(tok)
+            return None if not found or found["exp"] <= int(module.time.time()) else found
+
+        async def _upstream(method, url, *, content=None, headers=None):
+            return httpx.Response(200, content=b"dash")
+
+        with patch.object(module, "validate_jwt_token", _validate), \
+             patch.object(module, "_upstream_send", _upstream):
+            with TestClient(module.app) as client:
+                client.get(
+                    "/?model=Fund&auth_token=old",
+                    headers={"Accept": "text/html", "Sec-Fetch-Dest": "iframe"},
+                    follow_redirects=True,
+                )
+
+                adopted = client.post(
+                    "/auth/adopt", json={"auth_token": "new"}, headers={"Origin": self._SHELL}
+                )
+                self.assertEqual(
+                    adopted.status_code, 200,
+                    msg=f"the shell must be able to hand over a renewed token, got {adopted.status_code}",
+                )
+                self.assertTrue(
+                    adopted.json().get("adopted"),
+                    msg="a strictly newer token must supersede the stored one",
+                )
+
+                # Past the point where the bootstrap token is dead.
+                claims["old"]["exp"] = now - 1
+                still_live = client.get(
+                    "/", headers={"Accept": "text/html"}, follow_redirects=False
+                )
+
+        self.assertEqual(
+            still_live.status_code, 200,
+            msg="the session must outlive the token it was bootstrapped with",
+        )
+
+    # -- 1.288 ---------------------------------------------------------
+    def test_1_288_adoption_refuses_a_foreign_origin(self) -> None:
+        """
+        Scenario 1.288: only the configured frontend origin may adopt.
+        Given: a valid token
+        When: it is POSTed from an unrecognised Origin, and with none at all
+        Then: both are refused.
+
+        The endpoint is called with credentials, so it cannot answer `*` -- and
+        an unset REACT_APP_URL/LEX_FRONTEND_URL must therefore close it rather
+        than open it. A page the user happens to be visiting must not be able
+        to reach into their dashboard session.
+        """
+        module = self._app()
+        with patch.object(module, "validate_jwt_token", lambda _t: {"sub": "u1", "exp": 4_000_000_000}):
+            with TestClient(module.app) as client:
+                for origin, label in (
+                    ("https://evil.example", "a foreign origin"),
+                    (None, "no Origin header"),
+                ):
+                    with self.subTest(origin=label):
+                        headers = {"Origin": origin} if origin else {}
+                        resp = client.post("/auth/adopt", json={"auth_token": "t"}, headers=headers)
+                        self.assertEqual(
+                            resp.status_code, 403,
+                            msg=f"{label} must be refused, got {resp.status_code}",
+                        )
+
+    # -- 1.289 ---------------------------------------------------------
+    def test_1_289_adoption_still_validates_the_token(self) -> None:
+        """
+        Scenario 1.289: an unsigned or absent token is rejected.
+        Given: requests from the allowed origin carrying junk, or nothing
+        When: each is POSTed
+        Then: an invalid token is 401 and a missing one is 400.
+
+        This is what keeps the endpoint from being a way to install arbitrary
+        identity: the token is checked against Keycloak's JWKS exactly as every
+        other credential is, so presenting a genuine one for a user means
+        already holding that user's credential.
+        """
+        module = self._app()
+        with patch.object(module, "validate_jwt_token", lambda _t: None):
+            with TestClient(module.app) as client:
+                junk = client.post(
+                    "/auth/adopt", json={"auth_token": "forged"}, headers={"Origin": self._SHELL}
+                )
+                missing = client.post("/auth/adopt", json={}, headers={"Origin": self._SHELL})
+
+        self.assertEqual(junk.status_code, 401, msg="an unverifiable token must be rejected")
+        self.assertEqual(missing.status_code, 400, msg="a missing token is a malformed request")
+
+    # -- 1.290 ---------------------------------------------------------
+    def test_1_290_the_preflight_answers_for_the_allowed_origin_only(self) -> None:
+        """
+        Scenario 1.290: OPTIONS is answerable, and scoped.
+        Given: a CORS preflight from the frontend origin, then from another
+        When: each is sent
+        Then: the first returns 204 naming POST, the second is refused.
+
+        A cross-origin POST with a JSON content type is preflighted, so without
+        this the browser never sends the adoption request at all -- and the
+        failure would be invisible except as a session that quietly stops
+        renewing.
+        """
+        module = self._app()
+        with TestClient(module.app) as client:
+            allowed = client.request("OPTIONS", "/auth/adopt", headers={"Origin": self._SHELL})
+            refused = client.request(
+                "OPTIONS", "/auth/adopt", headers={"Origin": "https://evil.example"}
+            )
+
+        self.assertEqual(allowed.status_code, 204, msg="the preflight must succeed")
+        self.assertIn(
+            "POST", allowed.headers.get("access-control-allow-methods", ""),
+            msg="the preflight must permit POST or the browser will not send it",
+        )
+        self.assertEqual(
+            allowed.headers.get("access-control-allow-origin"), self._SHELL,
+            msg="the response must name the origin, never '*' -- it is a credentialed request",
+        )
+        self.assertEqual(refused.status_code, 403, msg="a foreign preflight must be refused")
