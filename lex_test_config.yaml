@@ -37,4 +37,5 @@ groups:
   - { name: serializers,         description: "Cluster 12 — Serializer contract: JSON shape, type round-trip, reserved scopes." }
   - { name: exports,             description: "Cluster 13 — Export endpoint, AG Grid flat/grouped, FK display names." }
   - { name: queries,             description: "Cluster 14 — AG Grid query endpoint, filter/sort/group models." }
+  - { name: design_system,      description: "Design system — vendored LEX tokens: mode symmetry, shape, staleness." }
   - { name: journeys,            description: "End-to-end multi-cluster user journeys." }
