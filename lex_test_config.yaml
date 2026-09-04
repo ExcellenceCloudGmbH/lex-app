@@ -39,3 +39,4 @@ groups:
   - { name: queries,             description: "Cluster 14 — AG Grid query endpoint, filter/sort/group models." }
   - { name: design_system,      description: "Design system — vendored LEX tokens: mode symmetry, shape, staleness." }
   - { name: journeys,            description: "End-to-end multi-cluster user journeys." }
+  - { name: ai_tooling,          description: "Cluster 16 — MCP embed tool, `lex setup-with-ai` mode/environment normalization + .env persistence, MCP compatibility shims." }

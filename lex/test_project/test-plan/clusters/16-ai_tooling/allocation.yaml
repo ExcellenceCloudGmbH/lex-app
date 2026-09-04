@@ -1,0 +1,65 @@
+cluster: 16
+slug: ai_tooling
+title: AI Tooling (MCP embed tool, setup-with-ai, MCP shims)
+max_scenario: 61
+letters:
+  a:
+    title: MCP embed-view tool — frontend URL resolution & view-type classification
+    scenarios: 16.1-16.28
+    status: complete
+    tests:
+      pass: 28
+      skip: 0
+      xfail: 0
+    note: lex/mcp_server/tools/embed.py — _resolve_frontend_url/_csp_origins settings+env
+      priority, _classify_path view-type patterns, _build_title, _build_embed_url query/fragment
+      construction, and the actual async lex_embed_view MCP tool entry point (custom-route
+      handling, container metadata attach/degrade, OIDC access-token injection into embed_url
+      without leaking into the model-visible narration link). lex.mcp_server.config/registry/context
+      (siblings embed.py imports) do not exist yet in this checkout, so a stub-install helper
+      (_mcp_server_stubs.py) provides minimal fakes for exactly those three imports; embed.py's
+      own source runs completely unmodified.
+  b:
+    title: setup-with-ai — MCP mode override gate + AI-environment alias normalization
+    scenarios: 16.29-16.43
+    status: complete
+    tests:
+      pass: 15
+      skip: 0
+      xfail: 0
+    note: lex/tools/setup_with_ai.py — resolve_submitted_mcp_mode's acknowledgement gate
+      (a submitted non-default mode without MODE_OVERRIDE_FIELD silently reverts to
+      DEFAULT_LEX_MCP_MODE rather than being honoured or refused), normalize_ai_environments'
+      alias/`all`/dedup handling and its strict (raises SetupWithAIError on an unknown name)
+      vs strict=False (degrades to the default, for reading back persisted config) contract.
+      lex_mcp is not installed in this environment so these scenarios exercise the local-mirror
+      fallback tables (_environment_registry() returns None), which is the documented
+      cold-start code path.
+  c:
+    title: setup-with-ai — .env file persistence
+    scenarios: 16.44-16.54
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: lex/tools/setup_with_ai.py — _format_env_value safe-vs-JSON-quoted encoding,
+      update_env_file in-place key replacement (no duplicate lines), comment/blank-line
+      preservation, legacy COPILOT_GITHUB_TOKEN removal only when GITHUB_TOKEN is written,
+      round trip through _read_dotenv_value, and _atomic_write_text's parent-directory
+      creation + no leftover temp file.
+  d:
+    title: MCP compatibility shims (mcp_mode_invoke.py / verify_ai_assets.py)
+    scenarios: 16.55-16.61
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: lex/tools/mcp_mode_invoke.py and lex/tools/verify_ai_assets.py are compatibility
+      shims over the separate lex-mcp-local package. lex_mcp is genuinely absent in this
+      environment (not a lex-app dependency), so the ImportError-with-recovery-hint path
+      (`lex ai-update` / `lex setup-with-ai`) is exercised unmocked; a minimal fake lex_mcp
+      package is installed to exercise the "package present" re-export + __getattr__/__dir__
+      delegation path, including SUPPORTED_MCP_MODES being derived from
+      lex_mcp.payload.MODE_TO_PACKAGE rather than hard-coded.
