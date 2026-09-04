@@ -407,63 +407,46 @@ def flower(ctx):
     _run_celery_command(build_flower_command(settings, ctx.args))
 
 def _warn_if_sessions_are_not_durable() -> None:
-    """Fail on the main thread rather than inside the uvicorn worker.
+    """Report session-durability problems on the main thread.
 
-    ``lex/proxy.py`` is the authority on these rules and raises on import. But
-    it is imported *in the proxy thread*, where a RuntimeError would kill only
-    uvicorn and leave Streamlit running and unreachable -- a confusing failure.
-    Checking the same environment here turns it into a readable CLI error.
-    Deliberately duplicated, and small enough to stay in step; if you change a
-    rule, change it in both places.
+    ``lex/proxy.py`` is the authority on these rules, but it is imported *in the
+    uvicorn worker thread*, where a RuntimeError kills only the proxy and leaves
+    Streamlit serving and unreachable -- which reads as "the dashboard is
+    broken" rather than "fix your environment". Checking the same environment
+    here turns the ones worth refusing over into readable CLI errors.
+    Deliberately duplicated; if you change a rule, change it in both places.
+
+    What is worth refusing over is a narrow set: configurations that are
+    genuinely *broken*, not merely degraded. A replica set with no shared token
+    store returns 401s to half its traffic; a ``SameSite=None`` cookie without
+    ``Secure`` is discarded by browsers so no session is ever established.
+    Those refuse. A per-process session key only means sessions do not survive
+    a restart -- so it warns, because a guard that stops a dashboard starting
+    is worse than the fragility it guards against.
     """
     public_url = (os.getenv("STREAMLIT_URL") or os.getenv("BASE_URL") or "").rstrip("/")
     # Lowercased, because proxy.py derives the same fact through
     # ``httpx.URL(...).scheme``, which normalises case. Comparing
-    # case-sensitively here let ``HTTPS://host`` pass the pre-check and then
-    # raise at import -- the pre-check disagreeing with the rule it mirrors.
+    # case-sensitively let ``HTTPS://host`` disagree between the two.
     is_https = public_url.lower().startswith("https://")
+
     has_secret = bool(
         os.getenv("SESSION_SECRET")
         or os.getenv("SESSION_KEY")
         or os.getenv("SESSION_SECRET_KEY")
     )
-    allow_ephemeral = (
-        os.getenv("LEX_ALLOW_EPHEMERAL_SESSION_SECRET", "").strip().lower()
-        in ("1", "true", "yes", "y", "on")
-    )
+    # Mirrors proxy.py's ``_resolve_session_secret``: a non-default
+    # DJANGO_SECRET_KEY is a perfectly good source -- terraform generates it and
+    # keeps it in state, so it is stable across restarts and identical on every
+    # replica -- and every deployed instance has one. Its presence means
+    # sessions ARE durable, with nothing further to set.
+    published_default = "pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
+    django_secret = (os.getenv("DJANGO_SECRET_KEY") or "").strip()
+    has_derivable = bool(django_secret) and django_secret != published_default
 
-    if not has_secret and is_https and not allow_ephemeral:
-        raise click.ClickException(
-            "SESSION_SECRET is not set, but STREAMLIT_URL/BASE_URL is https, so this "
-            "looks like a real deployment. Session cookies would be signed with a "
-            "random per-process value: every restart, and every request that lands on "
-            "another replica, would silently log all users out and reset their "
-            "dashboard state. Set SESSION_SECRET to a fixed value shared by all "
-            "replicas, or set LEX_ALLOW_EPHEMERAL_SESSION_SECRET=true to proceed "
-            "anyway (single-process development only)."
-        )
-
-    replicas = os.getenv("LEX_PROXY_REPLICAS", "1") or "1"
     has_redis = bool(os.getenv("TOKEN_REDIS_URL") or os.getenv("REDIS_URL"))
-    try:
-        replicated = int(replicas.strip()) > 1
-    except ValueError:
-        # Matches proxy.py's `_env_int`, which warns and falls back to 1 rather
-        # than raising. The two must agree or this pre-check stops being one.
-        click.echo(
-            f"Warning: LEX_PROXY_REPLICAS={replicas!r} is not an integer; assuming 1.",
-            err=True,
-        )
-        replicated = False
-    if replicated and not has_redis:
-        raise click.ClickException(
-            f"LEX_PROXY_REPLICAS={replicas} but no TOKEN_REDIS_URL/REDIS_URL is set. "
-            "The token store would be process-local, so a request routed to another "
-            "replica would find no session and return 401."
-        )
 
-    # proxy.py raises on these too, and its raise lands in the worker thread
-    # where it kills only the proxy. Mirror every rule, not just the first two.
+    # --- refuse: genuinely broken -------------------------------------
     samesite = (os.getenv("SESSION_SAMESITE") or "").strip().lower()
     if samesite and samesite not in {"lax", "strict", "none"}:
         raise click.ClickException(
@@ -483,9 +466,30 @@ def _warn_if_sessions_are_not_durable() -> None:
             "Streamlit on one registrable domain."
         )
 
-    if not has_secret:
+    replicas = os.getenv("LEX_PROXY_REPLICAS", "1") or "1"
+    try:
+        replicated = int(replicas.strip()) > 1
+    except ValueError:
+        # Matches proxy.py's `_env_int`, which warns and falls back to 1 rather
+        # than raising. The two must agree or this pre-check stops being one.
         click.echo(
-            "Warning: SESSION_SECRET is not set; sessions will not survive a restart.",
+            f"Warning: LEX_PROXY_REPLICAS={replicas!r} is not an integer; assuming 1.",
+            err=True,
+        )
+        replicated = False
+
+    if replicated and not has_redis:
+        raise click.ClickException(
+            f"LEX_PROXY_REPLICAS={replicas} but no TOKEN_REDIS_URL/REDIS_URL is set. "
+            "The token store would be process-local, so a request routed to another "
+            "replica would find no session and return 401."
+        )
+
+    # --- warn: degraded, but it starts --------------------------------
+    if not has_secret and not has_derivable:
+        click.echo(
+            "Warning: no SESSION_SECRET and no non-default DJANGO_SECRET_KEY; dashboard "
+            "sessions will not survive a restart.",
             err=True,
         )
     if not has_redis:

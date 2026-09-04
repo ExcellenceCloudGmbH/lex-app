@@ -1,7 +1,7 @@
 ---
 date: 2026-09-04
 clusters: [1]
-tests_added: 40
+tests_added: 49
 suite_tally: "1ad: 40 pass / 0 fail, 31 subtests; init cluster: 353 pass / 13 skip / 119 subtests on a clean run (BUG-029 makes it intermittent)"
 ---
 
@@ -98,3 +98,56 @@ Two lessons for the next pass:
    duplicate proxy.py's import-time rules deliberately, and shipped covering two of five — with
    a case-sensitive https test where proxy.py's normalises. 1.285 and 1.286 exist to keep the
    two in step, because the docstring saying "keep these in sync" did not.
+
+## The guard that was worse than the bug
+
+Scenario 1.270 shipped asserting that the proxy **refuses to boot** without `SESSION_SECRET` on an
+https deployment, and it immediately stopped a running instance from starting. That is the most
+useful thing this batch produced, because the mistake is a general one.
+
+The reasoning — *degrading into the symptom is what made the original bug hard to find* — is true of
+a **broken** configuration and false of a **degraded** one. A replica set with no shared token store
+returns 401s to half its traffic: refuse. A `SameSite=None` cookie without `Secure` is discarded by
+browsers, so no session is ever established: refuse. A per-process session key means sessions do not
+survive a restart — and `lex streamlit` runs a single process, so it works perfectly until the next
+redeploy, at which point users are logged out once. Refusing there trades an occasional re-login for
+a dashboard that will not start.
+
+The fix was the same shape as the `DOMAIN_HOSTED` correction one section up, which is why it is worth
+naming as a pattern: **when a fix wants a new required variable, look for an existing one that
+already carries the property.** Three times in this batch the answer was already in the environment.
+
+- `DOMAIN_HOSTED` for the adopt allowlist — mandatory in every deployment, already means "the frontend".
+- `DJANGO_SECRET_KEY` for the session key — terraform `random_password` in state, so stable across
+  restarts and identical on every replica.
+
+Both derived, not reused verbatim: the session key is an HMAC of the Django secret under a fixed
+label, so a leak of one does not hand over the other. And the published `settings.py` fallback is
+excluded from derivation — sharing *that* would give every lex-app instance the same cookie-signing
+key, which is worse than a random per-process value rather than better.
+
+## What production found that review did not
+
+Three rounds of adversarial review found ten bugs in this change. Production then found an
+eleventh that none of the angles had reached, and it is instructive about *why*:
+
+```
+httpx.RemoteProtocolError: Server disconnected without sending a response.
+```
+
+exactly **5 seconds** after the previous upstream request — uvicorn's default keep-alive timeout.
+Streamlit closes the socket at that point, the pool hands the dead connection to the next request,
+and it fails before a byte is exchanged. `RemoteProtocolError` is neither `ConnectError` nor
+`TimeoutException`, so it escaped both handlers as *"Exception in ASGI application"*: a dropped
+request rather than a status. Since `/media/...` is proxied, the user-visible form was
+*"Protokoll downloaden geht nicht"* — a document download that failed for no stated reason.
+
+The reason review missed it is worth naming. Every angle asked *is this code correct?* The bug is
+not in the code; it is in an **interaction with a timeout in another process** that only exists once
+connections are reused. The per-request client this replaced could not have hit it. So a review
+question that would have caught it is not "is the pooling correct" but **"what did the old code get
+for free that the new code now has to earn?"** — the removed-behaviour angle, applied to a
+non-functional property rather than a guard or a validation.
+
+Scenarios 1.293–1.295, all three failing against the deployed tree. 1.293 drives a real socket
+server that answers and then closes, because a mock cannot reproduce a keep-alive race.

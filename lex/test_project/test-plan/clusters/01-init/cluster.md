@@ -280,15 +280,15 @@ does not remove user launch configurations.
 | 1.267 | the breakout can recover | the iframe recovery page's sign-in link is absolute, `target="_top"`, and carries the view being recovered |
 | 1.268 | stripping keeps the destination | removing `auth_token` preserves `model`, `pk` and the rest — dropping them would trade one bug for another |
 | 1.269 | only documents are redirected | `document` and `iframe` count; `empty` and `script` do not, so an XHR is served rather than 303'd |
-| 1.270 | a deployment needs a real secret | no `SESSION_SECRET` on https raises, naming the variable |
-| 1.271 | legitimate setups still boot | https with a secret, https with an explicit opt-out, and zero-config local http all start |
+| 1.270 | the session key is derived, not demanded | `DJANGO_SECRET_KEY` yields a durable cookie key, and is not reused verbatim |
+| 1.271 | no configuration refuses to start | explicit secret, derivable secret, neither, and the published default all boot; only the first two are durable |
 | 1.272 | replicas need a shared store | `LEX_PROXY_REPLICAS>1` without Redis raises; with Redis it boots |
 | 1.273 | an unusable cookie is refused | `SameSite=None` without `Secure` raises (browsers discard such cookies outright), and so does a typo |
 | 1.274 | cross-site frames get a cookie | https defaults to `SameSite=None`; local http stays `lax` |
 | 1.275 | the session window outlasts a login | `--server.disconnectedSessionTTL` is passed and exceeds Streamlit's 120s default |
-| 1.276 | the CLI fails readably | `lex streamlit`'s pre-flight raises a `ClickException` rather than letting the proxy thread die alone |
+| 1.276 | the CLI reports without blocking | the pre-flight warns about an undurable session key rather than refusing to start |
 
-**Scenario range:** 1.247 – 1.292. **Test file:** `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py`. **Type:** U. **Status:** ✅ 46 pass, 33 subtests. **27 of the first 30 fail against the pre-fix tree**; 1.254, 1.255 and 1.271 pass by design as guards. Measured and explicitly not a cause: JWT validation at 0.045 ms/request — 16 ms across all 365 chunks. Recorded **BUG-029** (a pre-existing cluster-1 flake) while running this batch.
+**Scenario range:** 1.247 – 1.299. **Test file:** `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py`. **Type:** U. **Status:** ✅ 53 pass, 36 subtests. **27 of the first 30 fail against the pre-fix tree**; 1.254, 1.255 and 1.271 pass by design as guards. Measured and explicitly not a cause: JWT validation at 0.045 ms/request — 16 ms across all 365 chunks. Recorded **BUG-029** (a pre-existing cluster-1 flake) while running this batch.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
@@ -315,3 +315,20 @@ does not remove user launch configurations.
 | 1.292 | the localhost default is not promoted | `DOMAIN_HOSTED=localhost` trusts the shell's dev ports, not `https://localhost` |
 
 **Scenarios 1.287 – 1.290** exist because the earlier fixes created the gap between them: freezing the iframe `src` protects the Streamlit session but removed the only channel a renewed token had. Verified before fixing — an embedded session 401s past its bootstrap token's expiry with a valid renewal sitting unused in the shell.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.293 | a closed pooled connection is retried | a request after the upstream's keep-alive expiry succeeds on a fresh connection |
+| 1.294 | the pool expires before the upstream does | the proxy's keep-alive expiry undercuts uvicorn's 5s, and reaches the client |
+| 1.295 | an unreachable upstream answers 502 | `RemoteProtocolError` yields 502 on both the public and the authenticated path |
+
+**Scenarios 1.293 – 1.295** come from a production log rather than review: pooling connections is what made a stale one possible, and `RemoteProtocolError` escaped both existing handlers as an unhandled ASGI exception. `/media/...` is proxied, so the visible symptom was a document download that failed for no stated reason.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.296 | a failed request is logged at WARNING | a 404 asset and a 401 path both appear with method, path and status |
+| 1.297 | a successful asset stays quiet | suppressed by default, logged under `LEX_PROXY_ACCESS_LOG_STATIC` |
+| 1.298 | the log never carries the query string | `?auth_token=<jwt>` is recorded as `?<query>`, status preserved |
+| 1.299 | logging can be turned off | `LEX_PROXY_ACCESS_LOG=false` silences it without changing the response |
+
+**Scenarios 1.296 – 1.299** exist because the production log for the bug in 1.293–1.295 had **no access lines**, so an asset failure could not be told apart from an auth failure or a missing file without curling the live host afterwards.

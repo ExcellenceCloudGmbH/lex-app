@@ -107,9 +107,9 @@ Nothing to configure: the proxy accepts that handoff from the instance's own hos
 
 Sessions do not live forever: Keycloak's SSO maximum lifetime still applies, and a session revoked in Keycloak stops working immediately. When renewal genuinely can't succeed, the embedded dashboard asks the surrounding app to re-authenticate, and a standalone one offers a sign-in link. Either way you are returned to the view you were on, not to the application's first page.
 
-Two deployment settings decide whether a session survives at all, and both are refused at startup rather than degrading quietly, because a session that dies for an invisible reason looks exactly like one that expired:
+Two deployment settings decide whether a session survives at all:
 
-- `SESSION_SECRET` must be set and identical on every replica. Left unset, the proxy signs cookies with a value unique to each process, so any restart or second replica logs everyone out.
+- Session cookies need a key that is stable across restarts and shared by every replica. The proxy derives one from `DJANGO_SECRET_KEY`, so there is normally nothing to set; `SESSION_SECRET` overrides it if you want to choose the key yourself. With neither, cookies are signed per-process and a restart logs everyone out — the proxy warns and starts anyway.
 - `TOKEN_REDIS_URL` (or `REDIS_URL`) is required beyond a single replica, and that replica needs session affinity — Streamlit's own session state is held in the process the browser is connected to.
 
 See [[reference/Environment Variables]] for both, along with `SESSION_SAMESITE`, which has to be `none` whenever the frontend and the dashboard are not on the same registrable domain.

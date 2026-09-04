@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import hmac
 import html
 import json
 import logging
@@ -87,36 +89,64 @@ PUBLIC_IS_HTTPS = (PUBLIC_URL_OBJ.scheme == "https") if PUBLIC_URL_OBJ else Fals
 
 UPSTREAM = (os.environ.get("UPSTREAM") or os.environ.get("STREAMLIT_UPSTREAM") or "http://localhost:8080").rstrip("/")
 
-SESSION_SECRET = os.environ.get("SESSION_SECRET") or os.environ.get("SESSION_KEY") or os.environ.get("SESSION_SECRET_KEY")
+#: The published fallback in ``lex/lex_app/settings.py``. Deriving a
+#: cookie-signing key from *this* would give every lex-app instance in the world
+#: the same one, so it is explicitly excluded -- worse than a random value, not
+#: better.
+_PUBLISHED_DJANGO_SECRET_DEFAULT = "pjlulvaa77lteno-_y6!oxb%63xqiaw4%n%1or&77a!x9@nkd+"
 
-#: Escape hatch for the one legitimate case: a single-process dev run where
-#: nobody minds being logged out by a restart.
-ALLOW_EPHEMERAL_SESSION_SECRET = _env_bool(
-    "LEX_ALLOW_EPHEMERAL_SESSION_SECRET", not PUBLIC_IS_HTTPS
-)
 
-if not SESSION_SECRET:
-    if not ALLOW_EPHEMERAL_SESSION_SECRET:
-        # A random per-process secret is not a weak secret, it is a *different*
-        # secret in every process. Every session cookie signed before a restart
-        # becomes undecodable after it, and cookies signed by one replica are
-        # rejected by the next -- so users are thrown back to a login they did
-        # nothing to deserve. That is indistinguishable from "session timeout
-        # resets my state", and it is not a timeout at all.
-        raise RuntimeError(
-            "SESSION_SECRET is not set. The proxy would sign session cookies with a "
-            "random per-process value, so every restart -- and every request that "
-            "lands on a different replica -- would silently log all users out and "
-            "reset their dashboard state. Set SESSION_SECRET to a fixed secret "
-            "shared by every replica. To run without one anyway (single-process "
-            "development only), set LEX_ALLOW_EPHEMERAL_SESSION_SECRET=true."
-        )
-    SESSION_SECRET = "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32)
-    logger.warning(
-        "SESSION_SECRET is not set; using a random per-process value. Sessions will "
-        "not survive a restart and cannot be shared across replicas. Do not deploy "
-        "like this."
+def _resolve_session_secret() -> Tuple[str, str]:
+    """The key used to sign session cookies, and where it came from.
+
+    Order matters, and each step exists for a reason:
+
+    1. ``SESSION_SECRET`` (or its aliases) -- an explicit choice always wins.
+    2. Derived from ``DJANGO_SECRET_KEY``. Every deployed instance already has
+       one: terraform generates it with ``random_password`` and keeps it in
+       state, so unlike a per-process value it is stable across restarts and
+       identical on every replica -- which is exactly the property session
+       cookies need. Derived rather than used directly, so that a stolen
+       session cookie key does not hand over Django's secret and vice versa.
+       The published settings.py default is excluded: sharing *that* would give
+       every instance the same signing key.
+    3. A random per-process value, with a warning. Sessions then do not survive
+       a restart -- degraded, but a Streamlit dashboard that starts and loses
+       sessions on redeploy beats one that refuses to start at all.
+
+    An earlier version of this raised on step 3 when the public URL was https.
+    That was wrong: it bricked instances that had been running fine, and the
+    single-process ``lex streamlit`` case is genuinely only *degraded* by a
+    per-process key, not broken. The durable fix was to stop needing a new
+    variable, not to demand one.
+    """
+    explicit = (
+        os.environ.get("SESSION_SECRET")
+        or os.environ.get("SESSION_KEY")
+        or os.environ.get("SESSION_SECRET_KEY")
     )
+    if explicit:
+        return explicit, "SESSION_SECRET"
+
+    django_secret = (os.getenv("DJANGO_SECRET_KEY") or "").strip()
+    if django_secret and django_secret != _PUBLISHED_DJANGO_SECRET_DEFAULT:
+        derived = hmac.new(
+            django_secret.encode("utf-8"),
+            b"lex-proxy-session-cookie-v1",
+            hashlib.sha256,
+        ).hexdigest()
+        return derived, "DJANGO_SECRET_KEY"
+
+    logger.warning(
+        "Neither SESSION_SECRET nor a non-default DJANGO_SECRET_KEY is set, so session "
+        "cookies will be signed with a random per-process value. Dashboard sessions will "
+        "not survive a restart and cannot be shared across replicas. Set SESSION_SECRET "
+        "to a fixed value, or DJANGO_SECRET_KEY (which every deployed instance has)."
+    )
+    return "CHANGE_ME_IN_PRODUCTION_" + secrets.token_urlsafe(32), "ephemeral"
+
+
+SESSION_SECRET, SESSION_SECRET_SOURCE = _resolve_session_secret()
 
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", PUBLIC_IS_HTTPS)
 
@@ -643,7 +673,7 @@ def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         signing_key = _get_signing_key(token)
         if not signing_key:
-            print("[proxy] JWT validation failed: no signing key")
+            logger.warning("JWT validation failed: no signing key available")
             return None
 
         client_id = os.getenv("OIDC_RP_CLIENT_ID", "")
@@ -664,10 +694,10 @@ def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
         )
         return payload
     except jwt.ExpiredSignatureError:
-        print("[proxy] JWT token expired")
+        logger.info("JWT token expired")
         return None
     except jwt.InvalidTokenError as e:
-        print(f"[proxy] JWT validation failed: {e}")
+        logger.warning("JWT validation failed: %s", e)
         return None
 
 
@@ -1073,6 +1103,7 @@ def _upstream_http_client_kwargs(timeout: httpx.Timeout) -> Dict[str, Any]:
         "follow_redirects": False,
         "timeout": timeout,
         "trust_env": UPSTREAM_USE_SYSTEM_PROXY,
+        "limits": _UPSTREAM_LIMITS,
     }
 
 
@@ -1235,6 +1266,19 @@ async def ws_proxy(websocket: WebSocket):
 # reuses connections; streaming means the first byte leaves as soon as it
 # arrives.
 _UPSTREAM_TIMEOUT = httpx.Timeout(float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", "30")))
+
+# Keep pooled connections for less time than the upstream will hold them open.
+# Streamlit runs behind uvicorn, whose keep-alive timeout is 5s: past that it
+# closes the socket, and a pooled connection handed out afterwards fails with
+# `RemoteProtocolError: Server disconnected without sending a response` before
+# a single byte is exchanged. Observed in production exactly 5s after the
+# previous request. Expiring first turns that race into a fresh connection.
+_UPSTREAM_KEEPALIVE_EXPIRY = float(os.getenv("UPSTREAM_KEEPALIVE_EXPIRY_SECONDS", "2"))
+_UPSTREAM_LIMITS = httpx.Limits(
+    max_connections=_env_int("UPSTREAM_MAX_CONNECTIONS", 100),
+    max_keepalive_connections=_env_int("UPSTREAM_MAX_KEEPALIVE", 20),
+    keepalive_expiry=_UPSTREAM_KEEPALIVE_EXPIRY,
+)
 _UPSTREAM_CLIENT: Optional[httpx.AsyncClient] = None
 _UPSTREAM_CLIENT_LOOP: Optional[Any] = None
 
@@ -1342,8 +1386,28 @@ async def _upstream_send(
     callers, so a stub here observes exactly the proxy's forwarding decisions.
     """
     client = await _get_upstream_client()
-    request = client.build_request(method, url, content=content, headers=headers)
-    return await client.send(request, stream=True)
+
+    # One retry, and only for failures that happen before any response byte
+    # exists. A pooled connection the upstream has already closed fails this
+    # way, and the request is safe to replay: `content` is bytes rather than a
+    # consumed stream, and nothing has been sent to our own client yet. A
+    # failure *during* the body is a different matter -- the response head has
+    # gone out, so it cannot be retried, and `_iter_upstream` raises instead.
+    last_error: Optional[Exception] = None
+    for attempt in (1, 2):
+        request = client.build_request(method, url, content=content, headers=headers)
+        try:
+            return await client.send(request, stream=True)
+        except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as exc:
+            last_error = exc
+            if attempt == 2:
+                break
+            logger.info(
+                "Upstream connection failed before a response (%s: %s); retrying once on a "
+                "fresh connection", type(exc).__name__, exc,
+            )
+
+    raise last_error  # type: ignore[misc]  # unreachable unless both attempts failed
 
 
 async def _iter_upstream(upstream_resp: httpx.Response):
@@ -1488,6 +1552,17 @@ async def public_proxy(request: Request):
         )
     except httpx.TimeoutException:
         return JSONResponse({"error": f"Upstream timeout: {UPSTREAM}"}, status_code=504)
+    except httpx.HTTPError as exc:
+        # Anything else httpx can raise before a response exists -- notably
+        # RemoteProtocolError from a connection the upstream closed. Left
+        # unhandled it escaped as an unhandled ASGI exception, which reaches
+        # the browser as a dropped request: a failed /media download, or an
+        # iframe document that never loads.
+        logger.warning("Upstream request to %s failed: %s: %s", UPSTREAM, type(exc).__name__, exc)
+        return JSONResponse(
+            {"error": f"Upstream request failed: {type(exc).__name__}"},
+            status_code=502,
+        )
 
     return _build_proxied_response(request, upstream_resp)
 
@@ -1635,6 +1710,17 @@ async def proxy(request: Request):
         return JSONResponse(
             {"error": f"Upstream timeout: {UPSTREAM}"},
             status_code=504,
+        )
+    except httpx.HTTPError as exc:
+        # Anything else httpx can raise before a response exists -- notably
+        # RemoteProtocolError from a connection the upstream closed. Left
+        # unhandled it escaped as an unhandled ASGI exception, which reaches
+        # the browser as a dropped request: a failed /media download, or an
+        # iframe document that never loads.
+        logger.warning("Upstream request to %s failed: %s: %s", UPSTREAM, type(exc).__name__, exc)
+        return JSONResponse(
+            {"error": f"Upstream request failed: {type(exc).__name__}"},
+            status_code=502,
         )
 
     response = _build_proxied_response(request, upstream_resp)
@@ -2037,6 +2123,97 @@ def _warn_if_upstream_is_not_colocated() -> None:
 
 
 # -----------------------------------------------------------------------------
+# Access logging: make a failed asset request visible
+# -----------------------------------------------------------------------------
+# There were no access-log lines at all in the production log that this was
+# written for, which is why a browser reporting "Failed to fetch dynamically
+# imported module" could not be traced to a status code. Two uvicorn servers
+# run in this process -- ours on 8501 and Streamlit's own on 8080 -- and Django
+# applies its own ``dictConfig`` afterwards, so whether ``uvicorn.access``
+# survives is not something this module can rely on.
+#
+# So it does not rely on it. This logs through the ``lex`` logger hierarchy,
+# which the same production log proves is configured and emitting, and it
+# chooses levels so the useful half is visible without the noise:
+#
+#   * 4xx/5xx at WARNING -- visible even when LEX_LOG_LEVEL is WARNING, which
+#     is the whole point: an asset that 401s or 404s must never again be
+#     invisible;
+#   * everything else at INFO, and a *successful* static asset not at all
+#     unless asked for. Streamlit eagerly preloads 107 chunks, so logging those
+#     would bury the line anyone actually needs.
+
+ACCESS_LOG_ENABLED = _env_bool("LEX_PROXY_ACCESS_LOG", True)
+#: Log successful static-asset responses too. Off by default: 107 lines per
+#: page load hides everything else. Turn on to confirm the bundle is serving.
+ACCESS_LOG_STATIC = _env_bool("LEX_PROXY_ACCESS_LOG_STATIC", False)
+
+access_logger = logging.getLogger("lex.proxy.access")
+
+
+class AccessLogMiddleware:
+    """Log one line per HTTP request, with the status the client actually got.
+
+    Pure ASGI rather than ``BaseHTTPMiddleware``: it must not buffer a
+    streaming response, and it must see the status even when the response is a
+    passthrough of Streamlit's own bytes.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not ACCESS_LOG_ENABLED:
+            await self.app(scope, receive, send)
+            return
+
+        started = time.monotonic()
+        status_holder = {"code": 0}
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                status_holder["code"] = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            # An exception that escapes here is what the client sees as a
+            # dropped connection, so it is precisely what must be logged.
+            self._log(scope, 500, started, note="unhandled exception")
+            raise
+
+        self._log(scope, status_holder["code"], started)
+
+    def _log(self, scope, status: int, started: float, note: str = "") -> None:
+        path = scope.get("path", "")
+        is_static = path.startswith(f"{STREAMLIT_BASE_URL_PATH}/static/")
+        failed = status >= 400
+
+        if not failed and is_static and not ACCESS_LOG_STATIC:
+            return
+
+        elapsed_ms = (time.monotonic() - started) * 1000
+        query = scope.get("query_string", b"")
+        # `auth_token` is a credential; never write one to a log.
+        suffix = "?<query>" if query else ""
+        message = "%s %s%s -> %d (%.0fms)%s"
+        args = (
+            scope.get("method", "?"),
+            path,
+            suffix,
+            status,
+            elapsed_ms,
+            f" {note}" if note else "",
+        )
+
+        if failed:
+            access_logger.warning(message, *args)
+        else:
+            access_logger.info(message, *args)
+
+
+# -----------------------------------------------------------------------------
 # Routing / app
 # -----------------------------------------------------------------------------
 _assert_static_bundle_present()
@@ -2094,3 +2271,7 @@ app.add_middleware(
     minimum_size=STATIC_GZIP_MIN_SIZE,
     compresslevel=STATIC_GZIP_LEVEL,
 )
+
+# Outermost of all, so the status it records is the one the client received --
+# after gzip, after the session middleware, and including anything those raise.
+app.add_middleware(AccessLogMiddleware)
