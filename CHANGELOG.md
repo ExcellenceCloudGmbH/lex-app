@@ -1,3 +1,17 @@
+## [2.1.9] - 2026-09-04
+
+### Added
+- **backend** give the drafter the context the backfill needed ([9633952a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/9633952a)) (#742)
+- **backend** attribute the three pre-manifest frontend bundles ([d8d49dee](https://github.com/ExcellenceCloudGmbH/lex-app/commit/d8d49dee)) (#738)
+- **backend** land frontend provenance on lex-app-v2 ([0744dc9f](https://github.com/ExcellenceCloudGmbH/lex-app/commit/0744dc9f)) (#733)
+- **backend** frontend provenance, gap recovery and backfill ([393f9298](https://github.com/ExcellenceCloudGmbH/lex-app/commit/393f9298)) (#732)
+
+### Fixed
+- **backend** the 401 flood, the slow cold start and the dynamic-import TypeErrors are one bug ([b7c1478a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/b7c1478a)) (#750)
+- **backend** ignore client-admin and purge stale ignored-role policies (LEX-5) ([25c4429a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/25c4429a)) (#726)
+- **backend** stop a rejected draft passing as a success ([37afacea](https://github.com/ExcellenceCloudGmbH/lex-app/commit/37afacea)) (#739)
+- **backend** draft from PR bodies, and stop announcing our toolchain as a feature ([3e152ae8](https://github.com/ExcellenceCloudGmbH/lex-app/commit/3e152ae8)) (#702)
+
 # Changelog
 
 Every notable change, tagged **backend** (this repository) or **frontend**
@@ -7,33 +21,6 @@ Reconstructed 2026-09-03 for releases 2.1.1–2.1.9. Frontend ranges come from t
 side-car: each pre-manifest bundle was matched to its source revision by rebuilding the
 candidate and comparing the content-addressed output, so the attribution is proven rather
 than inferred. Commits whose entire diff is the vendored bundle are omitted, as are merges.
-
-## [2.1.9] - 2026-09-02
-
-> No frontend change: the bundle is unchanged from `v2.1.4`.
-
-### Added
-- **backend** append a frontend addendum without rewriting a body ([26a90eba](https://github.com/ExcellenceCloudGmbH/lex-app/commit/26a90eba))
-- **backend** attribute the three pre-manifest frontend bundles ([39d89f8c](https://github.com/ExcellenceCloudGmbH/lex-app/commit/39d89f8c))
-- **backend** backfill a span of tags and repair single gaps ([29dcb028](https://github.com/ExcellenceCloudGmbH/lex-app/commit/29dcb028))
-- **backend** draft from the PR bodies, not from subject lines ([3e152ae8](https://github.com/ExcellenceCloudGmbH/lex-app/commit/3e152ae8))
-- **backend** prove all three bundle attributions by rebuild ([b0bbc969](https://github.com/ExcellenceCloudGmbH/lex-app/commit/b0bbc969))
-- **backend** record an unresolved frontend range in the changelog ([3cbe13ad](https://github.com/ExcellenceCloudGmbH/lex-app/commit/3cbe13ad))
-- **backend** reject a bundle whose manifest says nothing true ([84427c45](https://github.com/ExcellenceCloudGmbH/lex-app/commit/84427c45))
-- **backend** resolve the bundle commit for a ref ([11c7d069](https://github.com/ExcellenceCloudGmbH/lex-app/commit/11c7d069))
-- **backend** serve pre-manifest tags from a committed side-car ([62e31436](https://github.com/ExcellenceCloudGmbH/lex-app/commit/62e31436))
-- **backend** validate the frontend provenance manifest ([359a1dcc](https://github.com/ExcellenceCloudGmbH/lex-app/commit/359a1dcc))
-- **backend** verify-frontend reports gaps without blocking ([7e4491a5](https://github.com/ExcellenceCloudGmbH/lex-app/commit/7e4491a5))
-
-### Fixed
-- **backend** degrade to a gap when PAC cannot be read, and use the real token ([0744dc9f](https://github.com/ExcellenceCloudGmbH/lex-app/commit/0744dc9f))
-- **backend** make --force the thing that replaces a section ([7e20acb4](https://github.com/ExcellenceCloudGmbH/lex-app/commit/7e20acb4))
-- **backend** make a failed draft visible in the release body ([12008644](https://github.com/ExcellenceCloudGmbH/lex-app/commit/12008644))
-- **backend** reject a manifest sha with trailing content ([5bec0ae1](https://github.com/ExcellenceCloudGmbH/lex-app/commit/5bec0ae1))
-- **backend** stop a rejected draft passing as a success ([37afacea](https://github.com/ExcellenceCloudGmbH/lex-app/commit/37afacea))
-- **backend** treat an unknown frontend flag as a gap ([8200f2cc](https://github.com/ExcellenceCloudGmbH/lex-app/commit/8200f2cc))
-- **backend** verify-frontend survives a git failure ([1345e9f8](https://github.com/ExcellenceCloudGmbH/lex-app/commit/1345e9f8))
-- **backend** warn on shallow clones and test the runner hermetically ([402b3f2c](https://github.com/ExcellenceCloudGmbH/lex-app/commit/402b3f2c))
 
 ## [2.1.8] - 2026-08-25
 
