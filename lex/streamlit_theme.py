@@ -237,41 +237,119 @@ _FOLLOWER_HTML = """<script>
       }
     }
 
+    // ── One drive at a time ──────────────────────────────────────────────
+    // Reported from switching fast: "it starts to drift... it will take two
+    // switches in lex-app to do one on streamlit", and "the streamlit theme
+    // option gets opened".
+    //
+    // Both are the same race. Opening the menu is a TOGGLE, so a second drive
+    // starting while the first still had it open closed it again -- neither
+    // found its item, both sat until the 2s timeout, and the page ended up one
+    // switch behind. The same toggle is why the menu appeared: the close step
+    // clicked the button when the popover had already dismissed itself, which
+    // re-opened it, and the mask came off 60ms later regardless.
+    //
+    // So drives are serialised and coalesced. A request arriving mid-drive is
+    // remembered rather than started, latest wins, and it runs only if it
+    // differs from what we just applied -- flip A->B->A quickly and the second
+    // A is correctly a no-op instead of two more menu round-trips.
+    var driving = false;
+    var drivingTo = null;
+    var queued = null;
+
+    /**
+     * What this page will be showing once everything in flight has settled.
+     *
+     * NOT what it is showing now. `currentMode()` is stale for as long as a
+     * drive is open -- Streamlit has not re-rendered yet -- so comparing against
+     * it drops requests that are real changes. Firing light/dark/light/dark
+     * back to back, every intermediate request matched the not-yet-updated
+     * current mode, returned as "already right", and never reached the queue;
+     * the page settled on whichever mode happened to be mid-flight rather than
+     * the one asked for last. That is the drift, and it needed no human speed --
+     * only two changes closer together than one menu round-trip.
+     */
+    function settledTarget() {
+      if (queued) return queued;
+      if (driving) return drivingTo;
+      return currentMode();
+    }
+
+    function requestDrive(mode) {
+      if (driving) { queued = mode; return true; }
+      return drive(mode);
+    }
+
+    function afterDrive(droveTo) {
+      driving = false;
+      var next = queued;
+      queued = null;
+      if (next && next !== droveTo) requestDrive(next);
+    }
+
     /**
      * Click Streamlit's theme control, without the menu being seen.
      *
      * The popover only exists in the DOM while it is open, so it has to be
      * opened. React renders it a frame or two later, which is long enough to
-     * flash -- so it is hidden for the duration and revealed again afterwards,
-     * with a timeout that restores visibility even if nothing ever appears.
+     * flash -- so it is hidden for the duration.
+     *
+     * The mask is removed only once the popover is actually GONE. Removing it on
+     * a timer was what let a lingering menu appear; waiting for the thing itself
+     * cannot race. There is still a bound, because a mask that never came off
+     * would hide the real menu from the user permanently -- which is worse than
+     * briefly showing it.
      */
     function drive(mode) {
       var doc = host.document;
       var button = doc.querySelector(MENU_BUTTON);
       if (!button) return false;
 
+      driving = true;
+      drivingTo = mode;
+
       var mask = doc.createElement("style");
       mask.textContent = POPOVER + "{opacity:0 !important;pointer-events:none !important}";
       doc.head.appendChild(mask);
 
       var settled = false;
+
+      function unmask() {
+        try { mask.remove(); } catch (e) {}
+        afterDrive(mode);
+      }
+
+      /** Dismiss the popover, then reveal. Never toggles blindly. */
+      function closeThenUnmask(attempt) {
+        if (!doc.querySelector(POPOVER)) return unmask();
+        if (attempt > 12) return unmask();   // bounded: reveal rather than trap
+        if (attempt === 0) {
+          // Escape first: unlike clicking the button it cannot re-open.
+          doc.dispatchEvent(new host.KeyboardEvent(
+            "keydown", { key: "Escape", code: "Escape", bubbles: true }
+          ));
+        } else if (attempt === 4) {
+          var b = doc.querySelector(MENU_BUTTON);
+          if (b && doc.querySelector(POPOVER)) b.click();
+        }
+        host.setTimeout(function () { closeThenUnmask(attempt + 1); }, 50);
+      }
+
       function finish() {
         if (settled) return;
         settled = true;
         observer.disconnect();
-        try { mask.remove(); } catch (e) {}
+        closeThenUnmask(0);
       }
 
       var observer = new host.MutationObserver(function () {
         var item = doc.querySelector(itemFor(mode));
         if (!item) return;
         item.click();
-        // Close it again: a radio group stays open after a choice.
-        var open = doc.querySelector(POPOVER);
-        if (open && doc.querySelector(MENU_BUTTON)) doc.querySelector(MENU_BUTTON).click();
-        host.setTimeout(finish, 60);
+        finish();
       });
       observer.observe(doc.body, { childList: true, subtree: true });
+
       host.setTimeout(function () {
         if (!settled) {
           console.warn(
@@ -290,12 +368,12 @@ _FOLLOWER_HTML = """<script>
 
     function apply(mode, reason) {
       if (mode !== "light" && mode !== "dark") return;
-      var now = currentMode();
+      var now = settledTarget();
       console.info("[lex-theme] asked for", mode, "(" + (reason || "?") + ")",
-                   "; showing", now || "(unknown)");
+                   "; settling on", now || "(unknown)");
       if (now === mode) { host.__lexThemeLastAction = "already " + mode; return; }
       host.__lexThemeLastAction = "drove to " + mode + " (" + reason + ")";
-      drive(mode);
+      requestDrive(mode);
     }
 
     if (URL_MODE) {

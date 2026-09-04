@@ -20,7 +20,7 @@ refuses to act on an unmeasurable background, reloads once under an event burst,
 ignores a garbage mode. That harness needs a JS runtime, which this repository
 does not have, so it is not in CI. The batch note records the gap.
 
-Cluster 01-init, batch 1ad, scenarios 1.261-1.293.
+Cluster 01-init, batch 1ad, scenarios 1.261-1.294.
 
 Run:
     python -m lex pytest lex/test_project/tests/init/test_1ad_streamlit_theme_follower.py
@@ -200,11 +200,13 @@ class TestCluster1ad_StreamlitThemeFollower:
         assert "stMainMenuPopover" in js
         assert "opacity:0" in js
 
-        # Revealed again on BOTH exit paths -- the click, and the give-up
-        # timeout. A mask left behind would hide the real menu from the user for
-        # the rest of the page's life, which is a worse bug than the flash.
-        assert "host.setTimeout(finish, 60)" in js, "not revealed after a successful click"
-        assert "finish();" in js, "not revealed when the control never appears"
+        # Revealed only once the popover is actually GONE -- not on a timer.
+        # Revealing after a fixed delay is what let a lingering menu appear
+        # (1.294); waiting for the thing itself cannot race.
+        assert "if (!doc.querySelector(POPOVER)) return unmask();" in js
+        assert "host.setTimeout(finish, 60)" not in js, "revealed on a timer again"
+        # Both exit paths still end in finish(): the click, and the give-up timeout.
+        assert js.count("finish()") >= 2, "not revealed on every path"
         # The only early return happens before the mask exists.
         before_mask = js[: js.index("doc.head.appendChild(mask)")]
         assert "return false;" in before_mask
@@ -412,6 +414,65 @@ class TestCluster1ad_StreamlitThemeFollower:
 
         # A backgrounded tab must not be driven; it is not being looked at.
         assert "if (!host.document.hidden) reconcile" in js
+
+
+    def test_01_294_fast_switching_lands_on_the_last_request(self):
+        """Scenario 1.294: two changes closer together than one menu round-trip.
+
+        Reported from switching quickly: "it starts to drift... it will take two
+        switches in lex-app to do one on streamlit", and "the streamlit theme
+        option gets opened".
+
+        Three defects, all of them the same window -- a drive is not
+        instantaneous, and everything assumed it was:
+
+        1. **Opening the menu is a TOGGLE.** A second drive starting while the
+           first still had it open closed it again, so neither found its item and
+           both sat until the timeout. Drives are now serialised, and a request
+           arriving mid-drive is queued rather than started, latest wins.
+
+        2. **The close step toggled blindly.** It clicked the button whenever it
+           wanted the menu shut -- including when the popover had already
+           dismissed itself, which re-opened it, and the mask came off on a timer
+           regardless. That is the menu the user saw. It now asks with Escape,
+           which cannot re-open, and reveals only once the popover is actually
+           gone rather than after a fixed delay.
+
+        3. **`currentMode()` is stale while a drive is open**, because Streamlit
+           has not re-rendered yet. Comparing against it dropped genuine changes
+           as "already right": firing light/dark/light/dark back to back, every
+           intermediate request matched the not-yet-updated mode and never
+           reached the queue, so the page settled on whichever mode was
+           mid-flight instead of the one asked for last. That is the drift, and
+           it is the one that survived fixing the other two.
+
+        The comparison is now against the SETTLED target -- what the page will be
+        once everything in flight is done -- not what it happens to show now.
+
+        Verified on the user's own Streamlit (1.63) with five flips fired
+        back-to-back with no delay, and again with an adversarial mix of gaps
+        (0/40/350/0/900/60/0/1400ms): the page lands on the last requested mode,
+        the popover is never visible, and no mask is left behind.
+        """
+        js = theme_follower_html()
+
+        # One drive at a time, with the latest request winning.
+        assert "var driving = false" in js
+        assert "queued = mode" in js
+        assert "function settledTarget" in js
+
+        # The decision compares against the settled target, never the stale one.
+        assert "var now = settledTarget();" in js
+        assert "var now = currentMode();" not in js, (
+            "a request is being judged against a mode that is still changing"
+        )
+
+        # Closing asks rather than toggles, and reveals only when it is really shut.
+        assert '"Escape"' in js
+        assert "function closeThenUnmask" in js
+        assert "if (!doc.querySelector(POPOVER)) return unmask();" in js
+        # ...but bounded, because a mask that never lifts hides the real menu.
+        assert "attempt > 12" in js
 
 
 class TestCluster1ad_ThemeEnvelopeWiring:

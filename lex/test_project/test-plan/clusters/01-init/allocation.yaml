@@ -303,10 +303,10 @@ letters:
 
   ad:
     title: Streamlit theme follower
-    scenarios: 1.261-1.293
+    scenarios: 1.261-1.294
     status: complete
     tests:
-      pass: 24
+      pass: 25
       skip: 0
       xfail: 0
     note: >-
@@ -560,6 +560,28 @@ letters:
       fired, rather than relying on it bubbling to `window`); a Streamlit rerun is a free third
       opportunity. Verified against a drifted page: agreement light, page dark, no event possible,
       then "drove to light (focus)" and the page went white.
+      1.294 closes the fast-switch edge the user asked to have removed rather than tolerated:
+      "if I switch really quickly, it starts to drift... it will take two switches in lex-app to do
+      one on streamlit", plus "the streamlit theme option gets opened when I switch too fast".
+      Three defects, all the same window - a drive is not instantaneous and everything assumed it
+      was. (a) Opening the menu is a TOGGLE, so a second drive starting while the first still had
+      it open closed it again; neither found its item and both sat until the timeout. Drives are
+      serialised now, a mid-drive request is queued rather than started, latest wins. (b) The close
+      step toggled blindly, clicking the button even when the popover had already dismissed itself
+      - which re-opened it, and the mask came off on a timer regardless. That is the menu the user
+      saw. It asks with Escape now, which cannot re-open, and reveals only once the popover is
+      really gone rather than after a fixed delay (bounded, since a mask that never lifts hides the
+      real menu). (c) The one that survived fixing the other two: currentMode() is STALE while a
+      drive is open, because Streamlit has not re-rendered, so comparing against it dropped genuine
+      changes as "already right" - fire light/dark/light/dark back to back and every intermediate
+      request matched the not-yet-updated mode, never reached the queue, and the page settled on
+      whichever mode was mid-flight instead of the one asked for last. That is the drift, and it
+      needed no human speed, only two changes closer together than one menu round-trip. The
+      comparison is now against the SETTLED target - what the page will be once everything in
+      flight is done. Verified on the user's own Streamlit 1.63: five flips fired back-to-back with
+      no delay, then an adversarial mix of gaps (0/40/350/0/900/60/0/1400ms) - lands on the last
+      requested mode every time, popover never visible, no mask left behind. The back-to-back case
+      reproduced the drift against the pre-fix build first, which is why it is worth having.
 
   ae:
     title: Streamlit theme parity — tokens, native theme config, CLI wiring
