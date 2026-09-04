@@ -1266,14 +1266,20 @@ async def _upstream_send(
 
 
 async def _iter_upstream(upstream_resp: httpx.Response):
-    """Yield the upstream body, whether it is streaming or already buffered."""
-    try:
-        buffered = upstream_resp.content
-    except httpx.ResponseNotRead:
-        async for chunk in upstream_resp.aiter_raw():
-            yield chunk
+    """Yield the upstream body, whether it is streaming or already buffered.
+
+    The streaming path is the production one and yields **raw** (still encoded)
+    bytes, which is what lets ``Content-Encoding`` be forwarded untouched. An
+    already-consumed response can only offer ``.content``, which httpx has
+    *decoded* -- so ``_build_proxied_response`` drops the encoding header in
+    that case, keeping the invariant that the bytes always match the headers
+    describing them.
+    """
+    if upstream_resp.is_stream_consumed:
+        yield upstream_resp.content
         return
-    yield buffered
+    async for chunk in upstream_resp.aiter_raw():
+        yield chunk
 
 
 #: Dropped from both directions: meaningful only for a single hop.
@@ -1306,6 +1312,10 @@ def _build_proxied_response(request: Request, upstream_resp: httpx.Response) -> 
     saving. ``GZipMiddleware`` sees the header and leaves such responses alone.
     """
     drop = _HOP_BY_HOP | {"content-length"}
+    if upstream_resp.is_stream_consumed:
+        # `.content` is decoded, so claiming an encoding would make the body
+        # undecodable for the client. See _iter_upstream.
+        drop = drop | {"content-encoding"}
     resp_headers = [
         (k, v)
         for k, v in upstream_resp.headers.multi_items()
