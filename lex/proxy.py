@@ -673,7 +673,7 @@ def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         signing_key = _get_signing_key(token)
         if not signing_key:
-            print("[proxy] JWT validation failed: no signing key")
+            logger.warning("JWT validation failed: no signing key available")
             return None
 
         client_id = os.getenv("OIDC_RP_CLIENT_ID", "")
@@ -694,10 +694,10 @@ def validate_jwt_token(token: str) -> Optional[Dict[str, Any]]:
         )
         return payload
     except jwt.ExpiredSignatureError:
-        print("[proxy] JWT token expired")
+        logger.info("JWT token expired")
         return None
     except jwt.InvalidTokenError as e:
-        print(f"[proxy] JWT validation failed: {e}")
+        logger.warning("JWT validation failed: %s", e)
         return None
 
 
@@ -2123,6 +2123,97 @@ def _warn_if_upstream_is_not_colocated() -> None:
 
 
 # -----------------------------------------------------------------------------
+# Access logging: make a failed asset request visible
+# -----------------------------------------------------------------------------
+# There were no access-log lines at all in the production log that this was
+# written for, which is why a browser reporting "Failed to fetch dynamically
+# imported module" could not be traced to a status code. Two uvicorn servers
+# run in this process -- ours on 8501 and Streamlit's own on 8080 -- and Django
+# applies its own ``dictConfig`` afterwards, so whether ``uvicorn.access``
+# survives is not something this module can rely on.
+#
+# So it does not rely on it. This logs through the ``lex`` logger hierarchy,
+# which the same production log proves is configured and emitting, and it
+# chooses levels so the useful half is visible without the noise:
+#
+#   * 4xx/5xx at WARNING -- visible even when LEX_LOG_LEVEL is WARNING, which
+#     is the whole point: an asset that 401s or 404s must never again be
+#     invisible;
+#   * everything else at INFO, and a *successful* static asset not at all
+#     unless asked for. Streamlit eagerly preloads 107 chunks, so logging those
+#     would bury the line anyone actually needs.
+
+ACCESS_LOG_ENABLED = _env_bool("LEX_PROXY_ACCESS_LOG", True)
+#: Log successful static-asset responses too. Off by default: 107 lines per
+#: page load hides everything else. Turn on to confirm the bundle is serving.
+ACCESS_LOG_STATIC = _env_bool("LEX_PROXY_ACCESS_LOG_STATIC", False)
+
+access_logger = logging.getLogger("lex.proxy.access")
+
+
+class AccessLogMiddleware:
+    """Log one line per HTTP request, with the status the client actually got.
+
+    Pure ASGI rather than ``BaseHTTPMiddleware``: it must not buffer a
+    streaming response, and it must see the status even when the response is a
+    passthrough of Streamlit's own bytes.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not ACCESS_LOG_ENABLED:
+            await self.app(scope, receive, send)
+            return
+
+        started = time.monotonic()
+        status_holder = {"code": 0}
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                status_holder["code"] = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            # An exception that escapes here is what the client sees as a
+            # dropped connection, so it is precisely what must be logged.
+            self._log(scope, 500, started, note="unhandled exception")
+            raise
+
+        self._log(scope, status_holder["code"], started)
+
+    def _log(self, scope, status: int, started: float, note: str = "") -> None:
+        path = scope.get("path", "")
+        is_static = path.startswith(f"{STREAMLIT_BASE_URL_PATH}/static/")
+        failed = status >= 400
+
+        if not failed and is_static and not ACCESS_LOG_STATIC:
+            return
+
+        elapsed_ms = (time.monotonic() - started) * 1000
+        query = scope.get("query_string", b"")
+        # `auth_token` is a credential; never write one to a log.
+        suffix = "?<query>" if query else ""
+        message = "%s %s%s -> %d (%.0fms)%s"
+        args = (
+            scope.get("method", "?"),
+            path,
+            suffix,
+            status,
+            elapsed_ms,
+            f" {note}" if note else "",
+        )
+
+        if failed:
+            access_logger.warning(message, *args)
+        else:
+            access_logger.info(message, *args)
+
+
+# -----------------------------------------------------------------------------
 # Routing / app
 # -----------------------------------------------------------------------------
 _assert_static_bundle_present()
@@ -2180,3 +2271,7 @@ app.add_middleware(
     minimum_size=STATIC_GZIP_MIN_SIZE,
     compresslevel=STATIC_GZIP_LEVEL,
 )
+
+# Outermost of all, so the status it records is the one the client received --
+# after gzip, after the session middleware, and including anything those raise.
+app.add_middleware(AccessLogMiddleware)

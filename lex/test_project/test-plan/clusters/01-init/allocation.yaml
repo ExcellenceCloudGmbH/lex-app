@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 295
+max_scenario: 299
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -327,10 +327,10 @@ letters:
       re-entered itself on every rerun. 14 of 17 fail against the pre-fix tree.
   ad:
     title: Streamlit asset bundle served ungated + session durability guards
-    scenarios: 1.247-1.295
+    scenarios: 1.247-1.299
     status: complete
     tests:
-      pass: 49
+      pass: 53
       skip: 0
       xfail: 0
     note: >-

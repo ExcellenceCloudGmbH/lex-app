@@ -2159,3 +2159,129 @@ class TestCluster01ad_StaleConnectionRecovery(SimpleTestCase):
                     resp.status_code, 502,
                     msg=f"{label} must answer 502, not escape as an unhandled exception",
                 )
+
+
+class TestCluster01ad_AccessLogging(SimpleTestCase):
+    """Cluster 1ad: a failed asset request must never be invisible again."""
+
+    def _chunk(self) -> str:
+        return _a_shipped_chunk()
+
+    # -- 1.296 ---------------------------------------------------------
+    def test_1_296_a_failed_request_is_logged_at_warning(self) -> None:
+        """
+        Scenario 1.296: 4xx and 5xx responses are logged at WARNING.
+        Given: a request for a static asset that does not exist, and a gated path
+        When: each is answered
+        Then: both appear in the log at WARNING, carrying method, path and status.
+
+        The reason this exists: a production log for the very bug this batch
+        addresses contained **no access lines at all**, so a browser reporting
+        "Failed to fetch dynamically imported module" could not be traced to a
+        status code -- and the investigation stalled on exactly that. WARNING
+        rather than INFO so the useful half survives a deployment running at
+        LEX_LOG_LEVEL=WARNING.
+        """
+        with self.assertLogs("lex.proxy.access", level="WARNING") as captured:
+            with TestClient(proxy.app) as client:
+                client.get("/static/js/this-chunk-does-not-exist.js")
+                client.get("/", headers={"Accept": "*/*"}, follow_redirects=False)
+
+        joined = "\n".join(captured.output)
+        self.assertIn(
+            "404", joined,
+            msg=f"a missing asset must be logged with its status; got {joined!r}",
+        )
+        self.assertIn(
+            "this-chunk-does-not-exist.js", joined,
+            msg="the log line must name the path that failed",
+        )
+        self.assertIn(
+            "401", joined,
+            msg="a denied request must be logged with its status too",
+        )
+
+    # -- 1.297 ---------------------------------------------------------
+    def test_1_297_a_successful_asset_is_not_logged_by_default(self) -> None:
+        """
+        Scenario 1.297: successful static responses stay quiet unless asked for.
+        Given: a chunk that exists
+        When: it is fetched with the default configuration, then with logging enabled
+        Then: nothing is logged the first time; the request is logged the second.
+
+        Streamlit eagerly preloads 107 chunks, so logging the successes would
+        bury the one line anyone needs -- which is the failure. The opt-in
+        exists for confirming the bundle is serving at all.
+        """
+        chunk = self._chunk()
+
+        with patch.object(proxy, "ACCESS_LOG_STATIC", False):
+            with self.assertNoLogs("lex.proxy.access", level="INFO"):
+                with TestClient(proxy.app) as client:
+                    client.get(f"/static/js/{chunk}")
+
+        with patch.object(proxy, "ACCESS_LOG_STATIC", True):
+            with self.assertLogs("lex.proxy.access", level="INFO") as captured:
+                with TestClient(proxy.app) as client:
+                    client.get(f"/static/js/{chunk}")
+
+        self.assertIn(
+            chunk, "\n".join(captured.output),
+            msg="with the opt-in set, a served chunk must be logged",
+        )
+
+    # -- 1.298 ---------------------------------------------------------
+    def test_1_298_the_log_never_contains_the_query_string(self) -> None:
+        """
+        Scenario 1.298: a credential in the URL is not written to the log.
+        Given: a request carrying ?auth_token=<jwt>
+        When: it is logged
+        Then: the line records that a query was present, not what it contained.
+
+        The embedded dashboard is bootstrapped with the access token in the
+        iframe URL. An access log that echoed it would move the credential from
+        somewhere transient into log storage and every downstream log shipper --
+        which is the opposite of what stripping it from the URL was for.
+        """
+        with self.assertLogs("lex.proxy.access", level="WARNING") as captured:
+            with TestClient(proxy.app) as client:
+                client.get(
+                    "/?model=Fund&auth_token=SUPER-SECRET-JWT-VALUE",
+                    headers={"Accept": "*/*"},
+                    follow_redirects=False,
+                )
+
+        joined = "\n".join(captured.output)
+        self.assertNotIn(
+            "SUPER-SECRET-JWT-VALUE", joined,
+            msg=f"the credential must never reach the log; got {joined!r}",
+        )
+        self.assertNotIn(
+            "auth_token", joined,
+            msg="not even the parameter name, so nothing invites a closer look",
+        )
+        self.assertIn(
+            "401", joined, msg="the status must still be recorded",
+        )
+
+    # -- 1.299 ---------------------------------------------------------
+    def test_1_299_logging_can_be_turned_off_entirely(self) -> None:
+        """
+        Scenario 1.299: LEX_PROXY_ACCESS_LOG=false silences the middleware.
+        Given: access logging disabled
+        When: a failing request is answered
+        Then: nothing is logged, and the response is unaffected.
+
+        An operator with their own request logging in front of this should be
+        able to opt out without the middleware also changing what the client
+        receives.
+        """
+        with patch.object(proxy, "ACCESS_LOG_ENABLED", False):
+            with self.assertNoLogs("lex.proxy.access", level="WARNING"):
+                with TestClient(proxy.app) as client:
+                    resp = client.get("/static/js/still-does-not-exist.js")
+
+        self.assertEqual(
+            resp.status_code, 404,
+            msg="silencing the log must not change the response",
+        )
