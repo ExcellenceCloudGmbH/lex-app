@@ -14,6 +14,15 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
+try:  # Streamlit >= 1.55 moved these; older layouts kept them under scriptrunner.
+    from streamlit.runtime.scriptrunner_utils.exceptions import ScriptControlException
+except ImportError:  # pragma: no cover - defensive across Streamlit versions
+    try:
+        from streamlit.runtime.scriptrunner.exceptions import ScriptControlException
+    except ImportError:
+        class ScriptControlException(BaseException):  # type: ignore[no-redef]
+            """Fallback so the handlers below still have something to catch."""
+
 logger = logging.getLogger(__name__)
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -294,8 +303,42 @@ def _session_is_live(session_id: str) -> bool:
         return True
 
 
+def _read_stop_flag(stop_key: str) -> bool:
+    """Read the stop flag without letting Streamlit's control flow kill the thread.
+
+    The refresher carries a script run context so it can reach
+    ``st.session_state`` at all. The cost is that a read goes through
+    ``SafeSessionState``, which raises ``StopException`` or ``RerunException``
+    to interrupt *the script* -- and both derive from ``BaseException``, so an
+    ``except Exception`` guard does not catch them. Observed in production:
+
+        Exception in thread token_refresher:
+          File "lex/streamlit_app.py", line 298, in _refresher_should_stop
+            return bool(st.session_state.get(stop_key, False)) ...
+        streamlit.runtime.scriptrunner_utils.exceptions.StopException
+
+    The thread then died. ``start_token_refresh_thread_if_needed`` replaces a
+    dead one, but only on the *next script run* -- so if the user's last
+    interaction is what killed it and they then leave the tab idle, there is no
+    further run, nothing restarts it, and the session expires on the access
+    token's own lifetime. That is precisely the "left it open, came back, it
+    was dead" report the refresher exists to prevent, and it is why the failure
+    looks intermittent: it needs a rerun followed by idleness.
+
+    A rerun is completely ordinary, so it must never end the refresher: treat
+    an unreadable flag as "not set" and let ``_session_is_live`` remain the
+    authority on whether to stop.
+    """
+    try:
+        return bool(st.session_state.get(stop_key, False))
+    except ScriptControlException:
+        return False
+    except Exception:
+        return False
+
+
 def _refresher_should_stop(session_id: str, stop_key: str) -> bool:
-    return bool(st.session_state.get(stop_key, False)) or not _session_is_live(session_id)
+    return _read_stop_flag(stop_key) or not _session_is_live(session_id)
 
 
 def _seconds_until_renewal() -> int:
@@ -346,6 +389,14 @@ def _token_refresher(session_id: str, stop_key: str = "stop_token_refresher") ->
                     return
                 time.sleep(min(RENEW_POLL_SECONDS, backoff - slept))
                 slept += RENEW_POLL_SECONDS
+    except ScriptControlException:
+        # A rerun or a stop interrupted a session-state access somewhere in the
+        # loop. The *session* is fine -- only this script run ended -- so
+        # exiting would silently stop renewal for a tab that is still open.
+        # Hand off to a fresh thread instead; the next script run restarts one.
+        log.debug(
+            "Token refresher for session %s interrupted by a script rerun", session_id or "?"
+        )
     except Exception as e:
         # Session state torn down from under us, or an unexpected fault. Exiting
         # is right: a thread that cannot reach its session has nothing to renew.
