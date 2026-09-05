@@ -1427,354 +1427,6 @@ class TestCluster01ad_StartupHardening(SimpleTestCase):
     def test_1_286_the_https_test_agrees_between_the_cli_and_the_proxy(self) -> None:
         """
         Scenario 1.286: an uppercase scheme resolves the same way on both sides.
-        Given: STREAMLIT_URL=HTTPS://dash.example.com and no explicit SameSite
-        When: the CLI pre-flight runs
-        Then: it treats the deployment as https -- refusing the SameSite=none-without-Secure
-              combination that follows from it, exactly as the proxy's import would.
-
-        proxy.py derives the same fact via `httpx.URL(...).scheme`, which
-        lowercases; the pre-flight used `startswith("https://")`. An uppercase
-        scheme therefore passed the readable check and raised later in the
-        worker thread -- a pre-check that disagrees with the rule it mirrors is
-        worse than no pre-check.
-        """
-        import click
-
-        from lex.bin.lex import _warn_if_sessions_are_not_durable
-
-        env = {"STREAMLIT_URL": "HTTPS://dash.example.com", "SESSION_HTTPS_ONLY": "false"}
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop("SESSION_SAMESITE", None)
-            with self.assertRaises(
-                click.ClickException,
-                msg="an uppercase https scheme must be recognised, so SameSite resolves to none",
-            ) as caught:
-                _warn_if_sessions_are_not_durable()
-
-        self.assertIn(
-            "Secure", caught.exception.message,
-            msg="the refusal must be the Secure-cookie one, i.e. https was detected",
-        )
-
-
-def _reimport_proxy_with(env: dict):
-    """Re-import ``lex.proxy`` under ``env``, then restore the live module.
-
-    The guards under test run at import time -- deliberately, so a broken
-    deployment fails before it serves a request -- so exercising them means
-    re-importing. ``None`` in ``env`` removes a variable. The original module is
-    put back afterwards so the rest of the suite keeps the instance it holds
-    references to.
-    """
-    import sys
-
-    import lex as lex_pkg
-
-    saved_module = sys.modules.get("lex.proxy")
-    overrides = {k: v for k, v in env.items() if v is not None}
-    removals = [k for k, v in env.items() if v is None]
-
-    with patch.dict(os.environ, overrides, clear=False):
-        for key in removals:
-            os.environ.pop(key, None)
-        sys.modules.pop("lex.proxy", None)
-        try:
-            return importlib.import_module("lex.proxy")
-        finally:
-            # Both have to go back. Restoring only sys.modules leaves the
-            # PACKAGE attribute bound to the throwaway, so a later
-            # `from lex import proxy` returns a module with a different
-            # TOKEN_STORE than the one the rest of the suite holds.
-            sys.modules["lex.proxy"] = saved_module
-            if saved_module is not None:
-                lex_pkg.proxy = saved_module  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# what review found: the ways each fix could still fail
-# ---------------------------------------------------------------------------
-class TestCluster01ad_ForwardingHardening(SimpleTestCase):
-    """Cluster 1ad: defects an adversarial read of the first pass turned up."""
-
-    # -- 1.277 ---------------------------------------------------------
-    def test_1_277_the_strip_redirect_hands_over_every_credential(self) -> None:
-        """
-        Scenario 1.277: stripping auth_token from the URL re-issues the access cookie.
-        Given: a document request carrying ?auth_token=<jwt>
-        When: the proxy banks it and redirects to the same path without it
-        Then: the redirect sets `st_access`, not only the session cookie.
-
-        The redirect must never deliver *fewer* credentials than the response it
-        replaces. Where the session cookie is unusable inside the frame -- Safari
-        ITP, or any third-party-cookie blocking, which reaches even
-        SameSite=None -- the follow-up request would otherwise arrive with no
-        auth_token (just stripped), no session and no st_access, and get a frame
-        breakout. The proxy would have thrown away the one credential that
-        still worked.
-        """
-        token = "bootstrap-jwt"
-        claims = {"sub": "u1", "email": "u@example.com", "exp": 4_000_000_000}
-
-        with patch.object(proxy, "validate_jwt_token", lambda _t: claims), \
-             patch.object(proxy, "SET_ST_ACCESS_COOKIE", True):
-            with TestClient(proxy.app) as client:
-                resp = client.get(
-                    f"/?model=Fund&auth_token={token}",
-                    headers={"Accept": "text/html", "Sec-Fetch-Dest": "iframe"},
-                    follow_redirects=False,
-                )
-
-        self.assertEqual(resp.status_code, 303, msg="a banked bootstrap token must redirect")
-        cookies = " ".join(resp.headers.get_list("set-cookie"))
-        self.assertIn(
-            "st_access=", cookies,
-            msg=f"the redirect must re-issue st_access; got {cookies!r}",
-        )
-        self.assertNotIn(
-            token, resp.headers["location"],
-            msg="and the token must be gone from the redirect target",
-        )
-
-    # -- 1.278 ---------------------------------------------------------
-    def test_1_278_a_bodiless_response_yields_no_body_at_all(self) -> None:
-        """
-        Scenario 1.278: a 304 relays with no body chunk.
-        Given: an upstream 304 Not Modified
-        When: the proxy relays it
-        Then: the body iterator yields nothing.
-
-        Yielding `b""` is not the same as yielding nothing: an empty first
-        chunk with more_body reaches GZipMiddleware as a body, skips its
-        minimum_size guard, and gets a gzip header and ten bytes attached --
-        after which uvicorn raises "Response content longer than
-        Content-Length". Real `aiter_raw()` yields zero chunks here, so this
-        branch has to match, and it is the branch every test double takes.
-        """
-        async def _collect(resp):
-            return [chunk async for chunk in proxy._iter_upstream(resp)]
-
-        not_modified = httpx.Response(304)
-        self.assertEqual(
-            asyncio.run(_collect(not_modified)), [],
-            msg="a 304 must relay with no body chunk at all, not an empty one",
-        )
-
-        with_body = httpx.Response(200, content=b"payload")
-        self.assertEqual(
-            asyncio.run(_collect(with_body)), [b"payload"],
-            msg="a response that does have a body must still relay it",
-        )
-
-    # -- 1.279 ---------------------------------------------------------
-    def test_1_279_a_mid_body_upstream_failure_is_not_a_truncated_200(self) -> None:
-        """
-        Scenario 1.279: an upstream that dies part-way through the body raises.
-        Given: an upstream response whose stream fails after the first chunk
-        When: the proxy relays it
-        Then: the error propagates rather than the body simply ending.
-
-        The response head is already sent by then, so the failure cannot become
-        an HTTP status -- but truncating silently is worse than dropping the
-        connection. A half-delivered Vite chunk surfaces as a SyntaxError or
-        "Failed to fetch dynamically imported module", indistinguishable from
-        the bug this module exists to fix and not retryable. A dropped
-        connection the browser reports as a network error.
-        """
-        class _FailingStream(httpx.AsyncByteStream):
-            async def __aiter__(self):
-                yield b"first-chunk"
-                raise httpx.ReadError("upstream vanished")
-
-            async def aclose(self) -> None:
-                return None
-
-        async def _drain():
-            resp = httpx.Response(200, stream=_FailingStream())
-            chunks = []
-            async for chunk in proxy._iter_upstream(resp):
-                chunks.append(chunk)
-            return chunks
-
-        with self.assertRaises(
-            httpx.ReadError,
-            msg="a mid-body failure must propagate, not end the body quietly",
-        ):
-            asyncio.run(_drain())
-
-    # -- 1.280 ---------------------------------------------------------
-    def test_1_280_a_public_probe_carrying_a_body_is_not_a_500(self) -> None:
-        """
-        Scenario 1.280: `Content-Length` is never forwarded, so probes with a body work.
-        Given: a GET /_stcore/health that carries a request body
-        When: the proxy forwards it
-        Then: the forwarded headers omit Content-Length, and the probe answers 200.
-
-        The forwarded value beat httpx's own, so sending an empty body while
-        claiming the client's length raised LocalProtocolError ("Too little
-        data for declared Content-Length"). That is neither ConnectError nor
-        TimeoutException, so the readiness endpoint answered 500 -- a liveness
-        probe failing because of a header it did not care about.
-        """
-        _Upstream.reset(lambda: httpx.Response(200, stream=_RawStream(b"ok")))
-        with patch.object(proxy, "_upstream_send", _Upstream.send):
-            with TestClient(proxy.app) as client:
-                resp = client.request("GET", "/_stcore/health", content=b"unexpected-body")
-
-        self.assertEqual(resp.status_code, 200, msg="the probe must still answer 200")
-        forwarded = {k.lower() for k in _Upstream.calls[0]["headers"]}
-        self.assertNotIn(
-            "content-length", forwarded,
-            msg="Content-Length must never be forwarded; httpx recomputes it from the real body",
-        )
-
-    # -- 1.281 ---------------------------------------------------------
-    def test_1_281_the_pooled_client_is_never_shared_across_event_loops(self) -> None:
-        """
-        Scenario 1.281: each event loop gets its own upstream client.
-        Given: two successive event loops in one process
-        When: each asks for the pooled client
-        Then: they get different clients.
-
-        `is_closed` says nothing about which loop a client's keep-alive sockets
-        belong to. Reusing one across loops raises "unable to perform operation
-        on <TCPTransport closed=True>; the handler is closed" from a connection
-        the previous loop left in the pool -- and a module-level singleton
-        outlives any number of loops.
-        """
-        first = asyncio.run(self._client_id())
-        second = asyncio.run(self._client_id())
-
-        self.assertNotEqual(
-            first, second,
-            msg="a client from a finished loop must not be handed to the next one",
-        )
-
-    async def _client_id(self) -> int:
-        return id(await proxy._get_upstream_client())
-
-    # -- 1.282 ---------------------------------------------------------
-    def test_1_282_the_single_flight_lock_belongs_to_the_running_loop(self) -> None:
-        """
-        Scenario 1.282: lock identity is per event loop.
-        Given: two successive event loops
-        When: each takes the JWKS lock under contention
-        Then: neither raises, and each got its own lock object.
-
-        A module-level `asyncio.Lock()` *looks* loop-agnostic because an
-        uncontended acquire never binds it -- but the first contended acquire
-        does, and a contended acquire on another loop then raises "is bound to a
-        different event loop". So it would break only under the concurrency the
-        single-flight was written for, which is the worst possible time.
-        """
-        async def contend():
-            lock = proxy._jwks_lock()
-            async def hold():
-                async with lock:
-                    await asyncio.sleep(0)
-            await asyncio.gather(hold(), hold(), hold())
-            return id(lock)
-
-        first = asyncio.run(contend())
-        second = asyncio.run(contend())
-
-        self.assertNotEqual(
-            first, second, msg="each loop must get its own lock, or contention raises",
-        )
-
-
-class TestCluster01ad_StartupHardening(SimpleTestCase):
-    """Cluster 1ad: startup must fail readably and never on a typo alone."""
-
-    # -- 1.283 ---------------------------------------------------------
-    def test_1_283_a_malformed_integer_setting_does_not_stop_the_proxy(self) -> None:
-        """
-        Scenario 1.283: a non-numeric LEX_PROXY_REPLICAS warns and defaults.
-        Given: LEX_PROXY_REPLICAS=auto
-        When: the proxy is imported
-        Then: it boots with one replica.
-
-        A bare `int()` raised at import, and this module is imported *in the
-        uvicorn worker thread* -- so a typo in one deployment variable killed
-        the proxy while Streamlit kept serving, which reads as "the dashboard is
-        broken" rather than "fix your env". The CLI pre-check already tolerated
-        the same value, so the two disagreed.
-        """
-        module = _reimport_proxy_with({
-            "STREAMLIT_URL": "http://localhost:8501",
-            "LEX_PROXY_REPLICAS": "auto",
-        })
-        self.assertEqual(
-            module.PROXY_REPLICAS, 1,
-            msg="an unparseable replica count must fall back to 1, not raise at import",
-        )
-
-    # -- 1.284 ---------------------------------------------------------
-    def test_1_284_the_bundle_follows_streamlits_base_url_path(self) -> None:
-        """
-        Scenario 1.284: a configured baseUrlPath moves the asset mount with it.
-        Given: LEX_STREAMLIT_BASE_URL_PATH=app
-        When: the proxy builds its routes
-        Then: the static mount is at /app/static, not /static.
-
-        Streamlit serves its whole app under `--server.baseUrlPath`, so the
-        browser asks for /app/static/js/... . A mount fixed at /static misses
-        every one of those, drops them into the authenticated catch-all, and
-        silently restores the 401 storm -- with the bundle present, so nothing
-        warns.
-        """
-        module = _reimport_proxy_with({
-            "STREAMLIT_URL": "http://localhost:8501",
-            "LEX_STREAMLIT_BASE_URL_PATH": "app",
-        })
-        mounts = [getattr(r, "path", "") for r in module._build_static_routes()]
-
-        self.assertIn(
-            "/app/static", mounts,
-            msg=f"the bundle must be mounted under the configured base path; got {mounts}",
-        )
-        self.assertNotIn(
-            "/static", mounts,
-            msg="and not also at the bare root, which would serve two truths",
-        )
-
-    # -- 1.285 ---------------------------------------------------------
-    def test_1_285_the_cli_precheck_mirrors_the_cookie_rules_too(self) -> None:
-        """
-        Scenario 1.285: `lex streamlit`'s pre-flight refuses an unusable SameSite.
-        Given: SESSION_SAMESITE=none with SESSION_HTTPS_ONLY=false, then a typo
-        When: the pre-flight runs
-        Then: each raises a ClickException.
-
-        The pre-flight exists so proxy.py's import-time rules fail on the main
-        thread instead of inside the uvicorn worker, where they kill only the
-        proxy and leave Streamlit serving. It mirrored two of the rules and not
-        these, so exactly the failure it was written to prevent still happened.
-        """
-        import click
-
-        from lex.bin.lex import _warn_if_sessions_are_not_durable
-
-        cases = {
-            "none without Secure": {
-                "SESSION_SAMESITE": "none", "SESSION_HTTPS_ONLY": "false",
-                "STREAMLIT_URL": "http://localhost:8501", "SESSION_SECRET": "s"},
-            "an invalid value": {
-                "SESSION_SAMESITE": "sometimes",
-                "STREAMLIT_URL": "http://localhost:8501", "SESSION_SECRET": "s"},
-        }
-        for label, env in cases.items():
-            with self.subTest(config=label):
-                with patch.dict(os.environ, env, clear=False):
-                    with self.assertRaises(
-                        click.ClickException,
-                        msg=f"the pre-flight must refuse {label} on the main thread",
-                    ):
-                        _warn_if_sessions_are_not_durable()
-
-    # -- 1.286 ---------------------------------------------------------
-    def test_1_286_the_https_test_agrees_between_the_cli_and_the_proxy(self) -> None:
-        """
-        Scenario 1.286: an uppercase scheme resolves the same way on both sides.
         Given: STREAMLIT_URL=HTTPS://dash.example.com, SESSION_HTTPS_ONLY=false, no
                explicit SESSION_SAMESITE
         When: the CLI pre-flight runs
@@ -2285,3 +1937,98 @@ class TestCluster01ad_AccessLogging(SimpleTestCase):
             resp.status_code, 404,
             msg="silencing the log must not change the response",
         )
+
+
+class TestCluster01ad_RefresherSurvivesReruns(SimpleTestCase):
+    """Cluster 1ad: a script rerun must not kill the thread that keeps the session alive."""
+
+    # -- 1.300 ---------------------------------------------------------
+    def test_1_300_streamlits_control_exceptions_are_not_ordinary_exceptions(self) -> None:
+        """
+        Scenario 1.300: StopException and RerunException derive from BaseException.
+        Given: Streamlit's script-control exceptions
+        When: their class hierarchy is inspected
+        Then: neither is a subclass of Exception.
+
+        This is the whole reason the bug existed, and it is worth pinning because
+        nothing about `except Exception` looks wrong until you know it. The
+        refresher guarded its loop that way, and Streamlit interrupts a script by
+        raising something that guard cannot catch -- so the thread died with a
+        traceback instead of being handled.
+        """
+        from streamlit.runtime.scriptrunner_utils.exceptions import (
+            RerunException,
+            ScriptControlException,
+            StopException,
+        )
+
+        for exc in (StopException, RerunException):
+            with self.subTest(exception=exc.__name__):
+                self.assertTrue(
+                    issubclass(exc, ScriptControlException),
+                    msg=f"{exc.__name__} must share the base the handler catches",
+                )
+                self.assertFalse(
+                    issubclass(exc, Exception),
+                    msg=(
+                        f"{exc.__name__} is not an Exception, so `except Exception` misses it -- "
+                        "if that ever changes, the handler can be simplified"
+                    ),
+                )
+
+    # -- 1.301 ---------------------------------------------------------
+    def test_1_301_the_stop_flag_survives_a_rerun_interrupting_the_read(self) -> None:
+        """
+        Scenario 1.301: a control exception during the flag read is not fatal.
+        Given: reading `st.session_state` raises StopException, then RerunException
+        When: the refresher checks whether it should stop
+        Then: it reports "do not stop" both times, and raises nothing.
+
+        Observed in production as `Exception in thread token_refresher` with a
+        StopException at the session-state read. The thread died; a dead one is
+        only replaced on the *next script run*, so if the interaction that killed
+        it was the user's last, nothing restarts it and the session expires on
+        the token's own lifetime. That is the "left it open, came back, it was
+        dead" report -- and why it looked intermittent: it needs a rerun followed
+        by idleness.
+        """
+        import lex.streamlit_app as streamlit_app
+        from streamlit.runtime.scriptrunner_utils.exceptions import (
+            RerunException,
+            StopException,
+        )
+
+        for label, raiser in (
+            ("StopException", StopException()),
+            ("RerunException", RerunException(rerun_data=None)),
+        ):
+            with self.subTest(interrupted_by=label):
+                with patch.object(streamlit_app, "st") as st_mock:
+                    st_mock.session_state.get.side_effect = raiser
+                    self.assertFalse(
+                        streamlit_app._read_stop_flag("stop_token_refresher"),
+                        msg=f"a read interrupted by {label} must not be read as 'stop'",
+                    )
+
+    # -- 1.302 ---------------------------------------------------------
+    def test_1_302_a_real_stop_flag_is_still_obeyed(self) -> None:
+        """
+        Scenario 1.302: making the read safe must not make it deaf.
+        Given: the stop flag genuinely set, then genuinely unset
+        When: the refresher checks it
+        Then: it reports stop, then continue.
+
+        The guard swallows control exceptions; it must not swallow the answer.
+        Without this, "always return False" would satisfy 1.301 while leaking a
+        refresher thread per session for the lifetime of the process.
+        """
+        import lex.streamlit_app as streamlit_app
+
+        for flag, expected in ((True, True), (False, False)):
+            with self.subTest(stop_flag=flag):
+                with patch.object(streamlit_app, "st") as st_mock:
+                    st_mock.session_state.get.return_value = flag
+                    self.assertEqual(
+                        streamlit_app._read_stop_flag("stop_token_refresher"), expected,
+                        msg=f"a stop flag of {flag} must be reported as {expected}",
+                    )

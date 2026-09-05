@@ -264,13 +264,13 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.247 – 1.299 |
+| Scenario range | 1.247 – 1.302 |
 | Type | U |
 | Files covered | `lex/proxy.py` (`_streamlit_static_dir`, `_build_static_routes`, `_apply_asset_cache_headers`, `_assert_static_bundle_present`, `PUBLIC_PROXY_PATHS`, `public_proxy`, `_get_upstream_client`, `_upstream_send`, `_iter_upstream`, `_build_proxied_response`, `_ensure_jwks_ready`, `_fetch_jwks_blocking`, `_get_jwks`, `_safe_next_path`, `_login_path`, `_login_url`, `_current_relative_path`, `_query_without_auth_token`, `_is_document_request`, `login`, `auth_callback`, `proxy`, and the `SESSION_SECRET` / `SESSION_SAMESITE` / `_build_token_store` startup guards), `lex/bin/lex.py` (`streamlit` launch args, `_warn_if_sessions_are_not_durable`) |
 | Test file | `lex/test_project/tests/init/test_1ad_proxy_assets_and_session_durability.py` |
-| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286), `TestCluster01ad_RenewalDelivery` (1.287–1.292), `TestCluster01ad_StaleConnectionRecovery` (1.293–1.295), `TestCluster01ad_AccessLogging` (1.296–1.299) |
+| Test classes | `TestCluster01ad_PublicAssetBundle` (1.247–1.251), `TestCluster01ad_AuthBoundary` (1.252–1.255), `TestCluster01ad_UpstreamForwarding` (1.256–1.259), `TestCluster01ad_JwksResilience` (1.260–1.263), `TestCluster01ad_LoginReturnPath` (1.264–1.267), `TestCluster01ad_BootstrapTokenHygiene` (1.268–1.269), `TestCluster01ad_SessionDurabilityGuards` (1.270–1.274), `TestCluster01ad_LaunchConfiguration` (1.275–1.276), `TestCluster01ad_ForwardingHardening` (1.277–1.282), `TestCluster01ad_StartupHardening` (1.283–1.286), `TestCluster01ad_RenewalDelivery` (1.287–1.292), `TestCluster01ad_StaleConnectionRecovery` (1.293–1.295), `TestCluster01ad_AccessLogging` (1.296–1.299), `TestCluster01ad_RefresherSurvivesReruns` (1.300–1.302) |
 | Fixtures | none — Starlette `TestClient` over the real `proxy.app`, a streaming stub (`_RawStream`) over the `_upstream_send` seam, and `_reimport_proxy_with` to exercise import-time guards |
-| Tests landed | **53 pass / 0 fail**, 36 subtests |
+| Tests landed | **56 pass / 0 fail**, 42 subtests |
 | Coverage gain | the asset path, which had none: what is public, what stays gated, and what the proxy does to a response on the way back. Plus the JWKS availability path, the login return path, and every startup guard |
 | Prereqs | batches 1z (breakout), 1aa (embedded renewal), 1ac (idle survival) — same auth path |
 | Status | ✅ Complete — **27 of the first 30 fail against the pre-fix tree**. The three that pass (1.254 the authenticated boundary, 1.255 the WebSocket deny, 1.271 the permitted configurations still boot) are deliberate guards: they assert behaviour this change must *not* alter, and would be the first things to break if the public allowlist ever widened |
@@ -368,3 +368,26 @@ Logged through the `lex` logger hierarchy rather than `uvicorn.access`, delibera
 | 1.299 | `LEX_PROXY_ACCESS_LOG=false` silences it without changing the response |
 
 Also in this pass: the three remaining `print()` calls in `validate_jwt_token` now go through `logger`. They bypassed logging configuration entirely, which is why "JWT validation failed" never appeared alongside the records that would have explained it.
+
+#### 1ad follow-up 6 — scenarios 1.300–1.302: the last live cause, found by the log we added
+
+The access logging from follow-up 5 paid for itself on its first production log. That log showed the customer's whole session clean — no 4xx on any asset, upload 204, media 200, no `RemoteProtocolError` — and one thing left over:
+
+```
+Exception in thread token_refresher:
+  File "lex/streamlit_app.py", line 298, in _refresher_should_stop
+    return bool(st.session_state.get(stop_key, False)) or not _session_is_live(session_id)
+streamlit.runtime.scriptrunner_utils.exceptions.StopException
+```
+
+The refresher carries a script run context so it can reach `st.session_state` at all. The cost is that a read goes through `SafeSessionState`, which raises `StopException` or `RerunException` to interrupt *the script* — and **both derive from `BaseException`, not `Exception`**, so the loop's `except Exception` could not catch them. The thread died with a traceback.
+
+Why that is the original bug and not just noise: `start_token_refresh_thread_if_needed` replaces a dead thread, but only on the **next script run**. So if the interaction that killed it was the user's last, nothing restarts it, nothing renews the token, and the dashboard expires on the access token's own lifetime. It needs a rerun *followed by idleness* — which is exactly why it looked intermittent, and exactly the "left it open, came back, it was dead" report.
+
+| Scenario | Asserts |
+| --- | --- |
+| 1.300 | `StopException` and `RerunException` share `ScriptControlException` and are **not** `Exception` subclasses — the fact that made `except Exception` look correct |
+| 1.301 | a read interrupted by either is reported as "do not stop" and raises nothing |
+| 1.302 | a genuine stop flag is still obeyed — the guard swallows control exceptions, not the answer, so "always return False" cannot pass |
+
+Also fixed here: a **duplicated block in this test file** that shadowed scenarios 1.277–1.286. Python keeps the later class definition, so 63 methods were defined and only 53 collected — ten scenarios silently not running. The two copies differed only in 1.286's docstring; the kept one was the refined version, so deleting the shadowed copy loses nothing. `defined == collected` is now checked as part of running this batch.

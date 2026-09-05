@@ -151,3 +151,41 @@ non-functional property rather than a guard or a validation.
 
 Scenarios 1.293–1.295, all three failing against the deployed tree. 1.293 drives a real socket
 server that answers and then closes, because a mock cannot reproduce a keep-alive race.
+
+## The log we added found the last one
+
+The access log from the previous section paid for itself on its first production log, and the
+result is the clearest evidence in this whole batch:
+
+**The customer's session was clean.** No 4xx on any asset — the only `/static/` line in the entire
+log was a deliberate probe for a file that does not exist. Upload 204, media 200, no
+`RemoteProtocolError`, no ASGI exception. The asset path and the connection path are both fixed
+and observably working in production.
+
+One thing remained:
+
+```
+Exception in thread token_refresher:
+  File "lex/streamlit_app.py", line 298, in _refresher_should_stop
+streamlit.runtime.scriptrunner_utils.exceptions.StopException
+```
+
+`StopException` and `RerunException` derive from **`BaseException`**, so the refresher's
+`except Exception` could not catch them and the thread died. A dead one is replaced only on the
+*next script run* — so an interaction that killed it followed by idleness left nothing renewing
+the token, and the dashboard expired on its own lifetime. A rerun *followed by idleness*: that is
+why it looked intermittent, and it is the original report exactly.
+
+Three things worth carrying forward:
+
+1. **The diagnostic was the fix.** Three review rounds and two production logs did not find this;
+   the log line that did exist only because 1.296–1.299 added it. When an investigation stalls on
+   "I cannot see what happened", building the ability to see is the highest-value work available.
+2. **`except Exception` is not a catch-all**, and in a framework that uses exceptions for control
+   flow it is a trap. `BaseException` subclasses are how Streamlit stops a script, how `asyncio`
+   cancels a task, and how Python exits — all of which can cross a thread boundary that a
+   long-running worker sits on.
+3. **`defined == collected` is worth asserting.** A duplicated class block in this very file had
+   been shadowing scenarios 1.277–1.286 — 63 methods defined, 53 collected — so ten scenarios
+   were silently not running, including several that gate the security boundary. Nothing failed;
+   they simply were not there.
