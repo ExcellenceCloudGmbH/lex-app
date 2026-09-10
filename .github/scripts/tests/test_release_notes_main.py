@@ -255,7 +255,13 @@ def test_digest_for_records_the_frontend_commit_count_and_the_facts(monkeypatch,
     """The two pieces of context the drafter cannot compute for itself."""
     from release_notes import __main__ as main, digest as digest_mod, ranges, facts
 
-    monkeypatch.setattr(main, "_previous_tag_for", lambda tag: "v1.0.0", raising=False)
+    # `_all_tags`, because that is what `_digest_for` actually calls. An
+    # earlier version patched `_previous_tag_for` with `raising=False` — a
+    # function this module does not have — so it stubbed nothing, the real
+    # `git tag --merged v1.0.1` ran, and the test passed only on a machine
+    # whose clone happens to carry that tag. CI's checkout fetches no tags, so
+    # it failed there and nowhere else.
+    monkeypatch.setattr(main, "_all_tags", lambda tag: ["v1.0.0"])
     monkeypatch.setattr(ranges, "frontend_range", lambda p, c, **k: None)
     monkeypatch.setattr(digest_mod, "collect_commits", lambda a, b, **k: [])
     monkeypatch.setattr(facts, "collect", lambda a, b, **k: {
