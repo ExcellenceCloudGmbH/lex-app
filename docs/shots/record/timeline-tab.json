@@ -1,0 +1,21 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Timeline tab",
+  "image_href": "timeline-tab.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "tab",
+      "box": {
+        "x": 514,
+        "y": 130,
+        "width": 91,
+        "height": 72
+      },
+      "found": true,
+      "detail": "Timeline"
+    }
+  ]
+}

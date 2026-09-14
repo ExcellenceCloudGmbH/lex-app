@@ -1,0 +1,32 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Dark mode",
+  "image_href": "dark-mode.png",
+  "surface": "dark",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "themeToggle",
+      "box": {
+        "x": 1113,
+        "y": 16,
+        "width": 40,
+        "height": 40
+      },
+      "found": true,
+      "detail": ""
+    },
+    {
+      "name": "firstRow",
+      "box": {
+        "x": 320,
+        "y": 174,
+        "width": 2083,
+        "height": 25
+      },
+      "found": true,
+      "detail": "9/10/2026Initial Data UploadEpsilon Bond FundEUR"
+    }
+  ]
+}

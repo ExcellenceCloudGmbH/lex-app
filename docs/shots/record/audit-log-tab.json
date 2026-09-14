@@ -1,0 +1,21 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Audit Log tab",
+  "image_href": "audit-log-tab.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "tab",
+      "box": {
+        "x": 695,
+        "y": 130,
+        "width": 99,
+        "height": 72
+      },
+      "found": true,
+      "detail": "Audit Log"
+    }
+  ]
+}

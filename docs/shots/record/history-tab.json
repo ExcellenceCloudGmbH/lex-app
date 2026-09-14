@@ -1,0 +1,21 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "History tab",
+  "image_href": "history-tab.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "tab",
+      "box": {
+        "x": 605,
+        "y": 130,
+        "width": 90,
+        "height": 72
+      },
+      "found": true,
+      "detail": "History"
+    }
+  ]
+}

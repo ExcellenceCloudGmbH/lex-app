@@ -1,0 +1,32 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Compact rows",
+  "image_href": "density-compact.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "firstRow",
+      "box": {
+        "x": 320,
+        "y": 178.75,
+        "width": 2083,
+        "height": 25
+      },
+      "found": true,
+      "detail": "9/10/2026Initial Data UploadEpsilon Bond FundEUR"
+    },
+    {
+      "name": "settingsGear",
+      "box": {
+        "x": 1162,
+        "y": 79.375,
+        "width": 34,
+        "height": 34
+      },
+      "found": true,
+      "detail": ""
+    }
+  ]
+}

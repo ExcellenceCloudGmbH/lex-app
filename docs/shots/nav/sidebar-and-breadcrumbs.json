@@ -1,0 +1,43 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Navigation",
+  "image_href": "sidebar-and-breadcrumbs.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "search",
+      "box": {
+        "x": 48.171875,
+        "y": 91.046875,
+        "width": 224.234375,
+        "height": 27.859375
+      },
+      "found": true,
+      "detail": ""
+    },
+    {
+      "name": "sidebarGroup",
+      "box": {
+        "x": 16,
+        "y": 153.5,
+        "width": 267,
+        "height": 31.96875
+      },
+      "found": true,
+      "detail": "Funds"
+    },
+    {
+      "name": "breadcrumb",
+      "box": {
+        "x": 332,
+        "y": 21.25,
+        "width": 169.375,
+        "height": 30
+      },
+      "found": true,
+      "detail": "fundshow"
+    }
+  ]
+}

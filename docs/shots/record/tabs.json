@@ -1,0 +1,65 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Record page",
+  "image_href": "tabs.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "summaryTab",
+      "box": {
+        "x": 320,
+        "y": 134,
+        "width": 98,
+        "height": 72
+      },
+      "found": true,
+      "detail": "Summary"
+    },
+    {
+      "name": "analyticsTab",
+      "box": {
+        "x": 418,
+        "y": 134,
+        "width": 96,
+        "height": 72
+      },
+      "found": true,
+      "detail": "Analytics"
+    },
+    {
+      "name": "timelineTab",
+      "box": {
+        "x": 514,
+        "y": 134,
+        "width": 91,
+        "height": 72
+      },
+      "found": true,
+      "detail": "Timeline"
+    },
+    {
+      "name": "historyTab",
+      "box": {
+        "x": 605,
+        "y": 134,
+        "width": 90,
+        "height": 72
+      },
+      "found": true,
+      "detail": "History"
+    },
+    {
+      "name": "auditTab",
+      "box": {
+        "x": 695,
+        "y": 134,
+        "width": 99,
+        "height": 72
+      },
+      "found": true,
+      "detail": "Audit Log"
+    }
+  ]
+}

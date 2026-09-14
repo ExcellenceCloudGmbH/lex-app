@@ -1,0 +1,54 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Funds",
+  "image_href": "first-look.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "sidebar",
+      "box": {
+        "x": 48.171875,
+        "y": 91.046875,
+        "width": 224.234375,
+        "height": 27.859375
+      },
+      "found": true,
+      "detail": ""
+    },
+    {
+      "name": "firstRow",
+      "box": {
+        "x": 320,
+        "y": 178.75,
+        "width": 2083,
+        "height": 25
+      },
+      "found": true,
+      "detail": "9/10/2026Initial Data UploadEpsilon Bond FundEUR"
+    },
+    {
+      "name": "nameHeader",
+      "box": {
+        "x": 1029,
+        "y": 121.75,
+        "width": 194,
+        "height": 56
+      },
+      "found": true,
+      "detail": "Name"
+    },
+    {
+      "name": "settingsGear",
+      "box": {
+        "x": 1162,
+        "y": 79.375,
+        "width": 34,
+        "height": 34
+      },
+      "found": true,
+      "detail": ""
+    }
+  ]
+}

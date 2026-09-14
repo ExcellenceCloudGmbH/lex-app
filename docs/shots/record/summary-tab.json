@@ -1,0 +1,21 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Summary tab",
+  "image_href": "summary-tab.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "tab",
+      "box": {
+        "x": 320,
+        "y": 130,
+        "width": 98,
+        "height": 72
+      },
+      "found": true,
+      "detail": "Summary"
+    }
+  ]
+}

@@ -1,0 +1,147 @@
+# Documentation figures, declared once and rebuilt from the live product.
+#
+#   # 1. capture, from the frontend repo (process-admin-general-client):
+#   LEX_DOCSHOT_DIR=<lex-app>/docs/shots npx playwright test docshots.spec.ts
+#
+#   # 2. render, from here:
+#   python -m docshots build docs/figures.yml --out ../lex-app-docs/content/images
+#   python -m docshots build docs/figures.yml --check     # CI: fail if the product moved
+#
+# Two kinds of source:
+#   terminal:  a command that is actually run, its output captured
+#   shot:      a JSON+PNG pair written by e2e/helpers/docshot.ts in the
+#              frontend repo, which records a bounding box per named locator
+#
+# `anchors` name the things worth pointing at — a regex over the command's
+# plain output, or (for a browser shot) a CSS selector resolved at capture
+# time. `callouts` say what to write about them. When an anchor stops
+# resolving the build fails: a renamed control breaks the docs on the pull
+# request that renamed it.
+#
+# A figure with no callouts is a plain framed screenshot. That is the right
+# answer when the page's prose already walks through what is on screen and
+# the reader only needs to see it.
+
+figures:
+  # docs page: using-the-app/the-grid (index)
+  - out: the-grid/first-look.svg
+    shot: shots/grid/first-look.json
+    surface: light
+    callouts:
+      - anchor: sidebar
+        text: "Search the sidebar to jump straight to a model instead of hunting through folders."
+      - anchor: settingsGear
+        text: "The gear opens the table settings panel — density, columns and number formats."
+      - anchor: nameHeader
+        text: "Click a header to sort. The filter control sits on the header by default."
+      - anchor: firstRow
+        text: "Click any row to open its record page."
+
+  # docs page: using-the-app/the-grid/table settings
+  - out: the-grid/table-settings.svg
+    shot: shots/grid/table-settings.json
+    surface: light
+    callouts:
+      - anchor: density
+        text: "Row height. Three steps, and the choice travels with the view rather than with you."
+      - anchor: statusBar
+        text: "The bar under the grid carrying the live sum, average and count for a selected range."
+      - anchor: timeInDates
+        text: "Off by default — a date column reads more cleanly without it, and the full timestamp is still on hover."
+      - anchor: filterButton
+        text: "The funnel in every column header. Filtering also works from the column menu."
+      - anchor: formats
+        text: "Any numeric column can be shown as a plain number, a currency or a percentage."
+      - anchor: reset
+        text: "Clears your overrides and hands every column back to what the application declares."
+
+  # docs page: using-the-app/record-detail (index)
+  - out: record-detail/tabs.svg
+    shot: shots/record/tabs.json
+    surface: light
+    callouts:
+      - anchor: summaryTab
+        text: "The record's own fields, laid out for reading rather than editing."
+      - anchor: analyticsTab
+        text: "A Streamlit dashboard scoped to this record."
+      - anchor: timelineTab
+        text: "Each version as a bar on a time axis — how long each one was the current one."
+      - anchor: historyTab
+        text: "Every version as a row, with time-travel to any of them."
+      - anchor: auditTab
+        text: "Who changed what, and when, for this record alone."
+
+  # The tab pages already walk through what is on screen; these are framed
+  # screenshots rather than annotated ones.
+  - out: record-detail/summary-tab.svg
+    shot: shots/record/summary-tab.json
+    surface: light
+  - out: record-detail/timeline-tab.svg
+    shot: shots/record/timeline-tab.json
+    surface: light
+  - out: record-detail/history-tab.svg
+    shot: shots/record/history-tab.json
+    surface: light
+  - out: record-detail/audit-log-tab.svg
+    shot: shots/record/audit-log-tab.json
+    surface: light
+
+  # docs page: using-the-app/navigation
+  #
+  # Captured from a record page, not the grid: the page describes a
+  # `Home > Group > Model > #id` trail, and the grid only ever has two
+  # segments to show.
+  - out: navigation/sidebar-and-breadcrumbs.svg
+    shot: shots/nav/sidebar-and-breadcrumbs.json
+    surface: light
+    callouts:
+      - anchor: search
+        text: "Type a few letters here instead of opening folders — it matches every model in the project."
+      - anchor: sidebarGroup
+        text: "A group from your project's model_structure.yaml. Click to expand it; the sidebar remembers."
+      - anchor: breadcrumb
+        text: "Where you are, and a way back to any level above."
+
+  # docs page: using-the-app/the-grid/density and display
+  #
+  # A pair. One picture cannot show a difference, and the reader's question
+  # is how much tighter Compact actually is. Framed, not annotated: the row
+  # height IS the subject, and callouts would cover the thing being compared.
+  - out: the-grid/density-compact.svg
+    shot: shots/grid/density-compact.json
+    surface: light
+  - out: the-grid/density-comfortable.svg
+    shot: shots/grid/density-comfortable.json
+    surface: light
+
+  # docs page: using-the-app/themes
+  - out: app/dark-mode.svg
+    shot: shots/app/dark-mode.json
+    surface: dark
+    callouts:
+      - anchor: themeToggle
+        text: "One control, in the header bar. Your choice is remembered per browser."
+      - anchor: firstRow
+        text: "The grid follows the app, and so do embedded dashboards."
+
+  # docs page: reference/CLI Commands, and the home page's note about it.
+  #
+  # Needs the lex-app CLI first on PATH. On many machines `/usr/bin/lex` is
+  # flex, the lexical analyser, and the capture then photographs its usage
+  # message instead — which the anchors catch, but only after a confusing
+  # minute.
+  - out: cli/lex-help.svg
+    terminal:
+      command: lex --help
+      title: lex --help
+    anchors:
+      pytest: '^\s+pytest\b.*'
+      groups: '^\s+pytest-groups\b.*'
+      streamlit: '^\s+streamlit\b.*'
+    callouts:
+      - anchor: pytest
+        text: "Runs pytest with Django already bootstrapped — no manage.py, no settings to juggle."
+      - anchor: groups
+        text: "Lists the configured test groups, so you can run one cluster instead of the whole suite."
+      - anchor: streamlit
+        text: "Serves the dashboards behind the same authentication as the app."
