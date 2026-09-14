@@ -86,6 +86,44 @@ figures:
     shot: shots/record/audit-log-tab.json
     surface: light
 
+  # docs page: using-the-app/navigation
+  #
+  # Captured from a record page, not the grid: the page describes a
+  # `Home > Group > Model > #id` trail, and the grid only ever has two
+  # segments to show.
+  - out: navigation/sidebar-and-breadcrumbs.svg
+    shot: shots/nav/sidebar-and-breadcrumbs.json
+    surface: light
+    callouts:
+      - anchor: search
+        text: "Type a few letters here instead of opening folders — it matches every model in the project."
+      - anchor: sidebarGroup
+        text: "A group from your project's model_structure.yaml. Click to expand it; the sidebar remembers."
+      - anchor: breadcrumb
+        text: "Where you are, and a way back to any level above."
+
+  # docs page: using-the-app/the-grid/density and display
+  #
+  # A pair. One picture cannot show a difference, and the reader's question
+  # is how much tighter Compact actually is. Framed, not annotated: the row
+  # height IS the subject, and callouts would cover the thing being compared.
+  - out: the-grid/density-compact.svg
+    shot: shots/grid/density-compact.json
+    surface: light
+  - out: the-grid/density-comfortable.svg
+    shot: shots/grid/density-comfortable.json
+    surface: light
+
+  # docs page: using-the-app/themes
+  - out: app/dark-mode.svg
+    shot: shots/app/dark-mode.json
+    surface: dark
+    callouts:
+      - anchor: themeToggle
+        text: "One control, in the header bar. Your choice is remembered per browser."
+      - anchor: firstRow
+        text: "The grid follows the app, and so do embedded dashboards."
+
   # docs page: reference/CLI Commands, and the home page's note about it.
   #
   # Needs the lex-app CLI first on PATH. On many machines `/usr/bin/lex` is
