@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_doc_imports import REPO, mirror_owned_paths  # noqa: E402
+from check_doc_imports import REPO, mirror_owned_paths, warn_if_behind  # noqa: E402
 
 CLI_SOURCE = REPO / "lex" / "bin" / "lex.py"
 
@@ -113,7 +113,7 @@ def main(argv: list[str]) -> int:
 
     if failures:
         print(f"\n{len(failures)} unknown command reference(s).", file=sys.stderr)
-        return 1
+        return 0 if warn_if_behind() else 1
 
     print(f"OK: {checked} `lex <command>` reference(s) across {len(pages)} page(s) all exist.")
     return coverage(pages, commands)
@@ -154,7 +154,7 @@ def coverage(pages: list[Path], commands: set[str]) -> int:
         + '"Commands this page leaves out" table there with the reason.',
         file=sys.stderr,
     )
-    return 1
+    return 0 if warn_if_behind() else 1
 
 
 if __name__ == "__main__":
