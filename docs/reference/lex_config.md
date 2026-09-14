@@ -11,10 +11,10 @@ title: "lex_config.py — project settings"
 
 | Key                       | Purpose                                                                              | Documented in                                                                  |
 | ------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `INITIAL_DATA`            | Path to the JSON file the framework loads on `lex Init` to seed your database        | [[features/data-pipeline/initial data]]                                        |
-| `PROJECT_GROUPS`          | List of [Keycloak](https://www.keycloak.org/documentation) group names to create on `lex Init` | [[tutorial/Part 4 — Validation & Permissions]], [[features/access-and-ui/permissions]] |
-| `TAB_DISPLAY_NAMES`       | Friendly labels for the tabs in the record-detail view                               | [[interface/record-detail/index]]                                              |
-| `DEFAULT_SERIALIZER_NAME` | Name of the serializer the framework picks when no explicit one is requested         | [[features/data-pipeline/serializers]]                                         |
+| `INITIAL_DATA`            | Path to the JSON file the framework loads on `lex Init` to seed your database        | [[model-your-data/initial data]]                                        |
+| `PROJECT_GROUPS`          | List of [Keycloak](https://www.keycloak.org/documentation) group names to create on `lex Init` | [[start-here/tutorial/Part 4 — Validation & Permissions]], [[access-and-dashboards/permissions]] |
+| `TAB_DISPLAY_NAMES`       | Friendly labels for the tabs in the record-detail view                               | [[using-the-app/record-detail/index]]                                              |
+| `DEFAULT_SERIALIZER_NAME` | Name of the serializer the framework picks when no explicit one is requested         | [[model-your-data/serializers]]                                         |
 
 ## `INITIAL_DATA`
 
@@ -22,7 +22,7 @@ title: "lex_config.py — project settings"
 INITIAL_DATA = "Tests/test_data.json"
 ```
 
-The path (relative to the project root) of the JSON fixture loaded when you run `lex Init` or `lex create_db`. Use it to seed reference data — categories, lookup tables, demo records — so a fresh database isn't empty. See [[features/data-pipeline/initial data]] for the file format and the bulk-load behaviour.
+The path (relative to the project root) of the JSON fixture loaded when you run `lex Init` or `lex create_db`. Use it to seed reference data — categories, lookup tables, demo records — so a fresh database isn't empty. See [[model-your-data/initial data]] for the file format and the bulk-load behaviour.
 
 ## `PROJECT_GROUPS`
 
@@ -41,7 +41,7 @@ TAB_DISPLAY_NAMES = {
 }
 ```
 
-A mapping from internal tab keys to the labels shown in the record-detail view. Tabs you don't list keep their default label. See [[interface/record-detail/index]] for the list of tab keys you can override.
+A mapping from internal tab keys to the labels shown in the record-detail view. Tabs you don't list keep their default label. See [[using-the-app/record-detail/index]] for the list of tab keys you can override.
 
 ## `DEFAULT_SERIALIZER_NAME`
 
@@ -49,9 +49,9 @@ A mapping from internal tab keys to the labels shown in the record-detail view. 
 DEFAULT_SERIALIZER_NAME = "compact"
 ```
 
-The serializer the framework reaches for when an API request doesn't ask for one explicitly. Defaults to the framework's built-in full serializer if unset. The History tables pick the override up automatically, so a change here affects both live and historical views. See [[features/data-pipeline/serializers]] for the full mechanic.
+The serializer the framework reaches for when an API request doesn't ask for one explicitly. Defaults to the framework's built-in full serializer if unset. The History tables pick the override up automatically, so a change here affects both live and historical views. See [[model-your-data/serializers]] for the full mechanic.
 
 ## Where it fits in the project
 
-`lex_config.py` is generated for you by `lex setup` and sits at the project root alongside `manage.py`, `lex_app/`, and your model packages. See [[project structure|Project structure]] for the full layout.
+`lex_config.py` is generated for you by `lex setup` and sits at the project root alongside `manage.py`, `lex_app/`, and your model packages. See [[start-here/project structure|Project structure]] for the full layout.
 

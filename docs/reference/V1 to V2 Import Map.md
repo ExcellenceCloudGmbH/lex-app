@@ -42,4 +42,4 @@ A complete find-and-replace table for updating your imports.
 | `from generic_app.generic_models.upload_model import IsCalculatedField` | *(removed — inherited from `CalculationModel`)* |
 | `from generic_app.generic_models.upload_model import CalculateField` | *(removed — inherited from `CalculationModel`)* |
 
-See [[migration/import migration]] for a full walkthrough of how to apply these changes.
+See [[migrating-from-v1/import migration]] for a full walkthrough of how to apply these changes.

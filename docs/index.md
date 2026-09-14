@@ -1,33 +1,71 @@
 ---
-title: Welcome to Lex App
+title: Lex App
+aliases:
+  - "home"
+  - "getting started"
+  - "features/index"
 ---
 
-Lex App is an [open-source](https://github.com/ExcellenceCloudGmbH/lex-app) [Python](https://www.python.org/)/[Django](https://docs.djangoproject.com/) framework for building data-driven business applications. You define your models and business logic; Lex App gives you the web UI, REST API, authentication, real-time updates, and a full audit trail — out of the box.
+Lex App is an [open-source](https://github.com/ExcellenceCloudGmbH/lex-app) [Python](https://www.python.org/)/[Django](https://docs.djangoproject.com/) framework for building data-driven business applications. You write the models and the business logic. You get a web interface, a REST API, authentication, real-time updates, permissions and a complete audit trail without writing any of them.
 
-At its heart, Lex App follows the **ETL pattern** — Extract, Transform, Load — the same pattern that powers data pipelines everywhere:
+## Start here
+
+**Building an application?** Go to [[start-here/index|Start Here]] — install it, learn the folder layout, then build a real one in the [[start-here/tutorial/index|TeamBudget tutorial]]. Allow an afternoon.
+
+**Using an application someone built for you?** Go to [[using-the-app/index|Using the App]]. Nothing there assumes you write Python.
+
+**Moving a project off `generic_app`?** Start at [[migrating-from-v1/index|Migrating from V1]].
+
+## How a Lex app is shaped
+
+Every project follows Extract → Transform → Load, and the folder layout says so out loud:
 
 ```mermaid
 flowchart LR
     A["📥 Extract
-    (Upload/)"] --> B["⚙️ Transform
-    (Input/)"]
+    Upload/"] --> B["⚙️ Transform
+    Input/"]
     B --> C["📊 Load
-    (Reports/)"]
+    Reports/"]
 ```
 
-**Upload models** ingest raw data — CSV files, Excel sheets, API payloads. **Input models** hold your business entities and domain logic. **Report models** compute summaries, run analytics, and surface results through interactive [Streamlit](https://docs.streamlit.io/) dashboards. Every step is tracked with [[features/tracking/bitemporal history|bitemporal history]], every action logged, every permission enforced.
+| Stage | Folder | What lives here |
+|---|---|---|
+| **Extract** | `Upload/` | Models that ingest CSVs, Excel sheets and API payloads |
+| **Transform** | `Input/` | Your business entities and the domain logic over them |
+| **Load** | `Reports/` | Models that compute summaries and feed [Streamlit](https://docs.streamlit.io/) dashboards |
 
-## Get Started
+You meet this layout in [[start-here/project structure|Project Structure]] and use it for the rest of the tutorial.
 
-1. [[installation|Install Lex App]] and set up your environment
-2. [[project structure|Understand the project structure]] and the ETL folder convention
-3. Work through the [[tutorial/index|TeamBudget Tutorial]] to build a real app
-4. Explore [[features/index|all building blocks]] or dive into the [[reference/index|reference]]
+## What the framework gives you
 
-## Explore the Interface
+Each section is something you will need at some point, in roughly the order you tend to need it. None of it is mandatory — you use what your application actually calls for.
 
-Already using Lex App? Explore the [[interface/index|user interface documentation]] — the [[interface/the-grid/index|data grid]], [[interface/record-detail/index|record detail]], [[interface/the-grid/saved views|saved views]], [[interface/themes|themes]], and more.
+| Section | What it covers |
+|---|---|
+| [[model-your-data/index\|Model your data]] | Model structure, serializers, initial data, lifecycle hooks |
+| [[calculations/index\|Calculations]] | Calculation models, batch generation, Celery, scheduling, logging |
+| [[history-and-audit/index\|History & audit]] | Change history, bitemporal queries, audit logs |
+| [[access-and-dashboards/index\|Access & dashboards]] | Permissions, Streamlit dashboards, widgets, embedding |
+| [[ship-and-operate/index\|Ship & operate]] | Deploying, configuration, upgrading, monitoring, troubleshooting |
+| [[using-the-app/index\|Using the app]] | The grid, record pages, saved views, exports — for the people who use what you built |
+| [[reference/index\|Reference]] | CLI commands, environment variables, class internals |
 
-## Migrating from V1?
+## Quick start
 
-If you're moving an existing project from `generic_app`, follow the [[migration/refactoring/index|step-by-step refactoring series]]. It covers everything from import updates to database migration.
+```bash
+pip install lex-app
+
+lex setup     # generate .run/, .vscode/launch.json, .env and migrations/
+lex init      # apply migrations, sync models and permissions to Keycloak
+lex start --reload --loop asyncio lex_app.asgi:application
+```
+
+Full walkthrough in [[start-here/installation|Installation]].
+
+> [!tip] `lex --help` does not list everything
+> It shows the ten commands the CLI implements itself. Django management
+> commands — `init`, `migrate`, `create_db`, `sync_keycloak` and the rest —
+> all work, but stay hidden, because listing them would mean starting Django
+> just to print help. [[reference/CLI Commands|CLI Commands]] is the complete
+> list.
