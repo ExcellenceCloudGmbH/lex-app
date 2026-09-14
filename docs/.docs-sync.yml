@@ -22,16 +22,22 @@ source_root: content
 # copied. Allowlist only — add a path here when a new published section
 # appears upstream.
 managed_paths:
-  - features
-  - interface
+  # Renamed wholesale by the 2026-09 restructure. features, interface,
+  # tutorial and migration no longer exist upstream; leaving them listed
+  # would mirror nothing while their local copies sat here forever, serving
+  # a tree the source had abandoned.
+  - start-here
+  - model-your-data
+  - calculations
+  - history-and-audit
+  - access-and-dashboards
+  - ship-and-operate
+  - using-the-app
   - reference
-  - tutorial
-  - migration
+  - migrating-from-v1
   - videos
   - workshop
   - images
-  - "getting started.md"
-  - "installation.md"
-  - "project structure.md"
-  - "running your app.md"
+  # The four root pages that used to be listed here moved into start-here/
+  # and are mirrored as part of it. Only the home page is still a root file.
   - "index.md"

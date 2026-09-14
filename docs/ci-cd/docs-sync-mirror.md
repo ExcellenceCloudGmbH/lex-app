@@ -7,6 +7,32 @@
 
 ---
 
+## When the mirror stops
+
+It did, silently, for weeks. Worth knowing the shape of it.
+
+The branch was named `docs-sync/<upstream-sha>` and pushed with
+`--force-with-lease`, so a rerun would update it. This repository's ruleset
+forbids force-pushing to **any** branch, so the first run for a given upstream
+commit succeeded and every rerun after it was rejected:
+
+```
+remote: error: GH013: Repository rule violations found for refs/heads/docs-sync/<sha>
+remote: - Cannot force-push to this branch
+```
+
+The job fails at the push, which means no PR, no notification, and a `docs/`
+tree that quietly falls further behind. By the time it was noticed, eight of
+the twelve managed sections were missing locally while the site served them
+fine.
+
+The branch name now carries the run id as well, so nothing ever needs a force,
+and the job exits early when an open PR already mirrors the same upstream
+commit. If the mirror looks stale again, check the workflow's run history
+first — a red daily cron is the symptom, and the failure is at the very last
+step, after all the useful work is done.
+
+
 ## What it does
 
 `lex-app-docs/content/` is the **canonical** published documentation. This pipeline mirrors the

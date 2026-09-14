@@ -1,3 +1,0 @@
-lex-app
-pandas
-openpyxl
