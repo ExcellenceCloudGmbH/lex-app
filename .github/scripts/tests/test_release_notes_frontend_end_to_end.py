@@ -225,3 +225,42 @@ def test_the_two_halves_are_tallied_separately(world, capsys):
     err = capsys.readouterr().err
     assert "Backend PR enrichment:" in err
     assert "Frontend PR enrichment:" in err
+
+
+def test_the_release_that_introduces_the_pin_is_a_gap(world, monkeypatch):
+    """Even with a manifest at both ends that resolves perfectly well.
+
+    This is the transition release, and it is the case a unit test missed: with
+    `bundle` stubbed to None the fallback happened to fail, so the gap looked
+    like the contract working. With a real manifest it does not fail — it
+    answers, comparing two vendored bundles for a release whose frontend now
+    comes from a pinned package instead.
+    """
+    lex = world["lex"]
+    manifest = lex / ranges.MANIFEST_PATH
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+
+    # v2.90.0 loses its pin but keeps a manifest, exactly as a pre-pin tag has.
+    _git(lex, "checkout", "-q", "-B", "transition", "v2.90.0~1")
+    manifest.write_text('{"sha": "%s"}' % ("a" * 40), encoding="utf-8")
+    _git(lex, "add", "-A")
+    _git(lex, "commit", "-q", "-m", "build(react): record the bundle")
+    _git(lex, "tag", "-f", "v2.93.0")
+
+    _write_pin(lex, "1.9.0")
+    manifest.write_text('{"sha": "%s"}' % ("b" * 40), encoding="utf-8")
+    _git(lex, "add", "-A")
+    _git(lex, "commit", "-q", "-m", "build(deps): introduce the pin")
+    _git(lex, "tag", "-f", "v2.93.1")
+
+    # The manifest alone would resolve: two ends, two distinct shas.
+    assert ranges.frontend_sha_at("v2.93.0") == "a" * 40
+    assert ranges.frontend_sha_at("v2.93.1") == "b" * 40
+    # It must still refuse, because the two ends measure different things.
+    assert ranges.frontend_range("v2.93.0", "v2.93.1") is None
+
+    built = main._digest_for("v2.93.1", pac_checkout=world["pac"])
+    assert built["frontend_recorded"] is False
+    assert changelog.GAP_MARKER in changelog.render(
+        built, date="2026-09-14", repo=LEX_REPO
+    )
