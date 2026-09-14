@@ -93,4 +93,16 @@ class ParentCalculation(CalculationModel):
         LexLogger().add_text("Child finished.").log()
 ```
 
-See [[features/processing/logging]] for more examples and usage patterns.
+Pass a plain string instead of a model instance to create a labeled section node in the log tree:
+
+```python
+with model_logging_context("Data preparation"):
+    LexLogger().add_text("Loading source data...").log()
+
+with model_logging_context("Processing"):
+    LexLogger().add_text("Running calculations...").log()
+```
+
+Strings and model instances nest freely with each other.
+
+See [[calculations/logging]] for more examples and usage patterns.
