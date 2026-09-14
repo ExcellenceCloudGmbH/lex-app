@@ -256,6 +256,27 @@ def frontend_range(
     SHA at both ends there is no truthful frontend range, and inventing one
     would produce notes about changes that may not be in the shipped bundle.
     """
+    # The declared pin wins, and only when BOTH ends carry one. Two versions
+    # are two frontend releases, so the range is known from the tags alone —
+    # no manifest, no side-car, and no way for it to fail after a release has
+    # already shipped, which is what retires the gap machinery.
+    #
+    # One pin is deliberately not enough: the release that INTRODUCES the pin
+    # has none at its previous tag, and inventing a starting point would
+    # attribute every frontend commit in history to that single release.
+    previous_version = (
+        frontend_version_at(previous_tag, show=show) if previous_tag else None
+    )
+    current_version = frontend_version_at(current_tag, show=show)
+    if previous_version and current_version:
+        # These carry frontend TAGS rather than SHAs. The field names
+        # under-describe that, but renaming them touches every historical call
+        # site for no behavioural gain — `git log` treats the two alike.
+        return Range(
+            from_sha=pac_tag_for(previous_version),
+            to_sha=pac_tag_for(current_version),
+        )
+
     to_sha = frontend_sha_at(current_tag, show=show, history=history, bundle=bundle)
     if to_sha is None:
         return None
@@ -265,3 +286,49 @@ def frontend_range(
     if from_sha is None:
         return None
     return Range(from_sha=from_sha, to_sha=to_sha)
+
+
+# ── The frontend version a release declared ──────────────────────────
+#
+# requirements.txt carries `lex-app-frontend~=X.Y.Z`, which is both the
+# dependency pip installs and the provenance record: plain text, readable from
+# any tag with `git show`, and visible in the pull request that changed it.
+#
+# `~=` rather than `==` is deliberate. An exact pin cannot be overridden — pip
+# treats two different `==` constraints as unsatisfiable and refuses to install
+# rather than letting a project win — so `~=1.12.0` is what allows a project to
+# take 1.12.3 for a hotfix without waiting for a lex-app release.
+#
+# The consequence, worth stating: a note describes the version lex-app
+# DECLARED, not necessarily the one a given instance resolved.
+PIN_RE = re.compile(
+    r"^lex-app-frontend\s*(?:~=|==)\s*(?P<version>\d+\.\d+\.\d+[A-Za-z0-9.]*)\s*$"
+)
+
+REQUIREMENTS_PATH = "requirements.txt"
+
+
+def frontend_version_at(ref: str, *, show=git_show) -> str | None:
+    """The frontend version declared at `ref`, or None.
+
+    None is the normal answer for every tag cut before the pin existed, and it
+    is what routes resolution to the manifest and side-car path instead.
+    """
+    blob = show(ref, REQUIREMENTS_PATH)
+    if not blob:
+        return None
+    for line in blob.splitlines():
+        line = line.split("#", 1)[0].strip()
+        match = PIN_RE.fullmatch(line)
+        if match:
+            return match["version"]
+    return None
+
+
+def pac_tag_for(version: str) -> str:
+    """The frontend repository tag that published `version`.
+
+    A frontend release is cut as a GitHub Release, exactly as lex-app's is, so
+    the tag and the version differ by one prefix and nothing else.
+    """
+    return f"v{version}"
