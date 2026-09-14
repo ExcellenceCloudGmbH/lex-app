@@ -260,6 +260,12 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Reads pull requests in PAC, so the frontend half of the note carries
+          # the same PR titles and bodies the backend half does. Scoped to
+          # lex-app, GITHUB_TOKEN cannot see them, and every frontend entry
+          # degrades to its raw commit subject — for PAC, "Update package.json".
+          # Absent, enrichment is skipped and the tally in the log says so.
+          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
           # -e matters here: without it a crash in the drafter still exits 0,

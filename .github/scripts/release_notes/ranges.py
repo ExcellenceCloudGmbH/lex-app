@@ -301,8 +301,10 @@ def frontend_range(
 #
 # The consequence, worth stating: a note describes the version lex-app
 # DECLARED, not necessarily the one a given instance resolved.
+PIN_NAME = "lex-app-frontend"
+
 PIN_RE = re.compile(
-    r"^lex-app-frontend\s*(?:~=|==)\s*(?P<version>\d+\.\d+\.\d+[A-Za-z0-9.]*)\s*$"
+    rf"^{re.escape(PIN_NAME)}\s*(?:~=|==)\s*(?P<version>\d+\.\d+\.\d+[A-Za-z0-9.]*)\s*$"
 )
 
 REQUIREMENTS_PATH = "requirements.txt"

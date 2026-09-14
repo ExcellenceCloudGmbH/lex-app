@@ -48,10 +48,47 @@ def test_verify_frontend_names_only_the_missing_end(monkeypatch, capsys):
         cli.ranges, "frontend_sha_at",
         lambda ref: "aaa" if ref == "v2.1.8" else None,
     )
+    # Both ends carry a pin, so the pin path is not the reason and must not be
+    # blamed. Without this the warning would name every end for both reasons.
+    monkeypatch.setattr(cli.ranges, "frontend_version_at", lambda ref: "1.12.0")
 
     cli.main(["verify-frontend", "--tag", "v2.1.8"])
 
-    assert "No frontend provenance for v2.1.7." in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "no recorded bundle provenance at v2.1.7" in out
+    assert "v2.1.8" not in out.split("Repair")[0]
+
+
+def test_verify_frontend_names_the_missing_pin(monkeypatch, capsys):
+    """The pin is the primary source now, so it has to be the primary message.
+
+    Before this the warning talked only about manifests, sending an operator to
+    inspect a file that is no longer how a range is resolved — for a release
+    whose real problem was one absent line in requirements.txt.
+    """
+    monkeypatch.setattr(cli, "_all_tags", lambda tag: ["v2.4.0", "v2.3.0"])
+    monkeypatch.setattr(cli.ranges, "frontend_range", lambda prev, tag: None)
+    monkeypatch.setattr(cli.ranges, "frontend_sha_at", lambda ref: "aaa")
+    monkeypatch.setattr(
+        cli.ranges, "frontend_version_at",
+        lambda ref: None if ref == "v2.3.0" else "1.12.0",
+    )
+
+    cli.main(["verify-frontend", "--tag", "v2.4.0"])
+
+    out = capsys.readouterr().out
+    assert f"`{cli.ranges.PIN_NAME}` pin in {cli.ranges.REQUIREMENTS_PATH} at v2.3.0" in out
+
+
+def test_verify_frontend_says_a_first_release_has_nothing_to_measure_from(
+    monkeypatch, capsys
+):
+    """Not a gap anyone can repair — there is no earlier tag."""
+    monkeypatch.setattr(cli, "_all_tags", lambda tag: ["v1.0.0"])
+    monkeypatch.setattr(cli.ranges, "frontend_range", lambda prev, tag: None)
+
+    assert cli.main(["verify-frontend", "--tag", "v1.0.0"]) == 0
+    assert "no earlier release tag" in capsys.readouterr().out
 
 
 def test_verify_frontend_handles_a_first_release_with_no_previous_tag(monkeypatch, capsys):

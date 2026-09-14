@@ -42,11 +42,37 @@ def test_groups_feat_under_added_and_fix_under_fixed():
 
 def test_marks_the_component_and_links_the_commit():
     d = {"tag": "v2.1.7", "previous_tag": "v2.1.6", "changes": [
+        _change(component="backend", type="fix", subject="stop stamping edited_at", sha="a3f91c2"),
+    ]}
+    out = changelog.render(d, date="2026-08-05", repo=REPO)
+    assert "**backend** stop stamping edited_at" in out
+    assert f"https://github.com/{REPO}/commit/a3f91c2" in out
+
+
+def test_a_frontend_change_links_to_the_frontend_repository():
+    """A frontend sha is not a lex-app sha.
+
+    Rendered under lex-app's URL it 404s, or — worse — resolves to whatever
+    lex-app commit shares the abbreviation. Every frontend section was a gap
+    until the pin landed, so this line had never once been rendered.
+    """
+    d = {"tag": "v2.1.7", "previous_tag": "v2.1.6", "changes": [
         _change(component="frontend", type="fix", subject="send the viewer timezone", sha="a3f91c2"),
     ]}
     out = changelog.render(d, date="2026-08-05", repo=REPO)
-    assert "**frontend** send the viewer timezone" in out
-    assert f"https://github.com/{REPO}/commit/a3f91c2" in out
+    assert f"https://github.com/{changelog.FRONTEND_REPO}/commit/a3f91c2" in out
+    assert f"https://github.com/{REPO}/commit/a3f91c2" not in out
+
+
+def test_a_breaking_frontend_change_is_linked_correctly_too():
+    """Breaking changes render through a separate call to `_line`."""
+    d = {"tag": "v2.1.7", "previous_tag": "v2.1.6", "changes": [
+        _change(component="frontend", type="feat", breaking=True,
+                subject="drop the legacy grid", sha="d4e5f60"),
+    ]}
+    out = changelog.render(d, date="2026-08-05", repo=REPO)
+    assert "### Breaking" in out
+    assert f"https://github.com/{changelog.FRONTEND_REPO}/commit/d4e5f60" in out
 
 
 def test_includes_the_pr_number_when_present():

@@ -190,6 +190,17 @@ jobs:
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Publishing version: ${VERSION}"
 
+      # requirements.txt pins lex-app-frontend, and that pin ships in the
+      # wheel's metadata. Pinned to a version PyPI does not have, every
+      # `pip install lex-app` fails to resolve — and nothing can be
+      # unpublished, so the smoke test below would only confirm it too late.
+      #
+      # Before the build, because that is the last point where the answer is
+      # a red job instead of a broken release. Free until the pin exists: with
+      # no pin it does not even call PyPI.
+      - name: Refuse a pin the frontend never published
+        run: python .github/scripts/check_frontend_pin.py
+
       - name: Write version to lex/_version.py
         run: |
           echo '__version__ = "${{ steps.version.outputs.VERSION }}"' > lex/_version.py
