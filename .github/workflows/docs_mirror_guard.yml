@@ -8,6 +8,11 @@
 #
 #  The sync bot's own PRs (head branch docs-sync/*) are exempt.
 #
+#  The second job is the opposite check and is NOT exempt: it verifies that
+#  every `lex` import the published docs teach actually resolves against this
+#  repo's source. A sync PR is exactly when a bad one arrives, and a change
+#  under lex/ is exactly when a good one stops resolving, so it runs for both.
+#
 #  See: docs/superpowers/specs/2026-05-31-docs-mirror-sync-design.md
 # ──────────────────────────────────────────────────────────────────────
 
@@ -17,6 +22,10 @@ on:
   pull_request:
     paths:
       - "docs/**"
+      # A rename or deletion under lex/ can invalidate a published example
+      # without touching a single .md file.
+      - "lex/**"
+      - ".github/scripts/check_doc_imports.py"
 
 permissions:
   contents: read
@@ -54,3 +63,21 @@ jobs:
       - name: Check no mirror-owned docs were edited
         run: |
           python .github/scripts/docs_mirror.py check-readonly < /tmp/changed.txt
+
+  imports:
+    name: Published docs only import things that exist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No install step on purpose. The checker resolves imports by parsing
+      # the source tree, so it needs neither the package's dependencies nor
+      # Django settings — which is what lets it run in a bare checkout.
+      - name: Check documented imports resolve
+        run: python .github/scripts/check_doc_imports.py
