@@ -1,0 +1,43 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Filtered",
+  "image_href": "filter-applied.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "nameHeader",
+      "box": {
+        "x": 906,
+        "y": 121.75,
+        "width": 194,
+        "height": 56
+      },
+      "found": true,
+      "detail": "Name"
+    },
+    {
+      "name": "matchingRow",
+      "box": {
+        "x": 906,
+        "y": 178.75,
+        "width": 194,
+        "height": 24
+      },
+      "found": true,
+      "detail": "Alpha Growth Fund"
+    },
+    {
+      "name": "clear",
+      "box": {
+        "x": 688,
+        "y": 81.375,
+        "width": 30,
+        "height": 30
+      },
+      "found": true,
+      "detail": ""
+    }
+  ]
+}
