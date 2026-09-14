@@ -1,0 +1,32 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Row grouping",
+  "image_href": "row-grouping.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "dropZone",
+      "box": {
+        "x": 320,
+        "y": 121.75,
+        "width": 940,
+        "height": 56
+      },
+      "found": true,
+      "detail": "Currency"
+    },
+    {
+      "name": "firstGroup",
+      "box": {
+        "x": 320,
+        "y": 234.75,
+        "width": 250,
+        "height": 24
+      },
+      "found": true,
+      "detail": "USD"
+    }
+  ]
+}

@@ -114,6 +114,56 @@ figures:
     shot: shots/grid/density-comfortable.json
     surface: light
 
+  # docs page: using-the-app/the-grid/filtering and sorting
+  #
+  # The result, not the control. Three attempts at an open filter panel all
+  # failed the same way -- it closes on the refetch the filter triggers, and
+  # both grid libraries keep hidden shells of it in the DOM. The page already
+  # has a video of the panel being driven; what a still adds is what a filter
+  # DOES.
+  - out: the-grid/filter-applied.svg
+    shot: shots/grid/filter-applied.json
+    surface: light
+    callouts:
+      - anchor: nameHeader
+        text: "The filtered column carries an indicator, so it is visible which column is narrowing the list."
+      - anchor: matchingRow
+        text: "Five funds became one. Filtering happens on the server, so it works on a table of any size."
+      - anchor: clear
+        text: "Puts every column back to the saved view in one click — filters, sort, grouping and all."
+
+  # docs page: using-the-app/the-grid/grouping and pivoting
+  - out: the-grid/row-grouping.svg
+    shot: shots/grid/row-grouping.json
+    surface: light
+    callouts:
+      - anchor: dropZone
+        text: "The column the rows are grouped by. Drag another header here for a second level."
+      - anchor: firstGroup
+        text: "Each group counts its rows. Click the chevron to open one — the rows underneath are the originals, unchanged."
+
+  # docs page: using-the-app/the-grid/saved views
+  - out: the-grid/saved-views.svg
+    shot: shots/grid/saved-views.json
+    surface: light
+    callouts:
+      - anchor: selector
+        text: "The active view. Columns, filters, sort, grouping and row height all travel with the name."
+      - anchor: save
+        text: "Saves the arrangement you have now into the view that is open."
+
+  # docs page: using-the-app/the-grid/exporting data
+  - out: the-grid/export-selection.svg
+    shot: shots/grid/export-selection.json
+    surface: light
+    callouts:
+      - anchor: exportButton
+        text: "The label counts what is about to leave — with nothing selected it exports the table as shown."
+      - anchor: checkedRow
+        text: "Tick rows to export exactly those instead."
+      - anchor: clearSelection
+        text: "Unticks everything without leaving selection mode."
+
   # docs page: using-the-app/themes
   - out: app/dark-mode.svg
     shot: shots/app/dark-mode.json

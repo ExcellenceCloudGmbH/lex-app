@@ -1,0 +1,43 @@
+{
+  "width": 1280,
+  "height": 720,
+  "title": "Export",
+  "image_href": "export-selection.png",
+  "surface": "light",
+  "cells": null,
+  "anchors": [
+    {
+      "name": "exportButton",
+      "box": {
+        "x": 1082,
+        "y": 81.375,
+        "width": 30,
+        "height": 30
+      },
+      "found": true,
+      "detail": ""
+    },
+    {
+      "name": "clearSelection",
+      "box": {
+        "x": 1158,
+        "y": 128.75,
+        "width": 89,
+        "height": 38.75
+      },
+      "found": true,
+      "detail": "Clear"
+    },
+    {
+      "name": "checkedRow",
+      "box": {
+        "x": 370,
+        "y": 337.5,
+        "width": 2083,
+        "height": 25
+      },
+      "found": true,
+      "detail": "9/10/2026Initial Data UploadAlpha Growth FundUSD"
+    }
+  ]
+}
