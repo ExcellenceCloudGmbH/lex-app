@@ -95,7 +95,26 @@ def mirror_is_behind() -> list[str]:
             entry = raw.strip()
             if entry.startswith("- "):
                 declared.append(entry[2:].strip().strip("\"'"))
-    return [d for d in declared if not (DOCS_ROOT / d).exists()]
+    return [d for d in declared if not _has_content(DOCS_ROOT / d)]
+
+
+def _has_content(path: Path) -> bool:
+    """A path counts as mirrored only if something is actually in it.
+
+    `exists()` alone is not enough. An empty directory satisfies it, contains
+    no documentation, and would tell these checks the mirror had caught up --
+    which is the one answer that switches them from warning to enforcing. Git
+    cannot store an empty directory, so this cannot happen in a clean CI
+    checkout; it happens on a working copy, which is exactly where someone
+    would be running this by hand.
+    """
+    if path.is_file():
+        return True
+    if not path.is_dir():
+        return False
+    # Any file, not just markdown: `images/` and `videos/` are managed paths
+    # and hold neither. Looking for *.md reported both as un-mirrored.
+    return any(child.is_file() for child in path.rglob("*"))
 
 
 def warn_if_behind() -> bool:
