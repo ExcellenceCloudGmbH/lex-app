@@ -29,6 +29,37 @@ Python.
 
 ---
 
+## First-time setup
+
+Once, before the first frontend release.
+
+**The PyPI project.** There is no "create project" button — a project exists the moment something
+is uploaded under its name. So creating `lex-app-frontend` means publishing it. PyPI normalises
+names, so `lex-app-frontend` and `lex_app_frontend` are the same project; registering one takes
+both.
+
+**The token.** This is the part with a chicken-and-egg. A *project-scoped* token can only be minted
+for a project that already exists, so the first upload needs something broader. Two ways:
+
+- **An account-scoped token.** PyPI → Account settings → API tokens → "Entire account". Store it on
+  `process-admin-general-client` as `PYPI_API_TOKEN_FRONTEND`. Publish once. Then mint a token
+  scoped to `lex-app-frontend`, replace the secret, and **delete the account-scoped one** — left in
+  a repository it can publish anything we own, `lex-app` included.
+
+- **Trusted Publishing, with no token at all.** PyPI supports a *pending publisher*: register the
+  trust relationship before the project exists, and the first upload creates it. PyPI → Your
+  projects → Publishing, with project `lex-app-frontend`, owner `ExcellenceCloudGmbH`, repository
+  `process-admin-general-client`, workflow `publish-frontend.yml`. Then add `id-token: write` to the
+  job's permissions and drop the `password:` line.
+
+  lex-app tried OIDC once and fell back to an API token after an `invalid-publisher` error. That
+  error means the publisher was never registered on PyPI's side — a configuration gap, not a verdict
+  on OIDC. A pending publisher is exactly the mechanism for a project that does not exist yet.
+
+Until the secret exists, the publish workflow refuses a real run in its first ten seconds rather
+than failing at the upload twenty minutes in. Dry runs are unaffected and exercise everything up to
+the publish step.
+
 ## Releasing the frontend
 
 In `process-admin-general-client`, publish a GitHub Release tagged `v1.12.0` — the same gesture as
@@ -121,6 +152,11 @@ then silently lost it. The reason you give the workflow is the text to use.
 ---
 
 ## When something goes wrong
+
+Before lex-app is built, the pipeline reads the pin and asks PyPI whether that version exists. A
+pin naming an unpublished version fails the release there, which is the last point where the answer
+is a red job: the pin ships in the wheel's metadata, so once published every `pip install lex-app`
+fails to resolve and nothing can be taken back. No pin at all passes, and does not call PyPI.
 
 After publishing, the pipeline installs the release from PyPI into a throwaway environment and
 checks it. It fails loudly if:
