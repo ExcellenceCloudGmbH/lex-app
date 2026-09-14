@@ -9,9 +9,11 @@
 #  The sync bot's own PRs (head branch docs-sync/*) are exempt.
 #
 #  The second job is the opposite check and is NOT exempt: it verifies that
-#  every `lex` import the published docs teach actually resolves against this
-#  repo's source. A sync PR is exactly when a bad one arrives, and a change
-#  under lex/ is exactly when a good one stops resolving, so it runs for both.
+#  everything the published docs name -- imports, commands, environment
+#  variables -- actually exists in this repo's source, and that nothing this
+#  repo ships is missing from them. A sync PR is exactly when a bad reference
+#  arrives from upstream, and a change under lex/ is exactly when a good one
+#  stops resolving, so it runs for both.
 #
 #  See: docs/superpowers/specs/2026-05-31-docs-mirror-sync-design.md
 # ──────────────────────────────────────────────────────────────────────
@@ -79,5 +81,17 @@ jobs:
       # No install step on purpose. The checker resolves imports by parsing
       # the source tree, so it needs neither the package's dependencies nor
       # Django settings — which is what lets it run in a bare checkout.
-      - name: Check documented imports resolve
+      - name: Documented imports resolve
         run: python .github/scripts/check_doc_imports.py
+
+      # Both directions. Every `lex <command>` the docs name must exist, and
+      # every command this repo ships must be documented -- `lex --help` prints
+      # ten of them, so the reference page is the only complete list a reader
+      # has, and a new management command nobody documents is invisible.
+      - name: Documented commands exist, and shipped commands are documented
+        if: always()
+        run: python .github/scripts/check_doc_commands.py
+
+      - name: Every environment variable the framework reads is documented
+        if: always()
+        run: python .github/scripts/check_doc_env_vars.py

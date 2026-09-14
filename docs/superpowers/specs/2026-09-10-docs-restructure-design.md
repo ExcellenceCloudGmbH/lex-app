@@ -1,7 +1,8 @@
 ---
 title: "Docs restructure — design and gap register"
 date: 2026-09-10
-status: implemented (restructure and figures), open (2 register items)
+updated: 2026-09-14
+status: implemented (restructure, figures, reference sweep); 1 register item blocked
 ---
 
 # Docs restructure — design and gap register
@@ -77,16 +78,65 @@ Blocking-first, then newest. Status as of 2026-09-10.
 | 1 | `ship-and-operate/` (6 pages) | 0 pages on backup, 1 on Kubernetes, 1 on troubleshooting; "running your app" 325 words | **done** |
 | 2 | `ship-and-operate/upgrading` | No page existed; 2.1.11's `max_length` migration had no home | **done** |
 | 3 | `access-and-dashboards/widgets` | `WidgetPage`, `WidgetSpecError`, `lex_calculation_log`, `lex_calculation_log_tree` exported and undocumented — the 2.2.0 flagship | **done** |
-| 4 | `calculations/scheduled calculations` | Written in lex-app under a mirror-managed path; guard-rejected, never published | **done** |
+| 4 | `calculations/scheduled calculations` | Recorded as "guard-rejected, never published". It was an untracked *draft* for an API that does not exist | **withdrawn** — see item 11 |
 | 5 | `access-and-dashboards/embedding` | Planned | **declined** — `lex_view callbacks` and `streamlit dashboards` already cover both directions |
 | 6 | Screenshots | 9 placeholders | **7 done** — record page + 4 tabs, the grid, table settings, `lex --help`; `deploying` got a mermaid diagram instead |
 | 7 | Analytics tab + widgets figures | Both prerequisites are now done — the fixture has `Fund.streamlit_main` and the harness starts `lex streamlit` behind `LEX_DOCSHOT_STREAMLIT=1`. Still blocked one level down: the Streamlit proxy wants a Keycloak JWT, the harness signs in with a Django admin session | blocked on fixture auth; capture exists and is skipped |
-| 8 | `reference/` completeness sweep | Not yet audited name-by-name against `__all__` and the env-var list | open |
-| 9 | Backup and restore | Named as absent; no framework-side facts verified yet, so not written | open |
+| 8 | `reference/` completeness sweep | 24 commands shipped / 4 documented; 126 env vars read / 66 listed | **done** — and turned into three CI checks, below |
+| 9 | Backup and restore | Named as absent; no framework-side facts verified | **done** — `ship-and-operate/backup and restore` |
+| 10 | `lex Init` is not a command | Found by the sweep. 34 occurrences, including step one of installation | **done** |
+| 11 | `ScheduledCalculation` does not exist | Found by the sweep. Item 4 above was published unverified | **done** — page removed |
 
-Items 8 and 9 are deliberately not started. 8 needs a mechanical audit that
-should be a CI check rather than prose. 9 needs facts from whoever operates
-the databases — writing it from assumption is how operational documentation
+### What the sweep actually found
+
+Item 8 was recorded as a completeness gap. It was, but the two worst things it
+turned up were not gaps — they were pages that were confidently wrong.
+
+**`lex Init` does not exist.** The command is `init`; `Init.py` was renamed and
+the docs were never followed. Click does an exact lookup, so `lex Init` fails
+with *No such command*. It appeared 34 times across 10 pages, including step
+one of the installation guide and every tutorial part.
+
+**`ScheduledCalculation` does not exist.** Register item 4 above says
+"written in lex-app under a mirror-managed path; guard-rejected, never
+published — **done**". That entry was wrong in the way that matters: the page
+was an untracked *design draft* in lex-app, and "blocked by the guard" was read
+as "finished but blocked". It was published in #176 with a parameter table and
+three conflict modes for an API that has never existed. Removed in
+lex-app-docs#180.
+
+The lesson is narrow and worth keeping: **a draft that reads like documentation
+is indistinguishable from documentation once it is moved.** Provenance —
+untracked, never committed, no implementing code — was available and not
+checked.
+
+### The CI checks that replace the prose audit
+
+Item 8 said the audit "should be a CI check rather than prose". Three now live
+in `.github/scripts/`, wired into `docs_mirror_guard.yml` as a job with no
+`docs-sync/*` exemption, because a sync PR is exactly when a bad reference
+arrives from upstream:
+
+| Script | Checks |
+|---|---|
+| `check_doc_imports.py` | every `from lex…` in the published docs resolves, by AST, against this repo's source |
+| `check_doc_commands.py` | every `lex <command>` named exists — **and** every shipped command is documented |
+| `check_doc_env_vars.py` | every environment variable the framework reads has a reference entry |
+
+All three default to the mirror-owned paths in `docs/.docs-sync.yml`: that is
+the published subset, and specs and plans under `docs/` legitimately name APIs
+before they exist. None imports anything — resolution is AST-only, so they run
+in a bare checkout with no dependencies and no Django settings.
+
+Extraction for the env check covers both `os.getenv("NAME")` and the proxy's
+`_env_bool("NAME", …)` wrappers. The first sweep used only the literal form and
+missed ten variables; the check exists partly to stop that recurring.
+
+Item 9 is written from framework facts only. What the framework backs up
+(Keycloak authorization) is documented precisely, including that `--restore`
+reports failure by printing it and exiting zero. What it does not back up (the
+database, file storage) is named as such, with the decision left to whoever
+operates them — writing that from assumption is how operational documentation
 becomes dangerous.
 
 ## Verification
@@ -102,6 +152,8 @@ four of its own bugs and two real ones (a dangling link to the declined
 |---|---|---|
 | `docs/restructure-2026-09-s8` | lex-app-docs | The restructure and the figures (all stages) |
 | `docs/restructure-mirror-s4` | lex-app | The mirror manifest, stale-copy removal, this spec |
+| `docs/reference-completeness` | lex-app-docs | The command/import fixes, the complete reference, backup & restore (#180) |
+| `docs/import-checker` | lex-app | The three CI checks and this register update |
 | `feat/docs-figures-s3` | lex-app | The renderer and figures spec |
 | `docs/figure-captures` | process-admin-general-client | The capture harness and the dashboard fixture |
 

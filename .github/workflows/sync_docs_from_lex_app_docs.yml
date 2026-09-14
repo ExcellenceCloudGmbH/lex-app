@@ -113,30 +113,41 @@ jobs:
           UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
         run: |
           set -euo pipefail
-          BRANCH="docs-sync/${UPSTREAM_SHA}"
           git config user.name "lex-docs-sync[bot]"
           git config user.email "lex-docs-sync@users.noreply.github.com"
 
-          # Fresh branch each run (ruleset forbids pushing to existing PR branches).
+          # If a sync PR for this same upstream commit is already open, there is
+          # nothing to do. Without this the daily cron opens an identical PR
+          # every morning until someone merges one.
+          EXISTING=$(gh pr list --state open --search "docs-sync in:title ${UPSTREAM_SHA}" \
+                       --json number --jq '.[0].number // empty')
+          if [[ -n "${EXISTING}" ]]; then
+            echo "PR #${EXISTING} already mirrors lex-app-docs@${UPSTREAM_SHA}. Nothing to do."
+            exit 0
+          fi
+
+          # The run id, not just the upstream sha. The branch used to be named
+          # `docs-sync/<sha>` and pushed with --force-with-lease, on the theory
+          # that a rerun would update it. The ruleset on this repo forbids
+          # force-pushing to any branch, so every rerun after the first was
+          # rejected with GH013 and the mirror silently stopped -- for long
+          # enough that docs/ was missing eight of the twelve managed sections.
+          # A name nothing has pushed before never needs a force.
+          BRANCH="docs-sync/${UPSTREAM_SHA}-${GITHUB_RUN_ID}"
           git checkout -b "${BRANCH}"
           git add docs/
           git commit -m "docs: mirror published docs from lex-app-docs@${UPSTREAM_SHA}"
-          git push --force-with-lease origin "${BRANCH}"
+          git push origin "${BRANCH}"
 
-          # Reuse an open PR for this branch if one already exists.
-          if gh pr view "${BRANCH}" --json number >/dev/null 2>&1; then
-            echo "PR already open for ${BRANCH}."
-          else
-            {
-              printf 'Automated mirror-down of the published docs subset from '
-              printf '`ExcellenceCloudGmbH/lex-app-docs` `content/` @ `%s`.\n\n' "${UPSTREAM_SHA}"
-              printf 'Only paths declared in `docs/.docs-sync.yml` are touched. These docs are '
-              printf '**read-only here** — edit them upstream in lex-app-docs; this job brings them back down.\n\n'
-              printf 'See `docs/ci-cd/docs-sync-mirror.md`.\n'
-            } > /tmp/pr_body.md
-            gh pr create \
-              --base lex-app-v2 \
-              --head "${BRANCH}" \
-              --title "docs: mirror from lex-app-docs@${UPSTREAM_SHA}" \
-              --body-file /tmp/pr_body.md
-          fi
+          {
+            printf 'Automated mirror-down of the published docs subset from '
+            printf '`ExcellenceCloudGmbH/lex-app-docs` `content/` @ `%s`.\n\n' "${UPSTREAM_SHA}"
+            printf 'Only paths declared in `docs/.docs-sync.yml` are touched. These docs are '
+            printf '**read-only here** — edit them upstream in lex-app-docs; this job brings them back down.\n\n'
+            printf 'See `docs/ci-cd/docs-sync-mirror.md`.\n'
+          } > /tmp/pr_body.md
+          gh pr create \
+            --base lex-app-v2 \
+            --head "${BRANCH}" \
+            --title "docs: mirror from lex-app-docs@${UPSTREAM_SHA}" \
+            --body-file /tmp/pr_body.md
