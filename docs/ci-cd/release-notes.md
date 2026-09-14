@@ -28,17 +28,22 @@ So to describe a release we need commits from both. The backend half is easy —
 own git log. The frontend half needs one extra fact: **which PAC commit produced the bundle we're
 shipping.**
 
-That fact is recorded in a small file next to the bundle:
+That fact is a version number. `requirements.txt` carries one line:
 
 ```
-lex/react/build/.frontend-version.json
-{"repo": "…/process-admin-general-client", "branch": "…", "sha": "22c16f9…", "built_at": "…"}
+lex-app-frontend~=1.12.0
 ```
 
-Two of those — the one in the previous release and the one in this release — give a range of PAC
-commits. That range is the frontend half of the note.
+The frontend is published separately to PyPI and lex-app depends on it, so "which frontend is in
+v2.3.0?" is answered by `git show v2.3.0:requirements.txt`. See
+[`frontend-versioning.md`](frontend-versioning.md).
 
----
+Two of those versions — the previous release's and this one's — give a range of frontend releases,
+and the frontend half of the note is the log between them.
+
+**Releases cut before the pin existed** are served by a committed side-car mapping each old bundle
+to the revision that built it, established by rebuilding candidates and comparing content-addressed
+output. It never grows again.
 
 ## The two moments in a release
 

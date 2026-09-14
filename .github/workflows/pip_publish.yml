@@ -206,3 +206,17 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+      # Publishing and walking away meant a release that forgot its frontend,
+      # or pinned a version that does not exist, would be found by a customer.
+      # This installs the exact version from PyPI — WITH dependencies, since
+      # the frontend is one — and checks it arrived with a usable bundle.
+      #
+      # It runs AFTER publication, so failing cannot unpublish anything. The
+      # point is finding out in minutes rather than days, and it fails hard
+      # because a red release is the signal.
+      - name: Smoke-test the published release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          python .github/scripts/smoke_published_wheel.py \
+            --version "${{ steps.version.outputs.VERSION }}"

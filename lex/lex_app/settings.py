@@ -230,9 +230,54 @@ if os.getenv("DEPLOYMENT_ENVIRONMENT") is not None:
                 + ", ".join(_missing_redis)
             )
 
-REACT_APP_BUILD_PATH = (
-    Path(__file__).resolve().parent.parent / Path("react/build")
-).as_posix()
+def _resolve_react_build_path(package: object = "unset") -> str:
+    """Where the single-page app is served from.
+
+    The frontend is a separate distribution, ``lex-app-frontend``, pinned in
+    requirements.txt and installed by pip alongside this package. An installed
+    one wins, because that pin is what the release declared and what a project
+    can deliberately override.
+
+    The in-tree bundle at ``lex/react/build`` remains the fallback so a source
+    checkout keeps working, and so this can land before the pin does.
+
+    A package that is installed but cannot locate its own bundle falls back
+    too: this runs at import time, and raising here takes the whole instance
+    down — strictly worse than serving the committed copy.
+
+    ``package`` is injected by tests; ``"unset"`` means "import it yourself".
+    """
+    if package == "unset":
+        try:
+            import lex_app_frontend as package  # type: ignore[no-redef]
+        except ImportError:
+            package = None
+
+    if package is not None:
+        try:
+            return Path(package.build_path()).as_posix()  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001 - see the docstring
+            print(
+                f"lex-app-frontend is installed but its bundle could not be "
+                f"located ({exc}); falling back to the in-tree bundle.",
+                file=sys.stderr,
+            )
+
+    in_tree = Path(__file__).resolve().parent.parent / Path("react/build")
+    if not (in_tree / "index.html").is_file():
+        # Neither source has a bundle. Say so once, loudly, at boot: the
+        # alternative is every page 404ing with nothing in the logs, which is
+        # the hardest version of this failure to diagnose.
+        print(
+            "No frontend bundle found. lex-app-frontend is not installed and "
+            f"there is no bundle at {in_tree}. Every page will 404. Install "
+            "the pinned frontend with `pip install -e .` or `pip install lex-app`.",
+            file=sys.stderr,
+        )
+    return in_tree.as_posix()
+
+
+REACT_APP_BUILD_PATH = _resolve_react_build_path()
 repo_name = derive_repo_name(PROJECT_ROOT, os.getcwd())
 LEGACY_MEDIA_ROOT = os.path.join(NEW_BASE_DIR, f"{repo_name}/")
 LOG_FILE_PATH = os.path.join(NEW_BASE_DIR, f"{repo_name}/{repo_name}.log")
