@@ -71,6 +71,25 @@ jobs:
           repositories: "lex-app-docs"
           owner: ExcellenceCloudGmbH
 
+      # The token above is scoped `repositories: lex-app-docs`, so it can read
+      # the canonical content and nothing else. Creating the pull request needs
+      # a token for THIS repo, and it cannot be the default GITHUB_TOKEN: the
+      # organisation has "Allow GitHub Actions to create and approve pull
+      # requests" turned off, so `gh pr create` came back with
+      #
+      #   GitHub Actions is not permitted to create or approve pull requests
+      #
+      # That fault was invisible until the force-push bug above was fixed,
+      # because the job never reached this step.
+      - name: Generate GitHub App token (open the PR here)
+        id: pr-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DOCS_APP_ID }}
+          private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}
+          repositories: "lex-app"
+          owner: ExcellenceCloudGmbH
+
       # ── 3. Checkout lex-app-docs (canonical) into a sibling dir ─
       - name: Checkout lex-app-docs
         uses: actions/checkout@v4
@@ -109,8 +128,9 @@ jobs:
       - name: Create branch and PR
         if: steps.diff.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.pr-token.outputs.token }}
           UPSTREAM_SHA: ${{ steps.upstream.outputs.sha }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           set -euo pipefail
           git config user.name "lex-docs-sync[bot]"
@@ -126,18 +146,30 @@ jobs:
             exit 0
           fi
 
-          # The run id, not just the upstream sha. The branch used to be named
-          # `docs-sync/<sha>` and pushed with --force-with-lease, on the theory
-          # that a rerun would update it. The ruleset on this repo forbids
-          # force-pushing to any branch, so every rerun after the first was
-          # rejected with GH013 and the mirror silently stopped -- for long
-          # enough that docs/ was missing eight of the twelve managed sections.
-          # A name nothing has pushed before never needs a force.
-          BRANCH="docs-sync/${UPSTREAM_SHA}-${GITHUB_RUN_ID}"
-          git checkout -b "${BRANCH}"
-          git add docs/
-          git commit -m "docs: mirror published docs from lex-app-docs@${UPSTREAM_SHA}"
-          git push origin "${BRANCH}"
+          # A run that pushed its branch and then failed to open the PR leaves
+          # the branch behind. Adopt it rather than pushing a near-identical
+          # one: without this the job litters a new `docs-sync/<sha>-<run>`
+          # every morning, none of them attached to anything.
+          ORPHAN=$(git ls-remote --heads origin "docs-sync/${UPSTREAM_SHA}-*" \
+                     | head -1 | sed 's|.*refs/heads/||')
+
+          if [[ -n "${ORPHAN}" ]]; then
+            echo "Adopting ${ORPHAN}, pushed by an earlier run that could not open a PR."
+            BRANCH="${ORPHAN}"
+          else
+            # The run id, not just the upstream sha. The branch used to be named
+            # `docs-sync/<sha>` and pushed with --force-with-lease, on the theory
+            # that a rerun would update it. The ruleset on this repo forbids
+            # force-pushing to any branch, so every rerun after the first was
+            # rejected with GH013 and the mirror silently stopped -- for long
+            # enough that docs/ was missing eight of the twelve managed sections.
+            # A name nothing has pushed before never needs a force.
+            BRANCH="docs-sync/${UPSTREAM_SHA}-${GITHUB_RUN_ID}"
+            git checkout -b "${BRANCH}"
+            git add docs/
+            git commit -m "docs: mirror published docs from lex-app-docs@${UPSTREAM_SHA}"
+            git push origin "${BRANCH}"
+          fi
 
           {
             printf 'Automated mirror-down of the published docs subset from '
@@ -146,8 +178,15 @@ jobs:
             printf '**read-only here** — edit them upstream in lex-app-docs; this job brings them back down.\n\n'
             printf 'See `docs/ci-cd/docs-sync-mirror.md`.\n'
           } > /tmp/pr_body.md
-          gh pr create \
-            --base lex-app-v2 \
-            --head "${BRANCH}" \
-            --title "docs: mirror from lex-app-docs@${UPSTREAM_SHA}" \
-            --body-file /tmp/pr_body.md
+          if ! gh pr create \
+              --base lex-app-v2 \
+              --head "${BRANCH}" \
+              --title "docs: mirror from lex-app-docs@${UPSTREAM_SHA}" \
+              --body-file /tmp/pr_body.md; then
+            # The mirrored content is safely on `${BRANCH}`; only the PR is
+            # missing, and the next run adopts that branch rather than making
+            # another. Name the two things that cause this so nobody has to
+            # rediscover them from a GraphQL error.
+            echo "::error title=Could not open the mirror PR::Branch ${BRANCH} is pushed, but opening the pull request was refused. Either the lex-docs-bot App lacks pull_requests:write on lex-app, or it is not installed here. Open it by hand meanwhile: ${REPO_URL}/compare/lex-app-v2...${BRANCH}?expand=1"
+            exit 1
+          fi
