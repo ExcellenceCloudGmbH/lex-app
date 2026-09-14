@@ -22,7 +22,7 @@ nothing but ``GET /media/....pdf -> 200``. Three separate defects combined:
   re-compressed for nothing on a loop this process shares with the Streamlit
   script runner.
 
-Cluster 1an — scenarios 1.300–1.304. Type: U.
+Cluster 1an — scenarios 1.336–1.341. Type: U.
 Covers: lex/proxy.py (_SERVER_OWNED_RESPONSE_HEADERS, _REQUEST_DROP,
         _build_proxied_response, _build_static_routes' gzip scope).
 Run: python -m lex pytest lex/test_project/tests/init/test_1an_proxy_http2_safe_headers.py -v
@@ -91,10 +91,10 @@ class TestCluster01an_Http2SafeResponseHeaders(SimpleTestCase):
             with TestClient(proxy.app) as client:
                 return client.get(path, **client_kwargs)
 
-    # -- 1.300 ---------------------------------------------------------
-    def test_1_300_date_and_server_are_never_duplicated(self) -> None:
+    # -- 1.336 ---------------------------------------------------------
+    def test_1_336_date_and_server_are_never_duplicated(self) -> None:
         """
-        Scenario 1.300: the upstream's Date and Server are not relayed.
+        Scenario 1.336: the upstream's Date and Server are not relayed.
         Given: an upstream response carrying its own Date and Server
         When: the proxy relays it
         Then: each appears exactly once, being the ASGI server's own.
@@ -132,10 +132,10 @@ class TestCluster01an_Http2SafeResponseHeaders(SimpleTestCase):
                     ),
                 )
 
-    # -- 1.301 ---------------------------------------------------------
-    def test_1_301_a_relayed_response_keeps_its_length(self) -> None:
+    # -- 1.337 ---------------------------------------------------------
+    def test_1_337_a_relayed_response_keeps_its_length(self) -> None:
         """
-        Scenario 1.301: Content-Length survives, so the response is not chunked.
+        Scenario 1.337: Content-Length survives, so the response is not chunked.
         Given: an upstream response with a known Content-Length
         When: the proxy relays the bytes unchanged
         Then: the same Content-Length is sent, and no Transfer-Encoding is.
@@ -161,10 +161,10 @@ class TestCluster01an_Http2SafeResponseHeaders(SimpleTestCase):
             msg="and the body must actually be that long",
         )
 
-    # -- 1.302 ---------------------------------------------------------
-    def test_1_302_an_already_compressed_payload_is_not_recompressed(self) -> None:
+    # -- 1.338 ---------------------------------------------------------
+    def test_1_338_an_already_compressed_payload_is_not_recompressed(self) -> None:
         """
-        Scenario 1.302: a proxied PDF comes back uncompressed.
+        Scenario 1.338: a proxied PDF comes back uncompressed.
         Given: a client that accepts gzip, and an upstream PDF
         When: the proxy relays it
         Then: no Content-Encoding is added.
@@ -185,15 +185,15 @@ class TestCluster01an_Http2SafeResponseHeaders(SimpleTestCase):
             ),
         )
 
-    # -- 1.303 ---------------------------------------------------------
-    def test_1_303_the_asset_bundle_is_still_compressed(self) -> None:
+    # -- 1.339 ---------------------------------------------------------
+    def test_1_339_the_asset_bundle_is_still_compressed(self) -> None:
         """
-        Scenario 1.303: narrowing GZip must not lose the saving it was added for.
+        Scenario 1.339: narrowing GZip must not lose the saving it was added for.
         Given: a client that accepts gzip
         When: it fetches a chunk of Streamlit's bundle
         Then: the response is gzip-encoded.
 
-        The guard on 1.302. GZip now wraps only the static mount, and the whole
+        The guard on 1.338. GZip now wraps only the static mount, and the whole
         point of adding it was the eagerly-preloaded bundle -- measured at
         1.77 MB plaintext against 0.42 MB gzipped. Scoping it must not quietly
         undo that.
@@ -219,10 +219,10 @@ class TestCluster01an_Http2SafeResponseHeaders(SimpleTestCase):
             msg="the bundle must still be compressed after scoping GZip to it",
         )
 
-    # -- 1.304 ---------------------------------------------------------
-    def test_1_304_content_length_is_still_dropped_from_the_request(self) -> None:
+    # -- 1.340 ---------------------------------------------------------
+    def test_1_340_content_length_is_still_dropped_from_the_request(self) -> None:
         """
-        Scenario 1.304: keeping the response's length must not keep the request's.
+        Scenario 1.340: keeping the response's length must not keep the request's.
         Given: a request that carries a body
         When: the proxy forwards it
         Then: Content-Length is not among the forwarded headers.
@@ -249,17 +249,17 @@ class TestCluster01an_Http2SafeResponseHeaders(SimpleTestCase):
             msg="Content-Length must never be forwarded on the request side",
         )
 
-    # -- 1.305 ---------------------------------------------------------
-    def test_1_305_a_consumed_response_drops_the_length_and_the_encoding(self) -> None:
+    # -- 1.341 ---------------------------------------------------------
+    def test_1_341_a_consumed_response_drops_the_length_and_the_encoding(self) -> None:
         """
-        Scenario 1.305: the buffered relay path keeps neither Content-Length nor
+        Scenario 1.341: the buffered relay path keeps neither Content-Length nor
         Content-Encoding.
         Given: an already-consumed upstream response carrying `Content-Encoding: gzip`
                and the COMPRESSED length, whose `.content` httpx has decoded
         When: the proxy relays it
         Then: both headers are gone, and the body is the decoded bytes.
 
-        `_build_proxied_response` treats its two branches differently, and 1.300–1.304
+        `_build_proxied_response` treats its two branches differently, and 1.336–1.340
         only exercise the streaming one -- `_RawStream` exists precisely to take that
         path. This is the branch where a stale header is *fatal* rather than merely
         wrong, and the two halves fail for different reasons. Both measured:

@@ -23,7 +23,19 @@ DEFAULT_PLAN_DIR = Path("lex/test_project/test-plan")
 DEFAULT_TESTS_DIR = Path("lex/test_project/tests")
 
 # Test folders that deliberately have no owning cluster.
-EXEMPT_TEST_DIRS = {"fixtures", "journeys", "gate_selftest", "others", "__pycache__"}
+#
+# ``design_system`` belongs here rather than under a cluster: its tests assert the
+# shape of ``lex/lex_app/design_system/lex_tokens.py``, which is generated verbatim
+# by ``@excellencecloudgmbh/lex-tokens``, and they carry no scenario IDs at all —
+# so there is nothing for a cluster's allocation to own or number.
+EXEMPT_TEST_DIRS = {
+    "fixtures",
+    "journeys",
+    "gate_selftest",
+    "others",
+    "design_system",
+    "__pycache__",
+}
 
 VALID_STATUSES = {"planned", "in-flight", "complete", "blocked", "rolled-back"}
 

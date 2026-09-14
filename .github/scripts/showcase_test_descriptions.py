@@ -569,4 +569,24 @@ INIT_TESTS: dict[str, str] = {
     "test_1_109_every_delegated_command_is_a_real_django_command":
         "Run configurations that hand off to the underlying application framework name commands "
         "it actually knows, so operators get real work instead of a confusing error.",
+    # ── dashboard launch — branding and ports ────────────────────────
+    "test_1_292_a_broken_theme_never_blocks_the_launch":
+        "If the LEX branding cannot be applied for any reason, the dashboard still starts — "
+        "unbranded rather than unavailable. A cosmetic problem never becomes an outage.",
+    "test_1_295_defaults_are_unchanged_when_nothing_is_supplied":
+        "Starting a dashboard without any port arguments behaves exactly as it always has, so "
+        "existing deployments keep working untouched.",
+    "test_1_296_a_supplied_server_port_wins_and_moves_the_upstream":
+        "An operator can move the dashboard to a free port and it is actually used, with the "
+        "sign-in proxy following it. If broken, the dashboard cannot start on a machine where "
+        "the default port is already taken.",
+    "test_1_296b_the_equals_form_is_recognised_too":
+        "The port can be given in either spelling an operator might type, so a working command "
+        "does not depend on remembering which one.",
+    "test_1_297_a_supplied_public_port_is_respected":
+        "The port the browser connects to can be chosen by the operator, independently of the "
+        "port the dashboard itself listens on.",
+    "test_1_298_both_ports_can_be_supplied_together":
+        "Both ports can be set at once and both are honoured, which is what makes running two "
+        "dashboards side by side on one machine possible.",
 }

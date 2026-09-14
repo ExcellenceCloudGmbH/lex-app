@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 305
+max_scenario: 341
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -178,7 +178,7 @@ letters:
     scenarios: 1.171-1.175
     status: complete
     tests:
-      pass: 6
+      pass: 5
       skip: 0
       xfail: 0
     note: scenarios 1.171–1.175; `/health` short-circuits to static liveness, `/readiness` gates on DB
@@ -306,74 +306,737 @@ letters:
       nothing live, 1.229 missing-id fail-fast.
 
   ac:
-    title: Streamlit session survival across an idle period (frozen-handshake fix)
-    scenarios: 1.230-1.246
+    title: Widget-host manifest construction and validation + Streamlit session survival across an idle period (frozen-handshake fix)
+    scenarios: 1.230-1.260
     status: complete
     tests:
-      pass: 17
+      pass: 27
       skip: 0
       xfail: 0
     note: >-
-      the third and last batch on this auth path (z made expiry graceful, aa let the embedded
-      caller renew, ac stops the session expiring at all). Root cause: Streamlit reads request
-      headers off the *websocket handshake*, so every credential the proxy injects is a snapshot
-      that ages while the socket stays open - and session auth had local refresh deliberately
-      disabled, leaving nothing to renew it. Adds proxy /auth/token (secret-guarded pull, proxy
-      stays sole refresh authority so nothing races the rotation), reorders credential precedence
-      so the renewable session outranks the short-lived st_access cookie on both the HTTP and WS
-      paths, and on the Streamlit side stops the frozen header token overwriting a renewed one,
-      renews ahead of expiry for session auth too, and decouples identity from token freshness -
-      the "Missing user information" screen was reporting an expired token as a missing user, and
-      re-entered itself on every rerun. 14 of 17 fail against the pre-fix tree.
+      LETTER ALLOCATED TWICE, recorded rather than renumbered (letters are never renumbered). Two
+      batches took `1ac` concurrently while this shard was being clobbered by merges, so the file
+      carried them as two `ac` keys in one mapping -- where YAML keeps only the last, silently. Both are
+      on disk and both run; their scenario ranges overlap, which `test_plan_aggregates.py validate`
+      reports and only the two batch owners can settle.
+
+      -- test_1ac_widget_host_manifest.py, 1.251-1.260: Pure spec/manifest layer for lex_widgets() - no
+      Streamlit runtime, so the fiddly cases are testable without a browser. Rejects loudly rather than
+      dropping: an unknown option, an unknown widget type or a duplicate id raises at the
+      page.calculation(...) call site instead of producing a page that renders cleanly with a widget
+      silently absent. Boolean pk is refused explicitly because bool subclasses int and would otherwise
+      address record id 1. Letter ac not ab, and range from 1.251 not 1.223, because open PRs #723 and
+      #726 both claim 1ab/1.223-1.239 and closed #692 claimed 1.223-1.250 - taking a clear range avoids
+      a three-way collision on merge.
+
+      -- test_1ac_streamlit_session_survival.py, 1.230-1.246: the third and last batch on this auth path
+      (z made expiry graceful, aa let the embedded caller renew, ac stops the session expiring at all).
+      Root cause: Streamlit reads request headers off the *websocket handshake*, so every credential the
+      proxy injects is a snapshot that ages while the socket stays open - and session auth had local
+      refresh deliberately disabled, leaving nothing to renew it. Adds proxy /auth/token (secret-guarded
+      pull, proxy stays sole refresh authority so nothing races the rotation), reorders credential
+      precedence so the renewable session outranks the short-lived st_access cookie on both the HTTP and
+      WS paths, and on the Streamlit side stops the frozen header token overwriting a renewed one,
+      renews ahead of expiry for session auth too, and decouples identity from token freshness - the
+      "Missing user information" screen was reporting an expired token as a missing user, and re-entered
+      itself on every rerun. 14 of 17 fail against the pre-fix tree.
+
   ad:
-    title: Streamlit asset bundle served ungated + session durability guards
-    scenarios: 1.247-1.292
+    title: Streamlit theme follower + Streamlit asset bundle served ungated + session durability guards
+    scenarios: 1.247-1.302
     status: complete
     tests:
-      pass: 46
+      pass: 81
       skip: 0
       xfail: 0
     note: >-
-      the fourth batch on this auth path, and the one that explains the other three reports. The
-      proxy authenticated every request through one catch-all route, and Streamlit 1.61 ships 365
-      code-split JS chunks with 107 named in eager modulepreload tags - so one credential-less
-      moment produced a 401 flood, and a lazily-imported chunk that 401s reaches the browser as
-      "TypeError: Failed to fetch dynamically imported module", which is how an expired credential
-      was reaching customers as a type error. Serves Streamlit's own bundle from the proxy process
-      (located via streamlit.file_util.get_static_dir so hashes cannot drift from the index.html
-      naming them), makes only /_stcore/health and /_stcore/host-config publicly proxied, and keeps
-      everything else gated - the boundary scenarios matter as much as the public ones. Also: one
-      pooled httpx client instead of one per request; raw streaming that preserves Content-Encoding
-      (measured 1.77 MB -> 0.42 MB on the eager set, 4.17x); the JWKS fetch moved off the event
-      loop with single-flight and stale-key retention (a failed refresh used to reject every token
-      in the cluster); ?next= carried through login->callback with a strict open-redirect guard;
-      the bootstrap auth_token stripped out of the URL; and startup refusal for the configurations
-      that are genuinely broken rather than degraded - replicas without a shared token store,
-      SameSite=None without Secure. The session key is DERIVED from DJANGO_SECRET_KEY (stable in
-      terraform state, identical on every replica) rather than demanded as a new variable: an
-      earlier revision refused to boot without SESSION_SECRET and bricked a running instance,
-      which is a worse failure than the fragility it guarded against. 27 of 30 fail against the pre-fix tree; the 3 that pass
-      (1.254 boundary, 1.255 WS deny, 1.271 permitted configs still boot) are guards asserting what
-      the change must not break. Recorded BUG-029 (pre-existing cluster-1 flake) while running it. Scenarios 1.277-1.286 were added after an adversarial review of the first pass found ten further defects in it: the auth_token strip handed over fewer credentials than the response it replaced (no st_access, fatal wherever the frame cannot use the session cookie); JWKS backed off only when keys were already cached, so a cold cache cost every queued request its own 10s fetch; a bodiless 304 yielded an empty chunk that made GZip attach a body to it; a mid-body upstream failure became a truncated 200, i.e. a silent SyntaxError in a Vite chunk; the pooled client and the module-level locks were reusable across event loops; public_proxy forwarded a Content-Length it was not sending; the /static mount ignored baseUrlPath, silently restoring the 401 storm; a non-numeric LEX_PROXY_REPLICAS raised at import; the lifespan JWKS warmup delayed the port bind by up to 10s; and the CLI pre-check mirrored two of five import-time rules with a case-sensitive https test. Scenarios 1.287-1.290 then close the gap those fixes exposed: freezing the iframe src stops a renewal destroying the Streamlit session, but it also meant the renewed token had no way to REACH the proxy, since ?auth_token= in the iframe URL was the only channel that existed - so an embedded session still died at the access token's own lifetime with the shell holding a fresh token it could not deliver. POST /auth/adopt is that channel: token in the body rather than a URL, CORS-scoped to the configured frontend origin, JWKS-validated like every other credential, and adopted through the strictly-newer logic PR 723 already built for exactly this. The CORS allowlist is DERIVED from DOMAIN_HOSTED (1.291-1.292) rather than declared in a new variable: settings.py already refuses to start without it whenever DEPLOYMENT_ENVIRONMENT is set and Django builds CORS_ORIGIN_WHITELIST from it the same way, so it is guaranteed present - and a new required variable would have made the failure mode a dashboard that renews for five minutes and then quietly stops.
-  an:
-    title: HTTP/2-safe proxied response headers (duplicate singletons, chunked framing, gzip scope)
-    scenarios: 1.300-1.305
+      LETTER ALLOCATED TWICE, recorded rather than renumbered (letters are never renumbered). Two
+      batches took `1ad` concurrently while this shard was being clobbered by merges, so the file
+      carried them as two `ad` keys in one mapping -- where YAML keeps only the last, silently. Both are
+      on disk and both run; their scenario ranges overlap, which `test_plan_aggregates.py validate`
+      reports and only the two batch owners can settle.
+
+      -- test_1ad_streamlit_theme_follower.py, 1.261-1.294: Python side of lex-app <-> Streamlit theme
+      agreement. Streamlit's theme is boot-time config, so a page can only follow a change by reloading
+      - which makes a WRONG reload expensive (it discards typed input) and a missed one merely cosmetic.
+      Hence 1.263: a URL with no embed_options must report "" and not "light", or every standalone tab
+      would reload on a guess. 1.266 pins the storage key to one Python definition, because the relay in
+      proxy.py and the follower drift apart silently - both halves keep working alone and sync just
+      stops. 1.268 found a real hole while being written: json.dumps escapes what JS needs but not
+      "</script>", which the HTML parser acts on first, so the value could close the element and inject
+      markup; fixed by escaping angle brackets as \u003c/\u003e. GAP: the emitted script's runtime
+      behaviour is verified only by a DOM-double harness run by hand (7 cases, all passing) - this repo
+      has no JS runner, so it is not in CI. Moving it to the frontend repo's vitest would close that.
+      1.269 covers the SECOND delivery path, added after the relay was found not to reach a real
+      deployment: widgets embedded IN a Streamlit page postMessage their palette to the host, and the
+      shim - served by the Streamlit server, so same-origin with the page - turns that into the storage
+      write the follower waits for. This is the path that survives cross-SITE deployments, where
+      browsers give the relay iframe partitioned storage and its write lands somewhere the page never
+      reads. The test pins the three links that are each silent when broken: the component accepts and
+      forwards the key, both host call sites supply it, and the static shim reads it from args rather
+      than keeping a second copy. 1.270 covers a lifetime bug found by re-reading the follower against
+      Streamlit's rerun model, not by a failing test: the install flag lived on the persistent Streamlit
+      page while the storage listener lived on the component iframe, which Streamlit destroys and
+      recreates per rerun. That combination works for exactly one render - the next iframe sees the
+      flag, returns early, and the iframe holding the listener is already gone, so nothing listens and
+      nothing is logged. Both now live on the page. The same pass moved the initial read to the page's
+      storage and added one console.info per decision, because three cross-context hops with no UI of
+      their own make "never arrived" and "arrived and was already correct" indistinguishable from the
+      outside. 1.271 shortens the embedded path rather than debugging it further. It was widget -> shim
+      -> localStorage -> storage event -> follower -> reload; the shim is already inside the page's
+      frame tree and same-origin with it, so the follower now publishes host.__lexThemeFollow and the
+      shim calls it outright: widget -> shim -> follower -> reload. Three fewer links, each of which was
+      silent when broken and only reachable by guessing. The storage route is retained, not replaced -
+      it is the only way in for a writer with no handle to the page (the relay iframe, a sibling tab,
+      and a shim that reports before the follower has rendered, which the install-time read covers).
+      Harness after the change: 8/8 across both routes. 1.272 is the bug that made all of this look
+      dead. The background measurement parsed "rgba(0, 0, 0, 0)" into four zeroes, passed a "length < 3"
+      guard, and computed luma 0 - pure black - so ANY page whose measured element painted nothing
+      reported "dark". A light page asked to become dark then saw now === mode and returned: a silent
+      no-op every time, with a log line asserting the page was already correct. Three earlier fixes in
+      this batch were all downstream of a measurement that was confidently wrong. The guard is now on
+      ALPHA rather than component count, several candidate elements are tried in order because which one
+      carries the theme background is Streamlit's business and has moved between versions, and the last
+      resort is the OS preference - which is what Streamlit follows when the URL names no theme.
+      Harness: 10/10, including the exact regression. 1.273 covers LEX_THEME_DEBUG, added because four
+      rounds of this were debugged by inference: the mechanism spans three browsing contexts, is
+      reported with screenshots, and console output was not reaching the diagnosis. A panel rendered IN
+      the page makes one screenshot sufficient - it shows the measured background, the stored value,
+      whether a widget has announced anything and by which route, and whether the reload budget is
+      spent. Off by default, and SPLICED rather than gated: when off the panel code is absent, not
+      present-and-skipped, so no production page carries it and no future edit to a runtime guard can
+      leak a debug box into a dashboard. The scenario also pins that the follower is identical in both
+      variants - diagnostics must observe the mechanism, never alter it. 1.274 makes following
+      switchable, after the user reported "the streamlit is always in dark mode, you cannot change it".
+      Cause: following reloads with ?embed_options=<mode>_theme, and that parameter is the TOP of
+      Streamlit's own precedence - above the stored theme and above Streamlit's theme menu - so on a
+      following page the menu has no effect and _streamlit_structure cannot override it either, a query
+      parameter being outside what app code can influence. Verified the launch flags were NOT the cause
+      first: the 1ae CLI flags emit backgroundColor #ffffff with proper theme.light/theme.dark blocks
+      and no base override. Default is ON by product decision - the two surfaces are meant to read as
+      one, so lex-app decides the mode and Streamlit matches, rather than branded widgets sitting on a
+      mismatched page. LEX_THEME_FOLLOW=0 opts out where a page needs its own theme control. The escape
+      hatch is TESTED rather than only documented, in every spelling an operator would reach for, and a
+      blank value reads as ON because an unfilled deployment template must not silently disable a
+      default. A page pinned by an earlier follow is freed by opening it once without embed_options,
+      once following is off. The eager-frames script (1ai) is deliberately NOT gated on this - it
+      governs when component frames load, not the theme, so switching theme sync off must not bring back
+      load-on-scroll. 1.275 fixes "both are always dark at first". Neither product chose it: Streamlit
+      falls back to prefers-color-scheme by design, and react-admin's ThemeProvider resolves
+      defaultTheme || (prefersDarkMode && darkTheme ? 'dark' : 'light'), so merely SUPPLYING a darkTheme
+      handed lex-app's first-load default to the OS. A dark-OS user got a dark app and a dark dashboard
+      having never asked for either. The follower now treats "nothing agreed yet" as light instead of
+      leaving the page on Streamlit's own default, and lex-app sets defaultTheme="light" on both <Admin>
+      and <AdminContext> (frontend F12.48) so the two products agree on first paint. Costs at most one
+      reload, and only where the page was about to be the wrong colour - on a light machine the measured
+      mode already matches and follow() returns without acting. Verified against DOM doubles that it
+      TERMINATES: the reloaded page re-evaluates with the mode now in its URL and stops, so there is no
+      reload loop. A stored choice still wins on both sides; this decides the first load only. 1.276
+      REPLACES the mechanism, after the user pointed at Streamlit's own Settings dialog and said "I
+      think this is overriding the streamlit behaviour". They were right, and it was the root cause the
+      previous five scenarios had all been downstream of. Following used ?embed_options=<mode>_theme,
+      which sits at the top of Streamlit's resolver - so the theme menu stopped applying AND stopped
+      saving, because Streamlit's own writer bails out while a URL theme is present (Cae = e => { if
+      (!Pa() || (Rw(), xg() || Sg())) return; ... }). The follower now writes the key the MENU writes -
+      stActiveTheme-<pathname>-v2, JSON "Light"/"Dark" - so the two cannot disagree: the menu keeps
+      working, shows the truth, and a choice made there persists. A reload is still needed because
+      Streamlit reads the theme at boot, but the URL is untouched. 1.272 was rewritten rather than
+      deleted: the luma measurement it pinned is GONE, not fixed, because the selection is now read from
+      Streamlit instead of inferred from pixels - "System" and unset both mean the OS decides, which
+      prefers-color-scheme answers exactly. Its regression guard is that nobody reintroduces
+      measurement. A URL that already pins a theme makes the follower stand down entirely and log how to
+      clear it, since earlier versions put those parameters there and a pinned tab would otherwise burn
+      its one reload per load forever. Harness after the rewrite: 8/8. 1.277 fixes a RELOAD LOOP - the
+      page flipping between light and dark without stopping, which is the worst thing this file can do
+      to a page. The guard lived on `host`, and location.reload() destroys that window: it stopped a
+      second reload WITHIN one load and nothing across them. Two independent inputs feed follow() - the
+      stored agreement, and a widget reporting its own palette - so when those disagree each load flips
+      the other way. They disagree exactly when the widget frames cannot see lex-app's storage (third-
+      party frames get partitioned storage) and fall back to the light default while the agreement key
+      says dark. The ledger now lives in sessionStorage, which survives a reload and is scoped to the
+      tab - the lifetime a cross-reload guard actually needs - and records what was last reloaded FOR,
+      so a contradiction is recognisable rather than merely repeatable. Bounded to two reloads per
+      episode, then it refuses and says why. The guard must not become the bug in turn, so follow() now
+      knows HOW it heard: a storage event is a fresh deliberate change made elsewhere and clears the
+      ledger, while the install read and a widget report are re-reads of existing state and are the two
+      that can argue. The window expires, so sync does not work once per tab and then quietly stop.
+      Harness reproduces the loop directly - agreement=dark with widgets reporting light, twelve loads -
+      and asserts it terminates in at most two: 5/5. 1.278-1.280 finish the job 1.277 only bounded.
+      Reported as "streamlit reloads after a moment, so I'll be using it and it reloads by itself" - the
+      flipping had stopped, the INTERRUPTIONS had not, because a bounded loop still restarts every time
+      the ledger's window expires and a real contradiction never heals. Two things were wrong with the
+      model. First, follow()'s three inputs are not equals: install fires while the page is booting
+      anyway and storage means somebody just chose something, but `widget` is an embedded frame
+      DESCRIBING ITSELF, and it is the only one that arrives mid-use. A widget saying "I am light" is an
+      observation, not a request to reload the dashboard - so it is now recorded and never acted on.
+      Second, the memory of a contradiction was windowed like the ledger; it is now sticky for the tab,
+      cleared only by a genuine `storage` change, since "these two disagree" stays true until something
+      changes it. Silencing the direct route looked like a complete fix and was not, which is the point
+      of 1.280. The shim writes the agreed key BEFORE calling the page, and a same-origin iframe's write
+      is delivered to its parent as a `storage` event - indistinguishable from a person switching theme
+      in another tab. The identical report simply took the other road and reloaded the page anyway. The
+      shim now marks the write as its own (__lexThemeSelfReport) and the follower treats route as route,
+      not authority. A deliberate storage change, conversely, now outranks every refusal including one
+      this load already made - otherwise the escape hatch the stand-down message advertises would be
+      closed by the refusal that suggests it. 1.280 also fixes how this batch is tested. No property of
+      a STRING proves a page settles, so the follower's logic was only ever covered by a hand-run DOM
+      double that lived in a temp directory and was gone by the next session - which is why the loop it
+      had already proved fixed came back wearing different clothes. The harness now lives in the repo
+      (tests/init/harness/theme_follower_harness.mjs), runs under pytest when node is present and skips
+      when it is not, and models the one distinction that matters: state that survives location.reload()
+      versus state that does not. Eight cases, 18 checks. Case 7 - the shim's storage road - fails
+      against the pre-fix script and passes after, which is the whole reason to have it. 1.278 then
+      shipped INVERTED and broke theme following outright - reported as "theme switch isn't working", a
+      light page hosting a dark widget. Refusing a widget report its reload is true of a RE-ASSERTION
+      and false of a REPORT: in a same-site deployment the widget frame is the only messenger, because
+      lex-app writes its preference, the frame reads it (same origin, so unlike the partitioned cross-
+      site case it genuinely can), and tells the shim - and the relay cannot cover for it, since the
+      shim already wrote that value and `storage` does not fire for an unchanged one. The change was
+      swallowed whole. The error was generalising "widget frames cannot see lex-app's storage" from the
+      cross-site case to every case; it is false when the origins match, which is the deployment we run.
+      The rule is now act-versus- forget: every input may ACT, and only a `storage` event no widget
+      claimed may clear the loop memory. That carries both requirements, where refusing to act carried
+      only one - and the sticky stand-down was what actually stopped the mid-use reloads all along.
+      Harness case 9 covers the gap that let this ship green through a suite added to catch exactly
+      this: no case had a widget report carrying real news. It fails against the broken commit and
+      passes against the fix. 9 cases, 19 checks. 1.281-1.282 come from finally RUNNING the follower in
+      a real Streamlit page instead of reasoning about the string it emits - after the user reported,
+      for the third time, that the switch never works. Two silent failures, either one sufficient on its
+      own. 1.281: a theme in the page's URL outranks both this key and Streamlit's own menu, and the
+      previous answer was to stand down and log how to clear it. Earlier versions of THIS script put
+      that parameter there, so standing down converted our own past mistake into a permanent, per-URL
+      failure carried by any bookmark, pinned tab or shared link - with one console.info as the only
+      evidence. It now strips the theme values and keeps every other embed option, so the page self-
+      heals in one load. Standing down survives only when removal fails. 1.282: the install-time
+      correction ran inside requestAnimationFrame, which does not fire while a document is not being
+      rendered. Anyone whose Streamlit page finished loading unfocused - the normal case, since people
+      open lex-app and the dashboard side by side and look at one - never got the first correction at
+      all, and the page sat on Streamlit's own default. Confirmed by A/B against a real page at
+      visibilityState "hidden": before, the theme key stayed null and the page stayed on the OS default;
+      after, it wrote "Light" and corrected itself. Nothing in that path needs a frame - it reads
+      storage and a media query. 1.283-1.289 REPLACE the mechanism after the user said the result was
+      "slow and unreliable, I can easily break it" - which was correct, and structural rather than
+      incidental. Every version until now wrote Streamlit's stored theme key and RELOADED, on the
+      premise that Streamlit resolves its theme once at boot. The premise was false: Streamlit's own
+      menu changes the theme live, through React state rather than storage - measured dark to light with
+      no navigation. The reload was the whole problem. Slow, because a change cost a full page load and
+      two when the page booted wrong; unreliable, because the ledger, the sticky stand-down, self-report
+      marking and the one-reload flag existed ONLY to make reloading survivable, addressed nothing the
+      user wanted, and could each get stuck. Deleting the reload does not fix those bugs, it makes them
+      unreachable - scenarios 1.277-1.280 are retired along with the DOM-double harness, which modelled
+      reload semantics that no longer exist. The new flow is one-directional, which is what removes the
+      arguing: Streamlit hands every declared component its resolved theme in the RENDER event ({base,
+      backgroundColor, ...}) and re-fires it on every change; the shim forwards it down to the widget
+      frames; and lex-app still drives the page by clicking Streamlit's OWN theme control instead of
+      writing storage. Nothing reports upward any more, so there is nothing to contradict. The shim had
+      listened for RENDER since it was written, read `args`, and thrown `theme` away - every part of the
+      old design was reconstructing, badly, a value already being handed over for free. Verified end to
+      end against a real Streamlit page with the real shim: Streamlit's menu -> page -> widget in ~1s
+      with no reload, and lex.theme.mode -> driver -> page -> widget in ~1s with no reload,
+      menuEverVisible false and popoverLeftOpen false. The menu-DOM dependency is the accepted cost, and
+      it fails HARMLESSLY - the theme is left alone with a log, since nothing reloads or overrides.
+      1.285 pins that the mask is removed on both exit paths, because a mask left behind would hide the
+      real menu from the user permanently. 1.290-1.291 fix the diagnostics, which the rewrite had
+      silently broken: the debug panel still called four functions that no longer existed, so it would
+      have thrown on first paint - in the one situation it exists for, when someone is already stuck. A
+      diagnostic that breaks exactly when it is needed is worse than none, because its silence reads as
+      "nothing to report". The panel now reports each LINK of the chain separately, because from the
+      outside every break looks identical ("the switch does nothing") and only the link that failed
+      distinguishes them. 1.291 names the one break the page cannot otherwise report: lex-app and
+      Streamlit are separate ORIGINS, so lex-app's storage is not this page's storage, and the only
+      bridge is the hidden /_lex/theme-relay frame. A browser that partitions third-party storage -
+      Brave's shields, Safari, strict Firefox - blocks that write, the agreed key stays empty forever,
+      and every theme change is dropped in silence. That is now a console.warn on every load, WITHOUT
+      the debug flag, since nobody who does not already suspect it would think to turn diagnostics on.
+      Standing hypothesis for the report that survived the rewrite; unconfirmed, because the failure
+      lives in a browser profile that cannot be reached from here. 1.292 is the ROOT CAUSE of the whole
+      "switch never works" thread, and it was never the mechanism. The reporting environment runs
+      Streamlit 1.54 while requirements.txt has said streamlit>=1.58 since the theme work landed. The
+      sync reads and drives Streamlit's OWN surfaces, and both changed shape after 1.54: the stored key
+      is `stActiveTheme-<pathname>` in 1.54 versus `...-v2` in 1.58, and 1.54 has no theme control in
+      its menu at all (no stThemeSwitcher, no stMainMenuItem-theme-*). So every version of this sync
+      wrote a key nobody read and, after the rewrite, looked for a control that does not exist - failing
+      silently and completely while every probe against a supported build passed. Four rewrites of a
+      mechanism that was correct, because a version mismatch and a bug present identically. The lesson
+      is procedural, not technical: I read Streamlit's internals out of .venv-test (1.58) and never once
+      checked the version the app under test actually runs. Verify the environment before verifying the
+      code. A floor nothing checks is not a floor, so `lex streamlit` now warns at launch, naming the
+      cost and the cure. A warning rather than a refusal - the rest of the app is unaffected, and
+      blocking a launch over a theme is the worse trade. CORRECTION to the 1.292 note above: the claim
+      that 1.54 stored the theme under a key with no -v2 suffix is WRONG, and wrong through the same
+      mistake twice - grepping for the literal key when the suffix is built at runtime
+      (`${base}-v${2}`). 1.63 looked identical under that grep and is demonstrably fine. What 1.54
+      genuinely lacked, measured before the upgrade, is the theme control itself: stMainMenuButton and
+      stThemeSwitcher were both absent (0 occurrences, versus 1 each in 1.58 and 1.63), so drive() had
+      nothing to click. The version floor is still the root cause; one supporting detail was not. 1.293
+      fixes the residue the user reported after upgrading: "sometimes it doesn't detect the switch. I
+      reload it then it detects it." The agreement is a VALUE, and the relay writes only when the value
+      changes - correct on its own terms, since an unchanged write wakes every tab for nothing. But a
+      page that has DRIFTED from the agreement can then never be told to come back: drift happens
+      ordinarily (the theme is changed in Streamlit's own menu, or one drive() times out) and from then
+      on the only thing that could re-sync it is a change to a mode it is already agreed on, which never
+      arrives. A reload fixed it because install reads the value directly rather than waiting to be told
+      - which is the shape of the whole bug: conforming to a value we already hold does not require an
+      event. It now re-reads on return to the page. `focus` is the one that matters, since two windows
+      side by side never change visibility when you alt-tab between them, and that is exactly how these
+      products are used; visibilitychange covers a genuinely backgrounded tab (and is registered on
+      `document`, where it is actually fired, rather than relying on it bubbling to `window`); a
+      Streamlit rerun is a free third opportunity. Verified against a drifted page: agreement light,
+      page dark, no event possible, then "drove to light (focus)" and the page went white. 1.294 closes
+      the fast-switch edge the user asked to have removed rather than tolerated: "if I switch really
+      quickly, it starts to drift... it will take two switches in lex-app to do one on streamlit", plus
+      "the streamlit theme option gets opened when I switch too fast". Three defects, all the same
+      window - a drive is not instantaneous and everything assumed it was. (a) Opening the menu is a
+      TOGGLE, so a second drive starting while the first still had it open closed it again; neither
+      found its item and both sat until the timeout. Drives are serialised now, a mid-drive request is
+      queued rather than started, latest wins. (b) The close step toggled blindly, clicking the button
+      even when the popover had already dismissed itself - which re-opened it, and the mask came off on
+      a timer regardless. That is the menu the user saw. It asks with Escape now, which cannot re-open,
+      and reveals only once the popover is really gone rather than after a fixed delay (bounded, since a
+      mask that never lifts hides the real menu). (c) The one that survived fixing the other two:
+      currentMode() is STALE while a drive is open, because Streamlit has not re-rendered, so comparing
+      against it dropped genuine changes as "already right" - fire light/dark/light/dark back to back
+      and every intermediate request matched the not-yet-updated mode, never reached the queue, and the
+      page settled on whichever mode was mid-flight instead of the one asked for last. That is the
+      drift, and it needed no human speed, only two changes closer together than one menu round-trip.
+      The comparison is now against the SETTLED target - what the page will be once everything in flight
+      is done. Verified on the user's own Streamlit 1.63: five flips fired back-to-back with no delay,
+      then an adversarial mix of gaps (0/40/350/0/900/60/0/1400ms) - lands on the last requested mode
+      every time, popover never visible, no mask left behind. The back-to-back case reproduced the drift
+      against the pre-fix build first, which is why it is worth having.
+
+      -- test_1ad_proxy_assets_and_session_durability.py, 1.247-1.302: the fourth batch on this auth
+      path, and the one that explains the other three reports. The proxy authenticated every request
+      through one catch-all route, and Streamlit 1.61 ships 365 code-split JS chunks with 107 named in
+      eager modulepreload tags - so one credential-less moment produced a 401 flood, and a lazily-
+      imported chunk that 401s reaches the browser as "TypeError: Failed to fetch dynamically imported
+      module", which is how an expired credential was reaching customers as a type error. Serves
+      Streamlit's own bundle from the proxy process (located via streamlit.file_util.get_static_dir so
+      hashes cannot drift from the index.html naming them), makes only /_stcore/health and
+      /_stcore/host-config publicly proxied, and keeps everything else gated - the boundary scenarios
+      matter as much as the public ones. Also: one pooled httpx client instead of one per request; raw
+      streaming that preserves Content-Encoding (measured 1.77 MB -> 0.42 MB on the eager set, 4.17x);
+      the JWKS fetch moved off the event loop with single-flight and stale-key retention (a failed
+      refresh used to reject every token in the cluster); ?next= carried through login->callback with a
+      strict open-redirect guard; the bootstrap auth_token stripped out of the URL; and startup refusal
+      for the configurations that are genuinely broken rather than degraded - replicas without a shared
+      token store, SameSite=None without Secure. The session key is DERIVED from DJANGO_SECRET_KEY
+      (stable in terraform state, identical on every replica) rather than demanded as a new variable: an
+      earlier revision refused to boot without SESSION_SECRET and bricked a running instance, which is a
+      worse failure than the fragility it guarded against. 1.293-1.295 fix a regression the pooling
+      change introduced and production found: Streamlit sits behind uvicorn, whose keep-alive timeout is
+      5s, so a pooled connection handed out after that fails with RemoteProtocolError before a byte is
+      exchanged - observed in a prod log exactly 5s after the previous request, on a /media fetch, i.e.
+      a document download that simply failed. The per-request client this replaced could never hit it.
+      Pool expiry now undercuts the upstream's, one retry covers the race, and the error class answers
+      502 instead of escaping as an unhandled ASGI exception. 27 of 30 fail against the pre-fix tree;
+      the 3 that pass (1.254 boundary, 1.255 WS deny, 1.271 permitted configs still boot) are guards
+      asserting what the change must not break. Recorded BUG-029 (pre-existing cluster-1 flake) while
+      running it. Scenarios 1.277-1.286 were added after an adversarial review of the first pass found
+      ten further defects in it: the auth_token strip handed over fewer credentials than the response it
+      replaced (no st_access, fatal wherever the frame cannot use the session cookie); JWKS backed off
+      only when keys were already cached, so a cold cache cost every queued request its own 10s fetch; a
+      bodiless 304 yielded an empty chunk that made GZip attach a body to it; a mid-body upstream
+      failure became a truncated 200, i.e. a silent SyntaxError in a Vite chunk; the pooled client and
+      the module-level locks were reusable across event loops; public_proxy forwarded a Content-Length
+      it was not sending; the /static mount ignored baseUrlPath, silently restoring the 401 storm; a
+      non-numeric LEX_PROXY_REPLICAS raised at import; the lifespan JWKS warmup delayed the port bind by
+      up to 10s; and the CLI pre-check mirrored two of five import-time rules with a case-sensitive
+      https test. Scenarios 1.287-1.290 then close the gap those fixes exposed: freezing the iframe src
+      stops a renewal destroying the Streamlit session, but it also meant the renewed token had no way
+      to REACH the proxy, since ?auth_token= in the iframe URL was the only channel that existed - so an
+      embedded session still died at the access token's own lifetime with the shell holding a fresh
+      token it could not deliver. POST /auth/adopt is that channel: token in the body rather than a URL,
+      CORS-scoped to the configured frontend origin, JWKS-validated like every other credential, and
+      adopted through the strictly-newer logic PR 723 already built for exactly this. The CORS allowlist
+      is DERIVED from DOMAIN_HOSTED (1.291-1.292) rather than declared in a new variable: settings.py
+      already refuses to start without it whenever DEPLOYMENT_ENVIRONMENT is set and Django builds
+      CORS_ORIGIN_WHITELIST from it the same way, so it is guaranteed present - and a new required
+      variable would have made the failure mode a dashboard that renews for five minutes and then
+      quietly stops.
+
+  ae:
+    title: Streamlit theme parity — tokens, native theme config, CLI wiring
+    scenarios: 1.274-1.299
+    status: complete
+    tests:
+      pass: 41
+      skip: 0
+      xfail: 0
+    note: Streamlit pages now carry the real lex brand. Design tokens are vendored as pure Python
+      (tokens.py) and mapped onto Streamlit 1.58's native theme keys (mapping.py) — ~120 keys exist,
+      so the navy sidebar, dataframe header, chart palettes, radii and fonts are all reachable through
+      the PUBLIC config API rather than CSS. config_writer.py renders that one mapping two ways — CLI
+      flags (primary — a config.toml resolves relative to CWD, so only flags theme every launch
+      identically) and a generated .streamlit/config.toml (fallback for a bare `streamlit run`). The
+      committed config was hand-written with every value drifted (primaryColor `#08BCC2` vs the real
+      `#14b4b4`, grey sidebar vs navy, "sans serif" vs Inter, no dark mode); 1.293 makes that
+      unrepeatable by asserting the file is byte-identical to the generator. Fonts point at the
+      frontend's OWN Google Fonts stylesheet via Streamlit's "<family>:<url>" form, so the two
+      surfaces agree both connected (both Inter) and air-gapped (both fall back) — bundling a woff2
+      for Streamlit alone was rejected because the frontend does not bundle one either. 4 keys
+      (chart ramps + showSidebarBorder) are global-only with no per-mode twin, pinned by 1.280b since
+      Streamlit rejects unrecognised options outright. A broken theme never blocks a launch (1.292).
+      Verified against real Streamlit — flags and generated TOML both accepted, launch survives a
+      deliberately broken token module. Also fixes `lex streamlit` silently overriding a
+      caller-supplied port — the hardcoded ports were appended AFTER the caller's args, so a
+      custom port was ignored and the command was unusable wherever 8080 was already taken.
+      The proxy's UPSTREAM now follows `--server.port`, so it cannot forward to a dead port
+      (1.295-1.298). CLI flag values are emitted BARE — reusing the TOML encoder
+      quoted them, so every colour arrived as `"#14b4b4"` and Streamlit silently skipped it as
+      invalid; the theme applied nowhere while every shape-level check passed. 1.299 now asserts
+      the values Streamlit actually RESOLVES. Streamlit's CLI cannot express list options at all,
+      lists ARE expressible on the CLI (Streamlit json.loads them) so they stay JSON while
+      scalars go bare, and the sequential/diverging ramps need EXACTLY 10 stops or Streamlit
+      discards them for its own defaults — another silent skip (1.299c/1.299d).
+      RENUMBERED ON MERGE 2026-08-28 - this branch claimed letter z and scenarios 1.211-1.236,
+      and both landed on lex-app-v2 while it was open. Letter z is now the iframe-breakout batch
+      (1.211-1.216) and aa took 1.217-1.222, so a duplicate z key here would have silently
+      dropped one of them from the YAML. Kept as ae/1.274-1.299 so no scenario id means two
+      different things. Second renumber for this batch - the first, to letter z, is in its own
+      history, which is how the collision happened twice.
+  af:
+    title: The mode switch and the branded theme compose
+    scenarios: 1.300-1.301
     status: complete
     tests:
       pass: 5
       skip: 0
       xfail: 0
     note: >-
-      a download that started, sat at 0 bytes and ended in a network error, while the proxy log
-      showed only "GET /media/....pdf -> 200". Three defects combined, and none was visible over
-      HTTP/1.1: Date and Server were relayed from the upstream so uvicorn's own copies became
-      DUPLICATES, and both are singleton fields whose repetition an HTTP/2 intermediary rejects by
-      resetting the stream - which the browser reports as ERR_HTTP2_PROTOCOL_ERROR against a 200;
-      Content-Length was dropped from every proxied response, forcing Transfer-Encoding: chunked
-      (forbidden in HTTP/2) and leaving the browser unable to show progress, hence "0 BYTE"; and
-      GZip wrapped the whole app, re-compressing already-compressed PDFs and ZIPs on a loop shared
-      with the Streamlit script runner. The duplication predated the streaming change - verified
-      against the pre-750 proxy, which also emitted two of each - but the streaming change added
-      the chunked framing and the re-compression that made it fatal. 4 of 5 fail against the
-      unfixed tree. NOTE: letters ad-am and scenarios 1.293-1.299 were allocated concurrently by
-      other batches while this work was open; 1an/1.300-1.305 is the first slot free of that. 1.305 added on review: _build_proxied_response treats its two branches differently and 1.300-1.304 only exercised the streaming one, leaving the branch where a stale header is FATAL uncovered - measured, a stale compressed length makes uvicorn raise 'Response content longer than Content-Length' and the client sees http=200 bytes=0, which is the reported symptom verbatim.
+      Found while merging 1ae (launch-time branding from LEX tokens) into 1ad (runtime mode switch
+      via ?embed_options). Read separately, 1ad looks like it destroys 1ae: the URL option appears
+      to select Streamlit's BUILT-IN light/dark, which would discard the brand on every theme
+      follow. Verified in the Streamlit 1.58 bundle that it does not - the URL option is a
+      preference SIGNAL, and the resolver prefers the custom variant of that mode
+      (Light -> ["Custom Theme Light", "Light"], Dark -> ["Custom Theme Dark", "Dark"]). But those
+      custom variants exist only when the config supplies BOTH [theme.light] and [theme.dark]; a
+      config carrying only the flat [theme] section yields one unnamed custom theme that table
+      cannot reach, and the switch would fall through to the built-in. So 1ad is safe BECAUSE 1ae
+      populates both mode sections - a dependency neither batch states. Pinned here because the
+      config is generated and collapsing it to one section would look harmless: the theme would
+      still be right until someone switched mode. Second half guards the two mode vocabularies
+      staying distinct ("dark" internally vs "dark_theme" in the URL), since Streamlit drops an
+      unrecognised embed option silently.
+      1.301 adds a THIRD theme mechanism, taken selectively from
+      origin/feat/lex-brand-tokens-and-theme-handshake: lex_view(theme=) pushes the host's mode
+      DOWN into an embedded lex-app iframe (?theme= boot fallback plus a host->iframe `theme`
+      postMessage on load). Exact inverse authority to 1ad - there the Streamlit author decides,
+      here lex-app does - and they coexist because the envelopes differ by source tag
+      ("lex-app-host" down, "lex-app" up) and neither listens to the other, so no loop. Only the
+      SENDING half was taken, and only because the rest of that branch is superseded: its
+      733-line design_system/lex_tokens.py predates the 787-line version that landed on
+      lex-app-v2 via #686 with a CI freshness gate, so merging the branch whole would have been a
+      54-line regression. DOCUMENTED GAP, asserted rather than implied: the React app reads
+      neither ?theme= nor the postMessage, so lex_view(theme=) is currently inert on the frontend
+      while looking like it works - it validates its input, appears in the URL, and does nothing.
+      Delete that third assertion and replace it with an effect test when the consumer lands.
+  ag:
+    title: SPA assets are cacheable, and responses are compressed
+    scenarios: 1.302-1.303
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      User report - "the loading speed, it seems that it's taking way too long". Measured rather
+      than guessed: the built SPA is ONE chunk of 6281 KB (1895 KB gzipped), and lex/react/views.py
+      serve_react stamped EVERY file it served with "no-store, no-cache, must-revalidate,
+      max-age=0". no-store is the strongest form - the browser may keep no copy at all - so
+      nothing was reused between page loads and nothing was shared between a page and the iframes
+      inside it. A Streamlit page with three lex-app widgets therefore re-fetched ~24 MB on every
+      load (6.3 x (3+1)), and the same again on the next one; thirteen widgets would be ~86 MB.
+      Hashed assets are content-addressed, so they are safe to cache forever and same-origin
+      iframes share one HTTP cache: assets matching -<hash>. now get
+      "public, max-age=31536000, immutable". Everything else keeps no-store, and that half is
+      tested just as hard, because inverting the split is WORSE than the original bug - a pinned
+      index.html names hashed bundles that a deploy has replaced, giving a blank app with 404s and
+      no way to publish a correction. The hash is required rather than inferred from the directory
+      for the same reason. GZipMiddleware added for the cold-cache path (6.3 MB -> 1.9 MB), pinned
+      near the top of MIDDLEWARE since it compresses on the way out.
+      NOT fixed here, and the next real win: the 6 MB chunk itself. src/index.tsx imports ag-grid
+      at the entry and /embed/widgets is registered INSIDE <Admin> beside six <Resource>
+      declarations, so a Calculate button loads AG Grid Enterprise, ten ra-* enterprise packages,
+      moment and a markdown editor. Route-level React.lazy cannot help (the entry and <Admin> load
+      first); it needs a separate Vite entry mounting <AdminContext> only. Its own import graph is
+      78 modules.
+  ah:
+    title: Per-user metadata responses are briefly cacheable
+    scenarios: 1.304-1.305
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Follow-up to 1ag, from the user's network log: 171 requests for one Streamlit page, with
+      api/model-structure fetched five to six times. Nothing was looping - each embedded lex-app
+      frame is its own JS realm with its own query cache, so six widget blocks meant six
+      independent runtimes each legitimately wanting the tree once, concurrently. That endpoint is
+      also expensive to produce: it deepcopies the structure, then INSTANTIATES every model class
+      and evaluates its list permission, per request. The browser HTTP cache is shared across
+      same-origin frames, so "private, max-age=30" collapses N fetches to one with no client-side
+      coordination and no shared-state machinery. private is load-bearing rather than tidy: the
+      tree is pruned to the requesting user's permissions, so a shared cache serving it onward
+      would disclose which models another user can see - a confidentiality bug, not a performance
+      one, which is why 1.304 asserts it directly. Vary is extended rather than overwritten
+      because DRF sets it for content negotiation and clobbering it misbehaves only under a cache.
+      The window is a staleness budget for permission changes, so
+      LEX_METADATA_CACHE_SECONDS=0 disables it outright; 1.305 pins that 0 means no-store rather
+      than falling back to the default, and that a blank or malformed value cannot take the
+      endpoint down. Also applied to model-styling, the same class of per-user metadata.
+  ai:
+    title: Component frames load without being scrolled to
+    scenarios: 1.306-1.308
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      User report - "the components trigger when I scroll to them". The cause is in Streamlit
+      1.58, not in the widgets: ComponentInstance renders every custom component's frame as
+      styled('iframe')(({componentReady}) => ({display: componentReady ? 'initial' : 'none'})),
+      so the frame is display:none until the code INSIDE it calls setComponentReady() - which it
+      can only do once loaded. Browsers deprioritise hidden frames and commonly defer off-screen
+      ones outright, so nothing fetches until scrolling changes visibility; Streamlit's skeleton
+      placeholder is what was on screen. loading="eager" on our inner iframe cannot reach this,
+      because that frame lives INSIDE the hidden one. Fix holds the frame open across its load -
+      display:block, height:0, rendered but occupying nothing - and releases it the moment
+      Streamlit writes a height, which only happens after ready. Deliberately inline and NOT
+      !important: inline already beats the emotion class, and staying beatable is what lets
+      Streamlit take the element back. 1.307 covers the part that makes this safe rather than
+      merely effective - all three exits (ready, timeout, detached) go through one release path,
+      because a frame left holding our styles would be permanently zero-height AFTER loading,
+      i.e. an invisible widget instead of a slow one. Behaviour verified against DOM doubles
+      (7 cases: nudge, leave-visible-alone, release-on-ready, release-on-timeout,
+      release-on-detach, pick up frames from a later rerun, install once) - no JS runner in this
+      repo, so that harness is not in CI.
+      1.308 fixes what the first version missed: "some iframes load when we scroll to them".
+      Partial success is the shape of a race, not a wrong mechanism. Streamlit flips a component
+      frame between hidden and shown by swapping the emotion CLASS, an attribute change rather
+      than a DOM insertion, and the observer watched childList only - so a frame that existed but
+      was not yet display:none when the first sweep ran was checked once, skipped, and never
+      looked at again. Now observes attributes with a class/style filter (every attribute would
+      fire on each height write Streamlit makes as components report in), plus a bounded backstop
+      sweep for orderings not yet thought of - bounded because an unbounded timer on a dashboard
+      left open all day is a worse and quieter bug than the one it fixes. Harness after the fix:
+      6/6, including the exact regression (a frame hidden AFTER the first sweep) driven through an
+      attribute mutation with no insertion.
+  aj:
+    title: Streamlit sidebar chrome in lex-app's language
+    scenarios: 1.309-1.315
+    status: complete
+    tests:
+      pass: 28
+      skip: 0
+      xfail: 0
+    note: >-
+      The Streamlit sidebar was a teal link floating in an empty navy column - no branding, no
+      indication of who is signed in, and a log-out styled as the most prominent thing on screen
+      (teal is this palette's accent, which reads as "primary action", and logging out is not
+      one). It now carries the same chrome as lex-app's sidenav: brand lockup, signed-in user with
+      an initials avatar on the active-item tint, hairlines, and a log-out row weighted like a
+      navigation item. Identity sits in the SIDEBAR rather than a top bar, the reverse of lex-app
+      and on purpose - lex-app puts the user menu top-right because its sidenav is full of
+      navigation, while a Streamlit page has no top bar of ours and a mostly empty sidebar.
+      Two boundaries, both asserted because both are invisible when crossed. It owns the CONTAINER
+      only: the author's streamlit_structure.main() content is not styled, wrapped or reordered
+      (1.310), since two components deciding a page's navigation means the author's loses quietly
+      depending on call order. And it depends on NO Streamlit internals - no data-testid, no
+      emotion class - so an upgrade cannot break it by renaming something, which is the failure
+      mode stActiveTheme and stCustomComponentV1 are pinned against elsewhere in this cluster.
+      The second boundary was later traded, deliberately and once. Call order puts the account
+      block under the navigation, not at the FOOT of the panel, and the user asked twice for the
+      foot - so the batch now spends exactly one Streamlit dependency on it (1.313). The terms are
+      written down: data-testid, which is Streamlit's own testing surface rather than a generated
+      emotion class, and layout properties only, so the failure mode when an upgrade breaks it is
+      "not pinned" - where the block would have been anyway - and never "restyled" or "hidden".
+      The first attempt at that pin matched and did nothing, which is why 1.313 exists rather than
+      an assertion that the selector is present. `div:has(> div[data-lex-account])` bound to the
+      innermost wrapper Streamlit puts around markdown output; that element is not a flex child of
+      the column, so margin-top:auto had no free space to consume. Live CSS, inert result, no
+      error - invisible to any test asserting the selector exists. So 1.313 asserts the two things
+      the pin actually needs and the broken version failed: a DESCENDANT match, since Streamlit's
+      wrapping depth is not ours to predict, and an unbroken flex column from the panel down.
+      Its second half removes a magic number. Reserving the header and nav with
+      `min-height: calc(100vh - 9rem)` is right for exactly one app - the nav's height is however
+      many pages the author declared, so a smaller nav leaves the block floating mid-panel and a
+      larger one grows a scrollbar in a sidebar with no reason to scroll. `min-height: 100%` on a
+      flex column asks for the same thing knowing nothing, and grows instead of clipping.
+      Its third half comes from READING Streamlit 1.58's styles rather than assuming them.
+      stSidebarContent is `position: relative; height: 100%; overflow: auto` - a scroll container,
+      and not a flex container until this CSS makes it one. Its header carries
+      `height: theme.sizes.headerHeight`, which is a fixed height on a block and merely a starting
+      point on a flex item: the default flex-shrink:1 would have handed the column permission to
+      squash the logo on a short sidebar, and the navigation below it is the author's and no more
+      ours to compress. Both are held at `flex: 0 0 auto`. The account block is the only thing that
+      flexes and may only GROW (`1 0 auto`) - letting it shrink would squeeze the way out of the
+      app on exactly the sidebar that is already too full, while the real scroll container sits one
+      level up and would have handled it.
+      1.314 is the batch's first finding from RUNNING the component rather than reasoning about
+      it, and it had been shipping broken. st.markdown(unsafe_allow_html=True) parses MARKDOWN
+      first, and markdown has opinions about whitespace that HTML does not: a blank line ends an
+      HTML block and a four-space indent is a code block. The pretty-printed markup satisfied
+      both - so whenever the optional subtitle was omitted, its placeholder left a whitespace-only
+      line, markdown closed the HTML block there and rendered the following indented `</div>` as
+      literal text in a code box, in the sidebar, to the user. Invisible in every screenshot taken
+      until then because every account anyone had looked at HAD an email for the subtitle. Both
+      builders now emit a single line, joined with a SPACE rather than welded - HTML attributes are
+      whitespace-separated, so joining with nothing turns `target="_top"` and `style="..."` into one
+      unparseable attribute, which is the bug the obvious fix would have introduced. The scenario
+      asserts no builder emits a newline at all, removing the class rather than the instance.
+      One test-authoring fix rides along, because the same mistake was made three times in this
+      cluster: assertions that forbid a property were tripping on COMMENTS explaining why that
+      property was rejected. _rules_only() strips comments before asserting, so documenting a
+      rejected approach no longer fails the test that rejects it.
+      1.315 removes the sidebar entirely when lex-app frames the page, on the user's instruction
+      that "when streamlit is being embedded in lex-app, the sidebar should never exists". lex-app
+      already draws a sidenav, the logo, the signed-in user and a way out immediately to the left
+      of the frame; a second sidebar inside it is the same furniture twice, and the inner one
+      navigates a different app. Gone rather than collapsed - collapsing leaves a control that
+      reopens a panel the host never wanted - and the expand control and the content column's left
+      offset go with it, or the page keeps a gutter for furniture that is not there. Decided in
+      Python, not only in CSS, so the chrome is never BUILT: a hidden logo is still an st.logo call
+      and a hidden account block still renders a display name into the page. EMBEDDED is read
+      BEFORE the try, because the finally consults it - computing it inside would have made an
+      early failure raise NameError from the cleanup path and bury the real error.
+      The signal is an explicit `lex_embed=true` (added in StreamlitIframe.tsx) rather than an
+      inference: is_logout_enabled=false and auth_token both correlate with being framed today, but
+      they mean other things, and a signal that is true by coincidence stops being true the moment
+      either is used elsewhere. A framing check (host.top !== host, where a cross-origin throw IS
+      the answer) is the fallback that works before that frontend ships - not a hypothetical gap in
+      this project. Both paths share ONE definition of the rules, learned the hard way in this very
+      change: the first version extracted them with a regex that matched the file's FIRST style
+      block, shipped the account-block layout as the hide rules, and logged "sidebar is hidden"
+      over a fully visible sidebar. Verified in a real cross-origin frame: sidebar gone, content
+      flush to the left edge, and standalone unchanged (sidebar, logo and account all present).
+      1.309 covers the genuine hazard rather than the styling: the display name arrives from the
+      identity provider and is rendered through unsafe_allow_html, so a hostile
+      preferred_username would execute in the session of whoever opened the dashboard. Name,
+      subtitle and the sign-out href are all escaped. Colours are derived from the vendored
+      lex_tokens (NAVY, TEAL) rather than retyped, so the sidebar cannot drift from the product it
+      imitates - silently, in the one place a user sees both side by side.
+      1.311 swaps the text wordmark for lex-app's REAL logo - the same dark-lex-logo.svg its
+      sidenav imports, white wordmark on teal, which is what a navy surface needs. Vendored into
+      lex/assets/ (already declared package data) rather than referenced from the frontend build,
+      whose filenames carry content hashes and change on every rebuild - a reference would break
+      at the next deploy and show a broken image in the one place branding matters.
+      Placed by st.logo rather than by us. The first attempt hand-placed an <img> in the sidebar's
+      USER CONTENT and the user reported it misplaced: that area begins BELOW Streamlit's header,
+      so the image landed under the collapse control with the header's whitespace above it, and no
+      negative margin fixes that honestly. st.logo renders into the header slot Streamlit reserves
+      for exactly this - top of the sidebar, on the collapse control's line, which is where
+      lex-app puts its logo too. The scenario asserts the SLOT rather than a measurement. Guarded
+      on the file existing, because st.logo raises on a missing path and a packaging mistake
+      should cost the logo rather than the page. Known limit, stated: st.logo also renders in the
+      app's upper-left when the sidebar is COLLAPSED, and that surface follows the page theme, so
+      a white wordmark is hard to see on a light page there; choosing a variant would mean
+      guessing a client-side value server-side, which is the trap this session already fell into.
+      ORDERING, after the user marked it up: logo to the very top, identity and log-out to the
+      bottom. Streamlit's sidebar is stSidebarHeader (logo + collapse) -> stSidebarNav -> 
+      stSidebarUserContent, so st.logo already lands above even the page navigation and identity
+      only had to move. It is now one ACCOUNT block - identity and the way out belong to each
+      other - rendered after main(), so the app's own navigation sits above it without either
+      side coordinating. Call order alone puts that under the nav rather than at the foot of the
+      panel, and pinning genuinely needs a selector, so there is exactly ONE: a data-testid
+      (Streamlit's testing surface, far more stable than a generated emotion class) that sets
+      layout and nothing else. If it stops matching the block sits in normal flow - where it
+      would be anyway - so the failure mode is "not pinned", not "broken". 1.310 pins both halves
+      of that bargain, including that the rule may not touch colour, visibility or !important:
+      a rule that did would fail invisibly and unattributably.
+      1.312 fixes the residual the previous scenario had only NAMED: st.logo fills two slots with
+      different backgrounds, and both were getting the dark file. The sidebar is brand-navy in
+      either mode so it takes the white wordmark; the app's upper-left - where the mark moves when
+      the sidebar is COLLAPSED - follows the page theme, so it takes the navy one (#282f63) via
+      icon_image. Reported as the collapsed logo being nearly invisible, which is exactly white on
+      a light page. Two files rather than one adaptive SVG on purpose: an SVG can switch fills on
+      prefers-color-scheme, but that follows the OPERATING SYSTEM while both products deliberately
+      default to light regardless of it, so a dark-OS user on a light page would get white on
+      white - the same class of mismatch this cluster spent 1.261-1.276 removing. The test asserts
+      the FILLS rather than the filenames: the names differ by one word, the files by three hex
+      values, and swapping them yields a logo invisible on exactly one surface - which no reviewer
+      would catch and a filename assertion would happily pass. Residual, still stated: collapsed
+      AND dark gives navy on dark; st.logo takes one image per slot and choosing would mean
+      reading a client-side theme from Python.
+      Sizing and alignment, after the user marked both slots up. Size is st.logo's own `size`
+      parameter (large) rather than CSS - a native API beats a rule that has to survive
+      Streamlit's markup. Alignment cannot be: each slot sits flush against a different edge. In
+      the sidebar the logo was further left than the navigation it heads; in the app header, when
+      the sidebar is COLLAPSED, it sat against the window edge while the page's own text began
+      well inside it. Both are pure inset corrections and join the existing bottom-pin under the
+      same layout-only limit, which the scenario now asserts across EVERY rule in the block rather
+      than just the pin - that limit is what keeps the whole selector dependency cheap to lose.
+      The content inset is a single named constant in rem, since an inset in px would not track
+      text scaling and the whole point is lining up with text.
+      Writing this scenario surfaced a real packaging bug, unrelated to the logo and older:
+      lex.lex_app.streamlit._widget_host_component was absent from [tool.setuptools.package-data],
+      so the widget-host shim's frontend/ would NOT ship in a wheel and lex_widgets() would fail
+      to find its component on any non-editable install. An editable install reads the source
+      tree, which hides it completely. Now declared, and 1.311 asserts the rule rather than the
+      instance: every _*_component that ships a frontend/ must be declared.
+  ak:
+    title: Widget keys and flow — two widget blocks on one page stay isolated
+    scenarios: 1.316-1.326
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      Record reconstructed from the tests on disk: this batch landed with no entry in this shard (merge
+      3d14e959 truncated the letters map, and the batch was never recorded here). The scenario range and
+      the pass count are measured; the title is the file's own stated intent. The batch's own reasoning
+      was never written down here and is not invented.
+
+  al:
+    title: The example dashboard we tell people to copy actually runs
+    scenarios: 1.327-1.330
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Record reconstructed from the tests on disk: this batch landed with no entry in this shard (merge
+      3d14e959 truncated the letters map, and the batch was never recorded here). The scenario range and
+      the pass count are measured; the title is the file's own stated intent. The batch's own reasoning
+      was never written down here and is not invented.
+
+  am:
+    title: Quackback launcher — exactly one, owned by the top-level page
+    scenarios: 1.331-1.335
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Record reconstructed from the tests on disk: this batch landed with no entry in this shard (merge
+      3d14e959 truncated the letters map, and the batch was never recorded here). The scenario range and
+      the pass count are measured; the title is the file's own stated intent. The batch's own reasoning
+      was never written down here and is not invented.
+
+  an:
+    title: A relayed response is legal over HTTP/2, not just over HTTP/1.1
+    scenarios: 1.336-1.341
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      a relayed response must be legal over HTTP/2, not just over HTTP/1.1. A /media PDF download failed
+      in production with ERR_HTTP2_PROTOCOL_ERROR on a 200: the proxy copied the upstream's Date and
+      Server through, so nginx appended its own and those singleton fields arrived twice (RFC 9110
+      5.5.2), and it copied Transfer-Encoding, which HTTP/2 forbids outright (RFC 9113 8.2.2). Both are
+      invisible over HTTP/1.1, which is why every local check passed. The buffered branch is guarded
+      too: a consumed response's .content is decoded, so relaying the upstream's Content-Length or
+      Content-Encoding makes uvicorn raise "Response content longer than Content-Length" and hand the
+      client a 0-byte 200 -- the reported symptom exactly. Removing either half of the drop fails
+      exactly one scenario, so both are load-bearing.
+
+      Scenarios start at 1.336 rather than the 1.300 this batch first took: 1.300-1.305 are held by
+      1af/1ag/1ah on disk, and this shard said max_scenario 292 at the time because merge 3d14e959 had
+      truncated it.

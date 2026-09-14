@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 34
+max_scenario: 38
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -70,10 +70,10 @@ letters:
       reuse, routing/root records skip headings, __str__ tree titles
   h:
     title: PDF export renders like the log view
-    scenarios: 15.32-15.34
+    scenarios: 15.32-15.38
     status: complete
     tests:
-      pass: 3
+      pass: 7
       skip: 0
       xfail: 0
     note: customer report 2026-07-14 — the Download-PDF of a calculation log lost markdown structure.
@@ -81,4 +81,7 @@ letters:
       fallback) with a GitHub-style stylesheet mirroring the frontend log view, and the markdown extras
       match the log view's parser surface (tables, fenced code, strike; dropped code-friendly which
       silently disabled __bold__). Contract pinned; anything the log view renders appears rendered in
-      the PDF — never as raw markdown syntax
+      the PDF — never as raw markdown syntax. Range and count reconciled 2026-09-10 from the tests on
+      disk; the file carries 15.32-15.38 (7 pass, measured) while this record still said 15.32-15.34
+      and max_scenario 34, so `test_plan_aggregates.py validate` reported four scenarios as exceeding
+      the ceiling and the next allocator in this cluster would have collided with them
