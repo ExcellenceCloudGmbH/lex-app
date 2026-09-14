@@ -32,6 +32,26 @@ commit. If the mirror looks stale again, check the workflow's run history
 first — a red daily cron is the symptom, and the failure is at the very last
 step, after all the useful work is done.
 
+Behind that was a second fault, invisible until the first was fixed because
+the job never reached it:
+
+```
+pull request create failed: GraphQL: GitHub Actions is not permitted
+to create or approve pull requests (createPullRequest)
+```
+
+The organisation has *Allow GitHub Actions to create and approve pull requests*
+turned off, and the step was using the default `GITHUB_TOKEN`. It now uses a
+second **lex-docs-bot** App token, scoped to `lex-app` — the existing one is
+scoped to `lex-app-docs` and can only read the canonical content. App tokens
+are not subject to that setting.
+
+A run that pushes its branch and then cannot open the PR leaves the branch
+behind. The next run **adopts** it rather than pushing a near-identical one,
+so a spell of this leaves one orphan rather than one per morning. If PR
+creation is refused anyway, the job fails with a compare link — the mirrored
+content is already on the branch, and only the pull request is missing.
+
 
 ## What it does
 
