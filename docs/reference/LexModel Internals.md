@@ -18,10 +18,18 @@ Every `LexModel` subclass automatically gets these fields — you never need to 
 | Field | Type | Description |
 |---|---|---|
 | `id` | `AutoField` | Primary key (inherited from [Django](https://docs.djangoproject.com/)) |
+| `created_at` | `DateTimeField` | When the record was first created (set automatically) |
+| `edited_at` | `DateTimeField` | When the record was last edited (set automatically on every user edit) |
 | `created_by` | `TextField` | Username of the creator (set automatically) |
 | `edited_by` | `TextField` | Username of the last editor (set automatically for normal user edits; calculation-triggered framework saves don't overwrite it) |
 
 History fields (via [django-simple-history](https://django-simple-history.readthedocs.io/)) are added transparently — you don't interact with them directly.
+
+> [!note] Timestamps are stored and served in UTC
+> `created_at` and `edited_at` are stored in UTC and served by the API with an explicit
+> `Z` designator (e.g. `2026-07-14T11:43:00Z`). Parse them as UTC and convert to local
+> time for display — the application already does this for you. This is the same contract
+> the [[history-and-audit/bitemporal history#The REST API|`as_of` history queries]] follow.
 
 ## Lifecycle Hooks
 
@@ -146,7 +154,7 @@ def permission_read(self, user_context):
 | `streamlit_class_main(cls)` | Table-level (`@classmethod`) | Override for model-wide dashboard |
 
 > [!warning]
-> Always import `streamlit` **inside** these methods, not at the top of the file. See [[tutorial/Part 5 — Streamlit Dashboards]] for details.
+> Always import `streamlit` **inside** these methods, not at the top of the file. See [[start-here/tutorial/Part 5 — Streamlit Dashboards]] for details.
 
 ## History Tracking Control
 
@@ -157,3 +165,41 @@ def permission_read(self, user_context):
 | `save_without_historical_record()` | Save once without creating a history entry |
 
 For bulk operations where history tracking is expensive, use `Model.objects.bulk_create(objs, skip_history=True)`.
+
+## Change Detection & Lean Initial State
+
+django-lifecycle powers change detection — `has_changed('field')`, `initial_value('field')`, and the conditional `@hook(when=..., has_changed=True)` forms — by keeping a snapshot of the instance's field values from when it was loaded. By default Lex App keeps a **lean** snapshot rather than a full copy of every field, which materially cuts per-row memory on large `calculate`-all runs (where every live row would otherwise carry a second full copy of itself).
+
+The lean snapshot retains only the fields the framework can prove are needed: `edited_at`, every field named in this class's hook clauses (the `when=` / `when_any=` / `condition=` conditions, including chained `&`/`|` forms), and anything you list in `lex_initial_state_extra_fields`. Tracked values stay byte-for-byte identical to the full snapshot — the narrowing is transparent for the vast majority of models.
+
+| Attribute | Default | What It Does |
+|---|---|---|
+| `lex_lean_initial_state` | `True` | When `True`, narrow the change-detection snapshot to the tracked fields above. Set `False` to restore the full per-field snapshot. |
+| `lex_initial_state_extra_fields` | `()` | Field names to keep in the lean snapshot beyond what's auto-discovered. The escape hatch for models that call `has_changed` / `initial_value` imperatively. |
+
+> [!warning] If you query change detection on a field outside a hook clause
+> Calling `has_changed('x')` or `initial_value('x')` on a field that isn't tracked by a `@hook` clause won't be auto-discovered. Either declare it:
+> ```python
+> class MyModel(LexModel):
+>     lex_initial_state_extra_fields = ("x",)
+> ```
+> or opt the whole model out with `lex_lean_initial_state = False` to restore the full snapshot.
+
+## DateTimeField Timezone Awareness
+
+When `USE_TZ = True`, every `DateTimeField` on a `LexModel` subclass is made timezone-aware the moment you assign a value — not only when it comes back from the database. If you assign a naive datetime, the framework automatically converts it to the project's default timezone (the `TIME_ZONE` setting), which is the same interpretation Django applies when it saves the value.
+
+```python
+from datetime import datetime
+
+obj = MyReport()
+obj.report_date = datetime(2026, 1, 15, 9, 0)  # naive in → aware out
+# obj.report_date is now tz-aware (e.g. UTC+01:00 for Europe/Berlin in winter)
+```
+
+Already-aware datetimes pass through unchanged — the framework never re-zones a value you've already pinned to a timezone.
+
+This keeps in-memory instances consistent with fetched querysets. Mixing the two — say, a freshly-created object alongside rows loaded from the database — won't produce a `TypeError: Cannot compare tz-naive and tz-aware timestamps` in pandas sorts or financial calculations.
+
+> [!note]
+> This behaviour only applies under `USE_TZ = True`. With `USE_TZ = False`, naive datetimes are stored and returned as-is and no conversion takes place.

@@ -51,7 +51,7 @@ This is the orchestrator — a `CalculationModel` with a three-phase
 ### Phase A — WaitForTasks (Monte Carlo)
 
 ```python
-from lex.utilities.multitasking import WaitForTasks, FireAndForget
+from lex.lex_app.celery_tasks import WaitForTasks, FireAndForget
 
 def calculate(self):
     # Phase A: Run 160 Monte Carlo simulations in parallel
