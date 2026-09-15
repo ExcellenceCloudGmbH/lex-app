@@ -34,7 +34,12 @@ on:
 # Nothing by default. A command that needs the API should be given the
 # token explicitly, in the step below, so granting it is a visible edit
 # rather than something this workflow carries around for every run.
-permissions: {}
+permissions:
+  contents: write         # tags, release bodies, commits
+  packages: write         # the container registry
+  pull-requests: write    # a repair PR
+  id-token: write         # OIDC, should trusted publishing ever be turned on
+  actions: read
 
 jobs:
   run:
