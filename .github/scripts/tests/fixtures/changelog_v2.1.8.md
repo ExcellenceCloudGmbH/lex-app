@@ -7,4 +7,4 @@
 - **backend** schedule activations without a timer ([aaa1111](https://github.com/ExcellenceCloudGmbH/lex-app/commit/aaa1111)) (#695)
 
 ### Fixed
-- **frontend** grouping by a foreign key shows the name ([bbb2222](https://github.com/ExcellenceCloudGmbH/lex-app/commit/bbb2222)) (#441)
+- **frontend** grouping by a foreign key shows the name ([bbb2222](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/bbb2222)) (#441)
