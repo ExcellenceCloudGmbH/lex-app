@@ -1,0 +1,114 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Run one bash command on a runner and hand back its output.
+#
+#  For the questions you can only answer from inside CI: what does this
+#  path look like on the runner, is that secret actually set, which
+#  version of a tool is installed, does this git range resolve there.
+#
+#  The output lands in the job summary as well as the log, so
+#  `gh run view --job <id>` is not the only way to read it.
+#
+#  Deliberately not scheduled, not on push. The only trigger is a human
+#  asking for it.
+# ──────────────────────────────────────────────────────────────────────
+name: Run one command
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Bash to run. Multiple lines are fine."
+        required: true
+        type: string
+      checkout:
+        description: "Check the repository out first"
+        required: false
+        default: true
+        type: boolean
+      fetch_depth:
+        description: "0 for full history and tags. Only read when checking out."
+        required: false
+        default: "1"
+        type: string
+
+# Nothing by default. A command that needs the API should be given the
+# token explicitly, in the step below, so granting it is a visible edit
+# rather than something this workflow carries around for every run.
+permissions: {}
+
+jobs:
+  run:
+    name: "Run"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ inputs.checkout }}
+        with:
+          fetch-depth: ${{ inputs.fetch_depth }}
+          # fetch-depth: 0 brings history but does not guarantee tags, and a
+          # tag missing from the clone is the usual reason a command that
+          # works locally answers differently here.
+          fetch-tags: ${{ inputs.fetch_depth == '0' }}
+
+      - name: Run the command
+        id: run
+        env:
+          # Passed as an environment variable rather than interpolated into
+          # the script. `${{ inputs.command }}` pasted inline would break on
+          # any quote or newline in the command, and mangling the thing you
+          # asked to run is a confusing way to get a wrong answer.
+          COMMAND: ${{ inputs.command }}
+          # Uncomment what a given run needs. Left commented so no ordinary
+          # run carries a credential it has no use for.
+          # GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
+        run: |
+          # No -e: a failing command is a result to report, not a reason to
+          # skip reporting it. The exit code is carried out by hand below.
+          set +e
+          bash --noprofile --norc -c "$COMMAND" > /tmp/out.txt 2> /tmp/err.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "── stdout ──"; cat /tmp/out.txt
+          echo "── stderr ──"; cat /tmp/err.txt
+
+      - name: Report
+        if: ${{ always() }}
+        env:
+          COMMAND: ${{ inputs.command }}
+          CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          # The summary has a 1 MiB ceiling and silently drops everything
+          # over it, so truncate here and say so rather than lose the tail
+          # without a word.
+          LIMIT=50000
+          emit() {   # emit <heading> <file>
+            printf '\n### %s\n\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+            if [ ! -s "$2" ]; then
+              printf '_(empty)_\n' >> "$GITHUB_STEP_SUMMARY"
+              return
+            fi
+            printf '```text\n' >> "$GITHUB_STEP_SUMMARY"
+            head -c "$LIMIT" "$2" >> "$GITHUB_STEP_SUMMARY"
+            # Only add a newline if the output did not end with one, so a
+            # normal command does not gain a blank line it never printed.
+            [ -n "$(tail -c 1 "$2")" ] && printf '\n' >> "$GITHUB_STEP_SUMMARY"
+            printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+            if [ "$(wc -c < "$2")" -gt "$LIMIT" ]; then
+              printf '\n_Truncated at %s bytes — the full text is in the step log._\n' \
+                "$LIMIT" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+          {
+            # A fenced block rather than an inline `span`: a command
+            # containing a backtick — jq, a shell substitution — would
+            # otherwise close the span early and render as garbage.
+            printf '## Command\n\n```bash\n%s\n```\n\n' "$COMMAND"
+            printf 'Exit code: **%s**\n' "${CODE:-unknown}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          emit stdout /tmp/out.txt
+          emit stderr /tmp/err.txt
+
+          # Fail the job when the command failed, so the run's own status
+          # answers "did it work?" without anyone opening the summary.
+          exit "${CODE:-1}"
