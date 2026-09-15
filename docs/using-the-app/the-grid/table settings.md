@@ -15,7 +15,7 @@ Click the gear in the table's toolbar. The panel says *Saved for you on this tab
 is exactly what it does: your choices apply to this model's table and nobody else's
 account.
 
-![The table settings panel: density, display and column options, and per-column number formats](../../images/the-grid/table-settings.svg)
+![The table settings panel: density, display and column options, and per-column number formats](images/the-grid/table-settings.svg)
 
 > [!tip] There is no Save button, and that's deliberate
 > Changes take effect and are stored the moment you make them. Earlier versions kept these

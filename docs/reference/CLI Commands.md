@@ -4,7 +4,7 @@ title: CLI Commands
 
 Lex App ships with a `lex` CLI tool for managing your application. Here's every command at a glance.
 
-![What `lex --help` prints — ten commands, not the whole set](../images/cli/lex-help.svg)
+![What `lex --help` prints — ten commands, not the whole set](images/cli/lex-help.svg)
 
 > [!important] This page is longer than `lex --help` on purpose
 > `--help` lists only the commands the CLI implements itself. Everything below
