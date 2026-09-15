@@ -198,6 +198,46 @@ why, and do not soften it — a customer who reads about a feature in one releas
 and silently loses it in the next has been misled by our notes, not by the
 change.
 
+A DEFECT THE READER NEVER HAD IS NOT A BUG FIX
+Ask of every fix: was the broken behaviour in the release the reader is
+upgrading FROM? Two kinds of entry fail that test.
+
+  * A fix to something this SAME release introduces. The capability is the
+    news; the defect found while building it is not. Describe the capability
+    as it now works, in "## Main changes", and say nothing about the defect.
+  * A fix to something that was shipped and then WITHDRAWN. Anyone who
+    upgraded past the withdrawal never ran it, so a fix to it describes a
+    problem they cannot place.
+
+The detail usually says so outright. Treat "REGRESSION", "on the new
+<feature>", "reported against the new <feature>", "the previous fix", and a
+reference to an unreleased branch as evidence that the defect never reached
+the reader. When an entry says a fix repairs a previous fix, only the final
+behaviour is the note.
+
+The cost of getting this wrong is not a wasted bullet. It reads as a list of
+things that were broken in the feature you are handing over, and it asks the
+reader to place a symptom in a screen they have never seen.
+
+NEVER DESCRIBE A "BEFORE" USING SOMETHING THIS RELEASE INTRODUCES
+"Filtering was off unless you found the setting" is unreadable when the
+setting ships in this release. If the old behaviour cannot be described in
+terms the reader already has, describe only what is true now.
+
+DO NOT INFER WHAT THE PREVIOUS BEHAVIOUR WAS
+State a "before" only when an entry's detail asserts it. A diff shows what
+changed, never what a user saw, and a plausible reconstruction of the old
+behaviour is the easiest wrong claim to make: a note once said grouping used
+to show a raw id, when the id had been introduced by unreleased work and users
+had always seen the name.
+
+SOMETHING WITHDRAWN MAY BE COMING BACK
+The mirror of the case above. If this release restores a capability an earlier
+release withdrew, that is the first thing in the note: say it is back, and
+which release withdrew it. Readers were told it was gone. Do NOT itemise the
+defects that caused the withdrawal — the reader upgrading past it never saw
+them, and a list of them reads as a warning about what you are shipping.
+
 WHEN A CHANGE CAME FROM A CUSTOMER
 If a detail says a change was reported by a customer, lead the bullet with the
 symptom they reported, in their terms, before anything else. It is the clearest
@@ -213,6 +253,23 @@ nothing under it.
 Each entry is one bullet: a bold summary phrase, then one or two plain
 sentences saying what a user will notice.
 
+Two structures are allowed on top of that, and only when earned:
+
+  * `###` subsections under a heading, to group many bullets by the part of
+    the product they touch. Worth it past roughly eight bullets under one
+    heading; noise below that.
+  * A two-column "Before / Now" table, when one area of the product has
+    several changes that are each a straight swap of old behaviour for new.
+    A table earns its place by making the comparison scannable — never use it
+    for a single row, and never put anything in it you could not defend as a
+    "before" under the rules above.
+
+A security fix goes in a `### Security` subsection at the end of the bug
+fixes, not in the bullet list. State what was exposed, who could reach it,
+whether it was exploitable in practice, and whether to upgrade promptly. A
+reader deciding how fast to act needs all four, and cannot get them from a
+one-line bullet.
+
     - **New sidebar.** A full-height side navigation with a consolidated header
       bar. More room for your data, and models are easier to find.
 
@@ -221,6 +278,13 @@ WRITING
   Never write "backend", "frontend", or a repository name.
 - Merge entries describing the same user-visible change into one bullet. Two
   fixes to embedded authentication are one bullet, not two.
+- When a detail says several symptoms were ONE bug, they are one bullet. A
+  note once split one root cause into "faster startup" and "more stable
+  sessions", which reads as two unrelated wins and hides that either symptom
+  returning means the same fix regressed.
+- Prefer the author's own measured figures over an adjective. "About 24 MB per
+  load, down to nothing on a reload" beats "dramatically faster"; take the
+  numbers from the detail and never estimate your own.
 - Be concrete. "Date columns show the date only, with the full timestamp on
   hover" — not "an improved date experience".
 - Cut filler. No "seamless", "robust", "enhanced experience", "allowing you to",
@@ -249,7 +313,7 @@ Changes in {tag}:
 <digest>
 {digest}
 </digest>
-
+{context}
 Return only the markdown release note. No preamble, no explanation.
 """
 
@@ -320,9 +384,12 @@ def build_prompt(digest: dict, *, exemplar: str, retry_reason: str | None = None
     suffix = "" if retry_reason is None else _RETRY_SUFFIX.format(reason=retry_reason)
     budget = MAX_PROMPT_BYTES - len(suffix.encode("utf-8"))
 
+    facts = facts_block if facts_block is not None else digest.get("facts")
+    context = _context_block(digest, facts)
+
     prompt = _INSTRUCTIONS.format(
         exemplar=exemplar, tag=digest["tag"],
-        digest=json.dumps(changes, indent=2),
+        digest=json.dumps(changes, indent=2), context=context,
     )
 
     if len(prompt.encode("utf-8")) > budget:
@@ -335,13 +402,12 @@ def build_prompt(digest: dict, *, exemplar: str, retry_reason: str | None = None
                     entry["detail"] = entry["detail"][:limit].rstrip() + "…[truncated]" if limit else ""
             prompt = _INSTRUCTIONS.format(
                 exemplar=exemplar, tag=digest["tag"],
-                digest=json.dumps(trimmed, indent=2),
+                digest=json.dumps(trimmed, indent=2), context=context,
             )
             if len(prompt.encode("utf-8")) <= budget:
                 break
 
-    facts = facts_block if facts_block is not None else digest.get("facts")
-    return prompt + _context_block(digest, facts) + suffix
+    return prompt + suffix
 
 
 def validate(text: str) -> str | None:

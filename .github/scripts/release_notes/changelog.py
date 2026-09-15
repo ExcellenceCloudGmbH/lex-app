@@ -27,6 +27,13 @@ EXCLUDED_TYPES = frozenset({"docs", "test", "ci", "chore", "build"})
 # drift away from reality.
 GAP_MARKER = "> **Frontend changes for this release are not yet recorded.**"
 
+# Written when the frontend range resolved and turned out to be empty. Saying
+# nothing would read exactly like a release whose frontend was never looked at
+# -- the confusion GAP_MARKER exists to prevent -- so "we looked, and the
+# interface did not change" gets a line of its own. Every such line in this
+# changelog before 2.1.11 was added by hand for want of this.
+NO_CHANGE_MARKER = "> No frontend change: the bundle is unchanged from `{previous}`."
+
 # Order matters: it is the order sections appear. `other` joins Changed so
 # that non-conforming commits are reported rather than silently dropped.
 _SECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
@@ -37,13 +44,24 @@ _SECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
 )
 
 
-def _line(change: dict, repo: str) -> str:
-    url = f"https://github.com/{repo}/commit/{change['sha']}"
+# The frontend ships from its own repository, so a commit link built from
+# GITHUB_REPOSITORY points at a sha lex-app has never contained -- a 404, or
+# worse, an unrelated commit that the abbreviation happens to match. Every
+# frontend line already in this changelog had to be corrected by hand for
+# want of this; a re-render would have put ninety-two wrong links back.
+FRONTEND_REPO = "ExcellenceCloudGmbH/process-admin-general-client"
+
+
+def _line(change: dict, repo: str, frontend_repo: str = FRONTEND_REPO) -> str:
+    target = frontend_repo if change["component"] == "frontend" else repo
+    url = f"https://github.com/{target}/commit/{change['sha']}"
     suffix = f" (#{change['pr_number']})" if change.get("pr_number") else ""
     return f"- **{change['component']}** {change['subject']} ([{change['sha']}]({url})){suffix}"
 
 
-def render(digest: dict, *, date: str, repo: str) -> str:
+def render(
+    digest: dict, *, date: str, repo: str, frontend_repo: str = FRONTEND_REPO
+) -> str:
     """Render one release section. Returns the heading alone if nothing shipped."""
     version = digest["tag"].lstrip("v")
     parts = [f"## [{version}] - {date}", ""]
@@ -55,13 +73,20 @@ def render(digest: dict, *, date: str, repo: str) -> str:
     # historical re-renders sprouting false gaps.
     if not digest.get("frontend_recorded", True):
         parts.extend([GAP_MARKER, ""])
+    elif digest.get("frontend_commits") == 0 and digest.get("previous_tag"):
+        # Both conditions are deliberately explicit. An absent
+        # `frontend_commits` is an unknown, not a zero, so a historical
+        # re-render says nothing rather than claiming the interface held
+        # still; and the first release has no previous tag to be unchanged
+        # from.
+        parts.extend([NO_CHANGE_MARKER.format(previous=digest["previous_tag"]), ""])
 
     shippable = [c for c in digest["changes"] if c["type"] not in EXCLUDED_TYPES]
 
     breaking = [c for c in shippable if c.get("breaking")]
     if breaking:
         parts.append("### Breaking")
-        parts.extend(_line(c, repo) for c in breaking)
+        parts.extend(_line(c, repo, frontend_repo) for c in breaking)
         parts.append("")
 
     for heading, types in _SECTIONS:
@@ -69,7 +94,7 @@ def render(digest: dict, *, date: str, repo: str) -> str:
         if not rows:
             continue
         parts.append(f"### {heading}")
-        parts.extend(_line(c, repo) for c in rows)
+        parts.extend(_line(c, repo, frontend_repo) for c in rows)
         parts.append("")
 
     return "\n".join(parts).rstrip() + "\n"

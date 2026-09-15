@@ -610,3 +610,39 @@ def test_an_explicit_facts_block_still_overrides_the_digest():
     d = _digest(); d["facts"] = "- FROM DIGEST"
     out = notes.build_prompt(d, exemplar="X", facts_block="- EXPLICIT")
     assert "EXPLICIT" in out and "FROM DIGEST" not in out
+
+
+def test_computed_context_precedes_the_closing_instruction():
+    """The interface state and release facts must not trail the last line.
+
+    They were previously appended AFTER "Return only the markdown release
+    note", so the two blocks the provenance work exists to deliver sat past the
+    instruction that closes the prompt. A model is most reliable about the
+    thing it read last, and that should be the output contract.
+    """
+    digest = _digest()
+    digest.update(frontend_commits=0, frontend_recorded=True)
+    prompt = notes.build_prompt(digest, exemplar="EX", facts_block="- no migration")
+
+    for block in ("THE INTERFACE", "RELEASE FACTS"):
+        assert block in prompt
+        assert prompt.index(block) < prompt.index("Return only the markdown")
+
+
+def test_the_budget_accounts_for_the_context_block():
+    """Trimming has to see the context, not be measured without it.
+
+    While the context was appended after the budget check, a prompt could pass
+    the check and then exceed MAX_PROMPT_BYTES by the size of the block. The
+    detail below is far over budget on its own, so trimming must still run and
+    the assembled prompt must land inside the cap WITH the context included.
+    """
+    digest = _digest([
+        {"sha": "1" * 7, "component": "backend", "type": "fix", "scope": "x",
+         "breaking": False, "subject": "a fix", "detail": "y" * 200_000},
+    ])
+    digest.update(frontend_commits=0, frontend_recorded=True)
+    prompt = notes.build_prompt(digest, exemplar="EX", facts_block="- no migration")
+
+    assert len(prompt.encode("utf-8")) <= notes.MAX_PROMPT_BYTES
+    assert "RELEASE FACTS" in prompt
