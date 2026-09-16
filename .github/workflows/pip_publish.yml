@@ -201,6 +201,18 @@ jobs:
       - name: Check dist with twine
         run: twine check dist/*
 
+      # The SPA is no longer inside the wheel — it arrives as the
+      # lex-app-frontend dependency. Two files and a setuptools default decide
+      # which of those is true, so this reads the built zip rather than the
+      # config: carries the bundle, or requires the package. Neither means
+      # every page 404s for anyone who installs the release.
+      #
+      # Runs on a dry run too. A dry run that skipped the one check standing
+      # between a packaging mistake and a customer would be rehearsing the
+      # wrong thing.
+      - name: Refuse a wheel that ships no frontend
+        run: python .github/scripts/check_wheel_frontend.py --dist dist
+
       - name: Publish to PyPI
         if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1

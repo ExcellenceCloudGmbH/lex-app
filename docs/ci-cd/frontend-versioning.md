@@ -27,6 +27,16 @@ pip only fetches Python packages. A wheel is a zip file with a name and a versio
 compiled JavaScript and a few lines of Python saying where it is. Nothing about the frontend becomes
 Python.
 
+The `lex-app` wheel therefore does **not** contain the compiled frontend. It used to, and for a
+while it did both — 2.1 MB of the 3.7 MB wheel was a bundle nothing served, frozen at whatever the
+last person to rebuild it committed. The copy in the source tree stays, because a git checkout has
+to work before anything is installed, but it is excluded from the distribution.
+
+That leaves one rule the release has to keep: **a wheel serves the app either by carrying the bundle
+or by depending on `lex-app-frontend`.** Neither is a release where every page 404s, and dropping
+the bundle is a one-line change anyone could make. So the pipeline reads the built zip before
+uploading it and refuses a wheel with neither.
+
 ---
 
 ## Releasing the frontend
@@ -134,8 +144,14 @@ checks it. It fails loudly if:
 A resolution failure is reported immediately rather than retried, because a pin naming a version
 that does not exist will not fix itself by waiting.
 
+Before publishing, it reads the built wheel and refuses one that neither carries the bundle nor
+declares the `lex-app-frontend` dependency. That is the last moment where the answer is a red job:
+a published wheel cannot be taken back, and the post-publish check above would only confirm the
+damage.
+
 If neither an installed package nor an in-tree bundle can be found at boot, LEX says so on stderr.
-The alternative is every page 404ing with nothing in the logs to explain it.
+The alternative is every page 404ing with nothing in the logs to explain it. In an installed
+lex-app there is no in-tree bundle, so that message means the dependency is missing.
 
 ---
 
