@@ -238,8 +238,12 @@ def _resolve_react_build_path(package: object = "unset") -> str:
     one wins, because that pin is what the release declared and what a project
     can deliberately override.
 
-    The in-tree bundle at ``lex/react/build`` remains the fallback so a source
-    checkout keeps working, and so this can land before the pin does.
+    The in-tree bundle at ``lex/react/build`` is the fallback, and it is a
+    SOURCE-CHECKOUT fallback only: it is excluded from the built distribution,
+    so an installed lex-app has no second copy to fall back to. A wheel that
+    reached this line would serve nothing, which is why the packaging guard
+    refuses to publish one that neither carries the bundle nor depends on
+    lex-app-frontend.
 
     A package that is installed but cannot locate its own bundle falls back
     too: this runs at import time, and raising here takes the whole instance

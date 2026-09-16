@@ -14,12 +14,26 @@ on:
     paths:
       - ".github/scripts/**"
       - ".github/workflows/scripts_tests.yml"
-      - "pyproject.toml"          # supplies pytest's addopts
+      - "pyproject.toml"          # supplies pytest's addopts, and decides what
+                                  # the wheel ships
+      # These two together decide whether a built wheel delivers a frontend at
+      # all: the manifest says whether the bundle is in it, requirements.txt
+      # says whether the dependency that replaces it is declared.
+      # test_check_wheel_frontend.py refuses the combination that has neither.
+      - "MANIFEST.in"
+      - "requirements.txt"
   pull_request:
     paths:
       - ".github/scripts/**"
       - ".github/workflows/scripts_tests.yml"
-      - "pyproject.toml"          # supplies pytest's addopts
+      - "pyproject.toml"          # supplies pytest's addopts, and decides what
+                                  # the wheel ships
+      # These two together decide whether a built wheel delivers a frontend at
+      # all: the manifest says whether the bundle is in it, requirements.txt
+      # says whether the dependency that replaces it is declared.
+      # test_check_wheel_frontend.py refuses the combination that has neither.
+      - "MANIFEST.in"
+      - "requirements.txt"
   workflow_dispatch:
 
 jobs:

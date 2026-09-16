@@ -1,4 +1,12 @@
 recursive-include lex/react *
+# The compiled SPA is NOT shipped in the distribution. It arrives as the
+# lex-app-frontend dependency, pinned in requirements.txt, and shipping a
+# second copy meant every release carried a frozen bundle that nothing served
+# — 57% of the wheel, stale from the day it was built.
+#
+# It stays in the source tree: settings.py falls back to it so a git checkout
+# works without installing the frontend package.
+recursive-exclude lex/react/build *
 recursive-include lex/assets *
 include pyproject.toml
 include requirements*.txt
