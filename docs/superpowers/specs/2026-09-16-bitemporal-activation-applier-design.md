@@ -1,7 +1,8 @@
 # Bitemporal activation: the in-database applier
 
-**Status:** design, revision 2, awaiting review
-**Date:** 2026-09-16 (rewritten and then revised the same day; see §1)
+**Status:** design, revision 3 — implemented: lex-app on this branch, the controller on
+`feat/pg-cron-activation-job` (lex-instance-controller-backend); awaiting review
+**Date:** 2026-09-16 (rewritten, revised and implemented the same day; see §1)
 **Linear:** [LEX-131](https://linear.app/lundgroup/issue/LEX-131) (parent) · LEX-135 · LEX-136 · LEX-578 · LEX-593
 **Related PR:** [#695](https://github.com/ExcellenceCloudGmbH/lex-app/pull/695) — the reconcile floor (open)
 
@@ -34,6 +35,14 @@ design exists to remove (§3.2). Revision 2 derives discovery from the database 
 (§4.3, §5.2), drops the registry, its startup hook and the settings table, turns the max-age
 skip into an alert (§5.3, §8.11), adds the full unavailability matrix (§9) and a worked
 example (§14).
+
+Revision 3 records what implementation taught. The applier now writes a **heartbeat**
+that lex-app reads at save time, so a future-dated save arms the legacy in-process timer
+only while no database applier is alive (§5.8) — which makes the lex-app release safe to
+deploy in any order relative to the infrastructure change. The heartbeat is deliberately
+not a Django model (§5.8). The meta-flip contract is stated precisely (§8.12). And §15
+describes the infrastructure half: what the instance controller does, what the servers
+need, and what the other repositories do not.
 
 ---
 
@@ -226,7 +235,7 @@ lex-app is involved at exactly two moments, and forbidden at a third:
 | Moment | lex-app's part | Allowed? |
 |---|---|---|
 | **Deploy time** | Migrations create the three tables, declare the index (§5.5) and install the SQL functions (§5.3, §5.6) | Yes — the tables have to come from somewhere, and the functions must version with lex-app |
-| **Write time** | The user's save writes the history row and the `SCHEDULED` meta row (§10.3) | Yes — someone has to record the intent, and there is no separate schedule store to drift from it |
+| **Write time** | The user's save writes the history row and the `SCHEDULED` meta row (§10.3), and reads the applier's heartbeat to decide whether it must still arm a legacy timer (§5.8) | Yes — someone has to record the intent, and there is no separate schedule store to drift from it. Reading a heartbeat is not depending on a process |
 | **Apply time** | Nothing. No process, no registration, no cache, no timer | **Never.** Anything the apply path needs must come from the database itself |
 
 The floor (#695) runs in lex-app and is therefore not part of the apply path's contract. It
@@ -348,13 +357,14 @@ informational field.
 Neither path knows about the other. Both converge to the same end state. Nothing in lex-app
 runs at apply time (§3.2).
 
-Three functions, one SQL file, one migration (§5.7):
+One table and three functions, one SQL file, one migration (§5.7):
 
 | Function | Role |
 |---|---|
 | `lex_bitemporal_tables()` | Discovery (§5.2). Returns `(main_table, history_table, meta_table, pk_column)` per model |
 | `lex_pending_activations()` | Visibility (§5.6). Every `SCHEDULED` row across every triple, due or not |
 | `lex_apply_due_activations()` | The applier (§5.3) |
+| `lex_activation_applier_state` | Heartbeat (§5.8). One row, written by the applier on every run, read by lex-app at save time |
 
 ### 5.2 `lex_bitemporal_tables()` — discovery from the catalog
 
@@ -399,7 +409,8 @@ For each triple from `lex_bitemporal_tables()` (§5.2), for each distinct `pk` t
    ORDER BY valid_from DESC, history_id DESC LIMIT 1 FOR UPDATE`
    — the predicate from §2.2, evaluated at apply time. If it is not the row that was
    scheduled, that is a supersede and step 2 still applies the *effective* one; if there is
-   no effective row, nothing is written.
+   no effective row — every window has closed — the main row is removed, exactly what
+   `sync_record_for_model` does when nothing is valid now.
 2. **Converge the main row.**
    - `history_type = '-'` → `DELETE FROM main WHERE pk = $1`.
    - otherwise → `INSERT INTO main (cols) SELECT cols FROM history WHERE history_id = $2
@@ -414,6 +425,9 @@ For each triple from `lex_bitemporal_tables()` (§5.2), for each distinct `pk` t
 4. Steps 1–3 run inside a per-`pk` `BEGIN ... EXCEPTION WHEN OTHERS THEN ... END` block,
    so one failing record raises a `WARNING` (visible in `cron.job_run_details`) and the
    loop continues. The main-row write and the meta flip commit together or not at all.
+5. **Write the heartbeat** (§5.8): one upsert into `lex_activation_applier_state` — the
+   database clock, records converged, records failed, duration — whether or not anything
+   was due.
 
 **Not bounded by age.** Revision 1 skipped rows whose `valid_from` was older than a window,
 so that a database restored from an old backup could not "replay a year of history" on its
@@ -494,6 +508,53 @@ functions; the migration reads and executes it, with `DROP FUNCTION IF EXISTS` f
 the reverse. A reviewer reads SQL as SQL rather than as a Python string, and the file is
 what the tests load.
 
+### 5.8 Liveness: the heartbeat and the write-time gate
+
+The design has two activators for the same row, and until now both were always armed:
+the database applier, and the in-process timer (or Celery beat row) the save has always
+created. Revision 2 said the write side "stops creating timers" (§10.3). Implementation
+asked the obvious question: stops *when*? A lex-app release that stops arming timers
+before pg_cron is registered on its instance has no activator at all; one that keeps
+arming them forever never retires the mechanism this design exists to replace.
+
+The answer is a **heartbeat**. `lex_apply_due_activations()` ends every run — whether or
+not anything was due — by upserting one row into `lex_activation_applier_state`: the
+database clock, records converged, records failed, duration. At save time,
+`_schedule_future_activation` asks `applier_is_alive()`: is that row younger than the
+liveness window (five minutes by default, `LEX_ACTIVATION_APPLIER_LIVENESS_SECONDS`)?
+
+- **Alive** → the save leaves only the `SCHEDULED` meta row, named `db_applier_…`. No
+  timer, no `PeriodicTask`. The database will apply it.
+- **Not alive** — SQLite, PostgreSQL without pg_cron, an instance whose job is not
+  registered yet, a migration that has not run, an applier that stopped — → the save
+  does exactly what it always did: a `PeriodicTask` under `CELERY_ACTIVE=true`, else the
+  local scheduler thread.
+
+Why a heartbeat and not a setting: a flag says what someone *configured*; the heartbeat
+says what is *happening*. A misconfigured flag would silently lose activations in the
+one direction that matters. The heartbeat cannot claim an applier that is not there,
+and it needs nothing from the controller or the deploy: the lex-app release is safe to
+ship before or after the infrastructure change, in any order, on any instance (§15.5).
+
+The failure directions are asymmetric and both are benign. A false negative (the
+applier is alive but the heartbeat looks stale — a slow tick, a failover) arms a
+redundant timer, which §8.9 makes harmless. A false positive (the applier died less
+than a window ago) leaves rows to the floor or to the applier's return: a delay of at
+most the window (§9).
+
+The gate reads the row through a raw cursor inside a savepoint, so a missing table
+cannot poison the caller's transaction, and any database error means "not alive".
+
+**Not a Django model, deliberately.** The first implementation declared the heartbeat
+as a `lex.core` model. The framework's app config walks every module under `lex/` and
+registers each concrete model it finds — for history tracking and for the model list —
+so the heartbeat immediately acquired a history table it did not have and a place in
+the customer's model tree it should not have. The table is created and written by the
+SQL file; lex-app reads it with a cursor; tests write it through
+`activation_applier.record_heartbeat()`. One more consequence, found by the tests: the
+test flush removes only model tables, so `E2ETestCase` clears the heartbeat around every
+test (§13).
+
 ---
 
 ## 6. The three-model contract (LEX-593)
@@ -524,7 +585,8 @@ That acceptance is also §3.2's: the same test, read as a statement about the bo
 | UI list views | Not notified of activation | Unchanged (§10.5) |
 | Activation cost | One main-row write on the firing thread | Bounded SQL in the database |
 | Backend startup | Local scheduler thread; Celery beat rows | Nothing — no registration, no timers (§3.2) |
-| New schema | — | Three SQL functions (§5.1); one partial index per meta table (§5.5). **No new tables** |
+| Future-dated save | Always arms a timer or a beat row | Arms one only while the database applier's heartbeat is stale (§5.8) |
+| New schema | — | Three SQL functions and one heartbeat table (§5.1, §5.8); one partial index per meta table (§5.5). No Django models |
 | Customer repositories | — | One autogenerated `AddIndex` migration per meta table on the next `makemigrations` (§5.5) |
 | Local dev / SQLite | Local scheduler | Reconcile floor only (§8.13) |
 
@@ -582,7 +644,11 @@ due for longer than the window are the alert condition in `lex_pending_activatio
 
 **8.12 Meta versioning.** The applier mirrors the in-place `UPDATE` (§2.4), touching every
 `SCHEDULED` version for the `history_object_id`. It does not open a new meta version. Any
-future improvement to that must land on both paths together.
+future improvement to that must land on both paths together. Stated precisely, because
+the tests met the case: a due row that a *later* save re-chains after its own time has
+passed acquires a new meta version whose status is `NONE` (§2.4's versioning at work);
+both paths flip the `SCHEDULED` versions and leave that one alone. The contract is *no
+`SCHEDULED` version remains*, not *every version is `DONE`*.
 
 **8.13 No pg_cron.** Local development, CI, SQLite, self-hosted PostgreSQL without the
 extension, non-PostgreSQL backends: no applier. The floor is the only mechanism. The
@@ -653,6 +719,18 @@ Until verified, a failover is a case where the floor may be the only activator f
 row `DONE` or converges to the same state (§8.9). `SKIP LOCKED` on the meta scan would let
 the second tick pass over rows the first holds; a refinement if long ticks are ever observed.
 
+**8.26 Stale heartbeat.** The applier is alive but its last row is older than the window —
+a tick that ran long, a failover. The save arms a redundant timer; both activators
+converge (§8.9); nothing is lost. The opposite error, an applier that died within the
+window, costs at most the window in delay (§9).
+
+**8.27 Re-chaining a future row inside one second.** A later future save closes the
+earlier row's `valid_to`, which re-saves it and re-runs scheduling for it. The legacy
+local-timer branch named its task `local_thread_<pk>_<second>` and collided with itself
+on the unique `meta_task_name` — an `IntegrityError` the handler swallowed into the log.
+Found by scenario 5.111; fixed in the same change with the uuid suffix the Celery branch
+always had.
+
 ---
 
 ## 9. Failure modes
@@ -666,6 +744,7 @@ happens when X comes back.
 | lex-app, at write time | Nothing is saved, so nothing is scheduled | — | None; there is no separate schedule store to drift |
 | pg_cron job never registered, or extension absent | The floor applies within its interval, if lex-app is up | — | Latency |
 | pg_cron **and** lex-app | Nothing applies | Whichever returns first converges; the other finds `DONE` rows (§8.9) | Delay; visible in `lex_pending_activations()` |
+| The applier, less than a liveness window ago | lex-app still trusts the heartbeat and arms no timer | The floor, or the applier's next tick, applies it | At most the window of delay (§5.8) |
 | The database | Nothing runs and nothing is written | pg_cron resumes and applies the *current* effective state — one write per affected record, not a replay (§5.3) | Delay only |
 | The database, by failover | Job definitions survive in `cron.job`; worker restart on the new primary unverified (§8.24) | Applies on the next tick once the worker runs; the floor covers the gap | Unknown until LEX-136 verifies |
 | The function (migration not yet run) | Each tick logs a failed run; no `SCHEDULED` row can exist yet either (§8.23) | The first `migrate` installs it | Log noise; guard in LEX-136 |
@@ -719,9 +798,11 @@ pre-existing gap. Named so it is not mistaken for a regression; §12.7.
 
 ## 12. Open items for someone else
 
-1. **LEX-136** — execution role for the function (§5.7); job registration; guard the
-   registered command on the function's existence (§8.23); verify the cron worker restarts
-   after a Cloud SQL failover (§8.24).
+1. **LEX-136** — job registration, the guarded command (§8.23) and removal on purge are
+   implemented in the instance controller (§15.2). Left: confirm on the production server
+   that the `initdeploy` admin may call `cron.schedule_in_database` (a `cloudsqlsuperuser`
+   member by construction; verified on dev), and verify the cron worker restarts after a
+   Cloud SQL failover (§8.24).
 2. **LEX-578** — measure the scan on the largest instance; this design makes the index
    load-bearing for both paths and puts it on the meta model (§5.5), which is the migration
    LEX-578 flagged.
@@ -738,22 +819,29 @@ pre-existing gap. Named so it is not mistaken for a regression; §12.7.
 8. **Custom `db_table` override** — only if a bitemporal model with one appears (§8.21).
 9. **Discovery cost** — cache `lex_bitemporal_tables()` within or across ticks only if the
    catalog queries show up in LEX-578's measurement (§5.2).
+10. **`cloudsql.enable_pg_cron` on the production server** — a restart-required flag on
+    `lex-main-1`, owned by no repository (§15.3). Until it is on, nothing changes there.
 
 ---
 
 ## 13. How it gets tested
 
-Cluster 05-history, following batch 5n (5.104–5.109, the floor). The applier's tests need
-real PostgreSQL and **not** pg_cron (§8.13); the floor's need neither.
+Cluster 05-history, batch 5o, scenarios 5.110–5.129 (5n / 5.104–5.109 are PR #695's, the
+floor). The applier's tests need real PostgreSQL and **not** pg_cron (§8.13); the floor's
+need neither. **Status: 20 pass; the history cluster 61 pass / 1 skip / 1 xfail after the
+change.**
 
 **Deliverables under test:**
 
 | File | Holds |
 |---|---|
-| `lex/core/sql/bitemporal_activation.sql` | The three functions (§5.1) |
+| `lex/core/sql/bitemporal_activation.sql` | The heartbeat table and the three functions (§5.1, §5.8) |
 | `lex/core/migrations/0001_bitemporal_activation.py` | `RunSQL` installing the file; the reverse drops the functions |
 | `lex/core/services/MetaHistory.py` | The partial index declared on the generated meta model (§5.5) |
-| `lex/lex_app/migrations/` | `AddIndex` for lex-app's own test models (§5.5) |
+| `lex/core/services/activation_applier.py` | The write-time gate, the heartbeat helpers and the thin invokers (§5.8) |
+| `lex/core/services/bitemporal_signals.py` | `_schedule_future_activation` consults the gate; the legacy branch's task name gets its uuid suffix (§8.27) |
+| `lex/test_project/tests/_e2e_test_case.py` | Clears the heartbeat around every test (§5.8) |
+| `lex/lex_app/migrations/` | Nothing: lex-app's own test models were removed in its migration 0002; customer repositories pick the index up on their next `makemigrations` (§5.5) |
 | `lex/test_project/tests/history/test_5o_activation_applier.py` | The scenarios below |
 
 **Scenarios:**
@@ -814,3 +902,115 @@ minute of the backend starting — applies 1.30 once; the other finds `DONE` (§
 
 **What the database never knows.** That this is a fee, that 1.30 is a percentage, or what
 the fund is. It copies a snapshot when its time arrives (§3.1).
+
+---
+
+## 15. How it looks in the infrastructure
+
+Three repositories were read for this; §15.4 says what each does *not* need. The
+mechanism has exactly two halves, and they meet at one function name.
+
+### 15.1 The two halves
+
+| Half | Lives in | Does |
+|---|---|---|
+| The applier | lex-app — `lex/core/sql/bitemporal_activation.sql`, installed by the `core` migration at the instance's next `lex init` | Discovers, converges, flips, writes the heartbeat |
+| The scheduler | the instance controller — `lex-instance-controller-backend`, branch `feat/pg-cron-activation-job` | Creates the extension, registers one pg_cron job per instance database, removes it on purge, sweeps orphans |
+
+They never call each other. The job's command is one statement, and it is guarded:
+
+```sql
+DO $$ BEGIN
+  IF to_regproc('public.lex_apply_due_activations') IS NOT NULL THEN
+    PERFORM public.lex_apply_due_activations();
+  END IF;
+END $$;
+```
+
+A database whose lex-app has not migrated yet — the controller provisions the database
+first; the app container migrates when it starts — gets a clean no-op tick instead of a
+failed run per minute (§8.23).
+
+### 15.2 What the controller does
+
+`InstanceDeploymentManager.sync()` already ran Terraform and read the database name back
+from its outputs. It now ends with `ensure_activation_job()`:
+
+1. `CREATE EXTENSION IF NOT EXISTS pg_cron` in the server's `postgres` database, plus one
+   server-wide daily job pruning `cron.job_run_details` older than seven days — a
+   per-minute job per database writes a row per run, and pg_cron never deletes them.
+2. `cron.schedule_in_database('apply-activations-<db>', '* * * * *', <guarded command>, '<db>')`
+   — an upsert by job name, so re-running is how a schedule change or a backfill lands.
+
+Both run through `psql` as the `initdeploy` admin the controller already uses for that
+server (per alias for alternate servers), connected to `postgres`, with the database and
+job names passed as psql variables and never concatenated into SQL. Both are
+**best-effort**: a failure is logged and swallowed, because lex-app keeps its fallback
+until it sees a heartbeat (§5.8) — an unregistered job costs latency; a failed
+provisioning would cost the instance.
+
+`purge()` removes the job **before** `DROP DATABASE`, so no job is left pointing at a
+database that is gone. If that removal fails the purge still completes, and
+`manage.py registerActivationJobs --prune` removes every activation job whose database
+no longer exists.
+
+Two settings: `PG_CRON_ACTIVATION_ENABLED` (default `true`) and
+`PG_CRON_ACTIVATION_SCHEDULE` (default every minute; LEX-135 verified 30 seconds).
+
+**Backfill.** Instances provisioned before this existed are not re-synced until their
+next operation. `manage.py registerActivationJobs` reports what it would do; `--apply`
+registers the job for every instance with a database, on every configured server. Run
+once per environment after the controller release.
+
+### 15.3 What the servers need
+
+pg_cron on Cloud SQL requires the flag `cloudsql.enable_pg_cron = on`, and setting it
+**restarts the server**. No repository owns the two servers: `LEX_TERRAFORM_MODULES`
+creates databases and roles *inside* them, and `instance-controller-deployment` reads
+them as `data` sources only. The flag is therefore a one-time operation on the server
+itself, in a maintenance window.
+
+| Server | Serves | State |
+|---|---|---|
+| `lex-main-2` | dev and test | Flag on; pg_cron 1.6.7 verified in LEX-135 |
+| `lex-main-1` | production | Flag **to be enabled**. Dev and test share `lex-main-2`, so there is no per-environment rehearsal of the restart |
+
+Until the flag is on, `CREATE EXTENSION` fails, the controller logs it, no job exists,
+and lex-app behaves exactly as today. Nothing breaks and nothing improves.
+
+The app database role gets no cron access without anyone configuring it: the `cron`
+schema lives in `postgres` and is not granted to `PUBLIC`.
+
+### 15.4 What the other repositories do not need
+
+- **`LEX_TERRAFORM_MODULES`** — nothing. Its `lex-postgres` module creates the database
+  and the role. The extension is server-level; from here it would run once per instance
+  against the same `postgres` database, under a provider that declares
+  `superuser = false`. Once, idempotently, from the controller is the right shape.
+- **`LEX_PROJECT_AUTOMATION`** — nothing. It builds the instance image and owns the
+  entrypoint that runs `lex init` (and with it the `core` migration) before the app
+  serves. It never touches the database.
+- **`instance-controller-deployment`** — nothing in code; §15.3's flag is set on the
+  server it only reads.
+
+### 15.5 Rollout order, and why it barely matters
+
+1. Enable the flag on `lex-main-1` (restart).
+2. Deploy the controller release; run `registerActivationJobs --apply` once per environment.
+3. Ship the lex-app release; each instance installs the function at its next restart.
+
+Any other order is also safe. Before the function exists the job is a no-op; before the
+job exists lex-app sees no heartbeat and arms its timer; before the flag is on the
+controller logs and moves on. The first minute in which all three hold is the first
+minute the database applies a change, and the first future-dated save after it stops
+arming timers.
+
+### 15.6 Checking it
+
+| Question | Where |
+|---|---|
+| Is the job registered for this database? | `SELECT jobname, schedule, database FROM cron.job` in `postgres` |
+| Is it running, and did the guard no-op? | `cron.job_run_details` — `status`, `return_message` |
+| Is anything waiting, and for how long? | `SELECT * FROM lex_pending_activations()` in the instance database (§5.6) |
+| Is the applier alive? | `SELECT * FROM lex_activation_applier_state` (§5.8) |
+| Did lex-app notice? | The next future-dated save's `meta_task_name` starts with `db_applier_` |
