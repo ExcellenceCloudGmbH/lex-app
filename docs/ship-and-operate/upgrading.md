@@ -47,6 +47,26 @@ This matters when a feature spans both halves. The 2.2.0 Streamlit widgets need 
 5. Exercise the parts of your application that touch whatever the notes mentioned.
 6. Promote.
 
+Step 3 is the one with a fork in it. `lex_migrate` generates migrations and
+applies them; `--no-makemigrations` applies only what already exists:
+
+```mermaid
+flowchart TB
+    P["Pin the new version"] --> D["Deploy to a non-production instance"]
+    D --> M{"lex_migrate"}
+    M -- "default" --> G["makemigrations → migrate<br/>the AlterField appears here"]
+    M -- "--no-makemigrations" --> S["migrate only<br/>a framework field change is NOT applied"]
+    G --> R["Review the generated migration"]
+    S --> W["Django believes the new declaration;<br/>the column is still the old one"]
+    R --> E["Exercise what the notes named"]
+    E --> PR["Promote"]
+```
+
+The right-hand branch is the one to be careful with, and only on upgrades that
+change a field: the schema and Django's idea of it drift apart silently, and the
+first over-length value turns what used to be quiet truncation into a
+`DataError`.
+
 ## Downgrading
 
 Reinstall the older pin and redeploy. The caveat is migrations: a migration your app generated during the upgrade is not reversed by reinstalling the old package. If step 4 produced one, plan the reverse before you need it.

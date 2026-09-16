@@ -6,9 +6,10 @@ aliases:
 
 By default, all your models appear in the frontend sidebar under a generic "Models" group. To organize them into meaningful groups — and to control display names and history tracking — create a `model_structure.yaml` file in your project root.
 
-## The Three Sections
+## The Sections
 
-The file has three top-level keys, all optional:
+The file has five top-level keys, all optional. Three shape the sidebar; two
+decide what gets history:
 
 ```yaml title="model_structure.yaml"
 # ┌─────────────────────────────────────────────
@@ -131,6 +132,32 @@ untracked_models:
 ```
 
 The framework also automatically untracks internal models like `calculationlog`, `auditlog`, and `auditlogstatus`.
+
+### Turning history off for the whole project
+
+`history_tracking_enabled` is the project-wide switch. It defaults to `true`,
+and setting it to `false` stops every model being registered for history —
+`untracked_models` then has nothing left to exclude:
+
+```yaml
+history_tracking_enabled: false
+```
+
+Three settings decide whether a given model gets a `Historical*` table, and they
+are checked in this order:
+
+```mermaid
+flowchart TB
+    A{"history_tracking_enabled"} -- "false" --> N["No history, for anything"]
+    A -- "true (default)" --> B{"Model listed in<br/>untracked_models?"}
+    B -- "yes" --> N2["No history for this model"]
+    B -- "no" --> C{"Excluded by the<br/>framework itself?"}
+    C -- "yes" --> N3["No history — calculationlog,<br/>auditlog and similar"]
+    C -- "no" --> Y["Tracked"]
+```
+
+It must be a boolean. A string — `"false"` — is rejected at load with a message
+naming the key, rather than being read as truthy and silently leaving history on.
 
 ## Built-In Groups
 

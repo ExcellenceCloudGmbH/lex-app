@@ -54,6 +54,27 @@ with lex_widgets(key="report") as page:
     page.calculation_log("navcalc", pk=1, height=420)
 ```
 
+```mermaid
+flowchart LR
+    subgraph block["one lex_widgets() block"]
+        direction TB
+        H["host iframe<br/>one React bundle<br/>one auth handshake<br/>one model_info fetch"]
+        H --- W1["calculation navcalc"]
+        H --- W2["calculation feecalc"]
+        H --- W3["calculation_log navcalc"]
+    end
+    subgraph flat["three flat calls"]
+        direction TB
+        F1["iframe + React runtime"]
+        F2["iframe + React runtime"]
+        F3["iframe + React runtime"]
+    end
+```
+
+Widget count is free; block count is not. Both sides above render the same three
+controls, and the right-hand one boots three React applications that contend for
+the same network and main thread.
+
 `lex_widgets()` and the flat calls are the same code path — the flat form enters and exits the block in one call. There is one manifest builder and one host, so the two cannot drift apart in what they think a widget is.
 
 ## Shaping a control

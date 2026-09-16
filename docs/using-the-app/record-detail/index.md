@@ -49,7 +49,7 @@ Above the tabs, a toolbar gives you quick access to:
 | **Edit** | Jump to the edit form for this record |
 | **Export to PDF** | Download the current Summary tab as a PDF document |
 
-![The record page: the five tabs, and what each one answers](../../images/record-detail/tabs.svg)
+![The record page: the five tabs, and what each one answers](images/record-detail/tabs.svg)
 
 ## Customizing Tab Labels
 

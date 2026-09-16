@@ -23,13 +23,21 @@ The sidebar collapses to icons on smaller screens, giving you more room for the 
 > [!tip]
 > If you're a developer configuring the sidebar, see [[model-your-data/model structure]] for the `model_structure.yaml` reference.
 
+![The sidebar, its search box, and the breadcrumb trail](images/navigation/sidebar-and-breadcrumbs.svg)
+
 ## Breadcrumbs
 
-A breadcrumb trail at the top of every page shows your current location in the application. It always starts from **Home** and traces the path to where you are:
+A breadcrumb trail at the top of every page shows your current location. It
+always starts from the **home** icon and traces the path to where you are. On a
+table, that is the group and the model:
 
 ```
-Home › Teams & People › Employee › #42
+⌂ › Funds › Fund
 ```
+
+The group segment carries a dropdown, so you can jump sideways to another model
+in the same group without going back to the sidebar. Click **Funds** itself, or
+the home icon, to go up.
 
 Click any breadcrumb to jump back to that level — from a record detail page back to the table, or from a table back to the home screen.
 

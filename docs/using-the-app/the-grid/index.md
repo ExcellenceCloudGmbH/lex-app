@@ -48,7 +48,7 @@ Take your data out of Lex App when you need to. Export respects your current vie
 
 Above every grid is a toolbar that gives you quick access to key actions:
 
-![A model's grid: the sidebar search, the settings gear, a sortable header and a row](../../images/the-grid/first-look.svg)
+![A model's grid: the sidebar search, the settings gear, a sortable header and a row](images/the-grid/first-look.svg)
 
 
 | Control | What It Does |

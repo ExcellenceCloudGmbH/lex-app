@@ -16,6 +16,8 @@ menu, which meant it was reachable only by people who already knew it was there.
 - **Pivot mode active?** The cross-tabulated layout is exported as-is.
 - **Rows selected?** Exactly those rows are exported — nothing else.
 
+![One row ticked, and the export button counting it](images/the-grid/export-selection.svg)
+
 Selection is the whole contract, and there is no mode to switch: with nothing selected
 you get the table as the grid is currently showing it, filters, sort, grouping and pivot
 carried in; with rows selected you get precisely those rows. The button's tooltip names

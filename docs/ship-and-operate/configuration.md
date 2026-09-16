@@ -26,6 +26,18 @@ That principle was learned the hard way: an earlier release added a required `SE
 2. Otherwise, **derived from `DJANGO_SECRET_KEY`** (HMAC-SHA256 under a fixed label). Terraform already generates that key, keeps it in state and ships it to every replica, so it is stable across restarts and identical on each one — exactly what session cookies need, with nothing new to configure.
 3. Otherwise a random per-process value, with a warning. The process starts; users are signed out once per restart.
 
+```mermaid
+flowchart TB
+    A{"SESSION_SECRET set?<br/><small>or SESSION_KEY / SESSION_SECRET_KEY</small>"} -- "yes" --> E["Use it verbatim"]
+    A -- "no" --> B{"DJANGO_SECRET_KEY set,<br/>and not the shipped default?"}
+    B -- "yes" --> D["HMAC-SHA256 of it,<br/>under a fixed label"]
+    B -- "no" --> R["Random, per process<br/>+ a warning in the log"]
+    R --> W["Sessions do not survive a restart<br/>and are not shared across replicas"]
+```
+
+`SESSION_KEY` and `SESSION_SECRET_KEY` are accepted as aliases of
+`SESSION_SECRET`; any one of the three counts as an explicit choice.
+
 Derived rather than reused verbatim, so that a leaked cookie-signing key does not hand over Django's secret, or the other way round.
 
 > [!warning] The published fallback secret is excluded on purpose

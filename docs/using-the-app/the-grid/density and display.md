@@ -11,6 +11,13 @@ Not all tasks need the same amount of visual space. When you're scanning a thous
 Open [[using-the-app/the-grid/table settings|Table Settings]] — the gear beside the table —
 and pick one of three row heights:
 
+The same five funds, at the two extremes. Compact fits every one of them above
+the fold; Comfortable shows two and leaves room to read them.
+
+![The grid at Compact density — five rows visible](images/the-grid/density-compact.svg)
+
+![The same grid at Comfortable density — two rows in the same space](images/the-grid/density-comfortable.svg)
+
 ### Compact
 
 Row height: **25px**

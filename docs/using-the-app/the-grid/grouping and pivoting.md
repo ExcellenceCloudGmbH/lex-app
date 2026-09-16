@@ -10,6 +10,8 @@ Sometimes you don't want a flat list — you want a structure. Grouping lets you
 
 Drag any column header to the grouping area above the grid (or right-click a column → **Group by this column**). The grid instantly reorganizes into expandable groups.
 
+![Funds grouped by currency, with one group open](images/the-grid/row-grouping.svg)
+
 For example, group your expenses by **Team**:
 
 ```

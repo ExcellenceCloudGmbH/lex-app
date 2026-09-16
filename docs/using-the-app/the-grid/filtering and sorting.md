@@ -10,6 +10,8 @@ Finding the right data shouldn't require a database query. Lex App's grid lets y
 
 Every column header has a built-in filter. Click the menu icon on any column to open its filter panel. The filter type adapts to the data:
 
+![The grid with a filter in force — five funds narrowed to one](images/the-grid/filter-applied.svg)
+
 | Column Type | Filter Style | Example |
 |---|---|---|
 | **Text** | Contains, starts with, equals, not equals | Find expenses where description *contains* "travel" |

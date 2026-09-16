@@ -20,6 +20,8 @@ A saved view captures the complete state of your grid:
 
 When you load a saved view, all of these settings are restored instantly — the grid reconfigures itself to exactly how you left it.
 
+![A saved view named Q1 review, active in the toolbar](images/the-grid/saved-views.svg)
+
 ## Two Kinds of Views
 
 The view selector in the toolbar organizes views into two groups:
