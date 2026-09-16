@@ -93,7 +93,23 @@ INTERNAL_TYPES = frozenset({"ci", "build", "chore", "test", "docs"})
 INTERNAL_SCOPES = frozenset({
     "release-notes", "test-plan", "ci", "gate", "showcase", "plan", "spec",
     "setup-with-ai", "agent", "copilot",
+    # How the frontend is built and delivered, not what it does. These arrive
+    # from the OTHER repository, and the first frontend release is made almost
+    # entirely of them: of the seven commits between the last vendored bundle
+    # and v2.1.0, five reach the changelog unflagged — including
+    # "feat(packaging): publish the frontend as a versioned package", announced
+    # to customers as a new frontend feature.
+    "packaging", "deps",
 })
+
+# A version bump records a release rather than describing one. `release(...)`
+# is not a conventional type, so it parses as `other` and lands under Changed —
+# publishing a line that says only "2.1.0" inside the section already headed
+# "2.1.0".
+_VERSION_BUMP_RE = re.compile(
+    r"^(?:release|chore|build)(?:\([^)]*\))?!?:\s*v?\d+\.\d+\.\d+[A-Za-z0-9.\-]*\s*$",
+    re.I,
+)
 
 
 def is_internal(type_: str, scope: str | None) -> bool:
@@ -145,6 +161,8 @@ def is_noise(subject: str) -> bool:
     if subject.startswith(_MERGE_PREFIXES):
         return True
     if subject.startswith(_BUNDLE_PREFIX):
+        return True
+    if _VERSION_BUMP_RE.match(subject):
         return True
     return False
 
