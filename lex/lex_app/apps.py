@@ -135,6 +135,26 @@ class LexAppConfig(GenericAppConfig):
                 target=_run_async_ready, name="lex-async-ready", daemon=True
             ).start()
 
+            # Catch up any future-dated activation whose timer was lost.
+            #
+            # Gated to the served backend: this is the one always-on process per
+            # instance, and running it from a management command or a worker
+            # would duplicate the work. The loop takes a pass immediately on
+            # start, because a restart is precisely how the in-process timer
+            # queue gets dropped.
+            if running_in_uvicorn():
+                try:
+                    from lex.core.services.activation_reconcile import (
+                        start_background_reconcile,
+                    )
+
+                    start_background_reconcile()
+                except Exception:
+                    logger.exception(
+                        "Failed to start the activation reconcile loop; "
+                        "future-dated activations will rely on timers alone"
+                    )
+
     def register_models(self):
         """
         Override parent's register_models to filter out lex core models
