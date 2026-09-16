@@ -1,7 +1,7 @@
 # Bitemporal activation: the in-database applier
 
-**Status:** design, awaiting review
-**Date:** 2026-09-16 (rewritten the same day; see §1)
+**Status:** design, revision 2, awaiting review
+**Date:** 2026-09-16 (rewritten and then revised the same day; see §1)
 **Linear:** [LEX-131](https://linear.app/lundgroup/issue/LEX-131) (parent) · LEX-135 · LEX-136 · LEX-578 · LEX-593
 **Related PR:** [#695](https://github.com/ExcellenceCloudGmbH/lex-app/pull/695) — the reconcile floor (open)
 
@@ -12,19 +12,28 @@
 LEX-135 settled *where* future-dated bitemporal activation runs: inside the instance
 database, driven by pg_cron. That is verified on dev and **not reopened here**.
 
-This document decides three things LEX-135 leaves open:
+This document decides four things LEX-135 leaves open:
 
 1. **What the applier may skip.** LEX-135's fourth checkbox asks whether
    `activate_history_version` has app-level side effects that raw SQL would bypass. §2.3
    answers it from the source: it has none that run.
-2. **How the applier discovers its work.** Postgres cannot call `apps.get_models()`. §4.
-3. **What the applier must replicate exactly.** §5.
+2. **Where the boundary between lex-app and the database lies.** What lex-app may do at
+   deploy time and at write time, and what it may never do at apply time. §3.2.
+3. **How the applier discovers its work.** Postgres cannot call `apps.get_models()`. §4.
+4. **What the applier must replicate exactly.** §5.
 
-A first draft of this document, written earlier the same day, was organised around a
-propagation side effect — dependent calculated models recalculating at activation. On
-inspection that code path is dead: the method it depends on is defined nowhere in v2. The
-draft's central trade-off therefore did not exist, and this rewrite replaces it. The
-finding itself is real and is recorded in §10.1 and §12.6 as a separate matter.
+**Revision history, same day.** A first draft was organised around a propagation side
+effect — dependent calculated models recalculating at activation. That code path is dead:
+the method it depends on is defined nowhere in v2 (§2.3). The finding is recorded in §10.1
+and §12.6 as a separate matter.
+
+The second version (revision 1) discovered bitemporal tables through a registry table that
+a served backend populated at startup. That put a lex-app process back into the apply path —
+the applier knew only what the last backend start had told it — which is the dependency this
+design exists to remove (§3.2). Revision 2 derives discovery from the database catalog
+(§4.3, §5.2), drops the registry, its startup hook and the settings table, turns the max-age
+skip into an alert (§5.3, §8.11), adds the full unavailability matrix (§9) and a worked
+example (§14).
 
 ---
 
@@ -179,6 +188,60 @@ created by lex-app's own migrations, in the instance database, under the app rol
 broker. It does not mean database-agnostic; this binds activation to PostgreSQL with
 pg_cron. §8.13 covers what that costs.
 
+### 3.1 Who computes what
+
+The idea behind pg_cron, stated plainly: the backend works out what a record should look
+like, from when, and which records change; the database applies it. lex already does the
+first half today. Each phrase maps to one concrete piece:
+
+| The idea | What it is in lex | Who does it, when |
+|---|---|---|
+| What it should look like | The history row. Every row is a full snapshot of the record as it must appear from its start time | Backend, at save time |
+| At what time | `valid_from` on that history row | Backend, at save time |
+| Which records change | The meta row marked `SCHEDULED`, one per future history row | Backend, same transaction |
+| The change applies | One standing pg_cron job calls one function, which copies the snapshot into the main table — or deletes the row — and marks the meta row `DONE` | Database, every tick |
+
+The backend computes everything about the domain; the database computes nothing about it.
+The function does not know what a fee or a report is. It knows three table shapes and a
+timestamp.
+
+Two refinements over a literal "replay the stored change":
+
+- **No separate change-list table.** The history row and its meta row already *are* the
+  precomputed change. A second copy would have to be updated on every edit, cancel or delete
+  that touches a future row, and the moment one path is missed the two disagree (§4.3).
+- **Effective row, not stored row.** When the applier runs late and several changes for one
+  record are due at once, it applies the row that is effective *now*, not each stored change
+  in turn (§2.2, §8.3). Same end state, fewer writes, no transient states visible to users.
+
+The shape is forced by LEX-136: the app role has no cron access, so the backend cannot
+schedule one job per change at its exact time. The controller registers one standing job per
+database, and the backend can only leave data for it to find. LEX-135 verified the job at a
+30-second interval; the minute above is a knob, not a limit.
+
+### 3.2 The boundary
+
+lex-app is involved at exactly two moments, and forbidden at a third:
+
+| Moment | lex-app's part | Allowed? |
+|---|---|---|
+| **Deploy time** | Migrations create the three tables, declare the index (§5.5) and install the SQL functions (§5.3, §5.6) | Yes — the tables have to come from somewhere, and the functions must version with lex-app |
+| **Write time** | The user's save writes the history row and the `SCHEDULED` meta row (§10.3) | Yes — someone has to record the intent, and there is no separate schedule store to drift from it |
+| **Apply time** | Nothing. No process, no registration, no cache, no timer | **Never.** Anything the apply path needs must come from the database itself |
+
+The floor (#695) runs in lex-app and is therefore not part of the apply path's contract. It
+is the fallback for environments without pg_cron (§8.13). Production correctness must not
+depend on it.
+
+Revision 1 failed this test in one place: a registry table that the served backend populated
+at startup. The applier then knew only the models a backend had registered since the last
+deploy — wrong for a database restored from backup, a deploy that fails after migrate, a
+row written by a data migration or a script, or a renamed table. The registry's content was
+also derivable from the catalog (§5.2). It is gone.
+
+**Acceptance for the boundary** is §6's acceptance: stop every lex-app process, let a due
+row pass its `valid_from`, and observe all three tables in their final state.
+
 ---
 
 ## 4. Discovery: how the applier knows what to apply
@@ -186,44 +249,74 @@ pg_cron. §8.13 covers what that costs.
 ### 4.1 The problem
 
 `lex_apply_due_activations()` needs, for every bitemporal model, the names of three tables
-and the primary-key column. The floor gets them from Django's app registry (§2.5).
-pl/pgSQL has no equivalent. Discovery must be **materialised in the database**.
+and the primary-key column. The floor gets them from Django's app registry (§2.5). pl/pgSQL
+has no equivalent. Discovery must happen **inside the database**, from what the database
+already holds or from what lex-app has written into it — and, per §3.2, never from a
+process that has to be running.
 
-### 4.2 The two honest shapes
+### 4.2 The three honest shapes
 
 **Per-activation queue table** — LEX-135's wording. At save time lex-app writes one row per
 future-dated activation, naming its tables and `history_id`. The applier scans one table.
 
-- For: single indexed scan; framework-owned, so attempt counters and max-age have a natural
-  home; verified on dev in this shape.
+- For: single indexed scan; framework-owned, so attempt counters have a natural home;
+  verified on dev in this shape.
 - Against: a **second source of truth** beside `meta_task_status`. Both are written in the
   user's transaction, so they agree at write time — but the applier reads the queue and the
   floor reads meta rows, so the two mechanisms consult different tables, and parity between
-  them becomes something to prove rather than something that follows.
+  them becomes something to prove rather than something that follows. It also carries either
+  a *payload*, which drifts under schema change (§8.6), or a pointer to the history row, which
+  makes the queue row a duplicate of the meta row.
 
-**Per-model registry + meta rows.** lex-app writes one row per bitemporal model naming
-its `(main, history, meta, pk_column)`. The applier iterates the registry and runs **the
-floor's own predicate** against each meta table.
+**Per-model registry + meta rows** — revision 1's choice. lex-app writes one row per
+bitemporal model naming its `(main, history, meta, pk_column)`, upserted at served-backend
+startup. The applier iterates the registry and runs **the floor's own predicate** against
+each meta table.
 
-- For: **one source of truth** — the `SCHEDULED` meta row and its history row's
-  `valid_from`, read identically by both paths. Parity is near-automatic. No per-activation
-  write at save time; `_schedule_future_activation` changes only in what it stops doing.
-- Against: N scans per tick instead of one, so the `meta_task_status` index (LEX-578) is
-  load-bearing for both paths. Attempt counters have no framework-owned per-activation home.
+- For: **one source of truth for what is pending** — the `SCHEDULED` meta row and its history
+  row's `valid_from`, read identically by both paths. No per-activation write at save time;
+  `_schedule_future_activation` changes only in what it stops doing.
+- Against: a **second source of truth for which tables exist**, and one that a lex-app
+  process must refresh. Stale after a restore, a failed deploy or a rename; empty on a
+  database no served backend has started against. Revision 1 argued that "a model cannot
+  have a future-dated row before its application has run" — true of the first row, false of
+  everything after it: a data migration, a script, a restored dump. It fails §3.2.
+
+**Catalog derivation + meta rows.** Nothing is written for discovery at all. The three
+tables are named from one another by lex's own conventions, and the PostgreSQL catalog
+already lists them. The applier derives the triples on every tick (§5.2).
+
+- For: cannot be stale — the catalog *is* the tables. Nothing to populate, no startup hook,
+  no lex-app involvement at apply time. The same single truth for what is pending as the
+  registry shape.
+- Against: depends on the naming conventions holding — a bitemporal model with a custom
+  `db_table` would not be found (§8.21) — and on quoting identifiers correctly (§8.20). A
+  handful of catalog queries per tick (§12.9).
 
 LEX-135's stated rationale for the queue table — *same transaction as the user's save, so
 cancel/supersede is local* — is equally true of the meta row, which is written in that same
-transaction. The rationale does not distinguish the two shapes.
+transaction. The rationale does not distinguish the shapes.
 
 ### 4.3 Decision
 
-**Registry + meta rows.** One source of truth.
+**Catalog derivation + meta rows.** One source of truth for what is pending, and no source
+at all for what exists other than the catalog itself.
 
 The argument that decides it: this design has two activators by construction, forever. The
 single most valuable property they can have is that they cannot disagree. Reading the same
-row through the same predicate gives that for free; reading different tables means every
-future change must be made twice and tested for equivalence. The cost — N small scans per
-minute — is bought back by the index in §5.5, which the floor needed regardless.
+meta row through the same predicate gives that for *what is pending*. For *which tables
+exist*, the floor asks Django and the applier asks the catalog; they can disagree only if a
+model exists in one and not the other, and the parity test (§13) asserts they do not.
+
+**The proof that the registry was unnecessary.** On a real project database with 51
+bitemporal models, the rules in §5.2 recovered every triple from the catalog alone. A first
+attempt through `django_content_type` did not — dynamically registered models have no
+content-type rows — which is why the rules use table shape and names, not Django's tables:
+
+| Discovery method | Triples found |
+|---|---|
+| `django_content_type` | 7 of 51 |
+| Catalog shape and naming rules (§5.2) | 51 of 51 |
 
 A third option, making the queue table the *only* truth and having the floor read it too,
 was considered and rejected: it changes #695 before it merges, and it demotes
@@ -237,10 +330,10 @@ informational field.
 ### 5.1 Architecture
 
 ```
-       save — Django, in the user's transaction         apply — Postgres, every minute
+       save — Django, in the user's transaction         apply — Postgres, every tick
        ────────────────────────────────────────         ──────────────────────────────────
  user save ──► history row   valid_from = future        pg_cron ──► lex_apply_due_activations()
-           ──► meta row      meta_task_status='SCHEDULED'          │ for each registry row:
+           ──► meta row      meta_task_status='SCHEDULED'          │ for each triple in lex_bitemporal_tables():
                                                                     │   meta rows SCHEDULED
                                                                     │     whose history.valid_from <= now()
                                                                     │   converge main row  (upsert | delete)
@@ -249,24 +342,47 @@ informational field.
                                ┌────────── same predicate, same writes ──────────┐
                                │                                                  │
                     floor — #695, Python, 60 s                        applier — pl/pgSQL
-                    discovers via apps.get_models()                   discovers via lex_bitemporal_registry
+                    discovers via apps.get_models()                   discovers via the catalog (§5.2)
 ```
 
-Neither path knows about the other. Both converge to the same end state. The registry
-exists for one reason: Postgres cannot call `apps.get_models()`.
+Neither path knows about the other. Both converge to the same end state. Nothing in lex-app
+runs at apply time (§3.2).
 
-### 5.2 `lex_bitemporal_registry`
+Three functions, one SQL file, one migration (§5.7):
 
-A framework-owned table, created by a lex-app migration:
-
-| Column | Meaning |
+| Function | Role |
 |---|---|
-| `app_label`, `model_name` | Django identity, for logging and for the floor to cross-check |
-| `main_table`, `history_table`, `meta_table` | Physical names — `<app>_<model>`, `<app>_historical<model>`, `<app>_<model>_meta_history` |
-| `pk_column` | `model._meta.pk.name` — any single-column pk, not assumed to be `id` |
-| `registered_at` | Last upsert |
+| `lex_bitemporal_tables()` | Discovery (§5.2). Returns `(main_table, history_table, meta_table, pk_column)` per model |
+| `lex_pending_activations()` | Visibility (§5.6). Every `SCHEDULED` row across every triple, due or not |
+| `lex_apply_due_activations()` | The applier (§5.3) |
 
-Unique on `(main_table)`. One row per bitemporal model.
+### 5.2 `lex_bitemporal_tables()` — discovery from the catalog
+
+Four rules, applied on every call, all against `information_schema` and `pg_catalog`:
+
+1. **Meta tables by shape.** A table is a meta table if it has all of `meta_task_status`,
+   `history_object_id`, `sys_from` and `sys_to`. The shape is fixed by
+   `MetaLevelHistoricalRecords` (§2.4) and no other lex table has it.
+2. **Main table by suffix.** lex names the meta table after the main table:
+   `<main>_meta_history` (`lex/lex_app/migrations/0001_initial.py` shows
+   `lex_app_asoftestmodel_meta_history` beside `lex_app_asoftestmodel`). Strip the suffix.
+3. **History table by the last underscore.** simple-history's default is
+   `<app_label>_historical<modelname>`. Model names are class names lowercased and never
+   contain an underscore; app labels may (`lex_app`). So the *last* underscore in the main
+   table's name splits app from model unambiguously, and `historical` is inserted there.
+4. **Keep the triple only if all three tables exist** — `to_regclass(format('%I', name))`
+   on each — and the main table has a single-column primary key, read from `pg_index`.
+   Anything else is skipped with a `NOTICE` naming the table (§8.17, §8.18, §8.21).
+
+Identifiers always pass through `%I`. Real project app labels contain capitals, so the
+physical names are case-sensitive quoted identifiers; unquoted, the existence check would
+silently report them missing (§8.20).
+
+Why not `django_content_type`: it has rows only for models Django's migration machinery has
+seen. On the project database in §4.3 that was 7 of 51. The catalog has all 51 because the
+tables exist, whatever created them.
+
+Cost: a few catalog queries per tick. Not measured at scale and not cached in v1 (§12.9).
 
 ### 5.3 `lex_apply_due_activations()`
 
@@ -274,7 +390,9 @@ pl/pgSQL, created by a lex-app migration (`RunSQL`) so it lives in the instance 
 under the app role (§3). All table references are dynamic — `EXECUTE format(%I ...)` —
 because the function is generic over customer models it has never seen.
 
-For each registry row, for each distinct `pk` with a due `SCHEDULED` meta row:
+For each triple from `lex_bitemporal_tables()` (§5.2), for each distinct `pk` that has a
+`SCHEDULED` meta row — found through the partial index (§5.5) — whose history row has
+`valid_from <= now()`:
 
 1. **Select the effective history row, locked:**
    `... WHERE pk = $1 AND valid_from <= now() AND (valid_to > now() OR valid_to IS NULL)
@@ -297,73 +415,84 @@ For each registry row, for each distinct `pk` with a due `SCHEDULED` meta row:
    so one failing record raises a `WARNING` (visible in `cron.job_run_details`) and the
    loop continues. The main-row write and the meta flip commit together or not at all.
 
-Bounded by **max-age**: rows whose `valid_from` is older than the configured window are
-skipped and counted, never applied — so an instance restored from an old backup cannot
-replay a year of history on its first tick. The value mirrors
-`LEX_ACTIVATION_RECONCILE_MAX_AGE_DAYS` and lives in a one-row settings table the migration
-seeds, since pl/pgSQL cannot read environment variables.
+**Not bounded by age.** Revision 1 skipped rows whose `valid_from` was older than a window,
+so that a database restored from an old backup could not "replay a year of history" on its
+first tick. That framing was wrong on both counts. The applier does not replay: for each
+pending `pk` it writes the *current* effective row once, so a burst after a long outage is
+one write per affected record, not one per missed change — and that end state is exactly
+what the main table is supposed to hold. A skipped row, by contrast, leaves the main table
+wrong for as long as nobody notices. The scan is bounded by the number of pending rows
+through the partial index (§5.5), not by age. The window survives as an *alert threshold* in
+`lex_pending_activations()` (§5.6). There is no settings table.
 
 ### 5.4 The floor (#695)
 
-Predicate and writes: **unchanged**. Two additions:
+Predicate and writes: **unchanged**. Discovery: **unchanged** — it is Python and may call
+`apps.get_models()`. The two paths therefore discover differently, and the parity test in
+§13 asserts they find the same triples on the same database.
 
-- On its startup pass, it **populates the registry first** (§5.6), then proceeds as today.
-- It reads its model list **from the registry** rather than `apps.get_models()` directly, so
-  the two paths cannot disagree about which tables exist. (`apps.get_models()` is still
-  what writes the registry; the floor consumes what it wrote.)
+One asymmetry is accepted for now: #695 bounds the floor by
+`LEX_ACTIVATION_RECONCILE_MAX_AGE_DAYS` and skips older rows; the applier applies them
+(§5.3). Wherever pg_cron runs, the applier's behaviour wins because it gets there first.
+Where only the floor runs (§8.13), old rows are skipped as #695 designed. Revisiting #695's
+bound is §12.3, not this document.
 
-It remains the only activator wherever pg_cron is absent (§8.13), which is why §4.3's
-rejected third option — demoting it to detect-only — would have reintroduced the failure
-this project exists to remove.
+It remains the only activator wherever pg_cron is absent, which is why §4.3's rejected third
+option — demoting it to detect-only — would have reintroduced the failure this project
+exists to remove.
 
 ### 5.5 The index
 
-Both paths now select on `meta_task_status`, every minute, per meta table, forever. LEX-578
+Both paths select on `meta_task_status`, every tick, per meta table, forever. LEX-578
 records the floor's scan as "free on small instances, unmeasured on a large one"; this
 design doubles it and makes it permanent.
 
-The direct fix — `db_index=True` on the generated meta model — forces a migration into
-**every customer repository**, because the meta model is generated per customer model.
-LEX-578 flags exactly that.
+Revision 1 created a partial index from the startup hook. With the hook gone (§3.2) the
+index returns to where a table's indexes belong: **declared on the generated meta model** in
+`MetaLevelHistoricalRecords`, as an `Index` on `history_object_id` with the condition
+`meta_task_status = 'SCHEDULED'`. `SCHEDULED` rows are transient and rare, so the index is
+tiny, and it serves the applier's scan, the applier's flip and the floor's scan alike.
 
-Instead: a **partial index** on each registered meta table, created at registration time
-(§5.6) with `CREATE INDEX IF NOT EXISTS ... ON <meta_table> (history_object_id) WHERE
-meta_task_status = 'SCHEDULED'`. `SCHEDULED` rows are transient and rare, so the index is
-tiny, and it serves both the applier's scan and the floor's. Trade, stated: framework DDL
-against generated tables at startup. It is idempotent and confined to tables the framework
-itself generated.
+The cost LEX-578 flagged is real and accepted: each customer repository picks up one
+autogenerated `AddIndex` migration per meta table on its next `makemigrations`, and
+lex-app's own test models get theirs in `lex/lex_app/migrations`. **Correctness never
+depends on the index**; a project that has not migrated yet pays a sequential scan per meta
+table per tick until it does (§9). The alternative — the applier issuing `CREATE INDEX`
+itself — would put DDL under the cron job's role and a table lock into a job that fires
+every minute; rejected.
 
-### 5.6 Registry population
+### 5.6 `lex_pending_activations()` — visibility
 
-An **idempotent upsert at served-backend startup**, in `lex/lex_app/apps.py` next to
-`start_background_reconcile()`, under the same `running_in_uvicorn()` gate and the same
-try/except that logs and continues. Iterates `apps.get_models()`, upserts one registry row
-per bitemporal triple, creates the partial index (§5.5), and removes registry rows for
-models no longer present.
+A set-returning function over the same triples: every `SCHEDULED` meta row across every
+bitemporal table, with its `main_table`, `pk`, `history_id`, `valid_from`, whether it is
+due, and for how long. Read-only; it writes nothing and is not a second truth — it is a
+*view* of the first one that happens to span fifty tables.
 
-Why startup rather than a migration: a data migration would see only the models present
-when it ran; a model added afterwards would never register. Startup re-derives the set on
-every boot. Why the uvicorn gate: `ready()` runs in every process, including management
-commands before migrations exist; the served backend is the one process known to have a
-migrated database.
+Three uses. Operators get the single "what is pending" place a queue table would have given
+(§4.2) without the dual-truth cost. Monitoring gets its alert: any row due for longer than
+the former max-age window means neither activator has run, so the silent-non-activation row
+of §9 becomes visible. Tests get their oracle: the row is listed before the tick and not
+after.
 
-The apparent gap — a model added but the backend not yet restarted — does not exist: a
-model cannot have a future-dated history row until the application that defines it has
-run.
-
-### 5.7 Two sub-decisions
+### 5.7 Three sub-decisions
 
 **No attempt-counter table in v1.** Without a queue table there is no per-activation home
 for one, and a `lex_activation_attempts` table would be a queue table under another name —
-the dual-truth cost §4.3 rejected. The applier is bounded instead by max-age (§5.3) and by
-isolation: a poison row costs one failed statement per tick, is visible in
-`cron.job_run_details`, and blocks nothing. #695's in-memory counter continues to bound the
-floor. Add the table only if a real poison row is ever observed; §12 lists it.
+the dual-truth cost §4.3 rejected. The applier is bounded instead by isolation: a poison row
+costs one failed statement per tick, is visible in `cron.job_run_details` and as a row that
+stays due in `lex_pending_activations()`, and blocks nothing. #695's in-memory counter
+continues to bound the floor. Add the table only if a real poison row is ever observed; §12
+lists it.
 
 **Execution role is LEX-136's decision, not this document's.** The function must run as a
 role that can write the app's tables. Two workable shapes: register the job with the app
 role as `username`, or make the function `SECURITY DEFINER` owned by the app role. The
 requirement is stated here; the choice belongs with the permissions work.
+
+**The SQL lives in one file.** `lex/core/sql/bitemporal_activation.sql` holds the three
+functions; the migration reads and executes it, with `DROP FUNCTION IF EXISTS` for each as
+the reverse. A reviewer reads SQL as SQL rather than as a Python string, and the file is
+what the tests load.
 
 ---
 
@@ -380,6 +509,9 @@ ends with all three tables in their final, mutually consistent state — includi
 supersede case, where the main row reflects the superseding change and the superseded
 history row's meta status is also `DONE`.
 
+That acceptance is also §3.2's: the same test, read as a statement about the boundary.
+§13's last scenario is its executable form.
+
 ---
 
 ## 7. What changes, and who notices
@@ -391,7 +523,9 @@ history row's meta status is also `DONE`.
 | Dependent calculations | Not recalculated (dead since v2, §2.3) | Unchanged — now explicit and tested |
 | UI list views | Not notified of activation | Unchanged (§10.5) |
 | Activation cost | One main-row write on the firing thread | Bounded SQL in the database |
-| New schema | — | `lex_bitemporal_registry`, one settings row, one partial index per meta table |
+| Backend startup | Local scheduler thread; Celery beat rows | Nothing — no registration, no timers (§3.2) |
+| New schema | — | Three SQL functions (§5.1); one partial index per meta table (§5.5). **No new tables** |
+| Customer repositories | — | One autogenerated `AddIndex` migration per meta table on the next `makemigrations` (§5.5) |
 | Local dev / SQLite | Local scheduler | Reconcile floor only (§8.13) |
 
 ---
@@ -442,17 +576,20 @@ the property that makes running the floor forever free.
 v1 (§5.7). The failure is visible in `cron.job_run_details` and via the applier's
 `WARNING`s.
 
-**8.11 Very old due rows.** Bounded by max-age on both paths. Below the bound, skipped and
-counted, never applied.
+**8.11 Very old due rows.** Applied, not skipped. Convergence makes a late apply correct and
+a skipped one wrong indefinitely (§5.3). The floor keeps #695's bound for now (§5.4). Rows
+due for longer than the window are the alert condition in `lex_pending_activations()` (§5.6).
 
 **8.12 Meta versioning.** The applier mirrors the in-place `UPDATE` (§2.4), touching every
 `SCHEDULED` version for the `history_object_id`. It does not open a new meta version. Any
 future improvement to that must land on both paths together.
 
 **8.13 No pg_cron.** Local development, CI, SQLite, self-hosted PostgreSQL without the
-extension, non-PostgreSQL backends: no applier. The floor is the only mechanism. **Test
-environments therefore exercise the floor, not the applier**; the applier needs its own
-integration coverage against real PostgreSQL with pg_cron or it ships untested.
+extension, non-PostgreSQL backends: no applier. The floor is the only mechanism. The
+applier's own tests need real PostgreSQL but **not pg_cron**: they call
+`lex_apply_due_activations()` directly, which is the right boundary because pg_cron's only
+job is to issue that call, and LEX-135 verified on dev that it does. What the tests cannot
+cover — the controller's registration and the job's role — is LEX-136's (§8.14).
 
 **8.14 Cross-database registration and role.** LEX-136's subject. Not resolved here; the
 requirement on the execution role is in §5.7.
@@ -465,14 +602,15 @@ row; the applier takes `FOR UPDATE` on the history row and relies on the `INSERT
 CONFLICT` row lock for the main row. Deadlock ordering (history before main) must match
 the Python path.
 
-**8.17 Registry drift.** A model removed from the codebase leaves a registry row pointing at
-tables that may be dropped. Startup population removes rows for absent models (§5.6); if a
-tick runs in between, the per-`pk` exception block skips it with a `WARNING`.
+**8.17 Catalog drift.** A model removed from the codebase leaves its tables until a migration
+drops them, and the applier keeps applying their pending rows until then — correct, since
+the rows exist. A triple with one table gone fails the existence check in §5.2 and is skipped
+with a `NOTICE`; nothing raises. There is no registry to fall out of date.
 
 **8.18 Non-`id` primary key.** `sync_record_for_model` uses `model._meta.pk.name`. The
-registry carries `pk_column` and the applier uses it in every predicate and in the `ON
-CONFLICT` target. Composite keys are not supported by the existing code and are not
-supported here.
+applier reads the main table's primary-key column from `pg_index` (§5.2) and uses it in every
+predicate and in the `ON CONFLICT` target. Composite keys are not supported by the existing
+code and are skipped with a `NOTICE` here.
 
 **8.19 A customer model defining `get_dependent_entries`.** Nothing in the framework
 provides it (§2.3), but a customer repository could. That model would then propagate on
@@ -480,20 +618,67 @@ the floor and not on the applier. The parity test in §13 catches it; the fix is
 `post_save` propagation in the activation path unconditionally rather than rely on the
 method's absence.
 
+**8.20 Case-sensitive identifiers.** Real project app labels contain capitals, so the
+physical table names are quoted identifiers. Every dynamic reference goes through
+`format('%I')`, and the existence check in §5.2 does too — an unquoted lookup would report a
+present table as missing and skip the model silently. A fixture with a mixed-case name is in
+§13.
+
+**8.21 Custom `db_table`.** A bitemporal model that overrides `db_table` breaks rule 2 or 3
+of §5.2 and is not discovered. None exists in the framework — the only overrides are the
+non-bitemporal `legacy_data` models — nor in the project database checked in §4.3. If one
+appears, the fix is a small override table consulted before the rules; added then, not now
+(§12.8).
+
+**8.22 A table that matches the shape by accident.** Rule 1 of §5.2 alone could match a
+non-lex table with those four columns; rule 4 then also demands sibling tables with lex's
+exact names. The combination has no realistic false positive. If one is ever constructed,
+the applier attempts a convergence against it and fails in the per-`pk` block with a
+`WARNING`.
+
+**8.23 The function does not exist yet.** The controller registers the cron job at
+provisioning; lex-app installs the function at its first `migrate`. In between, every tick
+logs a failed run in `cron.job_run_details`. Harmless — no `SCHEDULED` row can exist before
+lex-app has run either — but noisy. The registered command can guard on
+`to_regproc('lex_apply_due_activations')` before calling; that is LEX-136's line to change
+(§12.1).
+
+**8.24 Database failover.** pg_cron's job definitions live in a table in the `postgres`
+database and survive a Cloud SQL failover. Whether the cron background worker starts on the
+new primary is a property of Cloud SQL's pg_cron integration to verify, not assume (§12.1).
+Until verified, a failover is a case where the floor may be the only activator for a while.
+
+**8.25 Overlapping ticks.** A slow tick can still be running when the next fires. Safe: the
+`FOR UPDATE` on the history row serialises the two per `pk`, and the second finds the meta
+row `DONE` or converges to the same state (§8.9). `SKIP LOCKED` on the meta scan would let
+the second tick pass over rows the first holds; a refinement if long ticks are ever observed.
+
 ---
 
 ## 9. Failure modes
 
-| Failure | Detected by | Cost |
-|---|---|---|
-| pg_cron job never registered | Floor applies it within its interval | Latency |
-| pg_cron extension absent | Same | Same |
-| Applier raises on one row | Per-`pk` exception block; `WARNING` in `cron.job_run_details` | That record stays pending; others unaffected |
-| Backend never runs (scale to zero) | — | None; this is the design's purpose |
-| Applier and floor both disabled | Nothing | Silent non-activation — the state being left |
-| Schema drift mid-flight | Apply-time column derivation | None |
-| Registry row for a dropped table | Exception block; removed on next startup | That model skipped until restart |
-| Meta row whose history row was deleted | No effective row → no write | None |
+The question this table answers is *what if X is not available*, for every X — and what
+happens when X comes back.
+
+| Unavailable | While it is down | When it returns | Cost |
+|---|---|---|---|
+| lex-app, at apply time | The database applies on time; nothing was needed from lex-app | Reads the applied state. The floor finds no due `SCHEDULED` rows; no timer re-fires because none exists | None — this is the design's purpose |
+| lex-app, at write time | Nothing is saved, so nothing is scheduled | — | None; there is no separate schedule store to drift |
+| pg_cron job never registered, or extension absent | The floor applies within its interval, if lex-app is up | — | Latency |
+| pg_cron **and** lex-app | Nothing applies | Whichever returns first converges; the other finds `DONE` rows (§8.9) | Delay; visible in `lex_pending_activations()` |
+| The database | Nothing runs and nothing is written | pg_cron resumes and applies the *current* effective state — one write per affected record, not a replay (§5.3) | Delay only |
+| The database, by failover | Job definitions survive in `cron.job`; worker restart on the new primary unverified (§8.24) | Applies on the next tick once the worker runs; the floor covers the gap | Unknown until LEX-136 verifies |
+| The function (migration not yet run) | Each tick logs a failed run; no `SCHEDULED` row can exist yet either (§8.23) | The first `migrate` installs it | Log noise; guard in LEX-136 |
+| Both activators disabled | Nothing | — | Silent non-activation — the state being left. Now visible in §5.6 |
+| One row, every tick (poison) | Per-`pk` exception block; `WARNING` in `cron.job_run_details`; the row stays due in §5.6 | — | That record only |
+| The index, in a project not yet migrated | Sequential scan per meta table per tick | The project's next `migrate` | Cost only; never correctness (§5.5) |
+| One table of a triple | Existence check fails; `NOTICE`; skipped (§8.17) | — | That model only |
+| The history row behind a meta row | No effective row → no write | — | None |
+| The schema, changed mid-flight | Apply-time column derivation (§8.6) | — | None |
+
+**No double application, in any row above.** Both activators lock the history row and
+upsert the main row, and the meta flip is a single `UPDATE` filtered on `SCHEDULED`.
+Whichever loses the race writes nothing.
 
 ---
 
@@ -522,9 +707,11 @@ pre-existing gap. Named so it is not mistaken for a regression; §12.7.
 
 ## 11. What this design deliberately does not do
 
-- It does not add a per-activation table (§4.3).
+- It does not add a per-activation table, and no longer adds a registry table (§4.3).
+- It does not run anything in lex-app at apply time — no startup registration, no cache, no
+  DDL (§3.2).
 - It does not change the meta flip's semantics (§2.4, §8.12).
-- It does not change the floor's predicate or writes (§5.4).
+- It does not change the floor's predicate, writes or discovery (§5.4).
 - It does not suppress `post_save` on the activation path, because nothing that runs
   depends on it (§2.3) — but §8.19 records when that would change.
 
@@ -532,10 +719,14 @@ pre-existing gap. Named so it is not mistaken for a regression; §12.7.
 
 ## 12. Open items for someone else
 
-1. **LEX-136** — execution role for the function (§5.7) and job registration.
+1. **LEX-136** — execution role for the function (§5.7); job registration; guard the
+   registered command on the function's existence (§8.23); verify the cron worker restarts
+   after a Cloud SQL failover (§8.24).
 2. **LEX-578** — measure the scan on the largest instance; this design makes the index
-   load-bearing for both paths and proposes the partial-index shape (§5.5).
-3. **PR #695 merge** — the floor is this design's prerequisite.
+   load-bearing for both paths and puts it on the meta model (§5.5), which is the migration
+   LEX-578 flagged.
+3. **PR #695** — merge is this design's prerequisite; its max-age skip is now an asymmetry
+   with the applier (§5.4, §8.11) and should become an alert there too.
 4. **Instances with `autoscaling: true`** — the applier serves them and the floor cannot.
 5. **Attempt-counter table** — only if a real poison row is observed (§5.7).
 6. **Dead dependency propagation, framework-wide** — `DependencyAnalysisMixin` was not
@@ -544,27 +735,82 @@ pre-existing gap. Named so it is not mistaken for a regression; §12.7.
    Needs an issue against the calculation engine, and confirmation against a v1 instance
    that it *did* propagate before this is filed as a regression.
 7. **UI notification on activation** — pre-existing gap (§10.5).
+8. **Custom `db_table` override** — only if a bitemporal model with one appears (§8.21).
+9. **Discovery cost** — cache `lex_bitemporal_tables()` within or across ticks only if the
+   catalog queries show up in LEX-578's measurement (§5.2).
 
 ---
 
 ## 13. How it gets tested
 
-Cluster 05-history, following batch 5n (5.104–5.109, the floor).
+Cluster 05-history, following batch 5n (5.104–5.109, the floor). The applier's tests need
+real PostgreSQL and **not** pg_cron (§8.13); the floor's need neither.
+
+**Deliverables under test:**
+
+| File | Holds |
+|---|---|
+| `lex/core/sql/bitemporal_activation.sql` | The three functions (§5.1) |
+| `lex/core/migrations/0001_bitemporal_activation.py` | `RunSQL` installing the file; the reverse drops the functions |
+| `lex/core/services/MetaHistory.py` | The partial index declared on the generated meta model (§5.5) |
+| `lex/lex_app/migrations/` | `AddIndex` for lex-app's own test models (§5.5) |
+| `lex/test_project/tests/history/test_5o_activation_applier.py` | The scenarios below |
+
+**Scenarios:**
 
 - **Producer:** a future-dated save writes a `SCHEDULED` meta row and no timer; rolling
   back leaves nothing.
-- **Registry:** startup registers every bitemporal triple with the right `pk_column`;
-  removing a model removes its row; re-running is idempotent.
+- **Discovery:** `lex_bitemporal_tables()` returns exactly the fixture's triple with the
+  right `pk_column`; a mixed-case table name is found (§8.20); a triple with one table
+  dropped is skipped with a `NOTICE` while the others still apply (§8.17); the result does
+  not depend on `django_content_type` (§5.2).
+- **Visibility:** `lex_pending_activations()` lists the row before the tick and not after;
+  a row long past due is reported with its age (§5.6).
 - **Supersede / cancel / convergence / deletion:** §8.1–8.4, each against the applier.
+- **Late apply:** a row far past its `valid_from` is applied, not skipped (§8.11).
 - **Parity — the one that matters most:** applier and floor, run against identical
-  fixtures, produce identical `(main, history, meta)` state. This is the test that makes
-  §4.3's argument true in practice.
+  fixtures, produce identical `(main, history, meta)` state and discover the same triples.
+  This is the test that makes §4.3's argument true in practice.
 - **No propagation:** activation through either path leaves other tables untouched.
 - **Meta mirror:** the applier's flip touches exactly the rows the Python `.update()`
   touches, and opens no new meta version (§8.12).
 - **Timezone:** a `valid_from` either side of a UTC-offset boundary activates at the right
   instant on both paths (§8.7).
-- **Idempotence:** applier then floor, and floor then applier, converge (§8.9).
+- **Idempotence:** applier then floor, and floor then applier, converge (§8.9); the applier
+  twice in a row writes nothing the second time (§8.25).
 - **Isolation:** one failing `pk` does not prevent the others from applying (§8.10).
+- **Boundary:** the apply step is one `SELECT lex_apply_due_activations()` through a raw
+  cursor; no lex-app Python runs between the save and the assertion, and all three tables
+  reach their final state (§3.2, §6).
 
-The applier's tests need real PostgreSQL with pg_cron (§8.13); the floor's do not.
+---
+
+## 14. Worked example
+
+A fund controller learns in December that a fund's management fee drops on 1 January. She
+records it today, so the fee is right on the day without anyone logging in at midnight.
+
+| When | Who | What happens |
+|---|---|---|
+| 12 Dec, 14:03 | Controller | Opens the fund record, changes the fee from 1.50 to 1.25, sets the effective date to 1 Jan, saves |
+| 12 Dec, 14:03 | Backend | Leaves the main row untouched, still 1.50. Writes one history row: a full snapshot with the new fee, `valid_from` 1 Jan 00:00, `history_type` `~`. Writes one meta row, `SCHEDULED`. Commits. Creates no timer and no Celery task (§10.3) |
+| 12 Dec, 14:04 | Controller | The grid still shows 1.50, because that is what is true today. The history view shows the pending row and its effective date; `lex_pending_activations()` lists it as not yet due |
+| 20 Dec | Platform | The instance is redeployed for a release, then scaled to zero over the holidays. Nothing needs preserving — the schedule is a row |
+| 28 Dec | Controller | Changes her mind: 1.30, not 1.25. lex records the correction as it does today; the row effective from 1 Jan now says 1.30. Nothing is rescheduled, because there is nothing to reschedule |
+| 1 Jan, 00:00 | Cloud SQL, pg_cron | Fires the standing job. The function lists the bitemporal tables from the catalog (§5.2), finds one `SCHEDULED` meta row whose history row is now effective, locks that row, copies its columns into the main row — 1.30 — marks the meta row `DONE`, commits. One line in `cron.job_run_details` |
+| 2 Jan, 09:10 | Controller | Opens the fund. The fee reads 1.30. Nobody touched it, and every calculation from now on reads 1.30 from the main table |
+
+**Where this story breaks today.** On the 20 December redeploy the in-memory timer dies with
+the process (§2.1), so on the non-Celery instances the fee never changes. Someone notices in
+February when a fee calculation comes out wrong, and the correction is a manual edit with
+the wrong audit trail.
+
+**If the backend had been down at midnight.** Same rows, same outcome. The backend was never
+part of the midnight step (§3.2).
+
+**If pg_cron had been down at midnight too.** The row sits in `lex_pending_activations()` as
+due. The first activator to return — the applier on its next tick, or the floor within a
+minute of the backend starting — applies 1.30 once; the other finds `DONE` (§9).
+
+**What the database never knows.** That this is a fee, that 1.30 is a percentage, or what
+the fund is. It copies a snapshot when its time arrives (§3.1).
