@@ -16,6 +16,17 @@
 # will fail in ten minutes with an error about something else.
 #
 #   --check   report what is and is not available, then stop.
+#
+# If the prerequisites are not reachable -- most often the private
+# @react-admin registry token, which is a repository secret and is on nobody's
+# laptop -- run the workflow instead:
+#
+#   gh workflow run capture_figures.yml --repo ExcellenceCloudGmbH/lex-app
+#
+# (installed from docs/ci-cd/capture-figures-workflow.yml)
+#
+# It does the same three steps with the secret available, and uploads both the
+# rendered SVGs and the raw shots.
 set -euo pipefail
 
 LEX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

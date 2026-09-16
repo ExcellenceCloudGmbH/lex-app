@@ -1,0 +1,189 @@
+# REFERENCE COPY — install as `.github/workflows/capture_figures.yml`.
+#
+# Kept here rather than in place for the same reason as
+# `docs/ci-cd/docs-receiver-workflow.yml`: the credential available to this
+# session has no `workflow` scope, and GitHub refuses a push that creates or
+# updates a file under `.github/workflows/`. Copying it into place is one
+# command, and the file is unchanged:
+#
+#     cp docs/ci-cd/capture-figures-workflow.yml \
+#        .github/workflows/capture_figures.yml
+#
+# `workflow_dispatch` also requires the file to be on the DEFAULT branch before
+# it can be run at all, so it cannot be tried from a pull request.
+#
+# ---------------------------------------------------------------------------
+
+name: Capture documentation figures
+
+# Produce every documentation figure, in the one place that can.
+#
+# The captures need the React app running, and the React app needs the private
+# @react-admin registry. That token is a repository secret and is not on
+# anybody's laptop -- so a contributor with the whole toolchain installed still
+# cannot rebuild the figures, and the person who can is whoever last ran
+# `yarn install` before the token rotated. That is not a reproducible pipeline,
+# it is a person.
+#
+# So the capture runs here. `scripts/capture_figures.sh` remains the local
+# route for anyone who does have the token; this is the one that always works.
+#
+# Manual by design. Figures are a deliberate act -- a capture that fired on
+# every push would rewrite them on unrelated changes and turn a docs diff into
+# noise.
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_branch:
+        description: "Frontend branch to capture from"
+        required: false
+        default: "lex-app-v2-pac-latest"
+        type: string
+      streamlit:
+        description: "Also capture the Streamlit surface (slower — boots a third server)"
+        required: false
+        default: true
+        type: boolean
+
+env:
+  FRONTEND_REPO: ExcellenceCloudGmbH/process-admin-general-client
+  FRONTEND_BRANCH: ${{ inputs.frontend_branch || 'lex-app-v2-pac-latest' }}
+
+jobs:
+  capture:
+    name: Capture and render
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout backend (lex)
+        uses: actions/checkout@v4
+
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_BRANCH }}
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          path: frontend
+
+      - name: Fail early if the registry token is missing
+        env:
+          NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
+        run: |
+          if [ -z "${NPM_MARMELAB_TOKEN}" ]; then
+            echo "::error title=Missing secret::NPM_MARMELAB_TOKEN is not set — the capture cannot install the frontend, and every figure here embeds it."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies + lex CLI
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install --prefer-binary -r requirements.txt
+          pip install -e .
+          pip install pyyaml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install Node dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: frontend
+        env:
+          NPM_MARMELAB_TOKEN: ${{ secrets.NPM_MARMELAB_TOKEN }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      # LEX_DOCSHOT_DIR points at docs/shots because that is where figures.yml
+      # already looks for them. Capturing anywhere else means the render step
+      # reads the shots committed last time and reports success having changed
+      # nothing.
+      - name: Capture the application figures
+        run: npx playwright test docshots.spec.ts --reporter=line
+        working-directory: frontend
+        env:
+          CI: "true"
+          LEX_DOCSHOT_DIR: ${{ github.workspace }}/docs/shots
+          DJANGO_SETTINGS_MODULE: e2e_project.e2e_settings
+          PROJECT_ROOT: ${{ github.workspace }}/frontend/e2e/e2e_project
+          DATABASE_DEPLOYMENT_TARGET: local
+          PYTHONPATH: "${{ github.workspace }}/frontend/e2e:${{ github.workspace }}:${{ github.workspace }}/lex"
+
+      # Its own step, and its own flag: LEX_DOCSHOT_STREAMLIT is what adds the
+      # Streamlit webServer at all, and booting it for the spec above would cost
+      # ninety seconds for nothing.
+      - name: Capture the Streamlit figures
+        if: ${{ inputs.streamlit }}
+        run: npx playwright test docshots-streamlit.spec.ts --reporter=line
+        working-directory: frontend
+        env:
+          CI: "true"
+          LEX_DOCSHOT_STREAMLIT: "1"
+          LEX_DOCSHOT_DIR: ${{ github.workspace }}/docs/shots
+          DJANGO_SETTINGS_MODULE: e2e_project.e2e_settings
+          PROJECT_ROOT: ${{ github.workspace }}/frontend/e2e/e2e_project
+          DATABASE_DEPLOYMENT_TARGET: local
+          PYTHONPATH: "${{ github.workspace }}/frontend/e2e:${{ github.workspace }}:${{ github.workspace }}/lex"
+
+      - name: Render the figures
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/figures"
+          PYTHONPATH=.github/scripts python -m docshots build docs/figures.yml \
+            --out "${RUNNER_TEMP}/figures"
+
+      - name: What changed
+        run: |
+          {
+            echo "### Figures"
+            echo
+            echo '```'
+            ls -1 "${RUNNER_TEMP}/figures" | sed 's/^/  /' || true
+            echo '```'
+            echo
+            echo "Shots captured this run:"
+            echo
+            echo '```'
+            git status --porcelain docs/shots | sed 's/^/  /' || true
+            echo '```'
+            echo
+            echo "Download **figures** below and commit the SVGs to lex-app-docs"
+            echo "\`content/images/\`. Paths in the markdown go **from the content"
+            echo "root** — \`images/…\`, never \`../../images/…\`: Quartz computes the"
+            echo "climb itself and a hand-written one lands above the base path."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the rendered figures
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures
+          path: ${{ runner.temp }}/figures/
+          retention-days: 30
+
+      # The PNG + JSON pairs, not only the SVGs. A new figure needs the anchor
+      # boxes to write its callouts against, and re-running the capture to get
+      # them back is twenty minutes.
+      - name: Upload the raw shots
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: docs/shots/
+          retention-days: 30
+
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
