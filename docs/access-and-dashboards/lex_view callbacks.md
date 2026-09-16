@@ -43,6 +43,31 @@ Turn on only what you need:
 
 `on_select` is opt-in for a reason: it drives a Streamlit re-run on *every* grid selection change, which is expensive. The framework only wires the grid's selection callback when you explicitly ask for it.
 
+## How an event reaches your script
+
+There is no polling and no backend round-trip. The embedded page posts a message
+to its parent, a small shim hands it to Streamlit, and Streamlit re-runs your
+script — so the event arrives as the return value of the same `lex_view(...)`
+call that drew the frame.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Page as Embedded lex-app page
+    participant Shim as Component shim
+    participant Script as Your Streamlit script
+    User->>Page: Saves a record
+    Page->>Shim: window.postMessage(envelope)
+    Shim->>Script: setComponentValue(envelope)
+    Note over Script: Streamlit re-runs the script
+    Script-->>Script: event = lex_view(..., on_update=True)
+```
+
+Because the script re-runs, everything below the `lex_view(...)` call is
+evaluated again with the event in hand. The envelope carries an `id` so a re-run
+does not deliver the same event twice.
+
 ## The event envelope
 
 Every event the embedded page sends back is a dict with a stable shape:

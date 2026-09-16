@@ -19,4 +19,10 @@ Four steps, in order. The first three take about twenty minutes; the tutorial ta
 
 A running application with your own models in it, a grid to edit them through, a calculation you wrote, and an audit trail of everything you did to it — none of which you had to build.
 
+![The grid, as a new user first meets it — the sidebar built from your models, and a row per record](images/the-grid/first-look.svg)
+
+Nothing in that picture was written by hand. The sidebar comes from your model
+structure, the columns from your fields, and the toolbar is the same for every
+model you declare.
+
 From there, each section of these docs covers one thing you might need next — [[model-your-data/index|modelling]], [[calculations/index|calculations]], [[history-and-audit/index|history]], [[access-and-dashboards/index|access and dashboards]]. Nothing is compulsory; take what your application actually calls for.

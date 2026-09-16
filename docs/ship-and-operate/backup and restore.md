@@ -16,6 +16,19 @@ command for backing it up. Knowing which is which is most of this page.
 > pretended to would be worse than none, because the only way to discover it
 > had missed the database is to need the database.
 
+```mermaid
+flowchart TB
+    A["A running Lex App"] --> DB["PostgreSQL<br/>application data"]
+    A --> FS["File storage<br/>local · GCS · SharePoint"]
+    A --> KC["Keycloak<br/>permission configuration"]
+    DB --> Y["your database tooling"]
+    FS --> Z["that storage's tooling"]
+    KC --> L["lex keycloak_backup"]
+```
+
+Two of the three arrows point at something outside the framework. That is the
+whole shape of the page.
+
 ## Permission configuration
 
 `lex init` writes your models into Keycloak as resources, roles, policies and
@@ -108,9 +121,11 @@ In the order that avoids the failure modes above:
 3. Restore file storage to the same point in time.
 4. Restore Keycloak authorization with `lex keycloak_backup --restore`, or
    rebuild it with `lex init` if no one has adjusted it by hand.
-5. Start the web process, confirm `/api/health` answers — see
-   [[ship-and-operate/monitoring and health|Monitoring & health]] — then start
-   the workers.
+5. Start the web process and confirm **`/readiness`** answers — not `/health`.
+   `/health` returns 200 without touching the database, so it answers happily
+   against a database you have not finished restoring; `/readiness` is the one
+   that checks. See [[ship-and-operate/monitoring and health|Monitoring &
+   health]]. Then start the workers.
 
 Step 1 is the one that gets skipped. Everything else is recoverable; a worker
 writing into a half-restored database is not.

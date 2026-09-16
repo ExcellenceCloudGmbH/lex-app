@@ -6,6 +6,24 @@ aliases:
 
 Once you've [[start-here/installation|installed and initialized]] your Lex App application, you can run it locally. We recommend using [PyCharm](https://www.jetbrains.com/pycharm/) (the run configurations handle everything automatically), but the terminal works just as well.
 
+A running app is more than one process, and which ones you need depends on what
+you are doing:
+
+```mermaid
+flowchart TB
+    S["lex start<br/><b>always</b><br/>the app, at :8000"]
+    T["lex streamlit<br/><i>only if your models</i><br/><i>define dashboards</i>"]
+    W["lex celery-workers<br/><i>only if CELERY_ACTIVE=true</i>"]
+    F["lex flower<br/><i>optional — watches the queue</i>"]
+    W -.-> F
+```
+
+`lex start` on its own is enough to browse data, edit records and run
+calculations: with `CELERY_ACTIVE` unset — the default — a calculation runs
+in-process and finishes before the request returns. Turn Celery on and the same
+click dispatches to a worker instead, so `lex celery-workers` has to be running
+or the calculation sits in the queue and nothing appears to happen.
+
 ## Using PyCharm
 
 The `lex setup` command generates ready-to-use run configurations in the `.run/` folder. Open the **Run Configuration** dropdown in the top-right toolbar and you'll see:

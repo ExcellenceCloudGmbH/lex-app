@@ -208,10 +208,31 @@ InvestorCashflow.api_serializers = {
 }
 ```
 
-| Key         | When It's Used                               |
-| ----------- | -------------------------------------------- |
-| `'default'` | List view and standard API calls             |
-| `'detail'`  | Detail view when a specific record is opened |
+| Key         | When It's Used                                               |
+| ----------- | ------------------------------------------------------------ |
+| `'default'` | Any request that does not ask for another one                  |
+| `'detail'`  | A request that asks for it: `?serializer=detail`               |
+
+The key is just a name. Nothing in the framework treats `'detail'` specially —
+a caller selects a serializer with `?serializer=<key>`, and the default is
+`'default'`:
+
+```mermaid
+flowchart TB
+    R["GET /api/model_entries/…?serializer=detail"] --> C{"Key present in<br/>api_serializers?"}
+    C -- "yes" --> U["That serializer"]
+    C -- "no" --> E["400 — Unknown serializer 'detail',<br/>with the available keys listed"]
+    N["…no ?serializer at all"] --> D["'default'"]
+```
+
+An unknown key is an error rather than a silent fall-back to `'default'`, and
+the response names the keys that do exist — so a typo in a frontend call says
+so instead of quietly returning the wrong shape.
+
+> [!note]
+> `auth.User` is the exception: it always uses the framework's own serializer,
+> whatever `api_serializers` says. That is deliberate — an allowlist, so a
+> column added to the user model is never published by accident.
 
 > [!note] The `id` field is always present
 > When you override `api_serializers["default"]`, the framework always includes the model's primary key as `id` in the serialized output — even if your `Meta.fields` omits it. Row navigation, edit URLs, and the CRUD loading overlay all depend on this field.

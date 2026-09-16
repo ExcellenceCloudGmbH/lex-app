@@ -94,6 +94,26 @@ class ParentCalculation(CalculationModel):
 
 This ensures logs from the child appear nested under the parent in the frontend.
 
+Each `with` block puts a model on top of the context for as long as it is open,
+and takes it off again at the end. A log call always attaches to whatever is on
+top, and remembers the one beneath it — which is what produces the tree rather
+than a flat list:
+
+```mermaid
+flowchart TB
+    subgraph run["One calculation run"]
+        direction TB
+        P["ParentCalculation<br/><i>Starting parent</i>"]
+        P --> C["with model_logging_context(child)<br/>CalculateNAV<br/><i>its own log lines</i>"]
+        P --> A["<i>Child finished.</i><br/>back on the parent"]
+    end
+```
+
+Nesting is not limited to one level: a child that opens a context of its own
+sits under it in the same way. Nothing is passed by hand — no calculation id, no
+instance — which is the point. An id threaded through every call site is an id
+that eventually gets threaded wrongly.
+
 ## Grouping logs into sections
 
 A long calculation is easier to follow when its log reads like a document — with a

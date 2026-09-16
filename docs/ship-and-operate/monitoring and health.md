@@ -8,9 +8,31 @@ What to probe, what to watch, and where the output goes.
 
 | Path | Served by | Use for |
 |---|---|---|
-| `/health` | The web process | Liveness and readiness |
+| `/health` | The web process | **Liveness only** — is the process alive? |
 | `/api/health` | The web process | The same check, under the API prefix |
+| `/readiness` | The web process | **Readiness** — can it actually serve? |
+| `/api/readiness` | The web process | The same check, under the API prefix |
 | `/_stcore/health` | The Streamlit proxy | Liveness of the dashboard process |
+
+**`/health` and `/readiness` are deliberately different checks, and pointing the
+wrong probe at the wrong one has a specific failure mode.**
+
+```mermaid
+flowchart LR
+    L["Liveness probe"] --> H["/health"]
+    R["Readiness probe"] --> Y["/readiness"]
+    H --> HR["200, always<br/>touches nothing"]
+    Y --> D{"Database<br/>reachable?"}
+    D -- "yes" --> OK["Ready — joins the Service,<br/>receives WebSocket traffic"]
+    D -- "no" --> NR["Not ready — no traffic sent"]
+```
+
+`/health` answers *is the process alive* and returns 200 without touching
+Django, Channels or the database. That is what makes it a good liveness probe
+and a bad readiness one: a pod that has booted but cannot yet reach the database
+passes it, is marked Ready, joins the Service, and answers real requests with
+`/server-not-ready`. `/readiness` verifies the database first, so the pod only
+becomes Ready once it can serve.
 
 `/_stcore/health` is deliberately **public** — it carries no session, because a probe that had to authenticate would report the auth system's health rather than the process's.
 
@@ -43,7 +65,8 @@ Query strings are never written out, only noted as present. The embedded dashboa
 
 | Signal | Meaning |
 |---|---|
-| `/health` failing | The web process is down or cannot reach the database |
+| `/health` failing | The web process is down — it touches nothing else, so this is never a database symptom |
+| `/readiness` failing while `/health` passes | The process is up but cannot reach the database |
 | Celery queue depth only rising | Workers are gone, or wedged |
 | A rise in 5xx in the proxy log | Upstream Streamlit is failing or restarting |
 | Repeated startup-probe kills | The probe budget is under the migration time, not a crash |

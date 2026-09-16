@@ -45,6 +45,19 @@ YourProject/
 | `Input/` | Core business entities and domain logic | `LexModel` | `Fund`, `Investor` |
 | `Reports/` | Compute summaries, analytics | `CalculationModel` | `CalculateNAV` |
 
+The three are a direction, not just three folders:
+
+```mermaid
+flowchart LR
+    F["A spreadsheet<br/>someone uploads"] --> U["Upload/<br/><i>CalculationModel</i><br/>parse and validate"]
+    U --> I["Input/<br/><i>LexModel</i><br/>the domain — Fund, Investor"]
+    I --> R["Reports/<br/><i>CalculationModel</i><br/>summaries and analytics"]
+```
+
+`Upload/` turns a file into records, `Input/` is what those records mean, and
+`Reports/` computes over them. The base classes follow from that: the two ends
+do work and are `CalculationModel`s; the middle holds state and is a `LexModel`.
+
 This isn't enforced by the framework — you can organize however you like — but following this convention makes projects immediately understandable to anyone familiar with Lex App.
 
 > [!tip]

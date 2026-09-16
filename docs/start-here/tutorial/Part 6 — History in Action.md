@@ -21,6 +21,10 @@ Your app already has full [[history-and-audit/bitemporal history|bitemporal hist
 
 Click the **History icon** on the record. You'll see:
 
+![The History tab on a record, showing each version and what changed](images/record-detail/history-tab.svg)
+
+For the tutorial's expense the rows read like this:
+
 | Version | Amount | Valid From | Valid To | Changed By |
 |---|---|---|---|---|
 | v2 *(current)* | €380.00 | Feb 5, 10:15 AM | — | Anna Schmidt |

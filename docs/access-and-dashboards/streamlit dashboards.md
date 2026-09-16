@@ -66,6 +66,25 @@ class Quarter(LexModel):
 
 ## Running Streamlit
 
+One process serves all three kinds of dashboard on this page, and the query
+string decides which you get:
+
+```mermaid
+flowchart TB
+    A["lex streamlit"] --> B["lex-app's streamlit_app.py"]
+    B --> C{"Identity in the<br/>proxy's headers?"}
+    C -- "no" --> D["Authentication error"]
+    C -- "yes" --> E{"Query parameters"}
+    E -- "model and pk" --> F["Fund.objects.get(pk=42)<br/>.streamlit_main(user)"]
+    E -- "model only" --> G["Fund.streamlit_class_main()"]
+    E -- "neither" --> H["yourproject/_streamlit_structure.py<br/>main()"]
+```
+
+The frontend links to the first two branches with `?model=fund&pk=42` and
+`?model=fund` respectively — those are the record- and table-level dashboards
+described above. The third is your own standalone app: a
+`_streamlit_structure.py` beside your models, with a `main()`, is all it takes.
+
 Streamlit dashboards run as a separate process alongside your Lex App application. See [[start-here/running your app]] for how to start the Streamlit server.
 
 > [!tip]
