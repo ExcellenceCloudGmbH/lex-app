@@ -1,16 +1,89 @@
 ## [2.2.0] - 2026-09-08
 
-> **Frontend changes for this release are not yet recorded.**
+### Added
+- **backend** page.calculation_log() — the log as its own sized widget ([38eea203](https://github.com/ExcellenceCloudGmbH/lex-app/commit/38eea203))
+- **backend** render the theme as TOML and CLI flags ([2e3a22b9](https://github.com/ExcellenceCloudGmbH/lex-app/commit/2e3a22b9))
+- **frontend** export from the toolbar, not only from a right-click ([576ea19](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/576ea19))
+- **frontend** bring back the subtree scope, now that the backend renders it ([5cc6004](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/5cc6004))
+- **frontend** the record leads its own detail page ([d345062](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/d345062))
+- **frontend** create opens a drawer, on a shell shared with edit ([0218db6](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/0218db6))
+- **frontend** export a step or a whole subtree, and stop hiding Details ([f23f24d](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/f23f24d))
+- **frontend** search inside it, and copy all of it ([66a4d3e](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/66a4d3e))
+- **frontend** export the run, not whatever the pane happens to hold ([f3beb3a](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/f3beb3a))
+- **frontend** an empty grid says which kind of empty it is ([e9f1a5a](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/e9f1a5a))
+- **frontend** column filter control on by default, for existing users too ([5de302c](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/5de302c))
+- **frontend** tell the embedded Streamlit page it is a guest ([23fe62b](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/23fe62b))
+- **frontend** take the theme from the host page, never argue with it ([da30ffa](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/da30ffa))
+- **frontend** propagate the theme to every window, storage-backed, no server ([513865c](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/513865c))
+- **frontend** composable calculation row, and stop painting our own surface ([2683777](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/2683777))
+- **frontend** calculation_log is the live stream; tree opts in; richer calculation row ([f7f4588](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/f7f4588))
+- **frontend** calculation_log_stream — the live log as its own component ([285dc75](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/285dc75))
+- **frontend** calculation_log as its own widget, and resolve the id three ways ([6fba8fe](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/6fba8fe))
+- **frontend** chrome-less widget host — one runtime for every calculation on a page ([52913e4](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/52913e4))
+- **frontend** pass lex-app's light/dark mode to Streamlit on the URL ([22ae35e](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/22ae35e))
+
+### Fixed
+- **backend** read the component value Streamlit already keeps, not a copy ([ed6a2405](https://github.com/ExcellenceCloudGmbH/lex-app/commit/ed6a2405))
+- **frontend** a date filter matches the day you picked, not midnight ([b532231](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/b532231))
+- **frontend** a route change reaches the host, exactly once ([7622ae7](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/7622ae7))
+- **frontend** a grouped aggregate is painted, not discarded ([b40e7c5](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/b40e7c5))
+- **frontend** a choice column gets a picker, whatever its scalar type ([cf225fc](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/cf225fc))
+- **frontend** drop the case-duplicated ErrorMessages test ([89b24af](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/89b24af))
+- **frontend** an opened panel can be closed again ([6af16b1](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/6af16b1))
+- **frontend** the embedded log is legible in dark mode ([2c08bc1](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/2c08bc1))
+- **frontend** a table appears already sized, instead of settling on screen ([2aec52d](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/2aec52d))
+- **frontend** the audit fields are fields, not a footnote ([9cfaa69](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/9cfaa69))
+- **frontend** the export button no longer crashes the record page's tabs ([3f4509f](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/3f4509f))
+- **frontend** resolve a calculation id for runs from any session, not just this one ([c5c66b1](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/c5c66b1))
+- **frontend** the log tree stops forgetting which calculation it is showing ([69c92c8](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/69c92c8))
+- **frontend** a malformed flow table says so instead of going quiet ([6cf1d5c](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/6cf1d5c))
+- **frontend** put the Export button in the toolbar the list actually renders ([de8fd54](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/de8fd54))
+- **frontend** download the PDF the product already has ([e5a0669](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/e5a0669))
+- **frontend** export through the backend, as xlsx, not a text file ([5b89199](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/5b89199))
+- **frontend** actually show the empty overlay; give the traceback real chrome ([8315bfb](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/8315bfb))
+- **frontend** a hidden input no longer leaves its grid row behind ([d47207a](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/d47207a))
+- **frontend** a rejected save says what to fix ([3328c85](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/3328c85))
+- **frontend** report IN_PROGRESS while a calculation is running ([02adf5e](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/02adf5e))
+- **frontend** the FK hover card refuses credential-shaped fields (BUG-F-033) ([571476d](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/571476d))
+- **frontend** emit a boolean filter the backend implements (BUG-F-004) ([0d7966c](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/0d7966c))
+- **frontend** a failed Run says what went wrong (BUG-F-014) ([092c38c](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/092c38c))
+- **frontend** default to light on first load instead of following the OS ([a57c947](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/a57c947))
+- **frontend** stop letting stored state switch navigation off for good ([7e57c27](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/7e57c27))
+- **frontend** announce the palette to the host page, don't rely on the relay ([988bcc5](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/988bcc5))
+- **frontend** no foreign-key hover overlays inside a frame ([b45ce17](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/b45ce17))
+- **frontend** an embedded widget can never be navigated away from ([a5fede0](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/a5fede0))
+- **frontend** paint no background at all inside a frame ([032e564](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/032e564))
+- **frontend** no calculation toasts inside a frame — state updates unaffected ([3036b39](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/3036b39))
+- **frontend** a bare control renders as a control, not an empty row ([749d1fe](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/749d1fe))
+- **frontend** one log socket per channel, and kill the loader that survived embed mode ([86d56c7](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/86d56c7))
+- **frontend** one feedback launcher per page, no branded loader in a frame, eager frames ([8b41005](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/8b41005))
+- **frontend** stop inventing a calculation id, and emit open_log so the log can escape the frame ([b62f406](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/b62f406))
+- **frontend** refresh the record when a calculation finishes ([3231717](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/3231717))
+- **frontend** resolve the calculation id from both sources, and say when there is none ([7fd467f](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/7fd467f))
+- **frontend** strip chrome for real, and stop the frame growing without bound ([6da95f9](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/6da95f9))
+- **frontend** grouping by a foreign key shows the name, not the id (batch 3i) ([2c539b3](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/2c539b3))
+- **frontend** the tree starts fully collapsed (batch 2b, revised) ([d1e6f07](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/d1e6f07))
+- **frontend** the tree remembers its shape, and starts expanded (batch 2b) ([82a834d](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/82a834d))
+- **frontend** group label vanishes after collapse/expand (batch 3h) ([71c3bda](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/71c3bda))
+- **frontend** persist the gear panel per user, per table ([8262f1f](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/8262f1f))
+- **frontend** make creating a view discoverable ([7061544](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/7061544))
+- **frontend** restore filtering, align header menu button, stop view loss ([f7cb02b](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/f7cb02b))
+- **frontend** send the viewer's timezone on export requests ([1e10b1e](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/1e10b1e))
+- **frontend** send explicit UTC instants from datetime inputs ([d2f116d](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/d2f116d))
 
 ### Changed
 - **backend** Record the PAC commit the shipped bundle was built from ([d277308c](https://github.com/ExcellenceCloudGmbH/lex-app/commit/d277308c)) (#757)
 - **backend** Four backend fixes: a credential leak, and three contracts the frontend was already ready for ([ef9ed850](https://github.com/ExcellenceCloudGmbH/lex-app/commit/ef9ed850)) (#756)
 - **backend** Fix NameError that stops lex streamlit starting ([588cbe72](https://github.com/ExcellenceCloudGmbH/lex-app/commit/588cbe72)) (#755)
 - **backend** Streamlit widget host: one flat lex_* call per widget, theme sync, and log export ([7f34d409](https://github.com/ExcellenceCloudGmbH/lex-app/commit/7f34d409)) (#754)
+- **frontend** stop widget frames fetching the whole model tree ([91749a9](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/91749a9))
+- **frontend** give the widget host its own entry — 6281 KB to 1563 KB per frame ([b42bd3f](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/b42bd3f))
+- **frontend** stop the widget frame waiting for the whole admin app ([0494841](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/0494841))
+- **frontend** test-plan(F12): batch 12c — widget-host manifest validation ([81b4ed0](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/81b4ed0))
 
 ## [2.1.11] - 2026-09-06
 
-> **Frontend changes for this release are not yet recorded.**
+> No frontend change: the bundle is unchanged from `v2.1.10`.
 
 ### Fixed
 - **backend** callable XLSX report helpers, and the max_length that never applied ([b1dfa006](https://github.com/ExcellenceCloudGmbH/lex-app/commit/b1dfa006)) (#753)
@@ -18,11 +91,8 @@
 
 ## [2.1.10] - 2026-09-04
 
-> **Frontend changes for this release are not yet recorded.**
-
-## [2.1.9] - 2026-09-04
-
-> **Frontend changes for this release are not yet recorded.**
+<!-- 2.1.9 was tagged but never published to PyPI; its GitHub release and tag
+     were removed. These changes reached users in 2.1.10. -->
 
 ### Added
 - **backend** give the drafter the context the backfill needed ([9633952a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/9633952a)) (#742)
@@ -36,6 +106,9 @@
 - **backend** ignore client-admin and purge stale ignored-role policies (LEX-5) ([25c4429a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/25c4429a)) (#726)
 - **backend** stop a rejected draft passing as a success ([37afacea](https://github.com/ExcellenceCloudGmbH/lex-app/commit/37afacea)) (#739)
 - **backend** draft from PR bodies, and stop announcing our toolchain as a feature ([3e152ae8](https://github.com/ExcellenceCloudGmbH/lex-app/commit/3e152ae8)) (#702)
+- **frontend** deliver each renewed token to the proxy, without reloading it ([f918ce4](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/f918ce4))
+- **frontend** close the gaps an adversarial review found in the renewal fix ([cc35f1b](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/cc35f1b))
+- **frontend** renew the dashboard token without reloading the dashboard ([bc3e3e6](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/bc3e3e6))
 
 ## [2.1.8] - 2026-08-25
 

@@ -122,13 +122,21 @@ jobs:
           # pip_publish.yml's gate-release job.
           {
             printf '%s\n\n' "$BODY"
-            printf 'Prerelease gate passed for `%s` via Prerelease Gate.\n\n' "$TAG"
-            printf 'Promote this prerelease to a full release (untick "pre-release"\n'
-            printf 'in the UI) to ship it. The PyPI publish gate is skipped because\n'
-            printf 'the same gate already ran and passed here; see pip_publish.yml.\n\n'
             printf '<!-- lex:gate-passed tag=%s commit=%s -->\n' "$TAG" "$SHA"
           } > notes.md
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          # The promotion instruction is addressed to whoever promotes the
+          # prerelease, so it belongs in the run summary. It used to be written
+          # into the release BODY, where the drafter below preserved it -- so
+          # v2.1.11 shipped to customers opening with 'untick "pre-release" in
+          # the UI'. Only the marker above has a machine reader
+          # (pip_publish.yml greps for it); the prose never did.
+          {
+            printf '### Prerelease gate passed for `%s`\n\n' "$TAG"
+            printf 'Promote this prerelease to a full release (untick "pre-release" in the\n'
+            printf 'UI) to ship it. The PyPI publish gate is skipped because the same gate\n'
+            printf 'already ran and passed here; see pip_publish.yml.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "Stamped lex:gate-passed on $TAG — promote it to ship."
 
   # ── RED: delete the prerelease AND its tag so the version is reclaimed.
@@ -326,12 +334,19 @@ jobs:
           # that stamped it would make its own failure permanent: the next run
           # would see the marker, assume a human had written the notes, and
           # decline to try again.
+          # The note leads; whatever the body already held follows it. Written
+          # the other way round -- which is how v2.1.11 shipped -- the first
+          # thing a customer reads is release-engineering scaffolding. Nothing
+          # is discarded: the gate marker still has to reach pip_publish.yml,
+          # and a release author who typed their own text keeps it.
           {
-            printf '%s\n' "$BODY"
-            printf '\n---\n\n'
             cat note.md
             if [ "$DRAFT_OK" = "yes" ]; then
               printf '\n<!-- lex:notes-drafted tag=%s -->\n' "$TAG"
+            fi
+            if [ -n "$(printf '%s' "$BODY" | tr -d '[:space:]')" ]; then
+              printf '\n<!-- Preserved from the original release body — read by pip_publish.yml. -->\n'
+              printf '%s\n' "$BODY"
             fi
           } > combined.md
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file combined.md

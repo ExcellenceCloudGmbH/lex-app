@@ -13,5 +13,10 @@
     "pac_sha": "22c16f913663c5a4841e6c623c7cb50cc3667be6",
     "method": "hash-proof",
     "note": "Rebuilt PAC at 22c16f9; emitted index-BD1SQUOi.js, index-isLX8XQ_.css, index.es-Cta2lik9.js, purify.es-Bf0oSh3b.js — identical to the committed bundle. Covers v2.1.4 through v2.1.7 and any release until a new bundle lands."
+  },
+  "148d1283a35c72725b832cc39389e110528198c5": {
+    "pac_sha": "f918ce4d55650a4974a082bc4dbad37ab11a764a",
+    "method": "hash-proof",
+    "note": "Rebuilt PAC at f918ce4; emitted index-DMLDxN6j.js, index-isLX8XQ_.css, index.es-D1xOt0Lv.js, purify.es-Bf0oSh3b.js — byte-identical to the committed bundle. Covers v2.1.10 and v2.1.11. This bundle landed inside #751, a backend PR, so a388985a's \"until a new bundle lands\" ended here rather than at v2.2.0."
   }
 }

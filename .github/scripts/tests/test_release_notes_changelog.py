@@ -46,7 +46,8 @@ def test_marks_the_component_and_links_the_commit():
     ]}
     out = changelog.render(d, date="2026-08-05", repo=REPO)
     assert "**frontend** send the viewer timezone" in out
-    assert f"https://github.com/{REPO}/commit/a3f91c2" in out
+    # A frontend sha resolves against the frontend's own repository, not REPO.
+    assert f"https://github.com/{changelog.FRONTEND_REPO}/commit/a3f91c2" in out
 
 
 def test_includes_the_pr_number_when_present():
@@ -144,6 +145,43 @@ def test_prepend_leaves_other_versions_untouched_when_replacing():
     assert "- new\n" not in doc
 
 
+def _two_component_digest():
+    def entry(component, sha, subject):
+        return {
+            "sha": sha, "component": component, "type": "fix", "scope": None,
+            "breaking": False, "subject": subject, "pr_number": None,
+            "internal": False,
+        }
+    return {
+        "tag": "v2.2.0", "previous_tag": "v2.1.11",
+        "changes": [
+            entry("backend", "d277308c", "record the shipped bundle's origin"),
+            entry("frontend", "f918ce4", "deliver each renewed token to the proxy"),
+        ],
+    }
+
+
+def test_a_frontend_commit_links_to_the_frontend_repository():
+    # The two components ship from different repositories. A frontend sha
+    # resolved against GITHUB_REPOSITORY is a link to a commit lex-app has
+    # never contained.
+    out = changelog.render(
+        _two_component_digest(), date="2026-09-08", repo="ExcellenceCloudGmbH/lex-app"
+    )
+    assert "ExcellenceCloudGmbH/process-admin-general-client/commit/f918ce4" in out
+    assert "ExcellenceCloudGmbH/lex-app/commit/d277308c" in out
+    assert "lex-app/commit/f918ce4" not in out
+
+
+def test_the_frontend_repository_can_be_overridden():
+    out = changelog.render(
+        _two_component_digest(), date="2026-09-08", repo="o/backend",
+        frontend_repo="o/frontend",
+    )
+    assert "o/frontend/commit/f918ce4" in out
+    assert "o/backend/commit/d277308c" in out
+
+
 def _gap_digest(**over):
     base = {
         "tag": "v2.1.8",
@@ -209,6 +247,70 @@ def test_the_marker_survives_a_release_with_no_shippable_changes():
         date="2026-09-01", repo="o/r",
     )
     assert changelog.GAP_MARKER in out
+
+
+def test_a_resolved_empty_range_says_the_interface_did_not_change():
+    # The middle case: the range resolved and held nothing. Before this line
+    # existed the renderer said nothing at all, which reads identically to a
+    # release whose frontend was never checked.
+    out = changelog.render(
+        _gap_digest(frontend_recorded=True, frontend_commits=0),
+        date="2026-09-01", repo="o/r",
+    )
+    assert "No frontend change: the bundle is unchanged from `v2.1.7`." in out
+    assert changelog.GAP_MARKER not in out
+
+
+def test_a_gap_is_never_reported_as_no_change():
+    # An unresolved range also carries zero commits -- `_digest_for` leaves the
+    # list empty either way. If the two branches were tested in the other
+    # order, every unrecorded release would claim its interface held still,
+    # which is the exact false statement this pair of markers exists to stop.
+    out = changelog.render(
+        _gap_digest(frontend_recorded=False, frontend_commits=0),
+        date="2026-09-01", repo="o/r",
+    )
+    assert changelog.GAP_MARKER in out
+    assert "No frontend change" not in out
+
+
+def test_a_range_with_commits_gets_neither_marker():
+    out = changelog.render(
+        _gap_digest(frontend_recorded=True, frontend_commits=4),
+        date="2026-09-01", repo="o/r",
+    )
+    assert changelog.GAP_MARKER not in out
+    assert "No frontend change" not in out
+
+
+def test_an_absent_count_is_an_unknown_not_a_zero():
+    # Re-rendering an old release through a caller that never resolved a range
+    # must not sprout a claim about the interface. Same reasoning as
+    # `test_absent_flag_means_recorded`, applied to the count.
+    out = changelog.render(
+        _gap_digest(frontend_recorded=True), date="2026-09-01", repo="o/r"
+    )
+    assert "No frontend change" not in out
+
+
+def test_a_first_release_has_no_previous_bundle_to_match():
+    out = changelog.render(
+        _gap_digest(previous_tag=None, frontend_recorded=True, frontend_commits=0),
+        date="2026-09-01", repo="o/r",
+    )
+    assert "No frontend change" not in out
+    assert "None" not in out
+
+
+def test_find_gaps_ignores_the_no_change_marker():
+    # `list-gaps` is a work queue. A release whose interface provably did not
+    # change is finished work, not a gap to go back and fill.
+    text = (
+        "## [2.1.11] - 2026-09-06\n\n"
+        + changelog.NO_CHANGE_MARKER.format(previous="v2.1.10") + "\n\n"
+        "## [2.1.10] - 2026-09-04\n\n" + changelog.GAP_MARKER + "\n"
+    )
+    assert changelog.find_gaps(text) == ["2.1.10"]
 
 
 def test_find_gaps_lists_only_marked_versions():
