@@ -9,6 +9,7 @@ artifacts can never describe different sets of changes.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import subprocess
@@ -92,7 +93,23 @@ INTERNAL_TYPES = frozenset({"ci", "build", "chore", "test", "docs"})
 INTERNAL_SCOPES = frozenset({
     "release-notes", "test-plan", "ci", "gate", "showcase", "plan", "spec",
     "setup-with-ai", "agent", "copilot",
+    # How the frontend is built and delivered, not what it does. These arrive
+    # from the OTHER repository, and the first frontend release is made almost
+    # entirely of them: of the seven commits between the last vendored bundle
+    # and v2.1.0, five reach the changelog unflagged — including
+    # "feat(packaging): publish the frontend as a versioned package", announced
+    # to customers as a new frontend feature.
+    "packaging", "deps",
 })
+
+# A version bump records a release rather than describing one. `release(...)`
+# is not a conventional type, so it parses as `other` and lands under Changed —
+# publishing a line that says only "2.1.0" inside the section already headed
+# "2.1.0".
+_VERSION_BUMP_RE = re.compile(
+    r"^(?:release|chore|build)(?:\([^)]*\))?!?:\s*v?\d+\.\d+\.\d+[A-Za-z0-9.\-]*\s*$",
+    re.I,
+)
 
 
 def is_internal(type_: str, scope: str | None) -> bool:
@@ -144,6 +161,8 @@ def is_noise(subject: str) -> bool:
     if subject.startswith(_MERGE_PREFIXES):
         return True
     if subject.startswith(_BUNDLE_PREFIX):
+        return True
+    if _VERSION_BUMP_RE.match(subject):
         return True
     return False
 
@@ -256,14 +275,34 @@ _PR_JQ = (
 )
 
 
-def _lookup_pr(sha: str) -> tuple[int, str, str] | None:
-    """The PR a commit belongs to, via the GitHub API. Merged ones win."""
+def _lookup_pr(
+    sha: str,
+    *,
+    cwd: Path | None = None,
+    token: str | None = None,
+) -> tuple[int, str, str] | None:
+    """The PR a commit belongs to, via the GitHub API. Merged ones win.
+
+    `gh` expands `{owner}/{repo}` from the git remote of `cwd`, which is what
+    lets the same call serve both repositories: pointed at a PAC checkout it
+    asks PAC about a PAC sha. Pointed at lex-app with a frontend sha it would
+    ask the wrong repository and answer confidently — hence `cwd` is a
+    parameter rather than a constant.
+    """
+    env = None
+    if token:
+        # The default GITHUB_TOKEN is scoped to lex-app and cannot read PRs in
+        # a different private repository. Both names are set because `gh`
+        # honours GH_TOKEN first but falls back to GITHUB_TOKEN, and a stale
+        # value in the one we did not override would win over nothing.
+        env = {**os.environ, "GH_TOKEN": token, "GITHUB_TOKEN": token}
     result = subprocess.run(
         ["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls",
          "--jq", _PR_JQ],
-        cwd=REPO_ROOT,
+        cwd=cwd or REPO_ROOT,
         capture_output=True,
         text=True,
+        env=env,
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None
@@ -271,10 +310,23 @@ def _lookup_pr(sha: str) -> tuple[int, str, str] | None:
     return int(number), title, body
 
 
+def pr_lookup_for(
+    checkout: Path,
+    *,
+    token: str | None = None,
+    lookup: Callable[..., tuple[int, str, str] | None] = _lookup_pr,
+) -> Callable[[str], tuple[int, str, str] | None]:
+    """A `lookup` for `enrich_with_prs` bound to another repository."""
+    def bound(sha: str) -> tuple[int, str, str] | None:
+        return lookup(sha, cwd=checkout, token=token)
+    return bound
+
+
 def enrich_with_prs(
     commits: list[Commit],
     *,
     lookup: Callable[[str], tuple[int, str, str] | None] = _lookup_pr,
+    label: str = "PR enrichment",
 ) -> list[Commit]:
     """Attach PR number and title where a commit came through a PR.
 
@@ -305,6 +357,6 @@ def enrich_with_prs(
                 )
             )
     if commits:
-        print(f"PR enrichment: {hits}/{len(commits)} commits matched a pull request.",
+        print(f"{label}: {hits}/{len(commits)} commits matched a pull request.",
               file=sys.stderr)
     return enriched

@@ -21,12 +21,12 @@ shipped — only about how much detail to give.
 ## Where the content comes from
 
 lex-app is two codebases. The backend lives here. The frontend lives in a separate repo
-(`process-admin-general-client`, "PAC") and arrives as a **pre-built bundle** copied into
-`lex/react/build/`.
+(`process-admin-general-client`, "PAC") and arrives as an ordinary pip dependency, resolved on the
+customer's machine like any other.
 
 So to describe a release we need commits from both. The backend half is easy — it's this repo's
-own git log. The frontend half needs one extra fact: **which PAC commit produced the bundle we're
-shipping.**
+own git log. The frontend half needs one extra fact: **which frontend version this release
+ships.**
 
 That fact is a version number. `requirements.txt` carries one line:
 
@@ -40,6 +40,14 @@ v2.3.0?" is answered by `git show v2.3.0:requirements.txt`. See
 
 Two of those versions — the previous release's and this one's — give a range of frontend releases,
 and the frontend half of the note is the log between them.
+
+Both halves are then enriched the same way: each commit is traced back to the pull request it came
+in through, so an entry leads with the PR's title and the drafter writes from the PR's body. The
+frontend half is looked up **in PAC**, which needs `FRONTEND_REPO_TOKEN` — the default
+`GITHUB_TOKEN` is scoped to lex-app and cannot see pull requests in another private repository.
+Without it the lookups simply return nothing and every frontend entry falls back to its raw commit
+subject, which for PAC means lines like "Update package.json". The log tallies each half separately
+so that shows up as `Frontend PR enrichment: 0/12` rather than blending into the backend count.
 
 **Releases cut before the pin existed** are served by a committed side-car mapping each old bundle
 to the revision that built it, established by rebuilding candidates and comparing content-addressed
@@ -63,8 +71,13 @@ committed.
 
 ## When the frontend can't be worked out
 
-Sometimes the range can't be resolved — an old release with no record, a missing credential, a
-checkout that failed.
+Sometimes the range can't be resolved — no pin at one end of the range, an old release with no
+record, a missing credential, a checkout that failed. The warning names which of those it was, and
+which tag it was looking at.
+
+The commonest case is expected rather than broken: the release that *introduces* the pin has none
+at its previous tag, and one pin is deliberately not enough. Inventing a starting point would
+attribute every frontend commit in history to that single release.
 
 The old behaviour was to quietly leave the frontend out. That was the actual bug: **a release that
 lost the information looked identical to a release with no frontend changes.** Same silence, two

@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -333,3 +335,62 @@ def test_the_commit_body_is_used_when_there_is_no_pr_body():
     c = digest.Commit(sha="aaa1111", subject="fix(x): y", body="COMMIT EXPLANATION")
     entry = digest._entry(c, "backend")
     assert "COMMIT EXPLANATION" in entry["detail"]
+
+
+# ── Frontend packaging work is not a frontend feature ──────────────────
+#
+# These arrive from the other repository. The first frontend release is made
+# almost entirely of them — of the seven commits between the last vendored
+# bundle and v2.1.0, five reached the changelog before this, one of them
+# announcing "publish the frontend as a versioned package" to customers as a
+# new frontend feature.
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "feat(packaging): publish the frontend as a versioned package",
+        "refactor(packaging): pip only — drop the npm half",
+        "fix(packaging): 1.12.0 — v1.10.0 was already taken",
+        "fix(deps): take the frontend from PyPI",
+    ],
+)
+def test_packaging_work_is_internal(subject: str):
+    parsed = digest.parse_subject(subject)
+    assert digest.is_internal(parsed.type, parsed.scope) is True
+
+
+def test_a_real_frontend_feature_is_still_user_facing():
+    """The scope is what makes it internal, not the repository it came from."""
+    parsed = digest.parse_subject("feat(grid): group rows by any column")
+    assert digest.is_internal(parsed.type, parsed.scope) is False
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "release(frontend): 2.1.0",
+        "release: 2.1.0",
+        "chore(release): v1.11.2",
+        "build: 2.1.0rc1",
+    ],
+)
+def test_a_version_bump_is_noise(subject: str):
+    """It records a release rather than describing one.
+
+    `release(...)` is not a conventional type, so it parses as `other` and
+    lands under Changed — a line saying only "2.1.0" inside the section already
+    headed "2.1.0".
+    """
+    assert digest.is_noise(subject) is True
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "fix(grid): a date filter matches the day you picked, not midnight",
+        "feat(forms): 2.1.0 brings a new create form",   # a version in prose
+        "release(frontend): drop the legacy theme",       # not a bare version
+    ],
+)
+def test_real_work_is_not_mistaken_for_a_version_bump(subject: str):
+    assert digest.is_noise(subject) is False

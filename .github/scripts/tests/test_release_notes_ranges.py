@@ -489,17 +489,36 @@ def test_an_unchanged_pin_resolves_to_an_empty_range_not_a_gap():
     assert (got.from_sha, got.to_sha) == ("v1.12.0", "v1.12.0")
 
 
-def test_a_pin_on_only_one_end_falls_back_to_the_side_car():
-    # The release that INTRODUCES the pin has none at its previous tag.
-    # Inventing a starting point would attribute every frontend commit in
-    # history to that one release.
-    called = []
-    ranges.frontend_range(
+def test_a_pin_on_only_one_end_is_a_gap():
+    """The release that INTRODUCES the pin has none at its previous tag.
+
+    This used to fall through to the manifest, and the fallback does not fail
+    on a transition release — it answers. The in-tree bundle still ships as a
+    fallback for an instance with no frontend package, so its manifest still
+    resolves at both ends, and the range it produces compares two vendored
+    bundles for a release that no longer takes its frontend from one.
+
+    Measuring the two ends with different instruments is worse than saying so.
+    It costs one release: the next has a pin at both ends.
+    """
+    consulted = []
+    got = ranges.frontend_range(
         "v2.2.0", "v2.3.0", show=_pins({"v2.3.0": "1.12.0"}),
-        history=lambda: called.append("history") or {},
-        bundle=lambda ref, **k: called.append(ref) or None,
+        history=lambda: consulted.append("history") or {"k": {"pac_sha": "p"}},
+        bundle=lambda ref, **k: consulted.append(ref) or ("f" * 40),
     )
-    assert called, "expected the side-car path to be consulted"
+    assert got is None
+    assert consulted == [], "the bundle path must not be consulted at all"
+
+
+def test_a_dropped_pin_is_a_gap_too():
+    """The reverse: pinned before, not pinned now. Same mismatch, same answer."""
+    got = ranges.frontend_range(
+        "v2.3.0", "v2.4.0", show=_pins({"v2.3.0": "1.12.0"}),
+        history=lambda: {"k": {"pac_sha": "p"}},
+        bundle=lambda ref, **k: "f" * 40,
+    )
+    assert got is None
 
 
 def test_no_pin_at_either_end_leaves_historical_behaviour_untouched():

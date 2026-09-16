@@ -93,10 +93,46 @@ def _pac_log(pac_checkout: Path):
     return run_log
 
 
+# The credential that reads PAC. The default GITHUB_TOKEN is scoped to lex-app
+# and cannot see pull requests in another private repository, so without this
+# every frontend entry degrades to its raw commit subject — which for PAC means
+# "Update package.json" instead of the pull request that explains it.
+FRONTEND_TOKEN_ENV = "FRONTEND_REPO_TOKEN"
+
+
+def _frontend_gap_reason(previous_tag: str | None, tag: str) -> str:
+    """Why the frontend range did not resolve, in terms an operator can act on.
+
+    Both resolution paths are reported, because both were tried. Naming only
+    the manifest — as this did before the pin existed — sent operators to look
+    at a file that is no longer the primary source, for a release whose real
+    problem was a missing line in requirements.txt.
+    """
+    if previous_tag is None:
+        return (f"{tag} has no earlier release tag to measure from, so there is "
+                "no range to resolve")
+
+    ends = (previous_tag, tag)
+    no_pin = [ref for ref in ends if ranges.frontend_version_at(ref) is None]
+    no_sha = [ref for ref in ends if ranges.frontend_sha_at(ref) is None]
+
+    parts = []
+    if no_pin:
+        parts.append(
+            f"no `{ranges.PIN_NAME}` pin in {ranges.REQUIREMENTS_PATH} at "
+            + " or ".join(no_pin)
+        )
+    if no_sha:
+        parts.append("no recorded bundle provenance at " + " or ".join(no_sha))
+    return "; ".join(parts) or "the range could not be established"
+
+
 def _digest_for(tag: str, *, pac_checkout: Path | None = None) -> dict:
     previous = ranges.previous_release_tag(tag, tags=_all_tags(tag))
 
-    backend = digest.enrich_with_prs(digest.collect_commits(previous, tag))
+    backend = digest.enrich_with_prs(
+        digest.collect_commits(previous, tag), label="Backend PR enrichment"
+    )
 
     frontend: list[digest.Commit] = []
     frontend_recorded = True
@@ -105,7 +141,7 @@ def _digest_for(tag: str, *, pac_checkout: Path | None = None) -> dict:
         # Unresolvable is NOT the same as "no frontend changes", and the
         # changelog must not let a reader confuse them.
         frontend_recorded = False
-        print("No frontend provenance at one or both ends — omitting the frontend section.",
+        print(f"Omitting the frontend section: {_frontend_gap_reason(previous, tag)}.",
               file=sys.stderr)
     elif pac_checkout is None:
         frontend_recorded = False
@@ -128,6 +164,16 @@ def _digest_for(tag: str, *, pac_checkout: Path | None = None) -> dict:
         else:
             print(f"Frontend: {len(frontend)} commits in "
                   f"{fe_range.from_sha}..{fe_range.to_sha}", file=sys.stderr)
+            # Against PAC, not against lex-app. A frontend sha means nothing
+            # here, and `gh` would answer for whichever lex-app commit the
+            # abbreviation happened to hit rather than returning nothing.
+            frontend = digest.enrich_with_prs(
+                frontend,
+                lookup=digest.pr_lookup_for(
+                    pac_checkout, token=os.environ.get(FRONTEND_TOKEN_ENV)
+                ),
+                label="Frontend PR enrichment",
+            )
 
     built = digest.build_digest(tag, previous, backend, frontend)
     built["frontend_recorded"] = frontend_recorded
@@ -271,17 +317,13 @@ def cmd_verify_frontend(args: argparse.Namespace) -> int:
         print(f"Frontend provenance resolves for {args.tag}.", file=sys.stderr)
         return 0
 
-    missing = [
-        ref for ref in (previous, args.tag)
-        if ref is not None and ranges.frontend_sha_at(ref) is None
-    ]
-    detail = ", ".join(missing) or "an unknown end of the range"
+    reason = _frontend_gap_reason(previous, args.tag)
     print(
-        f"::warning title=Frontend notes unavailable::No frontend provenance for "
-        f"{detail}. This release note will omit frontend changes. Repair later with: "
-        f"python -m release_notes backfill --tag {args.tag} --force"
+        f"::warning title=Frontend notes unavailable::{reason}. This release note "
+        f"will omit frontend changes. Repair by adding the pin and re-running: "
+        f"python -m release_notes backfill --tag {args.tag} --force --pac-checkout ./pac"
     )
-    print(f"Frontend provenance missing for: {detail}", file=sys.stderr)
+    print(f"Frontend provenance unavailable: {reason}", file=sys.stderr)
     return 0
 
 

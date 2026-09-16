@@ -74,6 +74,12 @@ jobs:
         id: draft
         env:
           TAG: ${{ inputs.tag }}
+          # Reads pull requests in PAC, so the frontend half of the note carries
+          # the same PR titles and bodies the backend half does. Scoped to
+          # lex-app, GITHUB_TOKEN cannot see them, and every frontend entry
+          # degrades to its raw commit subject — for PAC, "Update package.json".
+          # Absent, enrichment is skipped and the tally in the log says so.
+          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
           LEX_NOTES_PROVIDER: ${{ inputs.provider }}
           LEX_NOTES_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

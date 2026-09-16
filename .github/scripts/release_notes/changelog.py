@@ -37,13 +37,25 @@ _SECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
 )
 
 
-def _line(change: dict, repo: str) -> str:
-    url = f"https://github.com/{repo}/commit/{change['sha']}"
+# Where a frontend change actually lives. A frontend sha is not a lex-app sha,
+# so rendering it under lex-app's URL produces a link that 404s — or, if the
+# abbreviation happens to collide, one that points at an unrelated commit.
+#
+# This went unnoticed until the pin made the frontend range resolve: before
+# that every frontend section was a gap marker, so `_line` had never once been
+# called with a frontend change.
+FRONTEND_REPO = "ExcellenceCloudGmbH/process-admin-general-client"
+
+
+def _line(change: dict, repo: str, *, frontend_repo: str = FRONTEND_REPO) -> str:
+    home = frontend_repo if change.get("component") == "frontend" else repo
+    url = f"https://github.com/{home}/commit/{change['sha']}"
     suffix = f" (#{change['pr_number']})" if change.get("pr_number") else ""
     return f"- **{change['component']}** {change['subject']} ([{change['sha']}]({url})){suffix}"
 
 
-def render(digest: dict, *, date: str, repo: str) -> str:
+def render(digest: dict, *, date: str, repo: str,
+           frontend_repo: str = FRONTEND_REPO) -> str:
     """Render one release section. Returns the heading alone if nothing shipped."""
     version = digest["tag"].lstrip("v")
     parts = [f"## [{version}] - {date}", ""]
@@ -61,7 +73,7 @@ def render(digest: dict, *, date: str, repo: str) -> str:
     breaking = [c for c in shippable if c.get("breaking")]
     if breaking:
         parts.append("### Breaking")
-        parts.extend(_line(c, repo) for c in breaking)
+        parts.extend(_line(c, repo, frontend_repo=frontend_repo) for c in breaking)
         parts.append("")
 
     for heading, types in _SECTIONS:
@@ -69,7 +81,7 @@ def render(digest: dict, *, date: str, repo: str) -> str:
         if not rows:
             continue
         parts.append(f"### {heading}")
-        parts.extend(_line(c, repo) for c in rows)
+        parts.extend(_line(c, repo, frontend_repo=frontend_repo) for c in rows)
         parts.append("")
 
     return "\n".join(parts).rstrip() + "\n"

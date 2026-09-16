@@ -150,7 +150,8 @@ def _stub_backend(monkeypatch):
     """Neutralise the backend half of _digest_for — git and gh are not under test."""
     monkeypatch.setattr(cli, "_all_tags", lambda tag: ["v2.1.8", "v2.1.7"])
     monkeypatch.setattr(cli.digest, "collect_commits", lambda *a, **kw: [])
-    monkeypatch.setattr(cli.digest, "enrich_with_prs", lambda commits: commits)
+    monkeypatch.setattr(cli.digest, "enrich_with_prs",
+                        lambda commits, **kwargs: commits)
 
 
 def test_digest_for_flags_an_unresolvable_frontend_range(monkeypatch):
@@ -229,7 +230,8 @@ def test_digest_for_records_a_gap_when_the_pac_checkout_cannot_be_read(
     # of render-changelog and fail the publish job. It must degrade to a gap,
     # the same as an unresolvable range.
     monkeypatch.setattr(cli, "_all_tags", lambda tag: ["v2.1.8", "v2.1.7"])
-    monkeypatch.setattr(cli.digest, "enrich_with_prs", lambda commits: commits)
+    monkeypatch.setattr(cli.digest, "enrich_with_prs",
+                        lambda commits, **kwargs: commits)
     monkeypatch.setattr(
         cli.ranges, "frontend_range",
         lambda prev, tag: cli.ranges.Range(from_sha="aaa", to_sha="bbb"),

@@ -277,6 +277,22 @@ def frontend_range(
             to_sha=pac_tag_for(current_version),
         )
 
+    if previous_version or current_version:
+        # Exactly one end declares a pin: the release that introduces it, or
+        # one that drops it. Falling through here would measure the two ends
+        # with different instruments — the pin says which frontend RELEASE
+        # ships, the manifest says which PAC commit built a vendored bundle —
+        # and produce a confident answer to a question nobody asked.
+        #
+        # The in-tree bundle still exists as a fallback for an instance with no
+        # frontend package installed, so its manifest still resolves. That is
+        # exactly what makes this dangerous: the fallback does not fail, it
+        # answers, and the answer looks like every other release's.
+        #
+        # A gap is the honest outcome, and it is a one-release cost: the next
+        # release has a pin at both ends.
+        return None
+
     to_sha = frontend_sha_at(current_tag, show=show, history=history, bundle=bundle)
     if to_sha is None:
         return None
@@ -301,8 +317,10 @@ def frontend_range(
 #
 # The consequence, worth stating: a note describes the version lex-app
 # DECLARED, not necessarily the one a given instance resolved.
+PIN_NAME = "lex-app-frontend"
+
 PIN_RE = re.compile(
-    r"^lex-app-frontend\s*(?:~=|==)\s*(?P<version>\d+\.\d+\.\d+[A-Za-z0-9.]*)\s*$"
+    rf"^{re.escape(PIN_NAME)}\s*(?:~=|==)\s*(?P<version>\d+\.\d+\.\d+[A-Za-z0-9.]*)\s*$"
 )
 
 REQUIREMENTS_PATH = "requirements.txt"
