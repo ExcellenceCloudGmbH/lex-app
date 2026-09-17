@@ -17,11 +17,10 @@ from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ct
 from lex.lex_app.streamlit.eager_frames import eager_frames_js
 from lex.lex_app.streamlit.quackback import quackback_launcher_js
 from lex.lex_app.streamlit.sidebar import (
-    HIDE_SIDEBAR_CSS,
     embedded_in_lex_app,
-    hide_sidebar_when_framed_js,
-    render_account,
     render_logo,
+    render_topbar,
+    sidebar_state_for,
 )
 from lex.streamlit_theme import (
     DEBUG_PANEL_HEIGHT,
@@ -80,7 +79,13 @@ INTERNAL_AUTH_HEADER = "x-lex-internal-auth"
 # Streamlit commands firing at import time. Streamlit executes this file with
 # ``__name__ == "__main__"``, so the app itself is unaffected.
 if __name__ == "__main__":
-    st.set_page_config(layout="wide")
+    # Read BEFORE set_page_config, which is what carries the sidebar state.
+    # Streamlit dropped the "must be the first command" rule, and reading a
+    # query parameter enqueues no delta in any case.
+    st.set_page_config(
+        layout="wide",
+        initial_sidebar_state=sidebar_state_for(embedded_in_lex_app(st.query_params)),
+    )
 
 
 def _oidc_token_endpoint() -> str:
@@ -873,12 +878,6 @@ def render_theme_follower() -> None:
     # The eager-frames script is unconditional: it is about WHEN component
     # frames load, and has nothing to do with the theme.
     body = f"<script>{eager_frames_js()}</script>"
-    # Unconditional too, and for the same reason: whether this page is inside
-    # someone's frame is not a theme question. It is the fallback for the
-    # parameter above, which is exact and flash-free but only once the frontend
-    # that sends it has shipped -- framing is knowable without anyone's help.
-    body = hide_sidebar_when_framed_js() + body
-
     # The feedback launcher, and it decides for itself whether to appear: a
     # framed Streamlit page must not stack a second one over lex-app's, and only
     # the browser knows whether this page is framed. Unconditional here for the
@@ -964,13 +963,21 @@ if __name__ == "__main__":
         except Exception:
             streamlit_structure = None
 
-        if EMBEDDED:
-            st.markdown(HIDE_SIDEBAR_CSS, unsafe_allow_html=True)
-        else:
+        if not EMBEDDED:
             # The logo only, and early: st.logo renders into Streamlit's header
-            # slot, which sits ABOVE even the page navigation. Who is signed in
-            # goes to the bottom instead -- see the `finally` below.
+            # slot, which sits ABOVE even the page navigation.
             render_logo(st)
+            # The account bar, before anything the app draws, so it sits at the
+            # top of the content column -- and so the way out is on screen
+            # before main() has had a chance to fail. That last property is why
+            # the account block used to render from a `finally`.
+            render_topbar(
+                st,
+                st.session_state,
+                logout_href=_logout_href() if LOGOUT_ENABLED else None,
+            )
+        # Embedded: lex-app draws the logo and the account itself, and the
+        # sidebar arrives collapsed via `initial_sidebar_state` above.
 
         reset_streamlit_form_context()
         params = st.query_params
@@ -1030,20 +1037,6 @@ if __name__ == "__main__":
                 st.error(traceback.format_exc())
 
     finally:
-        # Rendered last so it sits at the BOTTOM of the sidebar, beneath the
-        # app's own navigation. In `finally` so a failure in main() still leaves
-        # the user a way out -- the property the original placement was
-        # protecting by rendering first.
-        # Identity and the way out, together and last, so they sit at the
-        # bottom beneath whatever navigation the app declared. In `finally` so a
-        # failure in main() still leaves the user a way out.
-        if not EMBEDDED:
-            render_account(
-                st,
-                st.session_state,
-                logout_href=_logout_href() if LOGOUT_ENABLED else None,
-            )
-
         # Zero-height and inert; also in `finally` so theme following survives a
         # failure in main(). A page stuck on the wrong theme after an error is a
         # small thing, but it is free to avoid.

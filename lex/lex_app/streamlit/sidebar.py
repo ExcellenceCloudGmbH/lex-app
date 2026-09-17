@@ -166,11 +166,11 @@ def _one_line(markup: str) -> str:
 def identity_html(name: str, subtitle: Optional[str] = None) -> str:
     """The brand lockup and the signed-in user, as one block of markup.
 
-    Identity sits in the sidebar rather than a top bar -- the reverse of
-    lex-app, and on purpose. lex-app puts the user menu top-right because its
-    sidenav is already full of navigation; a Streamlit page has no top bar of
-    ours to use, and its sidebar is mostly empty, so this is where the
-    information belongs.
+    Kept for the collapsed-sidebar case and for any app that wants the block
+    inline. Identity itself now lives in the top bar (:func:`topbar_html`),
+    matching lex-app: a page whose sidebar can be collapsed cannot keep the way
+    out inside it, because collapsing the panel would take the sign-out with
+    it.
 
     Every value is escaped: a display name arrives from the identity provider,
     which is not a place to trust markup from.
@@ -375,6 +375,90 @@ def _role_subtitle(session_state) -> Optional[str]:
 #: `auth_token` both happen to correlate today, but they mean other things, and
 #: a signal that is true by coincidence stops being true the moment either is
 #: used somewhere else.
+
+#: Neutral enough to read on either theme. A fixed light or dark value would be
+#: wrong for one of them, and the bar sits in the CONTENT column -- which
+#: follows Streamlit's theme, unlike the sidebar, which is always navy.
+TOPBAR_BORDER = "rgba(128,128,128,0.25)"
+
+
+def topbar_html(name: str, subtitle: Optional[str] = None,
+                logout_href: Optional[str] = None) -> str:
+    """The signed-in user and the way out, as a bar across the content column.
+
+    Mirrors lex-app, which puts the account top-right. The reason it moved here
+    from the sidebar is not symmetry: an embedded page now opens with its
+    sidebar COLLAPSED, and a sign-out that lives inside a collapsed panel is a
+    sign-out nobody can reach.
+
+    Background is inherited and the text colour is not set at all, so the bar
+    takes whatever theme the page is on. Only the avatar carries the accent.
+
+    Every value is escaped -- the display name comes from the identity
+    provider, which is not a place to trust markup from.
+    """
+    safe_name = html.escape(name)
+    safe_initials = html.escape(_initials(name))
+    subtitle_markup = (
+        f'<div style="opacity:0.65;font-size:11px;line-height:1.3;">{html.escape(subtitle)}</div>'
+        if subtitle
+        else ""
+    )
+
+    logout_markup = ""
+    if logout_href:
+        # `target="_top"`: signing out is a full navigation, and inside a frame
+        # it would otherwise replace the widget rather than the page.
+        logout_markup = f"""
+  <a href="{html.escape(logout_href, quote=True)}" target="_top" title="Log out"
+     aria-label="Log out"
+     style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;
+            opacity:0.7;font-size:13px;text-decoration:none;color:inherit;"
+     onmouseover="this.style.opacity='1';this.style.background='{NAV_ACTIVE_BG}';"
+     onmouseout="this.style.opacity='0.7';this.style.background='transparent';">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+      <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+    </svg>
+    <span>Log out</span>
+  </a>"""
+
+    return _one_line(f"""
+<div data-lex-topbar
+     style="display:flex;align-items:center;justify-content:flex-end;gap:12px;
+            padding:2px 0 10px;margin:0 0 0.75rem;border-bottom:1px solid {TOPBAR_BORDER};">
+  <div style="width:30px;height:30px;border-radius:50%;background:{NAV_ACTIVE_BG};
+              color:{NAV_ACCENT};display:flex;align-items:center;justify-content:center;
+              font-size:12px;font-weight:600;flex:0 0 30px;">{safe_initials}</div>
+  <div style="min-width:0;text-align:right;">
+    <div style="font-size:13px;font-weight:500;line-height:1.3;white-space:nowrap;
+                overflow:hidden;text-overflow:ellipsis;">{safe_name}</div>
+    {subtitle_markup}
+  </div>{logout_markup}
+</div>
+""")
+
+
+def render_topbar(st_module, session_state, logout_href: Optional[str] = None) -> None:
+    """Render the account bar at the top of the content column.
+
+    Call it FIRST in the script, before anything the app draws: Streamlit lays
+    the main column out in call order, and this belongs above the page. Calling
+    it first also means the way out is on screen before ``main()`` has had the
+    chance to fail -- the property the old bottom-of-sidebar placement was
+    protecting with a ``finally``.
+    """
+    st_module.markdown(
+        topbar_html(
+            _display_name(session_state),
+            _role_subtitle(session_state),
+            logout_href,
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 EMBED_PARAM = "lex_embed"
 
 
@@ -386,66 +470,23 @@ def embedded_in_lex_app(query_params) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-_HIDE_SIDEBAR_RULES = """
-  section[data-testid="stSidebar"],
-  [data-testid="stSidebarCollapsedControl"],
-  [data-testid="stExpandSidebarButton"] {
-    display: none !important;
-  }
-  [data-testid="stAppViewContainer"] > section:first-of-type {
-    margin-left: 0 !important;
-  }
-"""
-
-
-#: Removes the sidebar outright, rather than collapsing it.
+#: An embedded page opens with its sidebar COLLAPSED, not removed.
 #:
-#: A guest surface has no business drawing navigation chrome: lex-app already
-#: provides a sidenav, a logo, the signed-in user and a way out, immediately to
-#: the left of the frame. A second sidebar inside it is the same furniture
-#: twice, and the inner one navigates a different app.
+#: It used to be removed outright -- panel and expand control both -- on the
+#: reasoning that lex-app already supplies navigation, a logo and the signed-in
+#: user immediately to the left of the frame, so a second sidebar was the same
+#: furniture twice. That held until people asked for the page's own navigation
+#: back. Collapsed is what satisfies both readings: the host's chrome is what
+#: you see, and the page's own is one click away.
 #:
-#: `display: none` on the panel AND on the control that would expand it again --
-#: collapsing leaves a button that reopens a panel the host never wanted, which
-#: is a worse end state than not having it. The content column's left offset
-#: goes with it, or the page keeps a gutter for furniture that is not there.
-HIDE_SIDEBAR_CSS = f"<style>{_HIDE_SIDEBAR_RULES}</style>"
+#: Uses Streamlit's own `initial_sidebar_state` rather than CSS, because
+#: collapsed is React state. CSS can hide a panel but cannot collapse one, and
+#: hiding the panel while leaving the expand control is a button that opens
+#: nothing -- which is why the old rules had to hide that control too.
+EMBEDDED_SIDEBAR_STATE = "collapsed"
+DEFAULT_SIDEBAR_STATE = "auto"
 
 
-
-
-
-def hide_sidebar_when_framed_js() -> str:
-    """Hide the sidebar when this page turns out to be inside someone's frame.
-
-    The fallback for the flash-free path. :func:`embedded_in_lex_app` reads a
-    parameter, which is exact and costs no repaint -- but only once the frontend
-    that adds it has shipped. Framing is knowable from the page itself and needs
-    nobody's cooperation, so it covers every deployment in between.
-
-    It is also true more generally: a Streamlit page inside ANY frame has a host
-    supplying the chrome around it. Being wrong here costs a hidden sidebar on a
-    page somebody deliberately framed themselves, which is the same thing they
-    would have asked for.
-    """
-    return (
-        "<script>\n"
-        "  (function () {\n"
-        "    var host = window.parent;\n"
-        "    if (!host || host === window) return;\n"
-        "    // `top`, not `parent`: this script's parent is the Streamlit page,\n"
-        "    // and the question is whether THAT page is itself framed.\n"
-        "    var framed;\n"
-        "    try { framed = host.top !== host; }\n"
-        "    catch (e) { framed = true; }   // cross-origin top: framed by definition\n"
-        "    if (!framed) return;\n"
-        "    if (host.__lexSidebarHidden) return;\n"
-        "    host.__lexSidebarHidden = true;\n"
-        "    var style = host.document.createElement('style');\n"
-        "    style.textContent = " + _js_literal(_HIDE_SIDEBAR_RULES) + ";\n"
-        "    host.document.head.appendChild(style);\n"
-        "    console.info('[lex-sidebar] this page is framed, so its sidebar is hidden: "
-        "the host already provides navigation, a logo and the signed-in user.');\n"
-        "  })();\n"
-        "</script>"
-    )
+def sidebar_state_for(embedded: bool) -> str:
+    """The ``initial_sidebar_state`` to hand ``st.set_page_config``."""
+    return EMBEDDED_SIDEBAR_STATE if embedded else DEFAULT_SIDEBAR_STATE

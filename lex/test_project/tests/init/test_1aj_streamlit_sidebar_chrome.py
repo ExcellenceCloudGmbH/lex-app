@@ -34,10 +34,11 @@ import pytest
 from lex.lex_app.design_system import lex_tokens
 from lex.lex_app.streamlit.sidebar import (
     EMBED_PARAM,
-    _HIDE_SIDEBAR_RULES,
-    HIDE_SIDEBAR_CSS,
+    EMBEDDED_SIDEBAR_STATE,
+    DEFAULT_SIDEBAR_STATE,
     embedded_in_lex_app,
-    hide_sidebar_when_framed_js,
+    sidebar_state_for,
+    topbar_html,
     _LOGO_COLLAPSED_PATH,
     _LOGO_PATH,
     NAV_ACCENT,
@@ -204,23 +205,25 @@ class TestCluster1aj_SidebarChrome:
         # And the omitted piece leaves no orphan.
         assert without.count("<div") == without.count("</div>")
 
-    def test_01_315_a_framed_page_has_no_sidebar_at_all(self):
-        """Scenario 1.315: a guest surface draws no host furniture.
+    def test_01_315_a_framed_page_opens_with_its_sidebar_collapsed(self):
+        """Scenario 1.315: a guest surface starts folded away, not stripped.
 
-        When lex-app frames a Streamlit page, lex-app is already drawing a
-        sidenav, the logo, the signed-in user and a way out -- immediately to the
-        left of the frame. A second sidebar inside it is the same furniture
-        twice, and the inner one navigates a different app.
+        It used to be removed outright, on the reasoning that lex-app already
+        draws a sidenav, the logo and the signed-in user immediately to the left
+        of the frame. That held until people asked for the page's own navigation
+        back, and both readings are right: the host's chrome is what you should
+        see, and the page's own should be reachable. Collapsed is the state that
+        satisfies both.
 
-        Gone, not collapsed. Collapsing leaves a control that reopens a panel the
-        host never wanted, which is a worse end state than not having one; the
-        expand control is hidden with it. The content column's left offset goes
-        too, or the page keeps a gutter for furniture that is not there.
+        `initial_sidebar_state` rather than CSS, because collapsed is React
+        state. CSS can hide a panel but cannot collapse one -- and hiding the
+        panel while leaving the expand control is a button that opens nothing,
+        which is why the old rules had to hide that control too.
 
-        The signal is an explicit parameter rather than an inference.
-        ``is_logout_enabled=false`` and ``auth_token`` both happen to correlate
-        with being framed today, but they mean other things, and a signal that is
-        true by coincidence stops being true the moment either is used elsewhere.
+        The signal stays an explicit parameter rather than an inference.
+        ``is_logout_enabled=false`` and ``auth_token`` both correlate with being
+        framed today, but they mean other things, and a signal that is true by
+        coincidence stops being true the moment either is used elsewhere.
         """
         assert EMBED_PARAM == "lex_embed"
 
@@ -229,52 +232,65 @@ class TestCluster1aj_SidebarChrome:
         assert not embedded_in_lex_app({})
         assert not embedded_in_lex_app({"lex_embed": "false"})
 
-        css = _rules_only(HIDE_SIDEBAR_CSS)
-        assert 'section[data-testid="stSidebar"]' in css
-        assert "display: none" in css
-        # The control that would bring it back goes too.
-        assert "stSidebarCollapsedControl" in css or "stExpandSidebarButton" in css
-        # And no gutter is left behind.
-        assert "margin-left: 0" in css
+        assert sidebar_state_for(True) == EMBEDDED_SIDEBAR_STATE == "collapsed"
+        assert sidebar_state_for(False) == DEFAULT_SIDEBAR_STATE == "auto"
+        # Both are values Streamlit actually accepts; a typo here degrades to an
+        # exception at page load rather than to a default.
+        assert {EMBEDDED_SIDEBAR_STATE, DEFAULT_SIDEBAR_STATE} <= {
+            "auto", "expanded", "collapsed"
+        }
 
-    def test_01_315_framing_is_the_fallback_until_the_frontend_ships(self):
-        """Scenario 1.315 (second half): work before the parameter arrives.
+    def test_01_315_the_way_out_does_not_live_in_a_collapsible_panel(self):
+        """Scenario 1.315 (second half): why the account had to move.
 
-        The parameter is exact and costs no repaint, but only once the frontend
-        that sends it has been rebuilt and deployed. Whether this page sits
-        inside a frame is knowable from the page itself and needs nobody's
-        cooperation, so it covers every deployment in between -- which in this
-        project is not a hypothetical gap.
+        This is the reason the top bar exists, not a style preference. Once an
+        embedded page opens collapsed, a sign-out rendered inside the sidebar is
+        a sign-out behind a click nobody knows to make. The bar sits in the
+        content column, which cannot be collapsed.
 
-        It asks about ``top``, not ``parent``: this script's parent is the
-        Streamlit page, and the question is whether THAT page is framed. A
-        cross-origin ``top`` throws on access, and throwing IS the answer -- only
-        a framed page can fail that read.
-
-        Both paths share one definition of the rules, because two copies of a
-        stylesheet drift and the drift is invisible until someone is looking at
-        the wrong surface. That already happened once here: the first version
-        extracted the rules with a regex that matched the file's FIRST style
-        block, shipped the account-block layout as the hide rules, and logged
-        "sidebar is hidden" over a fully visible sidebar.
+        The bar sets no text colour and no background, so it inherits the page's
+        theme. The sidebar is always navy and can hardcode; the content column
+        follows Streamlit's light/dark and cannot.
         """
-        js = hide_sidebar_when_framed_js()
+        markup = topbar_html("Ada Lovelace", "Administrator", "/logout")
 
-        assert "host.top !== host" in js
-        assert "catch (e) { framed = true; }" in js, (
-            "a cross-origin top must count as framed, not as an error"
+        assert "data-lex-topbar" in markup
+        assert "Ada Lovelace" in markup and "Administrator" in markup
+        assert "AL" in markup, "initials, so the avatar is never an empty circle"
+        assert 'href="/logout"' in markup
+        assert 'target="_top"' in markup, (
+            "signing out is a full navigation; inside a frame it must not "
+            "replace the widget"
         )
-        # One definition, shared. Decode the embedded literal rather than
-        # pattern-matching escaped text: the rules travel through _js_literal,
-        # which JSON-escapes the quotes, so asserting on the raw selector would
-        # fail for the wrong reason and asserting on the escaped form would pin
-        # the escaping instead of the rules.
-        embedded = json.loads(js[js.index('style.textContent = ') + 20 : js.index(";\n", js.index("style.textContent"))])
-        assert 'section[data-testid="stSidebar"]' in embedded
-        assert "display: none" in embedded
-        assert embedded == _HIDE_SIDEBAR_RULES, "the two paths have drifted apart"
-        # Installed once, however many reruns recreate this frame.
-        assert "__lexSidebarHidden" in js
+        # Theme-neutral: no hardcoded page colours on the bar itself.
+        assert "background:#" not in markup.replace(" ", "")
+        assert markup.count("<div") == markup.count("</div>")
+
+    def test_01_315_the_top_bar_escapes_what_the_idp_gave_it(self):
+        """Scenario 1.315 (third half): a display name is not trusted markup.
+
+        Same contract as the sidebar identity block it replaces -- the name
+        arrives from the identity provider, and the logout href is built from
+        configuration.
+        """
+        markup = topbar_html('<script>alert(1)</script>', None, '/out"onerror="x')
+
+        assert "<script>alert" not in markup
+        assert "&lt;script&gt;" in markup
+        assert '"onerror="' not in markup.replace('&quot;', "")
+
+    def test_01_315_a_page_with_no_logout_renders_no_logout(self):
+        """Scenario 1.315 (fourth half): the control is omitted, not disabled.
+
+        ``LOGOUT_ENABLED`` is false on embedded and single-sign-out deployments.
+        A dead control is worse than none: it invites the click and then does
+        nothing.
+        """
+        markup = topbar_html("Ada Lovelace", None, None)
+
+        assert "Log out" not in markup
+        assert "<a " not in markup
+        assert "Ada Lovelace" in markup, "identity still shows"
 
     def test_01_313_the_pin_matches_the_element_that_can_actually_move(self):
         """Scenario 1.313: the pin lands on a flex child, not on a wrapper.
