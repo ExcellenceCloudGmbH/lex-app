@@ -14,7 +14,7 @@
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 13 | 74 | 18 | 2 | 0 |
-| 5. History & Bitemporal | 12 | 103 | 15 | 6 | 3 |
+| 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
@@ -137,6 +137,8 @@ Scenarios start at 1.336 rather than the 1.300 this batch first took: 1.300-1.30
 | 5k |  | 5.81-5.87 | complete | 0 | 3 | 1 | auto-skip — MetaHistorical* not wired; prod registration covered in unit tests |
 | 5l |  | 5.91-5.97 | planned | 0 | 0 | 0 | save side of the future-activation handoff (worker side = 8.43); scenarios 5.91–5.97, reuses `HistSimpleItem` |
 | 5m | Edit-time correctness + as_of time-travel round trip | 5.98-5.103 | complete | 5 | 0 | 1 | end-to-end edited_at → Z serialization → parse_as_of_datetime → get_queryset_as_of chain; 5.101 xfail(strict) pins BUG-026 (edited_at vs valid_from/sys_from clock-read gap) |
+| 5n | Reconcile floor (PR #695, in flight; reserved, not on this branch) | 5.104-5.109 | in-flight | 0 | 0 | 0 | allocated by PR #695 (feat/bitemporal-activation-reconcile); reserved here so 5o cannot collide with it when both merge |
+| 5o | In-database activation applier (pg_cron → lex_apply_due_activations()) | 5.110-5.129 | complete | 20 | 0 | 0 | the database applies future-dated changes; lex-app only records them and arms its legacy timer only while the applier heartbeat is stale. PostgreSQL only (auto-skip elsewhere). Design: docs/superpowers/specs/2026-09-16-bitemporal-activation-applier-design.md |
 
 ## 6. Audit Logging (`audit_logging`)
 

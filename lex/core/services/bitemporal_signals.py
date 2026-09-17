@@ -17,6 +17,7 @@ Level 2 (MetaHistory → MetaHistory):
 
 import logging
 import os
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -497,7 +498,39 @@ def on_meta_saved__chain_sys_to(
 def _schedule_future_activation(
     meta_instance, history_instance, main_model, model_name, now
 ):
-    """Schedule a Celery task (or local thread) to activate a future-dated record."""
+    """
+    Record that a future-dated history row is waiting to be activated.
+
+    The record of intent is the meta row: ``meta_task_status = "SCHEDULED"``. Who acts
+    on it depends on where lex-app is running:
+
+    * **The database applier is alive** — ``lex_apply_due_activations()`` (installed by
+      the ``lex.core`` migration, called every minute by pg_cron) has written its
+      heartbeat within the liveness window. The meta row is all that is needed; the
+      database converges the main row when ``valid_from`` arrives, whether or not any
+      lex-app process exists at that moment. No timer, no ``PeriodicTask``.
+    * **Otherwise** — SQLite, PostgreSQL without pg_cron, a job not registered yet — the
+      pre-existing in-process mechanisms are armed exactly as before: a Celery
+      ``PeriodicTask`` under ``CELERY_ACTIVE=true``, else the local scheduler thread.
+
+    Both routes converge to the same end state and are safe to run side by side.
+    Design: docs/superpowers/specs/2026-09-16-bitemporal-activation-applier-design.md.
+    """
+    from lex.core.services.activation_applier import applier_is_alive
+
+    if applier_is_alive(now=now):
+        # ── Database applier (pg_cron → lex_apply_due_activations()) ──
+        meta_instance.meta_task_status = "SCHEDULED"
+        meta_instance.meta_task_name = (
+            f"db_applier_{history_instance.pk}_{int(now.timestamp())}_{uuid.uuid4().hex[:8]}"
+        )
+        meta_instance.save(update_fields=["meta_task_status", "meta_task_name"])
+        logger.info(
+            "Activation of %s.%s history %s at %s left to the database applier",
+            main_model._meta.app_label, model_name, history_instance.pk,
+            history_instance.valid_from,
+        )
+        return
 
     if os.getenv("CELERY_ACTIVE", "false").lower() != "true":
         # ── Local in-process scheduler ──
@@ -515,12 +548,16 @@ def _schedule_future_activation(
             },
         )
         meta_instance.meta_task_status = "SCHEDULED"
-        meta_instance.meta_task_name = f"local_thread_{history_instance.pk}_{int(now.timestamp())}"
+        # The uuid suffix mirrors the Celery branch: re-chaining a future row
+        # (valid_to closed by a later save) re-schedules it, and two schedules of
+        # one row inside the same second must not collide on the unique name.
+        meta_instance.meta_task_name = (
+            f"local_thread_{history_instance.pk}_{int(now.timestamp())}_{uuid.uuid4().hex[:8]}"
+        )
         meta_instance.save(update_fields=["meta_task_status", "meta_task_name"])
     else:
         # ── Celery Beat scheduler ──
         import json
-        import uuid
         from django_celery_beat.models import ClockedSchedule, PeriodicTask
 
         if meta_instance.meta_task_name:

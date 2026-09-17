@@ -12,6 +12,7 @@ The control fields are prefixed with ``meta_`` to avoid collisions with
 the Level 1 fields that are copied into the MetaHistory model.
 """
 
+import hashlib
 import logging
 
 from django.db import models, transaction
@@ -72,6 +73,29 @@ def create_meta_history_record(
     )
     history_instance.save(using=using)
     return history_instance
+
+
+def scheduled_activation_index(table_name: str) -> models.Index:
+    """
+    The partial index both activation paths scan every minute, forever.
+
+    ``SELECT ... WHERE meta_task_status = 'SCHEDULED'`` runs per meta table per tick —
+    from the in-database applier (``lex_apply_due_activations()``), from the pending
+    view, and from the reconcile floor. ``SCHEDULED`` rows are transient and rare, so a
+    partial index is tiny and serves the scan and the ``DONE`` flip alike. Declared on
+    the generated model, so every customer repository picks it up as one ``AddIndex``
+    migration per meta table on its next ``makemigrations``. Correctness never depends
+    on it; only the cost of the scan does.
+
+    The name is derived from the table name (Django caps index names at 30 characters
+    and they must be unique per database).
+    """
+    digest = hashlib.md5(table_name.encode("utf-8")).hexdigest()[:12]
+    return models.Index(
+        fields=["history_object"],
+        condition=models.Q(meta_task_status="SCHEDULED"),
+        name=f"lexsched_{digest}",
+    )
 
 
 class MetaLevelHistoricalRecords(HistoricalRecords):
@@ -170,6 +194,11 @@ class MetaLevelHistoricalRecords(HistoricalRecords):
         meta_fields = super().get_meta_options(model)
         meta_fields["ordering"] = ("-sys_from", "-meta_history_id")
         meta_fields["get_latest_by"] = ("sys_from", "meta_history_id")
+        table_name = self.table_name or f"{model._meta.db_table}_meta_history"
+        meta_fields["indexes"] = [
+            *meta_fields.get("indexes", ()),
+            scheduled_activation_index(table_name),
+        ]
         return meta_fields
 
     # ------------------------------------------------------------------

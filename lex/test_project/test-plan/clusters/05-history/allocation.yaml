@@ -1,7 +1,7 @@
 cluster: 5
 slug: history
 title: History & Bitemporal
-max_scenario: 103
+max_scenario: 129
 letters:
   a:
     title: ''
@@ -118,3 +118,21 @@ letters:
       xfail: 1
     note: end-to-end edited_at → Z serialization → parse_as_of_datetime → get_queryset_as_of chain;
       5.101 xfail(strict) pins BUG-026 (edited_at vs valid_from/sys_from clock-read gap)
+  n:
+    title: "Reconcile floor (PR #695, in flight; reserved, not on this branch)"
+    scenarios: 5.104-5.109
+    status: in-flight
+    tests:
+      pass: 0
+      skip: 0
+      xfail: 0
+    note: "allocated by PR #695 (feat/bitemporal-activation-reconcile); reserved here so 5o cannot collide with it when both merge"
+  o:
+    title: In-database activation applier (pg_cron → lex_apply_due_activations())
+    scenarios: 5.110-5.129
+    status: complete
+    tests:
+      pass: 20
+      skip: 0
+      xfail: 0
+    note: "the database applies future-dated changes; lex-app only records them and arms its legacy timer only while the applier heartbeat is stale. PostgreSQL only (auto-skip elsewhere). Design: docs/superpowers/specs/2026-09-16-bitemporal-activation-applier-design.md"

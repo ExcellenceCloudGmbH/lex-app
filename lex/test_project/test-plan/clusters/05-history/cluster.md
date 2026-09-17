@@ -45,3 +45,36 @@
 **Why a regression matters:** `as_of` answers "what did this record look like before the edit?" — audit-grade functionality customers explicitly rely on.
 
 **Scenario range:** 5.98 – 5.103. **Test file:** `lex/test_project/tests/history/test_5m_asof_edit_time.py`. **Type:** E. **Status:** ✅ Complete — 5 pass; 5.101 `xfail(strict)` pins **BUG-026** (`edited_at` vs history-window clock-read gap; anchoring `as_of` at a record's own `edited_at` misses the edit).
+
+---
+
+### 5o. In-database activation applier ✅
+
+**What it tests:** that a future-dated change lands at its instant with no lex-app process involved. lex-app records intent — a full-snapshot history row with a future `valid_from` and a `SCHEDULED` meta row — and PostgreSQL applies it: `lex_apply_due_activations()` (installed by the `core` migration, called every minute by a pg_cron job the instance controller registers) discovers the bitemporal tables from the catalog, converges each due record to the history row effective *now*, flips its meta rows to `DONE` in place, and writes a heartbeat. At save time lex-app reads that heartbeat and arms its legacy in-process timer only while the applier is not alive.
+
+**Why a regression matters:** 47 of 53 instances lose their in-process timer on every restart (design §2.1); a correctly scheduled fee, rate or status then never arrives, and a wrong calculation weeks later is the first sign.
+
+**Scenario range:** 5.110 – 5.129. **Test file:** `lex/test_project/tests/history/test_5o_activation_applier.py`. **Type:** I (PostgreSQL only). **Status:** ✅ Complete — 20 pass. **Design:** `docs/superpowers/specs/2026-09-16-bitemporal-activation-applier-design.md`.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 5.110 | Future save, applier alive | Meta `SCHEDULED` named `db_applier_*`; no local timer; no `PeriodicTask` under `CELERY_ACTIVE=true`; main row untouched |
+| 5.111 | Future save, applier not alive | Legacy behaviour intact: local timer armed once, `local_thread_*` name; a stale heartbeat counts as not alive; the window is configurable |
+| 5.112 | Discovery from the catalog | Fixture triple found with `pk_column`, content-type rows deleted first; the partial `SCHEDULED` index exists on the meta table |
+| 5.113 | Quoted mixed-case names | A capitalised triple built in SQL is discovered, applied and flipped |
+| 5.114 | Incomplete triple | Skipped with a `NOTICE` naming it; the fixture's due row still applies |
+| 5.115 | Pending view around a tick | Due and future rows listed with the right flag before; only the future one after |
+| 5.116 | Pending age | A row due for 400 days reports `due_for ≥ 399 days` |
+| 5.117 | Happy path | Main converged, meta `DONE`, heartbeat `applied=1 failed=0`, `applier_is_alive()` true |
+| 5.118 | Supersede | Later due change wins; both rows flipped |
+| 5.119 | Cancelled and orphan rows | Untouched; orphan visible in the pending view with no pk |
+| 5.120 | Several due rows | Converge to the effective row; one record counted; every SCHEDULED version flipped |
+| 5.121 | Deletion | `history_type='-'` removes the main row |
+| 5.122 | Due for a year | Applied, not skipped |
+| 5.123 | Parity with the Python task | Every shared column equals the snapshot on both paths; no history row minted; Django's table names ⊆ catalog discovery |
+| 5.124 | Pure data write | Other model rows, history count and meta version count unchanged |
+| 5.125 | Meta flip mirror | Every `SCHEDULED` version → `DONE`; `NONE` version untouched; no new version |
+| 5.126 | Instant, not wall clock | +05:00 past instant applied; −05:00 future instant not |
+| 5.127 | Idempotence | Second tick applies 0; Python task after the applier changes nothing |
+| 5.128 | Poison record | Healthy record applied; poison stays `SCHEDULED`; heartbeat `failed=1`; `WARNING` names it |
+| 5.129 | The boundary | One `SELECT` between save and final state; Python entry points instrumented to fail; three tables final |

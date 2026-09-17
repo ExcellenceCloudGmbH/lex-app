@@ -233,11 +233,33 @@ class E2ETestCase(TransactionTestCase):
         )
         self._env_patch.start()
 
+        # The in-database activation applier leaves a heartbeat row that flips
+        # future-dated saves from "arm a timer" to "leave it to the database"
+        # (lex.core.services.activation_applier). It is not a Django model, so
+        # the flush between tests never removes it, and with --keepdb it even
+        # survives runs. Clear it so every test starts from "no applier here";
+        # a test that wants a live applier writes the heartbeat itself.
+        self._clear_activation_heartbeat()
+
     def tearDown(self):
+        self._clear_activation_heartbeat()
         self._env_patch.stop()
         for p in self._patch_objs:
             p.stop()
         super().tearDown()
+
+    @staticmethod
+    def _clear_activation_heartbeat():
+        if connection.vendor != "postgresql":
+            return
+        from django.db import DatabaseError, transaction
+        from lex.core.services.activation_applier import clear_heartbeat
+
+        try:
+            with transaction.atomic():
+                clear_heartbeat()
+        except DatabaseError:
+            pass  # table not migrated in this database: nothing to clear
 
     # ── Pass B3 fixture helpers ──────────────────────────────────────
 
