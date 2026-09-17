@@ -829,7 +829,7 @@ letters:
     scenarios: 1.309-1.315
     status: complete
     tests:
-      pass: 28
+      pass: 30
       skip: 0
       xfail: 0
     note: >-
@@ -891,17 +891,31 @@ letters:
       cluster: assertions that forbid a property were tripping on COMMENTS explaining why that
       property was rejected. _rules_only() strips comments before asserting, so documenting a
       rejected approach no longer fails the test that rejects it.
-      1.315 removes the sidebar entirely when lex-app frames the page, on the user's instruction
-      that "when streamlit is being embedded in lex-app, the sidebar should never exists". lex-app
-      already draws a sidenav, the logo, the signed-in user and a way out immediately to the left
-      of the frame; a second sidebar inside it is the same furniture twice, and the inner one
-      navigates a different app. Gone rather than collapsed - collapsing leaves a control that
-      reopens a panel the host never wanted - and the expand control and the content column's left
-      offset go with it, or the page keeps a gutter for furniture that is not there. Decided in
-      Python, not only in CSS, so the chrome is never BUILT: a hidden logo is still an st.logo call
-      and a hidden account block still renders a display name into the page. EMBEDDED is read
-      BEFORE the try, because the finally consults it - computing it inside would have made an
-      early failure raise NameError from the cleanup path and bury the real error.
+      1.315 now opens a framed page with its sidebar COLLAPSED, reversing this scenario's own
+      earlier decision. It first removed the sidebar outright, on the instruction that "when
+      streamlit is being embedded in lex-app, the sidebar should never exists" - lex-app already
+      draws a sidenav, the logo, the signed-in user and a way out immediately to the left of the
+      frame, so a second sidebar inside it was the same furniture twice. That held until users
+      asked for the page's own navigation back, and both readings are right: the host's chrome is
+      what you should see, and the page's own should be reachable. Collapsed satisfies both, and
+      it is the state the original decision rejected - "collapsing leaves a control that reopens a
+      panel the host never wanted" was true when the host wanted no panel at all.
+      Done with Streamlit's own `initial_sidebar_state` rather than CSS, because collapsed is React
+      state: CSS can hide a panel but cannot collapse one, and hiding the panel while leaving the
+      expand control is a button that opens nothing - which is why the old rules had to hide that
+      control too. That retires both the hide stylesheet and its framing-detection JS fallback;
+      there is nothing left to hide, and the parameter path shipped in v2.2.0. Reading the
+      parameter before `st.set_page_config` is safe because Streamlit no longer requires it to be
+      the first command - verified against 1.61's source, which has neither the guard nor the
+      exception class. EMBEDDED is still read BEFORE the try, because the finally consults it.
+      The move forced the account out of the sidebar, which is 1.315's second half and the reason
+      the top bar exists: a sign-out inside a collapsed panel is a sign-out nobody can reach. The
+      bar renders in the content column, which cannot be collapsed, and FIRST - so the way out is
+      on screen before main() can fail, the property the old `finally` placement was protecting.
+      It sets no background and no text colour, inheriting the page theme, because unlike the
+      always-navy sidebar the content column follows Streamlit's light/dark. `render_account` is
+      kept and still tested, but no longer called: an app that wants an inline account block can
+      still ask for one.
       The signal is an explicit `lex_embed=true` (added in StreamlitIframe.tsx) rather than an
       inference: is_logout_enabled=false and auth_token both correlate with being framed today, but
       they mean other things, and a signal that is true by coincidence stops being true the moment
