@@ -56,9 +56,12 @@ def main(argv: list[str]) -> int:
     api_key = os.environ.get("SENDGRID_API_KEY")
     recipients_raw = os.environ.get("SHOWCASE_REPORT_RECIPIENTS", "")
     sender = os.environ.get("SHOWCASE_REPORT_FROM")
-    sender_name = os.environ.get("SHOWCASE_REPORT_FROM_NAME",
-                                 "Platform Health")
-    brand = os.environ.get("SHOWCASE_BRAND", "Excellence Cloud")
+    # `or`, not a get() default: a workflow that passes an unset secret or var
+    # sets the key to the EMPTY STRING, so the key is present and get()'s
+    # default never applies. That is how every report came to be sent with a
+    # blank sender name.
+    sender_name = os.environ.get("SHOWCASE_REPORT_FROM_NAME") or "Platform Health"
+    brand = os.environ.get("SHOWCASE_BRAND") or "Excellence Cloud"
 
     missing = [
         name for name, val in [
