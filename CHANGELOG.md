@@ -1,3 +1,27 @@
+## [2.2.1] - 2026-09-17
+
+> **Frontend changes for this release are not yet recorded.**
+
+### Added
+- **backend** depend on lex-app-frontend instead of vendoring it ([b6e609f6](https://github.com/ExcellenceCloudGmbH/lex-app/commit/b6e609f6)) (#766)
+
+### Fixed
+- **backend** restore the lex.py helpers the tests import, and the plan shards one merge truncated ([6c1c1fab](https://github.com/ExcellenceCloudGmbH/lex-app/commit/6c1c1fab)) (#759)
+- **backend** make a relayed response legal over HTTP/2, not just over HTTP/1.1 ([78132b99](https://github.com/ExcellenceCloudGmbH/lex-app/commit/78132b99)) (#758)
+- **backend** derive the session key from DJANGO_SECRET_KEY, and stop refusing to boot ([6d935520](https://github.com/ExcellenceCloudGmbH/lex-app/commit/6d935520))
+
+### Changed
+- **backend** Take the frontend from PyPI ([b87c03be](https://github.com/ExcellenceCloudGmbH/lex-app/commit/b87c03be)) (#782)
+- **backend** Release notes: the frontend half was wrong in three ways ([268df5a2](https://github.com/ExcellenceCloudGmbH/lex-app/commit/268df5a2)) (#771)
+- **backend** The wheel stops shipping a frontend it no longer serves ([905d3df7](https://github.com/ExcellenceCloudGmbH/lex-app/commit/905d3df7)) (#779)
+- **backend** Update run_command.yml ([247a045e](https://github.com/ExcellenceCloudGmbH/lex-app/commit/247a045e))
+- **backend** Run one bash command on a runner and hand back its output ([9caf34ce](https://github.com/ExcellenceCloudGmbH/lex-app/commit/9caf34ce)) (#773)
+- **backend** Declare the filtering, grouping, saved-view and export figures ([f21cc41c](https://github.com/ExcellenceCloudGmbH/lex-app/commit/f21cc41c)) (#772)
+- **backend** The mirror pushes now, but cannot open its pull request ([e9cbe8eb](https://github.com/ExcellenceCloudGmbH/lex-app/commit/e9cbe8eb)) (#769)
+- **backend** Declare the navigation, density and dark-mode figures ([63af3749](https://github.com/ExcellenceCloudGmbH/lex-app/commit/63af3749)) (#767)
+- **backend** Check what the docs claim against the source, un-break the mirror, and follow the restructure ([0ce807b0](https://github.com/ExcellenceCloudGmbH/lex-app/commit/0ce807b0)) (#765)
+- **backend** Fix the scripts test that fails on every PR and passes on every laptop ([d206eb5c](https://github.com/ExcellenceCloudGmbH/lex-app/commit/d206eb5c)) (#763)
+
 ## [2.2.0] - 2026-09-08
 
 > **Frontend changes for this release are not yet recorded.**
