@@ -62,7 +62,10 @@ You don't need to define or manage any of the following — they're inherited fr
 
 - **`is_calculated`** — the state field
 - **Recursion guard** — prevents re-entrant calculation loops
-- **Error capture** — exceptions are caught and stored in `calculation_error_message`
+- **Error capture** — exceptions are caught, the traceback is written to your
+  model's `calculation_error_message` (or `error_message`) field **if you declare
+  one**, and `is_calculated` becomes `ERROR` either way. `CalculationModel` adds
+  only `is_calculated`; without a message field the detail is in the logs alone
 - **Auto-save** — the record is saved automatically after `calculate()` returns
 - **Non-blocking trigger** — clicking **Calculate** returns the record in `IN_PROGRESS`, then the UI updates again when the run finishes
 - **Cancellation handling** — running Celery-backed calculations can be stopped cleanly from the UI/API
@@ -73,14 +76,22 @@ You don't need to define or manage any of the following — they're inherited fr
 > If your calculation creates one output per combination (e.g., one liability per award per upload), see [[calculations/batch calculations|Batch Calculations]] — `CalculatedModelMixin` handles the combination generation, deduplication, and parallel dispatch for you.
 
 > [!info]- How the state machine works internally
-> The `CalculationModel` base class uses `@hook(AFTER_UPDATE)` on the `is_calculated` field. When it transitions to `IN_PROGRESS`, the framework calls `calculate_hook()` which:
+> `calculate_hook()` carries **two** hooks — `@hook(AFTER_UPDATE)` and
+> `@hook(AFTER_CREATE)`, both conditioned on `is_calculated == IN_PROGRESS`. The
+> create hook is why a record that is *born* in `IN_PROGRESS` calculates too,
+> rather than only one edited into it.
 >
-> 1. Sets `is_calculated = IN_PROGRESS`
-> 2. Decides whether to hand the work to Celery or run it in-process (`should_use_celery()`)
-> 3. Calls your `calculate()` method
-> 4. On success: sets `is_calculated = SUCCESS` and saves
-> 5. On cancellation: sets `is_calculated = CANCELLED`
-> 6. On other exceptions: sets `is_calculated = ERROR`, stores the traceback in `calculation_error_message`, and saves
+> `IN_PROGRESS` is already committed before the hook runs — `save()` persists it
+> in its own transaction and then calls the hook outside that transaction, so
+> the state is visible to other readers while the work happens. The hook then:
+>
+> 1. Returns immediately if `save()` deferred it — that deferral is what stops a save made inside `calculate()` from re-entering the hook
+> 2. Broadcasts the status over the websocket
+> 3. Decides whether to hand the work to Celery or run it in-process (`should_use_celery()`)
+> 4. Calls your `calculate()` method
+> 5. On success: sets `is_calculated = SUCCESS` and saves
+> 6. On cancellation: sets `is_calculated = CANCELLED`
+> 7. On other exceptions: sets `is_calculated = ERROR`, writes the traceback to `calculation_error_message` if your model has one, and saves
 >
 > You never need to manage this yourself.
 

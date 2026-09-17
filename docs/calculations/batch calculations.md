@@ -238,7 +238,18 @@ The framework checks `CELERY_ACTIVE` and whether `calculate()` has been decorate
 
 The dispatcher has **multi-level fallback for dispatch failures**: if a single group can't be dispatched, that group is processed synchronously while others continue on Celery. If Celery itself is unreachable, the entire batch falls back to synchronous processing.
 
-A *calculation* error is different from a *dispatch* error. As soon as any model's `calculate()` or `save()` raises, the batch **aborts immediately** — the framework raises `CalculatedModelError` and stops processing the remaining models rather than skipping the failure and continuing. (Empty `None` slots are the only thing skipped.) This fail-fast behavior keeps a half-finished batch from silently committing partial results.
+A *calculation* error behaves differently on each path, and the difference
+matters when you are deciding whether a half-finished batch is possible.
+
+**Synchronously**, it is fail-fast: the first model whose `calculate()` or
+`save()` raises stops the batch with `CalculatedModelError`, and the remaining
+models are not processed. (Empty `None` slots are the only thing skipped.)
+
+**On Celery**, a task that raises does not stop anything. Its entire group is
+added to a synchronous retry queue and re-run with `calc_and_save_sync` —
+including the models in that group that had already succeeded, whose
+`calculate()` therefore runs twice. Only a failure of the retry propagates. If
+your `calculate()` is not idempotent, this is the path to think about.
 
 ## CalculatedModelMixin vs. CalculationModel
 

@@ -3,7 +3,6 @@ title: "Part 2 — Sequential Analysis"
 description: "Build a CalculationModel that analyses inventory for one warehouse at a time."
 ---
 
-# Part 2 — Sequential Analysis
 
 > **Goal:** Create an `InventoryOptimizer` that analyses a single
 > warehouse — safety stock, EOQ, reorder points — using `CalculationModel`.
@@ -25,7 +24,7 @@ stateDiagram-v2
 The user:
 1. Creates a record (selects a warehouse)
 2. Clicks **Calculate**
-3. LEX calls `calculate()`, updates `is_calculated` status
+3. Lex App calls `calculate()`, updates `is_calculated` status
 4. Results appear in the Calculation Log
 
 ## The InventoryOptimizer

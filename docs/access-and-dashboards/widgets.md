@@ -75,6 +75,12 @@ Widget count is free; block count is not. Both sides above render the same three
 controls, and the right-hand one boots three React applications that contend for
 the same network and main thread.
 
+![One block, three widgets: the control at SUCCESS, the live log streaming a table, and the execution tree](images/streamlit/widgets.png)
+
+One block, three widgets, after the run. The control carries the status, the
+live log has the calculation's own `LexLogger` output in it, and the execution
+tree and consolidated log below are the same run seen two other ways.
+
 `lex_widgets()` and the flat calls are the same code path — the flat form enters and exits the block in one call. There is one manifest builder and one host, so the two cannot drift apart in what they think a widget is.
 
 ## Shaping a control
@@ -113,9 +119,21 @@ With `on_status=True`, the call returns the latest status envelope, so the rest 
 
 ```python
 status = lex_calculation("navcalc", pk=1, on_status=True)
-if status and status.get("state") == "SUCCESS":
+if status and status["payload"]["status"] == "SUCCESS":
     st.success("Recalculated — the figures below are current.")
 ```
+
+The envelope has the same shape as the one
+[[access-and-dashboards/lex_view callbacks#The event envelope|`lex_view` returns]]:
+
+| Key | Meaning |
+|---|---|
+| `type` | `"calculation_status"`. Worth checking — every envelope type shares one component value, so a click on the log button arrives here too, and its payload has no `status` key |
+| `id` | A unique event id, used to de-duplicate across re-runs |
+| `payload.widget_id` | Which widget this is about, when a block has several |
+| `payload.status` | The calculation's state — `SUCCESS`, `ERROR`, `IN_PROGRESS`, and the rest of the [[calculations/calculation models#The State Machine|state machine]] |
+
+It arrives on the **next** rerun, not during the one that started the run.
 
 ## Two hosts on one page
 
@@ -129,10 +147,15 @@ with lex_widgets(key="bottom") as page: ...
 You rarely need to set widget ids yourself. An id is derived from what the widget is *about* — its kind, model and primary key — not from its position, so putting a widget behind an `if` does not renumber the ones after it. Ids used to be positional, and on the rerun where such a condition flipped, a status envelope could be routed to the wrong widget.
 
 > [!warning] A malformed widget raises rather than rendering blank
-> `WidgetSpecError` is raised when a spec cannot be built — an unknown model,
-> a missing primary key. It surfaces on the Streamlit page as an exception
-> rather than an empty frame, because an empty frame looks like a loading
-> state and gets waited on.
+> `WidgetSpecError` is raised when the *spec* cannot be built — a misspelled
+> option, a `variant` that is not `"full"` or `"action"`, `fields` given as a
+> bare string instead of a list, a non-positive `log_height`, or two widgets
+> claiming the same id. It surfaces as an exception rather than an empty frame,
+> because an empty frame looks like a loading state and gets waited on.
+>
+> A model or primary key that does not *exist* is a different case and does not
+> raise: that widget renders an error card and its siblings keep working. The
+> spec was well-formed; the record was not there.
 
 ## Related
 

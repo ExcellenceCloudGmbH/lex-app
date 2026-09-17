@@ -3,7 +3,6 @@ title: "Part 3 — Batch Processing"
 description: "Use CalculatedModelMixin to generate all warehouse × product forecasts in one click."
 ---
 
-# Part 3 — Batch Processing
 
 > **Goal:** Use `CalculatedModelMixin` to automatically generate and
 > compute 96 demand forecasts (8 warehouses × 12 products) — all from
@@ -39,7 +38,7 @@ class DemandForecast(CalculatedModelMixin):
     product_category = models.ForeignKey(ProductCategory, on_delete=models.CASCADE)
 
     defining_fields = ["warehouse", "product_category"]
-    #                    ↑ This tells LEX which fields to cross-product
+    #                    ↑ This tells Lex App which fields to cross-product
 
     # Computed outputs
     forecast_units_next_quarter = models.FloatField(default=0)
@@ -51,7 +50,7 @@ class DemandForecast(CalculatedModelMixin):
 
 ### How `defining_fields` Works
 
-When you call `DemandForecast.create()`, LEX:
+When you call `DemandForecast.create()`, Lex App:
 
 1. **Reads all Warehouses** (8) and all ProductCategories (12)
 2. **Generates the cartesian product** → 96 combinations

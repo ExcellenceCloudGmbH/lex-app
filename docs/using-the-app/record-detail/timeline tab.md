@@ -38,7 +38,7 @@ Switch to the **Effective Time** view to see when data was *actually valid* in t
 This distinction matters in industries where backdated corrections are common — finance, insurance, regulatory reporting. The timeline shows both "what we recorded" and "what was actually true."
 
 > [!tip]
-> To see the As-Of time-travel in action on a familiar grid view, check the [[using-the-app/record-detail/history tab|History tab]] — it uses the same control over a full AG Grid table.
+> To see the As Of time-travel in action on a familiar grid view, check the [[using-the-app/record-detail/history tab|History tab]] — it uses the same control over a full AG Grid table.
 
 ## Inspecting a Version
 

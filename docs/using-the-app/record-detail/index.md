@@ -33,7 +33,7 @@ An embedded [Streamlit](https://docs.streamlit.io/) dashboard scoped to this spe
 A visual timeline of every change this record has gone through. See who changed what, when, and compare versions side-by-side in a detail drawer.
 
 ### [[using-the-app/record-detail/history tab|History]]
-The full history of all versions of this record, displayed in a grid. Use the **As-Of** control to time-travel — see what this record looked like at any point in the past.
+The full history of all versions of this record, displayed in a grid. Use the **As Of** control to time-travel — see what this record looked like at any point in the past.
 
 ### [[using-the-app/record-detail/audit log tab|Audit Log]]
 All operations (create, update, delete) that have been performed on this record, with the author, timestamp, and full payload for each event.

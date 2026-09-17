@@ -3,14 +3,13 @@ title: "Part 4 — Parallelisation"
 description: "Add parallelizable_fields and @lex_shared_task to achieve 5-8× speedup."
 ---
 
-# Part 4 — Parallelisation
 
-> **Goal:** Take the exact same forecast model from Step 3, add **two
+> **Goal:** Take the exact same forecast model from Part 3, add **two
 > lines**, and watch it run 5–8× faster with Celery workers.
 
 ## The Two-Line Change
 
-Compare `DemandForecast` (Step 2) with `DemandForecastParallel` (Step 3):
+Compare `DemandForecast` (Part 3) with `DemandForecastParallel` (this part):
 
 ```diff
   class DemandForecastParallel(CalculatedModelMixin):
@@ -77,7 +76,7 @@ graph TD
     style W4 fill:#2196F3,color:white
 ```
 
-LEX's `ModelClusterManager`:
+Lex App's `ModelClusterManager`:
 1. Groups the 96 records by `warehouse` → **8 groups of 12**
 2. Dispatches each group as a Celery task
 3. Each worker processes its 12 products sequentially (~1.5 s)
@@ -112,13 +111,13 @@ redis-server
 export CELERY_ACTIVE=true
 lex celery worker --concurrency=4
 
-# Terminal 3: Start the LEX app
+# Terminal 3: Start the Lex App app
 export CELERY_ACTIVE=true
 lex start
 ```
 
 > [!important] Both app and workers need CELERY_ACTIVE=true
-> Without it, LEX falls back to synchronous execution and you won't
+> Without it, Lex App falls back to synchronous execution and you won't
 > see any speedup.
 
 ## Try It — Side by Side Comparison

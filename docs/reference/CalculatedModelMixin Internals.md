@@ -17,7 +17,7 @@ For the conceptual guide with examples and patterns, see [[calculations/batch ca
 
 | Attribute | Type | Default | Purpose |
 |---|---|---|---|
-| `defining_fields` | `List[str]` | `[]` | Field names that form the combination axes. A `UniqueConstraint` is created automatically. |
+| `defining_fields` | `List[str]` | **required** | Field names that form the combination axes. A `UniqueConstraint` is created automatically. Must appear in every subclass's class body — the metaclass reads it directly, so omitting it fails at import with `KeyError: 'defining_fields'`. Write `defining_fields = []` if you have no axes. |
 | `parallelizable_fields` | `List[str]` | `[]` | Subset of `defining_fields` used to group models for Celery dispatch. |
 | `input` | `bool` | `False` | Whether this model accepts external input data. |
 
@@ -25,7 +25,7 @@ For the conceptual guide with examples and patterns, see [[calculations/batch ca
 
 ### `get_selected_key_list(key: str) → list`
 
-Returns the possible values for a single defining field. Called once per field during combination generation.
+Returns the possible values for a single defining field. Called once per field **per partially-built combination** — not once per field overall. That is what lets a later field depend on an earlier one: `self` already carries the fields resolved before it.
 
 ```python
 def get_selected_key_list(self, key: str) -> list:
@@ -93,7 +93,17 @@ Checks `CELERY_ACTIVE` environment variable and whether `calculate()` has a `.de
 
 In both paths, the framework sets logging context for the currently executing child model automatically.
 
-Failed Celery *dispatch* (the broker is unreachable, or a single group's `.delay()` call fails) falls back to synchronous processing. A calculation error raised *inside* a task does not fall back — it aborts the batch.
+Failed Celery *dispatch* (the broker is unreachable, or a single group's `.delay()` call fails) falls back to synchronous processing.
+
+A calculation error raised *inside* a task also falls back, and this is worth
+knowing before you rely on either behaviour: `CeleryTaskDispatcher` adds that
+task's **whole group** to a synchronous retry queue and re-runs it with
+`calc_and_save_sync`. Models in the group that already succeeded have their
+`calculate()` called a second time. Only a failure of that synchronous retry
+propagates.
+
+Fail-fast applies to the **synchronous** path: there, the first `calculate()`
+or `save()` that raises stops the batch.
 
 ## The `CalculatedModelMixinMeta` Metaclass
 
@@ -113,7 +123,7 @@ class Meta:
 
 1. If `calculate_mixin()` is overridden → use it
 2. Otherwise if `calculate()` is overridden → use it
-3. Otherwise → `NotImplementedError`
+3. Otherwise → **nothing happens**. `calculate()` is declared `@abstractmethod`, but the metaclass is Django's `ModelBase` rather than `ABCMeta`, so the decorator is inert: the call is a no-op, the combination is still generated, and the row is saved with default field values. There is no error and no warning — a batch that produces blank rows is usually this.
 
 In practice, always override `calculate()`. The `calculate_mixin()` path exists for internal framework use.
 

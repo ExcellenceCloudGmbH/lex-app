@@ -16,11 +16,16 @@ When you open the Analytics tab, the application:
 
 From your perspective, it's one click: grid → record → Analytics tab. No context switching, no new browser tabs, no re-authentication.
 
+<!-- 🎬 TODO: grid → record → Analytics tab, showing the dashboard load.
+     Blocked on the same thing as the screenshot below: the Streamlit proxy
+     validates a Keycloak JWT and the capture harness signs in with a Django
+     admin session. Uncomment once the fixture can issue one.
 > [!example]- 🎬 Video — Grid to record to Analytics tab
 > <video controls width="100%">
 >   <source src="../../videos/record-analytics-tab.mp4" type="video/mp4">
 > </video>
 > Click from the grid to a record, switch to the Analytics tab, see the Streamlit dashboard load.
+-->
 
 ## Table-Level vs. Record-Level
 

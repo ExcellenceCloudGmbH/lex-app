@@ -1,11 +1,10 @@
 ---
 title: "Part 1 — Data Ingestion"
-description: "Create CSV upload models that read test data into LEX dimension tables."
+description: "Create CSV upload models that read test data into Lex App dimension tables."
 ---
 
-# Part 1 — Data Ingestion
 
-> **Goal:** Upload 4 CSV files into LEX using Upload models, populating
+> **Goal:** Upload 4 CSV files into Lex App using Upload models, populating
 > Warehouse, ProductCategory, Supplier, and ShipmentRecord tables.
 
 ## Test Data
@@ -44,7 +43,7 @@ Workshop/Input/
 ```
 
 > [!note] One model per file
-> LEX convention: each model lives in its own `.py` file, named after the
+> Lex App convention: each model lives in its own `.py` file, named after the
 > class.  The framework auto-discovers them — no need for `app_label`.
 
 ### ShipmentRecord — The Key Model
@@ -67,7 +66,7 @@ class ShipmentRecord(LexModel):
 
 ## Upload Models (Upload/)
 
-Upload models follow the LEX pattern: extend `LexModel`, add a `FileField`,
+Upload models follow the Lex App pattern: extend `LexModel`, add a `FileField`,
 and use `@hook(AFTER_SAVE)` to process the file on save.
 
 ```
@@ -154,7 +153,7 @@ breakdowns, and delivery performance statistics.
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant UI as LEX UI
+    participant UI as Lex App UI
     participant M as Upload Model
     participant DB as Database
 

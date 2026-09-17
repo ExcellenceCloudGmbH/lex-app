@@ -20,12 +20,6 @@ Every column header has a built-in filter. Click the menu icon on any column to 
 | **Boolean** | True / False / All | Show only *approved* expenses |
 | **Foreign Key** | Dropdown of related records | Filter by a specific team or employee |
 
-> [!example]- 🎬 Video — Column filtering in action
-> <video controls width="100%">
->   <source src="../../videos/grid-column-filter.mp4" type="video/mp4">
-> </video>
-> Open a column filter on the Amount column, type a value to filter, see the grid update instantly.
-
 ### Text Filters
 
 For text columns, simply start typing in the filter input. The grid filters as you type — no need to press Enter. You can also use the condition dropdown for more specific matches:

@@ -55,10 +55,10 @@ Above every grid is a toolbar that gives you quick access to key actions:
 |---|---|
 | **View Selector** | Switch between saved views or create new ones |
 | **Settings** (gear) | Density, display and column options, and per-column number formats — see [[using-the-app/the-grid/table settings\|Table Settings]] |
-| **As-Of** | Time-travel to see data as it existed at any point in the past |
+| **As Of** | Time-travel to see data as it existed at any point in the past |
 | **Export** | Download the current view as Excel or CSV |
 | **Calculate** | Trigger calculations on selected records (for calculation models) |
-| **Abort** | Stop an in-progress calculation — appears next to the spinner while a calculation is running |
+| **Cancel** | Stop an in-progress calculation — appears next to the spinner while a calculation is running |
 | **Add Record** | Create a new entry inline or via form |
 
 ## Inline Editing
