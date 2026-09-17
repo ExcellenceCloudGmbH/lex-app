@@ -33,6 +33,25 @@ from check_doc_imports import REPO, mirror_owned_paths, warn_if_behind  # noqa: 
 
 CLI_SOURCE = REPO / "lex" / "bin" / "lex.py"
 
+# Directories that sit inside `lex/` on a working copy and are not the package.
+# A clean CI checkout has none of them, which is why this was missing: the scan
+# was correct in the only place it ever ran. Locally `lex/` holds `.venv-test`
+# and `.claude/worktrees`, so this glob found Django's OWN management commands
+# in site-packages and reported `lex collectstatic`, `lex runserver` and 36
+# others as undocumented framework commands.
+_NOT_THE_PACKAGE = {
+    ".venv", ".venv-test", "venv", "site-packages", "node_modules",
+    ".claude", ".git", "__pycache__", "build", "dist", ".tox", ".mypy_cache",
+}
+
+
+def management_commands(root: Path):
+    """Management-command modules that this package actually ships."""
+    for path in root.rglob("management/commands/*.py"):
+        if _NOT_THE_PACKAGE.isdisjoint(path.parts):
+            yield path
+
+
 #: Django ships these; the CLI forwards anything it does not implement itself.
 DJANGO_BUILTINS = {
     "changepassword", "check", "collectstatic", "compilemessages", "createcachetable",
@@ -64,7 +83,7 @@ def known_commands() -> set[str]:
     names = set(DJANGO_BUILTINS)
     if CLI_SOURCE.is_file():
         names |= set(COMMAND_NAME.findall(CLI_SOURCE.read_text(encoding="utf-8")))
-    for path in (REPO / "lex").rglob("management/commands/*.py"):
+    for path in management_commands(REPO / "lex"):
         if path.name != "__init__.py":
             names.add(path.stem)
     return names
@@ -130,7 +149,7 @@ def coverage(pages: list[Path], commands: set[str]) -> int:
     """
     ours = {
         p.stem
-        for p in (REPO / "lex").rglob("management/commands/*.py")
+        for p in management_commands(REPO / "lex")
         if p.name != "__init__.py" and not p.name.startswith("test_")
     }
     ours |= set(COMMAND_NAME.findall(CLI_SOURCE.read_text(encoding="utf-8")))

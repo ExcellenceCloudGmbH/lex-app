@@ -33,6 +33,26 @@ from check_doc_imports import REPO, mirror_owned_paths, warn_if_behind  # noqa: 
 
 PACKAGE = REPO / "lex"
 
+# Directories that are inside `lex/` on a working copy and are not the package.
+# A clean CI checkout has none of them, which is exactly why this was missing:
+# the scan was correct in the only place it ever ran. Locally `lex/` holds
+# `.venv-test` (12k site-packages files) and `.claude/worktrees` (13k more), and
+# the env-var gate went from 126 variables to 467 -- reporting ARROW_HOME and
+# XDG_VIDEOS_DIR as framework configuration. Anything that ever vendors Python
+# under `lex/` would do the same to CI.
+_NOT_THE_PACKAGE = {
+    ".venv", ".venv-test", "venv", "site-packages", "node_modules",
+    ".claude", ".git", "__pycache__", "build", "dist", ".tox", ".mypy_cache",
+}
+
+
+def package_sources(root: Path):
+    """Every .py file that is actually part of the shipped package."""
+    for path in root.rglob("*.py"):
+        if _NOT_THE_PACKAGE.isdisjoint(path.parts):
+            yield path
+
+
 LITERAL = re.compile(
     r"""os\.(?:environ\.get|getenv)\(\s*["']([A-Z][A-Z0-9_]{2,})["']"""
     r"""|os\.environ\[\s*["']([A-Z][A-Z0-9_]{2,})["']\s*\]"""
@@ -69,7 +89,7 @@ INTERNAL_OR_INDIRECT = {
 
 def read_names() -> set[str]:
     names: set[str] = set()
-    for path in PACKAGE.rglob("*.py"):
+    for path in package_sources(PACKAGE):
         if "__pycache__" in path.parts:
             continue
         for m in LITERAL.finditer(path.read_text(encoding="utf-8", errors="replace")):
