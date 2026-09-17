@@ -376,10 +376,21 @@ def _role_subtitle(session_state) -> Optional[str]:
 #: a signal that is true by coincidence stops being true the moment either is
 #: used somewhere else.
 
-#: Neutral enough to read on either theme. A fixed light or dark value would be
-#: wrong for one of them, and the bar sits in the CONTENT column -- which
-#: follows Streamlit's theme, unlike the sidebar, which is always navy.
-TOPBAR_BORDER = "rgba(128,128,128,0.25)"
+#: The bar sits in Streamlit's own header band, level with Deploy, rather than at
+#: the top of the content column -- which is where it was first built and where
+#: it read as a second bar under the real one.
+#:
+#: `position: fixed` rather than a DOM move: the header is Streamlit's markup and
+#: `st.markdown` can only add to the content column, so the element stays where
+#: Streamlit put it and is painted where it belongs. Nothing is reparented, so an
+#: upgrade that renames a header testid costs the POSITION, not the bar.
+TOPBAR_HEIGHT = "3.5rem"
+
+#: Clear of Streamlit's own toolbar, which holds the ⋮ menu and -- only when
+#: running locally -- a Deploy button. Sized for both, so the bar never lands on
+#: top of either; the cost is a little empty space to its right on a deployed
+#: instance, where Deploy is absent. Overlapping a menu would be the worse trade.
+TOPBAR_RIGHT_INSET = "8.5rem"
 
 
 def topbar_html(name: str, subtitle: Optional[str] = None,
@@ -426,8 +437,8 @@ def topbar_html(name: str, subtitle: Optional[str] = None,
 
     return _one_line(f"""
 <div data-lex-topbar
-     style="display:flex;align-items:center;justify-content:flex-end;gap:12px;
-            padding:2px 0 10px;margin:0 0 0.75rem;border-bottom:1px solid {TOPBAR_BORDER};">
+     style="position:fixed;top:0;right:{TOPBAR_RIGHT_INSET};height:{TOPBAR_HEIGHT};
+            z-index:999980;display:flex;align-items:center;justify-content:flex-end;gap:12px;">
   <div style="width:30px;height:30px;border-radius:50%;background:{NAV_ACTIVE_BG};
               color:{NAV_ACCENT};display:flex;align-items:center;justify-content:center;
               font-size:12px;font-weight:600;flex:0 0 30px;">{safe_initials}</div>
