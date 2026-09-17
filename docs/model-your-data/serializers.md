@@ -234,6 +234,40 @@ so instead of quietly returning the wrong shape.
 > whatever `api_serializers` says. That is deliberate — an allowlist, so a
 > column added to the user model is never published by accident.
 
+## Some fields never reach a response, whatever you declare
+
+Before a representation is returned, the framework strips fields whose **name**
+marks them as a credential. This does not consult your serializer, your
+permissions, or anything else — the name alone disqualifies the field.
+
+| Stripped by exact name | Stripped by suffix |
+|---|---|
+| `password` · `password_hash` · `secret` · `secret_key` · `api_key` · `api_secret` · `private_key` · `access_token` · `refresh_token` · `id_token` · `session_key` · `salt` · `token` | `_password` · `_secret` · `_secret_key` · `_token` · `_api_key` · `_api_secret` · `_private_key` |
+
+So a model with `github_token`, `stripe_api_key` or `user_password` will list
+that field in `fields`, serialise it without complaint, and return a payload
+without it — in the grid, on the record page, and in exports alike.
+
+> [!important] If a field has vanished and you cannot see why, check its name
+> This is the first thing to rule out. The strip is logged once per model and
+> field per process, so the server log will say so — but nothing surfaces in the
+> API response itself, because a response that announced which credential it had
+> withheld would be its own disclosure.
+>
+> If you need the value, rename the field to something that is not a credential
+> name. If it really is a credential, it should not be on an API-exposed model.
+
+A serializer is not only an API concern. Anything that renders the model through
+the API renders it through the serializer you ask for — including a table
+embedded in a dashboard:
+
+![The declared serializer, the lex_view call that asks for it, and the narrowed table below](images/streamlit/serializer.png)
+
+Same route, same rows, six columns instead of a dozen: the framework's audit
+fields are gone and the foreign key arrives as a currency code, because that is
+what `FundSummarySerializer` declares. See
+[[access-and-dashboards/streamlit dashboards|Streamlit dashboards]].
+
 > [!note] The `id` field is always present
 > When you override `api_serializers["default"]`, the framework always includes the model's primary key as `id` in the serialized output — even if your `Meta.fields` omits it. Row navigation, edit URLs, and the CRUD loading overlay all depend on this field.
 

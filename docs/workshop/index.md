@@ -1,13 +1,12 @@
 ---
 title: "Workshop: Parallelisation"
-description: "A hands-on workshop building a supply chain risk system that progressively introduces LEX's computation and parallelisation features."
+description: "A hands-on workshop building a supply chain risk system that progressively introduces Lex App's computation and parallelisation features."
 ---
 
-# Workshop: Parallelisation in LEX
 
 > **Duration:** ~90 minutes  
 > **Level:** Intermediate  
-> **Prerequisites:** Completed the [Getting Started](../getting%20started.md) guide and the [Tutorial](../tutorial/)
+> **Prerequisites:** Completed [[start-here/index|Start Here]] and the [[start-here/tutorial/index|TeamBudget tutorial]]
 
 ## What You'll Build
 
@@ -75,7 +74,7 @@ Every month the operations team runs a risk analysis pipeline:
 5. **Alert** stakeholders about high-risk combinations
 
 The challenge?  Running 96 demand forecasts and 160 Monte Carlo
-simulations **sequentially** takes minutes.  With LEX's parallelisation
+simulations **sequentially** takes minutes.  With Lex App's parallelisation
 it takes seconds.
 
 > [!tip] Ready?

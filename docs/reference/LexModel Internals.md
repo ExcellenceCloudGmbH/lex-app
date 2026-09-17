@@ -161,7 +161,7 @@ def permission_read(self, user_context):
 | Method | What It Does |
 |---|---|
 | `track()` | Re-enable history tracking for this instance |
-| `untrack()` | Disable history tracking for the next save |
+| `untrack()` | Disable history tracking for this instance **until `track()` is called** — not just for the next save. For a single save use `save_without_historical_record()` |
 | `save_without_historical_record()` | Save once without creating a history entry |
 
 For bulk operations where history tracking is expensive, use `Model.objects.bulk_create(objs, skip_history=True)`.

@@ -111,7 +111,7 @@ This is where Lex App goes beyond standard history. The framework creates a **se
 | `history_object` | `ForeignKey` | Points back to the Level 1 history row |
 | `meta_history_type` | `CharField(1)` | `+` Created · `~` Changed · `-` Deleted |
 | `meta_task_name` | `CharField` | Celery task name (for scheduled activations) |
-| `meta_task_status` | `CharField` | Task status: `NONE`, `SCHEDULED`, `ACTIVE` |
+| `meta_task_status` | `CharField` | Task status: `NONE`, `SCHEDULED`, `DONE`, `CANCELLED` |
 
 Like Level 1, the `sys_to` fields are automatically chained — each meta row's `sys_to` points to the next row's `sys_from`, so you get a continuous system-time timeline.
 
@@ -259,7 +259,7 @@ The `snapshot` contains all field values at that version, serialized through you
 > `Z` (as above) or an offset like `+02:00` — so the instant is unambiguous. A value with
 > no timezone (`2026-02-01T09:00:00`) is read as UTC, *not* as your local wall-clock time,
 > so a naive local time can land you on the wrong side of an edit. The application's own
-> **As-Of** control already sends UTC for you; this only matters when you call the endpoint
+> **As Of** control already sends UTC for you; this only matters when you call the endpoint
 > directly. For the same reason, every timestamp the API *returns* carries a `Z` — parse it
 > as UTC and convert to local time for display.
 
@@ -268,7 +268,7 @@ The `snapshot` contains all field values at that version, serialized through you
 The bitemporal model powers several parts of the user interface:
 
 - **[[using-the-app/record-detail/timeline tab|Timeline Tab]]** — a visual timeline showing changes along both time dimensions, with a version details drawer for inspecting specific snapshots
-- **[[using-the-app/record-detail/history tab|History Tab]]** — a full grid of all historical versions with the **As-Of** control for time-travel queries
-- **As-Of Control** — a date picker in the grid toolbar that lets users view data as it existed at any point in the past
+- **[[using-the-app/record-detail/history tab|History Tab]]** — a full grid of all historical versions with the **As Of** control for time-travel queries
+- **As Of Control** — a date picker in the grid toolbar that lets users view data as it existed at any point in the past
 
 See [[using-the-app/record-detail/index|Record Detail]] for the full user-facing documentation.

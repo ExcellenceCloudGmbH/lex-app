@@ -68,6 +68,11 @@ Because the script re-runs, everything below the `lex_view(...)` call is
 evaluated again with the event in hand. The envelope carries an `id` so a re-run
 does not deliver the same event twice.
 
+![Five rows selected in the embedded table, and the event envelope rendered beside it](images/streamlit/callbacks.png)
+
+The panel on the right is `st.json(event)` and nothing else — five rows ticked
+in the embedded table, and the envelope that came back for them.
+
 ## The event envelope
 
 Every event the embedded page sends back is a dict with a stable shape:

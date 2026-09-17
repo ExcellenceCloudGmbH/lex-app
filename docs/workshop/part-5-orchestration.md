@@ -3,7 +3,6 @@ title: "Part 5 — Orchestration"
 description: "Compose multi-model pipelines with WaitForTasks and FireAndForget."
 ---
 
-# Part 5 — Orchestration
 
 > **Goal:** Build the `SupplyChainDashboard` — a single model that
 > orchestrates Monte Carlo simulations with `WaitForTasks` and
@@ -11,7 +10,7 @@ description: "Compose multi-model pipelines with WaitForTasks and FireAndForget.
 
 ## The Two Context Managers
 
-LEX provides two context managers for orchestrating parallel work:
+Lex App provides two context managers for orchestrating parallel work:
 
 | Context Manager | Behaviour | Use When |
 |-----------------|-----------|----------|

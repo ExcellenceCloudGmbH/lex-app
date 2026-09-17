@@ -571,11 +571,11 @@ Select **"Start"** from the run configuration dropdown in PyCharm → click ▶�
 > **Linux / macOS:**
 > ```bash
 > set -a; source .env; set +a
-> lex start
+> lex start --reload --loop asyncio lex_app.asgi:application
 > ```
 > **Windows PowerShell:**
 > ```powershell
-> lex start
+> lex start --reload --loop asyncio lex_app.asgi:application
 > ```
 
 On startup, Lex App automatically:

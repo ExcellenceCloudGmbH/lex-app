@@ -13,8 +13,14 @@ pip install lex-app
 Verify it worked:
 
 ```bash
-lex --version
+pip show lex-app
 ```
+
+> [!warning] Not `lex --version`
+> The `lex` CLI has no `--version` option — it answers
+> `Error: No such option '--version'`. `pip show lex-app` is the reliable
+> check, and it also prints where the package was installed from, which is
+> what you actually want when two checkouts are in play.
 
 > [!tip]
 > Make sure you're using **Python 3.12**. Check with `python3.12 --version`.

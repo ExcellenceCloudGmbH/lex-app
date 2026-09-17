@@ -13,6 +13,46 @@ There are two levels of dashboards:
 | **Table-level** | `streamlit_class_main(cls)` | When viewing the model's table (list view) |
 | **Record-level** | `streamlit_main(self)` | When viewing a specific record (detail view) |
 
+## How it fits together
+
+Dashboards and the application talk **both ways**, and the page is easier to
+read once you know which direction you are in.
+
+```mermaid
+flowchart LR
+    subgraph app["Lex App"]
+        G["A table or a record"]
+        A["Analytics tab"]
+    end
+    subgraph st["Your Streamlit dashboard"]
+        M["streamlit_main /<br/>streamlit_class_main"]
+        V["lex_view(…)"]
+        W["lex_widgets(…)"]
+    end
+    G --> A
+    A -- "opens it with model and pk" --> M
+    V -- "embeds a route" --> G
+    W -- "embeds a control" --> G
+```
+
+**Downward**, lex-app opens your dashboard. The Analytics tab on a record, and
+the chart icon on a table, both point at the Streamlit process with the model
+and primary key in the query string; the framework calls your
+`streamlit_main` or `streamlit_class_main` with them. You write Streamlit; the
+framework decides when it is shown.
+
+**Upward**, your dashboard opens lex-app. `lex_view` embeds one of the
+application's routes — a table, a form, a record — and `lex_widgets` embeds one
+of its controls. These are the same components the application renders, not
+copies, so a filter applied in an embedded table is the same filter, saved to
+the same view.
+
+A standalone app is the third case: no model, no pk, and the framework calls
+your project's `_streamlit_structure.main()` instead. It has no host page
+around it, so it is where you would put a dashboard that spans several models.
+
+Everything else on this page is one of those three, in detail.
+
 ## Table-Level Dashboard
 
 A `@classmethod` that receives the model class. Use it for aggregate views — summaries, charts across all records, filtered tables.
@@ -85,6 +125,27 @@ The frontend links to the first two branches with `?model=fund&pk=42` and
 described above. The third is your own standalone app: a
 `_streamlit_structure.py` beside your models, with a `main()`, is all it takes.
 
+> [!tip] Start from the one that ships
+> You do not have to write that file from scratch.
+> `lex/lex_app/streamlit/examples/_streamlit_structure.py` in the installed
+> package is a complete, maintained reference dashboard — one control, several
+> controls, a log with room, a row composed with Streamlit columns, reading a
+> result back, a whole page, and a multi-step flow. Copy it to
+> `<your_repo>/_streamlit_structure.py` and delete what you do not need.
+>
+> It also states the two rules that catch people first: `main()` is the only
+> name the framework looks for, and every `st.*` call must be **inside** a
+> function — the module is imported at startup, before there is a script run to
+> draw into, and anything at module level renders nothing and logs "missing
+> ScriptRunContext".
+
+![A standalone Streamlit app: the project's own pages, lex-app's theme and sign-in, and the project's data](images/streamlit/overview.png)
+
+Nothing about the frame is the project's own work — the navigation rail, the
+theme, the signed-in user and the way out all come from lex-app. What the
+project wrote is the column of metrics, the chart, and the Calculate control
+sitting beside them.
+
 Streamlit dashboards run as a separate process alongside your Lex App application. See [[start-here/running your app]] for how to start the Streamlit server.
 
 > [!tip]
@@ -93,6 +154,11 @@ Streamlit dashboards run as a separate process alongside your Lex App applicatio
 For production-style deployments, give the Streamlit proxy a fixed `SESSION_SECRET`. If you run more than one proxy replica, also use a shared `TOKEN_REDIS_URL` / `REDIS_URL` so users don't lose their dashboard session when a request lands on a different replica.
 
 ## Embedding Lex App in a Dashboard
+
+![lex_view embedding the application's own table inside a Streamlit page](images/streamlit/lex-view.png)
+
+That is the application's grid, not a copy of it: the same saved views, the
+same filters, the same export, inside a Streamlit page.
 
 When your dashboard needs Lex App controls, you can embed them directly instead
 of rebuilding the UI in Streamlit. Put your dashboard code in

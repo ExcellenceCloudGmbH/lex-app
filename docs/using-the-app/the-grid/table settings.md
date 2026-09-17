@@ -5,7 +5,7 @@ aliases:
 ---
 
 Every table has a **gear** beside it. What's behind it is the set of choices that are
-yours rather than the application's — how tight the rows are, which columns stay pinned,
+yours rather than the application's — which columns stay pinned,
 how a number is formatted. Lex App remembers them for you, on that table, and they follow
 you from one visit to the next.
 

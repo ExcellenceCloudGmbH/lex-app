@@ -184,11 +184,11 @@ Open `http://localhost:8000` in your browser. You should see the Lex App interfa
 > **Linux / macOS:**
 > ```bash
 > set -a; source .env; set +a
-> lex start
+> lex start --reload --loop asyncio lex_app.asgi:application
 > ```
 > **Windows PowerShell:**
 > ```powershell
-> lex start
+> lex start --reload --loop asyncio lex_app.asgi:application
 > ```
 > Press `Ctrl+C` to stop.
 

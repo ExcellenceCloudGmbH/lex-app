@@ -20,7 +20,7 @@ Lex App ships with a `lex` CLI tool for managing your application. Here's every 
 | `lex start`     | Start the development server                                  |
 | `lex streamlit` | Start the [Streamlit](https://docs.streamlit.io/) dashboard server |
 | `lex create_db` | Create the project database from the configured `DATABASE_*` env vars |
-| `lex --version` | Print the installed `lex-app` version                         |
+| `pip show lex-app` | Print the installed version. There is no `lex --version` — the group does not define one |
 
 `lex init` has two setup-focused flags worth knowing:
 

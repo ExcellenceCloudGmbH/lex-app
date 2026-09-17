@@ -172,7 +172,7 @@ After converting, remove these fields from your model — they're now inherited:
 
 ## The New State Machine
 
-V1's `is_calculated` was a simple boolean (true/false). The current system uses a 5-state enum:
+V1's `is_calculated` was a simple boolean (true/false). The current system uses a 6-state enum:
 
 ```mermaid
 stateDiagram-v2
@@ -180,11 +180,18 @@ stateDiagram-v2
     NOT_CALCULATED --> IN_PROGRESS : Calculate clicked
     IN_PROGRESS --> SUCCESS : Completed
     IN_PROGRESS --> ERROR : Exception
-    IN_PROGRESS --> ABORTED : Cancelled
+    IN_PROGRESS --> CANCELLED : User cancels
+    IN_PROGRESS --> ABORTED : Framework recovers a stuck run
     ERROR --> IN_PROGRESS : Retry
     SUCCESS --> IN_PROGRESS : Recalculate
+    CANCELLED --> IN_PROGRESS : Retry
     ABORTED --> IN_PROGRESS : Retry
 ```
+
+`CANCELLED` and `ABORTED` are both non-success and both audit as a failure, but
+they answer different questions afterwards: someone stopped this run, versus
+the framework found it stuck in `IN_PROGRESS` at startup and gave up on its
+behalf.
 
 This gives you proper progress tracking, retry capability, and clear error states. See [[calculations/calculation models]] for the full details.
 

@@ -11,7 +11,7 @@ title: "lex_config.py — project settings"
 
 | Key                       | Purpose                                                                              | Documented in                                                                  |
 | ------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `INITIAL_DATA`            | Path to the JSON file the framework loads on `lex init` to seed your database        | [[model-your-data/initial data]]                                        |
+| `INITIAL_DATA`            | Path to the JSON file the framework loads on **server start** to seed your database  | [[model-your-data/initial data]]                                        |
 | `PROJECT_GROUPS`          | List of [Keycloak](https://www.keycloak.org/documentation) group names to create on `lex init` | [[start-here/tutorial/Part 4 — Validation & Permissions]], [[access-and-dashboards/permissions]] |
 | `TAB_DISPLAY_NAMES`       | Friendly labels for the tabs in the record-detail view                               | [[using-the-app/record-detail/index]]                                              |
 | `DEFAULT_SERIALIZER_NAME` | Name of the serializer the framework picks when no explicit one is requested         | [[model-your-data/serializers]]                                         |
@@ -22,7 +22,7 @@ title: "lex_config.py — project settings"
 INITIAL_DATA = "Tests/test_data.json"
 ```
 
-The path (relative to the project root) of the JSON fixture loaded when you run `lex init` or `lex create_db`. Use it to seed reference data — categories, lookup tables, demo records — so a fresh database isn't empty. See [[model-your-data/initial data]] for the file format and the bulk-load behaviour.
+The path (relative to the project root) of the JSON fixture loaded **on server start** — `lex start`, and only when every model it references is empty. Neither `lex init` nor `lex create_db` touches it; the loader is gated on the app running under uvicorn. Use it to seed reference data — categories, lookup tables, demo records — so a fresh database isn't empty. See [[model-your-data/initial data]] for the file format and the bulk-load behaviour.
 
 ## `PROJECT_GROUPS`
 
@@ -36,12 +36,19 @@ A flat list of [Keycloak](https://www.keycloak.org/documentation) group names. O
 
 ```python title="lex_config.py"
 TAB_DISPLAY_NAMES = {
-    "summary": "Overview",
-    "timeline": "Change history",
+    "__default__": {"history_tab": "Change history"},
+    "expensereport": {"history_tab": "Revisions", "audit_log_tab": "Who touched this"},
 }
 ```
 
-A mapping from internal tab keys to the labels shown in the record-detail view. Tabs you don't list keep their default label. See [[using-the-app/record-detail/index]] for the list of tab keys you can override.
+Keyed by **model name** (lowercase), not by tab. Each value is a dict that may
+carry `history_tab` and `audit_log_tab` — those two are the only overridable
+labels. `"__default__"` applies to every model without an entry of its own.
+
+> [!warning] A flat `{tab: label}` dict is accepted and ignored
+> The loader type-checks the outer dict only, so the tab-keyed shape passes
+> validation, changes nothing, and reports no error. If your labels are not
+> taking effect, this is why.
 
 ## `DEFAULT_SERIALIZER_NAME`
 
@@ -49,7 +56,19 @@ A mapping from internal tab keys to the labels shown in the record-detail view. 
 DEFAULT_SERIALIZER_NAME = "compact"
 ```
 
-The serializer the framework reaches for when an API request doesn't ask for one explicitly. Defaults to the framework's built-in full serializer if unset. The History tables pick the override up automatically, so a change here affects both live and historical views. See [[model-your-data/serializers]] for the full mechanic.
+Not the serializer used for unqualified requests — that is always `"default"`.
+
+This is the **alias** under which the framework re-registers its own
+auto-generated serializer when your project overrides `"default"` on a model.
+Without it, overriding `"default"` would leave the framework's full-fidelity
+serializer unreachable, and the internal endpoints that need it — history
+snapshots, foreign-key reference loaders, `model_info` — would get your
+override instead.
+
+Two consequences worth knowing: a request with no `?serializer=` still gets the
+framework's serializer rather than a project one, and setting this to the name
+of a serializer you already define silently disables the alias. See
+[[model-your-data/serializers]] for the selection mechanic.
 
 ## Where it fits in the project
 

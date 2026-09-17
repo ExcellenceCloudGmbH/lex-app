@@ -14,7 +14,7 @@ Adds a plain text paragraph.
 LexLogger().add_text("Processing complete.").log()
 ```
 
-### `add_heading(text: str, level: int = 1)`
+### `add_heading(heading: str, level: int = 1)`
 
 Adds a Markdown heading (levels 1–6).
 

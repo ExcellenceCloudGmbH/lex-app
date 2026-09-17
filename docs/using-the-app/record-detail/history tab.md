@@ -4,7 +4,7 @@ aliases:
   - "interface/record-detail/history tab"
 ---
 
-The [[using-the-app/record-detail/timeline tab|Timeline tab]] tells the story visually. The History tab gives you the raw data — a full AG Grid of every historical version of this record, sortable, filterable, and equipped with the **As-Of** time-travel control. Because it's a standard table, this is the best place to explore historical values, compare versions, and verify changes.
+The [[using-the-app/record-detail/timeline tab|Timeline tab]] tells the story visually. The History tab gives you the raw data — a full AG Grid of every historical version of this record, sortable, filterable, and equipped with the **As Of** time-travel control. Because it's a standard table, this is the best place to explore historical values, compare versions, and verify changes.
 
 ## The History Grid
 
@@ -16,36 +16,36 @@ The columns include both history-tracking fields and all of the model's own fiel
 |---|---|
 | **Created By** | The user who originally created the record |
 | **Edited By** | The user who made this particular change |
-| **Calculation** | For `CalculationModel` records, the state at this version (`NOT_CALCULATED`, `IN_PROGRESS`, `SUCCESS`, `ERROR`) |
+| **Calculation** | For `CalculationModel` records, the state at this version (`NOT_CALCULATED`, `IN_PROGRESS`, `SUCCESS`, `ERROR`, `CANCELLED`, `ABORTED`) |
 | *All model fields* | The values at that point in time (e.g., Quarter, Total Expenses, Remaining Budget, etc.) |
 
 You can [[using-the-app/the-grid/filtering and sorting|filter and sort]] this grid like any other — for example, filter by `Edited By` to see all changes made by a specific person, or sort by date to trace the evolution of the record.
 
 ![The History tab, showing every version as a row](images/record-detail/history-tab.svg)
 
-## The As-Of Control
+## The As Of Control
 
-At the top of the History tab, the **As-Of** button lets you time-travel. Click it, pick a date and time, and the grid filters to show only the versions that were **active at that moment**.
+At the top of the History tab, the **As Of** button lets you time-travel. Click it, pick a date and time, and the grid filters to show only the versions that were **active at that moment**.
 
 This answers questions like:
 - "What did this record look like on March 1st?"
 - "What values were in place at the end of last quarter?"
 - "Was this field already updated before the audit?"
 
-> [!example]- 🎬 Video — As-Of time-travel in the History grid
+> [!example]- 🎬 Video — As Of time-travel in the History grid
 > <video controls width="100%">
 >   <source src="../../videos/record-history-as-of.mp4" type="video/mp4">
 > </video>
-> Click the As-Of button, pick a date from last month, and the grid updates to show the historical state at that point in time.
+> Click the As Of button, pick a date from last month, and the grid updates to show the historical state at that point in time.
 
-The As-Of control uses the [[history-and-audit/bitemporal history|system time dimension]] — it shows you what the system believed to be true at the timestamp you selected. To see when a change was *actually effective* in the business sense, use the [[using-the-app/record-detail/timeline tab|Timeline tab's]] effective-time view.
+The As Of control uses the [[history-and-audit/bitemporal history|system time dimension]] — it shows you what the system believed to be true at the timestamp you selected. To see when a change was *actually effective* in the business sense, use the [[using-the-app/record-detail/timeline tab|Timeline tab's]] effective-time view.
 
 > [!note]
-> The same As-Of control is also available at the [[using-the-app/the-grid/index|table level]], where it filters the entire model's grid — not just one record's history.
+> The same As Of control is also available at the [[using-the-app/the-grid/index|table level]], where it filters the entire model's grid — not just one record's history.
 
 ### Clearing the Time Travel
 
-Click the **Reset to Latest** button to exit time-travel mode and return to the current live data. The button is always visible when an As-Of date is active, so you never get stuck in the past.
+Click the **Reset to Latest** button to exit time-travel mode and return to the current live data. The button is always visible when an As Of date is active, so you never get stuck in the past.
 
 ## Jumping to Live Data
 

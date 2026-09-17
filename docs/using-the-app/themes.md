@@ -37,7 +37,7 @@ Click the **theme toggle** icon in the application header bar, next to the searc
 
 
 > [!tip]
-> Both themes are fully compatible with all features: the [[using-the-app/the-grid/index|data grid]], [[using-the-app/record-detail/index|record detail tabs]], embedded [[using-the-app/record-detail/analytics tab|Streamlit dashboards]], and [[using-the-app/the-grid/exporting data|exported files]] all respect your chosen theme.
+> Both themes are fully compatible with all features: the [[using-the-app/the-grid/index|data grid]], [[using-the-app/record-detail/index|record detail tabs]], embedded [[using-the-app/record-detail/analytics tab|embedded dashboards]], and [[using-the-app/the-grid/exporting data|exported files]] all respect your chosen theme.
 
 ### Streamlit dashboards
 
