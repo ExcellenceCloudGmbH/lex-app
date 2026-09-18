@@ -829,7 +829,7 @@ letters:
     scenarios: 1.309-1.315
     status: complete
     tests:
-      pass: 30
+      pass: 32
       skip: 0
       xfail: 0
     note: >-
