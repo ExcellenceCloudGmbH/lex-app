@@ -440,6 +440,40 @@ class Flow(dict):
         """Whether this flow is a sequence of steps rather than a mapping."""
         return bool(self._steps)
 
+    def entry_path(self) -> Optional[str]:
+        """The route this flow's first step opens, or ``None`` if it has none.
+
+        A sequence already says where it begins, so the caller does not have to
+        say it again::
+
+            lex_view(flow=Flow().create("investor").create("vehicle"))
+
+        Two statements of one route can disagree; one cannot. ``lex_view`` uses
+        this when no path is given.
+
+        ``None`` for a mapping, which has no first step -- its rules fire
+        whenever their operation happens, from wherever the embed already is --
+        and for anything else that cannot name a route on its own.
+        """
+        if not self._steps:
+            return None
+        step = self._steps[0]
+        operation = step["op"]
+        if operation == "goto":
+            return str(step["path"])
+        if operation == "create":
+            return f"/{step['res']}/create"
+        if operation == "update":
+            # A first step's id can only be a literal. An implicit one has no
+            # previous step to take from, and a ref can only point backwards --
+            # both are already refused by `_resolve_id` at author time, so the
+            # unresolvable forms cannot reach here. The check stays anyway: a
+            # guess at a route is worse than leaving the path alone.
+            identifier = step.get("id")
+            if isinstance(identifier, (str, int)) and not isinstance(identifier, bool):
+                return f"/{step['res']}/{identifier}"
+        return None
+
     def __bool__(self) -> bool:
         """Truthy when the flow says anything at all.
 
@@ -535,6 +569,15 @@ def lex_view(
         The React route to embed, e.g. ``"quarter"``, ``"fund/42"``,
         ``"investor/create"``.  A leading ``/`` is added automatically
         if missing.
+
+        Optional when ``flow`` is a **sequence**: it already names the route
+        its first step opens, and repeating it here is a second statement of
+        one route that can disagree with the first::
+
+            lex_view(flow=Flow().create("investor").create("vehicle"))
+
+        A path given explicitly always wins, and a mapping flow names no
+        starting point, so leaving both out still embeds the application root.
     height : int
         Iframe height in pixels.  Default ``800``.
     width : int | str
@@ -627,7 +670,11 @@ def lex_view(
     """
     resolved_base = base_url.rstrip("/") if base_url else _resolve_base_url()
 
-    # Normalise path
+    # Normalise path. A sequence flow names its own first step, so an omitted
+    # path is taken from it rather than defaulting to the application's root --
+    # which would drop the user somewhere the flow does not begin.
+    if not path and isinstance(flow, Flow):
+        path = flow.entry_path() or ""
     if path and not path.startswith("/"):
         path = f"/{path}"
 

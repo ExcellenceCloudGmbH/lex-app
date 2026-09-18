@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 347
+max_scenario: 350
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1084,3 +1084,25 @@ letters:
       the other -- dispatching `update()` between its two meanings routed the mapping branch through
       `dict.update`, which puts rules in without passing `__setitem__`; that is the door 1.325 exists
       to keep shut, and it stayed shut only because that test already existed.
+  ap:
+    title: A sequence flow names its own entry route
+    scenarios: 1.348-1.350
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      `Flow().create("investor")` already states that the chain opens /investor/create, so
+      `lex_view("investor/create", flow=flow)` stated one route twice -- and neither side validated
+      the other. When the two disagreed the embed opened whatever `path` said while the program
+      walked from its own step 0, leaving the user one step into a chain, or on a route the flow
+      never mentions, with nothing on screen to explain it.
+
+      `Flow.entry_path()` derives the route from step 0 and `lex_view` uses it when no path is
+      given, so the second statement is removed rather than checked. A first `update` can only carry
+      a literal id -- an implicit one has no previous step and a ref can only point backwards, both
+      already refused at author time -- which is what makes step 0 safe to resolve. 1.349 pins that
+      an explicit path still wins, because addressing a route directly is what `path` is for, and
+      1.350 that a mapping, a plain dict and no flow at all each derive nothing and still embed the
+      application root.
