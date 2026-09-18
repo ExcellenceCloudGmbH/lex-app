@@ -384,7 +384,26 @@ def _role_subtitle(session_state) -> Optional[str]:
 #: `st.markdown` can only add to the content column, so the element stays where
 #: Streamlit put it and is painted where it belongs. Nothing is reparented, so an
 #: upgrade that renames a header testid costs the POSITION, not the bar.
-TOPBAR_HEIGHT = "3.5rem"
+#:
+#: Matches Streamlit's `sizes.headerHeight` exactly, so `align-items: center`
+#: centres the bar against the same box the toolbar does and the two land on one
+#: line. 3.5rem was close enough to look deliberate and wrong enough to sit high.
+TOPBAR_HEIGHT = "3.75rem"
+
+#: One layer above Streamlit's header -- which is what makes the bar visible.
+#:
+#: The header is full-width and `top: 0`, and whenever the toolbar has anything
+#: in it the header is painted in an OPAQUE `bgColor` rather than left
+#: transparent. Placing the bar in the header BAND is therefore not enough: at
+#: any lower layer it renders perfectly, in the right place, behind a solid
+#: rectangle -- which on screen is indistinguishable from not rendering at all.
+#: That is the bug this constant exists to have fixed.
+#:
+#: 999990 is `zIndices.header` in Streamlit 1.61 (`1e6 - 10`). One above it,
+#: rather than far above, is the point: it leaves everything that SHOULD cover
+#: the bar still covering it -- the mobile sidebar (999995), the header
+#: decoration (999999), and every dialog, popup and toast (1000059 and up).
+TOPBAR_Z_INDEX = 999991
 
 #: Clear of Streamlit's own toolbar, which holds the ⋮ menu and -- only when
 #: running locally -- a Deploy button. Sized for both, so the bar never lands on
@@ -438,7 +457,7 @@ def topbar_html(name: str, subtitle: Optional[str] = None,
     return _one_line(f"""
 <div data-lex-topbar
      style="position:fixed;top:0;right:{TOPBAR_RIGHT_INSET};height:{TOPBAR_HEIGHT};
-            z-index:999980;display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+            z-index:{TOPBAR_Z_INDEX};display:flex;align-items:center;justify-content:flex-end;gap:12px;">
   <div style="width:30px;height:30px;border-radius:50%;background:{NAV_ACTIVE_BG};
               color:{NAV_ACCENT};display:flex;align-items:center;justify-content:center;
               font-size:12px;font-weight:600;flex:0 0 30px;">{safe_initials}</div>
