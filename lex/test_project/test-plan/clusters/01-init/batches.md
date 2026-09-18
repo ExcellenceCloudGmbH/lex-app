@@ -1465,3 +1465,31 @@ immediately.
 pins is the contract between them: that a sequence ships `lex_step=0` and a mapping ships no cursor
 at all — the distinction the frontend reads as "is a flow live".
 
+
+## Batch 1ap — the flow names its own entry
+
+| | |
+| --- | --- |
+| Scenario range | 1.348 – 1.350 |
+| Type | U |
+| Files covered | `lex/lex_app/streamlit/embed.py` (`Flow.entry_path`, the path normalisation in `lex_view`) |
+| Test file | `lex/test_project/tests/init/test_1ap_flow_entry_route.py` |
+| Test classes | `TestCluster1ap_TheFlowNamesItsOwnEntry` (1.348), `TestCluster1ap_AnExplicitPathStillWins` (1.349), `TestCluster1ap_WhatNamesNoEntryChangesNothing` (1.350) |
+| Fixtures | none — `monkeypatch` over `render_lex_view_component` to capture the built URL, the seam 1.301 and 1.347 already use |
+| Tests landed | **10 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Asked for as: "from the flow it's obvious that we will start from the fund/create, so why can't we just use flow instead". Follows [batch 1ao](#batch-1ao--a-flow-with-an-order), which gave a flow an order but still required the caller to repeat where that order began. |
+
+**The bug this removes cannot be written down any more, which is the point.** `path` and the flow's
+step 0 were two statements of one route with no check between them. Deriving the entry deletes one
+of the two rather than validating it — there is nothing left to disagree.
+
+1.348's fourth scenario is the one that matters under regression: it asserts the opened route and
+the shipped cursor name the *same* step. The cursor ships at 0 (pinned by 1.347), so if the
+derivation ever drifted from step 0 the embed would load one place while the program believed it was
+somewhere else — the exact failure mode, reintroduced from the other side.
+
+**Nothing derives from a mapping.** Its rules fire whenever their operation happens, from wherever
+the embed already is; reading its first *key* as a starting point would invent an order the author
+never wrote. 1.350 pins that, and that a plain `dict` — which `flow=` has always accepted — is not
+asked for an `entry_path` it does not have.
