@@ -38,6 +38,8 @@ from lex.lex_app.streamlit.sidebar import (
     DEFAULT_SIDEBAR_STATE,
     embedded_in_lex_app,
     sidebar_state_for,
+    TOPBAR_HEIGHT,
+    TOPBAR_Z_INDEX,
     topbar_html,
     _LOGO_COLLAPSED_PATH,
     _LOGO_PATH,
@@ -291,6 +293,58 @@ class TestCluster1aj_SidebarChrome:
         assert "Log out" not in markup
         assert "<a " not in markup
         assert "Ada Lovelace" in markup, "identity still shows"
+
+    def test_01_315_the_bar_outranks_the_band_it_sits_in(self):
+        """Scenario 1.315 (fifth half): sitting in the header band is not enough.
+
+        The first version of this bar was invisible, and not because it failed
+        to render. Streamlit's header is full-width, ``top: 0``, and -- as soon
+        as the toolbar has any content in it -- painted in an opaque ``bgColor``
+        rather than left transparent. A bar placed correctly in that band at a
+        lower layer renders perfectly and is covered by a solid rectangle, which
+        on screen is indistinguishable from not rendering at all.
+
+        So the stacking order is a contract, not a detail, and a number nudged
+        by someone tidying up would silently restore the bug. The Streamlit
+        figures below are read from ``zIndices`` in its 1.61 bundle, where
+        ``header`` is ``1e6 - 10``.
+
+        One above the header, not far above, so everything that SHOULD cover the
+        bar still does.
+        """
+        streamlit_header = 999990
+        streamlit_mobile_sidebar = 999995
+        streamlit_header_decoration = 999999
+        streamlit_modal = 1000059
+
+        assert TOPBAR_Z_INDEX > streamlit_header, (
+            "below the header the bar renders behind an opaque band -- the "
+            "exact bug this pins"
+        )
+        assert TOPBAR_Z_INDEX < streamlit_mobile_sidebar, (
+            "the mobile sidebar overlay must still cover the bar"
+        )
+        assert TOPBAR_Z_INDEX < streamlit_header_decoration
+        assert TOPBAR_Z_INDEX < streamlit_modal, "dialogs and popups win"
+
+        assert f"z-index:{TOPBAR_Z_INDEX}" in topbar_html("Ada Lovelace"), (
+            "the constant has to reach the markup to be worth pinning"
+        )
+
+    def test_01_315_the_bar_is_as_tall_as_the_band(self):
+        """Scenario 1.315 (sixth half): level with Deploy, not merely near it.
+
+        The bar centres its contents with ``align-items: center``, so it lines
+        up with Streamlit's toolbar only when both centre against boxes of the
+        same height. Streamlit's is ``sizes.headerHeight``, 3.75rem in 1.61.
+
+        A close-but-smaller value is the worst outcome available: it reads as a
+        deliberate choice while sitting a few pixels high.
+        """
+        streamlit_header_height = "3.75rem"
+
+        assert TOPBAR_HEIGHT == streamlit_header_height
+        assert f"height:{TOPBAR_HEIGHT}" in topbar_html("Ada Lovelace")
 
     def test_01_313_the_pin_matches_the_element_that_can_actually_move(self):
         """Scenario 1.313: the pin lands on a flex child, not on a wrapper.
