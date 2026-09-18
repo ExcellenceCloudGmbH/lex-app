@@ -16,7 +16,7 @@ optimisation you reach for once a page has several, and it exists for that
 reason alone.
 """
 
-from lex.lex_app.streamlit.embed import STAY, Flow, FlowError, lex_view
+from lex.lex_app.streamlit.embed import STAY, Flow, FlowError, Ref, lex_view, ref
 from lex.lex_app.streamlit.widgets import (
     WidgetPage,
     WidgetSpecError,
@@ -30,6 +30,7 @@ __all__ = [
     "STAY",
     "Flow",
     "FlowError",
+    "Ref",
     "WidgetPage",
     "WidgetSpecError",
     "lex_calculation",
@@ -37,4 +38,5 @@ __all__ = [
     "lex_calculation_log_tree",
     "lex_view",
     "lex_widgets",
+    "ref",
 ]

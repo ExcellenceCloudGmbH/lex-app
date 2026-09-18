@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 341
+max_scenario: 347
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1054,3 +1054,33 @@ letters:
       Scenarios start at 1.336 rather than the 1.300 this batch first took: 1.300-1.305 are held by
       1af/1ag/1ah on disk, and this shard said max_scenario 292 at the time because merge 3d14e959 had
       truncated it.
+
+  ao:
+    title: A flow with an order, and refusals where the author can see them
+    scenarios: 1.342-1.347
+    status: complete
+    tests:
+      pass: 29
+      skip: 0
+      xfail: 0
+    note: >-
+      `Flow` was a lookup table keyed by "<resource>/<operation>" and resolved independently on every
+      save, which left three things an author wants with no expression at all -- and each failed
+      silently. Order: a chain visiting the same resource and operation twice collided on one key, so
+      the second rule replaced the first and the flow was a step shorter than it read. Loops: "keep
+      opening create forms" could only be approximated by STAY, which repeats one step because it is a
+      sentinel meaning "do not navigate" rather than a position that did not move. References: a step
+      could not say "edit the record step four made"; only {id} existed and it always meant the record
+      just saved.
+
+      The sequence form adds all three and serialises as a versioned program; the mapping form is
+      untouched and still serialises byte-for-byte as before, which 1.346 pins because the wire format
+      is where a rewrite leaks. The two cannot be mixed, refused from both directions, because a flow
+      holding both has no single answer to "what happens after this save".
+
+      Two guards are there because the implementation reached for them and got them wrong first.
+      1.342's third half pins that a step-only flow is truthy: Flow subclasses dict, so an empty
+      mapping made `if flow:` in lex_view drop every sequence on the floor. 1.325 in batch 1ak caught
+      the other -- dispatching `update()` between its two meanings routed the mapping branch through
+      `dict.update`, which puts rules in without passing `__setitem__`; that is the door 1.325 exists
+      to keep shut, and it stayed shut only because that test already existed.

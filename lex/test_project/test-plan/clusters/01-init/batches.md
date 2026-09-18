@@ -1431,3 +1431,37 @@ Both halves measured, and they fail for different reasons:
 - a stale **encoding** raises `DecodingError: incorrect header check` in the client, which tries to gunzip bytes httpx already decoded.
 
 Verified as a guard, not decoration: removing `drop | {"content-encoding", "content-length"}` from the consumed branch fails 1.341 and nothing else.
+
+## Batch 1ao — a flow with an order
+
+| | |
+| --- | --- |
+| Scenario range | 1.342 – 1.347 |
+| Type | U |
+| Files covered | `lex/lex_app/streamlit/embed.py` (`Flow` sequence builders, `Ref`/`ref`, `to_wire`, `__bool__`, `_check_resource`, the `lex_flow`/`lex_step` emission in `lex_view`) |
+| Test file | `lex/test_project/tests/init/test_1ao_flow_composable_steps.py` |
+| Test classes | `TestCluster1ao_TheSequence` (1.342), `TestCluster1ao_Ids` (1.343), `TestCluster1ao_Endings` (1.344), `TestCluster1ao_RefusedWhenWritten` (1.345), `TestCluster1ao_TheMappingIsUntouched` (1.346), `TestCluster1ao_TheCursorShips` (1.347) |
+| Fixtures | none — `monkeypatch` over `render_lex_view_component` to capture the built URL, the seam 1.301 already uses |
+| Tests landed | **29 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Asked for as: `Table1_create -> Table2_create -> Table3(id=3)_update -> Table4_create -> Table4(that id)_update -> table view`, with `loop`/`loop_last` as alternative endings and without hand-writing `"resource/operation"` keys. 1.342 is that chain verbatim. Design: [`docs/superpowers/specs/2026-09-18-flow-composable-steps-design.md`](../../../../../docs/superpowers/specs/2026-09-18-flow-composable-steps-design.md). |
+
+**Two scenarios exist because the implementation got them wrong first**, and both are the kind of
+wrong that produces no error anywhere.
+
+`Flow` subclasses `dict`, so a flow built entirely from steps has an empty mapping and inherits
+`__bool__` as `False`. `lex_view` guards the parameter with `if flow:` — which meant the first
+working build serialised a correct program and then discarded it at that line. 1.342's third half
+pins the override.
+
+The second was caught by **1.325**, which already existed. `update()` had to mean two things — the
+step builder and `dict.update` — and the dispatch routed the mapping branch straight to
+`dict.update`, putting rules in without passing `__setitem__`. That is precisely the bypass 1.325
+was written to prevent, three batches earlier and for the previous shape of this class. It failed
+immediately.
+
+**The frontend half is not in this cluster.** The cursor runtime lives in
+`process-admin-general-client` (`useEmbedContext.ts`) and is covered by vitest there. What 1.347
+pins is the contract between them: that a sequence ships `lex_step=0` and a mapping ships no cursor
+at all — the distinction the frontend reads as "is a flow live".
+
