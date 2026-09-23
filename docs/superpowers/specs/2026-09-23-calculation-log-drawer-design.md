@@ -1,20 +1,45 @@
 # The calculation log, reachable after the run
 
-**Date:** 2026-09-23
-**Status:** approved design, awaiting spec review
-**Touches:** `lex-app` (list annotation, one index migration), `process-admin-general-client`
+**Date:** 2026-09-23 (amended the same day — see *Amendments*)
+**Status:** approved
+**Touches:** `lex-app` (a list annotation — no migration), `process-admin-general-client`
 (status cell, a side-drawer shell, the log drawer)
+
+## Amendments
+
+The first version of this spec was approved and then checked line by line against the source while
+the implementation plan was written. Five things it said were wrong. Two were decided by the user;
+the other three are corrections of fact.
+
+1. **Which run a row opens** *(decided by the user)*. The first version resolved "the latest run a
+   record appears in" through the `GenericForeignKey`. The frontend already has a tested resolver,
+   `useResolvedCalculationId`, that finds "the newest run *started from* this record" by the
+   `calculationId` prefix `<model>_<pk>_`. Two rules would let one row open different runs in the
+   table and the widget. This spec now uses the existing rule.
+2. **No migration.** That rule is served by the index `calculationId` already has. The first
+   version's `(content_type, object_id, -timestamp)` index is not needed.
+3. **The ERROR case** *(decided by the user)*. The first version claimed a failed run's log
+   already carries its `Error:` lines. It does not — nothing in the framework writes one on failure.
+   `update_calculation_status` only *broadcasts* the stack trace over the websocket; the one
+   persisted copy is `calculation_error_message` (or `error_message`), written only when the model
+   declares that field. That field — the traceback the request asked for — was deferred on the false
+   premise. It is now in scope.
+4. **The cell is two cells in the grid.** `CalculateFunctionality` renders twice there:
+   `variant='status'` in the Calculation column (pill only) and `variant='action'` in the Actions
+   column (play only). Today's only door, the spinner, lives in the *Actions* column.
+5. **The running body already exists.** `CalculationLogStream` is body-only by design and shares the
+   cell's socket through the same registry. The drawer hosts it rather than wiring a socket itself.
 
 ## The problem, as reported
 
 > "When the calculation is IN_PROGRESS, we can already access the logs that are streaming, and
 > once they are done, we lose the logs and we would have to do a lot of steps to get them."
 
-That sentence is literally true, and it is true for two separate reasons — one in the frontend
-and one in the lifecycle of the data.
+That sentence is literally true, for two separate reasons — one in the frontend, one in the
+lifecycle of the data.
 
-**The only door to the log is the spinner.** `CalculateFunctionality` renders the status cell,
-and after the pill it renders exactly one of two things:
+**The only door to the log is the spinner.** In the grid's Actions column, `CalculateFunctionality`
+renders either a clickable spinner (only while running) or the play button:
 
 ```tsx
 {!showButton ? null : shouldShowSpinner && !suppressLogViewer ? (
@@ -24,13 +49,11 @@ and after the pill it renders exactly one of two things:
 )}
 ```
 
-The spinner opens the live log. When the run ends the spinner is replaced by the play button, and
-the door goes with it.
+When the run ends the spinner is replaced by the play button, and the door goes with it.
 
-**The live log is deliberately destroyed at completion.** While a calculation runs, its log is
-served from cache: `InitCalculationLogs` reads `CacheManager` keyed by record and calculation id,
-and the websocket streams on top. When the *root* calculation finishes, `CalculationModel` purges
-that cache:
+**The live log is deliberately destroyed at completion.** While a calculation runs its log is served
+from cache: `InitCalculationLogs` reads `CacheManager`, and the websocket streams on top. When the
+*root* calculation finishes, `CalculationModel` purges that cache:
 
 ```python
 if is_root:
@@ -39,183 +62,200 @@ if is_root:
 
 So even if the door had stayed, the endpoint behind it returns `{"logs": ""}` from that moment.
 
-The durable copy is not lost. It is in the `CalculationLog` table, linked to the record by a
-`GenericForeignKey` (`content_type`, `object_id`) and grouped into runs by `calculationId`. What is
-missing is any path from a calculation row to it: the row carries `is_calculated` and nothing else,
-so today reaching a finished log means going to the audit log table, finding the entry, and
-following it to `/calculation_log_tree`.
+The durable copy is not lost. It is in the `CalculationLog` table, grouped into runs by
+`calculationId`. What is missing is any path from a calculation row to it: the row carries
+`is_calculated` and nothing else.
 
 ## What already exists, and is reused
 
-Two things this design does **not** need to build, both verified in the source:
+All verified in the source:
 
-- **A durable read path.** `CalculationLogTree` reads the `calculationlog` resource — the table,
-  not the cache — through `useGetTree('calculationlog', { filter: { calculation_id } })`. It is
-  what the audit log's "Calculation Log" button opens today.
-- **An embeddable log view.** The same component accepts `calculationId`, `height` and `embedded`
-  props, and `EmbedWidgetHost` already hosts it. It was built to live inside something else. It is
-  also the richer of the two log views: sections, collapse, copy, export.
+- **The run id convention.** The frontend mints every run's id as
+  `` `${model}_${pk}_update_${uuid4()}` `` (`CalculateFunctionality`), so a run started from a row
+  always begins `<model>_<pk>_`. The trailing underscore is load-bearing: without it, record 1 would
+  match record 11's runs.
+- **A resolver built on it.** `useResolvedCalculationId(model, pk, record?)` resolves a record's run
+  from, in order: the live Redux entry, `record.calculation_id`, then a `calculationlog` query for
+  the newest `calculationId__startswith: "<model>_<pk>_"` sorted by `id DESC` — and it remembers
+  what it resolved across the moment a run completes.
+- **A durable, embeddable log view.** `CalculationLogTree` reads the `calculationlog` table (not the
+  cache) and accepts `calculationId`, `height` and `embedded` props.
+- **A body-only live view.** `CalculationLogStream` renders the live stream without a Dialog, and
+  acquires its socket through `acquireLogSocket` — the same reuse-or-create registry, keyed
+  `<record>-<calcId>`, that `CalculateFunctionality` uses.
+- **A drawer.** `FormDrawer` is the right-anchored panel the create and edit forms already use.
 
-So the gap is narrow and specific: **a calculation row does not know its own `calculation_id`**,
-and nothing in the table offers a door to it.
+So the gap is narrow: **a calculation row does not carry its latest run's id**, so the grid cannot
+know which rows have a log to open, and nothing in the grid offers a door to it.
 
 ## The design
 
-### 1. The status cell
+### 1. The cells
 
-The pill is unchanged. Around it:
+**Calculation column** (`variant='status'`): the pill, unchanged, plus **a log button**
+(`ArticleIcon`) at the cell's trailing edge. It renders when the row has a log (see §4) or is
+running; it is tinted `error.main` on ERROR, so the cell itself says the door leads somewhere bad.
+Its slot is always reserved, so doors form one straight line down the column whatever the pill's
+width, and a row without a log leaves a gap rather than shifting anything.
 
-- **A log button** (`ArticleIcon`) between the pill and the play button, rendered when the row has
-  a log. Tinted `error.main` when the status is ERROR, so the cell itself says the door leads
-  somewhere bad. When there is no log the icon is absent but **its slot is reserved** — otherwise the
-  play button shifts left on `NOT_CALCULATED` rows and the column stops reading as a column.
-- **The play button becomes permanent.** Always rendered, disabled while running. Today it is
-  mutually exclusive with the spinner.
-- **The `ReactLoading` spinner is removed.** It repeated IN_PROGRESS — the pill already carries a
-  `CircularProgress` for that state — and it was the only door, which is the whole bug.
+**Actions column** (`variant='action'`): **the play button becomes permanent** — always rendered,
+disabled while running. **The `ReactLoading` spinner is removed.** It repeated IN_PROGRESS, which the
+pill already shows with its own `CircularProgress`, and it was the only door, which is the whole bug.
 
-One log button, not two. A failed run's traceback is how its log *ends*, not a separate artefact
-stored elsewhere; two icons would be two doors to one room, and a user would have to choose between
-them before knowing what they are looking for.
+**Widgets** (`variant='full'`): pill, log button, play button, in that order, same rules.
+
+Not rendered at all: in history view (a past version has no live log, and history rows are not
+annotated), and when `suppressLogViewer` is set (the widget already shows its own stream beside the
+control).
+
+One log button, not two: a traceback is part of *what happened in this run*, and it is shown inside
+the same drawer as the log rather than behind a second door.
 
 ### 2. Behaviour per status
 
 | Status | Log button | The drawer shows |
 |---|---|---|
-| `IN_PROGRESS` | shown | the **live stream**, as the spinner's dialog does today, over the socket the cell already holds |
-| `SUCCESS` | shown | the finished log, from the table |
-| `ERROR` | shown, **red** | the finished log, **led by its last `Error:` entry** |
-| `ABORTED` | shown | the log up to where it stopped, headed by a note that the worker died and the framework gave up |
-| `CANCELLED` | shown | the log up to the cancel, headed *stopped by a person* — not dressed as an error |
-| `NOT_CALCULATED` | slot reserved, empty | — never run, so nothing to open; the only control is run |
+| `IN_PROGRESS` | shown | the **live stream** |
+| `SUCCESS` | shown if a log exists | the finished log |
+| `ERROR` | shown if a log exists, **red** | the recorded failure first, then the log |
+| `ABORTED` | shown if a log exists | a note that the worker stopped, then the log up to where it stopped |
+| `CANCELLED` | shown if a log exists | *stopped by a person*, then the log up to the cancel |
+| `NOT_CALCULATED` | slot reserved, empty | — |
 
-**ERROR needs no new field.** `CalculationLog` stores messages as `"Severity: Message"` —
-`ERROR = "Error: "` is one of the prefixes, and the module docstring states the format is
-load-bearing. A failed run's log therefore already contains its failure lines, and the drawer can
-lead with the last one. `calculation_error_message` / `error_message` — written by
-`CalculationModel` only when a subclass happens to define the field — is not required. Surfacing it
-where it exists is a possible later enhancement, deliberately out of scope here.
-
-**Where the headline is computed.** `CalculationLogTree` already fetches the run's rows itself, so
-it — not the drawer — renders the heading, from a new optional `status` prop. For ERROR it scans the
-data it already holds for the last `Error:`-prefixed message in document order; for ABORTED and
-CANCELLED it renders the fixed heading. The drawer passes the status and nothing else. A second
-fetch of the same rows purely to find one line is the thing this avoids.
+**The failure headline comes from the row.** On ERROR the drawer leads with
+`calculation_error_message`, then `error_message` — the framework's own priority order — when the row
+carries either. That text is `f"{exception_details}\n\n{stack_trace}"`: its first line is the
+headline, the whole text sits beneath it in monospace. On models that declare neither field there is
+no durable traceback anywhere, and the drawer says so in plain words rather than showing nothing.
 
 **ABORTED has no traceback, by construction.** It is set at startup recovery after a row is found
-stuck in `IN_PROGRESS`; nothing raised, so there is nothing to show. Saying so beats an empty
-panel, which reads as broken.
+stuck in `IN_PROGRESS`; nothing raised. Saying so beats an empty panel, which reads as broken.
 
-**The button's presence follows the data, not the status.** A row shows a log button when the
-annotation below says a log exists, whatever its status. A `SUCCESS` row whose log was cleaned
-away shows none, rather than a door into an empty room.
+**CANCELLED is not dressed as an error.** A person stopped it on purpose.
 
 ### 3. The drawer
 
-`FormDrawer` is split rather than reused whole. Its docstring says it was extracted so a second
-drawer would not duplicate its chrome — but most of what it carries is a react-admin `sx`
-cascade that only makes sense around an Edit or Create card.
+`FormDrawer` is split. Most of what it carries is a react-admin `sx` cascade that only makes sense
+around an Edit or Create card.
 
-- **`SideDrawer`** — the shell: right-anchored panel, header strip, icon, title, id pill, close,
-  and the new expand toggle.
-- **`FormDrawer`** — becomes `SideDrawer` plus the form cascade. Its callers do not change.
-- **`CalculationLogDrawer`** — `SideDrawer` hosting `CalculationLogTree` for a finished run, or the
-  live stream for a running one.
+- **`SideDrawer`** — the shell: right-anchored panel, header strip, icon, title, id pill, close, and
+  an optional expand toggle.
+- **`FormDrawer`** — `SideDrawer` plus the form cascade. Its props and callers do not change, and its
+  existing baseline tests (F5.60–F5.63) must pass untouched.
+- **`CalculationLogDrawer`** — `SideDrawer` hosting the headline, then `CalculationLogStream` while
+  running or `CalculationLogTree` once finished.
 
-**Widths.** Forms keep `min(640px, 90vw)`. The log opens wider — `min(1000px, 92vw)` — because it
-carries tables, headings and code blocks laid out for the old `maxWidth="lg"` dialog. **The toggle
-expands it to the full viewport width**, and the choice is remembered per viewer in `localStorage`:
-someone who reads logs all day should not re-expand on every row. Storage failures (private mode,
-blocked site data) fall back to the default width; they never throw.
+**Widths.** Forms keep `min(640px, 90vw)`. The log opens at `min(1000px, 92vw)` — it carries
+tables, headings and code blocks laid out for the old `maxWidth="lg"` dialog — and **the toggle
+expands it to the full viewport width**. The choice is remembered per viewer in `localStorage`.
+Storage failures (private mode, blocked site data) fall back to the default width and never throw.
 
-**While running, no second socket.** The drawer is handed the socket `CalculateFunctionality`
-already holds (`wsRef`), exactly as the spinner's dialog is today. That file carries explicit
-comments about socket sharing; a drawer that quietly opened its own would double the connections
-on a busy table and nobody would notice until it mattered.
+**No second socket.** `CalculationLogStream` acquires its socket from the shared registry under the
+same key the Actions column uses, so it reuses that socket when one is open and opens exactly one
+when the Actions column is hidden.
 
-**Run end, drawer open.** A user watching the live stream in the drawer when the run finishes
-should not be left looking at a stream that will never receive another line. The drawer is rendered
-by `CalculateFunctionality`, which already tracks the row's status live over its socket, and
-receives that status as a prop. When the prop moves from `IN_PROGRESS` to a terminal status, the
-drawer swaps its body from the stream to `CalculationLogTree` for the same `calculation_id`. It
-learns of the change the way the pill does, so it cannot disagree with the pill beside it.
+**Which id the drawer opens.** The drawer resolves it with `useResolvedCalculationId`, passing the
+annotated id in as `record.calculation_id`. That gives the live id while running, the annotated id
+once finished, and — the part that matters — keeps the id it already has across the moment a run
+completes, when the live Redux entry has been removed but the grid has not yet refetched the row.
+Without it the drawer would flash "no log" in the second the log becomes available.
 
-### 4. The data: a calculation row learns its `calculation_id`
+**Run end, drawer open.** The drawer is rendered by `CalculateFunctionality`, which tracks the row's
+status live, and receives that status as a prop. When it moves from `IN_PROGRESS` to terminal, the
+body swaps from the stream to the tree for the same id. It learns of the change the way the pill
+does, so it cannot disagree with the pill beside it.
 
-The list endpoint annotates calculation-model rows with two reserved fields, the same way it already
-annotates audit log rows with `lex_reserved_has_calculation_log`:
+**No duplicate title.** `CalculationLogTree` gains one prop, `showTitle` (default `true`). The
+drawer passes `false`: its own header already says what this is, and two "Calculation Log" bars
+stacked on top of each other is exactly the kind of seam this work exists to remove.
 
-- `lex_reserved_calculation_id` — the `calculationId` of the latest run this record appears in;
-- `lex_reserved_has_calculation_log` — whether that run has log rows.
+**A failed load says so.** The tree reads only `{ data, isPending }` from `useGetTree` today, so a
+failed fetch renders an empty tree — indistinguishable from a run that logged nothing. It gains an
+error message with a retry, which is what the error-handling rule below needs from the one component
+that fetches the finished log.
 
-The existing audit log annotation (`List._annotate_has_calculation_log`) is the easy version:
-audit log rows already carry `calculation_id`, so it is one existence check. Calculation rows do
-not, so the id is derived through the generic relation — the latest `CalculationLog.timestamp` for
-`(content_type, object_id)`.
+### 4. The data: a calculation row learns its latest run
 
-**It is one query per page, not one per row.** A `Subquery` over `CalculationLog` ordered by
-`-timestamp` is annotated onto the page's queryset, so the database resolves the latest run per
-record inside the main query. A per-row lookup would turn a hundred-row page into a hundred
-requests.
+The list endpoint annotates calculation-model rows with two reserved fields, as it already annotates
+audit log rows with `lex_reserved_has_calculation_log`:
 
-**It needs an index, and that is a migration.** `CalculationLog` today indexes `calculationId` and,
-implicitly, the `content_type` foreign key — nothing else. The generic relation's `object_id` is
-not indexed, so the subquery would filter an append-only table by `content_type` alone, on every
-page load of every calculation table. The migration adds
-`Index(fields=["content_type", "object_id", "-timestamp"])`, which serves "latest for this record"
-directly and is the index Django's own documentation recommends for a generic foreign key.
+- `lex_reserved_calculation_id` — the `calculationId` of the newest run started from this record;
+- `lex_reserved_has_calculation_log` — whether such a run exists.
 
-**Which run is "the latest".** A record appears in a run either as its root or as a child of
-another record's calculation. The annotation takes the latest run the record appears in at all,
-and the drawer opens that run's whole tree. When a record was last calculated as part of a larger
-run, that larger run is the honest answer to "what happened the last time this was calculated".
+**The rule mirrors `useResolvedCalculationId` exactly**: `calculationId` starting with
+`f"{model._meta.model_name}_{pk}_"`, newest by `id`. One rule, stated in two languages, so the table
+and every widget open the same run for the same row.
 
-**Non-integer primary keys.** `CalculationLog.object_id` is a `PositiveIntegerField`, so a model
-with a UUID or string primary key cannot be linked by this relation at all. Such rows annotate as
-having no log — the button is absent, the slot reserved — rather than raising.
+**One query per page.** A single `CalculationLog` query ORs one `startswith` per row on the page and
+collapses to one row per run (`values("calculationId").annotate(newest=Max("id"))`); the newest run
+per record is picked in Python. That returns one small row per *run*, never one per log line, and
+never one query per grid row.
+
+**Matching is by longest prefix.** For string primary keys that contain underscores, a run id can
+start with two of the page's prefixes (`m_a_` and `m_a_b_`). The longest match is the record that
+started it: record `a`'s own runs begin `m_a_update_`, so only record `a_b` produces `m_a_b_…`.
+Integer keys cannot collide.
+
+**Served by an existing index.** `calculationId` is `db_index=True` (migration `0005`). On
+PostgreSQL, Django creates a companion `text_pattern_ops` index for an indexed text field, and that
+is what serves `LIKE 'prefix%'`. No migration is part of this work.
+
+**Where it runs.** The generic leaf path of the grid endpoint (`List._execute_leaf_level`)
+materialises the page for calculation models, annotates it, then serializes it — the shape the audit
+log branch directly above it already uses. The two fields are declared only on serializers of
+`CalculationModel` subclasses (`model2serializer` and `_wrap_custom_serializer`) and are listed in
+`LexSerializer._SYSTEM_FIELDS`, without which the visibility filter in `to_representation` would
+strip them silently.
 
 ## Error handling
 
-- **Annotation failure** must not take the list down. If the subquery errors, the rows are served
-  without the two fields and the button is absent: a missing door is recoverable, a table that will
-  not load is not.
-- **A log that fails to load** in the drawer shows an error state inside the drawer and a retry,
-  never a blank panel — the same distinction `CalculationLogStream` draws between "nothing yet" and
-  "could not fetch".
-- **The run-end swap** only fires on a genuine terminal transition for the drawer's own record. A
-  status update for another row must not repaint an open drawer.
+- **Annotation failure** must not take the list down. If the query raises, the page is served with
+  the two fields as `null` / `false` and the log button is absent: a missing door is recoverable, a
+  table that will not load is not.
+- **A log that fails to load** in the drawer shows an error inside the drawer, never a blank panel.
+- **The run-end swap** only fires on the drawer's own row. It is driven by that row's status prop,
+  so another row's update cannot repaint it.
 
 ## Testing
 
 **lex-app, cluster `15-calculation_logging`:**
 
-- **The regression, in one sentence:** after `CacheManager.cleanup_calculation` has run, the log is
-  still reachable from the calculation row — the annotation yields a `calculation_id` and the
-  `calculationlog` resource returns its tree.
-- The annotation resolves the **latest** run when a record has several, including a run in which it
-  was a child.
-- The annotation is **one query** for a page, asserted with `assertNumQueries` — the property that
-  stops this regressing into N+1.
-- A non-integer primary key annotates as no log without raising.
-- The migration adds the index, and the latest-run query uses it.
+- **The regression, in one sentence:** after `CacheManager.cleanup_calculation` has run, the grid
+  endpoint still returns the row with its run's `lex_reserved_calculation_id`, and the log rows for
+  that id are still there.
+- The newest run by `id` wins when a record has several.
+- The trailing underscore holds: record 1 never resolves record 11's runs.
+- A whole page is annotated in one query (`assertNumQueries`).
+- A record never run annotates `null` / `false`; a non-calculation model's rows carry neither field.
+- An annotation failure still serves the page.
+- On PostgreSQL, the `calculationId` pattern index exists — the guard against someone removing
+  `db_index` and silently turning every page load into a scan.
 
-**PAC — cell in `F07-calc_status`, drawer in `F12-embed_streamlit`:**
+**PAC — cells in `F07-calc_status`, drawer in `F12-embed_streamlit`:**
 
-- The six cell states, including the reserved-but-empty slot on `NOT_CALCULATED`.
-- The log button follows the annotation, not the status: a `SUCCESS` row without a log shows none.
-- ERROR leads with the last `Error:` entry; ABORTED and CANCELLED carry their own headings.
-- The expand toggle reaches full width and persists across reloads; a throwing `localStorage`
-  falls back rather than breaking the drawer.
-- **Opening the drawer mid-run reuses the cell's socket** — the regression nobody would see.
-- An open drawer swaps from stream to tree on its own record's terminal transition, and ignores
-  every other row's.
-- `FormDrawer`'s existing tests pass unchanged: the split must be invisible to its callers.
+- The door follows the annotation or the live run, not the status; it is absent in history view and
+  under `suppressLogViewer`; its slot is reserved when empty; it is red on ERROR.
+- The Actions column's play button is present and disabled while running. The existing test that
+  pinned the spinner is rewritten, with the correction in its name — it asserted the bug.
+- The headline: ERROR with `calculation_error_message`, with only `error_message`, with neither;
+  ABORTED; CANCELLED; nothing for the rest.
+- The drawer shows the stream while running, the tree once finished, swaps on the row's terminal
+  transition, and keeps its id across the completion gap.
+- `SideDrawer` expands to full width, persists the choice, and survives a throwing `localStorage`.
+- `FormDrawer`'s F5.60–F5.63 pass unchanged.
+- `CalculationLogTree` with `showTitle={false}` renders no title bar; a failed fetch shows an error
+  and a retry rather than an empty tree.
 
 ## Out of scope
 
-- Surfacing `calculation_error_message` / `error_message`. The log's own `Error:` lines cover
-  ERROR; the field exists only on subclasses that define it.
-- The audit log table. Reported as already fine.
-- Retiring `CalculationLogDialog` and the separate `calculation_log` / `calculation_id` columns.
-  Once the status cell is the door they become redundant, but removing a column users may have
-  configured into saved views is its own decision, made after this ships.
+- **Making every failed run carry its traceback in its log.** Writing the error into the run's
+  `CalculationLog` would make ERROR universal, but it touches the `except` block in
+  `CalculationModel` — which also handles cancellation, cache cleanup and terminal-state
+  persistence — and changes what every log contains, including the tree and the PDF export. A
+  follow-up of its own.
+- **Views that hide the Calculation column.** Removing the spinner leaves a view showing only the
+  Actions column with no door to the live log. That view has lost nothing it can't get back by
+  showing the column; noted so it is a decision, not a surprise.
+- The audit log table — reported as already fine.
+- Retiring `CalculationLogDialog` and the separate `calculation_log` / `calculation_id` columns. They
+  become redundant, but removing a column users may have in saved views is its own decision.
