@@ -126,3 +126,23 @@ class TestCluster15i_TheRunRule(_CalcLogTestCase):
             result = latest_calculation_ids("logrootcalc", range(1, 51))
 
         self.assertEqual(len(result), 50)
+
+
+class TestCluster15i_TheSerializer(_CalcLogTestCase):
+    """Only calculation models grow the two fields."""
+
+    def test_15_43_only_calculation_models_carry_the_run_fields(self):
+        """Scenario 15.43: declared where they mean something, nowhere else.
+
+        Every other model's rows would otherwise carry two permanent nulls — a
+        payload cost on every list in the application, for nothing.
+        """
+        from lex.api.serializers.base_serializers import model2serializer
+
+        calculation_fields = model2serializer(LogRootCalc)().fields
+        other_fields = model2serializer(CalculationLog)().fields
+
+        self.assertIn("lex_reserved_calculation_id", calculation_fields)
+        self.assertIn("lex_reserved_has_calculation_log", calculation_fields)
+        self.assertNotIn("lex_reserved_calculation_id", other_fields)
+        self.assertNotIn("lex_reserved_has_calculation_log", other_fields)
