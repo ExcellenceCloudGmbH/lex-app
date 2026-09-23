@@ -24,6 +24,7 @@ import pytest
 from django.db import connection
 from rest_framework import status
 
+from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.audit_logging.utils.latest_calculation import latest_calculation_ids
 
@@ -146,3 +147,30 @@ class TestCluster15i_TheSerializer(_CalcLogTestCase):
         self.assertIn("lex_reserved_has_calculation_log", calculation_fields)
         self.assertNotIn("lex_reserved_calculation_id", other_fields)
         self.assertNotIn("lex_reserved_has_calculation_log", other_fields)
+
+    def test_15_43_the_audit_log_keeps_its_own_answer(self):
+        """Scenario 15.43 (second half): the new fields leave the audit log alone.
+
+        AuditLogDefaultSerializer answers ``lex_reserved_has_calculation_log``
+        itself, falling back to a query when the list view has not annotated
+        the row. ``_wrap_custom_serializer`` builds ``(LexSerializer,
+        custom_cls)``, so a same-named getter on LexSerializer would come
+        first in the MRO, and every unannotated audit row — a detail view,
+        an embed — would silently answer False.
+        """
+        from lex.api.serializers.base_serializers import _wrap_custom_serializer
+        from lex.audit_logging.serializers.AuditLogSerializer import (
+            AuditLogDefaultSerializer,
+        )
+
+        calculation_id = _run("logrootcalc", 1)
+        audit_row = AuditLog.objects.create(
+            calculation_id=calculation_id,
+            resource="logrootcalc",
+            action="calculate",
+            author="cluster-15-tests",
+        )
+
+        serializer = _wrap_custom_serializer(AuditLogDefaultSerializer, AuditLog)()
+
+        self.assertIs(serializer.get_lex_reserved_has_calculation_log(audit_row), True)

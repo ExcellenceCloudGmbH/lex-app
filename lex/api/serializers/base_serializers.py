@@ -52,9 +52,17 @@ def _calculation_run_fields(model) -> dict:
     """
     if not is_calculation_model(model):
         return {}
+    # Explicit method names, deliberately not the get_<field> defaults:
+    # _wrap_custom_serializer builds (LexSerializer, custom_cls), so a method
+    # named get_lex_reserved_has_calculation_log on LexSerializer would come
+    # first in the MRO and shadow AuditLogDefaultSerializer's own getter.
     return {
-        CALCULATION_ID_NAME: serializers.SerializerMethodField(),
-        HAS_CALCULATION_LOG_NAME: serializers.SerializerMethodField(),
+        CALCULATION_ID_NAME: serializers.SerializerMethodField(
+            method_name="_lex_latest_calculation_id"
+        ),
+        HAS_CALCULATION_LOG_NAME: serializers.SerializerMethodField(
+            method_name="_lex_has_latest_calculation_log"
+        ),
     }
 
 
@@ -384,13 +392,13 @@ class LexSerializer(serializers.ModelSerializer):
         return target
 
     # ------------------------------------------------------------------
-    # Latest calculation run (declared only for CalculationModel subclasses)
+    # Latest calculation run — read through method_name, see _calculation_run_fields
     # ------------------------------------------------------------------
-    def get_lex_reserved_calculation_id(self, instance):
+    def _lex_latest_calculation_id(self, instance):
         """The newest run started from this row, when the list resolved it."""
         return getattr(instance, "_lex_calculation_id", None)
 
-    def get_lex_reserved_has_calculation_log(self, instance):
+    def _lex_has_latest_calculation_log(self, instance):
         """Whether that run exists. Unannotated rows answer False, never a query."""
         return bool(getattr(instance, "_has_calculation_log", False))
 
