@@ -174,3 +174,83 @@ class TestCluster15i_TheSerializer(_CalcLogTestCase):
         serializer = _wrap_custom_serializer(AuditLogDefaultSerializer, AuditLog)()
 
         self.assertIs(serializer.get_lex_reserved_has_calculation_log(audit_row), True)
+
+
+class TestCluster15i_TheGrid(_CalcLogTestCase):
+    """What the grid endpoint actually returns — the contract the frontend reads."""
+
+    def _post(self, **overrides):
+        return self.client.post(
+            self.url_list("logrootcalc"),
+            data={"request": _ag(**overrides)},
+            format="json",
+        )
+
+    def _row_data(self, resp, pk):
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        return {row["id"]: row for row in resp.data["rowData"]}[pk]
+
+    def test_15_44_a_finished_run_is_still_reachable_after_its_cache_is_gone(self):
+        """Scenario 15.44: the regression, in one sentence.
+
+        Completion purges the calculation's cache — which is what the live
+        endpoint reads, and why the reported log "disappeared". The row must
+        still name its run afterwards, and the run's rows must still exist.
+        """
+        from lex.audit_logging.utils.CacheManager import CacheManager
+
+        row = _row("reported")
+        calculation_id = _run("logrootcalc", row.pk, text="the log the user lost")
+        CacheManager.cleanup_calculation(calculation_id=calculation_id)
+
+        data = self._row_data(self._post(), row.pk)
+
+        self.assertEqual(data["lex_reserved_calculation_id"], calculation_id)
+        self.assertIs(data["lex_reserved_has_calculation_log"], True)
+        self.assertTrue(CalculationLog.objects.filter(calculationId=calculation_id).exists())
+
+    def test_15_44_a_row_that_never_ran_says_so(self):
+        """Scenario 15.44 (second half): null and false, not absent."""
+        row = _row("never-ran")
+
+        data = self._row_data(self._post(), row.pk)
+
+        self.assertIsNone(data["lex_reserved_calculation_id"])
+        self.assertIs(data["lex_reserved_has_calculation_log"], False)
+
+    def test_15_45_a_resolution_failure_still_serves_the_page(self):
+        """Scenario 15.45: a missing door is recoverable; a grid that won't load is not."""
+        row = _row("still-loads")
+        _run("logrootcalc", row.pk)
+
+        with mock.patch(
+            "lex.audit_logging.utils.latest_calculation.latest_calculation_ids",
+            side_effect=RuntimeError("database unavailable"),
+        ):
+            data = self._row_data(self._post(), row.pk)
+
+        self.assertIsNone(data["lex_reserved_calculation_id"])
+        self.assertIs(data["lex_reserved_has_calculation_log"], False)
+
+    def test_15_46_the_prefix_lookup_is_served_by_an_index(self):
+        """Scenario 15.46: the guard against someone removing ``db_index``.
+
+        ``calculationId`` is ``db_index=True``; on PostgreSQL Django adds a
+        ``text_pattern_ops`` companion, which is what makes ``LIKE 'prefix%'``
+        an index probe. Without it, every page load of every calculation table
+        scans an append-only log table.
+        """
+        if connection.vendor != "postgresql":
+            self.skipTest("the pattern-ops companion index is PostgreSQL-specific")
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT indexdef FROM pg_indexes WHERE tablename = %s",
+                [CalculationLog._meta.db_table],
+            )
+            definitions = [row[0] for row in cursor.fetchall()]
+
+        self.assertTrue(
+            any('"calculationId"' in d and "pattern_ops" in d for d in definitions),
+            f"no pattern-ops index on calculationId; indexes: {definitions}",
+        )
