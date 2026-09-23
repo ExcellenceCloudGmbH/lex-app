@@ -132,6 +132,31 @@ Extraction for the env check covers both `os.getenv("NAME")` and the proxy's
 `_env_bool("NAME", …)` wrappers. The first sweep used only the literal form and
 missed ten variables; the check exists partly to stop that recurring.
 
+### What the following two days found
+
+| # | Page | Evidence | Status |
+|---|---|---|---|
+| 12 | Every published figure 404ed | `../../images/…` in the markdown. Quartz's `transformLink` computes the climb to the content root itself and keeps a hand-written one as an extra prefix, so every `<img>` resolved above the site's base path. Eleven of twelve, broken since figures first shipped | **done** — lex-app-docs#183 |
+| 13 | No way to judge the rewrite | `compare_docs.py` measures two revisions on one ruler and runs these three gates against both | **done** — lex-app-docs#186 |
+| 14 | The gates scanned a virtualenv | `lex/**` is the package in CI and also `.venv-test` + `.claude/worktrees` on a working copy: 126 variables became 467, 34 commands became 72, and the gate asked for docs on `ARROW_HOME` and `lex collectstatic` | **done** — #775 |
+| 15 | The newest surface had no picture | `lex_view`, widgets and standalone dashboards each turned on a mechanism the prose could only assert | **done** — diagrams in lex-app-docs#187; screenshots written in process-admin-general-client#485 and blocked on the toolchain |
+
+**The visual count was wrong twice, and both errors flattered.** A scan for
+`![](images/…)` missed every figure written `../../images/…`; a scan for images
+and video missed the 30 pages carrying a **mermaid diagram**, and
+`compare_docs.py` shared that blind spot because it strips fenced code before
+counting — a diagram *is* a fenced block. Reported 16% of pages carrying a
+visual; the answer is 51%, now 54%. The number that is easiest to quote is the
+one worth checking twice.
+
+**The Streamlit auth blocker was narrower than its error message.** Item 7 has
+said for weeks that the Analytics capture needs a Keycloak JWT. That is true of
+the *embedded* path. `authenticate_from_proxy_or_jwt()` takes identity from four
+plain headers the proxy sets, and treats a bearer token as the fallback when
+they are absent — so the standalone app is capturable by supplying the same
+input the proxy does. Nobody re-read the function; the error message was taken
+as the finding.
+
 Item 9 is written from framework facts only. What the framework backs up
 (Keycloak authorization) is documented precisely, including that `--restore`
 reports failure by printing it and exiting zero. What it does not back up (the
