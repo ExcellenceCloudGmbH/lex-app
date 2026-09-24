@@ -1200,6 +1200,12 @@ class CalculationModel(LexModel):
 
                 if is_root:
                     calc_id = context.calculation_id
+                    # A run that did not succeed was rolled back with its log
+                    # rows; the cache about to be purged still holds the log.
+                    if self.is_calculated != self.SUCCESS:
+                        from lex.audit_logging.models.CalculationLog import CalculationLog
+
+                        CalculationLog.keep_rolled_back_log(calc_id, context.root_record, self)
                     # If we are root, we can clean up everything for this calculation ID
                     # or just our specific key. Cleaning everything ensures no orphaned child keys.
                     cleanup_result = CacheManager.cleanup_calculation(calculation_id=calc_id)
@@ -1432,6 +1438,11 @@ class CalculationModel(LexModel):
 
                 if is_root:
                     calc_id = context.calculation_id
+                    # Same as in execute_calculation_sync, for a failure that
+                    # never reached its cleanup; a no-op once that kept the log.
+                    from lex.audit_logging.models.CalculationLog import CalculationLog
+
+                    CalculationLog.keep_rolled_back_log(calc_id, context.root_record, self)
                     # Clean up all keys associated with this calculation ID
                     cleanup_result = CacheManager.cleanup_calculation(calculation_id=calc_id)
 

@@ -7,6 +7,7 @@ from django.db.models import Model, ForeignKey
 from django.db.models.fields import DateTimeField, DateField, TimeField
 from lex.api.utils.helpers import can_read_with_default_permission_scope
 from lex.audit_logging.utils.content_types import safe_get_content_type
+from lex.audit_logging.utils.latest_calculation import is_calculation_model
 from lex.core.models.LexModel import LexModel, UserContext
 from rest_framework import serializers, viewsets
 
@@ -21,6 +22,10 @@ from lex.api.serializers.sensitive_fields import (
 ID_FIELD_NAME = "id_field"
 SHORT_DESCR_NAME = "short_description"
 LEX_SCOPES_NAME = "lex_reserved_scopes"
+# The newest run a calculation row started, and whether it has one. Declared
+# only on serializers of CalculationModel subclasses; see _calculation_run_fields.
+CALCULATION_ID_NAME = "lex_reserved_calculation_id"
+HAS_CALCULATION_LOG_NAME = "lex_reserved_has_calculation_log"
 
 # --- MODULE-LEVEL CACHES (populated lazily, persist for process lifetime) ---
 
@@ -37,6 +42,28 @@ def _get_lexmodel_fields() -> set:
         except Exception:
             _lexmodel_fields = set()
     return _lexmodel_fields
+
+
+def _calculation_run_fields(model) -> dict:
+    """The two latest-run fields, for calculation models only.
+
+    Values are read from attributes the list view sets for a whole page at
+    once (``annotate_latest_calculation``). Nothing here queries per row.
+    """
+    if not is_calculation_model(model):
+        return {}
+    # Explicit method names, deliberately not the get_<field> defaults:
+    # _wrap_custom_serializer builds (LexSerializer, custom_cls), so a method
+    # named get_lex_reserved_has_calculation_log on LexSerializer would come
+    # first in the MRO and shadow AuditLogDefaultSerializer's own getter.
+    return {
+        CALCULATION_ID_NAME: serializers.SerializerMethodField(
+            method_name="_lex_latest_calculation_id"
+        ),
+        HAS_CALCULATION_LOG_NAME: serializers.SerializerMethodField(
+            method_name="_lex_has_latest_calculation_log"
+        ),
+    }
 
 
 # Cache: model-name -> model-class lookup for _resolve_target_model
@@ -365,6 +392,17 @@ class LexSerializer(serializers.ModelSerializer):
         return target
 
     # ------------------------------------------------------------------
+    # Latest calculation run — read through method_name, see _calculation_run_fields
+    # ------------------------------------------------------------------
+    def _lex_latest_calculation_id(self, instance):
+        """The newest run started from this row, when the list resolved it."""
+        return getattr(instance, "_lex_calculation_id", None)
+
+    def _lex_has_latest_calculation_log(self, instance):
+        """Whether that run exists. Unannotated rows answer False, never a query."""
+        return bool(getattr(instance, "_has_calculation_log", False))
+
+    # ------------------------------------------------------------------
     # Scopes computation
     # ------------------------------------------------------------------
     def get_lex_reserved_scopes(self, instance):
@@ -680,7 +718,10 @@ class LexSerializer(serializers.ModelSerializer):
     _SYSTEM_FIELDS = frozenset({
         'history_id', 'history_date', 'history_type', 'history_user', 'history_change_reason',
         'valid_from', 'valid_to',
-        'calculation_record', 'lex_reserved_scopes', 'id', 'id_field', SHORT_DESCR_NAME
+        'calculation_record', 'lex_reserved_scopes', 'id', 'id_field', SHORT_DESCR_NAME,
+        # Without these two, to_representation's visibility filter strips the
+        # run fields silently and the log button never appears.
+        CALCULATION_ID_NAME, HAS_CALCULATION_LOG_NAME,
     })
 
     def to_representation(self, instance):
@@ -870,13 +911,17 @@ def model2serializer(model, fields=None, name_suffix=""):
     pk_alias = serializers.ReadOnlyField(default=model._meta.pk.name)
 
     # ensure our internal fields are always present
-    all_fields = list(fields) + [ID_FIELD_NAME, SHORT_DESCR_NAME, "id", LEX_SCOPES_NAME]
+    run_fields = _calculation_run_fields(model)
+    all_fields = list(fields) + [
+        ID_FIELD_NAME, SHORT_DESCR_NAME, "id", LEX_SCOPES_NAME, *run_fields,
+    ]
 
     return type(
         class_name,
         (RestApiModelSerializerTemplate,),
         {
             ID_FIELD_NAME: pk_alias,
+            **run_fields,
             "Meta": type(
                 "Meta",
                 (RestApiModelSerializerTemplate.Meta,),
@@ -888,11 +933,12 @@ def model2serializer(model, fields=None, name_suffix=""):
 
 def _wrap_custom_serializer(custom_cls, model_class):
     meta = getattr(custom_cls, "Meta", type("Meta", (), {}))
+    run_fields = _calculation_run_fields(model_class)
     existing_fields = getattr(meta, "fields", "__all__")
     if existing_fields != "__all__":
         existing = list(existing_fields)
         # make sure all internal fields are present, including lex_reserved_scopes
-        for extra in (ID_FIELD_NAME, SHORT_DESCR_NAME, "id", LEX_SCOPES_NAME):
+        for extra in (ID_FIELD_NAME, SHORT_DESCR_NAME, "id", LEX_SCOPES_NAME, *run_fields):
             if extra not in existing:
                 existing.append(extra)
         new_fields = existing
@@ -935,6 +981,7 @@ def _wrap_custom_serializer(custom_cls, model_class):
         ID_FIELD_NAME: serializers.ReadOnlyField(default=model_class._meta.pk.name),
         SHORT_DESCR_NAME: serializers.SerializerMethodField(),
         "get_short_description": lambda self, obj: str(obj),
+        **run_fields,
         "Meta": NewMeta,
     }
     # Use a bare ``ReadOnlyField()`` (DRF defaults ``source`` to the field
