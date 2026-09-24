@@ -10,7 +10,8 @@
 The first version of this spec was approved and then checked line by line against the source while
 the implementation plan was written. Five things it said were wrong. Two were decided by the user;
 the other three are corrections of fact. A sixth was found later, by the final review of the built
-branch: §3 assumed the drawer's cell survives the end of a run, and it does not.
+branch: §3 assumed the drawer's cell survives the end of a run, and it does not. A seventh was found
+by the user on a real table: a failed run leaves no log, and its trace lives in the audit trail.
 
 1. **Which run a row opens** *(decided by the user)*. The first version resolved "the latest run a
    record appears in" through the `GenericForeignKey`. The frontend already has a tested resolver,
@@ -45,6 +46,18 @@ branch: §3 assumed the drawer's cell survives the end of a run, and it does not
    keys the live stream (the log socket listens per record), so it is handed on while live and never
    kept past the run. The re-review of that fix added one more rule: a reopened drawer starts from the
    row its button handed over, not from a record cached by an earlier open.
+7. **A failed run leaves no log, and the audit trail keeps its trace** *(found by the user, on a real
+   table)*. The log button showed on one of two ERROR rows, and neither showed a stack trace. A
+   calculation that fails inside its transaction (`is_atomic`) is rolled back with every log line it
+   wrote, because `CalculationLog` persists on commit. So "the row has a log" was false for exactly the
+   rows that failed, and the one failed row with a door opened an *earlier*, successful run's log under
+   today's failure. A model with no `calculation_error_message` / `error_message` field keeps no
+   traceback on the row either. The audit trail is written outside that transaction:
+   `ensure_terminal_calculation_audit` gives each run's newest `AuditLog` its terminal status and, on
+   failure, the stack trace. So the door now shows on every row that has run, and a drawer on a failed,
+   aborted or cancelled row asks the audit trail for the newest run from this row that ended that way
+   (filtering on the terminal status, so a later plain edit cannot hide it). It shows that run's trace
+   when the row has no field, and that run's log — or, when it left none, says the log was rolled back.
 
 ## The problem, as reported
 
