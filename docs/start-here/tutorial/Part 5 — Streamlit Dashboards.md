@@ -157,6 +157,29 @@ Select **"Streamlit"** from the run configuration dropdown in PyCharm → click 
 
 In the frontend, navigate to **Reports → BudgetSummary** and click the [Streamlit](https://docs.streamlit.io/) icon in the toolbar (not on a specific record) to see the company-wide overview. Click the icon on a specific record for the team deep-dive.
 
+### The company-wide overview
+
+`streamlit_class_main` runs when you open the dashboard from the toolbar, with
+no record selected. The three metrics and the chart are built from every
+`BudgetSummary` whose calculation succeeded:
+
+![The company overview: total budget 371,000 euro against 89,860 spent at 24.2% utilisation, a budget-versus-spent bar per team, and a breakdown table where Marketing is flagged Over at 129.35%](images/tutorial/part5-company-overview.png)
+
+The `Status` column is the `is_over_budget` field from
+[[start-here/tutorial/Part 3 — Calculations & Logging|Part 3]] — Marketing has
+spent 33,630 against a 26,000 budget, so its remaining budget is negative and
+the row reads red while the other three read green.
+
+### The team deep-dive
+
+`streamlit_main` runs when you open it from one record, and `self` is that
+record. Same team, one level down:
+
+![The Marketing deep-dive: 33,630 euro total expenses, minus 7,630 remaining, 129.4% utilisation with an Over Budget badge, expenses by category, and every expense listed with who submitted it](images/tutorial/part5-team-deepdive.png)
+
+The "Over Budget!" badge appears only on this page, because the record-level
+dashboard is the one that knows which team it is looking at.
+
 
 ## Checkpoint
 

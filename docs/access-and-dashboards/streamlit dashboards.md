@@ -155,14 +155,16 @@ For production-style deployments, give the Streamlit proxy a fixed `SESSION_SECR
 
 ## Embedding Lex App in a Dashboard
 
+When your dashboard needs Lex App controls, you can embed them directly instead
+of rebuilding the UI in Streamlit.
+
 ![lex_view embedding the application's own table inside a Streamlit page](images/streamlit/lex-view.png)
 
 That is the application's grid, not a copy of it: the same saved views, the
 same filters, the same export, inside a Streamlit page.
 
-When your dashboard needs Lex App controls, you can embed them directly instead
-of rebuilding the UI in Streamlit. Put your dashboard code in
-`_streamlit_structure.py` at your project root and expose a `main()` function.
+Put your dashboard code in `_streamlit_structure.py` at your project root and
+expose a `main()` function.
 
 Use one of the flat `lex_*` calls for a single control:
 

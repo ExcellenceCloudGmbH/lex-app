@@ -31,6 +31,27 @@ Developers would define explicit Django model classes for each legacy table, wir
 > - Static mapping can silently misrepresent column types.
 > - Teams are tempted to "fix" the DB to match static code — dangerous during migration.
 
+## How a Manifest Is Produced
+
+The manifest is not written by hand. It is the **difference** between the
+database as it stood before migration and the tables V2 accounts for, so the
+tables left over are exactly the legacy ones:
+
+```mermaid
+flowchart TB
+    A["Before migrating:<br/><code>lex capture_db_tables</code>"] --> S["snapshot.json<br/><i>every table that existed</i>"]
+    S --> G["<code>lex generate_legacy_freeze_manifest --before snapshot.json</code>"]
+    C["Current database"] --> G
+    V["V2 model tables<br/>+ known system tables<br/><i>django_*, auth_*, …</i>"] --> G
+    G --> M[".lex_legacy_freeze_manifest.json<br/><b>the contract</b>"]
+    M --> P["One policy, applied uniformly<br/>admin · API · ORM writes"]
+```
+
+Both commands are in [[reference/CLI Commands]], and
+[[ship-and-operate/backup and restore]] shows them in a working sequence. The
+snapshot has to be taken **before** the migration runs — after it, the
+difference no longer exists to be measured.
+
 ## Why Dynamic + Freeze Manifest Works
 
 | Property | Benefit |
