@@ -14,6 +14,10 @@ applies: a run started from record ``pk`` has an id beginning
 ``f"{model}_{pk}_"``, and the newest is the highest ``CalculationLog.id``.
 Stating it twice, in two languages, is what makes one row open one run in the
 table and in every widget.
+
+Covers: ``lex/audit_logging/utils/latest_calculation.py``,
+``lex/api/serializers/base_serializers.py``, and
+``lex/api/views/model_entries/List.py``.
 """
 from __future__ import annotations
 

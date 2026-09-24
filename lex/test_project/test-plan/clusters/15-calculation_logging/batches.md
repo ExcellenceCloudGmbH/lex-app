@@ -60,3 +60,6 @@ with two of a page's prefixes; only the longest is the record that started it. V
 matching shortest-first fails 15.41 and nothing else.
 
 15.43's second half exists because the first implementation shadowed the audit log's own getter: _wrap_custom_serializer builds (LexSerializer, custom_cls), so a same-named method on the shared base came first in the MRO and unannotated audit rows answered False. The fields now name their getters explicitly.
+2026-09-24 follow-up: the test file now names `lex/api/views/model_entries/List.py` explicitly so
+the coverage detector pairs these existing grid scenarios with the query-endpoint diff that
+introduced them.
