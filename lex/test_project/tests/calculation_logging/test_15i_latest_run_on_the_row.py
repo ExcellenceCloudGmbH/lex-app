@@ -177,7 +177,11 @@ class TestCluster15i_TheSerializer(_CalcLogTestCase):
 
 
 class TestCluster15i_TheGrid(_CalcLogTestCase):
-    """What the grid endpoint actually returns — the contract the frontend reads."""
+    """What the grid endpoint actually returns — the contract the frontend reads.
+
+    These drive the list view itself (``lex/api/views/model_entries/List.py``,
+    ``_execute_leaf_level``), which annotates each page before serializing it.
+    """
 
     def _post(self, **overrides):
         return self.client.post(
