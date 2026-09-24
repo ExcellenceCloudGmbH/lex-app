@@ -1,6 +1,6 @@
 # The calculation log, reachable after the run
 
-**Date:** 2026-09-23 (amended the same day — see *Amendments*)
+**Date:** 2026-09-23 (amended the same day and on 2026-09-24 — see *Amendments*)
 **Status:** approved
 **Touches:** `lex-app` (a list annotation — no migration), `process-admin-general-client`
 (status cell, a side-drawer shell, the log drawer)
@@ -9,7 +9,8 @@
 
 The first version of this spec was approved and then checked line by line against the source while
 the implementation plan was written. Five things it said were wrong. Two were decided by the user;
-the other three are corrections of fact.
+the other three are corrections of fact. A sixth was found later, by the final review of the built
+branch: §3 assumed the drawer's cell survives the end of a run, and it does not.
 
 1. **Which run a row opens** *(decided by the user)*. The first version resolved "the latest run a
    record appears in" through the `GenericForeignKey`. The frontend already has a tested resolver,
@@ -29,6 +30,18 @@ the other three are corrections of fact.
    column (play only). Today's only door, the spinner, lives in the *Actions* column.
 5. **The running body already exists.** `CalculationLogStream` is body-only by design and shares the
    cell's socket through the same registry. The drawer hosts it rather than wiring a socket itself.
+6. **The drawer cannot live in a cell** *(found by the final review)*. The grid remounts itself when
+   a run finishes, and again on every create, update and delete of the resource: each of those fires
+   the grid's refresh event, and the grid's React key carries a counter that event bumps. Anything a
+   cell renders is destroyed with it, so a drawer opened from the cell closed at the very moment it
+   exists for — and whenever any other row of the model finished. The drawer is now hosted once, in
+   the layout, outside every grid; the log button opens it through a small store, and the host
+   refreshes its record the way `CalculationWidget` does. The same review found the resolver ranking
+   a stale id above the run it had just watched: when a run ends, the live entry is removed before
+   the row is refetched, and for that moment the row still names its previous run. The resolver now
+   ranks an id it watched go live above the record and the query, because a live id is the newest run
+   of its record by construction. The `'IN_PROGRESS'` placeholder the status socket stores, when the
+   server does not say which run is live, is not an id.
 
 ## The problem, as reported
 
@@ -155,15 +168,30 @@ same key the Actions column uses, so it reuses that socket when one is open and 
 when the Actions column is hidden.
 
 **Which id the drawer opens.** The drawer resolves it with `useResolvedCalculationId`, passing the
-annotated id in as `record.calculation_id`. That gives the live id while running, the annotated id
-once finished, and — the part that matters — keeps the id it already has across the moment a run
-completes, when the live Redux entry has been removed but the grid has not yet refetched the row.
-Without it the drawer would flash "no log" in the second the log becomes available.
+annotated id in as `record.calculation_id`, so a finished row opens without a query of its own. The
+order is: the live id while running; then an id the drawer watched go live; then the record's id;
+then the `calculationlog` query; then whatever it resolved last. The second place is the part that
+matters. When a run ends, the live Redux entry is removed before the row is refetched, and for that
+moment the row still names its previous run. Ranked below the record, the id the drawer had just
+watched would lose to that stale one, and the drawer would show the previous run's log in the second
+this run's log became available. A live id is the newest run of its record by construction, so
+nothing the record says can be newer. Nor can the query outrank it: react-query answers from its
+cache the instant the query is enabled, and a run that wrote no log row makes the query answer the
+previous run. When the server does not say which run is live, the status socket stores the
+placeholder `'IN_PROGRESS'`; that is not an id, and the resolver looks past it to the record and the
+query.
 
-**Run end, drawer open.** The drawer is rendered by `CalculateFunctionality`, which tracks the row's
-status live, and receives that status as a prop. When it moves from `IN_PROGRESS` to terminal, the
-body swaps from the stream to the tree for the same id. It learns of the change the way the pill
-does, so it cannot disagree with the pill beside it.
+**Run end, drawer open.** A cell cannot host the drawer. The grid remounts when a run finishes, and
+on every create, update and delete of the resource, so anything a cell renders is destroyed with it.
+The drawer is therefore hosted once, in the layout, outside every grid — in the embedded layout too.
+The log button puts the row into a small store and the host renders the drawer for it, keyed by the
+row so that switching rows starts clean. The drawer belongs to the table it was opened from, so the
+host closes it when the page changes. The host fetches the record itself and shows the row the
+button handed it until that fetch lands. It refreshes the record the way `CalculationWidget` does:
+on the refresh event for its model or a global one, and when the row's live entry disappears. It
+derives the status from the same inputs as the pill — the live entry and `is_calculated` — so the
+two cannot disagree. When the status moves from `IN_PROGRESS` to terminal, the body swaps from the
+stream to the tree for the same id, and the refreshed record brings the failure headline with it.
 
 **No duplicate title.** `CalculationLogTree` gains one prop, `showTitle` (default `true`). The
 drawer passes `false`: its own header already says what this is, and two "Calculation Log" bars
