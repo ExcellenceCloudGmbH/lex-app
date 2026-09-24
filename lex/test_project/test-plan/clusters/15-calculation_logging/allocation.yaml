@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 38
+max_scenario: 46
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -85,3 +85,26 @@ letters:
       disk; the file carries 15.32-15.38 (7 pass, measured) while this record still said 15.32-15.34
       and max_scenario 34, so `test_plan_aggregates.py validate` reported four scenarios as exceeding
       the ceiling and the next allocator in this cluster would have collided with them
+  i:
+    title: A calculation row learns its latest run
+    scenarios: 15.39-15.46
+    status: complete
+    tests:
+      pass: 9
+      skip: 1
+      xfail: 0
+    note: >-
+      Reported as "once they are done, we lose the logs and we would have to do a lot of steps to get
+      them." Literally true: the live log is served from cache and the root calculation purges that
+      cache on completion (CacheManager.cleanup_calculation), so a finished run had no path back from
+      the row that started it. The durable copy was always in the CalculationLog table; what was
+      missing was the row knowing which run to open. The grid endpoint now annotates calculation rows
+      with lex_reserved_calculation_id / lex_reserved_has_calculation_log, one query per page, by the
+      rule the frontend's useResolvedCalculationId already applies - newest calculationId starting
+      "<model>_<pk>_", by id - so one row opens one run in the table and in every widget. 15.44 is the
+      regression; 15.42 is the guard against it becoming N+1; 15.46 guards the index that makes the
+      prefix match a probe rather than a scan. No migration: calculationId has been db_index=True since
+      0005. 15.43's second half exists because the first implementation shadowed the audit log's own
+      getter: _wrap_custom_serializer builds (LexSerializer, custom_cls), so a same-named method on the
+      shared base came first in the MRO and unannotated audit rows answered False. The fields now name
+      their getters explicitly.
