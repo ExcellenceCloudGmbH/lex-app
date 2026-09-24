@@ -12,6 +12,7 @@ the implementation plan was written. Five things it said were wrong. Two were de
 the other three are corrections of fact. A sixth was found later, by the final review of the built
 branch: §3 assumed the drawer's cell survives the end of a run, and it does not. A seventh was found
 by the user on a real table: a failed run leaves no log, and its trace lives in the audit trail.
+An eighth was the user's call after using it: a popup, not a drawer.
 
 1. **Which run a row opens** *(decided by the user)*. The first version resolved "the latest run a
    record appears in" through the `GenericForeignKey`. The frontend already has a tested resolver,
@@ -58,6 +59,13 @@ by the user on a real table: a failed run leaves no log, and its trace lives in 
    aborted or cancelled row asks the audit trail for the newest run from this row that ended that way
    (filtering on the terminal status, so a later plain edit cannot hide it). It shows that run's trace
    when the row has no field, and that run's log — or, when it left none, says the log was rolled back.
+8. **A popup, not a drawer** *(decided by the user)*. After using it: "make them look like a popup
+   rather than that drawer", with a failure reading like the traceback the audit log's "Show" opens.
+   The log now opens in a dialog on the same Paper as that traceback popup, with a remembered
+   full-screen toggle in place of the full-width one. The traceback body is one shared view, used by
+   both popups, and it puts the exception on top. A failure opens on its traceback, and the log is a
+   tab away. The host, store and completion behaviour of Amendment 6 are unchanged; only the shell
+   changed, and with it the names (`CalculationLogPopup`, `CalculationLogPopupHost`).
 
 ## The problem, as reported
 
