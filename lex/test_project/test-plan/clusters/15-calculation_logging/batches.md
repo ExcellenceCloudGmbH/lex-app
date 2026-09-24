@@ -46,7 +46,7 @@
 | Type | U + API |
 | Files covered | `lex/audit_logging/utils/latest_calculation.py` (new), `lex/api/serializers/base_serializers.py` (`_calculation_run_fields`, `_SYSTEM_FIELDS`, both factories), `lex/api/views/model_entries/List.py` (`_execute_leaf_level`) |
 | Test file | `lex/test_project/tests/calculation_logging/test_15i_latest_run_on_the_row.py` |
-| Tests landed | **10 pass / 0 fail** |
+| Tests landed | **9 pass / 0 fail / 1 skip** |
 | Status | ✅ Complete |
 | Paired with | PAC batches `7f` and `12m` — the status cell's log button and the drawer that read these two fields |
 

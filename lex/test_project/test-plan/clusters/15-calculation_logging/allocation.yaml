@@ -90,8 +90,8 @@ letters:
     scenarios: 15.39-15.46
     status: complete
     tests:
-      pass: 10
-      skip: 0
+      pass: 9
+      skip: 1
       xfail: 0
     note: >-
       Reported as "once they are done, we lose the logs and we would have to do a lot of steps to get
