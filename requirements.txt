@@ -58,4 +58,4 @@ cryptography
 # `~=` rather than `==`: pip treats two differing `==` constraints on one package
 # as unsatisfiable and refuses to install, so an exact pin here could not be
 # overridden by a project that needs a patch. `~=2.1.0` means >=2.1.0, ==2.1.*.
-lex-app-frontend~=2.1.0
+lex-app-frontend~=2.2.0
