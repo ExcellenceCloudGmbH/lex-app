@@ -39,9 +39,12 @@ branch: §3 assumed the drawer's cell survives the end of a run, and it does not
    refreshes its record the way `CalculationWidget` does. The same review found the resolver ranking
    a stale id above the run it had just watched: when a run ends, the live entry is removed before
    the row is refetched, and for that moment the row still names its previous run. The resolver now
-   ranks an id it watched go live above the record and the query, because a live id is the newest run
-   of its record by construction. The `'IN_PROGRESS'` placeholder the status socket stores, when the
-   server does not say which run is live, is not an id.
+   ranks an id it watched go live above the record and the query, because a live id is the run its
+   record is part of right now — its own, or a cascading parent's. The `'IN_PROGRESS'` placeholder the
+   status socket stores, when the server does not say which run is live, names no run, but it still
+   keys the live stream (the log socket listens per record), so it is handed on while live and never
+   kept past the run. The re-review of that fix added one more rule: a reopened drawer starts from the
+   row its button handed over, not from a record cached by an earlier open.
 
 ## The problem, as reported
 
@@ -174,12 +177,16 @@ then the `calculationlog` query; then whatever it resolved last. The second plac
 matters. When a run ends, the live Redux entry is removed before the row is refetched, and for that
 moment the row still names its previous run. Ranked below the record, the id the drawer had just
 watched would lose to that stale one, and the drawer would show the previous run's log in the second
-this run's log became available. A live id is the newest run of its record by construction, so
+this run's log became available. A live id is the run its record is part of right now — its own,
+or, for a calculation cascaded from a parent, the parent's run, where its lines are logged — so
 nothing the record says can be newer. Nor can the query outrank it: react-query answers from its
 cache the instant the query is enabled, and a run that wrote no log row makes the query answer the
-previous run. When the server does not say which run is live, the status socket stores the
-placeholder `'IN_PROGRESS'`; that is not an id, and the resolver looks past it to the record and the
-query.
+previous run. (A drawer opened after a run uses the prefix rule instead, so a cascaded child shows its
+parent's run only while watched.) When the server does not say which run is live, the status socket
+stores the placeholder `'IN_PROGRESS'`. It names no run, but the log socket listens per record — it
+joins the group named by the part of the key before `-` — so a stream keyed on the placeholder still
+carries the running calculation's lines, on the socket the Actions column opened with it. The resolver
+hands it on while live and never keeps it, so a finished run cannot resolve to it.
 
 **Run end, drawer open.** A cell cannot host the drawer. The grid remounts when a run finishes, and
 on every create, update and delete of the resource, so anything a cell renders is destroyed with it.
@@ -187,7 +194,11 @@ The drawer is therefore hosted once, in the layout, outside every grid — in th
 The log button puts the row into a small store and the host renders the drawer for it, keyed by the
 row so that switching rows starts clean. The drawer belongs to the table it was opened from, so the
 host closes it when the page changes. The host fetches the record itself and shows the row the
-button handed it until that fetch lands. It refreshes the record the way `CalculationWidget` does:
+button handed it until that fetch lands — a fetch made since the drawer opened, not a record
+react-query kept from an earlier open, which for a row re-run in between would be the previous run's
+status and failure. A record fetched one at a time carries no run id (only the grid's list is
+annotated), so the host keeps the row's run id rather than send the resolver to the query. It
+refreshes the record the way `CalculationWidget` does:
 on the refresh event for its model or a global one, and when the row's live entry disappears. It
 derives the status from the same inputs as the pill — the live entry and `is_calculated` — so the
 two cannot disagree. When the status moves from `IN_PROGRESS` to terminal, the body swaps from the
