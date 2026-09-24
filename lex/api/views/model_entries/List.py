@@ -892,7 +892,22 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
 
         row_count = qs.count()
         page_qs = qs[start_row:end_row]
-        serializer = self.get_serializer(page_qs, many=True)
+
+        from lex.audit_logging.utils.latest_calculation import (
+            annotate_latest_calculation,
+            is_calculation_model,
+        )
+
+        if is_calculation_model(self._ag_model_class):
+            # A calculation row carries only `is_calculated`; the grid needs to
+            # know which rows have a finished log to open. Resolved for the
+            # whole page in one query and set on the instances the serializer
+            # reads — the same shape as the audit log branch above.
+            page_rows = list(page_qs)
+            annotate_latest_calculation(page_rows, self._ag_model_class)
+            serializer = self.get_serializer(page_rows, many=True)
+        else:
+            serializer = self.get_serializer(page_qs, many=True)
         return {
             "rowData": serializer.data,
             "rowCount": row_count,
