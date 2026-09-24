@@ -1,3 +1,48 @@
+## [2.2.2] - 2026-09-24
+
+### Added
+- **backend** a calculation row knows which run its log is in ([c5d3c9b2](https://github.com/ExcellenceCloudGmbH/lex-app/commit/c5d3c9b2)) (#792)
+- **backend** a Flow can have an order, a loop, and a memory ([886ff57d](https://github.com/ExcellenceCloudGmbH/lex-app/commit/886ff57d)) (#789)
+- **backend** the embedded sidebar collapses instead of vanishing, and the account moves to a top bar ([5c668b44](https://github.com/ExcellenceCloudGmbH/lex-app/commit/5c668b44)) (#783)
+- **backend** apply future-dated activations inside the database ([130aee3d](https://github.com/ExcellenceCloudGmbH/lex-app/commit/130aee3d)) (#781)
+- **frontend** the log opens in a popup, and a failure reads like the audit log's traceback ([207a4ca](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/207a4ca))
+- **frontend** the log is reachable after the run ends ([757d654](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/757d654))
+- **frontend** a drawer for the run a row last started ([09b5d07](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/09b5d07))
+- **frontend** the tree can leave its title to its host ([2d4e7a2](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/2d4e7a2))
+- **frontend** say what happened before showing the log ([fe9ae5a](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/fe9ae5a))
+- **frontend** walk a lex_flow program, instead of looking one rule up ([f1f0688](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/f1f0688))
+
+### Fixed
+- **backend** the account bar outranks the header band it sits in ([d395b14a](https://github.com/ExcellenceCloudGmbH/lex-app/commit/d395b14a)) (#786)
+- **backend** the sender name was documented, referenced, and never set ([903efd38](https://github.com/ExcellenceCloudGmbH/lex-app/commit/903efd38)) (#749)
+- **frontend** no log button on an aborted or cancelled row ([138ecc7](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/138ecc7))
+- **frontend** a row that ended badly never shows another run's log ([d6a2362](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/d6a2362))
+- **frontend** a cancelled run leaves the live state, and aborted/cancelled rows are pinned ([be8e7bd](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/be8e7bd))
+- **frontend** the drawer slides in and out, and the live log fills it ([ac826c8](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/ac826c8))
+- **frontend** every row that ran gets the door, and a failure shows its stack trace ([df4155e](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/df4155e))
+- **frontend** a reopened drawer starts from its row, and the placeholder still streams ([24c1126](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/24c1126))
+- **frontend** the failure headline says only what it knows ([8d32231](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/8d32231))
+- **frontend** the log drawer stays open when the run it shows ends ([e1a9ed9](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/e1a9ed9))
+- **frontend** a run the resolver watched go live outranks a stale id ([d18282f](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/d18282f))
+- **frontend** a flow's position survives the app clearing its own URL ([176a624](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/176a624))
+- **frontend** make it scrollable, and match the dialog beside it ([cba6b70](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/cba6b70))
+- **frontend** align leaf indentation, and let a filter wait for Apply ([a14ab66](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/a14ab66))
+
+### Changed
+- **backend** Update requirements.txt ([9361e844](https://github.com/ExcellenceCloudGmbH/lex-app/commit/9361e844))
+- **backend** Capture the figures in CI, because that is the only place that can ([5a95b256](https://github.com/ExcellenceCloudGmbH/lex-app/commit/5a95b256)) (#778)
+- **backend** Four more register items, and two miscounts worth keeping ([095c6587](https://github.com/ExcellenceCloudGmbH/lex-app/commit/095c6587)) (#776)
+- **backend** The doc gates scanned a venv and called it the framework ([d5019721](https://github.com/ExcellenceCloudGmbH/lex-app/commit/d5019721)) (#775)
+- **frontend** format CustomLayout and its test with the repo's prettier ([ef59d64](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/ef59d64))
+- **frontend** split the panel out of FormDrawer as SideDrawer ([f5605ef](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/f5605ef))
+- **frontend** An on_select embed is two frames deep, not one ([731766c](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/731766c))
+- **frontend** Give the first embed room for the dev server's cold compile ([b876733](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/b876733))
+- **frontend** The figures were of an empty iframe, and the run went green anyway ([c926c96](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/c926c96))
+- **frontend** A Streamlit showcase the documentation can photograph ([0f6a2d4](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/0f6a2d4))
+- **frontend** Capture the standalone Streamlit surface — app, spec and wiring ([0e6a4d4](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/0e6a4d4))
+- **frontend** Capture filtering, grouping, saved views and export ([1f86148](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/1f86148))
+- **frontend** Capture navigation, density and dark mode — and stop two figures lying ([7b9d9c4](https://github.com/ExcellenceCloudGmbH/process-admin-general-client/commit/7b9d9c4))
+
 ## [2.2.1] - 2026-09-17
 
 > **Frontend changes for this release are not yet recorded.**
