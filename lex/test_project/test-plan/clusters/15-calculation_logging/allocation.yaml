@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 46
+max_scenario: 50
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -108,3 +108,25 @@ letters:
       getter: _wrap_custom_serializer builds (LexSerializer, custom_cls), so a same-named method on the
       shared base came first in the MRO and unannotated audit rows answered False. The fields now name
       their getters explicitly.
+  j:
+    title: A failed run keeps what it logged
+    scenarios: 15.47-15.50
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Review of the calculation log popup: "Why is there no display of the calculation logs from the
+      successful parts of the calculation until it raises an error?" CalculationLog persists on commit,
+      so a calculation that fails inside its transaction - every is_atomic model - was rolled back with
+      every row it wrote, and the steps that succeeded vanished with the one that failed. The live cache
+      is not transactional: it holds the run's whole log under the root's key until the run ends.
+      CalculationLog.keep_rolled_back_log writes that text back as the run's log in both failure paths
+      (execute_calculation_sync's finally, calculate_hook's except), just before the cache is purged.
+      15.47 is the regression; 15.48 is what the log popup reads - the audit row's
+      lex_reserved_has_calculation_log - turning true; 15.49 leaves surviving rows alone; 15.50 makes
+      an empty or raising cache cost the log, never the failure path. These unpatch the harness's cache
+      stubs (store_message, build_cache_key), which otherwise make every key "test_key" and store
+      nothing.
+

@@ -60,3 +60,25 @@ with two of a page's prefixes; only the longest is the record that started it. V
 matching shortest-first fails 15.41 and nothing else.
 
 15.43's second half exists because the first implementation shadowed the audit log's own getter: _wrap_custom_serializer builds (LexSerializer, custom_cls), so a same-named method on the shared base came first in the MRO and unannotated audit rows answered False. The fields now name their getters explicitly.
+
+## Batch 15j — a failed run keeps what it logged (15.47-15.50)
+
+| | |
+| --- | --- |
+| Scenario range | 15.47 – 15.50 |
+| Files covered | `lex/audit_logging/models/CalculationLog.py` (`keep_rolled_back_log`), `lex/core/models/CalculationModel.py` (both failure paths) |
+| Test file | `lex/test_project/tests/calculation_logging/test_15j_failed_run_keeps_its_log.py` (4) |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+| Paired with | process-admin-general-client F12 `12r` |
+
+**The steps that succeeded vanished with the one that failed.** `CalculationLog` persists on commit, so a
+calculation that fails inside its transaction — every `is_atomic` model — was rolled back with every row
+it wrote. The log popup could show the failure's traceback but nothing that led up to it.
+
+**The live cache still had it.** The cache is not transactional: it holds the run's whole log, in
+order, under the root's key until the run ends. `CalculationLog.keep_rolled_back_log` writes that text
+back as the run's log, one row on the root record, in both failure paths, just before the cache is
+purged. It does nothing when the run's rows survived, and it never raises. 15.47 is the regression.
+15.48 checks what the popup reads: the audit row's `lex_reserved_has_calculation_log` turns true.
+

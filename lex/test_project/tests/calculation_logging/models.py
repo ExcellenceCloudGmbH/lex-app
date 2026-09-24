@@ -98,6 +98,11 @@ class LogRootCalc(CalculationModel):
             # Mixin fan-out, then inner CalcModel.save() inside each child.
             LogChildWithInnerSave.create(unit=units)
             return
+        if self.child_mode == "fail_after_log":
+            # Logs a step that succeeds, then fails — inside the atomic
+            # transaction, so the rollback takes both log rows with it.
+            LexLogger().add_text("step one done").log()
+            raise ValueError("step two failed")
 
 
 @_permissive

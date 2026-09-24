@@ -58,7 +58,10 @@ An eighth was the user's call after using it: a popup, not a drawer.
    failure, the stack trace. So the door now shows on every row that has run, and a drawer on a failed,
    aborted or cancelled row asks the audit trail for the newest run from this row that ended that way
    (filtering on the terminal status, so a later plain edit cannot hide it). It shows that run's trace
-   when the row has no field, and that run's log — or, when it left none, says the log was rolled back.
+   when the row has no field, and that run's log — or, when it left none, says so. *(From the PR review:)*
+   the log such a run wrote before it failed is no longer lost. The live cache is not transactional
+   and holds the run's whole log until the run ends, so both failure paths write it back as the run's
+   log (`CalculationLog.keep_rolled_back_log`) just before they purge the cache.
 8. **A popup, not a drawer** *(decided by the user)*. After using it: "make them look like a popup
    rather than that drawer", with a failure reading like the traceback the audit log's "Show" opens.
    The log now opens in a dialog on the same Paper as that traceback popup, with a remembered

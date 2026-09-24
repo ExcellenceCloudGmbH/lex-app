@@ -204,6 +204,59 @@ class CalculationLog(models.Model):
             log_entry.save(update_fields=["calculation_log"])
 
     @classmethod
+    def keep_rolled_back_log(cls, calculation_id, root_record, root_instance) -> bool:
+        """
+        Keep what a failed run logged when its transaction took the rows with it.
+
+        `log` persists on commit, so a calculation that fails inside its
+        transaction — every `is_atomic` model — is rolled back with every row it
+        wrote: the steps that succeeded vanish with the one that failed. The live
+        cache is not transactional. It holds the run's whole log, in order, under
+        the root's key until the run ends, so the failure paths call this just
+        before they purge it, and it writes that text back as the run's log: one
+        row on the root record, the same text the live stream showed.
+
+        Does nothing when rows for the run survived (a run outside a transaction
+        keeps them) or when the cache holds nothing for it. Never raises — a
+        failure path must not fail again on its way to reporting the first one.
+        """
+        logger = logging.getLogger("lex.calclog")
+        try:
+            if not calculation_id or not root_record or root_instance is None:
+                return False
+            if cls.objects.filter(calculationId=calculation_id).exists():
+                return False
+            text = CacheManager.get_message(
+                CacheManager.build_cache_key(root_record, calculation_id)
+            )
+            if not text:
+                return False
+
+            from lex.audit_logging.models.AuditLog import AuditLog
+
+            # The run's first audit row was written by the request that started
+            # it, before the transaction, so it survived; rows the calculation
+            # wrote itself went with the rollback.
+            audit_log = (
+                AuditLog.objects.filter(calculation_id=calculation_id).order_by("id").first()
+            )
+            cls.objects.create(
+                calculationId=calculation_id,
+                audit_log=audit_log,
+                content_type=ContentType.objects.get_for_model(type(root_instance)),
+                object_id=root_instance.pk,
+                calculation_log=text,
+            )
+            return True
+        except Exception:
+            logger.warning(
+                "Could not keep the log of failed calculation %s",
+                calculation_id,
+                exc_info=True,
+            )
+            return False
+
+    @classmethod
     def log(cls, message: str):
         """
         Logs `message` against the current model context.
