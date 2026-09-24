@@ -6,6 +6,15 @@ aliases:
 
 This part covers two independent systems that both changed significantly from V1: logging and permissions. You can tackle them in either order.
 
+Two independent swaps. They touch different code and are worth doing as two
+passes rather than one:
+
+```mermaid
+flowchart LR
+    CL["<code>CalculationLog</code>"] ==> LL["<code>LexLogger</code><br/><i>builder; call .log() to write</i>"]
+    MR["<code>ModificationRestriction</code>"] ==> PM["<code>permission_*</code> methods<br/><i>on the model itself</i>"]
+```
+
 ## Logging: `CalculationLog` → `LexLogger`
 
 V1 used `CalculationLog.create()` for plain-text log entries. The current system uses `LexLogger`, a builder-pattern API that produces rich Markdown output with tables, headings, DataFrames, and code blocks.

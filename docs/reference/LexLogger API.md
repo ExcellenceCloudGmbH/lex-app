@@ -4,6 +4,21 @@ title: LexLogger API
 
 `LexLogger` uses a builder pattern — chain methods together and call `.log()` at the end. Every method returns the logger instance, so you can chain as many as you need.
 
+Every `add_*` method appends to an in-memory buffer and returns the logger, so
+calls chain. Nothing reaches the database until `.log()` flushes that buffer:
+
+```mermaid
+flowchart LR
+    N["LexLogger()"] --> B["buffer<br/><i>a list of strings</i>"]
+    B -->|"add_text / add_heading<br/>add_table / add_dataframe<br/>add_code — each returns self"| B
+    B -->|".log()"| W["joined and written to<br/>CalculationLog"]
+    W -->|"buffer cleared,<br/>logger returned"| B
+    B -.->|"no .log() call"| X["discarded —<br/>nothing is written"]
+```
+
+Because `.log()` empties the buffer and hands the logger back, one instance can
+be reused for several separate entries.
+
 ## Core Methods
 
 ### `add_text(text: str)`

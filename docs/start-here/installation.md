@@ -44,9 +44,33 @@ This generates a few things for you:
 
 The `.env` file is the **single source of truth** for runtime configuration.
 
-### Option A: Automatic (Recommended)
+The whole first run is four commands, and only the third needs credentials in
+place:
 
-Run `lex setup` and follow the prompts. The wizard will open [Excellence Cloud](https://excellence-cloud.de) for you, guide you through creating a new Client, and auto-populate your `.env` file.
+```mermaid
+flowchart LR
+    I["pip install lex-app"] --> S["lex setup<br/><i>writes .env, .run/,<br/>migrations/</i>"]
+    S --> C["credentials into .env<br/><i>Option A or B below</i>"]
+    C --> N["lex init<br/><i>migrations, Keycloak sync,<br/>initial data</i>"]
+    N --> R["lex start<br/><i>dev server</i>"]
+    C -.->|"missing, and --bootstrap given"| BS["bootstrap flow"]
+    BS --> N
+    C -.->|"missing, no --bootstrap"| F["lex init fails<br/>against Keycloak"]
+```
+
+### Option A: Let `lex init` bootstrap the credentials
+
+`lex setup` does not prompt for anything — it writes the files listed above and
+exits. The flow that can fetch credentials for you is a flag on `lex init`:
+
+```bash
+lex init --bootstrap
+```
+
+With `--bootstrap`, `lex init` starts the bootstrap flow **when the Keycloak
+environment variables are missing**. Without it (the default) `lex init` fails
+against Keycloak instead, because it needs the client configuration to exist
+and be reachable.
 
 ### Option B: Manual
 

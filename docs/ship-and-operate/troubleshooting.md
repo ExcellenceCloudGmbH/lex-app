@@ -4,6 +4,17 @@ title: Troubleshooting
 
 Symptoms that have actually happened on real installations, and what each one turned out to be. Ordered roughly by how often they come up.
 
+Three of the entries below are sign-in problems with different causes, and the
+symptom alone tells you which:
+
+```mermaid
+flowchart TB
+    A{"Who is affected,<br/>and when?"}
+    A -->|"one tab, after about an hour"| B["Credential renewal stopped<br/><i>check the interface version</i>"]
+    A -->|"everyone, right after a redeploy"| C["DJANGO_SECRET_KEY unset<br/>or still the example value<br/><i>a random per-process key is used</i>"]
+    A -->|"some requests, at random"| D["No shared token store<br/>across replicas<br/><i>startup is refused, not served</i>"]
+```
+
 ## The deployment fails, and the logs look like a crash loop
 
 **Check the startup probe budget before anything else.** The web process runs migrations and registers every model before it answers a request. If the startup probe expires mid-migration the pod is killed, the replacement starts the same migration from the beginning, and it repeats.
