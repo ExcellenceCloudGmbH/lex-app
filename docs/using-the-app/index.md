@@ -45,6 +45,6 @@ The interface sits on top of the [[home|what the framework gives you]]. Every fe
 | Validation errors when editing | [[model-your-data/serializers\|Serializers]] |
 | Timeline and history tabs | [[history-and-audit/bitemporal history\|Bitemporal History]] |
 | Audit log per record | [[history-and-audit/audit logs\|Audit Logs]] |
-| Embedded Streamlit dashboards | [[access-and-dashboards/streamlit dashboards\|Streamlit Dashboards]] |
+| Embedded Streamlit dashboards | [[access-and-dashboards/streamlit/index\|Streamlit Dashboards]] |
 | Calculation logs with progress | [[calculations/logging\|LexLogger]] |
 | Field and row restrictions | [[access-and-dashboards/permissions\|Permissions]] |

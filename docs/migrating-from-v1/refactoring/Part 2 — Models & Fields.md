@@ -8,6 +8,17 @@ Now that your imports are updated, it's time to convert your model base classes 
 
 ## Change Base Classes
 
+Which base a model takes depends on whether it computes anything:
+
+```mermaid
+flowchart LR
+    Q{"Does the model<br/>recompute itself?"}
+    Q -->|no| L["<code>LexModel</code><br/><i>plain domain model</i>"]
+    Q -->|yes| C["<code>CalculationModel</code><br/><i>brings is_calculated<br/>and the state machine</i>"]
+    C --> F["<code>IsCalculatedField</code><br/><code>CalculateField</code><br/><i>delete — now inherited</i>"]
+```
+
+
 Every V1 model inherits from `generic_app` base classes. These all map to either `LexModel` or `CalculationModel`:
 
 | V1 Base Class | Current Base Class | When to Use |

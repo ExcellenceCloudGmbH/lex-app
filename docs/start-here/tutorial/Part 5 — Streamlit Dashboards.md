@@ -4,7 +4,7 @@ aliases:
   - "tutorial/Part 5 — Streamlit Dashboards"
 ---
 
-In this part, you'll add two interactive dashboards to `BudgetSummary` — a company-wide overview and a per-team deep-dive. Both are added directly to your model file in `Reports/`, using [Streamlit](https://docs.streamlit.io/) — see [[access-and-dashboards/streamlit dashboards]] for the full guide.
+In this part, you'll add two interactive dashboards to `BudgetSummary` — a company-wide overview and a per-team deep-dive. Both are added directly to your model file in `Reports/`, using [Streamlit](https://docs.streamlit.io/) — see [[access-and-dashboards/streamlit/index|Streamlit Dashboards]] for the full guide.
 
 | Dashboard | Level | What It Shows |
 |---|---|---|
@@ -15,8 +15,16 @@ In this part, you'll add two interactive dashboards to `BudgetSummary` — a com
 
 Add this class method to your `BudgetSummary` class (after `calculate()`):
 
-> [!important]
-> Import `streamlit` **inside** the Streamlit methods, not at the top of the file. Your model file is loaded by Django at startup — when Streamlit isn't running. A top-level `import streamlit as st` would crash.
+> [!tip]
+> The snippets below import `streamlit` **inside** each method. That is a
+> preference, not a requirement — a top-level `import streamlit as st` in a
+> model file is harmless, it just makes every Django start-up pay for loading
+> Streamlit whether or not a dashboard is ever opened.
+>
+> The rule that does bite is about `st.*` **calls**, not imports: one outside a
+> function runs when the module is imported, before there is a page to draw
+> into. It renders nothing and logs "missing ScriptRunContext" — see
+> [[access-and-dashboards/streamlit/standalone dashboards|Standalone Dashboards]].
 
 > [!note]
 > The snippets below append to `BudgetSummary.py`. They assume the imports you already added in [[start-here/tutorial/Part 3 — Calculations & Logging|Part 3]] are still at the top of the file:
@@ -156,6 +164,29 @@ Select **"Streamlit"** from the run configuration dropdown in PyCharm → click 
 > ```
 
 In the frontend, navigate to **Reports → BudgetSummary** and click the [Streamlit](https://docs.streamlit.io/) icon in the toolbar (not on a specific record) to see the company-wide overview. Click the icon on a specific record for the team deep-dive.
+
+### The company-wide overview
+
+`streamlit_class_main` runs when you open the dashboard from the toolbar, with
+no record selected. The three metrics and the chart are built from every
+`BudgetSummary` whose calculation succeeded:
+
+![The company overview: total budget 371,000 euro against 89,860 spent at 24.2% utilisation, a budget-versus-spent bar per team, and a breakdown table where Marketing is flagged Over at 129.35%](images/tutorial/part5-company-overview.png)
+
+The `Status` column is the `is_over_budget` field from
+[[start-here/tutorial/Part 3 — Calculations & Logging|Part 3]] — Marketing has
+spent 33,630 against a 26,000 budget, so its remaining budget is negative and
+the row reads red while the other three read green.
+
+### The team deep-dive
+
+`streamlit_main` runs when you open it from one record, and `self` is that
+record. Same team, one level down:
+
+![The Marketing deep-dive: 33,630 euro total expenses, minus 7,630 remaining, 129.4% utilisation with an Over Budget badge, expenses by category, and every expense listed with who submitted it](images/tutorial/part5-team-deepdive.png)
+
+The "Over Budget!" badge appears only on this page, because the record-level
+dashboard is the one that knows which team it is looking at.
 
 
 ## Checkpoint

@@ -84,4 +84,4 @@ This means:
 - **Access control respected** — the dashboard sees only the data you're allowed to see
 
 > [!note]
-> For developers: the integration is powered by the `StreamlitIframe` component. See [[access-and-dashboards/streamlit dashboards]] for implementation details.
+> For developers: the integration is powered by the `StreamlitIframe` component. See [[access-and-dashboards/streamlit/index|Streamlit Dashboards]] for implementation details.

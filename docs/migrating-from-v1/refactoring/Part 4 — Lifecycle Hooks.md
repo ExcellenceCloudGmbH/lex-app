@@ -8,6 +8,17 @@ V1 used `UploadModelMixin` to trigger processing when a record was created. The 
 
 ## What Changes
 
+V1 ran upload behaviour for you and gave you no say in when. V2 has you name
+the moment:
+
+```mermaid
+flowchart LR
+    U["<code>UploadModelMixin</code><br/><i>behaviour fires implicitly</i>"]
+    ==> H["<code>@hook(AFTER_CREATE)</code><br/><code>@hook(BEFORE_UPDATE)</code><br/>…<br/><i>you choose the moment</i>"]
+    H --> S["saving inside a hook<br/>needs <code>skip_hooks=True</code><br/><i>or it re-enters itself</i>"]
+```
+
+
 | Aspect | V1 (`UploadModelMixin`) | Current (`@hook`) |
 |---|---|---|
 | Base class | `UploadModelMixin` | `LexModel` |

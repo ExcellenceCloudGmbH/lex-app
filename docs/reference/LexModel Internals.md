@@ -29,9 +29,50 @@ History fields (via [django-simple-history](https://django-simple-history.readth
 > `created_at` and `edited_at` are stored in UTC and served by the API with an explicit
 > `Z` designator (e.g. `2026-07-14T11:43:00Z`). Parse them as UTC and convert to local
 > time for display — the application already does this for you. This is the same contract
-> the [[history-and-audit/bitemporal history#The REST API|`as_of` history queries]] follow.
+> the [[history-and-audit/bitemporal history#The REST API|as_of history queries]] follow.
 
 ## Lifecycle Hooks
+
+`save()` runs the hooks in a fixed order inside one transaction. The two you
+override are `pre_validation` and `post_validation`; the create/update pairs
+around them fire too, and are available through django-lifecycle's decorators
+if you need them.
+
+```mermaid
+flowchart TB
+    S["save()"] --> SK{"skip_hooks, or a
+    lifecycle bypass in force?"}
+    SK -->|yes| PLAIN["plain save, no hooks"]
+    SK -->|no| N{"_state.adding?"}
+
+    N -->|new record| BC["BEFORE_CREATE"]
+    N -->|existing| BU["BEFORE_UPDATE"]
+    BC --> BS
+    BU --> BS
+
+    BS["BEFORE_SAVE
+    pre_validation()
+    snapshot captured here"] --> W[("the row is written")]
+    W --> AS["AFTER_SAVE
+    post_validation()"]
+    AS --> N2{"was it new?"}
+    N2 -->|yes| AC["AFTER_CREATE"]
+    N2 -->|no| AU["AFTER_UPDATE"]
+    AC --> RS
+    AU --> RS
+    RS["on_commit: reset initial state"]
+
+    BS -.->|"raises"| X1["nothing is written"]
+    AS -.->|"raises"| X2["restore from snapshot,
+    re-save with skip_hooks=True"]
+```
+
+> [!note] Why `post_validation` needs a snapshot and `pre_validation` does not
+> `pre_validation` runs before the write, so raising there simply means no row
+> is written. `post_validation` runs after it, so the framework captures every
+> field before the write and, on failure, restores those values and re-saves
+> with `skip_hooks=True` — the flag exists to stop the rollback from
+> re-entering the hooks that triggered it.
 
 ### `pre_validation(self)`
 

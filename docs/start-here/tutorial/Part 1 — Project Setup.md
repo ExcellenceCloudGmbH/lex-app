@@ -93,6 +93,12 @@ We recommend using [PyCharm](https://www.jetbrains.com/pycharm/) as your primary
 
 You'll see the run configurations appear in the top-right dropdown:
 
+> [!example]- 🎬 Video — The run configurations `lex setup` generates
+> <video controls width="100%">
+>   <source src="../../videos/pycharm-configs.mp4" type="video/mp4">
+> </video>
+> Opening the dropdown in the top-right toolbar and picking a configuration.
+
 | Run Configuration | What It Does |
 |---|---|
 | **Init** | Creates/updates the database and syncs [Keycloak](https://www.keycloak.org/documentation) |

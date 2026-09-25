@@ -17,6 +17,8 @@ order the model's metadata arrives in, which meant the most valuable rows on scr
 described the plumbing and the record's own content began below the fold. They are
 demoted, not hidden: open **Record details** and they are all there.
 
+![The record's own fields lead the page; Id, Created At, Edited At, Created By and Edited By are collapsed into Record details below them](images/record-detail/summary-tab.svg)
+
 ## Field Cards
 
 Each field gets its own card with a label and value. Fields are rendered intelligently based on their type:
@@ -29,8 +31,6 @@ Each field gets its own card with a label and value. Fields are rendered intelli
 | **Boolean** | Visual indicator (✓ / ✗) |
 | **Foreign Key** | Linked name of the related record, clickable |
 | **JSON** | Formatted, expandable view |
-
-![The Summary tab, showing the record's own fields](images/record-detail/summary-tab.svg)
 
 ## Column Layout
 
