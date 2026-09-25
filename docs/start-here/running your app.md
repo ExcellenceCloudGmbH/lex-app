@@ -56,7 +56,7 @@ The `--reload` flag enables hot-reloading so the server restarts automatically w
 
 ## Running Streamlit Dashboards
 
-If your models define [[access-and-dashboards/streamlit dashboards|Streamlit dashboards]], you need to start the Streamlit server separately:
+If your models define [[access-and-dashboards/streamlit/index|Streamlit dashboards]], you need to start the Streamlit server separately:
 
 ### Via PyCharm
 
