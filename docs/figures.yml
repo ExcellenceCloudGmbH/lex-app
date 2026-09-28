@@ -188,6 +188,7 @@ figures:
       pytest: '^\s+pytest\b.*'
       groups: '^\s+pytest-groups\b.*'
       streamlit: '^\s+streamlit\b.*'
+      reflex: '^\s+reflex\b.*'
     callouts:
       - anchor: pytest
         text: "Runs pytest with Django already bootstrapped — no manage.py, no settings to juggle."
@@ -195,3 +196,5 @@ figures:
         text: "Lists the configured test groups, so you can run one cluster instead of the whole suite."
       - anchor: streamlit
         text: "Serves the dashboards behind the same authentication as the app."
+      - anchor: reflex
+        text: "Runs the Reflex dashboards, signed in through the same Keycloak as the app."
