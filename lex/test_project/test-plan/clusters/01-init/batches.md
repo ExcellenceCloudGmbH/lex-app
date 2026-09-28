@@ -1596,3 +1596,52 @@ in only to the provider signed in with no form; a restart, a dropped access-toke
 all signed in without a click; a frame signed in silently, and through one click when the frame could
 not see the provider's session; the button, not a bounce, on coming back from the provider's form; and
 the provider's form again, at once, after signing out.
+
+### Batch 1as — Reflex dashboards: a Keycloak access token too large for its cookie is stored compressed ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.376 – 1.380 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/auth.py` (`LexKeycloakAuthState._set_tokens`, `_fit_access_token_cookie`, `_compress_token` / `_decompress_token`, `_read_access_token_cookie` installed as `AccessTokenMetadata.from_cookie_value`, `_report_oversized_token_cookies`) |
+| Test file | `lex/test_project/tests/init/test_1as_reflex_token_cookie_compression.py` |
+| Test classes | `TestCluster01as_TokenCookieCompression` (1.376–1.380) |
+| Fixtures | JWTs shaped like Keycloak access tokens, with the user's roles in 3 to 160 clients under varied names (seeded); a session's state tree from Reflex's root `State`, its router carrying the `Cookie` header a browser sends; the ID token's signature check stubbed (it needs Keycloak's keys) where the plugin's own `_set_tokens` runs, the plugin's `_set_tokens` stubbed where only the value lex-app hands it matters |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.376 | stored compressed, read as issued | through the plugin's own `_set_tokens`, a 30-client token's cookie is stored marked and under 4096 bytes; `_access_token` returns the token as issued; `_expected_at_hash` is `compute_at_hash` of it; the tab hash is its SHA-256; `expires_at` survives |
+| 1.377 | only where needed | a 3-client token is handed to the plugin unchanged; a compressed value — also one still too large — is handed on as it came and restores; a random token is left as it is; an opaque compressible token is compressed whole and restores |
+| 1.378 | read defensively | six forged values read as `None`, and a session receiving one from the browser holds no access token; unmarked values read exactly as the unpatched plugin function reads them |
+| 1.379 | what the log says | one INFO with the size as issued for two stores; a 160-client token warns once, "even compressed"; a random token warns once, without it; both name the cookie and "Full scope allowed" |
+| 1.380 | the browser's cookie | a session built from a `Cookie` header alone reads the token as issued, and `has_any_token` holds |
+
+**Why compression, and why this way.** A browser refuses a cookie over 4096 bytes, and a Keycloak
+access token with full scope carries every role a user holds, client by client. The plugin keeps
+the session in cookies and keeps tabs in step through them, so a refused cookie cost the session
+on every restart and in every new tab, and one tab's sign-in signed the others out — reproduced in
+a browser with a token Chromium itself refused. With Keycloak's configuration out of reach, the
+token has to be stored differently; compressing it inside its own cookie is the least of the ways,
+since everything else the plugin does stays its own. A provider cannot override the var that reads
+the cookie — the plugin's providers are mixins, and Reflex copies a mixin's vars over a subclass's —
+so the plugin's `AccessTokenMetadata.from_cookie_value`, its one reader, is patched to restore a
+marked token; unmarked values pass through unchanged, and 1.380 fails if the plugin ever reads the
+cookie another way.
+
+**1.375 (batch 1ar) changed its fixture.** It exercised the warning with `"a" * 5000`, which never
+reached compression because it is not in the cookie's `access_token=…` form; it now uses a random
+token in that form, which compression cannot shrink.
+
+**Mutations: ten of eleven fail a test here.** No compression, compressing a token that fits,
+keeping a compression that grew, not installing the reader, no inflation cap, accepting a truncated
+stream, the warning without "even compressed", logging every time, restoring without the JWT
+header, and letting a damaged value raise. The eleventh — dropping the "already compressed" check —
+is equivalent while the "only if smaller" guard stands: deflating base64 of deflated data never
+shrinks it, so the second compression is always discarded.
+
+Verified in a browser outside the suite, with the mock OIDC provider issuing an 8.9 KB
+Keycloak-like token (2.6 KB compressed): top level, reload, a new tab, a restart, two tabs side by
+side, a frame with the provider's session, and a frame on the dashboards' own site with no provider
+session at all all stayed signed in; before, the new tab and the second tab were signed out.

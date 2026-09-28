@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 375
+max_scenario: 380
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1171,3 +1171,38 @@ letters:
       outside the suite against a mock provider given a Keycloak-like SSO session: no click anywhere,
       carry-over from the provider's session, restart, a dropped access-token cookie, a new tab, framed
       silent sign-in, the popup when the frame cannot see the session, the retry window, and sign-out.
+
+  as:
+    title: Reflex dashboards — a Keycloak access token too large for its cookie is stored compressed
+    scenarios: 1.376-1.380
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      Reflex Enterprise keeps the session, and a user's tabs in step, through cookies, and browsers
+      refuse a cookie over 4096 bytes (name and value). A Keycloak access token carries every role the
+      user holds in every client of the realm, and in a shared realm it is easily larger: then only the
+      server's memory holds the session -- a restart or a new tab signs the user out, and one tab's
+      sign-in signs the others out through the plugin's own cross-tab sync (reproduced in a browser).
+      Where Keycloak cannot be changed, lex-app's _set_tokens stores such a token compressed (a JWT's
+      payload deflated, header and signature kept; anything else deflated whole) and a patched
+      AccessTokenMetadata.from_cookie_value restores it byte for byte. That classmethod is the plugin's
+      one reader of the cookie; the providers are mixins whose vars Reflex copies over a subclass's own,
+      so a provider cannot override the var that calls it. The rest of the plugin's session handling
+      is untouched, and the restored token is the one the at_hash check, the bearer token and the tab
+      hash use. Compression happens only when the cookie would not fit, only once, and only if smaller;
+      a damaged or forged value (bad base64, a truncated stream, a stream inflating past 256 KiB) reads
+      as no token. Keycloak-like tokens with varied names compressed 2.5-4.9x in measurement, so tokens
+      up to about 13 KB fit; larger ones are still reported, now "even compressed".
+
+      1.375 (batch 1ar) exercised the warning with "a" * 5000, which never reached compression because it
+      is not the cookie's access_token=... form; it now uses a random token in that form, which
+      compression cannot shrink. Mutations: ten of eleven fail a 1as test; the eleventh -- dropping the
+      "already compressed" check -- is equivalent while the "only if smaller" guard stands, because
+      deflating base64 of deflated data never shrinks it. Verified in a browser outside the suite, with
+      the mock provider issuing an 8.9 KB Keycloak-like token (2.6 KB compressed): top level, reload, a
+      new tab, a restart, two tabs side by side, a frame with the provider's session, and a frame on the
+      dashboards' own site with no provider session at all -- all signed in, where before the new tab
+      and the second tab were signed out.

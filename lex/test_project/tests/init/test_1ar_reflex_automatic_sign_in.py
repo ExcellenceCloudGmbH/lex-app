@@ -45,6 +45,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import secrets
 import tempfile
 import time
 from types import SimpleNamespace
@@ -56,7 +57,7 @@ import pytest
 from asgiref.sync import async_to_sync
 from reflex_enterprise.auth import GenericOIDCAuthState, OIDCAuthState
 from reflex_enterprise.auth.enforcement import login_url_for
-from reflex_enterprise.auth.oidc.state import IsIframedState
+from reflex_enterprise.auth.oidc.state import AccessTokenMetadata, IsIframedState
 
 import lex.lex_app.reflex.auth as auth
 from lex.lex_app.reflex.auth import LexKeycloakAuthState, lex_login_page
@@ -378,10 +379,11 @@ class TestCluster01ar_Tokens(TestCase):
         Given: a session waiting for a click after a failed silent request.
         When:  a sign-in stores its tokens -- the popup's, the callback's, a refresh.
         Then:  the button goes, and the next frame may try silently again. A
-               token whose cookie would exceed 4096 bytes -- which a browser
-               drops, so the session dies with the server and each new tab signs
-               in again -- is reported once per cookie, naming it and Keycloak's
-               "Full scope allowed"; tokens that fit are not.
+               token whose cookie a browser would still refuse -- one lex-app
+               cannot compress to fit (1.376-1.379), such as a random one -- is
+               reported once per cookie, naming it and Keycloak's "Full scope
+               allowed": the session dies with the server, and each new tab signs
+               in again. Tokens that fit are not.
         """
         root, provider, _ = _login_page()
         provider._silent_login_pending = True
@@ -396,12 +398,14 @@ class TestCluster01ar_Tokens(TestCase):
             self.assertFalse(provider._silent_login_failed)
             self.assertFalse(provider._silent_login_pending)
 
+            # Random bytes: nothing compression can shrink.
+            too_large = AccessTokenMetadata(access_token=secrets.token_urlsafe(4000), expires_at=1e10).to_cookie_value()
             with self.assertLogs("lex.lex_app.reflex.auth", logging.WARNING) as logged:
-                async_to_sync(provider._set_tokens)("a" * 5000, id_token="i" * 1500, refresh_token="r" * 500)
+                async_to_sync(provider._set_tokens)(too_large, id_token="i" * 1500, refresh_token="r" * 500)
             (warning,) = logged.output
             self.assertIn(ACCESS_COOKIE, warning, "the cookie the browser drops is named")
             self.assertIn("4096", warning)
             self.assertIn("Full scope allowed", warning, "and what to change in Keycloak")
 
             with self.assertNoLogs("lex.lex_app.reflex.auth", logging.WARNING):
-                async_to_sync(provider._set_tokens)("a" * 5000, id_token="i" * 1500, refresh_token="r" * 500)
+                async_to_sync(provider._set_tokens)(too_large, id_token="i" * 1500, refresh_token="r" * 500)

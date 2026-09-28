@@ -401,3 +401,19 @@ does not remove user launch configurations.
 | 1.375 | storing tokens | a stored sign-in ends the need for a click; a token cookie over 4096 bytes is reported once, naming Keycloak's "Full scope allowed" |
 
 **Scenario range:** 1.370 – 1.375. **Test file:** `lex/test_project/tests/init/test_1ar_reflex_automatic_sign_in.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Batch: [1ar](batches.md).
+
+### 1as. Reflex dashboards — a Keycloak access token too large for its cookie is stored compressed ✅
+
+**What it tests:** that a Reflex dashboard keeps a user signed in when Keycloak's access token is larger than a browser will keep in a cookie (4096 bytes). Reflex Enterprise keeps the session, and a user's tabs in step, through its cookies; lex-app stores such a token compressed and restores it where the plugin reads the cookie, byte for byte, so everything else runs as the plugin wrote it.
+
+**Why a regression matters:** with the cookie refused, a restart of the Reflex server or a new tab signs the user out, and one tab's sign-in signs the others out — in a realm with many clients, that is every user.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.376 | stored compressed, read as issued | a token too large for its cookie is stored compressed, small enough to keep; the plugin reads back the token as issued, and computes `at_hash` and the tab hash from it |
+| 1.377 | only where needed | a token that fits is stored as the plugin would; one compressed already is not compressed again; compression that would enlarge a token is skipped; an opaque token is compressed whole |
+| 1.378 | read defensively | damaged or forged compressed values — bad base64, truncated, too many parts, unknown form, inflating past the cap, not UTF-8 — are no token; the plugin's own values read as before |
+| 1.379 | what the log says | compressing is logged once with both sizes; a token too large even compressed, or one compression cannot shrink, is one warning naming the cookie and "Full scope allowed" |
+| 1.380 | the browser's cookie | a session with no tokens of its own — a new tab, a restart — restores the token from the cookie the browser sends |
+
+**Scenario range:** 1.376 – 1.380. **Test file:** `lex/test_project/tests/init/test_1as_reflex_token_cookie_compression.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Batch: [1as](batches.md).
