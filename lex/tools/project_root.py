@@ -60,6 +60,35 @@ def find_project_root(start=None) -> str:
     return str(base)
 
 
+def load_project_env_file(project_root) -> None:
+    """Load ``<project_root>/.env`` into ``os.environ`` without overriding it.
+
+    ``setdefault`` semantics on purpose: a variable the process already has --
+    a container's injected secret, a value the IDE run configuration set --
+    always wins over the file. The file is the local-development default, never
+    an override.
+
+    Shared by the ``lex`` CLI and by processes that are not started through it
+    but still need the same environment, such as the Reflex backend worker.
+    """
+    env_path = Path(project_root) / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
 def resolve_llm_working_directory(explicit_path: str | None = None) -> Path:
     """Return the literal directory the LLM agent is working in.
 

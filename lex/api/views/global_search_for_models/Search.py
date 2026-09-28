@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
 EXCLUDED_MODELS = {'calculationdashboard', 'user', 'group', 'permission', 'contenttype', 'userchangelog',
-                   'calculationlog', 'log', 'streamlit'}
+                   'calculationlog', 'log', 'streamlit', 'reflex'}
 EXCLUDED_TYPES = {'FloatField', 'BooleanField', 'IntegerField', "FileField", "ForeignKey", "XLSXField", "PDFField", "ImageField"}
 
 

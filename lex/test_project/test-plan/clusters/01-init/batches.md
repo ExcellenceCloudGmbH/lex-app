@@ -1465,3 +1465,183 @@ immediately.
 pins is the contract between them: that a sequence ships `lex_step=0` and a mapping ships no cursor
 at all — the distinction the frontend reads as "is a flow live".
 
+### Batch 1ap — `lex reflex`: the command, its ports, and its workers' Django ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.348 – 1.356 |
+| Type | U |
+| Files covered | `lex/bin/lex.py` (`reflex` command, `REFLEX_CONFIG_TEMPLATE`, `_ensure_reflex_config`, `_reflex_hot_reload_paths`, `_resolve_reflex_port_flags`, `_SKIP_BOOTSTRAP_COMMANDS`), `lex/tools/django_bootstrap.py`, `lex/tools/project_root.py` (`load_project_env_file`), `generate_pycharm_configs.py` (`Reflex` run configuration), `.run/Reflex.run.xml`, `.vscode/launch.json` |
+| Test file | `lex/test_project/tests/init/test_1ap_reflex_cli.py` |
+| Test classes | `TestCluster01ap_TheCommand` (1.348–1.350), `TestCluster01ap_HotReload` (1.351, 1.351b), `TestCluster01ap_Ports` (1.352–1.353), `TestCluster01ap_RunConfiguration` (1.354), `TestCluster01ap_WorkerBootstrap` (1.355, 1.355b, 1.356) |
+| Fixtures | a temp project directory as `PROJECT_ROOT_DIR`; Reflex's CLI entry point patched to record the arguments it would run with, invoked through click's `CliRunner` inside a forked `RegistrationContext` |
+| Tests landed | **11 pass / 0 fail** |
+| Status | ✅ Complete |
+| Pinned sets extended | 1m's `EXPECTED_FILES` gains `Reflex.run.xml` and its explicit-command set gains `reflex`; 1y's configuration names gain `Reflex` — both are exhaustive lists by design, so a new command must be added to them |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.348 | `lex reflex` alone | runs `reflex run`, and the CLI does not set Django up for it |
+| 1.349 | arguments pass through | every argument, `--help` included, reaches Reflex untouched; a command that acts on no project (`--help`, `login`) writes no rxconfig.py; only `run` is given ports |
+| 1.350 | rxconfig.py | written once from the template that calls `lex_config()`, never overwritten, and Reflex runs from the project root |
+| 1.351 | hot reload | `REFLEX_HOT_RELOAD_OVERRIDE_PATHS` names the project's own top-level entries — never hidden ones, `.web`, a virtualenv, or an empty value |
+| 1.352 | development ports | each missing port is supplied (8502 frontend, 8503 backend); one chosen by flag, `REFLEX_*_PORT` or config wins |
+| 1.353 | one port per mode | backend-only gets only the backend port, frontend-only only the frontend's, a prod/preview run only the single port it serves on — and none once the caller chose one |
+| 1.354 | run configuration | `lex setup` scaffolds a "Reflex" configuration for PyCharm and VS Code, running `reflex run` |
+| 1.355 | a worker's environment | `prepare_environment()` sets what the CLI sets (settings module, project root, `.env`) without overriding what is already set; `setup_django()` is a no-op once Django is ready |
+| 1.356 | one `.env` parser | the CLI and the workers parse `.env` identically — comments, quotes, invalid lines, existing values |
+
+Why the CLI does not bootstrap Django here: Reflex compiles and serves from worker processes that
+import `rxconfig.py` and `lex.reflex_app` themselves, so the parent's Django setup would be wasted
+and the workers' would be missing. The template therefore calls `prepare_environment()` before it
+imports anything from `lex.lex_app`, whose settings module reads the environment once, at import.
+
+### Batch 1aq — Reflex dashboards: Keycloak sign-in, the Django ORM, and the `?model=&pk=` dispatch ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.357 – 1.369 |
+| Type | U + I |
+| Files covered | `lex/lex_app/reflex/` (`config.py`, `auth.py` — `LexKeycloakAuthState`, `LexUser` —, `django_orm.py`, `dashboards.py`, `app.py`, `Reflex.py`, `examples/_reflex_structure.py`), `lex/reflex_app.py`, `lex/utilities/config/generic_app_config.py`, `lex/lex_app/apps.py` (`_apply_nest_asyncio`, `register_models`), `lex/process_admin/utils/model_structure_builder.py`, `lex/core/models/LexModel.py` (`reflex_main` / `reflex_class_main`) |
+| Test file | `lex/test_project/tests/init/test_1aq_reflex_dashboards.py` |
+| Test classes | `TestCluster01aq_Config` (1.357, 1.357b, 1.357c), `TestCluster01aq_KeycloakProvider` (1.358, 1.359, 1.369), `TestCluster01aq_Orm` (1.360–1.361), `TestCluster01aq_Dispatch` (1.362–1.363), `TestCluster01aq_PageChrome` (1.364), `TestCluster01aq_DispatchPage` (1.365, 1.365b), `TestCluster01aq_TheCompiledApp` (1.366), `TestCluster01aq_Registration` (1.367), `TestCluster01aq_EventLoops` (1.368) |
+| Fixtures | probe models `ReflexProbeFund` (both hooks), `ReflexProbeDefault` (`LexModel`, no overrides), `ReflexProbePlain` (plain Django model); a session's state tree built from Reflex's root `State`; `E2ETestCase` for the ORM and dispatch scenarios; subprocesses for 1.357c and 1.368 |
+| Tests landed | **16 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.357 | `lex_config()` | an `rxe.Config` importing `lex.reflex_app`, signing in through the Lex Keycloak provider without `offline_access` (an offline token would outlive the Keycloak session), Radix explicit, telemetry and the sitemap off, no port configured; overrides win and extra scopes add; the app name is a valid identifier derived from the project; importing it — what rxconfig.py does — creates no Reflex state |
+| 1.358 | where the provider's settings come from | `LEX_KEYCLOAK_*`, then `OIDC_*`, then Lex App's own `KEYCLOAK_URL`/`KEYCLOAK_REALM`(`_NAME`) and `OIDC_RP_CLIENT_ID`/`SECRET`; never `KEYCLOAK_CLIENT_ID`; a clear error when nothing is set |
+| 1.359 | the proxy's settings | `OIDC_ISSUER` widens the accepted issuers, `OIDC_VERIFY_SSL=false` switches TLS verification off, the button reads "Login with Keycloak" |
+| 1.360 | `run_orm` / `@orm` | synchronous Django code that raises `SynchronousOnlyOperation` on the loop runs through them, returns its result, and raises its own errors |
+| 1.361 | a request's connection handling, per event | stale connections are retired before and after every event (and on the loop's thread under `DJANGO_ALLOW_ASYNC_UNSAFE`), never inside an open transaction |
+| 1.362 | the URL contract | `?model=&pk=` → record, `?model=` → table, neither → the project's own; an unknown model, a missing or malformed pk, and a model with no hooks each resolve to their own error view, checked in Streamlit's order |
+| 1.363 | from the router | `LexDashboardState.resolve` and `current_record` read the URL an event sees and fetch through the ORM |
+| 1.364 | embed and logout | only a truthy `lex_embed` hides the top bar; sign-out shows unless `is_logout_enabled` is explicitly falsy |
+| 1.365 | the dispatch page | only models that override a hook are compiled in; a hook that is not a classmethod/staticmethod or returns no component fails at compile; `_reflex_structure.py` may be absent but never silently broken |
+| 1.366 | the compiled app | sign-in and popup routes, the guard running before `resolve` on `/`, the connection middleware, the standard scopes without `offline_access`, the structure's pages and the models' dashboards |
+| 1.367 | registration | the report frames `REFLEX_URL` (default `:8502`) with `lex_embed=1`; it and its sidebar entry exist only with `IS_REFLEX_ENABLED=true`; discovery skips `_reflex_structure.py` and `rxconfig.py`, and the `reflex` directory only inside lex's own packages |
+| 1.368 | granian's uvloop | `AppConfig.ready()` skips `nest_asyncio` on a loop it cannot patch instead of failing |
+| 1.369 | `LexUser` | `username` is `preferred_username`; `display_name` the name, else the username, else the email; both empty signed out |
+
+**1.361 was strengthened after a mutation run.** Its first form asserted only that a connection
+inside an atomic block survived an event, and a middleware that closed it anyway still passed:
+Django's `close()` inside a transaction marks the connection (`closed_in_transaction`,
+`needs_rollback`) instead of dropping it. It now pins both flags and a query in the same
+transaction. Removing `_apply_nest_asyncio`'s guard fails 1.368; letting discovery walk the Reflex
+package fails 1.367.
+
+**1.357c caught a shadowed export.** The package serves its API lazily (PEP 562), and
+`orm` was both the `@orm` decorator and the name of the submodule defining it. Importing
+a submodule sets the package attribute of that name, so after the first import of
+`lex.lex_app.reflex.orm` — which the app always makes — `from lex.lex_app.reflex import orm`
+returned the module. The check that every name in `__all__` resolves to its own object
+found it; the module is now `django_orm.py`, and 1.360 uses the public import path.
+
+**Two scenarios run the way Reflex constrains them.** The auth plugin binds itself to the process
+on the first compile and refuses a second, so 1.366 compiles the real `lex.reflex_app` once in
+`setUpClass` and every assertion reads that compile. `nest_asyncio` patches asyncio process-wide,
+so 1.368 runs in a subprocess rather than leave the rest of the suite on a patched loop.
+
+The browser half — Keycloak's redirect and callback, the dashboards rendering signed in, embed
+mode, sign-out, and a cross-site frame signing in through the popup — was verified end to end
+outside the suite, against a mock OIDC provider, because the suite has no Keycloak or browser.
+
+### Batch 1ar — Reflex dashboards sign in by themselves: no click, and the Keycloak session carries over ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.370 – 1.375 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/auth.py` (`LexKeycloakAuthState.start_login`, `_silent_login_redirect`, `_handle_auth_callback_error_response`, `_redirect_to_logout_payload`, `_set_tokens`; `lex_login_page`; `_report_oversized_token_cookies`), `lex/lex_app/reflex/config.py` (`LOGIN_PAGE`, `lex_auth_plugin`) |
+| Test file | `lex/test_project/tests/init/test_1ar_reflex_automatic_sign_in.py` |
+| Test classes | `TestCluster01ar_TheLoginPage` (1.370), `TestCluster01ar_TopLevel` (1.371–1.372), `TestCluster01ar_Framed` (1.373–1.374), `TestCluster01ar_Tokens` (1.375) |
+| Fixtures | a session's state tree built from Reflex's root `State`, its router on `/login` or `/callback`; Keycloak's authorization endpoint patched in (no discovery over the network); the running app stubbed where building and rendering `/login` asks for it (1.366 compiles the real one), in a temporary working directory, since rendering copies Reflex's shared assets into it; the plugin's out-of-band toast stubbed where a failure pushes one |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.370 | `/login` is lex-app's page | `lex_auth_plugin()` names `lex_login_page` by import path; the page renders "Signing you in…" and the "Login with Keycloak" button only under `login_needs_click`; on mount it runs `_LOGIN_PAGE_JS` and hands the answer to `start_login`; `login_page=` from the project wins; with any provider but lex-app's alone, exactly the plugin's palette |
+| 1.371 | the top level | signed out, `start_login` returns the plugin's own redirect to the authorization endpoint — no `prompt`, the provider's client, callback and `state` — with `redirect_to` kept for after and the frame check recorded; signed in, a replacing redirect to `redirect_to`; the repeat of one visit returns nothing and leaves the running sign-in's nonce alone |
+| 1.372 | never a loop | an attempt 5 s ago: the button, no redirect; one older than `AUTO_LOGIN_RETRY_SECONDS`: automatic; after `_redirect_to_logout_payload`: automatic at once; an authorization endpoint that raises: the button, with the plugin's error logged and its toast pushed |
+| 1.373 | in a frame | the authorization endpoint with `prompt=none`, `response_type=code`, the provider's client and callback, its `state` nonce and the S256 challenge of its verifier; `redirect_to` kept; the frame recorded for the popup; after `_silent_login_failed`, the button without a second request; a request that cannot be built leaves nothing pending |
+| 1.374 | "sign in first" | each of `login_required`, `interaction_required`, `consent_required` and `account_selection_required`, through `auth_callback`, redirects (replacing) to `login_url_for(<the page>)` with the button and no error message; `access_denied` after a silent request, and `login_required` without one, are reported by the plugin |
+| 1.375 | storing tokens | `_set_tokens` clears `login_needs_click`, `_silent_login_failed` and `_silent_login_pending`; an access-token cookie over 4096 bytes logs one warning naming `_oidc_lex_keycloak_access_token_data_partitioned`, 4096 and "Full scope allowed"; the same cookie again, or tokens that fit, log nothing |
+
+**Why `/login` signs in by itself.** A restart of the Reflex server kept asking a user who was
+signed in to lex-app to click "Login with Keycloak". The plugin's palette waits for that click on
+purpose — it does not bounce a visitor to a third party unasked — but lex-app has one provider, and
+the visitor's Keycloak session answers without a form. The likeliest reason a restart lost the
+session at all is a Keycloak access token larger than a cookie may be: the browser drops the cookie,
+the new server finds only the ID token, and the page guard sends the visitor to `/login`. Signing in
+by itself makes that a silent bounce through Keycloak, and 1.375's warning says what to change.
+
+**Two guards were found in a browser, not by reasoning.** React's development mode mounts every
+component twice, so `/login`'s check ran twice: the second call fell into the retry window and the
+button flashed before every redirect — seen by watching the websocket, now pinned by 1.371's repeat.
+And `start_login` first chained the plugin's `redirect_to_login`, which left it unable to see that the
+redirect could not be built: the page would spin for ever. It calls it inline now, and 1.372 pins the
+button that replaces the spinner.
+
+**Thirteen mutations each fail a test here** — the repeat, the retry window and its reset on
+sign-out, `prompt=none`, the silent-error branch, the button on a failed start, the tokens clearing
+the click, the cookie warning's threshold and its once-only, the page's mount event, the signed-in
+shortcut, the frame record, and the frame's fallback to the button.
+
+The browser half was verified outside the suite, against the mock OIDC provider given a
+Keycloak-like SSO session: an unsigned visit going straight to the provider's form; a visitor signed
+in only to the provider signed in with no form; a restart, a dropped access-token cookie and a new tab
+all signed in without a click; a frame signed in silently, and through one click when the frame could
+not see the provider's session; the button, not a bounce, on coming back from the provider's form; and
+the provider's form again, at once, after signing out.
+
+### Batch 1as — Reflex dashboards: a Keycloak access token too large for its cookie is stored compressed ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.376 – 1.380 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/auth.py` (`LexKeycloakAuthState._set_tokens`, `_fit_access_token_cookie`, `_compress_token` / `_decompress_token`, `_read_access_token_cookie` installed as `AccessTokenMetadata.from_cookie_value`, `_report_oversized_token_cookies`) |
+| Test file | `lex/test_project/tests/init/test_1as_reflex_token_cookie_compression.py` |
+| Test classes | `TestCluster01as_TokenCookieCompression` (1.376–1.380) |
+| Fixtures | JWTs shaped like Keycloak access tokens, with the user's roles in 3 to 160 clients under varied names (seeded); a session's state tree from Reflex's root `State`, its router carrying the `Cookie` header a browser sends; the ID token's signature check stubbed (it needs Keycloak's keys) where the plugin's own `_set_tokens` runs, the plugin's `_set_tokens` stubbed where only the value lex-app hands it matters |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.376 | stored compressed, read as issued | through the plugin's own `_set_tokens`, a 30-client token's cookie is stored marked and under 4096 bytes; `_access_token` returns the token as issued; `_expected_at_hash` is `compute_at_hash` of it; the tab hash is its SHA-256; `expires_at` survives |
+| 1.377 | only where needed | a 3-client token is handed to the plugin unchanged; a compressed value — also one still too large — is handed on as it came and restores; a random token is left as it is; an opaque compressible token is compressed whole and restores |
+| 1.378 | read defensively | six forged values read as `None`, and a session receiving one from the browser holds no access token; unmarked values read exactly as the unpatched plugin function reads them |
+| 1.379 | what the log says | one INFO with the size as issued for two stores; a 160-client token warns once, "even compressed"; a random token warns once, without it; both name the cookie and "Full scope allowed" |
+| 1.380 | the browser's cookie | a session built from a `Cookie` header alone reads the token as issued, and `has_any_token` holds |
+
+**Why compression, and why this way.** A browser refuses a cookie over 4096 bytes, and a Keycloak
+access token with full scope carries every role a user holds, client by client. The plugin keeps
+the session in cookies and keeps tabs in step through them, so a refused cookie cost the session
+on every restart and in every new tab, and one tab's sign-in signed the others out — reproduced in
+a browser with a token Chromium itself refused. With Keycloak's configuration out of reach, the
+token has to be stored differently; compressing it inside its own cookie is the least of the ways,
+since everything else the plugin does stays its own. A provider cannot override the var that reads
+the cookie — the plugin's providers are mixins, and Reflex copies a mixin's vars over a subclass's —
+so the plugin's `AccessTokenMetadata.from_cookie_value`, its one reader, is patched to restore a
+marked token; unmarked values pass through unchanged, and 1.380 fails if the plugin ever reads the
+cookie another way.
+
+**1.375 (batch 1ar) changed its fixture.** It exercised the warning with `"a" * 5000`, which never
+reached compression because it is not in the cookie's `access_token=…` form; it now uses a random
+token in that form, which compression cannot shrink.
+
+**Mutations: ten of eleven fail a test here.** No compression, compressing a token that fits,
+keeping a compression that grew, not installing the reader, no inflation cap, accepting a truncated
+stream, the warning without "even compressed", logging every time, restoring without the JWT
+header, and letting a damaged value raise. The eleventh — dropping the "already compressed" check —
+is equivalent while the "only if smaller" guard stands: deflating base64 of deflated data never
+shrinks it, so the second compression is always discarded.
+
+Verified in a browser outside the suite, with the mock OIDC provider issuing an 8.9 KB
+Keycloak-like token (2.6 KB compressed): top level, reload, a new tab, a restart, two tabs side by
+side, a frame with the provider's session, and a frame on the dashboards' own site with no provider
+session at all all stayed signed in; before, the new tab and the second tab were signed out.

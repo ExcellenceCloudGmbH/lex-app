@@ -14,7 +14,11 @@ import shutil
 
 import click
 import uvicorn
-from lex.tools.project_root import find_project_root, resolve_llm_working_directory
+from lex.tools.project_root import (
+    find_project_root,
+    load_project_env_file,
+    resolve_llm_working_directory,
+)
 from lex.tools.setup_with_ai import (
     DEFAULT_LEX_MCP_MODE,
     DEFAULT_REMOTE_MCP_URL,
@@ -83,23 +87,9 @@ PROJECT_ROOT_DIR = Path(find_project_root(os.getcwd())).resolve()
 sys.path.append(LEX_APP_PACKAGE_ROOT)
 
 
-def _load_project_env_file(project_root: Path) -> None:
-    env_path = project_root / ".env"
-    if not env_path.exists():
-        return
-
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
+# Lives in lex/tools/project_root.py so that a process not started through this
+# CLI -- the Reflex backend worker -- loads the same file the same way.
+_load_project_env_file = load_project_env_file
 
 
 _load_project_env_file(PROJECT_ROOT_DIR)
@@ -704,6 +694,187 @@ def streamlit(ctx):
         # command exiting.
         proxy_server.should_exit = True
         t.join(timeout=float(os.getenv("LEX_PROXY_SHUTDOWN_TIMEOUT", "5")))
+
+
+# ---------- Reflex ----------
+
+#: What `lex reflex` writes to a project with no ``rxconfig.py`` yet. Reflex reads
+#: its configuration from that file in the directory it runs in, so a project that
+#: serves Reflex dashboards has one; everything lex-app needs is in `lex_config()`.
+REFLEX_CONFIG_TEMPLATE = '''"""Reflex configuration for this Lex App project.
+
+`lex reflex` created this file, because Reflex reads its configuration from
+rxconfig.py in the project root. lex_config() is wired for Lex App: the Reflex
+app lex-app serves, and Keycloak sign-in. Pass it any rx.Config / rxe.Config
+option to override a default, e.g.
+
+    config = lex_config(show_built_with_reflex=False)
+
+Leave the ports to `lex reflex`, which gives each run mode the ones it accepts.
+"""
+
+from lex.tools.django_bootstrap import prepare_environment
+
+# The project's .env, loaded before anything reads Django's settings -- which
+# importing lex_config does. `lex reflex` has loaded it already; this is what
+# lets a bare `reflex run` see the same environment.
+prepare_environment()
+
+from lex.lex_app.reflex.config import lex_config  # noqa: E402
+
+config = lex_config()
+'''
+
+#: Reflex subcommands that do not act on a project, and so need no rxconfig.py.
+_REFLEX_PROJECTLESS_ARGS = frozenset({"login", "logout", "--help", "-h", "--version"})
+
+# Defaults for the two Reflex ports. Reflex's own, 3000 and 8000, are where the
+# React frontend and the Django server run in development; these sit beside
+# Streamlit's 8501 instead. Fixed rather than auto-incremented, because Keycloak
+# has to know the callback URL in advance: http://localhost:8502/callback.
+_DEFAULT_REFLEX_FRONTEND_PORT = "8502"
+_DEFAULT_REFLEX_BACKEND_PORT = "8503"
+
+
+def _env_flag_set(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _resolve_reflex_port_flags(reflex_args, configured_frontend=None, configured_backend=None):
+    """The port flags to append to a `lex reflex run`, honouring the caller.
+
+    A port the caller chose wins, wherever they chose it -- ``--frontend-port`` /
+    ``--backend-port``, ``REFLEX_FRONTEND_PORT`` / ``REFLEX_BACKEND_PORT``, or
+    ``rxconfig.py`` (``configured_*``) -- and only the missing ones are supplied,
+    the way `lex streamlit` resolves its ports.
+
+    Which ones a run may take depends on its mode, and Reflex refuses a run
+    handed one it cannot use: a frontend port with ``--backend-only``, a backend
+    port with ``--frontend-only``, and two different ports in ``--env prod`` or
+    ``preview``, which serve the frontend and backend on one. So in those modes a
+    single port is supplied, and none at all once the caller has chosen one.
+    """
+    if not reflex_args or reflex_args[0] != "run":
+        return []
+    args = reflex_args[1:]
+
+    env_mode = (_cli_option(args, "env") or "dev").strip().lower()
+    backend_only = "--backend-only" in args or _env_flag_set("REFLEX_BACKEND_ONLY")
+    frontend_only = "--frontend-only" in args or _env_flag_set("REFLEX_FRONTEND_ONLY")
+    given_frontend = (
+        _cli_option(args, "frontend-port") or os.getenv("REFLEX_FRONTEND_PORT") or configured_frontend
+    )
+    given_backend = (
+        _cli_option(args, "backend-port") or os.getenv("REFLEX_BACKEND_PORT") or configured_backend
+    )
+
+    if env_mode in ("prod", "preview"):
+        if given_frontend or given_backend:
+            return []
+        if backend_only:
+            return ["--backend-port", _DEFAULT_REFLEX_BACKEND_PORT]
+        return ["--frontend-port", _DEFAULT_REFLEX_FRONTEND_PORT]
+
+    flags = []
+    if not backend_only and not given_frontend:
+        flags += ["--frontend-port", _DEFAULT_REFLEX_FRONTEND_PORT]
+    if not frontend_only and not given_backend:
+        flags += ["--backend-port", _DEFAULT_REFLEX_BACKEND_PORT]
+    return flags
+
+#: Top-level entries of a project that Reflex's hot reload must not watch: they
+#: are generated, vendored, or change without the app changing.
+_REFLEX_RELOAD_SKIP = frozenset({
+    "build", "dist", "env", "htmlcov", "media", "migrations", "node_modules",
+    "reflex.lock", "reports", "static", "uploaded_files", "venv",
+})
+
+
+def _ensure_reflex_config(project_root: Path) -> tuple[Path, bool]:
+    """Return ``(path, created)`` for the project's ``rxconfig.py``, writing it if absent.
+
+    An existing file is never touched -- it is the project's to edit.
+    """
+    path = project_root / "rxconfig.py"
+    if path.exists():
+        return path, False
+    path.write_text(REFLEX_CONFIG_TEMPLATE, encoding="utf-8")
+    return path, True
+
+
+def _reflex_hot_reload_paths(project_root: Path) -> str:
+    """``REFLEX_HOT_RELOAD_OVERRIDE_PATHS`` for the project: what to watch in dev.
+
+    Reflex watches the tree its *app module* sits in. The app module is
+    ``lex.reflex_app``, inside the installed lex package, so left alone it would
+    watch site-packages -- tens of thousands of files -- and never the project's
+    own models and ``_reflex_structure.py``, which are what change.
+
+    Its top-level entries, then, minus hidden and generated ones: ``.web/`` is
+    rewritten by every compile, so watching it would reload the backend in a
+    loop. Names are relative, and resolve against the project root Reflex runs
+    in, because Reflex splits the variable on ``:`` -- which an absolute Windows
+    path contains.
+    """
+    names = []
+    for entry in sorted(project_root.iterdir(), key=lambda item: item.name):
+        name = entry.name
+        if name.startswith((".", "__")) or name in _REFLEX_RELOAD_SKIP or ":" in name:
+            continue
+        if entry.is_dir() and (entry / "pyvenv.cfg").exists():
+            continue  # a virtualenv under whatever name it was given
+        names.append(name)
+    return ":".join(names) or "rxconfig.py"
+
+
+@lex.command(
+    name="reflex",
+    short_help="Run the project's Reflex dashboards.",
+    context_settings=dict(ignore_unknown_options=True, allow_extra_args=True),
+    add_help_option=False,
+)
+@click.pass_context
+def reflex_cmd(ctx):
+    """Run the project's Reflex dashboards (arguments go to the Reflex CLI).
+
+    \b
+    lex reflex                    # reflex run: dev server with hot reload
+    lex reflex run --env prod     # production, as a deployment runs it
+    lex reflex login              # sign in to Reflex, for reflex-enterprise
+    lex reflex --help             # Reflex's own help
+    """
+    # The Reflex counterpart of `lex streamlit`, with one difference that shapes
+    # the rest: Streamlit runs in THIS process, after Django is set up, so this
+    # command set Django up for it. Reflex compiles and serves the app from worker
+    # processes that never see this one's bootstrap, so the app module they import
+    # (`lex.reflex_app`) sets Django up itself -- and this command, which is in
+    # `_SKIP_BOOTSTRAP_COMMANDS`, does not do it a second time.
+    reflex_args = list(ctx.args) or ["run"]
+
+    if reflex_args[0] not in _REFLEX_PROJECTLESS_ARGS:
+        # Reflex reads rxconfig.py from, and writes .web/ into, the directory it
+        # runs in -- the project root, wherever `lex` was invoked from.
+        os.chdir(PROJECT_ROOT_DIR.as_posix())
+        config_path, created = _ensure_reflex_config(PROJECT_ROOT_DIR)
+        if created:
+            click.echo(f"rxconfig.py: {config_path} (created)")
+        os.environ.setdefault(
+            "REFLEX_HOT_RELOAD_OVERRIDE_PATHS", _reflex_hot_reload_paths(PROJECT_ROOT_DIR)
+        )
+
+        if reflex_args[0] == "run":
+            # Loaded here only to learn whether rxconfig.py chose the ports. It is
+            # the load Reflex would make next anyway, and Reflex reuses it.
+            from reflex.config import get_config
+
+            config = get_config()
+            reflex_args += _resolve_reflex_port_flags(
+                reflex_args, config.frontend_port, config.backend_port
+            )
+
+    from reflex.reflex import cli as reflex_cli
+
+    reflex_cli.main(args=reflex_args, prog_name="lex reflex")
 
 
 @lex.command(name="pytest", context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
@@ -1500,8 +1671,13 @@ def _collect_setup_with_ai_credentials(
 #: It is lex-app's own command and must stay skipped whatever happens to that
 #: rule -- it is the recovery path when the installed lex-mcp-local is too old
 #: for anything else here to work.
+#: reflex is here because its server processes are not this one: the app module
+#: Reflex imports sets Django up where the app actually runs.
 _SKIP_BOOTSTRAP_COMMANDS = frozenset(
-    {"start", "celery", "celery-workers", "flower", "pytest", "pytest-groups", "setup", "setup-with-ai", "ai-update"}
+    {
+        "start", "celery", "celery-workers", "flower", "pytest", "pytest-groups",
+        "setup", "setup-with-ai", "ai-update", "reflex",
+    }
 )
 
 

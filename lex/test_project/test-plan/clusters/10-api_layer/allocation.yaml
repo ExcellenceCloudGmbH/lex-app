@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 81
+max_scenario: 82
 letters:
   a:
     title: ''
@@ -33,6 +33,19 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  d:
+    title: Global search with the Reflex report registered
+    scenarios: '10.82'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      With IS_REFLEX_ENABLED=true the Reflex HTMLReport is registered beside Streamlit, and the global
+      search walks every container. Without 'reflex' in EXCLUDED_MODELS the search reads the report's
+      _meta and fails with AttributeError -- every frontend search a 500 -- which is how 10.82 fails
+      against the tree without the exclusion.
   e:
     title: ''
     scenarios: 10.11-10.14

@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 74
+max_scenario: 79
 letters:
   a:
     title: ''
@@ -131,3 +131,19 @@ letters:
       xfail: 0
     note: scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit
       order + subclass contract
+  n:
+    title: Keycloak UMA permissions in Reflex dashboards
+    scenarios: 4.75-4.79
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      current_permissions / has_permission / current_access_token (lex/lex_app/reflex/auth.py) -- the
+      Reflex counterpart of st.session_state.permissions, which the Streamlit proxy fills. One
+      KeycloakManager lookup per access token, again after a refresh; a failed lookup keeps the same
+      user's grants and never hands them to another user; sign-out clears them; has_permission counts
+      model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of
+      five mutations of that code (keep grants across users, keep them across sign-out, count record
+      grants, cache the raw token, return the cached list itself) fails exactly one scenario.

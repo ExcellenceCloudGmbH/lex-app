@@ -52,6 +52,7 @@ _EXPECTED_CONFIG_NAMES = {
     "Make migrations",
     "Migrate",
     "Streamlit",
+    "Reflex",
     "Create DB",
     "Flush DB",
 }

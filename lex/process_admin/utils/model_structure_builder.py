@@ -208,3 +208,8 @@ class ModelStructureBuilder:
             if "Streamlit" not in self.model_structure:
                 self.model_structure["Streamlit"] = {}
             self.model_structure["Streamlit"]["streamlit"] = None
+
+        if os.getenv("IS_REFLEX_ENABLED") == "true":
+            if "Reflex" not in self.model_structure:
+                self.model_structure["Reflex"] = {}
+            self.model_structure["Reflex"]["reflex"] = None
