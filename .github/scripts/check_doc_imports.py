@@ -183,6 +183,7 @@ def defined_names(path: Path) -> tuple[set[str], bool]:
         return set(), True  # unparseable: do not accuse it of anything
     names: set[str] = set()
     star = False
+    lazy_exports: set[str] = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
@@ -190,6 +191,8 @@ def defined_names(path: Path) -> tuple[set[str], bool]:
             for t in node.targets:
                 if isinstance(t, ast.Name):
                     names.add(t.id)
+                    if t.id == "__all__":
+                        lazy_exports = _string_literals(node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             names.add(node.target.id)
         elif isinstance(node, ast.ImportFrom):
@@ -200,7 +203,19 @@ def defined_names(path: Path) -> tuple[set[str], bool]:
         elif isinstance(node, ast.Import):
             for a in node.names:
                 names.add(a.asname or a.name.split(".")[0])
+    # PEP 562: a module ``__getattr__`` serves names it never binds -- a package
+    # that imports its API lazily, on first use. ``__all__`` is where such a
+    # module lists them, so a literal one counts as its exports.
+    if "__getattr__" in names:
+        names |= lazy_exports
     return names, star
+
+
+def _string_literals(node: ast.expr) -> set[str]:
+    """The strings of a literal list or tuple of them, e.g. an ``__all__``."""
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return set()
+    return {e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
 
 
 def check_statement(line: str) -> str | None:
