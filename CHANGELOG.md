@@ -1,3 +1,8 @@
+## [2.3.0] - 2026-09-28
+
+### Changed
+- **backend** Claude/stoic mendel 890wci ([dca10d21](https://github.com/ExcellenceCloudGmbH/lex-app/commit/dca10d21)) (#796)
+
 ## [2.2.2] - 2026-09-24
 
 ### Added
