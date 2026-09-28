@@ -29,6 +29,10 @@ APP_MODULE = "lex.reflex_app"
 #: The provider that signs users in against lex-app's Keycloak.
 AUTH_PROVIDER = "lex.lex_app.reflex.auth.LexKeycloakAuthState"
 
+#: The ``/login`` page: it starts the sign-in by itself instead of offering a
+#: button, since lex-app has exactly one provider to sign in with.
+LOGIN_PAGE = "lex.lex_app.reflex.auth.lex_login_page"
+
 # No ports here, deliberately. Reflex treats a port in the config exactly like
 # one passed on the command line, so a configured frontend port makes
 # `--backend-only` refuse to start, and two configured ports make every
@@ -81,10 +85,14 @@ def lex_auth_plugin(**options: Any):
 
     Takes any ``AuthPlugin`` option -- ``auth=`` for an app-wide authorization
     check, ``extra_scopes`` for more claims, custom page builders, an audit hook.
+    Both defaults are named by import path, which the plugin resolves at compile
+    time: importing them here would create Reflex states while ``rxconfig.py``
+    is still loading.
     """
     import reflex_enterprise as rxe
 
     options.setdefault("auth_providers", [AUTH_PROVIDER])
+    options.setdefault("login_page", LOGIN_PAGE)
     return rxe.AuthPlugin(**options)
 
 

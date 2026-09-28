@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 369
+max_scenario: 375
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1136,3 +1136,38 @@ letters:
       asyncio process-wide. Verified end to end outside the suite against a mock OIDC provider in a
       browser: login redirect and return, record/table/structure dashboards, embed mode, sign-out, and a
       cross-site frame signing in through the popup.
+
+  ar:
+    title: Reflex dashboards sign in by themselves — no click, and the Keycloak session carries over
+    scenarios: 1.370-1.375
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Reflex Enterprise's /login is a palette that waits for a click, deliberately, even with one
+      provider; lex-app has exactly one, and a user signed in to lex-app already has a Keycloak session
+      that can answer at once. lex_login_page (the plugin's login_page, by import path) starts the
+      sign-in itself: the plugin's own redirect at the top level, and in a frame a silent prompt=none
+      request, answered without a page; the button only when Keycloak cannot answer silently there (no
+      session, or a browser that withholds its cookie from frames), whose popup is the one way left.
+      Keycloak's "sign in first" to a silent request is the button, not an error toast. A restart of the
+      Reflex server that costs the session its tokens, or a new tab, therefore signs in again without a
+      click.
+
+      Three guards keep it from looping or flashing. An automatic attempt within 30 seconds of the last
+      gives the button (the visitor backed out of Keycloak); a sign-out resets that window. React's
+      development mode mounts every component twice, so /login's browser check sends one visit's
+      identity (the history entry's key, on a window that each page load renews) and start_login ignores
+      the repeat -- without it the second call hit the retry window and the button flashed before every
+      redirect (found in a browser, by watching the websocket). A redirect that cannot be built leaves
+      the button beside the plugin's error, instead of a spinner for ever; that is why start_login
+      calls the plugin's redirect_to_login inline rather than chaining it.
+
+      A token whose cookie exceeds 4096 bytes is dropped by the browser without a word, so the session
+      dies with the server; _set_tokens reports it once per cookie, naming Keycloak's "Full scope
+      allowed". Thirteen mutations of the sign-in code each fail a 1ar test. Verified in a browser
+      outside the suite against a mock provider given a Keycloak-like SSO session: no click anywhere,
+      carry-over from the provider's session, restart, a dropped access-token cookie, a new tab, framed
+      silent sign-in, the popup when the frame cannot see the session, the retry window, and sign-out.

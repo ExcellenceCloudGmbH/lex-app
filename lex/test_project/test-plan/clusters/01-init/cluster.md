@@ -384,3 +384,20 @@ does not remove user launch configurations.
 | 1.369 | `LexUser` | `username` and `display_name` from Keycloak's claims |
 
 **Scenario range:** 1.357 – 1.369. **Test file:** `lex/test_project/tests/init/test_1aq_reflex_dashboards.py`. **Type:** U + I. **Status:** ✅ Complete (2026-09-28). Batch: [1aq](batches.md). Permissions in Reflex dashboards are cluster [4n](../04-permissions/cluster.md); the search exclusion of the `Reflex` report is [10d](../10-api_layer/cluster.md).
+
+### 1ar. Reflex dashboards sign in by themselves — no click, and the Keycloak session carries over ✅
+
+**What it tests:** that a Reflex dashboard never asks a visitor to click to sign in when Keycloak can answer. Reflex Enterprise's `/login` is a palette that waits for a click; lex-app's (`lex_login_page`) starts the sign-in itself — the plugin's own redirect at the top level, a silent `prompt=none` request in a frame — and shows the button only when a click is the one way left, without ever bouncing a visitor back and forth.
+
+**Why a regression matters:** a user signed in to lex-app clicking "Login with Keycloak" on every dashboard, after every restart of the Reflex server, in every new tab; or, worse, a dashboard bouncing between itself and Keycloak for ever.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.370 | `/login` is lex-app's page | the plugin's `login_page` by import path; signing in shown, the button only under `login_needs_click`; the browser check on mount; a project's own page wins; the palette for any other providers |
+| 1.371 | the top level | signed out: the plugin's own redirect to Keycloak, interactive, the page asked for kept; signed in: on to that page; React's repeat mount does nothing |
+| 1.372 | never a loop | the button within the retry window, automatic after it and at once after a sign-out; a sign-in that cannot start leaves the button and the plugin's error |
+| 1.373 | in a frame | `prompt=none` with the plugin's own client, callback, state and PKCE; the button once Keycloak has said it cannot answer silently |
+| 1.374 | "sign in first" | Keycloak's silent-request errors, through the plugin's callback, bring up the button for the same page with no error; any other error is the plugin's to report |
+| 1.375 | storing tokens | a stored sign-in ends the need for a click; a token cookie over 4096 bytes is reported once, naming Keycloak's "Full scope allowed" |
+
+**Scenario range:** 1.370 – 1.375. **Test file:** `lex/test_project/tests/init/test_1ar_reflex_automatic_sign_in.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Batch: [1ar](batches.md).

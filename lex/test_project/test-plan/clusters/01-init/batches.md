@@ -1547,3 +1547,52 @@ so 1.368 runs in a subprocess rather than leave the rest of the suite on a patch
 The browser half — Keycloak's redirect and callback, the dashboards rendering signed in, embed
 mode, sign-out, and a cross-site frame signing in through the popup — was verified end to end
 outside the suite, against a mock OIDC provider, because the suite has no Keycloak or browser.
+
+### Batch 1ar — Reflex dashboards sign in by themselves: no click, and the Keycloak session carries over ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.370 – 1.375 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/auth.py` (`LexKeycloakAuthState.start_login`, `_silent_login_redirect`, `_handle_auth_callback_error_response`, `_redirect_to_logout_payload`, `_set_tokens`; `lex_login_page`; `_report_oversized_token_cookies`), `lex/lex_app/reflex/config.py` (`LOGIN_PAGE`, `lex_auth_plugin`) |
+| Test file | `lex/test_project/tests/init/test_1ar_reflex_automatic_sign_in.py` |
+| Test classes | `TestCluster01ar_TheLoginPage` (1.370), `TestCluster01ar_TopLevel` (1.371–1.372), `TestCluster01ar_Framed` (1.373–1.374), `TestCluster01ar_Tokens` (1.375) |
+| Fixtures | a session's state tree built from Reflex's root `State`, its router on `/login` or `/callback`; Keycloak's authorization endpoint patched in (no discovery over the network); the running app stubbed where building and rendering `/login` asks for it (1.366 compiles the real one), in a temporary working directory, since rendering copies Reflex's shared assets into it; the plugin's out-of-band toast stubbed where a failure pushes one |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.370 | `/login` is lex-app's page | `lex_auth_plugin()` names `lex_login_page` by import path; the page renders "Signing you in…" and the "Login with Keycloak" button only under `login_needs_click`; on mount it runs `_LOGIN_PAGE_JS` and hands the answer to `start_login`; `login_page=` from the project wins; with any provider but lex-app's alone, exactly the plugin's palette |
+| 1.371 | the top level | signed out, `start_login` returns the plugin's own redirect to the authorization endpoint — no `prompt`, the provider's client, callback and `state` — with `redirect_to` kept for after and the frame check recorded; signed in, a replacing redirect to `redirect_to`; the repeat of one visit returns nothing and leaves the running sign-in's nonce alone |
+| 1.372 | never a loop | an attempt 5 s ago: the button, no redirect; one older than `AUTO_LOGIN_RETRY_SECONDS`: automatic; after `_redirect_to_logout_payload`: automatic at once; an authorization endpoint that raises: the button, with the plugin's error logged and its toast pushed |
+| 1.373 | in a frame | the authorization endpoint with `prompt=none`, `response_type=code`, the provider's client and callback, its `state` nonce and the S256 challenge of its verifier; `redirect_to` kept; the frame recorded for the popup; after `_silent_login_failed`, the button without a second request; a request that cannot be built leaves nothing pending |
+| 1.374 | "sign in first" | each of `login_required`, `interaction_required`, `consent_required` and `account_selection_required`, through `auth_callback`, redirects (replacing) to `login_url_for(<the page>)` with the button and no error message; `access_denied` after a silent request, and `login_required` without one, are reported by the plugin |
+| 1.375 | storing tokens | `_set_tokens` clears `login_needs_click`, `_silent_login_failed` and `_silent_login_pending`; an access-token cookie over 4096 bytes logs one warning naming `_oidc_lex_keycloak_access_token_data_partitioned`, 4096 and "Full scope allowed"; the same cookie again, or tokens that fit, log nothing |
+
+**Why `/login` signs in by itself.** A restart of the Reflex server kept asking a user who was
+signed in to lex-app to click "Login with Keycloak". The plugin's palette waits for that click on
+purpose — it does not bounce a visitor to a third party unasked — but lex-app has one provider, and
+the visitor's Keycloak session answers without a form. The likeliest reason a restart lost the
+session at all is a Keycloak access token larger than a cookie may be: the browser drops the cookie,
+the new server finds only the ID token, and the page guard sends the visitor to `/login`. Signing in
+by itself makes that a silent bounce through Keycloak, and 1.375's warning says what to change.
+
+**Two guards were found in a browser, not by reasoning.** React's development mode mounts every
+component twice, so `/login`'s check ran twice: the second call fell into the retry window and the
+button flashed before every redirect — seen by watching the websocket, now pinned by 1.371's repeat.
+And `start_login` first chained the plugin's `redirect_to_login`, which left it unable to see that the
+redirect could not be built: the page would spin for ever. It calls it inline now, and 1.372 pins the
+button that replaces the spinner.
+
+**Thirteen mutations each fail a test here** — the repeat, the retry window and its reset on
+sign-out, `prompt=none`, the silent-error branch, the button on a failed start, the tokens clearing
+the click, the cookie warning's threshold and its once-only, the page's mount event, the signed-in
+shortcut, the frame record, and the frame's fallback to the button.
+
+The browser half was verified outside the suite, against the mock OIDC provider given a
+Keycloak-like SSO session: an unsigned visit going straight to the provider's form; a visitor signed
+in only to the provider signed in with no form; a restart, a dropped access-token cookie and a new tab
+all signed in without a click; a frame signed in silently, and through one click when the frame could
+not see the provider's session; the button, not a bounce, on coming back from the provider's form; and
+the provider's form again, at once, after signing out.
