@@ -24,6 +24,10 @@ nest_asyncio
 Office365-REST-Python-Client
 streamlit>=1.61,<1.62
 streamlit-keycloak-lex
+# `lex reflex`. Upper-bounded like streamlit: lex.lex_app.reflex.auth extends
+# reflex-enterprise's OIDC provider hooks, which a 0.10 is free to change.
+reflex>=0.9.12,<0.10
+reflex-enterprise>=0.9.6,<0.10
 sqlalchemy
 django_redis
 django-storages[google]

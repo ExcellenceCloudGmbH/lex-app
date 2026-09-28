@@ -1253,6 +1253,33 @@ class LexModel(LifecycleModel):
         """
         st.info("No class-level visualization available for this model.")
 
+    @classmethod
+    def reflex_main(cls):
+        """
+        Instance-level Reflex dashboard -- the Reflex counterpart of ``streamlit_main``.
+        Override in subclasses to return the component ``lex reflex`` shows for
+        ``?model=<name>&pk=<pk>``.
+
+        A classmethod, not an instance method: Reflex compiles the page once,
+        ahead of any request, so there is no record to call it on. The
+        component's own state reads the record in an event handler with
+        ``lex.lex_app.reflex.current_record``.
+        """
+        import reflex as rx
+
+        return rx.callout("No instance-level visualization available for this model.", icon="info")
+
+    @classmethod
+    def reflex_class_main(cls):
+        """
+        Class-level Reflex dashboard -- the Reflex counterpart of ``streamlit_class_main``.
+        Override in subclasses to return the component ``lex reflex`` shows for
+        ``?model=<name>``: aggregate visualizations, statistics, etc.
+        """
+        import reflex as rx
+
+        return rx.callout("No class-level visualization available for this model.", icon="info")
+
 
 # -- Aware-datetime invariant ---------------------------------------------
 # Under USE_TZ=True, Django only normalizes datetimes at the DB boundary:

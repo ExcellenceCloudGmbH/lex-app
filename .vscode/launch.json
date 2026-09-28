@@ -131,6 +131,22 @@
       "envFile": "${workspaceFolder}/.env"
     },
     {
+      "name": "LEX: Reflex",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lex",
+      "args": [
+        "reflex",
+        "run"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
       "name": "LEX: Create DB",
       "type": "debugpy",
       "request": "launch",

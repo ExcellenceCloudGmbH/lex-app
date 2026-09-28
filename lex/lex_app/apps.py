@@ -95,6 +95,23 @@ def _create_audit_logger_for_task(audit_logging_enabled=None):
 
 
 
+def _apply_nest_asyncio():
+    """``nest_asyncio.apply()``, unless this process's event loop cannot be patched.
+
+    nest_asyncio patches asyncio's own pure-Python loop and refuses any other. A
+    server running on uvloop -- granian, which serves `lex reflex`, picks uvloop
+    whenever it is installed -- has already installed a uvloop policy when Django
+    is set up, so ``apply()`` raises ``ValueError`` inside ``ready()`` and takes
+    ``django.setup()`` down with it. Such a process does not need the patch: lex's
+    synchronous code reaches the database from worker threads there, and a worker
+    thread has no running loop to nest into.
+    """
+    try:
+        nest_asyncio.apply()
+    except ValueError as exc:
+        logger.info("nest_asyncio not applied (%s); this process's loop runs as it is.", exc)
+
+
 def should_load_data(auth_settings):
     """
     Check whether the initial data should be loaded.
@@ -116,7 +133,7 @@ class LexAppConfig(GenericAppConfig):
             generic_app_models = {f"{model.__name__}": model for model in
                                   set(list(apps.get_app_config(repo_name).models.values())
                                       + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
-            nest_asyncio.apply()
+            _apply_nest_asyncio()
 
             # Run the initial-data check (config load + are_all_models_empty()
             # DB query) OFF the ready() critical path so django.setup() returns
@@ -143,6 +160,7 @@ class LexAppConfig(GenericAppConfig):
         from django.contrib import admin
         from django.contrib.auth import get_user_model
         from lex.process_admin.utils.model_registration import ModelRegistration
+        from lex.lex_app.reflex.Reflex import Reflex, reflex_enabled
         from lex.lex_app.streamlit.Streamlit import Streamlit
 
         # Models to explicitly exclude (shouldn't show in frontend)
@@ -198,7 +216,7 @@ class LexAppConfig(GenericAppConfig):
         if self.model_structure_builder.widget_structure:
             ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
         ModelRegistration.register_models(
-            [Streamlit],
+            [Streamlit, Reflex] if reflex_enabled() else [Streamlit],
             self.untracked_models,
             self.model_structure_builder.history_tracking_enabled,
         )

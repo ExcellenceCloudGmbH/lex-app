@@ -75,6 +75,7 @@ EXPLICIT_COMMANDS = frozenset({
     "celery-workers",
     "flower",
     "streamlit",
+    "reflex",
     "start",
     "setup",
     "setup-with-ai",
@@ -167,6 +168,7 @@ class TestCluster01m_RunFileSetParity(TestCase):
         "Make_migrations.run.xml",
         "Migrate.run.xml",
         "Streamlit.run.xml",
+        "Reflex.run.xml",
         "Create_DB.run.xml",
         "Flush_DB.run.xml",
     })

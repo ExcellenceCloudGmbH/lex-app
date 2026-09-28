@@ -14,15 +14,29 @@ def _is_structure_yaml_file(file):
     return file == "model_structure.yaml"
 
 
+#: The project's Reflex dashboards. Named like a structure file, but it is the
+#: Reflex app's to import, and only the Reflex app's: it defines Reflex states and
+#: pages, which have no business being created in every process Django starts.
+_REFLEX_STRUCTURE_FILE = "_reflex_structure.py"
+
+
 def _is_structure_file(file):
-    return file.endswith('_structure.py')
+    return file.endswith('_structure.py') and file != _REFLEX_STRUCTURE_FILE
 
 
 class GenericAppConfig(AppConfig):
-    _EXCLUDED_FILES = ("asgi", "wsgi", "settings", "urls", 'setup')
+    # `rxconfig` is Reflex's configuration module: importing it as a model module
+    # would build the Reflex config in every process Django starts.
+    _EXCLUDED_FILES = ("asgi", "wsgi", "settings", "urls", 'setup', 'rxconfig')
     _EXCLUDED_DIRS = ('venv', '.venv', 'build', 'migrations')
     _EXCLUDED_PREFIXES = ('_', '.', 'test_')
     _EXCLUDED_POSTFIXES = ('_', '.', 'create_db', 'CalculationIDs', '_test')
+    #: Directories inside lex's OWN packages that discovery must not walk into.
+    #: Discovery imports a module under its app-relative name -- `lex_app.reflex.auth`
+    #: -- which is a second module object beside the `lex.lex_app.reflex.auth` the
+    #: rest of the code imports. For `reflex` that would define every Reflex state
+    #: twice. It holds no models, and its report is registered explicitly.
+    _LEX_PACKAGE_EXCLUDED_DIRS = ('reflex',)
 
     def __init__(self, app_name, app_module):
         super().__init__(app_name, app_module)
@@ -39,8 +53,11 @@ class GenericAppConfig(AppConfig):
 
 
     def start(self, repo=None, is_lex=True):
+        from lex.lex_app.reflex.Reflex import reflex_enabled
+
         self.pending_relationships = {}
         self.discovered_models = {}
+        self._discovering_lex_package = is_lex
         predefined_structure = {"AuditLog": {
             "auditlog": None,
         },
@@ -51,6 +68,8 @@ class GenericAppConfig(AppConfig):
             "streamlit": None
         }
         }
+        if reflex_enabled():
+            predefined_structure["Reflex"] = {"reflex": None}
 
         self.model_structure_builder = ModelStructureBuilder(repo=repo, predefined_structure= predefined_structure)
 
@@ -101,7 +120,12 @@ class GenericAppConfig(AppConfig):
                     self._process_module(rel_module_name, file)
 
     def _dir_filter(self, directory):
-        return directory not in self._EXCLUDED_DIRS and not directory.startswith(self._EXCLUDED_PREFIXES)
+        if directory in self._EXCLUDED_DIRS or directory.startswith(self._EXCLUDED_PREFIXES):
+            return False
+        return not (
+            getattr(self, "_discovering_lex_package", False)
+            and directory in self._LEX_PACKAGE_EXCLUDED_DIRS
+        )
 
     def _is_valid_module(self, module_name, file):
         return (file.endswith('.py')
@@ -158,6 +182,7 @@ class GenericAppConfig(AppConfig):
 
     def register_models(self):
         from django.contrib import admin
+        from lex.lex_app.reflex.Reflex import Reflex, reflex_enabled
         from lex.lex_app.streamlit.Streamlit import Streamlit
 
         ModelRegistration.register_models(
@@ -176,7 +201,7 @@ class GenericAppConfig(AppConfig):
         ModelRegistration.register_model_styling(self.model_structure_builder.model_styling)
         ModelRegistration.register_widget_structure(self.model_structure_builder.widget_structure)
         ModelRegistration.register_models(
-            [Streamlit],
+            [Streamlit, Reflex] if reflex_enabled() else [Streamlit],
             self.untracked_models,
             self.model_structure_builder.history_tracking_enabled,
         )

@@ -76,6 +76,11 @@ RUN_CONFIGS = (
         "args": ("streamlit", "run", "streamlit_app.py"),
     },
     {
+        "pycharm_filename": "Reflex.run.xml",
+        "name": "Reflex",
+        "args": ("reflex", "run"),
+    },
+    {
         "pycharm_filename": "Create_DB.run.xml",
         "name": "Create DB",
         "args": ("create_db",),
