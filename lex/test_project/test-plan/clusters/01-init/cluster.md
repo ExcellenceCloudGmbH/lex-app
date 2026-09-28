@@ -340,3 +340,47 @@ does not remove user launch configurations.
 | 1.302 | a real stop flag is still obeyed | the guard swallows control exceptions, not the answer |
 
 **Scenarios 1.300 – 1.302** close the last live cause of the original report: the token refresher died on a script rerun, and a dead one is only replaced on the *next* run — so a rerun followed by idleness left nothing renewing the token. Found in a production log, which was only readable because 1.296–1.299 added the access log.
+
+### 1ap. `lex reflex` — the Reflex command, its ports, and its workers' Django ✅
+
+**What it tests:** that a project runs its Reflex dashboards the way it runs Streamlit's — `lex reflex` (default `reflex run`) from the project root, an `rxconfig.py` written once, fixed ports beside Streamlit's (8502 frontend, 8503 backend) handed only to the run modes that accept them, hot reload on the project's own files, a "Reflex" run configuration from `lex setup` — and that Reflex's worker processes, which the CLI never sets Django up for, get the CLI's environment.
+
+**Why a regression matters:** a port Reflex refuses (`--frontend-port` on a backend-only run) stops the server before it starts; a worker without the project's `.env` sets Django up against the wrong database, and nothing says so.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.348 | `lex reflex` alone | runs `reflex run`; the CLI skips its Django bootstrap |
+| 1.349 | arguments pass through | Reflex receives exactly the arguments given, `--help` included; project-less commands write nothing |
+| 1.350 | rxconfig.py | written once from the template, never overwritten; Reflex runs from the project root |
+| 1.351 | hot reload | the project's own top-level entries, never `.web`, hidden entries, virtualenvs or caches — and never an empty value |
+| 1.352 | development ports | missing ports supplied; one chosen by flag, environment or config wins |
+| 1.353 | one port per mode | backend-only, frontend-only and prod/preview runs each get only the port they can use |
+| 1.354 | run configuration | PyCharm and VS Code both get "Reflex", running `reflex run` with the project's `.env` |
+| 1.355 | a worker's environment | `prepare_environment()` mirrors the CLI and never overrides what is set; `setup_django()` never runs twice |
+| 1.356 | one `.env` parser | the CLI's parser, shared with the workers |
+
+**Scenario range:** 1.348 – 1.356. **Test file:** `lex/test_project/tests/init/test_1ap_reflex_cli.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Batch: [1ap](batches.md).
+
+### 1aq. Reflex dashboards — Keycloak sign-in, the Django ORM, and the `?model=&pk=` dispatch ✅
+
+**What it tests:** that a Reflex dashboard gets what a Streamlit dashboard gets. Sign-in against the project's own Keycloak through Reflex Enterprise's `AuthPlugin` (no proxy), configured from the settings a project already has; the Django ORM from event handlers, which run on an event loop where Django refuses synchronous queries; a Django request's connection handling around every event; and lex-app's URL contract — `?model=&pk=` a record's dashboard, `?model=` a table's, neither the project's own — with Streamlit's checks and messages.
+
+**Why a regression matters:** the first ORM query in a handler raising `SynchronousOnlyOperation`, one dropped database connection failing every later event until a restart, or a dashboard framed by lex-app asking the user to sign in with the wrong client.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.357 | `lex_config()` | the app module, Keycloak sign-in bound to the Keycloak session (no `offline_access`), no ports, valid app name; importing it creates no state |
+| 1.358 | provider settings | `LEX_KEYCLOAK_*`, then `OIDC_*`, then Lex App's Keycloak settings — never `KEYCLOAK_CLIENT_ID` |
+| 1.359 | the proxy's settings | `OIDC_ISSUER`, `OIDC_VERIFY_SSL`, the "Login with Keycloak" label |
+| 1.360 | `run_orm` / `@orm` | synchronous Django code runs from the loop, returns, and raises its own errors |
+| 1.361 | connection handling per event | stale connections retired around every event, never inside a transaction |
+| 1.362 | the URL contract | each query string resolves to its view, in Streamlit's order |
+| 1.363 | from the router | `resolve` and `current_record` read the URL an event sees, through the ORM |
+| 1.364 | embed and logout | `lex_embed` and `is_logout_enabled` as lex-app sends them |
+| 1.365 | the dispatch page | overriding hooks compiled in, broken hooks and structure modules refused loudly |
+| 1.366 | the compiled app | sign-in routes, guard before `resolve`, connection middleware, every dashboard |
+| 1.367 | registration | the `Reflex` report and sidebar entry only when enabled; discovery never imports the Reflex package twice |
+| 1.368 | granian's uvloop | `AppConfig.ready()` survives a loop `nest_asyncio` cannot patch |
+| 1.369 | `LexUser` | `username` and `display_name` from Keycloak's claims |
+
+**Scenario range:** 1.357 – 1.369. **Test file:** `lex/test_project/tests/init/test_1aq_reflex_dashboards.py`. **Type:** U + I. **Status:** ✅ Complete (2026-09-28). Batch: [1aq](batches.md). Permissions in Reflex dashboards are cluster [4n](../04-permissions/cluster.md); the search exclusion of the `Reflex` report is [10d](../10-api_layer/cluster.md).

@@ -49,3 +49,32 @@
 | Status | ✅ Complete (Session 80 — June 18) |
 
 ---
+
+### Batch 4n — Keycloak UMA permissions in Reflex dashboards ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.75 – 4.79 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/auth.py` (`LexKeycloakAuthState._lex_uma_permissions`, `._reset_auth`, `current_permissions`, `current_access_token`, `has_permission`, `_fetch_uma_permissions`, `_token_subject`) |
+| Test file | `lex/test_project/tests/permissions/test_4n_reflex_permissions.py` |
+| Test classes | `TestCluster04n_PermissionLookup` (4.75–4.77), `TestCluster04n_HasPermission` (4.78), `TestCluster04n_AccessToken` (4.79) |
+| Fixtures | a session's Reflex state tree (root `State`); access tokens put in the provider's cookie as sign-in and refresh do; `KeycloakManager` patched as the one external boundary; `KeycloakItem` as the model a check names |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.75 | one lookup per access token | `[]` signed out without asking Keycloak; exactly `KeycloakManager`'s answer signed in, asked once however often it is read and again after a refresh; the session keeps a digest of the token, never the token; callers get a copy |
+| 4.76 | failures degrade safely | a lookup that raises, answers nothing or answers an error body keeps the same user's grants and is retried on the next read; a different user signing in while Keycloak fails gets `[]`, never the previous user's grants |
+| 4.77 | sign-out forgets them | `_reset_auth` clears the cached grants with the tokens; the next user gets a lookup of their own |
+| 4.78 | `has_permission(target, scope)` | a model resolves to `<app_label>.<ModelName>`; only a model-wide grant of the scope counts (`read` by default) — not a record grant, not another resource's, not a case variant; signed out or unanswered is a denial; anything but a model or a name is refused where the check is declared |
+| 4.79 | any state reaches the token | a dashboard's own state gets the session's access token (`""` signed out) and permissions |
+
+Every rule above was checked as a guard, not decoration: five mutations of `auth.py` — keep grants
+across users, keep them across sign-out, count record grants, cache the raw token, return the cached
+list itself — each fail exactly one of these scenarios. The rule for record grants is the API's own
+(`lex/api/utils/helpers.py`, `LexModel`): a `resource_set_id` scopes a grant to one record, so it
+must not open a check on the whole model.
+
+---

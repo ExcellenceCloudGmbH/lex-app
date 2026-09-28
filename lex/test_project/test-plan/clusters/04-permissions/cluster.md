@@ -37,3 +37,19 @@
 **Scenario range:** 4.66 – 4.70. **Test file:** `lex/test_project/tests/permissions/test_4m_api_key_middleware.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/authentication/middleware.py`.
 
 ---
+
+### 4n. Keycloak UMA permissions in Reflex dashboards ✅
+
+**Gap:** a Streamlit dashboard reads the user's Keycloak UMA permissions from `st.session_state.permissions`, filled by the proxy. A Reflex dashboard has no proxy: `current_permissions(state)` fetches them through `KeycloakManager` for the session's access token, and `has_permission(Model, scope)` turns one into a Reflex Enterprise `auth=` check. Getting the cache wrong in one direction leaks a previous user's grants into a session; in the other, it asks Keycloak on every event or demotes a user whenever Keycloak blips.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.75 | one lookup per access token | asked once per token, again after a refresh; no token, no lookup; the session keeps a digest, never the token |
+| 4.76 | failures degrade safely | the same user keeps their grants while Keycloak fails; another user never inherits them |
+| 4.77 | sign-out forgets them | `_reset_auth` clears the grants with the tokens |
+| 4.78 | `has_permission` | model-wide grants of the scope on `<app_label>.<ModelName>` only; fails closed |
+| 4.79 | the access token | any state reaches the session's token and permissions |
+
+**Scenario range:** 4.75 – 4.79. **Test file:** `lex/test_project/tests/permissions/test_4n_reflex_permissions.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Covers `lex/lex_app/reflex/auth.py`. Batch: [4n](batches.md).
+
+---

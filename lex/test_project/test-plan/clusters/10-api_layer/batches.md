@@ -44,6 +44,20 @@
 | Status | ✅ Complete — 6 pass / 0 fail |
 | Note | Backend OOM fix (session 77). The tree endpoint previously loaded the whole `CalculationLog` table (or every row for a calc) with a per-node child query (N+1). Now: limit/offset pagination (`DEFAULT_LIMIT=1000`, `MAX_LIMIT=5000`, `has_more`), children resolved for the whole page in one query via serializer context, `get_isRoot` reads `parent_log_id` (no lazy parent fetch). Scenario 10.61 placed past the 10.60 ceiling; the 10g-reserved "calculation-log tree" slot was never implemented (the on-disk 10g file became `one_endpoint_lifecycle`), so this lands as 10m. |
 
+### Batch 10d — Global search with the Reflex report registered ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.82 |
+| Type | I |
+| Files covered | `lex/api/views/global_search_for_models/Search.py` (`EXCLUDED_MODELS`) |
+| Test file | `lex/test_project/tests/api_layer/test_10d_reflex_search_exclusion.py` |
+| Test classes | `TestCluster10d_ReflexSearchExclusion` |
+| Fixtures | `SchemaItem` (shared api_layer model); the real `ModelContainer` of the `Reflex` report beside it; `UserPermission` forced open as in 10f |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | 10.82: with the Reflex report registered (`IS_REFLEX_ENABLED=true`), the global search answers with the model's matches and skips the report's container (id `reflex`) as it skips `streamlit`. Against the tree without the exclusion it fails with `AttributeError: type object 'Reflex' has no attribute '_meta'` — every search a 500. Letter d was free; scenario placed after 10i's 10.81. |
+
 > `ModelExport.py` (cluster 13f), `List.py` AG-Grid path (14f), `base_serializers.py` (12g) keep their forecasted homes.
 
 ---

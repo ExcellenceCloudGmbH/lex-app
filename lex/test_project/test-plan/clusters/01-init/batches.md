@@ -1465,3 +1465,85 @@ immediately.
 pins is the contract between them: that a sequence ships `lex_step=0` and a mapping ships no cursor
 at all — the distinction the frontend reads as "is a flow live".
 
+### Batch 1ap — `lex reflex`: the command, its ports, and its workers' Django ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.348 – 1.356 |
+| Type | U |
+| Files covered | `lex/bin/lex.py` (`reflex` command, `REFLEX_CONFIG_TEMPLATE`, `_ensure_reflex_config`, `_reflex_hot_reload_paths`, `_resolve_reflex_port_flags`, `_SKIP_BOOTSTRAP_COMMANDS`), `lex/tools/django_bootstrap.py`, `lex/tools/project_root.py` (`load_project_env_file`), `generate_pycharm_configs.py` (`Reflex` run configuration), `.run/Reflex.run.xml`, `.vscode/launch.json` |
+| Test file | `lex/test_project/tests/init/test_1ap_reflex_cli.py` |
+| Test classes | `TestCluster01ap_TheCommand` (1.348–1.350), `TestCluster01ap_HotReload` (1.351, 1.351b), `TestCluster01ap_Ports` (1.352–1.353), `TestCluster01ap_RunConfiguration` (1.354), `TestCluster01ap_WorkerBootstrap` (1.355, 1.355b, 1.356) |
+| Fixtures | a temp project directory as `PROJECT_ROOT_DIR`; Reflex's CLI entry point patched to record the arguments it would run with, invoked through click's `CliRunner` inside a forked `RegistrationContext` |
+| Tests landed | **11 pass / 0 fail** |
+| Status | ✅ Complete |
+| Pinned sets extended | 1m's `EXPECTED_FILES` gains `Reflex.run.xml` and its explicit-command set gains `reflex`; 1y's configuration names gain `Reflex` — both are exhaustive lists by design, so a new command must be added to them |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.348 | `lex reflex` alone | runs `reflex run`, and the CLI does not set Django up for it |
+| 1.349 | arguments pass through | every argument, `--help` included, reaches Reflex untouched; a command that acts on no project (`--help`, `login`) writes no rxconfig.py; only `run` is given ports |
+| 1.350 | rxconfig.py | written once from the template that calls `lex_config()`, never overwritten, and Reflex runs from the project root |
+| 1.351 | hot reload | `REFLEX_HOT_RELOAD_OVERRIDE_PATHS` names the project's own top-level entries — never hidden ones, `.web`, a virtualenv, or an empty value |
+| 1.352 | development ports | each missing port is supplied (8502 frontend, 8503 backend); one chosen by flag, `REFLEX_*_PORT` or config wins |
+| 1.353 | one port per mode | backend-only gets only the backend port, frontend-only only the frontend's, a prod/preview run only the single port it serves on — and none once the caller chose one |
+| 1.354 | run configuration | `lex setup` scaffolds a "Reflex" configuration for PyCharm and VS Code, running `reflex run` |
+| 1.355 | a worker's environment | `prepare_environment()` sets what the CLI sets (settings module, project root, `.env`) without overriding what is already set; `setup_django()` is a no-op once Django is ready |
+| 1.356 | one `.env` parser | the CLI and the workers parse `.env` identically — comments, quotes, invalid lines, existing values |
+
+Why the CLI does not bootstrap Django here: Reflex compiles and serves from worker processes that
+import `rxconfig.py` and `lex.reflex_app` themselves, so the parent's Django setup would be wasted
+and the workers' would be missing. The template therefore calls `prepare_environment()` before it
+imports anything from `lex.lex_app`, whose settings module reads the environment once, at import.
+
+### Batch 1aq — Reflex dashboards: Keycloak sign-in, the Django ORM, and the `?model=&pk=` dispatch ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.357 – 1.369 |
+| Type | U + I |
+| Files covered | `lex/lex_app/reflex/` (`config.py`, `auth.py` — `LexKeycloakAuthState`, `LexUser` —, `django_orm.py`, `dashboards.py`, `app.py`, `Reflex.py`, `examples/_reflex_structure.py`), `lex/reflex_app.py`, `lex/utilities/config/generic_app_config.py`, `lex/lex_app/apps.py` (`_apply_nest_asyncio`, `register_models`), `lex/process_admin/utils/model_structure_builder.py`, `lex/core/models/LexModel.py` (`reflex_main` / `reflex_class_main`) |
+| Test file | `lex/test_project/tests/init/test_1aq_reflex_dashboards.py` |
+| Test classes | `TestCluster01aq_Config` (1.357, 1.357b, 1.357c), `TestCluster01aq_KeycloakProvider` (1.358, 1.359, 1.369), `TestCluster01aq_Orm` (1.360–1.361), `TestCluster01aq_Dispatch` (1.362–1.363), `TestCluster01aq_PageChrome` (1.364), `TestCluster01aq_DispatchPage` (1.365, 1.365b), `TestCluster01aq_TheCompiledApp` (1.366), `TestCluster01aq_Registration` (1.367), `TestCluster01aq_EventLoops` (1.368) |
+| Fixtures | probe models `ReflexProbeFund` (both hooks), `ReflexProbeDefault` (`LexModel`, no overrides), `ReflexProbePlain` (plain Django model); a session's state tree built from Reflex's root `State`; `E2ETestCase` for the ORM and dispatch scenarios; subprocesses for 1.357c and 1.368 |
+| Tests landed | **16 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.357 | `lex_config()` | an `rxe.Config` importing `lex.reflex_app`, signing in through the Lex Keycloak provider without `offline_access` (an offline token would outlive the Keycloak session), Radix explicit, telemetry and the sitemap off, no port configured; overrides win and extra scopes add; the app name is a valid identifier derived from the project; importing it — what rxconfig.py does — creates no Reflex state |
+| 1.358 | where the provider's settings come from | `LEX_KEYCLOAK_*`, then `OIDC_*`, then Lex App's own `KEYCLOAK_URL`/`KEYCLOAK_REALM`(`_NAME`) and `OIDC_RP_CLIENT_ID`/`SECRET`; never `KEYCLOAK_CLIENT_ID`; a clear error when nothing is set |
+| 1.359 | the proxy's settings | `OIDC_ISSUER` widens the accepted issuers, `OIDC_VERIFY_SSL=false` switches TLS verification off, the button reads "Login with Keycloak" |
+| 1.360 | `run_orm` / `@orm` | synchronous Django code that raises `SynchronousOnlyOperation` on the loop runs through them, returns its result, and raises its own errors |
+| 1.361 | a request's connection handling, per event | stale connections are retired before and after every event (and on the loop's thread under `DJANGO_ALLOW_ASYNC_UNSAFE`), never inside an open transaction |
+| 1.362 | the URL contract | `?model=&pk=` → record, `?model=` → table, neither → the project's own; an unknown model, a missing or malformed pk, and a model with no hooks each resolve to their own error view, checked in Streamlit's order |
+| 1.363 | from the router | `LexDashboardState.resolve` and `current_record` read the URL an event sees and fetch through the ORM |
+| 1.364 | embed and logout | only a truthy `lex_embed` hides the top bar; sign-out shows unless `is_logout_enabled` is explicitly falsy |
+| 1.365 | the dispatch page | only models that override a hook are compiled in; a hook that is not a classmethod/staticmethod or returns no component fails at compile; `_reflex_structure.py` may be absent but never silently broken |
+| 1.366 | the compiled app | sign-in and popup routes, the guard running before `resolve` on `/`, the connection middleware, the standard scopes without `offline_access`, the structure's pages and the models' dashboards |
+| 1.367 | registration | the report frames `REFLEX_URL` (default `:8502`) with `lex_embed=1`; it and its sidebar entry exist only with `IS_REFLEX_ENABLED=true`; discovery skips `_reflex_structure.py` and `rxconfig.py`, and the `reflex` directory only inside lex's own packages |
+| 1.368 | granian's uvloop | `AppConfig.ready()` skips `nest_asyncio` on a loop it cannot patch instead of failing |
+| 1.369 | `LexUser` | `username` is `preferred_username`; `display_name` the name, else the username, else the email; both empty signed out |
+
+**1.361 was strengthened after a mutation run.** Its first form asserted only that a connection
+inside an atomic block survived an event, and a middleware that closed it anyway still passed:
+Django's `close()` inside a transaction marks the connection (`closed_in_transaction`,
+`needs_rollback`) instead of dropping it. It now pins both flags and a query in the same
+transaction. Removing `_apply_nest_asyncio`'s guard fails 1.368; letting discovery walk the Reflex
+package fails 1.367.
+
+**1.357c caught a shadowed export.** The package serves its API lazily (PEP 562), and
+`orm` was both the `@orm` decorator and the name of the submodule defining it. Importing
+a submodule sets the package attribute of that name, so after the first import of
+`lex.lex_app.reflex.orm` — which the app always makes — `from lex.lex_app.reflex import orm`
+returned the module. The check that every name in `__all__` resolves to its own object
+found it; the module is now `django_orm.py`, and 1.360 uses the public import path.
+
+**Two scenarios run the way Reflex constrains them.** The auth plugin binds itself to the process
+on the first compile and refuses a second, so 1.366 compiles the real `lex.reflex_app` once in
+`setUpClass` and every assertion reads that compile. `nest_asyncio` patches asyncio process-wide,
+so 1.368 runs in a subprocess rather than leave the rest of the suite on a patched loop.
+
+The browser half — Keycloak's redirect and callback, the dashboards rendering signed in, embed
+mode, sign-out, and a cross-site frame signing in through the popup — was verified end to end
+outside the suite, against a mock OIDC provider, because the suite has no Keycloak or browser.

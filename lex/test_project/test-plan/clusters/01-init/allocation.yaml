@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 347
+max_scenario: 369
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1084,3 +1084,55 @@ letters:
       the other -- dispatching `update()` between its two meanings routed the mapping branch through
       `dict.update`, which puts rules in without passing `__setitem__`; that is the door 1.325 exists
       to keep shut, and it stayed shut only because that test already existed.
+
+  ap:
+    title: '`lex reflex` — the Reflex command, its ports, and its workers'' Django'
+    scenarios: 1.348-1.356
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      `lex reflex` hands its arguments to Reflex's own CLI -- `reflex run` when there are none -- from
+      the project root, writing on the first run an rxconfig.py that calls `lex_config()` and never
+      touching it again. It supplies the ports Lex App documents (8502 frontend, 8503 backend) only
+      where Reflex accepts them: `reflex run` refuses --frontend-port on a backend-only run and a prod
+      run serves everything from one port, so each mode is handed only the port it can use, and none
+      when the caller chose one by flag, REFLEX_*_PORT or config. Hot reload watches the project's own
+      top-level entries; Reflex's default watches the app module's package, which for Lex App is the
+      installed `lex` package, not the project.
+
+      The CLI does not set Django up for this command: Reflex's workers import rxconfig.py and the app
+      module in processes of their own, so lex.tools.django_bootstrap gives each the environment the
+      CLI would have -- .env through the CLI's own parser (moved to lex.tools.project_root, 1.356),
+      DJANGO_SETTINGS_MODULE, PROJECT_ROOT -- before anything imports lex.lex_app, whose settings
+      import reads the environment once.
+
+  aq:
+    title: Reflex dashboards — Keycloak sign-in, the Django ORM, and the ?model=&pk= dispatch
+    scenarios: 1.357-1.369
+    status: complete
+    tests:
+      pass: 16
+      skip: 0
+      xfail: 0
+    note: >-
+      Reflex Enterprise's AuthPlugin replaces the Streamlit proxy. LexKeycloakAuthState reads the
+      Keycloak settings a project already has (KEYCLOAK_URL/KEYCLOAK_REALM, OIDC_RP_CLIENT_ID/SECRET)
+      behind the plugin's own LEX_KEYCLOAK_* and OIDC_* variables, honours OIDC_ISSUER and
+      OIDC_VERIFY_SSL as the proxy does, and never picks up KEYCLOAK_CLIENT_ID, which in Lex App is the
+      browser's client. It does not ask for offline_access: Keycloak issues a refresh token without it,
+      and with it the token outlives the Keycloak session, so a sign-out would not reach the dashboard. Handlers run on Reflex's event loop, where Django refuses synchronous queries:
+      run_orm/@orm hand synchronous code to Django's thread-sensitive executor, and
+      DjangoConnectionMiddleware gives every event the connection handling a request gets.
+
+      1.361 was strengthened after a mutation run: its first form asserted only that a connection
+      inside an atomic block survived an event, and a middleware that closed it anyway still passed,
+      because Django's close() inside a transaction marks it rather than nulling it. It now pins
+      closed_in_transaction, needs_rollback and a query in the same transaction. 1.366 compiles the
+      real lex.reflex_app once per process in setUpClass -- the auth plugin binds itself to the process
+      and refuses a second compile -- and 1.368 runs in a subprocess because nest_asyncio patches
+      asyncio process-wide. Verified end to end outside the suite against a mock OIDC provider in a
+      browser: login redirect and return, record/table/structure dashboards, embed mode, sign-out, and a
+      cross-site frame signing in through the popup.

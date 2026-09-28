@@ -10,16 +10,16 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 41 | 347 | 384 | 0 | 0 |
+| 1. Init — Project Bootstrap | 43 | 369 | 411 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 13 | 74 | 18 | 2 | 0 |
+| 4. Permissions | 14 | 79 | 23 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
-| 10. API Layer | 13 | 81 | 31 | 0 | 0 |
+| 10. API Layer | 14 | 82 | 32 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 11 | 53 | 21 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -53,6 +53,10 @@ Scenarios start at 1.336 rather than the 1.300 this batch first took: 1.300-1.30
 | 1ao | A flow with an order, and refusals where the author can see them | 1.342-1.347 | complete | 29 | 0 | 0 | `Flow` was a lookup table keyed by "<resource>/<operation>" and resolved independently on every save, which left three things an author wants with no expression at all -- and each failed silently. Order: a chain visiting the same resource and operation twice collided on one key, so the second rule replaced the first and the flow was a step shorter than it read. Loops: "keep opening create forms" could only be approximated by STAY, which repeats one step because it is a sentinel meaning "do not navigate" rather than a position that did not move. References: a step could not say "edit the record step four made"; only {id} existed and it always meant the record just saved.
 The sequence form adds all three and serialises as a versioned program; the mapping form is untouched and still serialises byte-for-byte as before, which 1.346 pins because the wire format is where a rewrite leaks. The two cannot be mixed, refused from both directions, because a flow holding both has no single answer to "what happens after this save".
 Two guards are there because the implementation reached for them and got them wrong first. 1.342's third half pins that a step-only flow is truthy: Flow subclasses dict, so an empty mapping made `if flow:` in lex_view drop every sequence on the floor. 1.325 in batch 1ak caught the other -- dispatching `update()` between its two meanings routed the mapping branch through `dict.update`, which puts rules in without passing `__setitem__`; that is the door 1.325 exists to keep shut, and it stayed shut only because that test already existed. |
+| 1ap | `lex reflex` — the Reflex command, its ports, and its workers' Django | 1.348-1.356 | complete | 11 | 0 | 0 | `lex reflex` hands its arguments to Reflex's own CLI -- `reflex run` when there are none -- from the project root, writing on the first run an rxconfig.py that calls `lex_config()` and never touching it again. It supplies the ports Lex App documents (8502 frontend, 8503 backend) only where Reflex accepts them: `reflex run` refuses --frontend-port on a backend-only run and a prod run serves everything from one port, so each mode is handed only the port it can use, and none when the caller chose one by flag, REFLEX_*_PORT or config. Hot reload watches the project's own top-level entries; Reflex's default watches the app module's package, which for Lex App is the installed `lex` package, not the project.
+The CLI does not set Django up for this command: Reflex's workers import rxconfig.py and the app module in processes of their own, so lex.tools.django_bootstrap gives each the environment the CLI would have -- .env through the CLI's own parser (moved to lex.tools.project_root, 1.356), DJANGO_SETTINGS_MODULE, PROJECT_ROOT -- before anything imports lex.lex_app, whose settings import reads the environment once. |
+| 1aq | Reflex dashboards — Keycloak sign-in, the Django ORM, and the ?model=&pk= dispatch | 1.357-1.369 | complete | 16 | 0 | 0 | Reflex Enterprise's AuthPlugin replaces the Streamlit proxy. LexKeycloakAuthState reads the Keycloak settings a project already has (KEYCLOAK_URL/KEYCLOAK_REALM, OIDC_RP_CLIENT_ID/SECRET) behind the plugin's own LEX_KEYCLOAK_* and OIDC_* variables, honours OIDC_ISSUER and OIDC_VERIFY_SSL as the proxy does, and never picks up KEYCLOAK_CLIENT_ID, which in Lex App is the browser's client. It does not ask for offline_access: Keycloak issues a refresh token without it, and with it the token outlives the Keycloak session, so a sign-out would not reach the dashboard. Handlers run on Reflex's event loop, where Django refuses synchronous queries: run_orm/@orm hand synchronous code to Django's thread-sensitive executor, and DjangoConnectionMiddleware gives every event the connection handling a request gets.
+1.361 was strengthened after a mutation run: its first form asserted only that a connection inside an atomic block survived an event, and a middleware that closed it anyway still passed, because Django's close() inside a transaction marks it rather than nulling it. It now pins closed_in_transaction, needs_rollback and a query in the same transaction. 1.366 compiles the real lex.reflex_app once per process in setUpClass -- the auth plugin binds itself to the process and refuses a second compile -- and 1.368 runs in a subprocess because nest_asyncio patches asyncio process-wide. Verified end to end outside the suite against a mock OIDC provider in a browser: login redirect and return, record/table/structure dashboards, embed mode, sign-out, and a cross-site frame signing in through the popup. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -123,6 +127,7 @@ Two guards are there because the implementation reached for them and got them wr
 | 4k | Permission views |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4l | User API endpoint *(blocked — see §6 decision #2)* |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4m | `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass | 4.66-4.70 | complete | 5 | 0 | 0 | scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit order + subclass contract |
+| 4n | Keycloak UMA permissions in Reflex dashboards | 4.75-4.79 | complete | 5 | 0 | 0 | current_permissions / has_permission / current_access_token (lex/lex_app/reflex/auth.py) -- the Reflex counterpart of st.session_state.permissions, which the Streamlit proxy fills. One KeycloakManager lookup per access token, again after a refresh; a failed lookup keeps the same user's grants and never hands them to another user; sign-out clears them; has_permission counts model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of five mutations of that code (keep grants across users, keep them across sign-out, count record grants, cache the raw token, return the cached list itself) fails exactly one scenario. |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -227,6 +232,7 @@ Two guards are there because the implementation reached for them and got them wr
 | 10a |  | 10.1-10.10 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 10b |  | 10.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 10c |  | 10.7 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 10d | Global search with the Reflex report registered | 10.82 | complete | 1 | 0 | 0 | With IS_REFLEX_ENABLED=true the Reflex HTMLReport is registered beside Streamlit, and the global search walks every container. Without 'reflex' in EXCLUDED_MODELS the search reads the report's _meta and fails with AttributeError -- every frontend search a 500 -- which is how 10.82 fails against the tree without the exclusion. |
 | 10e |  | 10.11-10.14 | complete | 4 | 0 | 0 | BUG-015 documented in-test — CharField w/o default reports `required=False` |
 | 10f |  | 10.15-10.16 | complete | 4 | 0 | 0 | 10.15–10.16b |
 | 10g | Calculation-log tree, clean, init, PDF | 10.17-10.19,10.70-10.71 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard. On-disk file is test_10g_one_endpoint_lifecycle.py; 10.15–10.16 renumbered to 10.70–10.71 on 2026-07-07 (BUG-023) — they collided with letter 10f (global search), which owns 10.15–10.16. |
