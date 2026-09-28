@@ -60,9 +60,13 @@ RUN set -eux; \
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections; \
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula seen true"   | debconf-set-selections; \
     \
-    # Install everything else (build deps + wkhtmltopdf + chrome + fonts + cairo stack)
+    # Install everything else (build deps + wkhtmltopdf + chrome + fonts + cairo stack).
+    # unzip: `lex reflex run --env prod` builds the dashboards' frontend when the
+    # container starts, and Reflex installs bun for that with a script that unzips
+    # it -- refusing to start at all where unzip is missing.
     apt-get install -y --no-install-recommends \
         git \
+        unzip \
         gcc \
         g++ \
         make \
