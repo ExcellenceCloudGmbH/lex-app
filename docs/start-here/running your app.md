@@ -13,6 +13,7 @@ you are doing:
 flowchart TB
     S["lex start<br/><b>always</b><br/>the app, at :8000"]
     T["lex streamlit<br/><i>only if your models</i><br/><i>define dashboards</i>"]
+    X["lex reflex<br/><i>only if the project has</i><br/><i>Reflex dashboards</i>"]
     W["lex celery-workers<br/><i>only if CELERY_ACTIVE=true</i>"]
     F["lex flower<br/><i>optional — watches the queue</i>"]
     W -.-> F
@@ -33,6 +34,7 @@ The `lex setup` command generates ready-to-use run configurations in the `.run/`
 | **Init** | Applies migrations and syncs to Keycloak |
 | **Start** | Starts the development server |
 | **Streamlit** | Runs the Streamlit dashboard server |
+| **Reflex** | Runs the Reflex dashboard server |
 
 Select **"Start"** and click the green ▶️ button. Your app is now running at `http://localhost:8000`.
 
@@ -56,7 +58,7 @@ The `--reload` flag enables hot-reloading so the server restarts automatically w
 
 ## Running Streamlit Dashboards
 
-If your models define [[access-and-dashboards/streamlit dashboards|Streamlit dashboards]], you need to start the Streamlit server separately:
+If your models define [[access-and-dashboards/streamlit/index|Streamlit dashboards]], you need to start the Streamlit server separately:
 
 ### Via PyCharm
 
@@ -73,6 +75,17 @@ lex streamlit
 > PyCharm's Streamlit run configuration handles all environment variables automatically. We recommend using it for local development.
 
 `lex streamlit` starts the Streamlit app and the authentication proxy together. Locally, the defaults are enough. In HTTPS deployments, set a fixed `SESSION_SECRET`; if you run multiple proxy replicas, set a shared `TOKEN_REDIS_URL` / `REDIS_URL` too so dashboard sessions survive restarts and load balancing.
+
+## Running Reflex Dashboards
+
+If the project has [[access-and-dashboards/reflex/index|Reflex dashboards]], start the Reflex server beside the app — select **"Reflex"** from the Run Configuration dropdown, or from a terminal:
+
+```bash
+set -a; source .env; set +a
+lex reflex
+```
+
+The dashboards are at `http://localhost:8502`. The first run writes `rxconfig.py` at the project root and builds Reflex's frontend, so it takes longer than the runs after it, which also reload when you change a file. Reflex Enterprise, which signs users in, needs the machine signed in to Reflex once: `lex reflex login`. [[access-and-dashboards/reflex/running and deploying|Running & Deploying]] has the rest.
 
 ## What's Next?
 

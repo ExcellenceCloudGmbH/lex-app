@@ -39,6 +39,14 @@ class Expense(LexModel):
 
 The error message appears directly in the [AG Grid](https://www.ag-grid.com/)-powered UI. No data is written to the database when validation fails.
 
+![An expense of 18,500 rejected on save: the form keeps the values that were entered, no record is created, and a banner offers the failure audit for the attempt](images/tutorial/validation-rejected.png)
+
+Two things are worth noticing in that screenshot. The form keeps what you
+typed, so a rejected save is a correction rather than a re-entry. And the
+banner across the top is the audit trail: the attempt was recorded even though
+nothing was written, because the audit entry is created *before* the operation
+runs. See [[using-the-app/record-detail/audit log tab|the Audit Log tab]].
+
 ## Add Permissions to Expense
 
 First, update the import at the top of `Input/Expense.py`:

@@ -9,6 +9,16 @@ title: "lex_config.py — project settings"
 
 ## Keys at a glance
 
+```mermaid
+flowchart LR
+    F["<code>lex_config.py</code>"]
+    F --> A["<code>INITIAL_DATA</code><br/><i>what loads at startup</i>"]
+    F --> B["<code>PROJECT_GROUPS</code><br/><i>who sees the project</i>"]
+    F --> C["<code>TAB_DISPLAY_NAMES</code><br/><i>per-model tab labels</i>"]
+    F --> D["<code>DEFAULT_SERIALIZER_NAME</code><br/><i>renames the generated serializer</i>"]
+```
+
+
 | Key                       | Purpose                                                                              | Documented in                                                                  |
 | ------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
 | `INITIAL_DATA`            | Path to the JSON file the framework loads on **server start** to seed your database  | [[model-your-data/initial data]]                                        |
@@ -72,5 +82,5 @@ of a serializer you already define silently disables the alias. See
 
 ## Where it fits in the project
 
-`lex_config.py` is generated for you by `lex setup` and sits at the project root alongside `manage.py`, `lex_app/`, and your model packages. See [[start-here/project structure|Project structure]] for the full layout.
+`lex_config.py` is a file you create at the project root, beside `.env`, `model_structure.yaml`, `migrations/` and your `Upload/` · `Input/` · `Reports/` folders. `lex setup` does not generate it — that command writes `.env`, the IDE run configurations and `migrations/`, and nothing else. See [[start-here/project structure|Project structure]] for the full layout.
 

@@ -1,8 +1,12 @@
 ---
-title: Widgets
+title: Embedding App Controls
+aliases:
+  - "access-and-dashboards/widgets"
 ---
 
 A Streamlit dashboard can host the application's *own* controls. Not a screenshot of the Calculate button, and not a re-implementation of it — the real control, wired to the real record, with the same status pill, the same live log and the same permissions as the grid.
+
+**Four pages of [Northwind Analytics](https://github.com/ExcellenceCloudGmbH/DemoNorthwindAnalytics) run everything below against real data:** *The three widgets*, *Shaping a control* — every argument rendered live — *Reacting to a run*, and *Layout and cost*.
 
 Use this when a dashboard is where the work happens: a report page where the reader should be able to re-run the calculation they are looking at, without leaving for the grid and coming back.
 
@@ -124,13 +128,15 @@ if status and status["payload"]["status"] == "SUCCESS":
 ```
 
 The envelope has the same shape as the one
-[[access-and-dashboards/lex_view callbacks#The event envelope|`lex_view` returns]]:
+[[access-and-dashboards/streamlit/embedding app pages#The event envelope|the one lex_view returns]]:
 
 | Key | Meaning |
 |---|---|
 | `type` | `"calculation_status"`. Worth checking — every envelope type shares one component value, so a click on the log button arrives here too, and its payload has no `status` key |
 | `id` | A unique event id, used to de-duplicate across re-runs |
 | `payload.widget_id` | Which widget this is about, when a block has several |
+| `payload.model` | The model the widget is wired to |
+| `payload.pk` | The record's primary key |
 | `payload.status` | The calculation's state — `SUCCESS`, `ERROR`, `IN_PROGRESS`, and the rest of the [[calculations/calculation models#The State Machine|state machine]] |
 
 It arrives on the **next** rerun, not during the one that started the run.
@@ -159,6 +165,6 @@ You rarely need to set widget ids yourself. An id is derived from what the widge
 
 ## Related
 
-- [[access-and-dashboards/streamlit dashboards|Streamlit dashboards]] — writing and serving the dashboards themselves
-- [[access-and-dashboards/lex_view callbacks|lex_view callbacks]] — embedding a whole lex-app page in a dashboard, and reacting to what happens in it
+- [[access-and-dashboards/streamlit/embedding app pages|Embedding App Pages]] — the same idea for a whole lex-app route, and reacting to what happens in it
+- [[access-and-dashboards/streamlit/standalone dashboards|Standalone Dashboards]] — the page these controls usually live on
 - [[calculations/logging|Logging]] — what appears in the log these widgets display
