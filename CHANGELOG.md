@@ -1,3 +1,8 @@
+## [2.3.2] - 2026-09-29
+
+### Fixed
+- **backend** ship the core migration's SQL file in the wheel ([a7b27cfe](https://github.com/ExcellenceCloudGmbH/lex-app/commit/a7b27cfe)) (#799)
+
 ## [2.3.1] - 2026-09-29
 
 ### Fixed
