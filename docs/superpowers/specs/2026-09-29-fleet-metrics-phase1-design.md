@@ -570,9 +570,9 @@ K8 reads `DeployEvent` directly.
   dedicated role that can `SELECT` only the `fleet_metrics` tables and view. The Instance
   Controller's database holds instance credentials, so Grafana must never read it with the
   controller's own role.
-- **Who creates it.** Terraform creates the role and the datasource in the cluster-services
-  layer, which already manages Grafana's database role. The password never leaves
-  Terraform.
+- **Who creates it.** Terraform creates the role, the organization, the datasource and the
+  dashboards in the cluster-services layer, which already manages Grafana's database role.
+  The password never leaves Terraform.
 - **Grants.** The `fleet_metrics` migration grants `SELECT` on its own tables to that role
   if the role exists, and every collector run re-applies the grant. The order in which the
   two changes are deployed therefore does not matter.
@@ -586,8 +586,11 @@ K8 reads `DeployEvent` directly.
   Each dashboard has variables for instance, client, type and release stage, defaulting to
   production. A per-customer conversation and the aggregate product view are the same
   dashboard with different filters. Dashboard time zone: UTC.
-- **Access.** The internal team, through the existing Keycloak login. No customer access in
-  phase 1.
+- **Access.** The internal team only, through the existing Keycloak login. No customer access
+  in phase 1. The datasource and the dashboards live in a **separate Grafana organization**
+  that only the internal team belongs to. Folder permissions are not enough: in Grafana's
+  open-source edition every member of an organization can query every data source in it,
+  and only an organization boundary isolates a data source.
 
 ### 5.7 Data protection
 
@@ -735,6 +738,7 @@ a dated Linear issue assigned to the fleet-metrics owner, not left to memory:
 | The collector holds instance credentials | A bug could read more than aggregates | Read-only transactions, aggregate-only queries, tests, review; a dedicated role in phase 2 |
 | Instances on versions before `USE_TZ=True` | Up to two hours of skew at day boundaries | Negligible for daily counts; flagged by the version dimension |
 | The controller's instance list wakes backends | K6 overstates starts that people caused | Stated as a limit of K6; a follow-up changes the probe (§10) |
+| Someone outside the internal team reaches the fleet data in Grafana | One customer sees another's names and usage | A separate Grafana organization holding the only fleet datasource (§5.6); a read-only role limited to the fleet tables |
 
 ---
 
