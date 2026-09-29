@@ -1,3 +1,8 @@
+## [2.3.1] - 2026-09-29
+
+### Fixed
+- **backend** install unzip, which Reflex needs to build dashboards in a pod ([5fc16aeb](https://github.com/ExcellenceCloudGmbH/lex-app/commit/5fc16aeb)) (#797)
+
 ## [2.3.0] - 2026-09-28
 
 ### Changed
