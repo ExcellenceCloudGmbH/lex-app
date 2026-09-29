@@ -46,7 +46,7 @@ Each section is something you will need at some point, in roughly the order you 
 | [[model-your-data/index\|Model your data]] | Model structure, serializers, initial data, lifecycle hooks |
 | [[calculations/index\|Calculations]] | Calculation models, batch generation, Celery, scheduling, logging |
 | [[history-and-audit/index\|History & audit]] | Change history, bitemporal queries, audit logs |
-| [[access-and-dashboards/index\|Access & dashboards]] | Permissions, Streamlit dashboards, widgets, embedding |
+| [[access-and-dashboards/index\|Access & dashboards]] | Permissions, Streamlit and Reflex dashboards, widgets, embedding |
 | [[ship-and-operate/index\|Ship & operate]] | Deploying, configuration, upgrading, monitoring, troubleshooting |
 | [[using-the-app/index\|Using the app]] | The grid, record pages, saved views, exports — for the people who use what you built |
 | [[reference/index\|Reference]] | CLI commands, environment variables, class internals |
@@ -64,7 +64,7 @@ lex start --reload --loop asyncio lex_app.asgi:application
 Full walkthrough in [[start-here/installation|Installation]].
 
 > [!tip] `lex --help` does not list everything
-> It shows the ten commands the CLI implements itself. Django management
+> It shows the eleven commands the CLI implements itself. Django management
 > commands — `init`, `migrate`, `create_db`, `sync_keycloak` and the rest —
 > all work, but stay hidden, because listing them would mean starting Django
 > just to print help. [[reference/CLI Commands|CLI Commands]] is the complete

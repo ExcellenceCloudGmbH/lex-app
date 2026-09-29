@@ -53,7 +53,7 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 
 | Variable                                  | Purpose                                                                                  |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `IS_STREAMLIT_ENABLED`                    | `true` to enable the Streamlit toolbar icon in the frontend. See [[access-and-dashboards/streamlit dashboards]]. |
+| `IS_STREAMLIT_ENABLED`                    | `true` to enable the Streamlit toolbar icon in the frontend. See [[access-and-dashboards/streamlit/index|Streamlit Dashboards]]. |
 | `STREAMLIT_URL` / `BASE_URL`              | Public URL used by the embedded dashboard proxy. When this is HTTPS, Lex App defaults to secure cross-site cookies for the iframe. |
 | `LEX_PROXY_PORT`                          | Port exposed by the local Streamlit proxy when running `lex streamlit`. Default `8501`. |
 | `LEX_PROXY_INTERNAL_URL`                  | Full base URL the dashboard uses to reach the proxy when it is not `http://127.0.0.1:$LEX_PROXY_PORT`. |
@@ -72,6 +72,23 @@ These govern how the framework recovers tasks from dead workers and how idle wor
 | `STATIC_GZIP_MIN_SIZE` / `STATIC_GZIP_LEVEL` | Compression floor and zlib level for Streamlit assets served by the proxy. Defaults `500` and `6`. |
 | `JWKS_CACHE_TTL` / `JWKS_RETRY_BACKOFF_SECONDS` | How long Keycloak signing keys are cached (default `3600`), and how long to wait before retrying a failed refresh while continuing to serve cached keys (default `30`). |
 | `LEX_THEME_FOLLOW`      | Keep embedded Streamlit pages in the same light/dark mode as Lex App. Enabled by default; set to `0`, `false`, `no`, or `off` to let Streamlit control its own theme. |
+
+## Reflex
+
+| Variable | Purpose |
+| --- | --- |
+| `IS_REFLEX_ENABLED` | `true` to add the **Reflex** entry to Lex App's sidebar, framing the project's Reflex dashboards. See [[access-and-dashboards/reflex/index\|Reflex Dashboards]]. |
+| `REFLEX_URL` | Where that entry finds the dashboards. Default `http://localhost:8502`. |
+| `REFLEX_FRONTEND_PORT` / `REFLEX_BACKEND_PORT` | Reflex's own port settings. `lex reflex` supplies `8502` and `8503` only when neither these, the `--frontend-port`/`--backend-port` flags, nor `rxconfig.py` chose a port. |
+| `REFLEX_HOT_RELOAD_OVERRIDE_PATHS` | What the development server watches: `:`-separated paths, relative to the project root. Unset, `lex reflex` sets it to the project's own top-level entries. |
+| `REFLEX_ACCESS_TOKEN` | A Reflex account token, for machines where nobody can run `lex reflex login`. Reflex Enterprise refuses to start on a machine that is not signed in, and production mode needs a paid tier. |
+| `REFLEX_API_URL` / `REFLEX_DEPLOY_URL` | In production, the dashboards' public URL: where the browser reaches the backend, and where the frontend is served. Built into the frontend, so set them before `lex reflex run --env prod`. |
+| `REFLEX_REDIS_URL` | Shared page state, for more than one Reflex backend replica. |
+| `LEX_KEYCLOAK_ISSUER_URI` / `LEX_KEYCLOAK_CLIENT_ID` / `LEX_KEYCLOAK_CLIENT_SECRET` | Override the issuer and client the dashboards sign in with. Unset, they come from `KEYCLOAK_URL` + `KEYCLOAK_REALM` and `OIDC_RP_CLIENT_ID` / `OIDC_RP_CLIENT_SECRET`. `KEYCLOAK_CLIENT_ID` is never used for this. |
+| `OIDC_ISSUER_URI` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | Reflex Enterprise's shared fallbacks for the same three; a `LEX_KEYCLOAK_*` value wins over them. |
+| `DJANGO_ALLOW_ASYNC_UNSAFE` | Django's switch that allows synchronous ORM calls on an event loop. Every such call then blocks every other user's events; see [[access-and-dashboards/reflex/the django orm\|The Django ORM]]. |
+
+`OIDC_ISSUER` and `OIDC_VERIFY_SSL` apply to the Reflex sign-in too, with the same meaning as for the Streamlit proxy.
 
 ## Keycloak / OIDC
 
@@ -199,7 +216,7 @@ rather than what happens when a worker dies.
 
 ## Dashboard proxy: tokens and sessions
 
-These govern how the [[access-and-dashboards/streamlit dashboards|dashboard proxy]]
+These govern how the [[access-and-dashboards/streamlit/index|dashboard proxy]]
 handles the tokens it holds on a user's behalf. The defaults are correct for a
 normal deployment.
 
@@ -244,12 +261,13 @@ normal deployment.
 
 ## Behaviour switches
 
-Two knobs that change how the framework behaves rather than what it connects to.
+Knobs that change how the framework behaves rather than what it connects to.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `LEX_METADATA_CACHE_SECONDS` | `30` | How long a browser may reuse the model-structure response. This is the staleness budget for a permission change: a revoked permission can stay visible in the model tree for at most this long. Set `0` where that is unacceptable — the tree is then re-fetched on every navigation. |
 | `LEX_SYNC_STREAMING_EXPANSION` | `true` | Whether synchronous batch expansion streams combinations one at a time (the memory-safe path) or materialises them all first. Set `false` for a one-line rollback to the old behaviour without a redeploy. See [[calculations/batch calculations]]. |
+| `LEX_ACTIVATION_APPLIER_LIVENESS_SECONDS` | `300` | How recent the in-database activation applier's heartbeat must be before lex-app treats it as alive and stops arming its own timers for future-dated history rows. pg_cron fires every minute, so five minutes absorbs a slow tick or a failover. See [[history-and-audit/bitemporal history]]. |
 
 ## Used only by the history backfill script
 
@@ -266,16 +284,25 @@ effect on the application.
 
 ## Where these get set
 
+```mermaid
+flowchart LR
+    E[".env at the project root<br/><i>local development</i>"] --> P["the process<br/><i>lex start · lex streamlit · lex reflex · celery</i>"]
+    C["container / cloud environment<br/><i>production secrets</i>"] --> P
+    P --> R["read ONCE, at startup"]
+    R -.->|"changed a value?"| RS["restart the process<br/><i>nothing re-reads it</i>"]
+```
+
+
 | Place                 | When it's used                                              |
 | --------------------- | ----------------------------------------------------------- |
 | `.env` at project root | Local development. Loaded by PyCharm run configs and `set -a; source .env; set +a` in the terminal. |
 | Container / cloud env | Production. Whatever your platform's secret manager exposes (Docker `--env-file`, Kubernetes Secrets, etc.). |
 
 > [!tip]
-> If you change anything in `.env`, restart your `lex start` / `lex streamlit` processes (and your Celery workers if you have them) — the variables are read once at startup.
+> If you change anything in `.env`, restart your `lex start` / `lex streamlit` / `lex reflex` processes (and your Celery workers if you have them) — the variables are read once at startup.
 
 ## See also
 
 - [[reference/CLI Commands]] — every command that reads these variables.
-- [[reference/lex_config.md|lex_config.py]] — the Python-side configuration that complements these env vars.
+- [[reference/lex_config|lex_config.py]] — the Python-side configuration that complements these env vars.
 - [[start-here/installation]] — how `.env` is generated by `lex setup`.

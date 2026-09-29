@@ -15,6 +15,19 @@ Every V1 file starts with imports from `generic_app`. These need to change to th
 
 ## Step-by-Step
 
+The loop is the same for each category, and the last step is the one that tells
+you whether you are finished:
+
+```mermaid
+flowchart LR
+    F["<code>grep -rn from generic_app</code><br/><i>find every file</i>"]
+    --> R["Replace by category<br/><i>models · calculations<br/>logging · permissions</i>"]
+    R --> V["<code>grep</code> again"]
+    V -->|"no output"| D["done"]
+    V -->|"still matches"| R
+```
+
+
 ### 1. Replace Model Imports
 
 Find all files that import from `generic_app`:

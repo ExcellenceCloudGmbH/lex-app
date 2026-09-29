@@ -130,7 +130,7 @@ Now that you've completed the tutorial, explore the rest of the documentation:
 - [[home|All building blocks]] — everything Lex App gives you out of the box
 - [[calculations/calculation models|Calculations]] — deep-dive into the state machine and [Celery](https://docs.celeryq.dev/) support
 - [[history-and-audit/bitemporal history|Bitemporal History]] — understand the two-level architecture
-- [[access-and-dashboards/streamlit dashboards|Streamlit Dashboards]] — build more complex visualizations
+- [[access-and-dashboards/streamlit/index|Streamlit Dashboards]] — build more complex visualizations
 - [[model-your-data/serializers|Serializers]] — advanced API validation and multiple views
 - [[reference/CLI Commands|CLI Commands]] — every `lex` command at a glance
 

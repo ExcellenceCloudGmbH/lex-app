@@ -4,7 +4,7 @@ title: CLI Commands
 
 Lex App ships with a `lex` CLI tool for managing your application. Here's every command at a glance.
 
-![What `lex --help` prints — ten commands, not the whole set](images/cli/lex-help.svg)
+![What `lex --help` prints — eleven commands, not the whole set](images/cli/lex-help.svg)
 
 > [!important] This page is longer than `lex --help` on purpose
 > `--help` lists only the commands the CLI implements itself. Everything below
@@ -19,6 +19,7 @@ Lex App ships with a `lex` CLI tool for managing your application. Here's every 
 | `lex init`      | Apply migrations + sync models/permissions to Keycloak        |
 | `lex start`     | Start the development server                                  |
 | `lex streamlit` | Start the [Streamlit](https://docs.streamlit.io/) dashboard server |
+| `lex reflex`    | Start the [Reflex](https://reflex.dev/docs/) dashboard server — arguments go to Reflex's own CLI; see [below](#lex-reflex) |
 | `lex create_db` | Create the project database from the configured `DATABASE_*` env vars |
 | `pip show lex-app` | Print the installed version. There is no `lex --version` — the group does not define one |
 
@@ -42,6 +43,27 @@ lex start --reload --loop asyncio lex_app.asgi:application
 | `lex_app.asgi:application` | The ASGI mount point. This is the framework's entry point — leave it as-is unless you have a custom ASGI app. |
 
 For production runs, drop `--reload`.
+
+### `lex reflex`
+
+`lex reflex` is [Reflex](https://reflex.dev/docs/)'s own command line, run for the project: every argument after `reflex` goes to it unchanged — `--help` included, which prints Reflex's help — and `lex reflex` with nothing after it is `lex reflex run`.
+
+| Command | What It Does |
+|---|---|
+| `lex reflex` | The development server, with hot reload: dashboards at `http://localhost:8502`, backend on `8503` |
+| `lex reflex run --env prod` | Production mode: an optimised build, frontend and backend on one port, `8502` |
+| `lex reflex run --backend-only` | Only the backend, on `8503` |
+| `lex reflex login` | Sign this machine in to Reflex — Reflex Enterprise refuses to start without it |
+| `lex reflex --help` | Reflex's own help, for every other subcommand and flag |
+
+What it adds to running `reflex` yourself:
+
+- it runs from the **project root**, wherever you call it from — Reflex reads `rxconfig.py` from, and builds `.web/` into, the directory it runs in;
+- it writes **`rxconfig.py`** there on first use (`config = lex_config()`) and never touches it again;
+- it gives each run mode the **ports** it accepts, and nothing when you chose one — see [[access-and-dashboards/reflex/running and deploying#Ports|Ports]];
+- it makes **hot reload** watch the project's own files rather than the installed `lex` package.
+
+It does not set Django up in its own process: Reflex's workers import the app, and set Django up there. See [[access-and-dashboards/reflex/index|Reflex Dashboards]].
 
 ## Testing Commands
 
@@ -234,7 +256,7 @@ than a gap:
 | `lex bootstrap_callback_server` | An internal helper that `lex bootstrap_keycloak` starts to receive the browser callback. Running it directly does nothing useful. |
 
 > [!note]
-> `lex --help` prints only the ten commands the CLI implements itself; the
+> `lex --help` prints only the eleven commands the CLI implements itself; the
 > Django passthrough commands do not appear there, because listing them would
 > mean starting Django just to render help. This page is the complete list, and
 > CI checks that it stays complete — a new management command with no entry here

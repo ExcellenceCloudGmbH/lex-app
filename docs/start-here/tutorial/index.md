@@ -20,6 +20,21 @@ TeamBudget tracks teams, employees, and expenses. It includes:
 - **Dashboards** — interactive [Streamlit](https://docs.streamlit.io/) visualizations
 - **History** — full [[history-and-audit/bitemporal history|bitemporal]] audit trail
 
+Those pieces are one path, not a list of features — a CSV becomes three domain
+records, and those records become a calculated summary you can then dashboard
+and audit:
+
+```mermaid
+flowchart LR
+    CSV["teams.csv<br/>employees.csv<br/>expenses.csv"]
+    --> UP["<b>Upload/</b><br/><i>CalculationModel</i><br/>TeamUpload, EmployeeUpload<br/>ExpenseUpload"]
+    UP --> IN["<b>Input/</b><br/><i>LexModel</i><br/>Team, Employee, Expense"]
+    IN --> RP["<b>Reports/</b><br/><i>CalculationModel</i><br/>BudgetSummary"]
+    RP --> D["Streamlit dashboards<br/><i>Part 5</i>"]
+    RP --> H["Bitemporal history<br/><i>Part 6</i>"]
+```
+
+
 ## Prerequisites
 
 Before starting, make sure you have:
