@@ -47,6 +47,12 @@ include = ["lex*", "migrations_logic*"]
 # install reads it from the source tree, so the gap only shows up in a built
 # wheel -- where lex_widgets() would fail to find its component frontend.
 "lex.lex_app.streamlit._widget_host_component" = ["frontend/**/*"]
+# The core migration 0001 executes this file to install the in-database
+# activation applier. It was missing here from 2.2.2 to 2.3.1: an editable
+# install reads the source tree, so every test passed, while every built wheel
+# shipped the migration without its SQL -- and `lex init` aborted on the first
+# start of any instance that installed one.
+"lex.core" = ["sql/*.sql"]
 
 [tool.setuptools.exclude-package-data]
 # Belt and braces with MANIFEST.in. include-package-data is on by default for
