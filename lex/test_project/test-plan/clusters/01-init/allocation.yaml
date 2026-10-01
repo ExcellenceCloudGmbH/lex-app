@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 380
+max_scenario: 383
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1206,3 +1206,30 @@ letters:
       new tab, a restart, two tabs side by side, a frame with the provider's session, and a frame on the
       dashboards' own site with no provider session at all -- all signed in, where before the new tab
       and the second tab were signed out.
+
+  at:
+    title: A Reflex development run behind one port — Reflex Enterprise's single-port proxy gets the Starlette app
+    scenarios: 1.381-1.383
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      A pod exposes one port and a Reflex development run has two servers, so the platform starts the
+      dashboards in Reflex Enterprise's single-port mode (REFLEX_USE_SINGLE_PORT): the backend answers its
+      own routes and proxies every other path to Vite. On reflex-enterprise 0.9.6 with Reflex 0.9.12 the
+      mode only logged "Unable to find the base Starlette app", and every page 404'd: Reflex passes a
+      lifespan task the Reflex app as `app` and the Starlette app as `starlette_app`, and the proxy names
+      its parameter `app`. lex_auth_plugin() -- which every project's rxconfig.py calls, lex_config()
+      included -- replaces the module's function with one taking `starlette_app`; Reflex Enterprise
+      imports it when it builds the app, after rxconfig.py has run. A proxy without an `app` parameter (a
+      fixed release, the stand-in without asgiproxy, the replacement itself) is left alone.
+
+      1.381 loads both kinds of rxconfig.py in a fresh interpreter, as a Reflex worker does; 1.382 runs
+      Reflex Enterprise's own registration and Reflex's own lifespan runner against a real frontend
+      socket. Mutations: four of four fail a test (no call, no `starlette_app` guard, no guard at all, the
+      replacement keeping the name `app`). Verified outside the suite with the platform's start script
+      (development mode, backend and Vite on two ports, the public origin as REFLEX_URL): pages, Vite's
+      assets and socket, a backend-served image, and the event socket's state updates in a browser, all
+      through the backend's one port.

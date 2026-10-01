@@ -80,6 +80,42 @@ def _make_app_module_findable() -> None:
         sys.path.append(parent)
 
 
+def _repair_single_port_proxy() -> None:
+    """Hand Reflex Enterprise's single-port proxy the Starlette app it is written for.
+
+    ``use_single_port`` (``REFLEX_USE_SINGLE_PORT``) has the backend answer its
+    own routes and pass every other request to the frontend server, so that a
+    development run -- two servers -- works behind the one port a pod exposes.
+    reflex-enterprise 0.9.6 registers that proxy as a lifespan task whose
+    parameter is named ``app``, and Reflex 0.9.12 passes a task the *Reflex*
+    app under that name, the Starlette app only as ``starlette_app``. The proxy
+    then finds nothing to mount on, logs "Unable to find the base Starlette
+    app", and every page 404s.
+
+    Reflex Enterprise imports the proxy when it builds the app, after
+    ``rxconfig.py`` has run, so replacing the module's function is enough. Only
+    a proxy taking ``app`` and not ``starlette_app`` is replaced; the rest are
+    left alone -- one already asking for ``starlette_app``, the stand-in Reflex
+    Enterprise defines when asgiproxy is missing, and this replacement itself.
+    """
+    import contextlib
+    import inspect
+
+    from reflex_enterprise import proxy
+
+    upstream = proxy.proxy_middleware
+    parameters = inspect.signature(upstream).parameters
+    if "app" not in parameters or "starlette_app" in parameters:
+        return
+
+    @contextlib.asynccontextmanager
+    async def proxy_middleware(starlette_app):
+        async with upstream(starlette_app):
+            yield
+
+    proxy.proxy_middleware = proxy_middleware
+
+
 def lex_auth_plugin(**options: Any):
     """``rxe.AuthPlugin``, signing users in against lex-app's Keycloak.
 
@@ -91,6 +127,10 @@ def lex_auth_plugin(**options: Any):
     """
     import reflex_enterprise as rxe
 
+    # Here because every project's rxconfig.py calls this -- `lex_config()`
+    # does, and so does a hand-written one that keeps lex-app's sign-in -- and
+    # Reflex reads rxconfig.py before it builds the app.
+    _repair_single_port_proxy()
     options.setdefault("auth_providers", [AUTH_PROVIDER])
     options.setdefault("login_page", LOGIN_PAGE)
     return rxe.AuthPlugin(**options)
