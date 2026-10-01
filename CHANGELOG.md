@@ -1,3 +1,8 @@
+## [2.3.3] - 2026-10-02
+
+### Fixed
+- **backend** give Reflex Enterprise's single-port proxy the Starlette app ([d5bf67df](https://github.com/ExcellenceCloudGmbH/lex-app/commit/d5bf67df)) (#800)
+
 ## [2.3.2] - 2026-09-29
 
 ### Fixed
