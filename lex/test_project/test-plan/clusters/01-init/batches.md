@@ -1684,3 +1684,13 @@ replacement keeping the name `app`.
 Verified outside the suite with the platform's start script — development mode, the backend and Vite
 on two ports, the public origin as `REFLEX_URL`: pages, Vite's assets and its socket, a backend-served
 image, and the event socket's state updates in a browser, all through the backend's one port.
+
+**Follow-up (2026-10-02): mounted on the Reflex backend.** In production the repaired proxy still
+404'd every page. Handed the Starlette app, Reflex Enterprise mounts on the outermost one, and
+Reflex reaches its backend there through a catch-all `Mount("")`; armira's `api_transformer` wraps
+the backend in ASGI middleware (RFDS's security headers, its sign-out guards), so the descent stops
+at the wrapper and the proxy lands behind the catch-all. The replacement now takes the Reflex app
+and hands the proxy `app._api`, where Reflex itself mounts a compiled frontend. 1.382 runs the
+backend bare and wrapped in middleware under a catch-all mount; the wrapped case fails on v2.3.3's
+repair with the production 404. 1.383 drops the cases a name check decided: the replacement is
+marked instead.

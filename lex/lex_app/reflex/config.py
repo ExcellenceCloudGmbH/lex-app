@@ -81,22 +81,29 @@ def _make_app_module_findable() -> None:
 
 
 def _repair_single_port_proxy() -> None:
-    """Hand Reflex Enterprise's single-port proxy the Starlette app it is written for.
+    """Mount Reflex Enterprise's single-port proxy on the Reflex backend itself.
 
     ``use_single_port`` (``REFLEX_USE_SINGLE_PORT``) has the backend answer its
     own routes and pass every other request to the frontend server, so that a
     development run -- two servers -- works behind the one port a pod exposes.
-    reflex-enterprise 0.9.6 registers that proxy as a lifespan task whose
-    parameter is named ``app``, and Reflex 0.9.12 passes a task the *Reflex*
-    app under that name, the Starlette app only as ``starlette_app``. The proxy
-    then finds nothing to mount on, logs "Unable to find the base Starlette
-    app", and every page 404s.
+    reflex-enterprise 0.9.6 never manages it on Reflex 0.9.12:
 
-    Reflex Enterprise imports the proxy when it builds the app, after
-    ``rxconfig.py`` has run, so replacing the module's function is enough. Only
-    a proxy taking ``app`` and not ``starlette_app`` is replaced; the rest are
-    left alone -- one already asking for ``starlette_app``, the stand-in Reflex
-    Enterprise defines when asgiproxy is missing, and this replacement itself.
+    * its lifespan task names its parameter ``app``, and Reflex passes the
+      *Reflex* app under that name (the Starlette app only as
+      ``starlette_app``), so it logs "Unable to find the base Starlette app";
+    * given the Starlette app, it mounts on the outermost one, and Reflex
+      reaches its backend through a catch-all ``Mount("")`` there. Behind an
+      ``api_transformer`` that wraps the backend in ASGI middleware (RFDS's
+      security headers do), the proxy lands after that mount and is never
+      reached. Every page 404s either way.
+
+    So the replacement takes the Reflex app and hands the proxy its backend,
+    ``app._api`` -- where Reflex itself mounts a compiled frontend -- inside
+    every wrapper, after every backend route. Reflex Enterprise imports the
+    proxy when it builds the app, after ``rxconfig.py`` has run, so replacing
+    the module's function is enough. The stand-in Reflex Enterprise defines
+    when asgiproxy is missing, which names no parameter, is left alone, and so
+    is this replacement itself.
     """
     import contextlib
     import inspect
@@ -104,15 +111,17 @@ def _repair_single_port_proxy() -> None:
     from reflex_enterprise import proxy
 
     upstream = proxy.proxy_middleware
-    parameters = inspect.signature(upstream).parameters
-    if "app" not in parameters or "starlette_app" in parameters:
+    if getattr(upstream, "lex_mounts_on_backend", False):
+        return
+    if not {"app", "starlette_app"} & set(inspect.signature(upstream).parameters):
         return
 
     @contextlib.asynccontextmanager
-    async def proxy_middleware(starlette_app):
-        async with upstream(starlette_app):
+    async def proxy_middleware(app):
+        async with upstream(app._api):
             yield
 
+    proxy_middleware.lex_mounts_on_backend = True
     proxy.proxy_middleware = proxy_middleware
 
 
