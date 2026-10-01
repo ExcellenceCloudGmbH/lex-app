@@ -417,3 +417,17 @@ does not remove user launch configurations.
 | 1.380 | the browser's cookie | a session with no tokens of its own — a new tab, a restart — restores the token from the cookie the browser sends |
 
 **Scenario range:** 1.376 – 1.380. **Test file:** `lex/test_project/tests/init/test_1as_reflex_token_cookie_compression.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Batch: [1as](batches.md).
+
+### 1at. A Reflex development run behind one port — Reflex Enterprise's single-port proxy gets the Starlette app ✅
+
+**What it tests:** that a Reflex development run serves its pages and its backend through the backend's one port, the way the platform runs dashboards in a pod. Reflex Enterprise's single-port mode proxies every path the backend does not own to Vite; lex-app hands that proxy the Starlette app it is written for, which Reflex 0.9.12 passes only as `starlette_app`.
+
+**Why a regression matters:** the dashboard's URL answers `/ping` and 404s every page, and the instance's dashboards are gone.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.381 | repaired as Reflex loads rxconfig.py | the rxconfig.py `lex reflex` writes, and a hand-written one that keeps lex-app's sign-in, leave the proxy taking the Starlette app once Reflex has loaded them, and the configuration is still the project's |
+| 1.382 | one port, both servers | run the way Reflex runs it, the backend's port answers the backend's routes itself and every other path, query string included, from the frontend server |
+| 1.383 | once, and only where needed | repairing again changes nothing; a proxy that already takes the Starlette app, or names no `app` parameter, is left exactly as it is |
+
+**Scenario range:** 1.381 – 1.383. **Test file:** `lex/test_project/tests/init/test_1at_reflex_single_port_proxy.py`. **Type:** U. **Status:** ✅ Complete (2026-10-02). Batch: [1at](batches.md).

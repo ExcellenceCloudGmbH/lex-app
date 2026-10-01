@@ -1645,3 +1645,42 @@ Verified in a browser outside the suite, with the mock OIDC provider issuing an 
 Keycloak-like token (2.6 KB compressed): top level, reload, a new tab, a restart, two tabs side by
 side, a frame with the provider's session, and a frame on the dashboards' own site with no provider
 session at all all stayed signed in; before, the new tab and the second tab were signed out.
+
+### Batch 1at — a Reflex development run behind one port: Reflex Enterprise's single-port proxy gets the Starlette app ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.381 – 1.383 |
+| Type | U |
+| Files covered | `lex/lex_app/reflex/config.py` (`_repair_single_port_proxy`, called by `lex_auth_plugin`) |
+| Test file | `lex/test_project/tests/init/test_1at_reflex_single_port_proxy.py` |
+| Test classes | `TestCluster01at_SinglePortProxy` (1.381–1.383) |
+| Fixtures | a project directory holding the rxconfig.py `lex reflex` writes, or a hand-written one that keeps lex-app's sign-in, loaded in a fresh interpreter; Reflex Enterprise's proxy module reloaded as it ships and restored afterwards; a stand-in for Vite on a free port, answering with the path it was asked for; `get_config` patched in Reflex Enterprise's app and proxy modules to a single-port `rxe.Config` |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.381 | repaired as Reflex loads rxconfig.py | in a fresh interpreter, the rxconfig.py `lex reflex` writes and a hand-written one calling `lex_auth_plugin()` both load as the project's configuration and leave the proxy taking `starlette_app` |
+| 1.382 | one port, both servers | Reflex Enterprise's own registration under a single-port config adds one lifespan task; run by Reflex's lifespan runner, `/ping` is the backend's answer and `/funds/42?tab=history` the frontend server's, path and query string |
+| 1.383 | once, and only where needed | a second build leaves the repair as it is; a proxy taking `starlette_app`, one taking both names, and the stand-in without asgiproxy are left unchanged |
+
+**Why a repair, and why there.** A pod exposes one port, and a development run has two servers, so
+the platform starts the dashboards in Reflex Enterprise's single-port mode: the backend answers its
+own routes and proxies every other path to Vite. On reflex-enterprise 0.9.6 with Reflex 0.9.12 that
+mode never mounted. Reflex binds a lifespan task's parameters by name — `app` gets the Reflex app,
+`starlette_app` the Starlette app — and the proxy, written for the Starlette app, names its
+parameter `app`, so it found nothing to mount on, logged "Unable to find the base Starlette app", and
+every page 404'd behind the one port. Both are the newest releases, so no upgrade fixes it. Reflex
+Enterprise imports the proxy when it builds the app, after rxconfig.py has run, so replacing the
+module's function from `lex_auth_plugin()` — which every project's rxconfig.py calls, `lex_config()`
+included — is enough. A proxy without an `app` parameter is left alone, so a fixed release ends the
+repair by itself.
+
+**Mutations: four of four fail a test here.** No call from `lex_auth_plugin()`, no `starlette_app`
+guard (a proxy taking both names is wrapped), no guard at all (the repair wraps itself), and a
+replacement keeping the name `app`.
+
+Verified outside the suite with the platform's start script — development mode, the backend and Vite
+on two ports, the public origin as `REFLEX_URL`: pages, Vite's assets and its socket, a backend-served
+image, and the event socket's state updates in a browser, all through the backend's one port.
