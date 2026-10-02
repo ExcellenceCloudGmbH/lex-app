@@ -1,3 +1,8 @@
+## [2.3.4] - 2026-10-02
+
+### Fixed
+- **backend** mount the single-port proxy on the Reflex backend itself ([a2b5b17e](https://github.com/ExcellenceCloudGmbH/lex-app/commit/a2b5b17e)) (#801)
+
 ## [2.3.3] - 2026-10-02
 
 ### Fixed
