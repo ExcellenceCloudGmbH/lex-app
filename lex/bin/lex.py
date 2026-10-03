@@ -14,6 +14,7 @@ import shutil
 
 import click
 import uvicorn
+from lex._version import __version__ as _LEX_APP_VERSION
 from lex.tools.project_root import (
     find_project_root,
     load_project_env_file,
@@ -187,7 +188,12 @@ class _LexGroup(click.Group):
         return _delegate
 
 
-lex = _LexGroup(help="lex-app Command Line Interface")
+# `lex --version` reports what /health reports: lex._version, not the package
+# metadata. An image built from a git ref stamps lex/_version.py after
+# `pip install`, and the metadata stays frozen at what was installed.
+lex = click.version_option(_LEX_APP_VERSION, prog_name="lex")(
+    _LexGroup(help="lex-app Command Line Interface")
+)
 
 # ---------- Project root and configs (no Django) ----------
 
