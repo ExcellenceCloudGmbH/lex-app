@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 53
+max_scenario: 57
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -132,3 +132,20 @@ letters:
       (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone;
       summer round trip, year-end midnight across the winter offset, and a truthful designated instant.
       Frontend twin datetimeConventionRoundTrip.test.ts.
+  l:
+    title: The FK display name on every request the grid, History tab and Summary tab send
+    scenarios: 12.54-12.57
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      The frontend never fetches the related record to label a foreign key: it renders the
+      <fk>__short_description companion (batch 12i) and shows the raw id when it is missing. 12i pinned
+      the plain GET list and detail; these pin the requests the screens send -- the grid's AG Grid POST
+      (12.54), the History tab's grid on historical<model>, where each version names the FK it held
+      (12.55), the Summary tab's ?serializer=default (12.56), and a serializer the project declared in
+      api_serializers, which _wrap_custom_serializer still bases on LexSerializer (12.57). Mutations:
+      silencing the list companion fails 12.54-12.55, silencing the single-record companion fails
+      12.56-12.57, wrapping a project serializer without LexSerializer fails 12.57.
