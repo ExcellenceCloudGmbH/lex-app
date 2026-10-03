@@ -1,7 +1,7 @@
 cluster: 9
 slug: signals_ws
 title: Signals & WebSocket
-max_scenario: 42
+max_scenario: 43
 letters:
   a:
     title: ''
@@ -62,3 +62,17 @@ letters:
       xfail: 0
     note: scenarios 9.37–9.42; public backend-health socket, calculations group fan-out, per-record calculation-log
       stream, and shutdown `disconnect_all` tracking
+  g:
+    title: '`lex.core.signals` star import — `__all__` names only what the package provides'
+    scenarios: '9.43'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      `from lex.core.signals import *` raised AttributeError. The profile handlers create_profile and
+      save_profile were deleted from CalculationSignals.py in February and their import into the package
+      a day later, but both names stayed in `__all__`; a star import binds every name there, so it failed
+      and took the calculation-signal API with it. Both names are dropped. 9.43 runs the star import and
+      requires the three re-exported functions to be CalculationSignals' own.

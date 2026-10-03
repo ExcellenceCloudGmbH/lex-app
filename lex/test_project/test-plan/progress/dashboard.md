@@ -18,7 +18,7 @@
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
-| 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
+| 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 14 | 82 | 32 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 11 | 53 | 21 | 0 | 0 |
@@ -232,6 +232,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 9d |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 9e | Generic CRUD mutation broadcast (live list refresh — June 3) | 9.29-9.36 | complete | 8 | 0 | 0 | scenarios 9.29–9.36; plain CRUD now emits a `model_data_update` `record_mutation` so open lists refresh without manual reload |
 | 9f | Core health/calculation/log WebSocket consumers (coverage task #620) | 9.37-9.42 | complete | 6 | 0 | 0 | scenarios 9.37–9.42; public backend-health socket, calculations group fan-out, per-record calculation-log stream, and shutdown `disconnect_all` tracking |
+| 9g | `lex.core.signals` star import — `__all__` names only what the package provides | 9.43 | complete | 1 | 0 | 0 | `from lex.core.signals import *` raised AttributeError. The profile handlers create_profile and save_profile were deleted from CalculationSignals.py in February and their import into the package a day later, but both names stayed in `__all__`; a star import binds every name there, so it failed and took the calculation-signal API with it. Both names are dropped. 9.43 runs the star import and requires the three re-exported functions to be CalculationSignals' own. |
 
 ## 10. API Layer (`api_layer`)
 
