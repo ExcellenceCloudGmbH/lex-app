@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 46 | 383 | 425 | 0 | 0 |
+| 1. Init — Project Bootstrap | 47 | 385 | 427 | 0 | 0 |
 | 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 14 | 79 | 23 | 2 | 0 |
@@ -18,7 +18,7 @@
 | 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
 | 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
-| 9. Signals & WebSocket | 6 | 42 | 14 | 0 | 0 |
+| 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 14 | 82 | 32 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 11 | 53 | 21 | 0 | 0 |
@@ -64,6 +64,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 1.375 (batch 1ar) exercised the warning with "a" * 5000, which never reached compression because it is not the cookie's access_token=... form; it now uses a random token in that form, which compression cannot shrink. Mutations: ten of eleven fail a 1as test; the eleventh -- dropping the "already compressed" check -- is equivalent while the "only if smaller" guard stands, because deflating base64 of deflated data never shrinks it. Verified in a browser outside the suite, with the mock provider issuing an 8.9 KB Keycloak-like token (2.6 KB compressed): top level, reload, a new tab, a restart, two tabs side by side, a frame with the provider's session, and a frame on the dashboards' own site with no provider session at all -- all signed in, where before the new tab and the second tab were signed out. |
 | 1at | A Reflex development run behind one port — Reflex Enterprise's single-port proxy gets the Starlette app | 1.381-1.383 | complete | 3 | 0 | 0 | A pod exposes one port and a Reflex development run has two servers, so the platform starts the dashboards in Reflex Enterprise's single-port mode (REFLEX_USE_SINGLE_PORT): the backend answers its own routes and proxies every other path to Vite. On reflex-enterprise 0.9.6 with Reflex 0.9.12 the mode only logged "Unable to find the base Starlette app", and every page 404'd: Reflex passes a lifespan task the Reflex app as `app` and the Starlette app as `starlette_app`, and the proxy names its parameter `app`. lex_auth_plugin() -- which every project's rxconfig.py calls, lex_config() included -- replaces the module's function with one taking `starlette_app`; Reflex Enterprise imports it when it builds the app, after rxconfig.py has run. A proxy without an `app` parameter (a fixed release, the stand-in without asgiproxy, the replacement itself) is left alone.
 1.381 loads both kinds of rxconfig.py in a fresh interpreter, as a Reflex worker does; 1.382 runs Reflex Enterprise's own registration and Reflex's own lifespan runner against a real frontend socket. Mutations: four of four fail a test (no call, no `starlette_app` guard, no guard at all, the replacement keeping the name `app`). Verified outside the suite with the platform's start script (development mode, backend and Vite on two ports, the public origin as REFLEX_URL): pages, Vite's assets and socket, a backend-served image, and the event socket's state updates in a browser, all through the backend's one port. |
+| 1au | `lex --version` — the version /health reports, answered from anywhere | 1.384-1.385 | complete | 2 | 0 | 0 | `lex --version` answered "No such option": main() already sent --version past the Django bootstrap, but the group never declared the option. It now prints `lex, version X`, where X is lex._version.__version__ -- the version /health reports -- and not the package metadata: an image built from a git ref stamps lex/_version.py after `pip install`, while the metadata stays frozen at 0.0.0.dev0. Both scenarios run the CLI in a fresh interpreter, from a directory named release-smoke, without the test project's environment and with the suite's checkout first on PYTHONPATH. Mutations: reading the version from the package metadata fails 1.384; dropping --version from the set main() answers without Django fails both, because Django setup crashes in that directory. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -231,6 +232,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 9d |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 9e | Generic CRUD mutation broadcast (live list refresh — June 3) | 9.29-9.36 | complete | 8 | 0 | 0 | scenarios 9.29–9.36; plain CRUD now emits a `model_data_update` `record_mutation` so open lists refresh without manual reload |
 | 9f | Core health/calculation/log WebSocket consumers (coverage task #620) | 9.37-9.42 | complete | 6 | 0 | 0 | scenarios 9.37–9.42; public backend-health socket, calculations group fan-out, per-record calculation-log stream, and shutdown `disconnect_all` tracking |
+| 9g | `lex.core.signals` star import — `__all__` names only what the package provides | 9.43 | complete | 1 | 0 | 0 | `from lex.core.signals import *` raised AttributeError. The profile handlers create_profile and save_profile were deleted from CalculationSignals.py in February and their import into the package a day later, but both names stayed in `__all__`; a star import binds every name there, so it failed and took the calculation-signal API with it. Both names are dropped. 9.43 runs the star import and requires the three re-exported functions to be CalculationSignals' own. |
 
 ## 10. API Layer (`api_layer`)
 

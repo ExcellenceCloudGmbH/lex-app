@@ -431,3 +431,16 @@ does not remove user launch configurations.
 | 1.383 | once, and only where needed | repairing again changes nothing; a proxy that already takes the Starlette app, or names no `app` parameter, is left exactly as it is |
 
 **Scenario range:** 1.381 – 1.383. **Test file:** `lex/test_project/tests/init/test_1at_reflex_single_port_proxy.py`. **Type:** U. **Status:** ✅ Complete (2026-10-02). Batch: [1at](batches.md).
+
+### 1au. `lex --version` — the version /health reports, answered from anywhere ✅
+
+**What it tests:** that `lex --version` prints the lex-app version a project runs — the one `/health` reports, read from `lex._version` rather than the package metadata — and answers from any directory without setting Django up.
+
+**Why a regression matters:** "which version are you on?" is the first question support asks and the installation guide's first check. Without the option, `lex --version` answers `No such option`; read from the metadata, it disagrees with `/health` on every image built from a git ref.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.384 | the version /health reports | `lex --version` prints `lex, version <lex._version.__version__>` and exits 0, even when `lex/_version.py` was stamped after install and the package metadata says otherwise |
+| 1.385 | answered from anywhere | in a directory that is no project, and that Django cannot load as an app, `lex --version` exits 0 with one version line |
+
+**Scenario range:** 1.384 – 1.385. **Test file:** `lex/test_project/tests/init/test_1au_lex_version.py`. **Type:** U. **Status:** ✅ Complete (2026-10-03). Batch: [1au](batches.md).

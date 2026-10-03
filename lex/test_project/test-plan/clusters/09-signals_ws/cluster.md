@@ -18,5 +18,6 @@
 | 9.4 | Root process cleans up cache | `CacheManager.cleanup_calculation` called for root |
 | 9.5 | Child process skips cache cleanup | Cleanup NOT called for child process |
 | 9.6 | `update_calculation_status` called with error details on failure | Exception details and stack trace included |
+| 9.43 | `from lex.core.signals import *` succeeds | Binds `update_calculation_status`, `do_post_save` and `custom_post_save` — `CalculationSignals`' own functions |
 
 ---

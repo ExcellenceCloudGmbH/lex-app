@@ -1694,3 +1694,31 @@ and hands the proxy `app._api`, where Reflex itself mounts a compiled frontend. 
 backend bare and wrapped in middleware under a catch-all mount; the wrapped case fails on v2.3.3's
 repair with the production 404. 1.383 drops the cases a name check decided: the replacement is
 marked instead.
+
+### Batch 1au — `lex --version`: the version /health reports, answered from anywhere ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.384 – 1.385 |
+| Type | U |
+| Files covered | `lex/bin/lex.py` (the `lex` group's `--version` option; the set of arguments `main()` answers without setting Django up) |
+| Test file | `lex/test_project/tests/init/test_1au_lex_version.py` |
+| Test classes | `TestCluster01au_LexVersion` (1.384–1.385) |
+| Fixtures | a temporary directory named `release-smoke`; the child process gets the suite's environment without `PROJECT_ROOT`, `DJANGO_SETTINGS_MODULE` and `LEX_APP_PACKAGE_ROOT`, with the suite's checkout first on `PYTHONPATH` |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.384 | the version /health reports | with `lex/_version.py` stamped after install, as a git-ref image is, `lex --version` through the console script's entry point prints `lex, version <stamped>` and exits 0 — not the package metadata's `0.0.0.dev0` |
+| 1.385 | answered from anywhere | `python -m lex --version` in a directory that is no project, and that Django cannot load as an app, exits 0 with one `lex, version …` line |
+
+**Why `lex._version` and not the package metadata.** `click.version_option(package_name="lex-app")`
+reads the installed distribution's metadata, which is frozen at install time. An image built from a
+git ref installs lex-app as `0.0.0.dev0` and then stamps `lex/_version.py` with the ref, and `/health`
+reports that module — so the two would disagree on exactly the images where the version is hardest
+to know any other way. The option takes `lex._version.__version__`.
+
+**Mutations: two of two fail a test.** Reading the version from the package metadata fails 1.384
+(`0.0.0.dev0` against the stamped label). Dropping `--version` from the set `main()` answers without
+setting Django up fails both: Django setup crashes in `release-smoke`.
