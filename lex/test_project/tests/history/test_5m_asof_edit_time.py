@@ -221,11 +221,14 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
     (``/api/model_entries/<model>/list?as_of=...``) — customer report
     2026-07-14: stepping back 1 min / 10 min / 1 h from an 11:22 edit never
     showed the pre-edit state. Root cause of the symptom: the client sent
-    naive LOCAL wall-clock, and the API contract interprets naive datetimes
-    as UTC (``parse_as_of_datetime``) — in Berlin summer every anchor less
-    than 2 h back still lands AFTER the edit in UTC. These scenarios pin the
-    backend side: with correct UTC anchors the endpoint time-travels
-    correctly, and naive values are interpreted as UTC by contract.
+    naive LOCAL wall-clock, and ``parse_as_of_datetime`` then read those digits
+    as UTC — so in Berlin summer every anchor less than 2 h back still landed
+    AFTER the edit. Both sides are now fixed: the client sends an absolute
+    instant, and a naive anchor is interpreted in the CONFIGURED timezone
+    (matching DRF's convention for every other datetime input) rather than
+    assumed to be UTC. These scenarios pin the backend side: an aware anchor
+    time-travels exactly, and a naive anchor denoting the same wall clock lands
+    on the same snapshot instead of overshooting by the zone's offset.
     """
 
     e2e_models = ALL_MODELS
@@ -269,33 +272,48 @@ class TestCluster05m_ListEndpointAsOf(E2ETestCase):
             "The list endpoint must show the current values at a present anchor.",
         )
 
-    def test_5_103_naive_as_of_is_interpreted_as_utc_by_contract(self) -> None:
+    def test_5_103_naive_as_of_follows_the_configured_timezone(self) -> None:
         """
-        Scenario 5.103: a NAIVE as_of value means UTC — not the caller's local
-        wall clock. This is the documented parse contract, and the exact trap
-        behind the customer report: a Berlin client sending naive local time
-        lands 2h in the future of the intended instant, so "1 minute before
-        my edit" still shows the post-edit state.
+        Scenario 5.103: a NAIVE as_of value is interpreted in the configured
+        timezone, not assumed to be UTC — so a client sending local wall-clock
+        lands on the instant it meant.
+
+        This is the exact trap behind the customer report: reading the digits as
+        UTC put a Berlin anchor 1-2 h in the future, so "1 minute before my edit"
+        still showed the post-edit state. Clients should send an absolute instant
+        (the frontend now does); this pins the fallback for anything that does
+        not, and matches DRF's convention for every other datetime input.
+
         Given: v1 created, then edited to v2
-        When: GET list?as_of=<naive pre-edit UTC value, no Z>
-        Then: identical result to the explicit-Z form (pre-edit values) —
-              proving naive == UTC, so clients MUST send UTC (or an offset)
+        When:  GET list?as_of=<pre-edit local wall clock, no offset>
+        Then:  the same snapshot as the offset-bearing form of that wall clock
+
+        Zone-agnostic on purpose: it asserts the two forms AGREE, which holds in
+        any TIME_ZONE under the new rule and fails under the old one whenever
+        TIME_ZONE is not UTC.
         """
         item, t_before_edit = self._create_and_edit()
 
-        # Build a genuinely naive string (no Z, no offset). Under USE_TZ=True
-        # lex_datetime_now() is aware, so strip the tzinfo to test the "naive
-        # anchor is read as UTC" contract rather than accidentally sending +00:00.
-        t_naive = (
-            t_before_edit if dj_tz.is_naive(t_before_edit)
-            else dj_tz.make_naive(t_before_edit, dt_timezone.utc)
+        # What a client actually sends: its own wall clock, with no zone. Under
+        # USE_TZ=True lex_datetime_now() is aware, so render it in the configured
+        # zone and strip the offset.
+        local = (
+            dj_tz.localtime(t_before_edit) if dj_tz.is_aware(t_before_edit)
+            else t_before_edit
         )
-        naive = t_naive.isoformat()  # no Z, no offset — naive on purpose
+        naive = local.replace(tzinfo=None).isoformat()  # no Z, no offset
+        aware = local.isoformat()  # same wall clock, offset attached
+
+        self.assertEqual(
+            self._list_names(naive), self._list_names(aware),
+            "A naive as_of must denote the same instant as that wall clock with "
+            "its offset attached. If these differ, the parse layer is guessing a "
+            "zone the caller did not mean and every naive anchor time-travels to "
+            "the wrong instant.",
+        )
         self.assertEqual(
             self._list_names(naive), ["v1"],
-            "A naive as_of must be read as UTC (parse contract). If this "
-            "fails, the parse layer drifted and every naive client anchor "
-            "time-travels to the wrong instant.",
+            "The pre-edit wall clock must reach the pre-edit snapshot.",
         )
         # And the same instant expressed with an explicit +02:00 offset (a
         # Berlin client converting correctly) must land identically.
