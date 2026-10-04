@@ -48,4 +48,20 @@
 | Prereqs | none |
 | Status | ✅ Complete (Session 81 — June 18). `CalculationLogConsumer.py` is no longer parked: PR #615 wires it in `authenticated_websocket_urlpatterns()`. |
 
+### Batch 9g — `lex.core.signals` star import: `__all__` names only what the package provides ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.43 |
+| Type | U |
+| Files covered | `lex/core/signals/__init__.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9g_signals_package_exports.py` |
+| Test classes | `TestCluster09g_SignalsPackageExports` (9.43 the star import works and binds the three calculation-signal functions, `CalculationSignals`' own) |
+| Fixtures | none |
+| Tests landed | **1 pass / 0 fail** (3 subtests) |
+| Coverage gain | the package's star-import contract |
+| Prereqs | none |
+| Status | ✅ Complete |
+| Note | `create_profile` and `save_profile`, `User` receivers that created a `Profile` the module never imported, were deleted from `CalculationSignals.py` in February, and their import into the package a day later. Both names stayed in `__all__`. A star import binds every name there, so `from lex.core.signals import *` raised `AttributeError` and lost the calculation-signal API with it. Both names are dropped. |
+
 ---

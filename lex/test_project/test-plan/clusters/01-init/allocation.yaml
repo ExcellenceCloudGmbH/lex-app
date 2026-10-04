@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 383
+max_scenario: 385
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1233,3 +1233,20 @@ letters:
       (development mode, backend and Vite on two ports, the public origin as REFLEX_URL): pages, Vite's
       assets and socket, a backend-served image, and the event socket's state updates in a browser, all
       through the backend's one port.
+  au:
+    title: '`lex --version` — the version /health reports, answered from anywhere'
+    scenarios: 1.384-1.385
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      `lex --version` answered "No such option": main() already sent --version past the Django
+      bootstrap, but the group never declared the option. It now prints `lex, version X`, where X is
+      lex._version.__version__ -- the version /health reports -- and not the package metadata: an image
+      built from a git ref stamps lex/_version.py after `pip install`, while the metadata stays frozen at
+      0.0.0.dev0. Both scenarios run the CLI in a fresh interpreter, from a directory named release-smoke,
+      without the test project's environment and with the suite's checkout first on PYTHONPATH.
+      Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
+      set main() answers without Django fails both, because Django setup crashes in that directory.
