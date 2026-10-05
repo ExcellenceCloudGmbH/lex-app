@@ -203,14 +203,17 @@ The framework only auto-loads initial data when **all** of the following are tru
 | All referenced models are empty | Every model class mentioned in `class` fields has zero rows in the database |
 | Server is starting normally | Running via `lex start` (uvicorn), not during Init or inside a Celery worker |
 
-If any condition fails, the auto-load is silently skipped.
+If any condition fails, the auto-load is skipped. When it is skipped because
+models already have rows, the startup output names them: `Loading Initial Data
+not triggered due to existence of objects of Model: …`.
 
 > [!tip]
-> To re-trigger the load after data already exists, drop and recreate the database:
+> To load it again after data already exists, empty the database and start the
+> server. `lex flush` deletes every row — not only the seed data's — after asking
+> you to type `yes`:
 > ```bash
-> lex create_db
-> lex init
-> lex start
+> lex flush
+> lex start --reload --loop asyncio lex_app.asgi:application
 > ```
 
 ## Execution Order

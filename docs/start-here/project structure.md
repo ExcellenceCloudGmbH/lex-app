@@ -9,14 +9,12 @@ Lex App uses a flat project structure — no `manage.py`, no nested [Django](htt
 ```
 YourProject/
 ├── .env                        ← environment config (single source of truth)
-├── .run/                       ← PyCharm run configurations (auto-generated)
-│   ├── Init.run.xml
-│   └── Start.run.xml
+├── .run/                       ← PyCharm run configurations (eleven, from lex setup)
 ├── migrations/                 ← Django migrations
 ├── tests/
 │   └── test_suite.py
 ├── model_structure.yaml        ← frontend sidebar layout (optional)
-├── lex_config.py               ← framework settings (Celery, etc.)
+├── lex_config.py               ← project settings (initial data, tab names, …)
 ├── requirements.txt
 │
 ├── Upload/                     ← Extract: data ingestion models
