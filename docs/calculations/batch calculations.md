@@ -195,7 +195,8 @@ flowchart TD
 
 ## The Four-Step Pipeline
 
-When you call `MyModel.create()`, four things happen internally:
+When you call `MyModel.create()` **with Celery active**, four things happen
+internally:
 
 ```mermaid
 flowchart LR
@@ -211,6 +212,19 @@ flowchart LR
     Dispatch
     (Celery or Sync)"]
 ```
+
+> [!note] Without Celery, expansion streams instead
+> `LEX_SYNC_STREAMING_EXPANSION` defaults to `true`, and on that path
+> `create()` never materialises the full combination list: it walks the
+> combination tree depth-first and calculates, saves and releases one model
+> before generating the next, so peak memory follows the depth of the tree
+> rather than the number of combinations. Steps 1–4 are skipped entirely,
+> which also means `parallelizable_fields` does nothing there — clustering is
+> Step 3.
+>
+> Set the flag to `false` to roll back to the materialising path below without
+> a redeploy. See [[reference/CalculatedModelMixin Internals]] for the branch
+> in full.
 
 ### Step 1 — Generate Combinations
 

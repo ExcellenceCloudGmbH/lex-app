@@ -25,7 +25,7 @@ pip show lex-app
 > [!tip]
 > Make sure you're using **Python 3.12**. Check with `python3.12 --version`.
 
-## Run the Setup Wizard
+## Run `lex setup`
 
 Navigate to your project directory and run:
 
@@ -35,7 +35,7 @@ lex setup
 
 This generates a few things for you:
 
-- `.run/` — PyCharm run configurations (Init, Start, Streamlit)
+- `.run/` — PyCharm run configurations (Init, Start, Streamlit, Reflex, and the rest)
 - `.vscode/launch.json` — VS Code launch configurations (if VS Code settings are present)
 - `.env` — Environment configuration template
 - `migrations/` — Django migrations folder
@@ -44,9 +44,34 @@ This generates a few things for you:
 
 The `.env` file is the **single source of truth** for runtime configuration.
 
-### Option A: Automatic (Recommended)
+The whole first run is a handful of commands, and only `lex init` needs
+credentials in place:
 
-Run `lex setup` and follow the prompts. The wizard will open [Excellence Cloud](https://excellence-cloud.de) for you, guide you through creating a new Client, and auto-populate your `.env` file.
+```mermaid
+flowchart LR
+    I["pip install lex-app"] --> S["lex setup<br/><i>writes .env, .run/,<br/>migrations/</i>"]
+    S --> C["credentials into .env<br/><i>Option A or B below</i>"]
+    C --> D["a database<br/><i>lex create_db, or SQLite</i>"]
+    D --> N["lex init<br/><i>migrations,<br/>Keycloak sync</i>"]
+    N --> R["lex start<br/><i>dev server, and initial<br/>data on the first start</i>"]
+    C -.->|"missing, and --bootstrap given"| BS["bootstrap flow"]
+    BS --> N
+    C -.->|"missing, no --bootstrap"| F["lex init fails<br/>against Keycloak"]
+```
+
+### Option A: Let `lex init` bootstrap the credentials
+
+`lex setup` does not prompt for anything — it writes the files listed above and
+exits. The flow that can fetch credentials for you is a flag on `lex init`:
+
+```bash
+lex init --bootstrap
+```
+
+With `--bootstrap`, `lex init` starts the bootstrap flow **when the Keycloak
+environment variables are missing**. Without it (the default) `lex init` fails
+against Keycloak instead, because it needs the client configuration to exist
+and be reachable.
 
 ### Option B: Manual
 
@@ -63,6 +88,45 @@ OIDC_RP_CLIENT_ID=your_client_id
 OIDC_RP_CLIENT_SECRET=your_client_secret
 OIDC_RP_CLIENT_UUID=your_client_uuid
 ```
+
+## Choose a Database
+
+`lex init` creates your tables, so it needs a database it can reach. Out of the
+box that is PostgreSQL on your own machine, with these fixed settings — none of
+them come from `.env`:
+
+| Setting | Value |
+|---|---|
+| Host and port | `localhost:5432` |
+| User | `django` |
+| Password | `lundadminlocal` |
+| Database | `db_` followed by your project folder's name in lower case — `db_teambudget` for the tutorial |
+
+Create that user once — in `psql`, as a PostgreSQL superuser — with the right
+to create databases:
+
+```sql
+CREATE USER django WITH PASSWORD 'lundadminlocal' CREATEDB;
+```
+
+Then let the framework create the database itself — it does nothing if the
+database already exists:
+
+```bash
+lex create_db
+```
+
+No PostgreSQL on this machine? Use SQLite instead, with one line in `.env`:
+
+```env
+DATABASE_DEPLOYMENT_TARGET=local
+```
+
+The database is then a file at your project root, named after the project
+folder (`TeamBudget.sqlite3` for the tutorial), created the first time
+migrations run. `lex create_db` has nothing to do and says so. The other
+connection profiles, for deployed instances, are listed under
+[[reference/Environment Variables#Database|Environment Variables]].
 
 ## Initialize the Application
 
@@ -123,9 +187,16 @@ set -a; source .env; set +a
 lex start --reload --loop asyncio lex_app.asgi:application
 ```
 
-Your application is now running at `http://localhost:8000`.
+Your application is now running at `http://localhost:8000`. Opening it sends
+you to Keycloak to sign in: use your Excellence Cloud account — the one you set
+the client up with — and you land back in the app.
 
 ## Troubleshooting
+
+> [!warning]- Database connection errors
+>
+> - `connection refused` on `localhost:5432`, or `password authentication failed for user "django"`: the default profile cannot reach PostgreSQL with the fixed settings in [[start-here/installation#Choose a Database|Choose a Database]]
+> - No PostgreSQL to point it at: set `DATABASE_DEPLOYMENT_TARGET=local` in `.env` to use SQLite
 
 > [!warning]- "Environment variable not set" errors
 >
