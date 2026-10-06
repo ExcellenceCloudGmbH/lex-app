@@ -8,6 +8,7 @@ from django.db.models.fields import DateTimeField, DateField, TimeField
 from lex.api.utils.helpers import can_read_with_default_permission_scope
 from lex.audit_logging.utils.content_types import safe_get_content_type
 from lex.audit_logging.utils.latest_calculation import is_calculation_model
+from lex.core.calculation_closing import calculation_closed_reason
 from lex.core.models.LexModel import LexModel, UserContext
 from rest_framework import serializers, viewsets
 
@@ -26,6 +27,9 @@ LEX_SCOPES_NAME = "lex_reserved_scopes"
 # only on serializers of CalculationModel subclasses; see _calculation_run_fields.
 CALCULATION_ID_NAME = "lex_reserved_calculation_id"
 HAS_CALCULATION_LOG_NAME = "lex_reserved_has_calculation_log"
+# Why a calculation row is closed (calculation_closed_reason()), or null: the
+# frontend shows it on the greyed Calculate button.
+CALCULATION_CLOSED_REASON_NAME = "lex_reserved_calculation_closed_reason"
 
 # --- MODULE-LEVEL CACHES (populated lazily, persist for process lifetime) ---
 
@@ -45,10 +49,12 @@ def _get_lexmodel_fields() -> set:
 
 
 def _calculation_run_fields(model) -> dict:
-    """The two latest-run fields, for calculation models only.
+    """The calculation-only row fields, for calculation models only.
 
-    Values are read from attributes the list view sets for a whole page at
-    once (``annotate_latest_calculation``). Nothing here queries per row.
+    The two latest-run values are read from attributes the list view sets for
+    a whole page at once (``annotate_latest_calculation``); nothing there
+    queries per row. The closed reason asks the model's own
+    ``calculation_closed_reason()``.
     """
     if not is_calculation_model(model):
         return {}
@@ -62,6 +68,9 @@ def _calculation_run_fields(model) -> dict:
         ),
         HAS_CALCULATION_LOG_NAME: serializers.SerializerMethodField(
             method_name="_lex_has_latest_calculation_log"
+        ),
+        CALCULATION_CLOSED_REASON_NAME: serializers.SerializerMethodField(
+            method_name="_lex_calculation_closed_reason"
         ),
     }
 
@@ -402,6 +411,10 @@ class LexSerializer(serializers.ModelSerializer):
         """Whether that run exists. Unannotated rows answer False, never a query."""
         return bool(getattr(instance, "_has_calculation_log", False))
 
+    def _lex_calculation_closed_reason(self, instance):
+        """Why this record can't be calculated again, or None while it can."""
+        return calculation_closed_reason(instance)
+
     # ------------------------------------------------------------------
     # Scopes computation
     # ------------------------------------------------------------------
@@ -486,6 +499,11 @@ class LexSerializer(serializers.ModelSerializer):
             # Remove internal LexModel fields and id
             lexmodel_fields = _get_lexmodel_fields()
             edit_fields -= (lexmodel_fields | {'id'})
+
+            # A closed calculation record can't be calculated again: leaving
+            # is_calculated out is what greys its Calculate button.
+            if 'is_calculated' in edit_fields and calculation_closed_reason(target_instance):
+                edit_fields.discard('is_calculated')
 
             # History records: make valid_from/valid_to editable
             if hasattr(instance, 'history_type') or hasattr(instance, 'history_id'):

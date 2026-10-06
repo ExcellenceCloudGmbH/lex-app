@@ -1,7 +1,7 @@
 cluster: 2
 slug: crud_api
 title: CRUD via REST API
-max_scenario: 109
+max_scenario: 112
 letters:
   a:
     title: Create (POST)
@@ -114,3 +114,16 @@ letters:
       2.108 a POST to a calculate_on_create model answers 201 with is_calculated IN_PROGRESS while the
       run is still held open, and the run finishes in SUCCESS afterwards; 2.109 a calculation model
       without the flag answers NOT_CALCULATED, as before.
+  l:
+    title: Calculate on a closed record is refused with its reason
+    scenarios: 2.110-2.112
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      2.110 the Calculate PATCH on a record whose calculation_closed_reason() answers a reason gets
+      409 with that reason in detail, the key the frontend shows; the record keeps its status and no
+      run is marked in progress. 2.111 an open record still gets 202; 2.112 a method answering True
+      gets the framework's default message.

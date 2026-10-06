@@ -11,17 +11,17 @@
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
 | 1. Init — Project Bootstrap | 47 | 385 | 427 | 0 | 0 |
-| 2. CRUD via REST API | 11 | 109 | 17 | 0 | 0 |
+| 2. CRUD via REST API | 12 | 112 | 20 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 14 | 79 | 23 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
-| 7. Calculation State Machine | 20 | 227 | 84 | 0 | 0 |
+| 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 14 | 82 | 32 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 11 | 53 | 21 | 0 | 0 |
+| 12. Serializer Contract | 12 | 62 | 26 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 7 | 35 | 2 | 0 | 0 |
 | 15. Calculation Logging Surface | 11 | 51 | 32 | 0 | 0 |
@@ -106,6 +106,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 2i | Cancel-calculation REST endpoint | 2.93-2.96 | complete | 4 | 0 | 0 | scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored |
 | 2j | Instance API-key extraction and matching | 2.97-2.107 | complete | 11 | 0 | 0 | scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key |
 | 2k | A create that starts a calculation answers straight away | 2.108-2.109 | complete | 2 | 0 | 0 | 2.108 a POST to a calculate_on_create model answers 201 with is_calculated IN_PROGRESS while the run is still held open, and the run finishes in SUCCESS afterwards; 2.109 a calculation model without the flag answers NOT_CALCULATED, as before. |
+| 2l | Calculate on a closed record is refused with its reason | 2.110-2.112 | complete | 3 | 0 | 0 | 2.110 the Calculate PATCH on a record whose calculation_closed_reason() answers a reason gets 409 with that reason in detail, the key the frontend shows; the record keeps its status and no run is marked in progress. 2.111 an open record still gets 202; 2.112 a method answering True gets the framework's default message. |
 
 ## 3. Validation Hooks (`validation_hooks`)
 
@@ -204,6 +205,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 7r | (withdrawn — Session 91) Per-instance inline-inside-worker guard |  | rolled-back | 0 | 0 | 0 | before commit — the Session 89 inline guard broke nested-dispatch parallelism (a nested `CalculateNAV` ran inline on the parent's worker unless the caller opened an explicit `WaitF |
 | 7s | Calculations must not move edited_at / edited_by (Celery-OFF + startup) | 7.205-7.221 | complete | 17 | 0 | 0 | Audit-column contract for the sync dispatch paths and the startup recovery sweep. Covers SUCCESS/ERROR/CANCELLED terminal states, child-record output rows, created_at immutability, IN_PROGRESS-at-restart -> ABORTED (7.211 both columns, 7.217 authorship via a distinct sentinel), and a recovery-tracked row. Includes three negative controls (real user edit stamps; a user edit after a calculation still stamps; an explicit edited_at override is honoured) that guard against a fix over-suppressing genuine edits. 17 pass, including the reported case driven through the real HTTP calculate=true endpoint (7.219 interrupted -> restart -> ABORTED leaves edited_at/edited_by unchanged; 7.220 the stamp is absent before any completion could revert it; 7.221 a genuine HTTP field edit still stamps). -- these paths were already correct; the batch pins them so the BUG-028 fix cannot regress them. |
 | 7t | calculate_on_create starts a run when the app creates a record | 7.222-7.227 | complete | 6 | 0 | 0 | A model opts in with calculate_on_create = True; a create through the form or the REST API then starts the run the way a Calculate click does - off the request thread, through Celery when it is on. 7.222 the run reaches SUCCESS; 7.223 a failing run leaves the record created and in ERROR; 7.224 no flag, no run; 7.225 a record created in code does not calculate; 7.226 the flag as a property decides per record; 7.227 with Celery on, the run is dispatched from the calculation thread pool, never inline on the request thread. |
+| 7u | A closed record is never calculated again | 7.228-7.237 | complete | 10 | 0 | 0 | A model closes a record through calculation_closed_reason(). 7.228 a save that sets a closed record IN_PROGRESS calculates nothing and keeps its status; 7.229 the rest of that save is still written; 7.230 an open record calculates as before; 7.231 a calculation that starts a closed child skips it, still ends in SUCCESS, and names the child and the reason in its own log; 7.232-7.234 closed generated rows keep their values on the streaming path, the materialized fallback and the Celery calc_and_save task; 7.235 answering True closes; 7.236 a record created closed does not calculate on create; 7.237 the method sees the status from before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not. |
 
 ## 8. Celery & Async (`celery_async`)
 
@@ -285,6 +287,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 12i | Foreign-key display names in the read contract (BUG-F-003 backend fix) | 12.42-12.45 | complete | 4 | 0 | 0 | additive companion `<fk>__short_description` = str(related) emitted alongside the raw FK id on both list and detail paths; list resolves names in one batched pk__in query per FK (mirrors ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of frontend BUG-F-003 (FK columns rendered as bare ids) |
 | 12j | Datetime write→read round trip under the aware-UTC convention | 12.46-12.48 | complete | 3 | 0 | 0 | live regression gates for the USE_TZ=True cutover — a client that sends an explicit instant (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone; summer round trip, year-end midnight across the winter offset, and a truthful designated instant. Frontend twin datetimeConventionRoundTrip.test.ts. |
 | 12k | A credential-shaped column never reaches a response | 12.49-12.53 | complete | 5 | 0 | 0 | LEX-702 / BUG-F-033 backend half. auth.User was served through model_entries WITH its Django password hash, and the LEAST-privileged account could read the MOST-privileged account's -- verified on a clean harness, HTTP 200. The FK hover card then painted it wherever a grid held an FK to User. NOT a permission bypass, and that is the whole point of the cluster. Field-level read scoping works correctly on that endpoint (admin gets nav, the restricted viewer's payload omits the key). Two things went around it: UserModelSerializer is a plain DRF ModelSerializer and not a LexSerializer, so can_read / permission_read never ran for it at all; and a model declaring neither hook falls through to "all fields" even inside LexSerializer. So the fix cannot be a permission rule -- it is a name-based refusal, at two enforcement points, plus an allowlist replacing fields = "__all__". Matching is exact-name plus unambiguous suffixes, deliberately NOT the substring search the frontend's hover-card denylist uses: `hash` would swallow content_hash and `auth` would swallow author, and a silently missing field is its own bug. 12.53 pins both directions. There WAS a unit test asserting Meta.fields == "__all__" -- it encoded the bug. Rewritten inverted in lex/tests/unit/api/test_model_entry_provider_mixin.py. |
+| 12m | A closed record does not offer Calculate, and says why | 12.58-12.62 | complete | 5 | 0 | 0 | 12.58 a closed record's lex_reserved_scopes.edit leaves out is_calculated, which greys its Calculate button, and keeps the fields the user may edit; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the model's reason in lex_reserved_calculation_closed_reason, for the greyed button's tooltip; 12.61 an open record's row carries null; 12.62 the reason survives a read permission that hides other fields. Follows 12l (12.54-12.57). |
 
 ## 13. Export Endpoint (`exports`)
 

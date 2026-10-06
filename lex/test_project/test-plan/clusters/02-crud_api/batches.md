@@ -89,3 +89,18 @@
 | Status | ✅ Complete — paired with 7t |
 
 ---
+
+### Batch 2l — Calculate on a closed record is refused with its reason ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.110 – 2.112 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/One.py` (`OneModelEntry.update`), `lex/core/calculation_closing.py` |
+| Test file | `lex/test_project/tests/crud_api/test_2l_calculate_closed_record.py` |
+| Test classes | `TestCluster02l_CalculateClosedRecord` — 2.110 the Calculate PATCH on a closed record answers 409 with the model's reason in `detail`, the record stays SUCCESS and no run is marked in progress; 2.111 an open record still gets 202 and its run finishes; 2.112 a method answering `True` gets the default message |
+| Fixtures | `ClosableCalc`, `ClosedByTrueCalc` from `calculations/models.py` (cluster 7u) |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete — paired with 7u and 12m |
+
+---

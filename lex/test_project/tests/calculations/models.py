@@ -1089,3 +1089,203 @@ ON_CREATE_MODELS = [OnCreateCalc, OnCreateOffCalc, OnCreateConditionalCalc]
 ON_CREATE = "oncreatecalc"
 ON_CREATE_OFF = "oncreateoffcalc"
 ON_CREATE_CONDITIONAL = "oncreateconditionalcalc"
+
+
+# ── Closed calculations (cluster 7u; reused by 2l and 12m) ──────────────────
+#
+# Kept out of ALL_MODELS: only the tests that close records use them.
+
+SAP_POSTED = "Already posted to SAP, so it can't be calculated again."
+
+
+@_permissive
+class ClosableCalc(CalculationModel):
+    """Answers ``calculation_closed_reason()`` from a ``closed`` flag, the way a
+    project's ``is_closed`` or ``sap_posted`` field would."""
+
+    name = models.CharField(max_length=200)
+    closed = models.BooleanField(default=False)
+    note = models.CharField(max_length=200, blank=True, default="")
+    total = models.IntegerField(null=True, blank=True)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    calls = 0  # runs of calculate(); reset by each test
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculation_closed_reason(self):
+        return SAP_POSTED if self.closed else None
+
+    def calculate(self):
+        type(self).calls += 1
+        self.total = (self.total or 0) + 1
+
+
+@_permissive
+class ClosedByTrueCalc(CalculationModel):
+    """Answers ``True`` instead of a reason."""
+
+    name = models.CharField(max_length=200)
+
+    calls = 0
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculation_closed_reason(self):
+        return True
+
+    def calculate(self):
+        type(self).calls += 1
+
+
+@_permissive
+class ClosingParentCalc(CalculationModel):
+    """Starts a ``ClosableCalc`` child's calculation from inside its own."""
+
+    name = models.CharField(max_length=200)
+    child_pk = models.IntegerField(null=True, blank=True)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        child = ClosableCalc.objects.get(pk=self.child_pk)
+        child.is_calculated = CalculationModel.IN_PROGRESS
+        child.save()
+
+
+@_permissive
+class ClosableBatchRow(CalculatedModelMixin):
+    """A generated output row. Once posted, it keeps its values."""
+
+    region = models.CharField(max_length=16)
+    category = models.CharField(max_length=16)
+    posted = models.BooleanField(default=False)
+    runs = models.IntegerField(default=0)
+
+    defining_fields = ["region", "category"]
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.region}-{self.category}"
+
+    def get_selected_key_list(self, key):
+        return {"region": ["US", "EU"], "category": ["A"]}.get(key, [])
+
+    def calculation_closed_reason(self):
+        return "Posted." if self.posted else None
+
+    def calculate(self, *args, **kwargs):
+        self.runs = (self.runs or 0) + 1
+
+
+@_permissive
+class ClosedOnCreateCalc(CalculationModel):
+    """Calculates on create, unless it is created closed."""
+
+    name = models.CharField(max_length=200)
+    closed = models.BooleanField(default=False)
+
+    calculate_on_create = True
+    calls = 0
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculation_closed_reason(self):
+        return "Closed from the start." if self.closed else None
+
+    def calculate(self):
+        type(self).calls += 1
+
+
+@_permissive
+class CalculatesOnceCalc(CalculationModel):
+    """Closes itself once it has calculated successfully: the project pattern of
+    a flag that says the calculation already ran, without a field of its own."""
+
+    name = models.CharField(max_length=200)
+    total = models.IntegerField(default=0)
+
+    calls = 0
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculation_closed_reason(self):
+        if self.is_calculated == self.SUCCESS:
+            return "Already calculated."
+        return None
+
+    def calculate(self):
+        type(self).calls += 1
+        self.total += 1
+
+
+class ClosableNarrowReadCalc(CalculationModel):
+    """A closable model whose users may read only a few of its fields.
+
+    Not ``@_permissive``: that decorator would replace ``permission_read``.
+    """
+
+    name = models.CharField(max_length=200)
+    closed = models.BooleanField(default=False)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_fields({"id", "name", "is_calculated"}, "cluster 7u: narrow read")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 7u")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+    def calculation_closed_reason(self):
+        return SAP_POSTED if self.closed else None
+
+    def calculate(self):
+        pass
+
+
+CLOSED_MODELS = [
+    ClosableCalc, ClosedByTrueCalc, ClosingParentCalc, ClosableBatchRow, ClosedOnCreateCalc, CalculatesOnceCalc,
+    ClosableNarrowReadCalc,
+]
+
+CLOSABLE = "closablecalc"
+CLOSED_BY_TRUE = "closedbytruecalc"
+CLOSING_PARENT = "closingparentcalc"
+CLOSED_ON_CREATE = "closedoncreatecalc"
+CLOSABLE_NARROW_READ = "closablenarrowreadcalc"

@@ -21,6 +21,7 @@ from lex.audit_logging.mixins.AuditLogMixin import AuditLogMixin
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
+from lex.core.calculation_closing import calculation_closed_reason
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 from lex.core.models.CalculationModel import (
     CalculationModel,
@@ -210,6 +211,14 @@ class OneModelEntry(
         """
         try:
             instance.refresh_from_db()
+            closed_reason = calculation_closed_reason(instance)
+            if closed_reason:
+                logger.info(
+                    "%s was created closed, so it was not calculated: %s",
+                    instance,
+                    closed_reason,
+                )
+                return
             calculation_record = f"{instance._meta.model_name}_{instance.pk}"
             calculation_id = f"{calculation_record}_update_{uuid4()}"
             with OperationContext(self.request, calculation_id):
@@ -772,6 +781,15 @@ class OneModelEntry(
                             return Response(
                                 self.get_serializer(instance).data,
                                 status=status.HTTP_200_OK,
+                            )
+
+                        # A closed record is refused before anything changes.
+                        # The frontend shows ``detail`` in its error notice.
+                        closed_reason = calculation_closed_reason(instance)
+                        if closed_reason:
+                            return Response(
+                                {"detail": closed_reason, "code": "calculation_closed"},
+                                status=status.HTTP_409_CONFLICT,
                             )
 
                         self._mark_calculation_started(

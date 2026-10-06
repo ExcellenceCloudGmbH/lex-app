@@ -73,3 +73,19 @@
 | Status | ✅ Complete — live regression gates for the cutover. A client sending an explicit instant (fixed frontend `toISOString`) gets that exact moment back for any viewer zone. Complements 12g (BUG-025 designator gate). Frontend twin: `datetimeConventionRoundTrip.test.ts`. |
 
 ---
+
+### Batch 12m — A closed record does not offer Calculate, and says why ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.58 – 12.62 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (`get_lex_reserved_scopes`, `_calculation_run_fields`, `_lex_calculation_closed_reason`), `lex/core/calculation_closing.py` |
+| Test file | `lex/test_project/tests/serializers/test_12m_closed_record_scopes.py` |
+| Test classes | `TestCluster12m_ClosedRecordScopes` — 12.58 a closed record's `lex_reserved_scopes.edit` leaves out `is_calculated` and keeps `note`; 12.59 an open record still lists `is_calculated`; 12.60 grid rows and the record page carry the reason in `lex_reserved_calculation_closed_reason`; 12.61 an open record's row carries null; 12.62 the reason survives a read permission that hides other fields |
+| Fixtures | `ClosableCalc`, `ClosableNarrowReadCalc` from `calculations/models.py` (cluster 7u) |
+| Tests landed | **5 pass / 0 fail** |
+| Coverage gain | the frontend enables Calculate only while `is_calculated` is in the edit scopes, so a closed record's button is greyed; the row's reason lets the greyed button say why instead of blaming permissions |
+| Status | ✅ Complete — paired with 7u and 2l |
+
+---

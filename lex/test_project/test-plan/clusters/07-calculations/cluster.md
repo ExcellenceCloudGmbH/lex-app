@@ -133,3 +133,11 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 **Scenario range:** 7.222 – 7.227. **Test file:** `lex/test_project/tests/calculations/test_7t_calculate_on_create.py`. **Type:** E. **Status:** ✅ Complete. 7.222 the run reaches SUCCESS; 7.223 a failing run leaves the record created and in ERROR; 7.224 no flag, no run; 7.225 a record created in code does not calculate; 7.226 the flag as a property decides per record; 7.227 with Celery on, the run is dispatched from the calculation pool, never inline. Paired with 2k (the POST's answer), 6r (audit) and 15k (the row's log).
 
 ---
+
+### 7u. A closed record is never calculated again ✅
+
+**Gap:** customers asked for framework support for the `is_closed` / `sap_posted` pattern: once a calculation's result has been used (posted to SAP, a period closed), the calculation must not run again, its status must not change, and the user must be told why. It matters most when calculations call calculations, where nobody is there to see a button. A model now answers `calculation_closed_reason()` with a reason, `True` or `None`, and every path that starts a calculation asks it first. A save that sets a closed record IN_PROGRESS keeps the previous status and writes the rest of the save; a parent calculation skips the closed child and says so in its own log; closed generated rows keep their values; a record created closed does not calculate on create. The method sees the record as it was before the run was asked for, so "closed once calculated" holds on every path.
+
+**Scenario range:** 7.228 – 7.237. **Test file:** `lex/test_project/tests/calculations/test_7u_closed_calculations.py`. **Type:** E. **Status:** ✅ Complete. 7.228 no run, status kept; 7.229 the rest of the save written; 7.230 an open record calculates; 7.231 the parent skips its closed child and logs why; 7.232–7.234 closed batch rows kept on the streaming, materialized and Celery paths; 7.235 `True` closes; 7.236 closed beats `calculate_on_create`; 7.237 closed once SUCCESS runs once. Paired with 2l (the button's 409) and 12m (the greyed button).
+
+---

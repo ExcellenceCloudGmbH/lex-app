@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 227
+max_scenario: 237
 letters:
   a:
     title: ''
@@ -209,3 +209,20 @@ letters:
       7.224 no flag, no run; 7.225 a record created in code does not calculate; 7.226 the flag as a
       property decides per record; 7.227 with Celery on, the run is dispatched from the calculation
       thread pool, never inline on the request thread.
+  u:
+    title: A closed record is never calculated again
+    scenarios: 7.228-7.237
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      A model closes a record through calculation_closed_reason(). 7.228 a save that sets a closed
+      record IN_PROGRESS calculates nothing and keeps its status; 7.229 the rest of that save is
+      still written; 7.230 an open record calculates as before; 7.231 a calculation that starts a
+      closed child skips it, still ends in SUCCESS, and names the child and the reason in its own
+      log; 7.232-7.234 closed generated rows keep their values on the streaming path, the
+      materialized fallback and the Celery calc_and_save task; 7.235 answering True closes; 7.236 a
+      record created closed does not calculate on create; 7.237 the method sees the status from
+      before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not.
