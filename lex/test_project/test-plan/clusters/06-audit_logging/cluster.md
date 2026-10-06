@@ -73,3 +73,13 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Scenario range:** 6.117 – 6.118. **Test file:** `lex/test_project/tests/audit_logging/test_6q_root_detection_with_headings.py`. **Type:** U. **Status:** ✅ Complete. Scenarios: 6.117 headings around/above the root never demote it; 6.118 a model nested below a heading stays non-root.
 
 ---
+
+### 6r. A run started by a create has its own audit entry ✅
+
+**What it tests:** a create on a `calculate_on_create` model leaves two entries — the create's, finalised to 'success' when the record exists, and a separate 'update' entry for the run under its own `<model>_<pk>_update_<uuid>` calculation id, which carries the run's outcome (`AuditLogMixin.log_calculation`).
+
+**Why a regression matters:** if the run reported on the create's entry, a failed run would tell an auditor the record was never created, or a successful create would hide a failed run.
+
+**Scenario range:** 6.119 – 6.120. **Test file:** `lex/test_project/tests/audit_logging/test_6r_create_triggered_run_audit.py`. **Type:** E. **Status:** ✅ Complete. 6.119 two entries, both 'success'; 6.120 the run's entry is 'failure' with a traceback, the create's stays 'success'.
+
+---

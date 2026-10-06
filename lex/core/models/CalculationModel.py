@@ -134,6 +134,15 @@ class CalculationModel(LexModel):
         max_length=50, choices=STATUSES, default=NOT_CALCULATED, editable=False
     )
 
+    #: Opt-in. When true, a record created through the app (the create form,
+    #: the REST API, an embedded form) starts its calculation as soon as it
+    #: exists, in the background, exactly as if Calculate had been clicked:
+    #: the create answers straight away and the run reports over the usual
+    #: status channel. Records created in code (scripts, initial data,
+    #: uploads, other calculations) are left alone. Read from the instance,
+    #: so a subclass can make it a property and decide per record.
+    calculate_on_create = False
+
     class Meta:
         abstract = True
 

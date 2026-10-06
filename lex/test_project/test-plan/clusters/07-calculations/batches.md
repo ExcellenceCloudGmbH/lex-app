@@ -160,3 +160,24 @@
 | Note | Scenario 7.214 was originally specified as "a field edit sent alongside `calculate=true` still stamps". That turned out to rest on a false premise — a `calculate=true` request **silently discards** accompanying field changes (verified: the same edit without `calculate` applies normally), so `edited_at` correctly does not move. Retargeted to the stronger control above. The discarded-edit behaviour is a separate question, out of scope here. |
 
 ---
+
+### Batch 7t — `calculate_on_create` starts a run when the app creates a record ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.222 – 7.227 |
+| Type | E |
+| Files covered | `lex/core/models/CalculationModel.py` (`calculate_on_create`), `lex/api/views/model_entries/One.py` (`OneModelEntry.create`, `_calculate_after_create`, `_mark_calculation_started`, `_calculate_in_background`) |
+| Test file | `lex/test_project/tests/calculations/test_7t_calculate_on_create.py` |
+| Test classes | `TestCluster07t_CalculateOnCreate` — 7.222 a record created through the API calculates by itself (SUCCESS, result saved, one run); 7.223 a failing run leaves the record created and in ERROR; 7.224 without the flag nothing starts; 7.225 a record created in code does not calculate; 7.226 the flag as a property decides per record; 7.227 with Celery on, the run is dispatched from the `lex-calc` pool, never run inline |
+| Fixtures | `OnCreateCalc`, `OnCreateOffCalc`, `OnCreateConditionalCalc` — added to `calculations/models.py`, kept out of `ALL_MODELS` (also used by 2k and 6r) |
+| Tests landed | **6 pass / 0 fail** |
+| Coverage gain | the create path of `OneModelEntry` now starts a calculation; the Calculate button's start code is shared with it (`_mark_calculation_started`, `_calculate_in_background`), and its existing tests (6i, 2i) pass unchanged |
+| Status | ✅ Complete — paired with 2k, 6r, 15k |
+
+**Why only creates made through the app.** A record created in code starts NOT_CALCULATED and stays
+so (7.225): scripts, initial data, uploads and calculations that create records keep deciding when
+they calculate. A parent calculation relies on its children calculating synchronously so it can wait
+for them, and a background run would break that.
+
+---

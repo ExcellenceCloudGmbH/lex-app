@@ -187,7 +187,7 @@ class AuditLogMixin:
         flushed_failed_audit_logs = self.flush_pending_failed_audit_logs()
         return flushed_failed_audit_logs[0] if flushed_failed_audit_logs else None
     
-    def log_change(self, action, target, payload=None):
+    def log_change(self, action, target, payload=None, calculation_id=None):
         payload = payload or {}
         user = self.request.user if hasattr(self.request, 'user') else None
         resource = target.__name__.lower() if isinstance(target, type) else target.__class__.__name__.lower()
@@ -197,7 +197,7 @@ class AuditLogMixin:
             resource=resource,
             action=action,
             payload=payload,
-            calculation_id=self.kwargs.get('calculationId'),
+            calculation_id=calculation_id or self.kwargs.get('calculationId'),
         )
         AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
 
@@ -214,6 +214,23 @@ class AuditLogMixin:
         except Exception:
             pass  # operation_context may not be active (e.g. management commands)
 
+        return audit_log
+
+    def log_calculation(self, instance, calculation_id):
+        """Open the pending 'update' entry for a run the view starts itself.
+
+        A Calculate click's run reports on the click's own update entry. A run
+        started by a create gets an entry of the same shape under its own
+        ``calculation_id``, so its outcome never lands on the create's entry.
+        Left 'pending'; ``ensure_terminal_calculation_audit`` finalises it.
+        """
+        payload = _serialize_payload(self.get_serializer(instance).data) or {}
+        if isinstance(payload, dict):
+            payload['id'] = instance.pk
+        audit_log = self.log_change("update", instance, payload=payload, calculation_id=calculation_id)
+        audit_log.content_type = _safe_get_content_type(instance.__class__)
+        audit_log.object_id = instance.pk
+        audit_log.save()
         return audit_log
 
     def perform_create(self, serializer):

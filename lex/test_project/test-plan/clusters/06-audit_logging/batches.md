@@ -82,3 +82,18 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Prereqs | none |
 | Status | ✅ Complete — 2 pass / 0 fail |
 | Note | Companion to batch 15g (`feat/calclog-heading-context`): `LogHeading` frames on the model context stack are presentation-only, so root detection resolves via `get_root_model()`/`get_current_model()` — a heading wrapped around (or inside) the root calculation must not demote it, and a heading between root and child must not hide the nesting. |
+
+### Batch 6r — A run started by a create has its own audit entry ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.119 – 6.120 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/One.py` (`_calculate_after_create`), `lex/audit_logging/mixins/AuditLogMixin.py` (`log_calculation`, `log_change(calculation_id=)`) |
+| Test file | `lex/test_project/tests/audit_logging/test_6r_create_triggered_run_audit.py` |
+| Test classes | `TestCluster06r_CreateTriggeredRunAudit` — 6.119 the create's entry is 'success' and the run's is a separate 'update' entry under its own `<model>_<pk>_update_<uuid>` id, finalised to 'success'; 6.120 a failed run's entry is 'failure' with a traceback while the create's stays 'success' |
+| Fixtures | `OnCreateCalc` from `calculations/models.py` (cluster 7t); unpatches `store_message`, `build_cache_key`, `ensure_terminal_calculation_audit` like 6i |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete — paired with 7t. Checked to fail when the run shares the create's entry, or is filed under the create request's id |
+
+---

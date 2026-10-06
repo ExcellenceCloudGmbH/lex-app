@@ -74,3 +74,18 @@
 | Status | ✅ Complete (Session 80 — June 18) |
 
 ---
+
+### Batch 2k — A create that starts a calculation answers straight away ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.108 – 2.109 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/One.py` (`OneModelEntry.create`) |
+| Test file | `lex/test_project/tests/crud_api/test_2k_create_starts_calculation.py` |
+| Test classes | `TestCluster02k_CreateStartsCalculation` — 2.108 the POST answers 201 with `is_calculated` IN_PROGRESS while `calculate()` is held open, and the run finishes in SUCCESS once released; 2.109 a calculation model without `calculate_on_create` answers NOT_CALCULATED, as before |
+| Fixtures | `OnCreateCalc`, `OnCreateOffCalc` from `calculations/models.py` (cluster 7t) |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete — paired with 7t |
+
+---

@@ -323,3 +323,26 @@ ALL_MODELS = [
     LogMiddleSavedCalc,
     LogChildWithInnerSave,
 ]
+
+
+@_permissive
+class LogOnCreateCalc(CalculationModel):
+    """Calculates when created through the app (``calculate_on_create``) and
+    logs one line, so its run leaves a log the grid can open (cluster 15k).
+
+    Kept out of ALL_MODELS: only 15k creates it through the API."""
+
+    name = models.CharField(max_length=200)
+
+    calculate_on_create = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        from lex.audit_logging.handlers.LexLogger import LexLogger
+
+        LexLogger().add_text(f"created {self.name}").log()
