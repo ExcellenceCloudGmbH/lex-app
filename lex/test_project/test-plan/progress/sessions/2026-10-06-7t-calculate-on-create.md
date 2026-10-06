@@ -23,3 +23,10 @@ All 11 were written first and failed for the right reason. Two deliberate breaka
 showed they catch a wrong implementation, not only a missing one: the run sharing the
 create's audit entry (6r fails), and the run filed under the create request's own id,
 which has no pk (15k and 6r fail). The button's own tests (6i, 2i) pass unchanged.
+
+**A flake fixed on the way.** 7m (7.192/7.193) failed about one run in five on
+lex-app-v2 itself: it patches `One._calculation_executor` to keep the Calculate
+button's background run from starting, but `One.py` imported the executor inside
+the method, so the patch never applied and the run raced the test's table flush
+("deadlock detected"). `One.py` now imports the executor at module level, the patch
+takes effect, and 7m passed 10 runs out of 10.

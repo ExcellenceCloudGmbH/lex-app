@@ -22,7 +22,11 @@ from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
-from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
+from lex.core.models.CalculationModel import (
+    CalculationModel,
+    CalculationModelException,
+    _calculation_executor,
+)
 from lex.core.signals.ModelMutationSignal import broadcast_model_mutation
 from lex.core.models.LexModel import should_use_atomic_model_operations
 from rest_framework import status
@@ -113,7 +117,6 @@ class OneModelEntry(
         and dispatches to Celery when Celery is on, as for a Calculate click.
         """
         from contextvars import copy_context
-        from lex.core.models.CalculationModel import _calculation_executor
         from lex.audit_logging.utils.ModelContext import (
             _model_context,
             ModelContext,
