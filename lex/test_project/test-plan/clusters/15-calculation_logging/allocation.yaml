@@ -1,7 +1,7 @@
 cluster: 15
 slug: calculation_logging
 title: Calculation Logging Surface
-max_scenario: 50
+max_scenario: 51
 letters:
   a:
     title: LexLogger builder API and content shape
@@ -130,3 +130,15 @@ letters:
       stubs (store_message, build_cache_key), which otherwise make every key "test_key" and store
       nothing.
 
+  k:
+    title: The grid opens the log of a run a create started
+    scenarios: '15.51'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      A run started by creating a record is filed under <model>_<pk>_update_<uuid>, the prefix the list
+      view's latest-run lookup reads, so the new row's log button opens it. Filed under the create
+      request's own id (<model>_create_<uuid>, no pk), the row could never find it.

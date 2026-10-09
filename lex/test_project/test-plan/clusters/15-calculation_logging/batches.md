@@ -82,3 +82,17 @@ back as the run's log, one row on the root record, in both failure paths, just b
 purged. It does nothing when the run's rows survived, and it never raises. 15.47 is the regression.
 15.48 checks what the popup reads: the audit row's `lex_reserved_has_calculation_log` turns true.
 
+### Batch 15k — The grid opens the log of a run a create started ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 15.51 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/One.py` (`_calculate_after_create`), read through `lex/audit_logging/utils/latest_calculation.py` by the list view |
+| Test file | `lex/test_project/tests/calculation_logging/test_15k_create_triggered_run_log.py` |
+| Test classes | `TestCluster15k_CreateTriggeredRunLog` — 15.51 after a create-started run, the list endpoint's row names it (`lex_reserved_calculation_id` starts `<model>_<pk>_`), says it has a log, and the log rows are stored under that id |
+| Fixtures | `LogOnCreateCalc` — added to `calculation_logging/models.py`, kept out of `ALL_MODELS` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete — paired with 7t. Checked to fail when the run is filed under the create request's own id (`<model>_create_<uuid>`, which has no pk) |
+
+---

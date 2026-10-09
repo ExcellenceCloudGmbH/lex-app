@@ -4,6 +4,7 @@ import traceback
 from contextlib import nullcontext
 from datetime import date, datetime
 from typing import Iterable, cast
+from uuid import uuid4
 
 from django.core.files.base import File
 from django.db import transaction
@@ -21,7 +22,11 @@ from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
-from lex.core.models.CalculationModel import CalculationModel, CalculationModelException
+from lex.core.models.CalculationModel import (
+    CalculationModel,
+    CalculationModelException,
+    _calculation_executor,
+)
 from lex.core.signals.ModelMutationSignal import broadcast_model_mutation
 from lex.core.models.LexModel import should_use_atomic_model_operations
 from rest_framework import status
@@ -59,6 +64,173 @@ class OneModelEntry(
         broadcast_model_mutation(
             model_name, "updated", f"{model_name}_{instance.pk}"
         )
+
+    def _mark_calculation_started(self, instance, calculation_record, calculation_id):
+        """Put a record into IN_PROGRESS and announce its run, before it starts.
+
+        The first half of starting a calculation off the request thread,
+        shared by the Calculate button (``update`` with ``calculate=true``)
+        and by a create on a ``calculate_on_create`` model.
+        """
+        from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateStore
+
+        CalculationModel._clear_terminal_state_persistence(instance)
+        instance.is_calculated = CalculationModel.IN_PROGRESS
+        instance.save(skip_hooks=True)
+        # ── Early registration ──────────────────────────────
+        # Register the calculation in the authoritative cache
+        # store and broadcast IN_PROGRESS **before** entering
+        # the atomic transaction.  This guarantees that:
+        #   a) A page-refresh during the calculation will see
+        #      the IN_PROGRESS entry in the reconciliation
+        #      snapshot (no DB read needed).
+        #   b) Other users/tabs receive the IN_PROGRESS
+        #      WebSocket message immediately.
+        ActiveCalculationStateStore.mark_in_progress(
+            record_id=calculation_record,
+            calculation_id=calculation_id,
+            record=str(instance),
+            model_name=instance._meta.object_name,
+            model_label=instance._meta.label_lower,
+            record_pk=instance.pk,
+        )
+
+        # Notify the "calculations" group (GenericSocket) so
+        # the triggering client can pair its temp ID with the
+        # server-side calculation_id.
+        WebSocketNotifier.send_calculation_update(
+            calculation_id=calculation_id,
+            calculation_record=calculation_record,
+        )
+
+        cache_key = CacheManager.build_cache_key(
+            calculation_record,
+            calculation_id,
+        )
+        CacheManager.store_message(cache_key, "")
+
+    def _calculate_in_background(self, instance, calculation_record):
+        """Run ``instance``'s calculation on the calculation thread pool.
+
+        The second half: ``calculate_hook`` runs off the request thread, under
+        the current operation context (its ``calculation_id`` and audit entry),
+        and dispatches to Celery when Celery is on, as for a Calculate click.
+        """
+        from contextvars import copy_context
+        from lex.audit_logging.utils.ModelContext import (
+            _model_context,
+            ModelContext,
+        )
+        from django.db import close_old_connections
+
+        ctx = copy_context()
+
+        def _invoke_calculate_hook():
+            # Runs inside ``ctx.run(...)`` below so the
+            # request's ``operation_context`` (with
+            # ``calculation_id``) is visible to both the
+            # hook and the terminal-audit finalizer.
+            #
+            # Install a FRESH model context for the
+            # background thread.  ``copy_context()``
+            # captures a reference to the same mutable
+            # ``ModelContext`` object that the request
+            # thread's ``model_logging_context`` will
+            # pop upon returning the response.  By
+            # the time this thread starts, the shared
+            # stack is empty → ContextResolver.resolve()
+            # cannot determine ``current_record`` →
+            # WebSocket log delivery and cache routing
+            # break.  Setting a new ModelContext here
+            # (inside ``ctx.run``) scopes it to this
+            # execution without affecting the request
+            # thread.
+            _model_context.set(
+                {"model_context": ModelContext([instance])}
+            )
+            instance._defer_calculate_hook = False
+            try:
+                instance.calculate_hook()
+            except Exception:
+                # The terminal failure audit is normally
+                # flushed by ``LexModel.save``'s except
+                # block (see
+                # ``_finalize_pending_terminal_audit``).
+                # In the async path we invoke
+                # ``calculate_hook`` directly — outside
+                # any ``save()`` — so we own that flush
+                # here.  Without it, the pending audit
+                # dict that ``calculate_hook`` set on
+                # the instance never becomes a row and
+                # the operator sees a 'success' audit
+                # for a calc that actually failed.
+                try:
+                    instance._finalize_pending_terminal_audit()
+                except Exception:
+                    logger.exception(
+                        "Failed to finalize terminal failure "
+                        "audit for %s after background "
+                        "calculation raised",
+                        calculation_record,
+                    )
+                raise
+
+        def _background_calculate():
+            try:
+                ctx.run(_invoke_calculate_hook)
+            except Exception as exc:
+                logger.error(
+                    "Background calculation failed for %s: %s",
+                    calculation_record, exc, exc_info=True,
+                )
+            finally:
+                close_old_connections()
+
+        _calculation_executor.submit(_background_calculate)
+
+    @staticmethod
+    def _calculates_on_create(instance):
+        """Whether creating ``instance`` should start its calculation.
+
+        Read from the instance, not the class, so a model can make
+        ``calculate_on_create`` a property and decide per record.
+        """
+        return isinstance(instance, CalculationModel) and bool(
+            getattr(instance, "calculate_on_create", False)
+        )
+
+    def _calculate_after_create(self, instance):
+        """Start a new record's calculation the way a Calculate click would.
+
+        Runs once the create has committed. The run gets an id of the shape a
+        click mints (``<model>_<pk>_update_<uuid>``), which is how the grid
+        finds a row's log, and an audit entry of its own, so its outcome never
+        lands on the create's entry. A failure to start is logged, not raised:
+        the record was created either way.
+        """
+        try:
+            instance.refresh_from_db()
+            calculation_record = f"{instance._meta.model_name}_{instance.pk}"
+            calculation_id = f"{calculation_record}_update_{uuid4()}"
+            with OperationContext(self.request, calculation_id):
+                self.log_calculation(instance, calculation_id)
+                with model_logging_context(instance):
+                    self._mark_calculation_started(
+                        instance, calculation_record, calculation_id
+                    )
+                    self._calculate_in_background(instance, calculation_record)
+        except Exception:
+            logger.exception(
+                "Could not start the calculation of %s after it was created",
+                instance,
+            )
+
+    def perform_create(self, serializer):
+        instance = super().perform_create(serializer)
+        # ``create`` starts a ``calculate_on_create`` model's run from this
+        # object once the create has committed.
+        self._created_instance = serializer.instance
+        return instance
 
     def _build_sharepoint_history_change_reason(self, request):
         edited_file = ""
@@ -405,6 +577,13 @@ class OneModelEntry(
             )
             broadcast_model_mutation(model_name, "created", record_id)
 
+            created = getattr(self, "_created_instance", None)
+            if self._calculates_on_create(created):
+                transaction.on_commit(lambda: self._calculate_after_create(created))
+                # Once started, the run shows in the answer: the form gets the
+                # record back already IN_PROGRESS.
+                response.data = self.get_serializer(created).data
+
             return response
 
     def destroy(self, request, *args, **kwargs):
@@ -595,40 +774,9 @@ class OneModelEntry(
                                 status=status.HTTP_200_OK,
                             )
 
-                        CalculationModel._clear_terminal_state_persistence(instance)
-                        instance.is_calculated = CalculationModel.IN_PROGRESS
-                        instance.save(skip_hooks=True)
-                        # ── Early registration ──────────────────────────────
-                        # Register the calculation in the authoritative cache
-                        # store and broadcast IN_PROGRESS **before** entering
-                        # the atomic transaction.  This guarantees that:
-                        #   a) A page-refresh during the calculation will see
-                        #      the IN_PROGRESS entry in the reconciliation
-                        #      snapshot (no DB read needed).
-                        #   b) Other users/tabs receive the IN_PROGRESS
-                        #      WebSocket message immediately.
-                        ActiveCalculationStateStore.mark_in_progress(
-                            record_id=calculation_record,
-                            calculation_id=calculationId,
-                            record=str(instance),
-                            model_name=instance._meta.object_name,
-                            model_label=instance._meta.label_lower,
-                            record_pk=instance.pk,
+                        self._mark_calculation_started(
+                            instance, calculation_record, calculationId
                         )
-
-                        # Notify the "calculations" group (GenericSocket) so
-                        # the triggering client can pair its temp ID with the
-                        # server-side calculation_id.
-                        WebSocketNotifier.send_calculation_update(
-                            calculation_id=calculationId,
-                            calculation_record=calculation_record,
-                        )
-
-                        cache_key = CacheManager.build_cache_key(
-                            calculation_record,
-                            calculationId,
-                        )
-                        CacheManager.store_message(cache_key, "")
 
                         # ── Async calculation (HTTP 202) ────────────────────
                         # The actual deferral that prevents the calc from
@@ -666,78 +814,7 @@ class OneModelEntry(
                         # HTTP 202 immediately.  The frontend already listens
                         # for calculation_success / calculation_error via the
                         # update_calculation_status WebSocket.
-                        from contextvars import copy_context
-                        from lex.core.models.CalculationModel import _calculation_executor
-                        from lex.audit_logging.utils.ModelContext import (
-                            _model_context,
-                            ModelContext,
-                        )
-                        from django.db import close_old_connections
-
-                        ctx = copy_context()
-
-                        def _invoke_calculate_hook():
-                            # Runs inside ``ctx.run(...)`` below so the
-                            # request's ``operation_context`` (with
-                            # ``calculation_id``) is visible to both the
-                            # hook and the terminal-audit finalizer.
-                            #
-                            # Install a FRESH model context for the
-                            # background thread.  ``copy_context()``
-                            # captures a reference to the same mutable
-                            # ``ModelContext`` object that the request
-                            # thread's ``model_logging_context`` will
-                            # pop upon returning the 202 response.  By
-                            # the time this thread starts, the shared
-                            # stack is empty → ContextResolver.resolve()
-                            # cannot determine ``current_record`` →
-                            # WebSocket log delivery and cache routing
-                            # break.  Setting a new ModelContext here
-                            # (inside ``ctx.run``) scopes it to this
-                            # execution without affecting the request
-                            # thread.
-                            _model_context.set(
-                                {"model_context": ModelContext([instance])}
-                            )
-                            instance._defer_calculate_hook = False
-                            try:
-                                instance.calculate_hook()
-                            except Exception:
-                                # The terminal failure audit is normally
-                                # flushed by ``LexModel.save``'s except
-                                # block (see
-                                # ``_finalize_pending_terminal_audit``).
-                                # In the async path we invoke
-                                # ``calculate_hook`` directly — outside
-                                # any ``save()`` — so we own that flush
-                                # here.  Without it, the pending audit
-                                # dict that ``calculate_hook`` set on
-                                # the instance never becomes a row and
-                                # the operator sees a 'success' audit
-                                # for a calc that actually failed.
-                                try:
-                                    instance._finalize_pending_terminal_audit()
-                                except Exception:
-                                    logger.exception(
-                                        "Failed to finalize terminal failure "
-                                        "audit for %s after background "
-                                        "calculation raised",
-                                        calculation_record,
-                                    )
-                                raise
-
-                        def _background_calculate():
-                            try:
-                                ctx.run(_invoke_calculate_hook)
-                            except Exception as exc:
-                                logger.error(
-                                    "Background calculation failed for %s: %s",
-                                    calculation_record, exc, exc_info=True,
-                                )
-                            finally:
-                                close_old_connections()
-
-                        _calculation_executor.submit(_background_calculate)
+                        self._calculate_in_background(instance, calculation_record)
 
                         # Return the IN_PROGRESS state immediately
                         return Response(

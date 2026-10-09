@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 221
+max_scenario: 227
 letters:
   a:
     title: ''
@@ -194,3 +194,18 @@ letters:
       (real user edit stamps; a user edit after a calculation still stamps; an explicit edited_at
       override is honoured) that guard against a fix over-suppressing genuine edits. 17 pass, including the reported case driven through the real HTTP calculate=true endpoint (7.219 interrupted -> restart -> ABORTED leaves edited_at/edited_by unchanged; 7.220 the stamp is absent before any completion could revert it; 7.221 a genuine HTTP field edit still stamps). --
       these paths were already correct; the batch pins them so the BUG-028 fix cannot regress them.
+  t:
+    title: calculate_on_create starts a run when the app creates a record
+    scenarios: 7.222-7.227
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      A model opts in with calculate_on_create = True; a create through the form or the REST API then
+      starts the run the way a Calculate click does - off the request thread, through Celery when it
+      is on. 7.222 the run reaches SUCCESS; 7.223 a failing run leaves the record created and in ERROR;
+      7.224 no flag, no run; 7.225 a record created in code does not calculate; 7.226 the flag as a
+      property decides per record; 7.227 with Celery on, the run is dispatched from the calculation
+      thread pool, never inline on the request thread.

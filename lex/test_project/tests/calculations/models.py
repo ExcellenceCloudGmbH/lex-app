@@ -1003,3 +1003,89 @@ ALL_MODELS.extend([
 ])
 
 AUDIT_CALC = "auditcolumnscalc"
+
+
+# ── Calculating on create (cluster 7t; reused by 2k and 6r) ─────────────────
+#
+# Kept out of ALL_MODELS: these three only matter to the tests that create
+# records through the API and watch a run start by itself.
+
+
+@_permissive
+class OnCreateCalc(CalculationModel):
+    """Sets ``calculate_on_create``: a record created through the app calculates
+    by itself, in the background, as if Calculate had been clicked."""
+
+    name = models.CharField(max_length=200)
+    should_fail = models.BooleanField(default=False)
+    total = models.IntegerField(null=True, blank=True)
+    calculation_error_message = models.TextField(blank=True, default="")
+
+    calculate_on_create = True
+
+    # Test controls, reset by every test that uses them. ``gate`` holds
+    # calculate() open, so a test can see the create answer while the run is
+    # still going; ``calls`` counts runs.
+    gate = None
+    calls = 0
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        type(self).calls += 1
+        if type(self).gate is not None:
+            type(self).gate.wait(timeout=10)
+        if self.should_fail:
+            raise RuntimeError(f"OnCreateCalc({self.name!r}) failing on purpose")
+        self.total = 42
+
+
+@_permissive
+class OnCreateOffCalc(CalculationModel):
+    """The same kind of model without the flag: creating one starts nothing."""
+
+    name = models.CharField(max_length=200)
+
+    calls = 0
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def calculate(self):
+        type(self).calls += 1
+
+
+@_permissive
+class OnCreateConditionalCalc(CalculationModel):
+    """``calculate_on_create`` as a property, so each record decides."""
+
+    name = models.CharField(max_length=200)
+    auto = models.BooleanField(default=False)
+    total = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    @property
+    def calculate_on_create(self):
+        return self.auto
+
+    def calculate(self):
+        self.total = 7
+
+
+ON_CREATE_MODELS = [OnCreateCalc, OnCreateOffCalc, OnCreateConditionalCalc]
+
+ON_CREATE = "oncreatecalc"
+ON_CREATE_OFF = "oncreateoffcalc"
+ON_CREATE_CONDITIONAL = "oncreateconditionalcalc"

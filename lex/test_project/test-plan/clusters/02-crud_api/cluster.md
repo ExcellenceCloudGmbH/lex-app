@@ -73,3 +73,11 @@
 **Scenario range:** 2.97 – 2.107. **Test file:** `lex/test_project/tests/crud_api/test_2j_instance_api_key.py`. **Type:** U. **Status:** ✅ Complete (Session 80 — June 18). Covers `lex/api/utils/api_key_requests.py`.
 
 ---
+
+### 2k. A create that starts a calculation answers straight away ✅
+
+**Gap:** with `calculate_on_create = True` on a model, a POST also starts the record's calculation. The POST must still answer as soon as the record exists: 201, with the record already IN_PROGRESS, while the run goes on in the background — not when the run ends, which is what an `AFTER_CREATE` hook did.
+
+**Scenario range:** 2.108 – 2.109. **Test file:** `lex/test_project/tests/crud_api/test_2k_create_starts_calculation.py`. **Type:** E. **Status:** ✅ Complete. 2.108 answers 201 IN_PROGRESS while `calculate()` is held open; 2.109 a model without the flag answers NOT_CALCULATED as before. Covers `lex/api/views/model_entries/One.py`.
+
+---

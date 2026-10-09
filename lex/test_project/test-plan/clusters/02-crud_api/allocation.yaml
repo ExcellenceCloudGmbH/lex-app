@@ -1,7 +1,7 @@
 cluster: 2
 slug: crud_api
 title: CRUD via REST API
-max_scenario: 107
+max_scenario: 109
 letters:
   a:
     title: Create (POST)
@@ -102,3 +102,15 @@ letters:
       xfail: 0
     note: scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge
       cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key
+  k:
+    title: A create that starts a calculation answers straight away
+    scenarios: 2.108-2.109
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      2.108 a POST to a calculate_on_create model answers 201 with is_calculated IN_PROGRESS while the
+      run is still held open, and the run finishes in SUCCESS afterwards; 2.109 a calculation model
+      without the flag answers NOT_CALCULATED, as before.

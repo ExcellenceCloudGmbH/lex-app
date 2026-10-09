@@ -11,12 +11,12 @@
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
 | 1. Init — Project Bootstrap | 47 | 385 | 427 | 0 | 0 |
-| 2. CRUD via REST API | 10 | 107 | 15 | 0 | 0 |
+| 2. CRUD via REST API | 11 | 109 | 17 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 14 | 79 | 23 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
-| 6. Audit Logging | 17 | 118 | 21 | 3 | 0 |
-| 7. Calculation State Machine | 19 | 221 | 78 | 0 | 0 |
+| 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
+| 7. Calculation State Machine | 20 | 227 | 84 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 14 | 82 | 32 | 0 | 0 |
@@ -24,7 +24,7 @@
 | 12. Serializer Contract | 11 | 53 | 21 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 7 | 35 | 2 | 0 | 0 |
-| 15. Calculation Logging Surface | 10 | 50 | 31 | 0 | 0 |
+| 15. Calculation Logging Surface | 11 | 51 | 32 | 0 | 0 |
 
 ## 1. Init — Project Bootstrap (`init`)
 
@@ -105,6 +105,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 2h | Structure / fields / lex-API endpoints |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 2i | Cancel-calculation REST endpoint | 2.93-2.96 | complete | 4 | 0 | 0 | scenarios 2.93–2.96; pins the `PATCH cancel=true` short-circuit (202 / 409 / sibling-fields-ignored |
 | 2j | Instance API-key extraction and matching | 2.97-2.107 | complete | 11 | 0 | 0 | scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key |
+| 2k | A create that starts a calculation answers straight away | 2.108-2.109 | complete | 2 | 0 | 0 | 2.108 a POST to a calculate_on_create model answers 201 with is_calculated IN_PROGRESS while the run is still held open, and the run finishes in SUCCESS afterwards; 2.109 a calculation model without the flag answers NOT_CALCULATED, as before. |
 
 ## 3. Validation Hooks (`validation_hooks`)
 
@@ -177,6 +178,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 6o |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 6p | Calculation-log cache backfill buffer cap |  | complete | 5 | 0 | 0 | scenarios 6.109–6.113; bounds `CacheManager.store_message` to a 256 KB tail (+ applies `CACHE_TIMEOUT`) so opening a long calc log can't OOM the backend |
 | 6q | Root-calculation detection ignores heading frames | 6.117-6.118 | complete | 2 | 0 | 0 | heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation` must skip them via get_root_model()/get_current_model() |
+| 6r | A run started by a create has its own audit entry | 6.119-6.120 | complete | 2 | 0 | 0 | 6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update' under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's entry is 'failure' with a traceback while the create's entry stays 'success'. |
 
 ## 7. Calculation State Machine (`calculations`)
 
@@ -201,6 +203,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 7q | Nested fan-out dispatches by default from inside a worker | 7.196-7.201 | rolled-back | 6 | 0 | 0 | scenarios 7.196–7.201; removed the `is_celery_worker_process()` inline guard from both dispatch paths (`CalculatedModelMixin._dispatch_model_processing`, `CalculationModel.calculat |
 | 7r | (withdrawn — Session 91) Per-instance inline-inside-worker guard |  | rolled-back | 0 | 0 | 0 | before commit — the Session 89 inline guard broke nested-dispatch parallelism (a nested `CalculateNAV` ran inline on the parent's worker unless the caller opened an explicit `WaitF |
 | 7s | Calculations must not move edited_at / edited_by (Celery-OFF + startup) | 7.205-7.221 | complete | 17 | 0 | 0 | Audit-column contract for the sync dispatch paths and the startup recovery sweep. Covers SUCCESS/ERROR/CANCELLED terminal states, child-record output rows, created_at immutability, IN_PROGRESS-at-restart -> ABORTED (7.211 both columns, 7.217 authorship via a distinct sentinel), and a recovery-tracked row. Includes three negative controls (real user edit stamps; a user edit after a calculation still stamps; an explicit edited_at override is honoured) that guard against a fix over-suppressing genuine edits. 17 pass, including the reported case driven through the real HTTP calculate=true endpoint (7.219 interrupted -> restart -> ABORTED leaves edited_at/edited_by unchanged; 7.220 the stamp is absent before any completion could revert it; 7.221 a genuine HTTP field edit still stamps). -- these paths were already correct; the batch pins them so the BUG-028 fix cannot regress them. |
+| 7t | calculate_on_create starts a run when the app creates a record | 7.222-7.227 | complete | 6 | 0 | 0 | A model opts in with calculate_on_create = True; a create through the form or the REST API then starts the run the way a Calculate click does - off the request thread, through Celery when it is on. 7.222 the run reaches SUCCESS; 7.223 a failing run leaves the record created and in ERROR; 7.224 no flag, no run; 7.225 a record created in code does not calculate; 7.226 the flag as a property decides per record; 7.227 with Celery on, the run is dispatched from the calculation thread pool, never inline on the request thread. |
 
 ## 8. Celery & Async (`celery_async`)
 
@@ -322,3 +325,4 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 15h | PDF export renders like the log view | 15.32-15.38 | complete | 7 | 0 | 0 | customer report 2026-07-14 — the Download-PDF of a calculation log lost markdown structure. DownloadMarkdownPdf now renders via WeasyPrint (already a declared dep; xhtml2pdf kept as runtime fallback) with a GitHub-style stylesheet mirroring the frontend log view, and the markdown extras match the log view's parser surface (tables, fenced code, strike; dropped code-friendly which silently disabled __bold__). Contract pinned; anything the log view renders appears rendered in the PDF — never as raw markdown syntax. Range and count reconciled 2026-09-10 from the tests on disk; the file carries 15.32-15.38 (7 pass, measured) while this record still said 15.32-15.34 and max_scenario 34, so `test_plan_aggregates.py validate` reported four scenarios as exceeding the ceiling and the next allocator in this cluster would have collided with them |
 | 15i | A calculation row learns its latest run | 15.39-15.46 | complete | 10 | 0 | 0 | Reported as "once they are done, we lose the logs and we would have to do a lot of steps to get them." Literally true: the live log is served from cache and the root calculation purges that cache on completion (CacheManager.cleanup_calculation), so a finished run had no path back from the row that started it. The durable copy was always in the CalculationLog table; what was missing was the row knowing which run to open. The grid endpoint now annotates calculation rows with lex_reserved_calculation_id / lex_reserved_has_calculation_log, one query per page, by the rule the frontend's useResolvedCalculationId already applies - newest calculationId starting "<model>_<pk>_", by id - so one row opens one run in the table and in every widget. 15.44 is the regression; 15.42 is the guard against it becoming N+1; 15.46 guards the index that makes the prefix match a probe rather than a scan. No migration: calculationId has been db_index=True since 0005. 15.43's second half exists because the first implementation shadowed the audit log's own getter: _wrap_custom_serializer builds (LexSerializer, custom_cls), so a same-named method on the shared base came first in the MRO and unannotated audit rows answered False. The fields now name their getters explicitly. |
 | 15j | A failed run keeps what it logged | 15.47-15.50 | complete | 4 | 0 | 0 | Review of the calculation log popup: "Why is there no display of the calculation logs from the successful parts of the calculation until it raises an error?" CalculationLog persists on commit, so a calculation that fails inside its transaction - every is_atomic model - was rolled back with every row it wrote, and the steps that succeeded vanished with the one that failed. The live cache is not transactional: it holds the run's whole log under the root's key until the run ends. CalculationLog.keep_rolled_back_log writes that text back as the run's log in both failure paths (execute_calculation_sync's finally, calculate_hook's except), just before the cache is purged. 15.47 is the regression; 15.48 is what the log popup reads - the audit row's lex_reserved_has_calculation_log - turning true; 15.49 leaves surviving rows alone; 15.50 makes an empty or raising cache cost the log, never the failure path. These unpatch the harness's cache stubs (store_message, build_cache_key), which otherwise make every key "test_key" and store nothing. |
+| 15k | The grid opens the log of a run a create started | 15.51 | complete | 1 | 0 | 0 | A run started by creating a record is filed under <model>_<pk>_update_<uuid>, the prefix the list view's latest-run lookup reads, so the new row's log button opens it. Filed under the create request's own id (<model>_create_<uuid>, no pk), the row could never find it. |
