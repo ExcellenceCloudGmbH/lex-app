@@ -119,3 +119,11 @@ cluster-2 models are too shallow; we need a model with one of every
 **Why a regression matters:** users must be able to remove attachments; a removal that silently un-does itself corrupts the record's document trail.
 
 **Scenario range:** 12.39 – 12.41. **Test file:** `lex/test_project/tests/serializers/test_12h_filefield_clear.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.39 empty value clears; 12.40 omit keeps; 12.41 upload replaces.
+
+### 12l. The FK display name on every request the interface sends ✅
+
+**What it tests:** that the `<fk>__short_description` companion (batch 12i) is present on the requests the screens actually send — the grid's AG Grid POST, the History tab's grid on `historical<model>` (each version naming the FK it held), and the Summary tab's `?serializer=` detail request, including a serializer the project declared in `api_serializers`.
+
+**Why a regression matters:** the frontend renders the companion and falls back to the raw id without it, so a request that loses it shows the customer ids where they expect names.
+
+**Scenario range:** 12.54 – 12.57. **Test file:** `lex/test_project/tests/serializers/test_12l_fk_labels_on_every_read_path.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.54 grid rows; 12.55 History rows per version; 12.56 Summary with `serializer=default`; 12.57 a project-declared serializer.

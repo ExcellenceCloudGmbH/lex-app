@@ -73,3 +73,19 @@
 | Status | ✅ Complete — live regression gates for the cutover. A client sending an explicit instant (fixed frontend `toISOString`) gets that exact moment back for any viewer zone. Complements 12g (BUG-025 designator gate). Frontend twin: `datetimeConventionRoundTrip.test.ts`. |
 
 ---
+
+### Batch 12l — The FK display name on every request the grid, History tab and Summary tab send ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.54 – 12.57 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (`FilteredListSerializer` and `LexSerializer` FK companions, `_wrap_custom_serializer`), `lex/api/views/model_entries/List.py` (AG Grid POST), `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (`?serializer=`) |
+| Test file | `lex/test_project/tests/serializers/test_12l_fk_labels_on_every_read_path.py` |
+| Test classes | `TestCluster12l_FkLabelsOnEveryReadPath` (12.54 the grid's AG Grid POST rows; 12.55 the History tab's rows on `historical<model>`, one name per version; 12.56 the Summary tab's `?serializer=default`; 12.57 a project-declared `api_serializers` default and detail) |
+| Fixtures | reuse cluster-12 `WideItem.related` → `RelatedItem` (`__str__` = `name`); `WideItem.api_serializers` declared for one test and restored |
+| Tests landed | **4 pass / 0 fail** (2 subtests) |
+| Coverage gain | the FK companion on the three request shapes the interface actually sends, which 12i's GET list/detail did not reach |
+| Status | ✅ Complete — live regression gates. Mutations: silencing the list companion fails 12.54–12.55; silencing the single-record companion fails 12.56–12.57; wrapping a project serializer without `LexSerializer` fails 12.57. Frontend twins: F3.66–F3.67, F8.38. |
+
+---
