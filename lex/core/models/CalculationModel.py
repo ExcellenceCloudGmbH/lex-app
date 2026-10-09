@@ -162,9 +162,11 @@ class CalculationModel(LexModel):
         rows carry it as ``lex_reserved_calculation_closed_reason``), and a
         click that slips through is refused with it; a save that sets it
         IN_PROGRESS keeps its previous status; a calculation that would start
-        it skips it and says so in its own log. Answer ``True`` to close it
-        with a default message. Keep it cheap: the grid asks it for every row
-        it shows.
+        it skips it and says so in its own log. Closing stops only the
+        calculation: the record's other fields stay editable, and an edit
+        through the app keeps its status, where an open record's edit resets
+        it to NOT_CALCULATED. Answer ``True`` to close it with a default
+        message. Keep it cheap: the grid asks it for every row it shows.
 
         It always sees the record as it was before the run was asked for, so
         a record that may only ever calculate once can close itself on its

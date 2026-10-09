@@ -1096,6 +1096,7 @@ ON_CREATE_CONDITIONAL = "oncreateconditionalcalc"
 # Kept out of ALL_MODELS: only the tests that close records use them.
 
 SAP_POSTED = "Already posted to SAP, so it can't be calculated again."
+CLOSED_FROM_THE_START = "Closed from the start."
 
 
 @_permissive
@@ -1210,7 +1211,7 @@ class ClosedOnCreateCalc(CalculationModel):
         return self.name
 
     def calculation_closed_reason(self):
-        return "Closed from the start." if self.closed else None
+        return CLOSED_FROM_THE_START if self.closed else None
 
     def calculate(self):
         type(self).calls += 1

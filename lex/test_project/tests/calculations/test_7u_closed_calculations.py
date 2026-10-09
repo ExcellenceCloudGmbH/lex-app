@@ -33,6 +33,7 @@ from lex.core.models.CalculationModel import CalculationModel
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import (
+    CLOSED_FROM_THE_START,
     CLOSED_MODELS,
     CLOSED_ON_CREATE,
     CLOSING_PARENT,
@@ -64,6 +65,20 @@ def _closed_record(**fields):
     return record
 
 
+def _wait_for(test, record, wanted):
+    """Poll ``record`` until its status is ``wanted``, or fail ``test``."""
+    deadline = time.monotonic() + _SETTLE_TIMEOUT_S
+    while time.monotonic() < deadline:
+        record.refresh_from_db()
+        if record.is_calculated == wanted:
+            return
+        time.sleep(_POLL_S)
+    test.fail(
+        f"{type(record).__name__} pk={record.pk} never reached {wanted!r}; "
+        f"last is_calculated={record.is_calculated!r}."
+    )
+
+
 class TestCluster07u_ClosedCalculations(E2ETestCase):
     """Cluster 7u: ``calculation_closed_reason()`` stops every run, without touching status."""
 
@@ -81,18 +96,6 @@ class TestCluster07u_ClosedCalculations(E2ETestCase):
     def tearDown(self):
         LexLogger().content = []
         super().tearDown()
-
-    def _wait_for(self, record, wanted):
-        deadline = time.monotonic() + _SETTLE_TIMEOUT_S
-        while time.monotonic() < deadline:
-            record.refresh_from_db()
-            if record.is_calculated == wanted:
-                return
-            time.sleep(_POLL_S)
-        self.fail(
-            f"{type(record).__name__} pk={record.pk} never reached {wanted!r}; "
-            f"last is_calculated={record.is_calculated!r}."
-        )
 
     # -- 7.228 ---------------------------------------------------------
     def test_7_228_a_closed_record_saved_in_progress_is_not_calculated(self):
@@ -166,7 +169,7 @@ class TestCluster07u_ClosedCalculations(E2ETestCase):
 
         resp = self.client.patch(self.url_detail(CLOSING_PARENT, parent.pk), data={"calculate": "true"}, format="json")
         self.assertEqual(resp.status_code, status.HTTP_202_ACCEPTED, getattr(resp, "data", None))
-        self._wait_for(parent, CalculationModel.SUCCESS)
+        _wait_for(self, parent, CalculationModel.SUCCESS)
 
         child.refresh_from_db()
         self.assertEqual(child.is_calculated, CalculationModel.SUCCESS, "The closed child's status must not change.")
@@ -247,30 +250,6 @@ class TestCluster07u_ClosedCalculations(E2ETestCase):
         self.assertEqual(record.is_calculated, CalculationModel.NOT_CALCULATED)
         self.assertEqual(ClosedByTrueCalc.calls, 0, "calculate() must not run.")
 
-    # -- 7.236 ---------------------------------------------------------
-    def test_7_236_a_record_created_closed_does_not_calculate_on_create(self):
-        """
-        Scenario 7.236: closed wins over ``calculate_on_create``
-        Given: a ``calculate_on_create`` model
-        When: one record is created through the API closed, and one open
-        Then: the closed one stays NOT_CALCULATED; the open one calculates
-        """
-        closed = self.client.post(self.url_create(CLOSED_ON_CREATE), data={"name": "c", "closed": True}, format="json")
-        opened = self.client.post(self.url_create(CLOSED_ON_CREATE), data={"name": "o", "closed": False}, format="json")
-        self.assertEqual(closed.status_code, status.HTTP_201_CREATED, getattr(closed, "data", None))
-        self.assertEqual(
-            closed.data.get("is_calculated"), CalculationModel.NOT_CALCULATED,
-            "A record created closed must not start its calculation.",
-        )
-
-        self._wait_for(ClosedOnCreateCalc.objects.get(pk=opened.data["id"]), CalculationModel.SUCCESS)
-        time.sleep(_QUIET_WINDOW_S)
-        self.assertEqual(
-            ClosedOnCreateCalc.objects.get(pk=closed.data["id"]).is_calculated,
-            CalculationModel.NOT_CALCULATED,
-        )
-        self.assertEqual(ClosedOnCreateCalc.calls, 1, "Only the open record may have calculated.")
-
     # -- 7.237 ---------------------------------------------------------
     def test_7_237_a_record_that_closes_once_calculated_runs_only_once(self):
         """
@@ -297,3 +276,84 @@ class TestCluster07u_ClosedCalculations(E2ETestCase):
         self.assertEqual(record.is_calculated, CalculationModel.SUCCESS, "The status must not change.")
         self.assertEqual(record.total, 1, "The second run must not recalculate.")
         self.assertEqual(CalculatesOnceCalc.calls, 1, "calculate() must run exactly once.")
+
+
+class TestCluster07u_CreatedClosed(E2ETestCase):
+    """Cluster 7u: ``calculate_on_create`` asks ``calculation_closed_reason()`` first."""
+
+    e2e_models = CLOSED_MODELS
+    e2e_framework_models = [CalculationLog, AuditLog, AuditLogStatus]
+    # Spied below: the three ways a started run makes itself known.
+    e2e_unpatch = {"mark_in_progress", "send_calculation_update", "build_cache_key"}
+
+    def setUp(self):
+        super().setUp()
+        ClosedOnCreateCalc.calls = 0
+
+    # -- 7.236 ---------------------------------------------------------
+    def test_7_236_a_record_created_closed_starts_nothing(self):
+        """
+        Scenario 7.236: closed wins over ``calculate_on_create``, with no side effects
+        Given: a ``calculate_on_create`` model whose ``calculation_closed_reason()``
+               answers a reason for one new record and None for another
+        When: both are created through the REST API
+        Then: the closed one answers 201 NOT_CALCULATED, with its reason and
+              without Calculate in its edit scopes, and stays that way: no run
+              is registered, announced or cached for it, its trail holds only
+              its create entry, and its history only its creation. The open
+              one calculates, as before.
+        """
+        registered = self.spy_on("mark_in_progress")
+        announced = self.spy_on("send_calculation_update")
+        cached = self.spy_on("build_cache_key")
+
+        closed = self.client.post(
+            self.url_create(CLOSED_ON_CREATE), data={"name": "c", "closed": True}, format="json",
+        )
+        opened = self.client.post(
+            self.url_create(CLOSED_ON_CREATE), data={"name": "o", "closed": False}, format="json",
+        )
+        self.assertEqual(closed.status_code, status.HTTP_201_CREATED, getattr(closed, "data", None))
+        self.assertEqual(opened.status_code, status.HTTP_201_CREATED, getattr(opened, "data", None))
+        self.assertEqual(
+            closed.data.get("is_calculated"), CalculationModel.NOT_CALCULATED,
+            "A record created closed must not start its calculation.",
+        )
+        self.assertEqual(
+            closed.data.get("lex_reserved_calculation_closed_reason"), CLOSED_FROM_THE_START,
+            "The answer must carry the reason.",
+        )
+        self.assertNotIn(
+            "is_calculated", closed.data["lex_reserved_scopes"]["edit"],
+            "A record created closed must not offer Calculate.",
+        )
+
+        # The open record's run is the yardstick: once it has finished, a run
+        # for the closed one has had every chance to start.
+        _wait_for(self, ClosedOnCreateCalc.objects.get(pk=opened.data["id"]), CalculationModel.SUCCESS)
+        time.sleep(_QUIET_WINDOW_S)
+
+        pk = closed.data["id"]
+        closed_run = f"'{CLOSED_ON_CREATE}_{pk}'"
+        open_run = f"'{CLOSED_ON_CREATE}_{opened.data['id']}'"
+        self.assertEqual(ClosedOnCreateCalc.objects.get(pk=pk).is_calculated, CalculationModel.NOT_CALCULATED)
+        self.assertEqual(ClosedOnCreateCalc.calls, 1, "Only the open record may have calculated.")
+        self.assertTrue(
+            [c for c in registered.call_args_list if open_run in repr(c)],
+            "The open record's run must be registered, or the checks below prove nothing.",
+        )
+        for spy, what in ((registered, "registered"), (announced, "announced"), (cached, "cached")):
+            self.assertFalse(
+                [c for c in spy.call_args_list if closed_run in repr(c)],
+                f"No run may be {what} for the closed record; got {spy.call_args_list!r}.",
+            )
+        self.assertEqual(
+            list(AuditLog.objects.filter(resource=CLOSED_ON_CREATE, object_id=pk).values_list("action", flat=True)),
+            ["create"],
+            "The closed record's trail must hold its create entry only.",
+        )
+        self.assertEqual(
+            list(ClosedOnCreateCalc.history.filter(id=pk).values_list("is_calculated", flat=True)),
+            [CalculationModel.NOT_CALCULATED],
+            "The closed record's history must hold its creation only.",
+        )

@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Iterable, cast
 from uuid import uuid4
 
+from django.core.exceptions import FieldDoesNotExist
 from django.core.files.base import File
 from django.db import transaction
 from django.db.models import Model, QuerySet
@@ -255,12 +256,38 @@ class OneModelEntry(
             and not getattr(self, "_calculate_requested", False)
         )
 
+    def _closed_after_update(self, serializer):
+        """Whether the record is closed once this update is applied.
+
+        Asked on a copy carrying the incoming values, with the status the
+        record has before the edit, as every other closed check is.
+        """
+        preview = copy.copy(serializer.instance)
+        for name, value in serializer.validated_data.items():
+            if name == "is_calculated":
+                continue
+            try:
+                field = preview._meta.get_field(name)
+            except FieldDoesNotExist:
+                continue
+            if not (field.many_to_many or field.one_to_many):
+                setattr(preview, name, value)
+        return bool(calculation_closed_reason(preview))
+
     def perform_update(self, serializer):
+        self._status_kept_closed = False
         if self._should_reset_is_calculated_for_update(serializer.instance):
-            serializer.instance.is_calculated = CalculationModel.NOT_CALCULATED
-        if hasattr(self, "request") and self._should_skip_history_for_sharepoint_edit(
-            self.request,
-            serializer.instance,
+            if self._closed_after_update(serializer):
+                # A closed record keeps its status through an edit, closing it
+                # included: nothing could ever calculate it to set it again.
+                serializer.validated_data["is_calculated"] = serializer.instance.is_calculated
+                self._status_kept_closed = True
+            else:
+                serializer.instance.is_calculated = CalculationModel.NOT_CALCULATED
+        if (
+            not self._status_kept_closed
+            and hasattr(self, "request")
+            and self._should_skip_history_for_sharepoint_edit(self.request, serializer.instance)
         ):
             serializer.instance._history_change_reason = self._build_sharepoint_history_change_reason(
                 self.request
@@ -624,6 +651,8 @@ class OneModelEntry(
 
     def update(self, request, *args, **kwargs):
         self.reset_failed_audit_log_state()
+        # Set by perform_update when an edit leaves the record closed.
+        self._status_kept_closed = False
 
         model_container = self.kwargs["model_container"]
         calculationId = self.kwargs["calculationId"]
@@ -726,7 +755,7 @@ class OneModelEntry(
                         audit_payload = getattr(prepared_request, "_data", getattr(prepared_request, "data", {}))
                         response = UpdateModelMixin.update(self, prepared_request, *args, **kwargs)
                         self._broadcast_update(instance)
-                        if should_reset_is_calculated:
+                        if should_reset_is_calculated and not self._status_kept_closed:
                             return self._reset_instance_is_calculated(
                                 response,
                                 skip_history=should_skip_history_for_sharepoint_edit,
@@ -820,7 +849,7 @@ class OneModelEntry(
                     # data-mutation broadcast for plain updates here.
                     if not self._calculate_requested:
                         self._broadcast_update(instance)
-                    if should_reset_is_calculated:
+                    if should_reset_is_calculated and not self._status_kept_closed:
                         return self._reset_instance_is_calculated(
                             response,
                             skip_history=should_skip_history_for_sharepoint_edit,

@@ -90,17 +90,24 @@
 
 ---
 
-### Batch 2l — Calculate on a closed record is refused with its reason ✅
+### Batch 2l — A closed record: Calculate is refused with its reason, the rest stays editable ✅
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 2.110 – 2.112 |
+| Scenario range | 2.110 – 2.116 |
 | Type | E |
-| Files covered | `lex/api/views/model_entries/One.py` (`OneModelEntry.update`), `lex/core/calculation_closing.py` |
+| Files covered | `lex/api/views/model_entries/One.py` (`OneModelEntry.update`, `perform_update`, `_closed_after_update`), `lex/core/calculation_closing.py` |
 | Test file | `lex/test_project/tests/crud_api/test_2l_calculate_closed_record.py` |
-| Test classes | `TestCluster02l_CalculateClosedRecord` — 2.110 the Calculate PATCH on a closed record answers 409 with the model's reason in `detail`, the record stays SUCCESS and no run is marked in progress; 2.111 an open record still gets 202 and its run finishes; 2.112 a method answering `True` gets the default message |
+| Test classes | `TestCluster02l_CalculateClosedRecord` — 2.110 the Calculate PATCH on a closed record answers 409 with the model's reason in `detail`, the record stays SUCCESS and no run is marked in progress; 2.111 an open record still gets 202 and its run finishes; 2.112 a method answering `True` gets the default message; 2.113 a closed record's other fields stay editable, and the edit keeps its status; 2.114 closing a record through an edit keeps its status; 2.115 reopening it resets it like any edit of an open record; 2.116 an open record's edit still resets it |
 | Fixtures | `ClosableCalc`, `ClosedByTrueCalc` from `calculations/models.py` (cluster 7u) |
-| Tests landed | **3 pass / 0 fail** |
+| Tests landed | **7 pass / 0 fail** |
 | Status | ✅ Complete — paired with 7u and 12m |
+
+**Why an edit keeps a closed record's status.** Every edit through the app resets a calculation record
+to NOT_CALCULATED, since its inputs may have changed. A closed record can never be recalculated, so the
+reset would strand it there for good, and closing a calculated record through an edit (setting the field
+its `calculation_closed_reason()` reads) would flip it to NOT_CALCULATED in the same save. The edit asks on a copy carrying the incoming values: a record that is
+closed once the edit is applied keeps its status; an open one, reopened ones included, is reset as
+before. Nothing else about edits changes: closing stops only the calculation.
 
 ---

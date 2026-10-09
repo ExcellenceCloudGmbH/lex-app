@@ -224,5 +224,6 @@ letters:
       closed child skips it, still ends in SUCCESS, and names the child and the reason in its own
       log; 7.232-7.234 closed generated rows keep their values on the streaming path, the
       materialized fallback and the Celery calc_and_save task; 7.235 answering True closes; 7.236 a
-      record created closed does not calculate on create; 7.237 the method sees the status from
+      record created closed (its calculation_closed_reason() answers a reason) does not calculate on
+      create, and nothing of a run happens for it: no registration, broadcast, cache entry, run audit entry or history row; 7.237 the method sees the status from
       before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not.
