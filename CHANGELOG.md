@@ -1,3 +1,12 @@
+## [2.3.5] - 2026-10-09
+
+### Added
+- **backend** a closed record is never calculated again ([a0d1f915](https://github.com/ExcellenceCloudGmbH/lex-app/commit/a0d1f915)) (#806)
+- **backend** a record created through the app can start its own calculation ([e7a6b10e](https://github.com/ExcellenceCloudGmbH/lex-app/commit/e7a6b10e)) (#805)
+
+### Fixed
+- **backend** `lex --version` works, and `from lex.core.signals import *` no longer raises ([674c42be](https://github.com/ExcellenceCloudGmbH/lex-app/commit/674c42be)) (#802)
+
 ## [2.3.4] - 2026-10-02
 
 ### Fixed
