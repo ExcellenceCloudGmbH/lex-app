@@ -134,6 +134,7 @@ from typing import List, Dict, Any, TYPE_CHECKING
 from django.db.models import UniqueConstraint
 from django.db.models.base import ModelBase
 from lex.api.utils import operation_context
+from lex.core.calculation_closing import skip_closed
 from lex.core.exceptions import *
 from lex.core.models.LexModel import LexModel
 from lex.lex_app import settings
@@ -959,6 +960,8 @@ def calc_and_save_sync(models, *args):
             # no-op. Mirrors calc_and_save_streaming, which already resolves
             # per model before save.
             prepared = model.delete_models_with_same_defining_fields()
+            if skip_closed(prepared):
+                continue
 
             # Calculate and save the model
             try:
@@ -1033,6 +1036,8 @@ def calc_and_save_streaming(model_iter, *args):
         # Stage-2 prepare inline (dedup + pk reset), matching the legacy
         # _prepare_models_for_processing per-model step.
         prepared = model.delete_models_with_same_defining_fields()
+        if skip_closed(prepared):
+            continue
         try:
             with calculation_execution_context():
                 try:
@@ -1251,6 +1256,17 @@ class CalculatedModelMixin(LexModel, metaclass=CalculatedModelMixinMeta):
     @abstractmethod
     def calculate(self):
         pass
+
+    def calculation_closed_reason(self):
+        """Why this row must not be calculated again, or ``None`` while it may be.
+
+        Override it to close a generated row, for instance once it has been
+        posted elsewhere. A closed row is neither recalculated nor saved when
+        its batch is generated again, so it keeps its values; the skip is noted
+        in the log of the calculation that generated the batch. Answer ``True``
+        to close it with a default message.
+        """
+        return None
 
     def lex_func(self):
         if self.calculate_mixin.__func__ is not CalculatedModelMixin.calculate_mixin:

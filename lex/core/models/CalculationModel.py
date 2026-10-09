@@ -20,6 +20,7 @@ from django_lifecycle.conditions import WhenFieldValueIs
 from lex.api.utils import operation_context, OperationContext
 from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ContextResolver import ContextResolver
+from lex.core.calculation_closing import calculation_closed_reason, report_skipped
 from lex.core.exceptions import (
     ensure_list,
     find_exception_artifacts,
@@ -146,6 +147,43 @@ class CalculationModel(LexModel):
     class Meta:
         abstract = True
 
+    def calculation_closed_reason(self):
+        """Why this record must not be calculated again, or ``None`` while it may be.
+
+        Override it to close a record, for instance once its result has been
+        posted elsewhere::
+
+            def calculation_closed_reason(self):
+                if self.sap_posted:
+                    return "Already posted to SAP, so it can't be calculated again."
+
+        A closed record is never calculated, and its status never changes:
+        its Calculate button is greyed and shows this message (the record's
+        rows carry it as ``lex_reserved_calculation_closed_reason``), and a
+        click that slips through is refused with it; a save that sets it
+        IN_PROGRESS keeps its previous status; a calculation that would start
+        it skips it and says so in its own log. Closing stops only the
+        calculation: the record's other fields stay editable, and an edit
+        through the app keeps its status, where an open record's edit resets
+        it to NOT_CALCULATED. Answer ``True`` to close it with a default
+        message. Keep it cheap: the grid asks it for every row it shows.
+
+        It always sees the record as it was before the run was asked for, so
+        a record that may only ever calculate once can close itself on its
+        own status::
+
+            def calculation_closed_reason(self):
+                if self.is_calculated == self.SUCCESS:
+                    return "Already calculated."
+        """
+        return None
+
+    def _status_before_trigger(self):
+        """The status this record had before something set it IN_PROGRESS."""
+        if self._state.adding:
+            return self.NOT_CALCULATED
+        return self.initial_value("is_calculated")
+
     def save(self, *args, **kwargs):
         skip_hooks = kwargs.get("skip_hooks", False)
         # Detect when this save is the trigger for a new calculation cycle.
@@ -159,6 +197,19 @@ class CalculationModel(LexModel):
             and not getattr(self, "_calculation_hook_in_progress", False)
             and not getattr(self, "_defer_calculate_hook", False)
         )
+
+        if is_calculation_trigger:
+            # Ask with the status the record had before this save, as the
+            # Calculate button does: "closed once calculated" holds here too.
+            requested_status = self.is_calculated
+            self.is_calculated = self._status_before_trigger()
+            closed_reason = calculation_closed_reason(self)
+            if closed_reason:
+                # A closed record keeps its status; the rest of the save goes ahead.
+                report_skipped(self, closed_reason)
+                is_calculation_trigger = False
+            else:
+                self.is_calculated = requested_status
 
         if is_calculation_trigger:
             # Phase 1: Save IN_PROGRESS with calculate_hook deferred.

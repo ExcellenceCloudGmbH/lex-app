@@ -181,3 +181,25 @@ they calculate. A parent calculation relies on its children calculating synchron
 for them, and a background run would break that.
 
 ---
+
+### Batch 7u — A closed record is never calculated again ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.228 – 7.237 |
+| Type | E |
+| Files covered | `lex/core/calculation_closing.py`, `lex/core/models/CalculationModel.py` (`calculation_closed_reason`, `save`), `lex/core/mixins/CalculatedModelMixin.py` (`calculation_closed_reason`, `calc_and_save_sync`, `calc_and_save_streaming`), `lex/lex_app/celery_tasks.py` (`calc_and_save`), `lex/api/views/model_entries/One.py` (`_calculate_after_create`) |
+| Test file | `lex/test_project/tests/calculations/test_7u_closed_calculations.py` |
+| Test classes | `TestCluster07u_ClosedCalculations` — 7.228 a save that sets a closed record IN_PROGRESS calculates nothing and keeps SUCCESS; 7.229 the rest of that save is still written; 7.230 an open record calculates as before; 7.231 a parent calculation skips its closed child, ends in SUCCESS, and its log names the child and the reason; 7.232 / 7.233 / 7.234 closed generated rows keep their values on the streaming path, the materialized fallback and the Celery `calc_and_save` task; 7.235 answering `True` closes; 7.236 (`TestCluster07u_CreatedClosed`) a record created closed — its model's `calculation_closed_reason()` answers a reason — does not calculate on create, and none of a run's side effects happen for it — no registration, broadcast or cache entry, no run audit entry, no history row beyond the creation; 7.237 a record that closes itself once SUCCESS runs exactly once through repeated saves |
+| Fixtures | `ClosableCalc`, `ClosedByTrueCalc`, `ClosingParentCalc`, `ClosableBatchRow`, `ClosedOnCreateCalc`, `CalculatesOnceCalc` — added to `calculations/models.py`, kept out of `ALL_MODELS` (also used by 2l and 12m, with 12m's `ClosableNarrowReadCalc`) |
+| Tests landed | **10 pass / 0 fail** |
+| Coverage gain | every path that starts a calculation asks `calculation_closed_reason()` first: the save that sets IN_PROGRESS (and so every nested calculation), the Calculate button (2l), a create on a `calculate_on_create` model, and the three batch paths |
+| Status | ✅ Complete — paired with 2l (the button's refusal) and 12m (the greyed button) |
+
+**Why the method sees the status from before the run.** Projects used an `is_closed` flag to know
+whether a calculation had already run. Written as `if self.is_calculated == self.SUCCESS`, the
+method saw SUCCESS through the Calculate button but IN_PROGRESS inside a save asking for a run, so a
+nested calculation recalculated what the button refused. The save now asks with the status the
+record had before it (7.237).
+
+---

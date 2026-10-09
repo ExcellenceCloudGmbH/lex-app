@@ -81,3 +81,11 @@
 **Scenario range:** 2.108 – 2.109. **Test file:** `lex/test_project/tests/crud_api/test_2k_create_starts_calculation.py`. **Type:** E. **Status:** ✅ Complete. 2.108 answers 201 IN_PROGRESS while `calculate()` is held open; 2.109 a model without the flag answers NOT_CALCULATED as before. Covers `lex/api/views/model_entries/One.py`.
 
 ---
+
+### 2l. A closed record: Calculate is refused with its reason, the rest stays editable ✅
+
+**Gap:** a record whose `calculation_closed_reason()` answers a reason must not start a run from the Calculate button, and the user must see why. The PATCH answers 409 with the reason in `detail`, the key the frontend's error notice reads, before anything changes: the status stays, and no run is registered or announced. Closing stops only the calculation: the record's other fields stay editable, and an edit keeps its status, since nothing could recalculate it to set it again.
+
+**Scenario range:** 2.110 – 2.116. **Test file:** `lex/test_project/tests/crud_api/test_2l_calculate_closed_record.py`. **Type:** E. **Status:** ✅ Complete. 2.110 409 with the reason, status unchanged, no run marked in progress; 2.111 an open record still gets 202; 2.112 `True` gets the default message; 2.113 a closed record's other fields stay editable and keep its status; 2.114 closing through an edit keeps the status; 2.115 reopening resets like any edit; 2.116 an open record's edit still resets. Covers `lex/api/views/model_entries/One.py`.
+
+---

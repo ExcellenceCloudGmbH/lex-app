@@ -847,6 +847,7 @@ def calc_and_save(models: List[Model], *args, **kwargs):
     so it lands CANCELLED instead of computing to completion. Signal
     revoke remains the relied-upon kill; this is skipped without Redis.
     """
+    from lex.core.calculation_closing import skip_closed
     from lex.core.cancellation import cluster_cancel_index
     from lex.core.models.CalculationModel import CalculationCancelled
 
@@ -862,10 +863,15 @@ def calc_and_save(models: List[Model], *args, **kwargs):
     summary = {
         "total_models": len(models),
         "processed_successfully": 0,
+        "skipped_closed": 0,
         "errors": 0
     }
 
     for model in models:
+        # A closed row keeps its values: it is neither calculated nor saved.
+        if skip_closed(model):
+            summary["skipped_closed"] += 1
+            continue
         try:
             logger.info(f"Processing model {model}")
             from lex.audit_logging.utils.ModelContext import model_logging_context

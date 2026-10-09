@@ -119,3 +119,11 @@ cluster-2 models are too shallow; we need a model with one of every
 **Why a regression matters:** users must be able to remove attachments; a removal that silently un-does itself corrupts the record's document trail.
 
 **Scenario range:** 12.39 – 12.41. **Test file:** `lex/test_project/tests/serializers/test_12h_filefield_clear.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.39 empty value clears; 12.40 omit keeps; 12.41 upload replaces.
+
+### 12m. A closed record does not offer Calculate, and says why ✅
+
+**What it tests:** the frontend enables a record's Calculate button only while `lex_reserved_scopes.edit` lists `is_calculated`. A closed record (one whose `calculation_closed_reason()` answers a reason) leaves it out, so its button is greyed; every other field the user may edit stays editable. Calculation rows also carry the reason as `lex_reserved_calculation_closed_reason`, so the greyed button can say why.
+
+**Why a regression matters:** an active button that can only ever be refused sends the user into an error for every closed record, and a greyed one without the reason tells them they lack permission when they don't.
+
+**Scenario range:** 12.58 – 12.62. **Test file:** `lex/test_project/tests/serializers/test_12m_closed_record_scopes.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.58 a closed record's edit scopes leave out `is_calculated` and keep `note`; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the reason; 12.61 an open record carries null; 12.62 the reason survives a narrow read permission. Follows 12l (12.54 – 12.57).

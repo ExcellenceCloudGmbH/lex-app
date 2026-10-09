@@ -283,6 +283,9 @@ class TestCluster08v_CooperativeMarkerCheck(SimpleTestCase):
 
         model = mock.MagicMock(name="model")
         model.lex_func.return_value = lambda: None
+        # The task asks every row whether it is closed; a bare MagicMock
+        # answers with a truthy mock, which reads as closed.
+        model.calculation_closed_reason.return_value = None
         with mock.patch(
             "lex.api.utils.operation_context"
         ) as op_ctx, mock.patch.object(idx, "is_cancelled", return_value=False):

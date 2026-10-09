@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 53
+max_scenario: 62
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -132,3 +132,18 @@ letters:
       (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone;
       summer round trip, year-end midnight across the winter offset, and a truthful designated instant.
       Frontend twin datetimeConventionRoundTrip.test.ts.
+  m:
+    title: A closed record does not offer Calculate, and says why
+    scenarios: 12.58-12.62
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      12.58 a closed record's lex_reserved_scopes.edit leaves out is_calculated, which greys its
+      Calculate button, and keeps the fields the user may edit; 12.59 an open record still lists
+      it; 12.60 grid rows and the record page carry the model's reason in
+      lex_reserved_calculation_closed_reason, for the greyed button's tooltip; 12.61 an open
+      record's row carries null; 12.62 the reason survives a read permission that hides other
+      fields. Follows 12l (12.54-12.57).
