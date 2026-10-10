@@ -11,6 +11,7 @@ What a Lex App installation runs, and what each process needs. How you schedule 
 | **Web** | `lex start --loop asyncio lex_app.asgi:application --host 0.0.0.0 --port 8000` | Always |
 | **Celery workers** | `lex celery-workers --count N` | The application has calculations that dispatch asynchronously |
 | **Streamlit** | `lex streamlit` | The application has dashboards |
+| **Reflex** | `lex reflex run --env prod` | The application has [[access-and-dashboards/reflex/index\|Reflex dashboards]] — see [[access-and-dashboards/reflex/running and deploying\|Running & Deploying]] for what production mode needs |
 | **Recovery supervisor** | `lex-recovery-supervisor` | Long-running calculations that must survive a worker dying |
 | **Recovery beat** | `lex-recovery-beat` | Alongside the supervisor |
 | **Flower** | `lex flower` | Optional; a web view of the Celery queues |
@@ -61,6 +62,7 @@ flowchart TB
     WK["Celery workers"] --> DB
     WK --> RD
     ST["Streamlit"] --> BE
+    RX["Reflex"] --> DB
 ```
 
 The dotted line is the one to remember: the interface talks to the backend
