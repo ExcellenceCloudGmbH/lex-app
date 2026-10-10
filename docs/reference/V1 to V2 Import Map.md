@@ -7,6 +7,21 @@ title: "V1 to V2 Import Map"
 
 A complete find-and-replace table for updating your imports.
 
+`generic_app` was one package. Its contents did not move together — they were
+split by what they do, and two of the destinations are not `lex` at all:
+
+```mermaid
+flowchart LR
+    G["<code>generic_app</code>"]
+    G --> M["<code>lex.core.models</code><br/><i>LexModel, CalculationModel</i>"]
+    G --> A["<code>lex.audit_logging.handlers</code><br/><i>LexLogger</i>"]
+    G --> D["<code>django.db.models</code><br/><i>plain Django</i>"]
+    G --> H["<code>django_lifecycle</code><br/><i>third party</i>"]
+    G --> X["nothing<br/><i>IsCalculatedField, CalculateField<br/>are inherited now</i>"]
+```
+
+That split is what a search-and-replace gets wrong.
+
 ## Core Models
 
 | V1 Import | Current Import |

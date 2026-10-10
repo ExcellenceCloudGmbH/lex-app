@@ -12,6 +12,7 @@ Four steps, in order. The first three take about twenty minutes; the tutorial ta
 ## Before you start
 
 - **Python 3.12.** Not 3.11, not 3.13 — check with `python3.12 --version`.
+- **A database.** PostgreSQL on your machine, or SQLite with one line in `.env` — [[start-here/installation#Choose a Database|Choose a Database]] has both.
 - **Access to your project's repository.**
 - **Access to [Excellence Cloud](https://excellence-cloud.de)** for the Keycloak client configuration. `lex init` needs it, and without it you can install the package but not run an application.
 

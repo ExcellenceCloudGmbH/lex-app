@@ -48,7 +48,49 @@ Business logic for one combination. Same contract as `CalculationModel.calculate
 MyBatchModel.create(**kwargs)
 ```
 
-Orchestrates the four-step pipeline:
+Which route `create()` takes depends on whether Celery is active, and — when it
+is not — on `LEX_SYNC_STREAMING_EXPANSION`:
+
+```mermaid
+flowchart TB
+    C["MyBatchModel.create(**kwargs)"] --> Q{"CELERY_ACTIVE is true
+    and calculate() has .delay?"}
+
+    Q -->|no| S{"LEX_SYNC_STREAMING_EXPANSION"}
+    S -->|"unset or true (default)"| ST["Streaming expansion
+    one model at a time"]
+    S -->|"false (legacy rollback)"| P
+    Q -->|yes| P["The four-step pipeline
+    every combination materialised first"]
+
+    ST --> STL["generate -> prepare -> calculate -> save -> release
+    peak memory O(depth)"]
+
+    P --> P1["1 - ModelCombinationGenerator"]
+    P1 --> P2["2 - duplicate handling"]
+    P2 --> P3["3 - ModelClusterManager"]
+    P3 --> P4{"4 - dispatch"}
+    P4 -->|Celery| CEL["CeleryTaskDispatcher
+    .dispatch_calculation_groups()"]
+    P4 -->|sync| SY["calc_and_save_sync()
+    fail-fast"]
+    CEL -.->|"dispatch fails, or a task raises"| SY
+```
+
+> [!important] The four-step pipeline is not the default path locally
+> `LEX_SYNC_STREAMING_EXPANSION` defaults to `true`, so with Celery inactive
+> `create()` **returns before Step 1 ever runs**. It expands depth-first
+> through `ModelCombinationGenerator.generate_model_combinations_streaming()`
+> and hands each model to `calc_and_save_streaming()`, which calculates, saves
+> and releases it before generating the next — peak memory proportional to the
+> depth of the combination tree rather than to the number of combinations.
+>
+> The four steps below therefore describe what happens when **Celery is
+> active**, or when the flag is explicitly set to `false` to roll back to the
+> materialising path. Clustering is a property of the pipeline, so
+> `parallelizable_fields` has no effect on the streaming path.
+
+The four-step pipeline:
 
 ### Step 1 — `ModelCombinationGenerator`
 

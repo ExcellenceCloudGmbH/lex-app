@@ -27,6 +27,22 @@ Make sure you have:
 4. [[migrating-from-v1/refactoring/Part 4 — Lifecycle Hooks|Part 4 — Lifecycle Hooks]] — replace `UploadModelMixin` with explicit `@hook` decorators
 5. [[migrating-from-v1/refactoring/Part 5 — Logging & Permissions|Part 5 — Logging & Permissions]] — upgrade `CalculationLog` to `LexLogger` and `ModificationRestriction` to `permission_*` methods
 
+Parts 1 and 2 touch every file; the rest are scoped to the models that use the
+feature in question, so a project with no upload models can skip most of Part 4:
+
+```mermaid
+flowchart TB
+    P1["<b>Part 1</b><br/>Project structure & imports<br/><i>every file</i>"]
+    P2["<b>Part 2</b><br/>Models & fields<br/><i>every model</i>"]
+    P3["<b>Part 3</b><br/>Calculations<br/><i>models that recompute</i>"]
+    P4["<b>Part 4</b><br/>Lifecycle hooks<br/><i>models with upload behaviour</i>"]
+    P5["<b>Part 5</b><br/>Logging & permissions<br/><i>models that log or restrict</i>"]
+
+    P1 --> P2 --> P3 --> P4 --> P5
+    P1 -.->|"flatten generic_app<br/>into Upload/ Input/ Reports/"| ETL["ETL layout"]
+```
+
+
 ## How Long Does It Take?
 
 | Project Size | Estimated Time |

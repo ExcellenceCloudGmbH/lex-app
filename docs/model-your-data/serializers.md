@@ -266,7 +266,7 @@ embedded in a dashboard:
 Same route, same rows, six columns instead of a dozen: the framework's audit
 fields are gone and the foreign key arrives as a currency code, because that is
 what `FundSummarySerializer` declares. See
-[[access-and-dashboards/streamlit dashboards|Streamlit dashboards]].
+[[access-and-dashboards/streamlit/index|Streamlit dashboards]].
 
 > [!note] The `id` field is always present
 > When you override `api_serializers["default"]`, the framework always includes the model's primary key as `id` in the serialized output — even if your `Meta.fields` omits it. Row navigation, edit URLs, and the CRUD loading overlay all depend on this field.
