@@ -11,6 +11,8 @@ In this part, you'll create a `BudgetSummary` model that automatically calculate
 In PyCharm, right-click the `Reports/` folder → **New → Python File** → name it `BudgetSummary`:
 
 ```python title="Reports/BudgetSummary.py"
+import pandas as pd
+
 from django.db import models
 from lex.core.models.CalculationModel import CalculationModel
 from lex.audit_logging.handlers.LexLogger import LexLogger
@@ -202,6 +204,19 @@ If your `calculate()` method throws an exception, the framework sets `is_calcula
 
 > [!tip]
 > In production, large calculations can be dispatched to [[calculations/celery and async calculations|Celery workers]] for parallel processing. During development, they stay in-process in your app, so you can work without separate workers.
+
+## What You Should See
+
+Run the calculation on each row and the five calculated fields fill in. The
+figure below is this tutorial's data: four teams, one quarter, and Marketing
+over its budget — `remaining_budget` has gone negative and `is_over_budget`
+is the only tick in the column.
+
+![Budget Summary after calculating: Design, Sales, Marketing and Engineering for Q1 2026, with Marketing at 33,630.00 spent against a 26,000 budget — remaining budget -7,630.00, utilisation 129.35%, and the only Is Over Budget tick](images/tutorial/budget-summary-calculated.png)
+
+The `Calculation` column on the left is the state machine from this part: every
+row reads SUCCESS because `calculate()` returned without raising. A row that
+failed would read ERROR and keep the previous values.
 
 ## Checkpoint
 
