@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 385
+max_scenario: 392
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1250,3 +1250,23 @@ letters:
       without the test project's environment and with the suite's checkout first on PYTHONPATH.
       Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
       set main() answers without Django fails both, because Django setup crashes in that directory.
+  av:
+    title: '`lex init` writes migrations for the project only, never into site-packages'
+    scenarios: 1.386-1.392
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      `lex init` ran makemigrations for every installed app, so two packages whose models their own
+      migrations don't match got a migration written into site-packages on every install:
+      oauth2_authcodeflow, whose id became a bigint under lex's BigAutoField default, and the api-key
+      fork exc-djangorestframework-api-key 1.0.0, whose model widened id and hashed_key to 150 characters
+      without a migration. The package's next migration under the same number would conflict and stop
+      `lex init`. Now `lex init` makes migrations for the project's app only (1.386-1.388); lex ships the
+      api-key widening through MIGRATION_MODULES under the name `lex init` generated, so databases that
+      applied it see it as applied and new ones store the fork's 145-character ids (1.390, 1.391); and
+      oauth2_authcodeflow gets the default_auto_field its migrations were made with (1.392). 1.389 runs
+      makemigrations --check for every installed app. Mutations: four of four fail a test; the widening
+      one needs a fresh test database, as the reused one keeps the widened columns.
