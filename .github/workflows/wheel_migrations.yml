@@ -1,0 +1,72 @@
+# ──────────────────────────────────────────────────────────────────────
+#  Wheel Migrations — migrate an empty database from the built wheel.
+#
+#  Every other test runs on an editable install, which reads the source
+#  tree, so a migration that needs something the wheel does not carry
+#  passes them all. 2.2.2, 2.3.0 and 2.3.1 shipped the core migration
+#  without its SQL file, and every install failed `lex init` at migrate.
+#  This builds the wheel the way pip_publish.yml does and runs the
+#  database half of `lex init` from it, on an empty PostgreSQL database
+#  (.github/scripts/check_wheel_migrations.py).
+#
+#  Runs on pull requests that touch migrations or what the wheel ships,
+#  and from the Prerelease Gate on every prerelease. pip_publish.yml runs
+#  the same two checks on the exact dist it uploads.
+# ──────────────────────────────────────────────────────────────────────
+name: Wheel Migrations
+
+on:
+  pull_request:
+    paths:
+      - "lex/**/migrations/**"
+      - "lex/**/sql/**"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "requirements.txt"
+      - ".github/scripts/check_wheel_migrations.py"
+      - ".github/scripts/check_wheel_runtime_files.py"
+      - ".github/workflows/wheel_migrations.yml"
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  wheel-migrations:
+    name: "Migrate an empty database from the built wheel"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # The check connects the way lex-app's `default` target does.
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: lundadminlocal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip build
+
+      # The sdist first and the wheel from it, as the release builds: the
+      # sdist is where a file left out of MANIFEST.in goes missing.
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Refuse a wheel missing a file the framework opens at runtime
+        run: python .github/scripts/check_wheel_runtime_files.py --dist dist
+
+      - name: Migrate an empty database from the built wheel
+        run: python .github/scripts/check_wheel_migrations.py --dist dist
