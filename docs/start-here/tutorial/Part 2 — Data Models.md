@@ -605,6 +605,17 @@ Open `http://localhost:8000` and navigate to **Teams & People → Team** — you
 >
 > Import order matters: teams first, then employees, then expenses.
 
+## What You Should See
+
+With the models in place and data loaded, `Expense` appears under the
+**Expenses** group you named in `model_structure.yaml`, one row per
+submission:
+
+![The Expense grid: fourteen Q1 2026 expenses with description, amount, category and date, grouped under the Expenses entry in the sidebar](images/tutorial/expenses-grid.png)
+
+The sidebar groups and their emoji come from `model_structure.yaml` — the
+names on the left are the ones you wrote there, not the model class names.
+
 ## Checkpoint
 
 At this point you have:

@@ -21,7 +21,7 @@ The columns include both history-tracking fields and all of the model's own fiel
 
 You can [[using-the-app/the-grid/filtering and sorting|filter and sort]] this grid like any other — for example, filter by `Edited By` to see all changes made by a specific person, or sort by date to trace the evolution of the record.
 
-![The History tab, showing every version as a row](images/record-detail/history-tab.svg)
+![One row per version, with Created By, Edited By and Calculation alongside the model's own fields as they stood at that moment](images/record-detail/history-tab.svg)
 
 ## The As Of Control
 

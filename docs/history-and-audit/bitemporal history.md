@@ -110,10 +110,44 @@ This is where Lex App goes beyond standard history. The framework creates a **se
 | `sys_to` | `DateTimeField` (nullable) | When superseded. `NULL` = current knowledge |
 | `history_object` | `ForeignKey` | Points back to the Level 1 history row |
 | `meta_history_type` | `CharField(1)` | `+` Created · `~` Changed · `-` Deleted |
-| `meta_task_name` | `CharField` | Celery task name (for scheduled activations) |
+| `meta_task_name` | `CharField` | Identifies who will activate a future-dated row — a Celery task name, or a `db_applier_…` marker when the database applier owns it (see [[history-and-audit/bitemporal history#Activating a future-dated record\|below]]) |
 | `meta_task_status` | `CharField` | Task status: `NONE`, `SCHEDULED`, `DONE`, `CANCELLED` |
 
 Like Level 1, the `sys_to` fields are automatically chained — each meta row's `sys_to` points to the next row's `sys_from`, so you get a continuous system-time timeline.
+
+### Activating a future-dated record
+
+A history row whose `valid_from` is in the future is written immediately and
+becomes the live row later. `meta_task_status` goes to `SCHEDULED` when the row
+is written; what converges it when the time comes depends on where the
+application runs.
+
+**In the database.** On PostgreSQL with the `lex.core` migration applied and
+pg_cron calling `lex_apply_due_activations()` every minute, the database does
+the work itself. Nothing in the application needs to be awake — no Celery task,
+no timer, no process at all. The applier writes a heartbeat on each run, and
+lex-app treats it as alive while that heartbeat is fresh.
+
+**Everywhere else.** On SQLite, on PostgreSQL without pg_cron, or before the
+job is registered, the mechanisms that were always there are armed exactly as
+before: a Celery `PeriodicTask` when `CELERY_ACTIVE=true`, otherwise an
+in-process scheduler thread.
+
+The choice is made per row, at write time, by asking whether the heartbeat is
+fresh. Both routes reach the same end state and are safe to run side by side,
+so an installation that gains or loses pg_cron does not need a migration of
+pending rows.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `LEX_ACTIVATION_APPLIER_LIVENESS_SECONDS` | `300` | How recent the applier's heartbeat must be for it to count as alive. pg_cron fires every minute; five minutes absorbs a slow tick or a failover without arming redundant timers, and still notices a dead applier inside the same window. |
+
+> [!note] "Not alive" is always safe
+> The liveness check never raises. A non-PostgreSQL backend, a heartbeat table
+> that the migration has not created yet, an applier that has never run, or a
+> connection problem all read as *not alive* — and that falls back to the
+> behaviour lex-app has always had. The query runs in its own savepoint, so a
+> missing table cannot poison the transaction that asked.
 
 ### Why Two Levels?
 
