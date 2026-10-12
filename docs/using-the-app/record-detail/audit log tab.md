@@ -24,7 +24,7 @@ The Audit Log tab displays a grid of all API operations that affected the curren
 | **Calculation Record** | The related record (e.g., "Marketing — 1") |
 | **Actions** | Quick view link to inspect the full entry |
 
-![The Audit Log tab, showing who changed what and when](images/record-detail/audit-log-tab.svg)
+![Every attempted operation, not just the ones that succeeded — the entry is written before the operation runs, so a delete that failed is still on record](images/record-detail/audit-log-tab.svg)
 
 ## The Status Lifecycle
 
