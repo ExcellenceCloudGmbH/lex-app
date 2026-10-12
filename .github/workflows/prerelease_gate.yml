@@ -93,12 +93,20 @@ jobs:
       # pip_publish gate, so the stakeholder email is sent as a release run.
       run_kind: release
 
+  # ── The wheel this prerelease would publish must migrate an empty
+  #    database. The gate above tests an editable install, which reads the
+  #    source tree and cannot see what the wheel leaves out: 2.2.2–2.3.1
+  #    shipped the core migration without its SQL file. ─────────────────
+  wheel-migrations:
+    name: "Release Gate: Wheel migrations"
+    uses: ./.github/workflows/wheel_migrations.yml
+
   # ── GREEN: stamp the marker so the eventual promotion skips the
   #    (redundant) pip_publish gate and publishes directly. ──────────────
   mark-validated:
     name: "Stamp gate-passed marker (green)"
-    needs: gate
-    if: ${{ needs.gate.outputs.overall_ok == 'true' }}
+    needs: [gate, wheel-migrations]
+    if: ${{ needs.gate.outputs.overall_ok == 'true' && needs.wheel-migrations.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write   # edit the prerelease body
@@ -135,8 +143,8 @@ jobs:
   #    Uses only GITHUB_TOKEN + contents:write — no PAT, no org scope. ────
   cleanup-on-red:
     name: "Delete failed prerelease + tag (red)"
-    needs: gate
-    if: ${{ always() && needs.gate.result == 'failure' }}
+    needs: [gate, wheel-migrations]
+    if: ${{ always() && (needs.gate.result == 'failure' || needs.wheel-migrations.result == 'failure') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write   # delete the release and the tag ref

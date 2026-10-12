@@ -158,6 +158,22 @@ jobs:
     permissions:
       contents: read
 
+    # check_wheel_migrations.py migrates an empty database from the built
+    # wheel, connecting the way lex-app's `default` target does.
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: django
+          POSTGRES_PASSWORD: lundadminlocal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -223,6 +239,20 @@ jobs:
       # wrong thing.
       - name: Refuse a wheel that ships no frontend
         run: python .github/scripts/check_wheel_frontend.py --dist dist
+
+      # The core migration executes a SQL file that sits next to it. Nothing
+      # declared that file as package data, so 2.2.2, 2.3.0 and 2.3.1 shipped
+      # the migration without it and every install failed `lex init` at
+      # migrate. Reads the built zip, like the frontend check above.
+      - name: Refuse a wheel missing a file the framework opens at runtime
+        run: python .github/scripts/check_wheel_runtime_files.py --dist dist
+
+      # Every test before this ran on an editable install, which reads the
+      # source tree, so it cannot see what the wheel leaves out. This installs
+      # the wheel into a fresh virtualenv and runs the database half of
+      # `lex init` on an empty PostgreSQL database. Runs on a dry run too.
+      - name: Migrate an empty database from the built wheel
+        run: python .github/scripts/check_wheel_migrations.py --dist dist
 
       - name: Publish to PyPI
         if: ${{ github.event.inputs.dry_run != 'true' }}

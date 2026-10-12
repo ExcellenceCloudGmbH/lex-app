@@ -22,6 +22,11 @@ on:
       # test_check_wheel_frontend.py refuses the combination that has neither.
       - "MANIFEST.in"
       - "requirements.txt"
+      # test_check_wheel_migrations.py reads these: every wheel guard must run
+      # before the upload, and the prerelease gate must count the wheel check.
+      - ".github/workflows/pip_publish.yml"
+      - ".github/workflows/prerelease_gate.yml"
+      - ".github/workflows/wheel_migrations.yml"
   pull_request:
     paths:
       - ".github/scripts/**"
@@ -34,6 +39,11 @@ on:
       # test_check_wheel_frontend.py refuses the combination that has neither.
       - "MANIFEST.in"
       - "requirements.txt"
+      # test_check_wheel_migrations.py reads these: every wheel guard must run
+      # before the upload, and the prerelease gate must count the wheel check.
+      - ".github/workflows/pip_publish.yml"
+      - ".github/workflows/prerelease_gate.yml"
+      - ".github/workflows/wheel_migrations.yml"
   workflow_dispatch:
 
 jobs:
