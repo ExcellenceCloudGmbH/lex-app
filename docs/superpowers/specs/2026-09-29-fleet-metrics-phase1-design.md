@@ -356,16 +356,19 @@ baselines (§4.4).
       secrets and run the migrations;
     - *container start*: initialised → container started;
     - *application ready*: container started → ready.
-  - **A failed start** is a pod deleted before it was ready, or not ready within the
-    600-second startup budget. Its init-container reason is kept, for example
-    `CrashLoopBackOff` in `django-migrate`.
+  - **A failed start** is a pod that never became ready: deleted before it was ready, or
+    still not ready 600 seconds (the startup budget) after it was created. Its
+    init-container reason is kept, for example `CrashLoopBackOff` in `django-migrate`. A
+    pod that became ready late is a slow start, not a failure, and counts in the startup
+    percentiles.
   - **Cause**, in this order:
     1. The Instance Controller operation running when the pod was created, mapped to
        `deploy` (`CREATE`, `RECOVER`, `RECONFIGURE`, `RELEASE`, `UPDATE_INFRA`,
        `CHANGE_CLIENT`), `resume` or `restart`.
     2. Otherwise `rollout` when the pod belongs to a new ReplicaSet.
-    3. Otherwise `scale_from_zero` on an autoscaled instance whose replicas were zero
-       before.
+    3. Otherwise `scale_from_zero` on an autoscaled instance whose Deployment wanted zero
+       replicas before (KEDA scales the wanted count; a node failure only drops the
+       available count, and is a reschedule).
     4. Otherwise `reschedule` (node maintenance, eviction).
   - Container restarts inside a running pod are counted separately and are not starts.
   - Also `api_idle_hours`: hours of D without a single API request, the time a
