@@ -728,7 +728,8 @@ the backend cannot see.
 - **Duplicates** are impossible in storage: the primary key is (day, actor, area,
   channel). The interface's per-tab dedupe saves requests, not correctness.
 - **Embedded use:** the admin app inside a Streamlit page (`embed=true`) and the widget
-  host (`/embed/widgets`) send `embed: true` and are counted as `ui_embed`. API requests
+  host (`/embed.html`, which lex-app frames; the older `/embed/widgets` route too) send
+  `embed: true` and are counted as `ui_embed`. API requests
   carry no embed marker, so only the event can say so.
 - **`api` and `ui` are never added together.** K2's figure is the collector's `ui_all`
   channel: distinct people over `ui` and `ui_embed` together, so a person who used an
