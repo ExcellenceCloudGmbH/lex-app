@@ -885,13 +885,16 @@ observation per instance.
 
 lex-analytics then takes the version for day D from these sources, in order:
 
-1. From R3: the instance's `lex_runtime_versions` row with the latest `first_seen` before
-   the end of D: the version most recently started by then. `last_seen` keeps moving while
-   a version runs, so it cannot select the day's version.
-2. For the newest day collected: the controller's observation, if it was made after the
+1. For the newest day collected: the controller's observation, if it was made after the
    end of D and no deploy-type operation finished between the end of D and the
-   observation. A release at 01:00 UTC is therefore never credited to the day before.
-   Source `observed`.
+   observation. A release at 01:00 UTC is therefore never credited to the day before. The
+   observation sees the running version whatever the traffic. Source `observed`.
+2. From R3: the instance's `lex_runtime_versions` table. Among rows with `first_seen`
+   before the end of D, take the one with the greatest `least(last_seen, end of D)`, and on
+   a tie the latest `first_seen`. That is the version seen running most recently by the end
+   of D. It is right for a version still running after D, an upgrade during D, and a
+   rollback, where a newer version stops being seen. The table only moves when the
+   instance serves requests, so it ranks after the observation.
 3. The previous day's stored version, when no deploy-type operation finished in between.
    Source `carried`.
 4. `unknown`.
