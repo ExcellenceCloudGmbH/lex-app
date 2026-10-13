@@ -27,6 +27,8 @@ on:
       - ".github/workflows/pip_publish.yml"
       - ".github/workflows/prerelease_gate.yml"
       - ".github/workflows/wheel_migrations.yml"
+      # test_docs_mirror.py reads how this one finds and supersedes mirror PRs.
+      - ".github/workflows/sync_docs_from_lex_app_docs.yml"
   pull_request:
     paths:
       - ".github/scripts/**"
@@ -44,6 +46,8 @@ on:
       - ".github/workflows/pip_publish.yml"
       - ".github/workflows/prerelease_gate.yml"
       - ".github/workflows/wheel_migrations.yml"
+      # test_docs_mirror.py reads how this one finds and supersedes mirror PRs.
+      - ".github/workflows/sync_docs_from_lex_app_docs.yml"
   workflow_dispatch:
 
 jobs:
