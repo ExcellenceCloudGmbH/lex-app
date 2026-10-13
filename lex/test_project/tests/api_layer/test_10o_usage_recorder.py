@@ -29,6 +29,22 @@ import pytest
 
 pytestmark = pytest.mark.api_layer
 
+_SKIP_NOT_PG = "the usage recorder's tables are PostgreSQL-only (0002_usage_metrics no-ops elsewhere)"
+
+
+def _skip_unless_postgresql(test_case) -> None:
+    """Skip ``test_case`` unless the active connection is PostgreSQL.
+
+    ``lex_usage_daily`` and ``lex_runtime_versions`` exist only where
+    ``0002_usage_metrics`` actually installed them -- it no-ops on every other backend,
+    including the ``local`` SQLite target (``DATABASE_DEPLOYMENT_TARGET=local``, see
+    ``lex/lex_app/settings.py``). Every class in this file that touches those tables
+    should call this from its own ``setUp`` so it skips cleanly there instead of
+    hard-failing on a table that was never supposed to exist.
+    """
+    if connection.vendor != "postgresql":
+        test_case.skipTest(_SKIP_NOT_PG)
+
 
 def _columns(table: str) -> set[str]:
     with connection.cursor() as cursor:
@@ -66,6 +82,10 @@ def _raw_insert(actor_kind: str, channel: str) -> None:
 
 class TestCluster10o_UsageTables(TestCase):
     """Cluster 10o: the recorder's tables exist, in the shape the collector reads."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        _skip_unless_postgresql(self)
 
     # -- 10.83 ---------------------------------------------------------
     def test_10_83_migration_installs_both_tables_with_their_keys(self) -> None:
