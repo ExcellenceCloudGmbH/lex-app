@@ -360,18 +360,26 @@ baselines (§4.4).
     - *container start*: initialised → container started;
     - *application ready*: container started → ready.
   - **A failed start** is a pod that never became ready: deleted before it was ready, or
-    still not ready 600 seconds (the startup budget) after it was created. Its
+    still not ready when its day is judged, at the end of the UTC day plus the 600-second
+    startup budget and 5 minutes. One instant judges every pod of the day, so a pod created
+    just before midnight has the least time. Its
     init-container reason is kept, for example `CrashLoopBackOff` in `django-migrate`. A
     pod that became ready late is a slow start, not a failure, and counts in the startup
     percentiles.
   - **Cause**, in this order:
     1. The Instance Controller operation running when the pod was created, mapped to
        `deploy` (`CREATE`, `RECOVER`, `RECONFIGURE`, `RELEASE`, `UPDATE_INFRA`,
-       `CHANGE_CLIENT`), `resume` or `restart`.
-    2. Otherwise `rollout` when the pod belongs to a new ReplicaSet.
-    3. Otherwise `scale_from_zero` on an autoscaled instance whose Deployment wanted zero
-       replicas before (KEDA scales the wanted count; a node failure only drops the
-       available count, and is a reschedule).
+       `CHANGE_CLIENT`), `resume` or `restart`. An operation without an end counts as
+       running for at most one hour after it started.
+    2. Otherwise `rollout` when a backend pod of another ReplicaSet was alive in the 10
+       minutes before this pod was created. It is asked at the pod's own creation, so the
+       UTC day boundary never changes a cause.
+    3. Otherwise `scale_from_zero` when the Deployment wanted zero replicas just before,
+       whatever the instance's autoscaling flag says today (KEDA scales the wanted count; a
+       node failure only drops the available count, and is a reschedule).
+    An instance whose `resource_identifier` is too long for Kubernetes to keep the
+    pod-template hash in its pod names (over 34 characters, 35 for dev) fails its whole
+    Prometheus read rather than reading as a day without starts.
     4. Otherwise `reschedule` (node maintenance, eviction).
   - Container restarts inside a running pod are counted separately and are not starts.
   - Also `api_idle_hours`: hours of D without a single API request, the time a
@@ -909,7 +917,12 @@ lex-analytics then takes the version for day D from these sources, in order:
    a tie the latest `first_seen`. That is the version seen running most recently by the end
    of D. It is right for a version still running after D, an upgrade during D, and a
    rollback, where a newer version stops being seen. The table only moves when the
-   instance serves requests, so it ranks after the observation.
+   instance serves requests, so it ranks after the observation. It speaks for D only
+   while fresh: it is stale when a deploy-type operation finished after its last sighting
+   (capped at the end of D) and before the end of D, or when that sighting predates the
+   operations the inventory covers. A release older than the recorder writes no
+   sighting, so after a rollback to one only the deploy reveals it. A stale table gives
+   no version, and the day's recorder coverage is `absent`, with no silence judged.
 3. The previous day's stored version, when no deploy-type operation finished in between.
    Source `carried`.
 4. `unknown`.
@@ -1016,7 +1029,11 @@ first release carries no Prometheus dependency at all.
 the fleet. Each touches a few series: the test cluster's ingress controller holds about
 120 active request series at a time. That is less than one person scrolling a per-instance dashboard. Operational
 effort is nil: the collector's own heartbeat covers it, and a failed Prometheus source
-marks itself without blocking the database sources.
+marks itself without blocking the database sources. A day on which Prometheus holds no
+sample of the instance's Deployment is a source error, not a day of zeros, and the
+catch-up retries it; idle hours and unavailable minutes count only time that has data.
+After three consecutive transport failures in a run, Prometheus is not asked again in
+that run, so an outage costs seconds, not the night.
 
 **Findings that shape the plan.**
 
