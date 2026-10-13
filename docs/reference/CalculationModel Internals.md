@@ -83,6 +83,14 @@ class LargeImport(CalculationModel):
         ...
 ```
 
+## Calculating on Create
+
+Set `calculate_on_create = True` to have records created through the app start
+their calculation straight away, in the background, as if **Calculate** had been
+clicked. Records created in code are not affected. It is read from the instance,
+so it can be a property that decides per record. See
+[[calculations/calculation models#Calculating New Records Automatically|Calculating New Records Automatically]].
+
 ## Celery Integration
 
 In production, calculations can be dispatched to [Celery](https://docs.celeryq.dev/) workers for background/parallel processing. The framework checks two things automatically:
@@ -131,6 +139,21 @@ For triaging and recovering from calculations that are wedged in `IN_PROGRESS`, 
 `cancel_stuck()` reuses the per-record `cancel()` machinery, so each cancelled run gets the identical terminal state, audit row, and WebSocket broadcast as a single user-initiated cancel — there's no parallel recovery code path. Because `cancel()` is recursive, cancelling a parent also revokes descendants sharing its `calculation_id`; each parent appears only once in `results`. Synchronously-dispatched runs (no `task_id`) can't be revoked and are reported as `skipped_not_cancellable` rather than force-failed.
 
 `started_at` is anchored to a monotonic clock internally, so `age_seconds` stays correct even if the system wall-clock jumps.
+
+## Closing a Record
+
+`calculation_closed_reason()` returns why a record must not be calculated again, or `None` while it may be. `CalculationModel` and `CalculatedModelMixin` both define it, returning `None`; returning `True` closes the record with a generic message. Every way a calculation can start asks it first, and sees the record as it was before the run was asked for:
+
+| How the calculation starts | What a closed record does |
+|---|---|
+| **Calculate** (`PATCH` with `calculate=true`) | Refused with HTTP 409, `{"detail": "<reason>", "code": "calculation_closed"}`; nothing changes |
+| A save that sets `is_calculated = IN_PROGRESS` (scripts, other calculations) | Keeps its previous status; the rest of the save is written, and the skip is logged, into the calling calculation's log when there is one |
+| `CalculatedModelMixin.create()`, in any mode | The existing row is neither recalculated nor saved; the Celery task counts it under `skipped_closed` |
+| A create on a `calculate_on_create` model | No run starts, and nothing of one is recorded: the record stays `NOT_CALCULATED`, with no audit entry or history row beyond its creation |
+
+Closing stops only the calculation. An edit through the app (a `PATCH` without `calculate`) saves the record's other fields and keeps its status, closing it included; an edit to an open record resets it to `NOT_CALCULATED`, as it always has. `calculation_closed_reason()` is asked on the record as the edit leaves it, so reopening a record resets it like any open one.
+
+Rows of calculation models carry the reason as `lex_reserved_calculation_closed_reason` (`null` while the record is open), and a closed record's `lex_reserved_scopes.edit` leaves out `is_calculated`, which is what greys its Calculate button. See [[calculations/calculation models#Closing a Record|Closing a Record]].
 
 ## Nested Calculations
 

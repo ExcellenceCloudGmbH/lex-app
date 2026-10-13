@@ -29,7 +29,7 @@ You should see `(.venv)` at the start of your prompt.
 
 > [!note]- Windows alternative
 > ```powershell
-> venv .venv
+> python -m venv .venv
 > .venv\Scripts\activate
 > ```
 > On some installations you may need to use `py` instead of `python`.
@@ -56,7 +56,7 @@ pip install -r requirements.txt
 > ```
 > If you encounter any problem in windows try using `python -m pip` on Windows to ensure you're using the virtual-environment pip.
 
-## Run the Setup Wizard
+## Run `lex setup`
 
 ```bash
 lex setup
@@ -67,13 +67,21 @@ lex setup
 > lex setup
 > ```
 
-After the wizard completes, you'll have:
+`lex setup` asks nothing — it writes these files and exits:
 
 ```
 TeamBudget/
 ├── .env
 ├── .run/
+│   ├── Celery_Worker.run.xml
+│   ├── Create_DB.run.xml
+│   ├── Flower.run.xml
+│   ├── Flush_DB.run.xml
 │   ├── Init.run.xml
+│   ├── Make_migrations.run.xml
+│   ├── Migrate.run.xml
+│   ├── Reflex.run.xml
+│   ├── Setup_With_AI.run.xml
 │   ├── Start.run.xml
 │   └── Streamlit.run.xml
 └── migrations/
@@ -86,7 +94,7 @@ The `.run/` folder contains PyCharm run configurations — these are pre-configu
 
 ## Open in PyCharm
 
-We recommend using [PyCharm](https://www.jetbrains.com/pycharm/) as your primary IDE — the setup wizard generates ready-made run configurations that handle environment variables automatically.
+We recommend using [PyCharm](https://www.jetbrains.com/pycharm/) as your primary IDE — `lex setup` generates ready-made run configurations that handle environment variables automatically.
 
 1. Open PyCharm → **File → Open** → select your TeamBudget folder
 2. When prompted, set the Python interpreter to the `python` inside your `.venv`
@@ -99,11 +107,17 @@ You'll see the run configurations appear in the top-right dropdown:
 > </video>
 > Opening the dropdown in the top-right toolbar and picking a configuration.
 
+This tutorial uses five of the eleven:
+
 | Run Configuration | What It Does |
 |---|---|
-| **Init** | Creates/updates the database and syncs [Keycloak](https://www.keycloak.org/documentation) |
+| **Create DB** | Creates the PostgreSQL database if it doesn't exist yet |
+| **Init** | Applies migrations and syncs your models' permissions to [Keycloak](https://www.keycloak.org/documentation) |
 | **Start** | Runs the development server |
 | **Streamlit** | Starts the [Streamlit](https://docs.streamlit.io/) dashboard server |
+| **Flush DB** | Deletes every row in the database, after asking — you'll meet it in Part 2 |
+
+[[start-here/running your app#Using PyCharm|Running Your App]] describes all eleven.
 
 ## Set Up the ETL Folders
 
@@ -138,29 +152,36 @@ TeamBudget/
 
 ## Create the Database
 
-In PyCharm's integrated terminal (**View → Tool Windows → Terminal**), run:
+The app expects PostgreSQL on `localhost:5432`, reached as the user `django`
+with the password `lundadminlocal`. Create that user once if you haven't — see
+[[start-here/installation#Choose a Database|Choose a Database]]. Then select
+**"Create DB"** from the run configuration dropdown → click ▶️. It creates
+`db_teambudget`, or tells you it already exists.
 
-```bash
-lex create_db
-```
-
-> [!note]- Windows alternative
-> ```powershell
+> [!note]- Terminal alternative
+> ```bash
 > lex create_db
 > ```
+
+> [!tip]- No PostgreSQL? Use SQLite
+> Add `DATABASE_DEPLOYMENT_TARGET=local` to `.env`. The database becomes a
+> file, `TeamBudget.sqlite3`, which the next step creates; **Create DB** has
+> nothing to do and says so.
 
 ## Initialize
 
 Select **"Init"** from the run configuration dropdown in PyCharm → click ▶️.
 
-This runs [Django](https://docs.djangoproject.com/) migrations and sets up [Keycloak](https://www.keycloak.org/documentation). You should see:
+This runs [Django](https://docs.djangoproject.com/) migrations and syncs your models' permissions to [Keycloak](https://www.keycloak.org/documentation). The output is long; these are the lines to look for:
 
 ```
-Running migrations...
+Django Migration + Keycloak Authorization Sync
+...
+Applying unapplied migrations...
   Applying contenttypes.0001_initial... OK
   Applying auth.0001_initial... OK
   ...
-Syncing models to Keycloak... OK
+✓ Django migrations completed successfully
 ```
 
 > [!note]- Terminal alternative
@@ -184,7 +205,7 @@ Syncing models to Keycloak... OK
 
 Select **"Start"** from the run configuration dropdown → click ▶️.
 
-Open `http://localhost:8000` in your browser. You should see the Lex App interface — empty for now, but working. The frontend uses [AG Grid](https://www.ag-grid.com/) for data tables, which you'll see populated once you add models.
+Open `http://localhost:8000` in your browser. You're sent to Keycloak first: sign in with your Excellence Cloud account and you land in the Lex App interface — none of your own models in it yet, but working. The frontend uses [AG Grid](https://www.ag-grid.com/) for data tables, which you'll see populated once you add models.
 
 > [!note]- Terminal alternative
 > **Linux / macOS:**
@@ -202,8 +223,8 @@ Open `http://localhost:8000` in your browser. You should see the Lex App interfa
 
 At this point you have:
 - A working Lex App project with `Input/`, `Upload/`, and `Reports/` folders
-- PyCharm run configurations ready (Init, Start, Streamlit)
+- PyCharm run configurations ready
 - Database created and migrations applied
-- Server starts without errors
+- Server starts, and you can sign in
 
 Next up: [[start-here/tutorial/Part 2 — Data Models|Part 2 — Data Models]] where you'll define the Team, Employee, and Expense models in `Input/`, plus upload models for CSV ingestion in `Upload/`.

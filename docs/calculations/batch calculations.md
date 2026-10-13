@@ -242,6 +242,8 @@ For each generated combination, the framework queries the database for an existi
 
 This means `create()` is **idempotent** — re-running it with the same inputs updates existing records rather than creating duplicates.
 
+An existing record that is closed is left as it is: it's neither recalculated nor saved. See [[calculations/calculation models#Closing a Record|Closing a Record]].
+
 ### Step 3 — Cluster into Groups
 
 `ModelClusterManager` groups the models based on `parallelizable_fields`. If empty, all models go into a single group. Otherwise, it builds a nested dictionary and flattens it into independent processing groups.

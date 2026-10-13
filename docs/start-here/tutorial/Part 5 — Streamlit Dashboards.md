@@ -4,7 +4,7 @@ aliases:
   - "tutorial/Part 5 — Streamlit Dashboards"
 ---
 
-In this part, you'll add two interactive dashboards to `BudgetSummary` — a company-wide overview and a per-team deep-dive. Both are added directly to your model file in `Reports/`, using [Streamlit](https://docs.streamlit.io/) — see [[access-and-dashboards/streamlit dashboards]] for the full guide.
+In this part, you'll add two interactive dashboards to `BudgetSummary` — a company-wide overview and a per-team deep-dive. Both are added directly to your model file in `Reports/`, using [Streamlit](https://docs.streamlit.io/) — see [[access-and-dashboards/streamlit/index|Streamlit Dashboards]] for the full guide.
 
 | Dashboard | Level | What It Shows |
 |---|---|---|
@@ -15,8 +15,16 @@ In this part, you'll add two interactive dashboards to `BudgetSummary` — a com
 
 Add this class method to your `BudgetSummary` class (after `calculate()`):
 
-> [!important]
-> Import `streamlit` **inside** the Streamlit methods, not at the top of the file. Your model file is loaded by Django at startup — when Streamlit isn't running. A top-level `import streamlit as st` would crash.
+> [!tip]
+> The snippets below import `streamlit` **inside** each method. That is a
+> preference, not a requirement — a top-level `import streamlit as st` in a
+> model file works just as well, and costs nothing extra: the framework already
+> imports Streamlit when Django starts.
+>
+> The rule that does bite is about `st.*` **calls**, not imports: one outside a
+> function runs when the module is imported, before there is a page to draw
+> into. It renders nothing and logs "missing ScriptRunContext" — see
+> [[access-and-dashboards/streamlit/standalone dashboards|Standalone Dashboards]].
 
 > [!note]
 > The snippets below append to `BudgetSummary.py`. They assume the imports you already added in [[start-here/tutorial/Part 3 — Calculations & Logging|Part 3]] are still at the top of the file:

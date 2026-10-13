@@ -118,9 +118,36 @@ Select **"Init"** in PyCharm → click ▶️ to sync your model permissions to 
 > lex init
 > ```
 
+## Try It Yourself
+
+Once `permission_read` is in place, your own login can most likely read **none**
+of the expenses, and the Expense grid comes up empty. Rows you may not read are
+left out without a message, so an empty grid here means the rule works:
+
+- the seed data creates employees, not logins, so your email matches no `Employee`;
+- `cfo` and `manager` don't exist yet — `user_context.groups` holds the names of
+  the **Django** groups the signed-in user belongs to;
+- your account is not a superuser.
+
+To see every expense, as the CFO does, put yourself in a `cfo` group. Sign in to
+the app once first so your user exists, then run `lex shell` and:
+
+```python
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+
+me = get_user_model().objects.get(email="you@example.com")  # the email you sign in with
+cfo, _ = Group.objects.get_or_create(name="cfo")
+me.groups.add(cfo)
+```
+
+Reload the Expense grid and every row is back. Keep it that way for
+[[start-here/tutorial/Part 6 — History in Action|Part 6]], which edits one of
+Anna's expenses.
+
 ## How It Looks
 
-When **Anna** (employee, Design team) logs in, she sees only her expenses:
+If **Anna** (employee, Design team) signed in, she would see only her expenses:
 
 | Description | Amount | Category |
 |---|---|---|
@@ -128,7 +155,7 @@ When **Anna** (employee, Design team) logs in, she sees only her expenses:
 | Team lunch with client | €85.00 | Meals |
 | Figma Annual License | €180.00 | Software |
 
-When **Thomas** (manager, Design team) logs in, he sees all Design expenses:
+**Thomas** — the Design team's manager, and in the `manager` group — would see all Design expenses:
 
 | Description | Amount | Category | Employee |
 |---|---|---|---|
@@ -138,7 +165,8 @@ When **Thomas** (manager, Design team) logs in, he sees all Design expenses:
 | Figma Annual License | €180.00 | Software | Anna Schmidt |
 | Train to Berlin | €120.00 | Travel | Max Weber |
 
-When the **CFO** logs in, they see everything across all teams.
+Anyone in the `cfo` group sees everything across all teams — which is what you
+just set up for yourself.
 
 
 ## Checkpoint
@@ -147,6 +175,7 @@ At this point you have:
 - Model-level validation rules that block bad data
 - API-level serializer validation from Part 2
 - Role-based permissions (employee, manager, CFO)
-- [Keycloak](https://www.keycloak.org/documentation) integration for group management
+- Your model permissions synced to [Keycloak](https://www.keycloak.org/documentation) with **Init**
+- Your own login in the `cfo` group, so you can see every expense
 
 Next up: [[start-here/tutorial/Part 5 — Streamlit Dashboards|Part 5 — Streamlit Dashboards]].

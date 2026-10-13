@@ -168,5 +168,6 @@ Lex App automatically adds these groups to the sidebar — you don't need to def
 | **AuditLog** | `auditlog`, `auditlogstatus` |
 | **Calculation Log** | `calculationlog` |
 | **Streamlit** | `streamlit` (if `IS_STREAMLIT_ENABLED=true`) |
+| **Reflex** | `reflex` (if `IS_REFLEX_ENABLED=true`) — the project's [[access-and-dashboards/reflex/index\|Reflex dashboards]] |
 
 If you define these groups yourself in `model_structure`, your definition takes precedence.

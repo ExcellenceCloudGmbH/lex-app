@@ -29,13 +29,15 @@ flowchart TD
     C --> R
     S["Streamlit
     lex streamlit"] --> DB
+    X["Reflex
+    lex reflex"] --> DB
     RS["Recovery supervisor
     lex-recovery-supervisor"] --> R
     F["Flower (optional)
     lex flower"] --> R
 ```
 
-Not every installation runs all of them. An application with no calculations needs no workers; one with no dashboards needs no Streamlit process.
+Not every installation runs all of them. An application with no calculations needs no workers; one with no dashboards needs no Streamlit or Reflex process.
 
 > [!important] The interface is a separate deployment
 > The web interface ships as a built bundle inside the `lex-app` package, but

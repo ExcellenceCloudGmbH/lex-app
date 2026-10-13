@@ -153,7 +153,7 @@ def permission_read(self, user_context: UserContext) -> PermissionResult:
 
 ## Authentication Architecture
 
-Lex App uses [Keycloak](https://www.keycloak.org/documentation) as its identity provider. Users authenticate once via OIDC (OpenID Connect), and the session is shared across the entire application — including embedded [[access-and-dashboards/streamlit dashboards|Streamlit dashboards]].
+Lex App uses [Keycloak](https://www.keycloak.org/documentation) as its identity provider. Users authenticate once via OIDC (OpenID Connect), and the session is shared across the entire application — including embedded [[access-and-dashboards/streamlit/index|Streamlit dashboards]].
 
 The frontend authentication flow:
 

@@ -556,13 +556,6 @@ INITIAL_DATA = "Tests/test_data.json"
 
 `INITIAL_DATA` tells the framework where to find your seed data file. The path is relative to your project root.
 
-> [!note]
-> `lex_config.py` is also where you define `PROJECT_GROUPS` — the list of [Keycloak](https://www.keycloak.org/documentation) groups your project will create on `lex init`. It's only a list of group names; you'll wire up the role-based permissions themselves in [[start-here/tutorial/Part 4 — Validation & Permissions|Part 4]]. Add the entry now:
-> ```python title="lex_config.py"
-> INITIAL_DATA = "Tests/test_data.json"
-> PROJECT_GROUPS = ["team_budget"]
-> ```
-
 ### Start the Server
 
 Select **"Start"** from the run configuration dropdown in PyCharm → click ▶️.
@@ -584,16 +577,24 @@ On startup, Lex App automatically:
 3. Checks whether **all referenced models are empty**
 4. If every check passes, processes the JSON files — creating all objects in order with `tag:` and `datetime:` references resolved
 
-You'll see log messages like:
+The load runs in the background, so its messages can land in between the
+server's own startup output, and it may still be working for a moment after the
+server reports that it's ready:
 
 ```
-Loading initial data from Tests/test_data.json...
+All models are empty: Starting Initial Data Fill
+Audit logging enabled for initial data upload
+Initial Data Fill completed Successfully
 ```
+
+The middle line says `disabled` if audit logging is off. If any of those models
+already has rows, you get `Loading Initial Data not triggered due to existence
+of objects of Model: …` instead, naming them.
 
 Open `http://localhost:8000` and navigate to **Teams & People → Team** — you should see your three teams. Check **Employees** and **Expenses** too.
 
 > [!warning]
-> Initial data loads **only once** — when every model referenced in the JSON is empty. If you've already created any Team, Employee, or Expense row (manually or from a previous load), the auto-load is skipped. To re-trigger it, clear all data first (e.g., drop and recreate the database with `lex create_db` followed by **Init**).
+> Initial data loads **only once** — when every model referenced in the JSON is empty. If you've already created any Team, Employee, or Expense row (manually or from a previous load), the auto-load is skipped. To load it again, run **Flush DB** (it runs `lex flush` and asks you to type `yes`), then **Start**. Flush DB deletes every row in the database, not only the tutorial's.
 
 > [!note]- Alternative: Manual upload via the UI
 > You can also import data through the frontend upload models:
