@@ -13,8 +13,9 @@ the middleware writes API activity on `api`, and `POST api/usage/area` writes th
 interface's area events on `ui` and `ui_embed`. With the running version, that gives K1
 and K2.
 
-Cluster 6's batch is letter s, scenarios 6.121–6.125 (5 tests):
-[batch 6s](../../clusters/06-audit_logging/batches.md) pins the audit shape the Instance
-Controller's collector reads — columns, `timestamptz` types, the API-key-name writer
-exclusion, and the K3 run-grouping contract, including a create-triggered run (paired
-with 6r/7t) counting as exactly one finished run.
+Cluster 6's batch is letter s, scenarios 6.121–6.126 (6 tests):
+[batch 6s](../../clusters/06-audit_logging/batches.md) pins the audit shape the
+lex-analytics collector reads — columns, `timestamptz` types, the readable API-key name
+column, and the K3 run-grouping contract, including a create-triggered run (paired
+with 6r/7t) counting as exactly one finished run. 6.126 records that an API key's writes
+carry `AnonymousUser` as their author, not the key's name (BUG-034, xfail strict).

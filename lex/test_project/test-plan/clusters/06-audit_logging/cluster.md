@@ -99,6 +99,6 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 | 6.125 | a create-triggered run is countable as one finished run | creating a `calculate_on_create` record through the API and applying the collector's K3 grouping rule (group by resource + calculation id; a run is finished when a row in its group carries a terminal `is_calculated`) finds exactly one finished run, whose outcome matches the record's final state; the create's own entry forms its own group and never finishes |
 | 6.126 | an API key's writes should be its own, not a person's | creating a record through the API with a named API key should leave an `AuditLog.author` equal to the key's name; it does not (BUG-034, xfail strict) |
 
-**Scenario range:** 6.121 – 6.125. **Test file:** `lex/test_project/tests/audit_logging/test_6s_fleet_metrics_contract.py`. **Type:** I + E. **Status:** ✅ Complete. Paired with 6r/7t for the create-triggered case. Covers `lex/audit_logging/models/AuditLog.py`, `lex/audit_logging/models/AuditLogStatus.py`, `lex/audit_logging/utils/calculation_audit.py`, `lex/api/views/model_entries/One.py`. Batch: [6s](batches.md).
+**Scenario range:** 6.121 – 6.126. **Test file:** `lex/test_project/tests/audit_logging/test_6s_fleet_metrics_contract.py`. **Type:** I + E. **Status:** ✅ Complete. Paired with 6r/7t for the create-triggered case. Covers `lex/audit_logging/models/AuditLog.py`, `lex/audit_logging/models/AuditLogStatus.py`, `lex/audit_logging/utils/calculation_audit.py`, `lex/api/views/model_entries/One.py`. Batch: [6s](batches.md).
 
 ---
