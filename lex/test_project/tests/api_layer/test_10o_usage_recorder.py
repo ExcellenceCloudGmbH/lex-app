@@ -27,10 +27,13 @@ from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import DatabaseError, IntegrityError, connection, transaction
-from django.test import SimpleTestCase, TestCase
+from django.middleware.csrf import get_token
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import URLPattern, URLResolver, get_resolver
 from rest_framework import status
+from rest_framework.test import APIClient
 
 import pytest
 
@@ -616,3 +619,194 @@ class TestCluster10o_RecorderEndToEnd(E2ETestCase):
         """
         missing = set(API_AREAS) - _url_names(get_resolver().url_patterns)
         self.assertEqual(missing, set(), f"Area map names with no route: {sorted(missing)}")
+
+
+def _csrf_pair() -> tuple[str, str]:
+    """The cookie secret and header token a browser holds once Django has set its cookie."""
+    request = RequestFactory().get("/")
+    token = get_token(request)
+    return request.META["CSRF_COOKIE"], token
+
+
+class TestCluster10o_UsageAreaEndpoint(E2ETestCase):
+    """Cluster 10o: the interface's area events, through the real URL and middleware stack."""
+
+    e2e_models = ALL_MODELS
+    EVENT = {"area": "history", "embed": False}
+
+    def setUp(self) -> None:
+        super().setUp()
+        usage_metrics.clear_all()
+        usage_metrics.recorder.reset()
+
+    def tearDown(self) -> None:
+        usage_metrics.clear_all()
+        usage_metrics.recorder.reset()
+        super().tearDown()
+
+    def _browser(self, *, with_csrf_token: bool = True) -> tuple[APIClient, dict]:
+        """A signed-in browser session with CSRF enforced, as the interface has one."""
+        client = APIClient(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        session = client.session
+        session["oidc_expires_at"] = (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()
+        session.save()
+        headers: dict = {}
+        if with_csrf_token:
+            secret, token = _csrf_pair()
+            client.cookies[settings.CSRF_COOKIE_NAME] = secret
+            headers["HTTP_X_CSRFTOKEN"] = token
+        return client, headers
+
+    def _send(self, body, *, client: APIClient | None = None, headers: dict | None = None):
+        if client is None:
+            client, headers = self._browser()
+        return client.post(self._url("usage-area"), body, format="json", **(headers or {}))
+
+    # -- 10.106 --------------------------------------------------------
+    def test_10_106_an_interface_event_records_the_person_on_the_ui_channel(self) -> None:
+        """
+        Scenario 10.106: the interface says a person opened History today.
+        Given: a signed-in browser session holding its CSRF token.
+        When: it POSTs {"area": "history", "embed": false} to api/usage/area.
+        Then: 204; exactly one row: the session's user id, ``history``, channel ``ui``,
+              today's UTC day. The event's own request adds no ``api`` row.
+        """
+        before = usage_metrics.utc_day()
+        response = self._send(self.EVENT)
+        after = usage_metrics.utc_day()
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT, response.content[:300])
+        rows = usage_metrics.presence_rows()
+        self.assertEqual(_keys(rows), [("person", str(self.user.pk), "history", "ui")])
+        self.assertIn(rows[0]["day"], {before, after})
+
+    # -- 10.107 --------------------------------------------------------
+    def test_10_107_an_embedded_interface_is_recorded_as_ui_embed(self) -> None:
+        """
+        Scenario 10.107: use inside a Streamlit page or the widget host is told apart.
+        Given: a signed-in browser session.
+        When: it POSTs {"area": "grid", "embed": true}.
+        Then: 204 and one row on channel ``ui_embed``.
+        """
+        response = self._send({"area": "grid", "embed": True})
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(_keys(usage_metrics.presence_rows()), [("person", str(self.user.pk), "grid", "ui_embed")])
+
+    # -- 10.108 --------------------------------------------------------
+    def test_10_108_a_body_outside_the_contract_is_refused(self) -> None:
+        """
+        Scenario 10.108: the event carries an area from the list and an embed flag, nothing else.
+        Given: a signed-in browser session.
+        When: it POSTs an area outside UI_AREAS (including the API-only ``app``), a body
+              without ``embed``, a body with an extra key, a non-boolean ``embed``, a
+              non-string area, or a JSON list.
+        Then: 400 every time and no row. Refusing extra keys enforces spec §5.3.2's privacy
+              boundary on the server too.
+        """
+        bodies = [
+            {"area": "nonsense", "embed": False},
+            {"area": "app", "embed": False},
+            {"area": "grid"},
+            {"area": "grid", "embed": False, "url": "/fund/42/show"},
+            {"area": "grid", "embed": "true"},
+            {"area": 3, "embed": False},
+            ["grid", False],
+        ]
+        for body in bodies:
+            with self.subTest(body=body):
+                response = self._send(body)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.content[:300])
+
+        self.assertEqual(usage_metrics.presence_rows(), [])
+
+    # -- 10.109 --------------------------------------------------------
+    def test_10_109_an_anonymous_caller_is_refused(self) -> None:
+        """
+        Scenario 10.109: no session, no event.
+        Given: a client with no session.
+        When: it POSTs a valid event.
+        Then: 401 or 403 (the login middleware answers 401 before DRF runs), and no row.
+        """
+        response = APIClient().post(self._url("usage-area"), self.EVENT, format="json")
+
+        self.assertIn(response.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+        self.assertEqual(usage_metrics.presence_rows(), [])
+
+    # -- 10.110 --------------------------------------------------------
+    def test_10_110_an_api_key_cannot_post_an_interface_event(self) -> None:
+        """
+        Scenario 10.110: an API key never appears on an interface channel.
+        Given: a caller authenticated with an API key and no session.
+        When: it POSTs a valid event.
+        Then: 401 or 403, and no row.
+        """
+        self.authenticate_as_api_key(name="Nightly import")
+        response = self.client.post(self._url("usage-area"), self.EVENT, format="json")
+
+        self.assertIn(response.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+        self.assertEqual(usage_metrics.presence_rows(), [])
+
+    # -- 10.111 --------------------------------------------------------
+    def test_10_111_a_session_without_its_csrf_token_is_refused(self) -> None:
+        """
+        Scenario 10.111: the CSRF check is in force.
+        Given: a signed-in browser session that does not send its CSRF token.
+        When: it POSTs a valid event.
+        Then: 403 naming CSRF, and no row.
+        """
+        client, _ = self._browser(with_csrf_token=False)
+        response = self._send(self.EVENT, client=client, headers={})
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("CSRF", response.content.decode())
+        self.assertEqual(usage_metrics.presence_rows(), [])
+
+    # -- 10.112 --------------------------------------------------------
+    def test_10_112_switched_off_answers_204_and_records_nothing(self) -> None:
+        """
+        Scenario 10.112: LEX_USAGE_METRICS=false turns the events off with the rest.
+        Given: the switch set to false.
+        When: a signed-in session POSTs a valid event.
+        Then: 204, so the interface sees nothing unusual, and no presence row.
+        """
+        with patch.dict(os.environ, {"LEX_USAGE_METRICS": "false"}):
+            response = self._send(self.EVENT)
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(usage_metrics.presence_rows(), [])
+
+    # -- 10.113 --------------------------------------------------------
+    def test_10_113_repeated_events_leave_one_row(self) -> None:
+        """
+        Scenario 10.113: presence, not volume, whatever the interface's dedupe did.
+        Given: a signed-in session.
+        When: it POSTs the same event three times (three tabs, or a lost dedupe).
+        Then: 204 each time and one row.
+        """
+        for _ in range(3):
+            self.assertEqual(self._send(self.EVENT).status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertEqual(len(usage_metrics.presence_rows()), 1)
+
+    # -- 10.114 --------------------------------------------------------
+    def test_10_114_the_day_is_the_servers_utc_day_across_midnight(self) -> None:
+        """
+        Scenario 10.114: a tab left open across midnight is one presence per UTC day.
+        Given: an event at 2026-10-25T23:30Z, already 00:30 on 26 Oct in Berlin, and the
+               same event at 2026-10-26T00:00Z.
+        When: both are POSTed.
+        Then: two ``ui`` rows, filed under 25 and 26 October: the day is fixed when lex-app
+              records the event, in UTC (spec §5.3.2, §6).
+        """
+        clock = _Clock(datetime(2026, 10, 25, 23, 30, tzinfo=timezone.utc))
+        with patch.object(usage_metrics.recorder, "_clock", clock):
+            self.assertEqual(self._send({"area": "grid", "embed": False}).status_code, status.HTTP_204_NO_CONTENT)
+            clock.now = datetime(2026, 10, 26, 0, 0, tzinfo=timezone.utc)
+            self.assertEqual(self._send({"area": "grid", "embed": False}).status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertEqual(
+            [(r["day"], r["area"], r["channel"]) for r in usage_metrics.presence_rows()],
+            [(date(2026, 10, 25), "grid", "ui"), (date(2026, 10, 26), "grid", "ui")],
+        )

@@ -24,6 +24,7 @@ from lex.api.views.sharepoint.DeleteUnusedFiles import DeleteUnusedFiles
 from lex.api.views.sharepoint.SharePointFileDownload import SharePointFileDownload
 from lex.api.views.sharepoint.SharePointPreview import SharePointPreview
 from lex.api.views.sharepoint.SharePointShareLink import SharePointShareLink
+from lex.api.views.usage.UsageArea import UsageAreaView
 from lex.authentication.views.permissions import UserPermissionsView
 from lex.authentication.views.token_views import StreamlitTokenView
 from lex.core.mixins.CalculatedModelMixin import CalculatedModelMixin
@@ -263,6 +264,11 @@ class ProcessAdminSite:
                 "api/user_permissions/",
                 UserPermissionsView.as_view(),
                 name="user-permissions",
+            ),
+            path(
+                "api/usage/area",
+                UsageAreaView.as_view(),
+                name="usage-area",  # lex.core.services.usage_areas.USAGE_AREA_URL_NAME
             ),
         ]
 
