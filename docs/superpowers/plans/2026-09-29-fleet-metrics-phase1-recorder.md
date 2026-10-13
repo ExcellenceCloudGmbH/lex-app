@@ -1,5 +1,12 @@
 # Fleet metrics phase 1 — the usage recorder (lex-app) Implementation Plan
 
+> **Superseded in part (2026-10-13).** The collector is the standalone component
+> **lex-analytics** (spec §5.4), not the Instance Controller. Three rules changed after this
+> plan was written, and spec §5.3.1 holds them: `lex_usage_daily` has no `first_seen` (a
+> usage row holds no time of day); a request without an actor touches neither table, so
+> `/health` never depends on the database; and `LEX_USAGE_METRICS` turns recording off for
+> any value it does not recognise.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every successful API request to a lex-app instance, and every product-area event the web interface sends, records a presence row in the instance's own database, once per person (or API key), product area, channel and UTC day, plus the running lex-app version. From those rows the Instance Controller counts active people (K1), feature reach (K2) and the version history (K7).

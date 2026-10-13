@@ -613,7 +613,6 @@ CREATE TABLE IF NOT EXISTS lex_usage_daily (
     actor_id    text        NOT NULL,              -- auth_user.id, or the API key's name
     area        text        NOT NULL,              -- one of the areas in §5.3.2
     channel     text        NOT NULL,              -- 'api' | 'ui' | 'ui_embed'
-    first_seen  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (day, actor_kind, actor_id, area, channel)
 );
 
@@ -624,6 +623,10 @@ CREATE TABLE IF NOT EXISTS lex_runtime_versions (
     usage_enabled  boolean     NOT NULL
 );
 ```
+
+A usage row holds no time of day: the day, the actor, the area and the channel are all it
+says (§5.3.2, privacy boundary). Only the version table carries times, and they describe a
+version, not a person.
 
 **Middleware (`channel = 'api'`).** `UsageRecorderMiddleware` is the last entry in
 `MIDDLEWARE`, after the Keycloak permissions middleware, so the user it sees is final. It
@@ -655,13 +658,18 @@ acts after the view returns:
   (day, actor, area, channel): one insert per person per area per day per process.
 - **The day** is `datetime.now(timezone.utc).date()`, never `timezone.localdate()`, which
   is Berlin.
-- **Runtime version.** On the first request a process serves, and at most hourly after
-  that, the recorder upserts `lex_runtime_versions` with the running version. It gives K7
-  a version read without waking anything, and a version history.
+- **Runtime version.** On the first request from a person or an API key that a process
+  serves, and at most hourly after that, the recorder upserts `lex_runtime_versions` with
+  the running version. It gives K7 a version read without waking anything, and a version
+  history. A request without an actor (`/health`, a probe, a login page) touches neither
+  table, so health checks never depend on the database. An instance upgraded and not used
+  since reads as *absent* until its first authenticated request.
 - **Failure isolation.** Any exception inside the recorder is caught and logged at most
   once per process per hour. The response is never affected.
-- **Switch.** `LEX_USAGE_METRICS=false`, set per instance through the controller's custom
-  environment, stops usage rows. The interface endpoint then answers 204 and records
+- **Switch.** `LEX_USAGE_METRICS=false` (or `0`, `no`, `off`), set per instance through
+  the controller's custom environment, stops usage rows. Unset, empty, `true`, `1`, `yes`
+  and `on` leave it on; any other value turns it off and logs one warning, since the
+  switch is a privacy opt-out. The interface endpoint then answers 204 and records
   nothing. The version row is still written, with `usage_enabled = false`, so the
   collector reports *disabled* rather than *nobody used it*.
 
