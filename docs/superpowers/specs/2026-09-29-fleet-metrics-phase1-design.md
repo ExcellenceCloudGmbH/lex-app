@@ -104,7 +104,10 @@ from these series. No fleet view or daily rollup exists.
 
 - **`AuditLog`**: one row per API create, update and delete (a bulk write creates one row
   per record): `date`, `author`, `resource`, `action`, `payload`. `author` is the person's
-  display string, an API key's name for API-key requests, or `system…` for the framework.
+  display string, `AnonymousUser` for an API-key request, or `system…` for the framework.
+  An API-key call never replaces the request's user, so the audit cannot name the key
+  (lex-app known bug BUG-034). The collector therefore excludes `AnonymousUser`,
+  `Technical User`, the system and, where readable, the API keys' names from K1's writers.
   The table has no index on `date` or `author`.
 - **`AuditLogStatus`**: one per audit row, `pending` → `success`/`failure`, with
   `created_at` and `updated_at`.
