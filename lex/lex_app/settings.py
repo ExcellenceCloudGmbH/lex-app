@@ -357,6 +357,8 @@ MIDDLEWARE = [
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
     "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
+    # Last, so it sees the user every middleware above settled on (fleet metrics, K1/K2).
+    "lex.core.middleware.usage_recorder.UsageRecorderMiddleware",
 ]
 
 ROOT_URLCONF = "lex_app.urls"

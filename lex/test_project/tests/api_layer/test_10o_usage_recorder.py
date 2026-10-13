@@ -22,17 +22,24 @@ Run: python -m lex pytest lex/test_project/tests/api_layer/test_10o_usage_record
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.test import SimpleTestCase, TestCase
+from django.urls import URLPattern, URLResolver, get_resolver
+from rest_framework import status
 
 import pytest
 
 from lex._version import __version__
 from lex.core.services import usage_metrics
+from lex.core.services.usage_areas import API_AREAS
+from lex.test_project.tests._e2e_test_case import E2ETestCase
+
+from .models import ALL_MODELS, API_SIMPLE, ApiSimpleItem
 
 pytestmark = pytest.mark.api_layer
 
@@ -303,6 +310,12 @@ class TestCluster10o_Recorder(TestCase):
     def setUp(self) -> None:
         super().setUp()
         _skip_unless_postgresql(self)
+        # The usage tables are raw SQL, outside the model registry, so the per-test
+        # flush never clears them. Now that UsageRecorderMiddleware is installed,
+        # every other E2E test in this cluster that makes a real request also writes
+        # real rows here -- start each test from an empty table rather than asserting
+        # on whatever an unrelated test left behind.
+        usage_metrics.clear_all()
 
     # -- 10.89 ---------------------------------------------------------
     def test_10_89_a_presence_row_is_written_once(self) -> None:
@@ -416,3 +429,190 @@ class TestCluster10o_Recorder(TestCase):
             _keys(usage_metrics.presence_rows()),
             [("person", "7", "grid", "api"), ("person", "7", "grid", "ui"), ("person", "7", "grid", "ui_embed")],
         )
+
+
+def _url_names(patterns) -> set[str]:
+    names: set[str] = set()
+    for pattern in patterns:
+        if isinstance(pattern, URLResolver):
+            names |= _url_names(pattern.url_patterns)
+        elif isinstance(pattern, URLPattern) and pattern.name:
+            names.add(pattern.name)
+    return names
+
+
+class TestCluster10o_RecorderEndToEnd(E2ETestCase):
+    """Cluster 10o: real API requests through the whole middleware stack leave api rows."""
+
+    e2e_models = ALL_MODELS
+
+    def setUp(self) -> None:
+        super().setUp()
+        usage_metrics.clear_all()
+        usage_metrics.recorder.reset()
+
+    def tearDown(self) -> None:
+        usage_metrics.clear_all()
+        usage_metrics.recorder.reset()
+        super().tearDown()
+
+    def _get(self, url: str):
+        before = usage_metrics.utc_day()
+        response = self.client.get(url)
+        after = usage_metrics.utc_day()
+        return response, {before, after}
+
+    def _assert_ok(self, response) -> None:
+        self.assertEqual(
+            response.status_code, status.HTTP_200_OK,
+            f"The request itself must succeed for this scenario: {response.status_code} {response.content[:300]!r}",
+        )
+
+    # -- 10.94 ---------------------------------------------------------
+    def test_10_94_a_person_listing_records_the_grid(self) -> None:
+        """
+        Scenario 10.94: a person listing a model is active in the grid today, on the API.
+        Given: a signed-in person.
+        When: they GET a model's list endpoint.
+        Then: one presence row: their user id, area ``grid``, channel ``api``, today's
+              UTC day.
+        """
+        response, days = self._get(self.url_list(API_SIMPLE))
+        self._assert_ok(response)
+
+        rows = usage_metrics.presence_rows()
+        self.assertEqual(len(rows), 1, rows)
+        self.assertIn(rows[0]["day"], days)
+        self.assertEqual(_keys(rows), [("person", str(self.user.pk), "grid", "api")])
+
+    # -- 10.95 ---------------------------------------------------------
+    def test_10_95_a_repeated_request_leaves_one_row(self) -> None:
+        """
+        Scenario 10.95: presence, not volume.
+        Given: a signed-in person.
+        When: they GET the same list three times.
+        Then: one presence row.
+        """
+        for _ in range(3):
+            self._assert_ok(self._get(self.url_list(API_SIMPLE))[0])
+
+        self.assertEqual(len(usage_metrics.presence_rows()), 1)
+
+    # -- 10.96 ---------------------------------------------------------
+    def test_10_96_history_is_recorded_from_both_of_its_routes(self) -> None:
+        """
+        Scenario 10.96: the history tab and the grid's as-of mode are history.
+        Given: a record with history.
+        When: the person opens its history, and the list with ``as_of``.
+        Then: a ``history`` row on ``api``, and no ``grid`` row.
+        """
+        item = ApiSimpleItem.objects.create(name="h", value=1)
+        self._assert_ok(self._get(self.url_history(API_SIMPLE, item.pk))[0])
+        self._assert_ok(self._get(f"{self.url_list(API_SIMPLE)}?as_of=2030-01-01T00:00:00Z")[0])
+
+        self.assertEqual(
+            {(row["area"], row["channel"]) for row in usage_metrics.presence_rows()},
+            {("history", "api")},
+        )
+
+    # -- 10.97 ---------------------------------------------------------
+    def test_10_97_an_api_key_is_recorded_by_its_name_on_the_api_channel(self) -> None:
+        """
+        Scenario 10.97: an API key is an actor of its own, never a person.
+        Given: a caller authenticated with an API key named "Nightly import".
+        When: it GETs a list.
+        Then: one row, actor ``api_key`` / "Nightly import", area ``grid``, channel
+              ``api``, the only channel an API key appears on (spec §5.3.2).
+        """
+        self.authenticate_as_api_key(name="Nightly import")
+        self._assert_ok(self._get(self.url_list(API_SIMPLE))[0])
+
+        self.assertEqual(
+            _keys(usage_metrics.presence_rows()),
+            [("api_key", "Nightly import", "grid", "api")],
+        )
+
+    # -- 10.98 ---------------------------------------------------------
+    def test_10_98_the_instance_platform_key_is_never_recorded(self) -> None:
+        """
+        Scenario 10.98: the Instance Controller's own calls are not usage.
+        Given: a caller whose key is the instance's LEX_API_KEY.
+        When: it GETs a list.
+        Then: no presence row.
+        """
+        raw_key = self.authenticate_as_api_key(name="instance")
+        with patch.dict(os.environ, {"LEX_API_KEY": raw_key}):
+            self._assert_ok(self._get(self.url_list(API_SIMPLE))[0])
+
+        self.assertEqual(usage_metrics.presence_rows(), [])
+
+    # -- 10.99 ---------------------------------------------------------
+    def test_10_99_a_failed_request_is_not_usage(self) -> None:
+        """
+        Scenario 10.99: only successful requests count.
+        Given: a signed-in person.
+        When: they GET a record that does not exist (404).
+        Then: no presence row.
+        """
+        response, _ = self._get(self.url_detail(API_SIMPLE, 987654))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        self.assertEqual(usage_metrics.presence_rows(), [])
+
+    # -- 10.100 --------------------------------------------------------
+    def test_10_100_switched_off_records_the_version_but_no_usage(self) -> None:
+        """
+        Scenario 10.100: LEX_USAGE_METRICS=false stops usage rows and says so.
+        Given: the switch set to false.
+        When: a person GETs a list.
+        Then: no presence row; one version row with usage_enabled false, so the collector
+              reports "disabled" rather than "nobody used it".
+        """
+        with patch.dict(os.environ, {"LEX_USAGE_METRICS": "false"}):
+            self._assert_ok(self._get(self.url_list(API_SIMPLE))[0])
+
+        self.assertEqual(usage_metrics.presence_rows(), [])
+        versions = usage_metrics.runtime_versions()
+        self.assertEqual([(v["version"], v["usage_enabled"]) for v in versions], [(__version__, False)])
+
+    # -- 10.101 --------------------------------------------------------
+    def test_10_101_the_running_version_is_recorded(self) -> None:
+        """
+        Scenario 10.101: a served request records the version serving it.
+        Given: the switch at its default.
+        When: a person GETs a list.
+        Then: one version row: the running lex-app version, usage enabled.
+        """
+        self._assert_ok(self._get(self.url_list(API_SIMPLE))[0])
+
+        versions = usage_metrics.runtime_versions()
+        self.assertEqual([(v["version"], v["usage_enabled"]) for v in versions], [(__version__, True)])
+
+    # -- 10.102 --------------------------------------------------------
+    def test_10_102_a_storage_failure_never_changes_the_response(self) -> None:
+        """
+        Scenario 10.102: the recorder failing is invisible to the person.
+        Given: presence inserts that raise DatabaseError.
+        When: a person GETs a list.
+        Then: HTTP 200 with the normal body, and one warning.
+        """
+        ApiSimpleItem.objects.create(name="visible", value=1)
+        with patch.object(usage_metrics, "insert_presence", side_effect=DatabaseError("simulated")), \
+                self.assertLogs("lex.core.services.usage_metrics", level="WARNING") as logs:
+            response, _ = self._get(self.url_list(API_SIMPLE))
+
+        self._assert_ok(response)
+        self.assertIn("visible", response.content.decode(), "The list body must be unaffected")
+        self.assertEqual(len(logs.records), 1)
+
+    # -- 10.103 --------------------------------------------------------
+    def test_10_103_every_mapped_name_is_a_real_route(self) -> None:
+        """
+        Scenario 10.103: the area map cannot silently rot.
+        Given: the live URLconf.
+        When: its route names are collected.
+        Then: every name in the API area map is among them; a renamed route would
+              otherwise fall into ``app`` and its area would read zero forever.
+        """
+        missing = set(API_AREAS) - _url_names(get_resolver().url_patterns)
+        self.assertEqual(missing, set(), f"Area map names with no route: {sorted(missing)}")
