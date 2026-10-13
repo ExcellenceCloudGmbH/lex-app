@@ -83,3 +83,21 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Scenario range:** 6.119 – 6.120. **Test file:** `lex/test_project/tests/audit_logging/test_6r_create_triggered_run_audit.py`. **Type:** E. **Status:** ✅ Complete. 6.119 two entries, both 'success'; 6.120 the run's entry is 'failure' with a traceback, the create's stays 'success'.
 
 ---
+
+### 6s. The audit contract fleet metrics reads ✅
+
+**What it tests:** the columns and behaviour the Instance Controller's fleet-metrics collector (`lex-analytics`) depends on when it reads `audit_logging_auditlog` / `audit_logging_auditlogstatus` directly — not the collector's own SQL, which lives in that repo, but the contract it assumes: the columns exist and the three timestamps are `timestamptz`; an API key keeps its name so K1 can exclude it from the writers (spec §4.3); a finished calculation run's terminal audit rows share the triggering request's calculation id so the collector's K3 rule can group them into one run; a plain edit of a calculation row never looks like a run; and a create that starts its own run (`calculate_on_create`) groups to exactly one finished run, never two.
+
+**Why a regression matters:** this table is read directly by another repo's SQL. A column rename, a timestamp losing its timezone, or a run's rows no longer sharing a calculation id would silently corrupt K1/K3 on every instance, with no test in this repo's own path to catch it — these scenarios are that test.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 6.121 | the audit tables keep the shape fleet metrics reads | every column the collector names exists on both tables, and `auditlog.date`, `auditlogstatus.created_at`/`updated_at` are `timestamp with time zone` |
+| 6.122 | a clean calculation is countable as one successful run | triggering an atomic calculation through the API with a calculation id leaves terminal audit rows that all carry that id, the last one SUCCESS, and status rows bracketing the run |
+| 6.123 | a failing calculation is countable as one failed run | a calculation whose `calculate()` raises leaves terminal audit rows carrying the id, the last one ERROR |
+| 6.124 | editing a calculation row is an edit, not a calculation | a plain PATCH (no `calculate`) is audited with `is_calculated=NOT_CALCULATED`, so the collector's run rule cannot count it |
+| 6.125 | a create-triggered run is countable as one finished run | creating a `calculate_on_create` record through the API and applying the collector's K3 grouping rule (group by resource + calculation id; a run is finished when a row in its group carries a terminal `is_calculated`) finds exactly one finished run, whose outcome matches the record's final state; the create's own entry forms its own group and never finishes |
+
+**Scenario range:** 6.121 – 6.125. **Test file:** `lex/test_project/tests/audit_logging/test_6s_fleet_metrics_contract.py`. **Type:** I + E. **Status:** ✅ Complete. Paired with 6r/7t for the create-triggered case. Covers `lex/audit_logging/models/AuditLog.py`, `lex/audit_logging/models/AuditLogStatus.py`, `lex/audit_logging/utils/calculation_audit.py`, `lex/api/views/model_entries/One.py`. Batch: [6s](batches.md).
+
+---

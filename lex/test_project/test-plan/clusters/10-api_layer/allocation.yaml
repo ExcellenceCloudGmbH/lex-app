@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 82
+max_scenario: 114
 letters:
   a:
     title: ''
@@ -143,3 +143,14 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  o:
+    title: Usage recorder and interface area events (fleet metrics)
+    scenarios: 10.83-10.114
+    status: complete
+    tests:
+      pass: 32
+      skip: 0
+      xfail: 0
+    note: fleet metrics phase 1 (LEX-749), release R3; raw-SQL tables with a channel column
+      (api, ui, ui_embed), the two area vocabularies, the recorder, the middleware end to
+      end, and POST api/usage/area (session-only, CSRF in force)

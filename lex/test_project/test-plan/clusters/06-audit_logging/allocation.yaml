@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 120
+max_scenario: 125
 letters:
   a:
     title: ''
@@ -177,3 +177,16 @@ letters:
       6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update'
       under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's
       entry is 'failure' with a traceback while the create's entry stays 'success'.
+  s:
+    title: The audit contract fleet metrics reads
+    scenarios: 6.121-6.125
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      fleet metrics phase 1 (LEX-749), release R3; pins audit_logging_auditlog +
+      audit_logging_auditlogstatus columns and timestamptz types, the API-key-name writer
+      exclusion (K1), and the K3 run-grouping contract including a create-triggered run
+      counting as exactly one finished run

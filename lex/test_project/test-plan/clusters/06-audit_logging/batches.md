@@ -97,3 +97,19 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Status | ✅ Complete — paired with 7t. Checked to fail when the run shares the create's entry, or is filed under the create request's id |
 
 ---
+
+### Batch 6s — The audit contract fleet metrics reads ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.121 – 6.125 |
+| Type | I + E |
+| Files covered | `lex/audit_logging/models/AuditLog.py`, `lex/audit_logging/models/AuditLogStatus.py`, `lex/audit_logging/utils/calculation_audit.py`, `lex/api/views/model_entries/One.py` |
+| Test file | `lex/test_project/tests/audit_logging/test_6s_fleet_metrics_contract.py` |
+| Test classes | `TestCluster06s_AuditColumns`, `TestCluster06s_CalculationRunContract`, `TestCluster06s_CreateTriggeredRunIsOneRun` |
+| Fixtures | `AuditAtomicCalc` (audit_logging models, `AUDIT_ATOMIC`); `OnCreateCalc` from `calculations/models.py` (cluster 7t), reused as in 6r; unpatches `store_message`, `build_cache_key`, `ensure_terminal_calculation_audit` like 6i/6r |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | fleet metrics phase 1 (LEX-749), release R3 — the lex-app half of the contract the Instance Controller's fleet-metrics collector (lex-analytics) reads; the collector's own SQL is out of scope here. 6.121 pins the columns + `timestamptz` types; 6.122/6.123 a successful/failed run's terminal audit rows all share one calculation id; 6.124 a plain edit carries `is_calculated=NOT_CALCULATED` so the collector's run rule cannot count it; 6.125 (paired with 6r/7t's `calculate_on_create`) checks the collector's K3 grouping rule end to end — a create-triggered run groups to exactly one finished run, with the create's own entry forming its own never-finished group rather than a second run. Letter r was taken by `test_6r_create_triggered_run_audit.py` (6.119–6.120); this batch lands on the next free letter, s. |
+
+---
