@@ -55,6 +55,12 @@ class TestCluster11b_ListEndpoint(StressTestCase):
         pages = 3
         page_size = 100
 
+        # Unmeasured warm-up: the same client/user's first request of the test also
+        # costs the usage recorder's presence and version-row inserts (last entry in
+        # MIDDLEWARE). Taking that hit here, outside the budget, keeps 11.3 measuring
+        # the list endpoint's own query count rather than depending on test order.
+        self.list_get(INVOICE, query_params={"page": 1, "page_size": page_size})
+
         for page in range(1, pages + 1):
             with self.assert_query_count_at_most(8, f"11.3_page_{page}_queries"):
                 resp = self.list_get(

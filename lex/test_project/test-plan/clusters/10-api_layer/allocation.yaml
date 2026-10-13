@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 114
+max_scenario: 118
 letters:
   a:
     title: ''
@@ -145,12 +145,16 @@ letters:
       recorded
   o:
     title: Usage recorder and interface area events (fleet metrics)
-    scenarios: 10.83-10.114
+    scenarios: 10.83-10.118
     status: complete
     tests:
-      pass: 32
+      pass: 36
       skip: 0
       xfail: 0
     note: fleet metrics phase 1 (LEX-749), release R3; raw-SQL tables with a channel column
-      (api, ui, ui_embed), the two area vocabularies, the recorder, the middleware end to
-      end, and POST api/usage/area (session-only, CSRF in force)
+      (api, ui, ui_embed) and no time of day, the two area vocabularies, the recorder, the
+      middleware end to end, and POST api/usage/area (session-only, CSRF in force).
+      10.115-10.117 pin the hourly version throttle and the switch's fail-closed parsing;
+      10.118 pins that a request with no actor writes neither table, including the version
+      row, and that the next authenticated request still finds it due. The two E2E classes
+      now skip on a non-PostgreSQL backend before their parent's setUp runs patches.

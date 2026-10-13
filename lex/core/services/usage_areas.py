@@ -19,8 +19,8 @@ person was here. Two kinds of request are not recorded at all (``None``):
 * an unnamed route, such as the SPA's catch-all and static assets, which are not use;
 * the usage endpoint itself, whose event is already recorded on its interface channel.
 
-``calculate`` has no API area. The Instance Controller counts calculation runs from the
-audit tables (K3), on every instance, whether or not it runs this recorder.
+``calculate`` has no API area. The lex-analytics collector counts calculation runs from
+the audit tables (K3), on every instance, whether or not it runs this recorder.
 
 Design: docs/superpowers/specs/2026-09-29-fleet-metrics-phase1-design.md (§5.3)
 """
@@ -51,8 +51,8 @@ API_AREAS: Mapping[str, str] = MappingProxyType({
     "run_step": "processes",
     "htmlreports": "reports",
     "streamlit_token": "analytics",
-    # Routed in lex-app-v2, though absent from spec §5.3.1's table. The interface's own
-    # search uses a query-string form this route does not match; see the plan, Task 2.
+    # Spec §5.3.1 lists this as "search | global-search"; the interface's own search
+    # uses a query-string form this route does not match.
     "global-search": "search",
     "file-download": "files",
     "sharepoint-file-download": "files",

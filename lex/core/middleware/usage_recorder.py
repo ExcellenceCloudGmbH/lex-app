@@ -6,7 +6,7 @@ which is supporting detail beside the interface's own area events (spec §5.3).
 The middleware is the last entry in ``MIDDLEWARE``. So the user it reads is the one every
 earlier middleware settled on, and it acts only after the view has returned. It never
 changes the response. The storage layer pauses itself on a database error, and the
-Instance Controller notices a silent recorder from the data (spec §7).
+lex-analytics collector notices a silent recorder from the data (spec §7).
 
 What is recorded:
 

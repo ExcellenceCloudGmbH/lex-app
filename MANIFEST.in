@@ -8,7 +8,8 @@ recursive-include lex/react *
 # works without installing the frontend package.
 recursive-exclude lex/react/build *
 recursive-include lex/assets *
-# Read at runtime by the core migration 0001; see pyproject.toml package-data.
+# Read at runtime by the core migrations 0001 (bitemporal_activation.sql) and 0002
+# (usage_metrics.sql); see pyproject.toml package-data.
 recursive-include lex/core/sql *.sql
 include pyproject.toml
 include requirements*.txt

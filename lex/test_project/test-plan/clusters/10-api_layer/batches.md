@@ -66,14 +66,14 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 10.83 – 10.114 |
+| Scenario range | 10.83 – 10.118 |
 | Type | U + I + E |
 | Files covered | `lex/core/sql/usage_metrics.sql`, `lex/core/migrations/0002_usage_metrics.py`, `lex/core/services/usage_areas.py`, `lex/core/services/usage_metrics.py`, `lex/core/middleware/usage_recorder.py`, `lex/api/views/usage/UsageArea.py`, the `usage-area` route in `lex/process_admin/sites/process_admin_site.py` |
 | Test file | `lex/test_project/tests/api_layer/test_10o_usage_recorder.py` |
 | Test classes | `TestCluster10o_UsageTables`, `TestCluster10o_AreaMap`, `TestCluster10o_Rules`, `TestCluster10o_Recorder`, `TestCluster10o_RecorderEndToEnd`, `TestCluster10o_UsageAreaEndpoint` |
 | Fixtures | api_layer `ALL_MODELS`; `usage_metrics.clear_all()` + `usage_metrics.recorder.reset()` in setUp/tearDown (the tables are raw SQL, outside the model registry, so per-test flush never clears them); a CSRF-enforcing `APIClient(enforce_csrf_checks=True)` for the endpoint |
-| Tests landed | **32 pass / 0 fail** |
+| Tests landed | **36 pass / 0 fail** |
 | Status | ✅ Complete |
-| Note | fleet metrics phase 1 (LEX-749), release R3. Design: `docs/superpowers/specs/2026-09-29-fleet-metrics-phase1-design.md` §5.3.1–§5.3.2, on the `docs/fleet-metrics-phase1-plan` branch merging alongside this one. Raw-SQL tables (`lex_usage_daily`, `lex_runtime_versions`, PostgreSQL-only — classes skip cleanly elsewhere) keyed so API activity (`api`) and interface use (`ui`/`ui_embed`) never merge; 10.103 guards the API area map against renamed routes; 10.104 pins `UI_AREAS` to the spec, which the interface mirrors in `src/usage/areas.ts` (process-admin-general-client batch F02 `d`). The endpoint is session-only with DRF's CSRF check in force (10.111) and never accepts an API key (10.110). |
+| Note | fleet metrics phase 1 (LEX-749), release R3. Design: `docs/superpowers/specs/2026-09-29-fleet-metrics-phase1-design.md` §5.3.1–§5.3.2. Raw-SQL tables (`lex_usage_daily` -- no time of day, only a UTC day; `lex_runtime_versions`, PostgreSQL-only — classes skip cleanly elsewhere) keyed so API activity (`api`) and interface use (`ui`/`ui_embed`) never merge; 10.103 guards the API area map against renamed routes; 10.104 pins `UI_AREAS` to the spec, which the interface mirrors in `src/usage/areas.ts` (process-admin-general-client batch F02 `d`). The endpoint is session-only with DRF's CSRF check in force (10.111) and never accepts an API key (10.110). 10.115–10.117 pin the hourly version throttle and the switch's fail-closed parsing; 10.118 checks that a request with no actor (an anonymous `/health` probe) writes neither table, including the version row, and that an authenticated request right after it still finds the version due. `TestCluster10o_RecorderEndToEnd` and `TestCluster10o_UsageAreaEndpoint` now skip on a non-PostgreSQL backend before their parent's `setUp` runs patches, instead of erroring on the missing tables. |
 
 ---

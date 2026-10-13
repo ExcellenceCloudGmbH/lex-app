@@ -6,8 +6,9 @@
 --
 -- A row holds a UTC day, an internal user id or an API key's name, a product area and a
 -- channel: 'api' for API activity (the middleware), 'ui' and 'ui_embed' for the web
--- interface's area events (POST api/usage/area). The Instance Controller reads counts
--- from these tables, never rows.
+-- interface's area events (POST api/usage/area). No time of day: that would add a
+-- per-person, per-area, per-day timestamp nothing reads, past the UTC day itself. The
+-- lex-analytics collector reads counts from these tables, never rows.
 --
 -- Design: docs/superpowers/specs/2026-09-29-fleet-metrics-phase1-design.md (§5.3)
 
@@ -17,7 +18,6 @@ CREATE TABLE IF NOT EXISTS lex_usage_daily (
     actor_id    text        NOT NULL,
     area        text        NOT NULL,
     channel     text        NOT NULL CHECK (channel IN ('api', 'ui', 'ui_embed')),
-    first_seen  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (day, actor_kind, actor_id, area, channel),
     -- Only a person uses the interface; an API key appears on the api channel only.
     CHECK (channel = 'api' OR actor_kind = 'person')

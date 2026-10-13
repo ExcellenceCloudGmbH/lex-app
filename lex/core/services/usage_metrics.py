@@ -11,12 +11,14 @@ The channel says who saw the use:
 * ``ui`` and ``ui_embed`` are written by ``POST api/usage/area``, for the web interface's
   area events, the latter when the interface runs embedded.
 
-The Instance Controller reads counts from both tables once a day (fleet metrics, phase 1).
-Nothing here can change a request's outcome:
+The lex-analytics collector reads counts from both tables once a day (fleet metrics,
+phase 1). Nothing here can change a request's outcome:
 
 * :meth:`UsageRecorder.record` never raises;
 * a database error pauses recording for a few minutes instead of failing every request;
-* a person costs one insert per area, channel and day per process.
+* a person costs one insert per area, channel and day per process;
+* a request nobody is attributed to writes nothing at all -- not a presence row, not
+  the version row -- so an anonymous liveness probe never touches the database.
 
 Design: docs/superpowers/specs/2026-09-29-fleet-metrics-phase1-design.md (§5.3, §6)
 """
@@ -39,7 +41,14 @@ USAGE_TABLE = "lex_usage_daily"
 VERSIONS_TABLE = "lex_runtime_versions"
 
 USAGE_METRICS_ENV = "LEX_USAGE_METRICS"
+_TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
 _FALSE_VALUES = frozenset({"false", "0", "no", "off"})
+
+# Guards the "unrecognised value" warning below it to at most once per process --
+# not time-based like WARNING_INTERVAL, since a misconfigured value does not change
+# from one call to the next.
+_invalid_value_lock = threading.Lock()
+_warned_invalid_value = False
 
 PERSON = "person"
 API_KEY = "api_key"
@@ -75,8 +84,32 @@ def utc_day(now: Optional[datetime] = None) -> date:
 
 
 def usage_metrics_enabled() -> bool:
-    """False when ``LEX_USAGE_METRICS`` is false, 0, no or off. Read on every call."""
-    return os.getenv(USAGE_METRICS_ENV, "true").strip().lower() not in _FALSE_VALUES
+    """Whether usage metrics recording is on. Read on every call; fails closed.
+
+    Unset or empty is on, and so are ``true``, ``1``, ``yes`` and ``on``; ``false``,
+    ``0``, ``no`` and ``off`` are off. Matching is case-insensitive and surrounding
+    whitespace is ignored. Any other value is off too -- a typo must never silently
+    turn recording back on -- and logs one warning naming the setting, at most once
+    per process so a persistently bad value cannot flood the log.
+    """
+    global _warned_invalid_value
+
+    raw = os.getenv(USAGE_METRICS_ENV, "")
+    value = raw.strip().lower()
+    if not value or value in _TRUE_VALUES:
+        return True
+    if value in _FALSE_VALUES:
+        return False
+
+    with _invalid_value_lock:
+        should_warn = not _warned_invalid_value
+        _warned_invalid_value = True
+    if should_warn:
+        logger.warning(
+            "%s=%r is not a recognised value; usage metrics recording is off.",
+            USAGE_METRICS_ENV, raw,
+        )
+    return False
 
 
 def supported() -> bool:
@@ -172,9 +205,11 @@ class UsageRecorder:
     ) -> None:
         """Record that ``actor`` used ``area`` on ``channel``. Never raises.
 
-        ``actor`` is ``(kind, id)``, or None for a request nobody is attributed to. ``area``
-        is None for a request that is not recorded. In both cases the version row is
-        still refreshed when it is due.
+        ``actor`` is ``(kind, id)``, or None for a request nobody is attributed to --
+        an anonymous caller writes nothing at all, not a presence row and not the
+        version row, and does not disturb the version row's hourly throttle either.
+        ``area`` is None for a request that is not recorded; with an actor present the
+        version row is still refreshed when it is due.
         """
         if not supported():
             return
@@ -193,12 +228,19 @@ class UsageRecorder:
 
     def _plan(self, now: datetime, actor, area, channel: str, enabled: bool):
         with self._lock:
+            # A request nobody is attributed to writes nothing: not a presence row,
+            # not the version row. Returning before the version decision means an
+            # anonymous request neither consumes nor resets the hourly throttle --
+            # the next authenticated request still finds it due exactly when it would
+            # have been had the anonymous request never happened.
+            if actor is None:
+                return False, None
             if self._paused_until is not None and now < self._paused_until:
                 return False, None
             write_version = self._version_due_at is None or now >= self._version_due_at
             if write_version:
                 self._version_due_at = now + VERSION_INTERVAL
-            if not enabled or actor is None or area is None:
+            if not enabled or area is None:
                 return write_version, None
             day = utc_day(now)
             if day != self._seen_day or len(self._seen) >= MAX_SEEN:

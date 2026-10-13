@@ -4,7 +4,8 @@
 Some framework code opens a file next to itself instead of importing it:
 
   * the ``core`` migration 0001 executes ``lex/core/sql/bitemporal_activation.sql``
-    to install the in-database activation applier;
+    to install the in-database activation applier, and migration 0002 executes
+    ``lex/core/sql/usage_metrics.sql`` to install the usage-metrics tables;
   * the Streamlit component shims serve their ``frontend/index.html``.
 
 setuptools puts a non-Python file in the wheel only when the packaging declares

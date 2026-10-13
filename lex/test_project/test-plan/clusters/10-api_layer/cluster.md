@@ -50,11 +50,11 @@
 
 **What it tests:** the usage recorder (fleet metrics phase 1, LEX-749) — the two raw-SQL tables (`lex_usage_daily`, `lex_runtime_versions`), the API-area map and the interface's area list (`lex/core/services/usage_areas.py`), the UTC-day rule, the process-local `UsageRecorder` front that collapses repeats to one insert per (day, actor, area, channel), the middleware that drives it for every API request (`api` channel), and `POST api/usage/area` which the interface calls for its own activity (`ui` / `ui_embed` channels).
 
-**Why a regression matters:** fleet metrics derives active-people (K1) and feature-reach (K2) counts entirely from what gets written here. A recorder that is registered but never reached, a day boundary computed in the wrong timezone, or a channel mix-up between API and interface activity all look identical to the Instance Controller: an instance nobody uses.
+**Why a regression matters:** fleet metrics derives active-people (K1) and feature-reach (K2) counts entirely from what gets written here. A recorder that is registered but never reached, a day boundary computed in the wrong timezone, or a channel mix-up between API and interface activity all look identical to the lex-analytics collector: an instance nobody uses.
 
 | # | Scenario | What We Assert |
 |---|----------|----------------|
-| 10.83 | the core migration installs the usage tables | `lex_usage_daily` carries day/actor_kind/actor_id/area/channel/first_seen keyed by the first five; `lex_runtime_versions` carries version/first_seen/last_seen/usage_enabled keyed by version; an unknown channel and an API key on an interface channel are refused |
+| 10.83 | the core migration installs the usage tables | `lex_usage_daily` carries day/actor_kind/actor_id/area/channel keyed by all five, with no time of day; `lex_runtime_versions` carries version/first_seen/last_seen/usage_enabled keyed by version, with the types the collector relies on; an unknown channel and an API key on an interface channel are refused |
 | 10.84 | the API area map matches the spec's table | every URL name in the spec's table lands in its area, and the map holds exactly those names |
 | 10.85 | the grid in as-of mode is history | a list request carrying `as_of` counts as `history`; without it, `grid`; `as_of` on any other route changes nothing |
 | 10.86 | a named route nobody mapped still says "this person was here" | an unmapped name is `app`; an unnamed route (SPA catch-all, static assets) is `None`; the usage endpoint's own name is `None` too, so its event isn't double-counted |
@@ -86,7 +86,11 @@
 | 10.112 | `LEX_USAGE_METRICS=false` turns the events off with the rest | the switch off still answers 204 (so the interface sees nothing unusual) and records nothing |
 | 10.113 | presence, not volume, whatever the interface's dedupe did | the same event POSTed three times leaves one row |
 | 10.114 | a tab left open across midnight is one presence per UTC day | the same event either side of `2026-10-26T00:00:00Z` leaves two `ui` rows, filed 25 and 26 October |
+| 10.115 | the hourly version throttle holds with anonymous requests in the mix | an actor's first call writes the version; a second call inside the hour does not; an anonymous request never writes it and never consumes or resets the throttle; past the hour, the next actor call writes it again |
+| 10.116 | a value that is neither a known "on" nor a known "off" is off | `LEX_USAGE_METRICS` set to an unrecognised value reports off on every read, and logs exactly one warning naming the setting |
+| 10.117 | whitespace and case don't matter for a true value | `LEX_USAGE_METRICS="TRUE "` reports on |
+| 10.118 | liveness never touches the recorder's tables | an anonymous `GET /health` leaves no row in either table and its response is unaffected; a signed-in request right after it still writes the version row |
 
-**Scenario range:** 10.83 – 10.114. **Test file:** `lex/test_project/tests/api_layer/test_10o_usage_recorder.py`. **Type:** U + I + E. **Status:** ✅ Complete. Covers `lex/core/sql/usage_metrics.sql`, `lex/core/migrations/0002_usage_metrics.py`, `lex/core/services/usage_areas.py`, `lex/core/services/usage_metrics.py`, `lex/core/middleware/usage_recorder.py`, `lex/api/views/usage/UsageArea.py`, the `usage-area` route in `lex/process_admin/sites/process_admin_site.py`. Batch: [10o](batches.md).
+**Scenario range:** 10.83 – 10.118. **Test file:** `lex/test_project/tests/api_layer/test_10o_usage_recorder.py`. **Type:** U + I + E. **Status:** ✅ Complete. Covers `lex/core/sql/usage_metrics.sql`, `lex/core/migrations/0002_usage_metrics.py`, `lex/core/services/usage_areas.py`, `lex/core/services/usage_metrics.py`, `lex/core/middleware/usage_recorder.py`, `lex/api/views/usage/UsageArea.py`, the `usage-area` route in `lex/process_admin/sites/process_admin_site.py`. Batch: [10o](batches.md).
 
 ---

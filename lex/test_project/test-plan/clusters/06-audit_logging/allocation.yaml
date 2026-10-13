@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 125
+max_scenario: 126
 letters:
   a:
     title: ''
@@ -179,14 +179,17 @@ letters:
       entry is 'failure' with a traceback while the create's entry stays 'success'.
   s:
     title: The audit contract fleet metrics reads
-    scenarios: 6.121-6.125
+    scenarios: 6.121-6.126
     status: complete
     tests:
       pass: 5
       skip: 0
-      xfail: 0
+      xfail: 1
     note: >-
       fleet metrics phase 1 (LEX-749), release R3; pins audit_logging_auditlog +
-      audit_logging_auditlogstatus columns and timestamptz types, the API-key-name writer
-      exclusion (K1), and the K3 run-grouping contract including a create-triggered run
-      counting as exactly one finished run
+      audit_logging_auditlogstatus columns and timestamptz types, and the K3
+      run-grouping contract including a create-triggered run counting as exactly one
+      finished run. 6.126 checks the K1 writer-exclusion claim end to end: an API
+      key's audit entries do not yet carry its name (BUG-034, xfail strict) --
+      request.user stays AnonymousUser for an API-key-only call, so the collector's
+      name match against a writer never fires

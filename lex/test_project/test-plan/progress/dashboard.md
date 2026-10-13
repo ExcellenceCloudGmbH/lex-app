@@ -15,11 +15,11 @@
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 14 | 79 | 23 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
-| 6. Audit Logging | 19 | 125 | 28 | 3 | 0 |
+| 6. Audit Logging | 19 | 126 | 28 | 3 | 1 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
-| 10. API Layer | 15 | 114 | 64 | 0 | 0 |
+| 10. API Layer | 15 | 118 | 68 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 12 | 62 | 26 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -180,7 +180,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 6p | Calculation-log cache backfill buffer cap |  | complete | 5 | 0 | 0 | scenarios 6.109–6.113; bounds `CacheManager.store_message` to a 256 KB tail (+ applies `CACHE_TIMEOUT`) so opening a long calc log can't OOM the backend |
 | 6q | Root-calculation detection ignores heading frames | 6.117-6.118 | complete | 2 | 0 | 0 | heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation` must skip them via get_root_model()/get_current_model() |
 | 6r | A run started by a create has its own audit entry | 6.119-6.120 | complete | 2 | 0 | 0 | 6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update' under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's entry is 'failure' with a traceback while the create's entry stays 'success'. |
-| 6s | The audit contract fleet metrics reads | 6.121-6.125 | complete | 5 | 0 | 0 | fleet metrics phase 1 (LEX-749), release R3; pins audit_logging_auditlog + audit_logging_auditlogstatus columns and timestamptz types, the API-key-name writer exclusion (K1), and the K3 run-grouping contract including a create-triggered run counting as exactly one finished run |
+| 6s | The audit contract fleet metrics reads | 6.121-6.126 | complete | 5 | 0 | 1 | fleet metrics phase 1 (LEX-749), release R3; pins audit_logging_auditlog + audit_logging_auditlogstatus columns and timestamptz types, and the K3 run-grouping contract including a create-triggered run counting as exactly one finished run. 6.126 checks the K1 writer-exclusion claim end to end: an API key's audit entries do not yet carry its name (BUG-034, xfail strict) -- request.user stays AnonymousUser for an API-key-only call, so the collector's name match against a writer never fires |
 
 ## 7. Calculation State Machine (`calculations`)
 
@@ -258,7 +258,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 10m | Calculation-log tree pagination + N+1 fix | 10.61-10.66 | complete | 6 | 0 | 0 | scenarios 10.61–10.66; `CalculationLogTreeView` now paginates (limit/offset) and resolves child ids in one query (`assertNumQueries(3)` pins N+1 gone) instead of loading every row  |
 | 10n |  | 10.67-10.69 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 10o | Usage recorder and interface area events (fleet metrics) | 10.83-10.114 | complete | 32 | 0 | 0 | fleet metrics phase 1 (LEX-749), release R3; raw-SQL tables with a channel column (api, ui, ui_embed), the two area vocabularies, the recorder, the middleware end to end, and POST api/usage/area (session-only, CSRF in force) |
+| 10o | Usage recorder and interface area events (fleet metrics) | 10.83-10.118 | complete | 36 | 0 | 0 | fleet metrics phase 1 (LEX-749), release R3; raw-SQL tables with a channel column (api, ui, ui_embed) and no time of day, the two area vocabularies, the recorder, the middleware end to end, and POST api/usage/area (session-only, CSRF in force). 10.115-10.117 pin the hourly version throttle and the switch's fail-closed parsing; 10.118 pins that a request with no actor writes neither table, including the version row, and that the next authenticated request still finds it due. The two E2E classes now skip on a non-PostgreSQL backend before their parent's setUp runs patches. |
 
 ## 11. Stress & Performance (`stress`)
 

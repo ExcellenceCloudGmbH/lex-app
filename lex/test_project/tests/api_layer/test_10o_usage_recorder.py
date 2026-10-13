@@ -11,8 +11,8 @@ K2 is read from the interface channels. The ``api`` channel is supporting detail
 
 A recorder that is registered but never reached looks exactly like an instance nobody
 uses. So these tests drive real requests through the whole middleware stack and assert
-rows, and they pin the UTC day the Instance Controller buckets by.
-Cluster 10o — scenarios 10.83–10.114. Type: U, I and E.
+rows, and they pin the UTC day the lex-analytics collector buckets by.
+Cluster 10o — scenarios 10.83–10.118. Type: U, I and E.
 Covers: lex/core/sql/usage_metrics.sql, lex/core/migrations/0002_usage_metrics.py,
 lex/core/services/usage_areas.py, lex/core/services/usage_metrics.py,
 lex/core/middleware/usage_recorder.py, lex/api/views/usage/UsageArea.py and the
@@ -72,6 +72,15 @@ def _columns(table: str) -> set[str]:
         return {row[0] for row in cursor.fetchall()}
 
 
+def _column_types(table: str) -> dict[str, str]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = %s",
+            [table],
+        )
+        return {row[0]: row[1] for row in cursor.fetchall()}
+
+
 def _primary_key(table: str) -> set[str]:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -110,15 +119,17 @@ class TestCluster10o_UsageTables(TestCase):
         Scenario 10.83: the core migration installs the usage tables.
         Given: a database migrated to the latest ``core`` migration.
         When: the catalog is read, and rows outside the channel rules are inserted.
-        Then: ``lex_usage_daily`` carries day, actor_kind, actor_id, area, channel and
-              first_seen, keyed by the first five; ``lex_runtime_versions`` carries
-              version, first_seen, last_seen and usage_enabled, keyed by version; an
-              unknown channel and an API key on an interface channel are refused.
+        Then: ``lex_usage_daily`` carries day, actor_kind, actor_id, area and channel,
+              keyed by all five -- no time of day, which would add a per-person,
+              per-area, per-day timestamp nothing reads; ``lex_runtime_versions``
+              carries version, first_seen, last_seen and usage_enabled, keyed by
+              version; an unknown channel and an API key on an interface channel are
+              refused.
         """
         self.assertEqual(
             _columns("lex_usage_daily"),
-            {"day", "actor_kind", "actor_id", "area", "channel", "first_seen"},
-            "lex_usage_daily drifted from the shape the Instance Controller queries.",
+            {"day", "actor_kind", "actor_id", "area", "channel"},
+            "lex_usage_daily drifted from the shape the lex-analytics collector queries.",
         )
         self.assertEqual(
             _primary_key("lex_usage_daily"),
@@ -129,7 +140,7 @@ class TestCluster10o_UsageTables(TestCase):
         self.assertEqual(
             _columns("lex_runtime_versions"),
             {"version", "first_seen", "last_seen", "usage_enabled"},
-            "lex_runtime_versions drifted from the shape the Instance Controller queries.",
+            "lex_runtime_versions drifted from the shape the lex-analytics collector queries.",
         )
         self.assertEqual(
             _primary_key("lex_runtime_versions"),
@@ -140,6 +151,23 @@ class TestCluster10o_UsageTables(TestCase):
             _raw_insert("person", "web")
         with self.assertRaises(IntegrityError, msg="an API key appears on the api channel only"):
             _raw_insert("api_key", "ui")
+
+        daily_types = _column_types("lex_usage_daily")
+        for column in ("actor_kind", "actor_id", "area", "channel"):
+            self.assertEqual(daily_types[column], "text", f"lex_usage_daily.{column} must stay text")
+        self.assertEqual(daily_types["day"], "date", "lex_usage_daily.day must stay date")
+
+        version_types = _column_types("lex_runtime_versions")
+        self.assertEqual(version_types["version"], "text", "lex_runtime_versions.version must stay text")
+        self.assertEqual(
+            version_types["usage_enabled"], "boolean",
+            "lex_runtime_versions.usage_enabled must stay boolean",
+        )
+        for column in ("first_seen", "last_seen"):
+            self.assertEqual(
+                version_types[column], "timestamp with time zone",
+                f"lex_runtime_versions.{column} must stay timestamptz -- the collector compares it to UTC bounds",
+            )
 
 
 class TestCluster10o_AreaMap(SimpleTestCase):
@@ -159,8 +187,8 @@ class TestCluster10o_AreaMap(SimpleTestCase):
         "run_step": "processes",
         "htmlreports": "reports",
         "streamlit_token": "analytics",
-        # Not in spec §5.3.1's table, but routed in lex-app-v2
-        # (process_admin_site.py:234-238); kept on purpose, see the plan's Task 2.
+        # Spec §5.3.1 lists this as "search | global-search"; the interface's own
+        # search sends a different (query-string) form that this route does not match.
         "global-search": "search",
         "file-download": "files",
         "sharepoint-file-download": "files",
@@ -290,6 +318,37 @@ class TestCluster10o_Rules(SimpleTestCase):
             "The recorder must come after every authentication middleware.",
         )
 
+    # -- 10.116 --------------------------------------------------------
+    def test_10_116_the_switch_fails_closed_on_an_unrecognised_value_and_warns_once(self) -> None:
+        """
+        Scenario 10.116: a value that is neither a known "on" nor a known "off" is off.
+        Given: LEX_USAGE_METRICS set to a value that is not one of the recognised
+               true or false spellings.
+        When: the switch is read twice.
+        Then: both reads report off -- a typo must never silently turn recording back
+              on -- and exactly one warning is logged, naming the setting.
+        """
+        with patch.object(usage_metrics, "_warned_invalid_value", False), \
+                patch.dict(os.environ, {"LEX_USAGE_METRICS": "disabled"}), \
+                self.assertLogs("lex.core.services.usage_metrics", level="WARNING") as logs:
+            self.assertFalse(usage_metrics.usage_metrics_enabled())
+            self.assertFalse(usage_metrics.usage_metrics_enabled())
+
+        self.assertEqual(len(logs.records), 1, "At most one warning per process")
+        self.assertIn("LEX_USAGE_METRICS", logs.output[0])
+
+    # -- 10.117 --------------------------------------------------------
+    def test_10_117_whitespace_and_case_dont_matter_for_a_true_value(self) -> None:
+        """
+        Scenario 10.117: "TRUE " with a trailing space is on.
+        Given: LEX_USAGE_METRICS="TRUE " (upper case, trailing whitespace).
+        When: the switch is read.
+        Then: it reports on; matching is case-insensitive and ignores surrounding
+              whitespace.
+        """
+        with patch.dict(os.environ, {"LEX_USAGE_METRICS": "TRUE "}):
+            self.assertTrue(usage_metrics.usage_metrics_enabled())
+
 
 class _Clock:
     """A settable clock for UsageRecorder."""
@@ -314,10 +373,9 @@ class TestCluster10o_Recorder(TestCase):
         super().setUp()
         _skip_unless_postgresql(self)
         # The usage tables are raw SQL, outside the model registry, so the per-test
-        # flush never clears them. Now that UsageRecorderMiddleware is installed,
-        # every other E2E test in this cluster that makes a real request also writes
-        # real rows here -- start each test from an empty table rather than asserting
-        # on whatever an unrelated test left behind.
+        # flush never clears them, and every other E2E test in this cluster that
+        # makes a real request also writes real rows here -- start each test from an
+        # empty table rather than asserting on whatever an unrelated test left behind.
         usage_metrics.clear_all()
 
     # -- 10.89 ---------------------------------------------------------
@@ -433,6 +491,42 @@ class TestCluster10o_Recorder(TestCase):
             [("person", "7", "grid", "api"), ("person", "7", "grid", "ui"), ("person", "7", "grid", "ui_embed")],
         )
 
+    # -- 10.115 --------------------------------------------------------
+    def test_10_115_the_version_row_is_refreshed_at_most_once_per_hour_and_never_for_an_anonymous_request(self) -> None:
+        """
+        Scenario 10.115: the hourly version throttle, with anonymous requests in the mix.
+        Given: a recorder with a fixed clock.
+        When: an actor is recorded, then an anonymous request, then the actor again
+              inside the hour, then an anonymous request right as the throttle falls
+              due, then the actor once more past the hour.
+        Then: the version is written on the first call and the last, never on the two
+              in between it's still inside the hour for, and never for either
+              anonymous request -- which also never consume or reset the throttle.
+        """
+        clock = _Clock(datetime(2026, 10, 1, 9, tzinfo=timezone.utc))
+        recorder = usage_metrics.UsageRecorder(clock=clock)
+        with patch.object(usage_metrics, "upsert_runtime_version", wraps=usage_metrics.upsert_runtime_version) as spy:
+            recorder.record(self.PERSON_7, "grid")
+            self.assertEqual(spy.call_count, 1, "The first call must write the version")
+
+            clock.now += timedelta(minutes=1)
+            recorder.record(None, "grid")
+            self.assertEqual(spy.call_count, 1, "An anonymous request must never write the version")
+
+            clock.now += timedelta(minutes=1)
+            recorder.record(self.PERSON_7, "record")
+            self.assertEqual(spy.call_count, 1, "Still inside the hour: no second write")
+
+            clock.now += usage_metrics.VERSION_INTERVAL
+            recorder.record(None, "grid")
+            self.assertEqual(
+                spy.call_count, 1,
+                "An anonymous request must not consume the throttle either, even once it falls due",
+            )
+
+            recorder.record(self.PERSON_7, "grid")
+            self.assertEqual(spy.call_count, 2, "Past the hour, reached by an actor: the version is refreshed")
+
 
 def _url_names(patterns) -> set[str]:
     names: set[str] = set()
@@ -450,6 +544,10 @@ class TestCluster10o_RecorderEndToEnd(E2ETestCase):
     e2e_models = ALL_MODELS
 
     def setUp(self) -> None:
+        # Skip before the parent's setUp runs: it has already started its patches by
+        # the time a table-missing error could surface, and a test that errors out of
+        # setUp never reaches tearDown, so those patches would leak into later tests.
+        _skip_unless_postgresql(self)
         super().setUp()
         usage_metrics.clear_all()
         usage_metrics.recorder.reset()
@@ -620,6 +718,33 @@ class TestCluster10o_RecorderEndToEnd(E2ETestCase):
         missing = set(API_AREAS) - _url_names(get_resolver().url_patterns)
         self.assertEqual(missing, set(), f"Area map names with no route: {sorted(missing)}")
 
+    # -- 10.118 --------------------------------------------------------
+    def test_10_118_an_anonymous_health_probe_writes_nothing_and_an_authenticated_request_after_it_writes_the_version(self) -> None:
+        """
+        Scenario 10.118: liveness never touches the recorder's tables.
+        Given: an anonymous client.
+        When: it GETs /health.
+        Then: the response is the normal health payload, and neither table gains a row.
+        When: a signed-in person then GETs a list.
+        Then: the version row is written -- the anonymous probe neither wrote it nor
+              consumed its hourly throttle.
+        """
+        from django.urls import reverse
+
+        response = APIClient().get(reverse("health_view"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.content[:300])
+        self.assertEqual(usage_metrics.presence_rows(), [], "An anonymous probe must leave no presence row")
+        self.assertEqual(usage_metrics.runtime_versions(), [], "An anonymous probe must leave no version row")
+
+        self._assert_ok(self._get(self.url_list(API_SIMPLE))[0])
+
+        versions = usage_metrics.runtime_versions()
+        self.assertEqual(
+            [(v["version"], v["usage_enabled"]) for v in versions], [(__version__, True)],
+            "A real actor right after the anonymous probe must still find the version due",
+        )
+
 
 def _csrf_pair() -> tuple[str, str]:
     """The cookie secret and header token a browser holds once Django has set its cookie."""
@@ -635,6 +760,8 @@ class TestCluster10o_UsageAreaEndpoint(E2ETestCase):
     EVENT = {"area": "history", "embed": False}
 
     def setUp(self) -> None:
+        # Skip before the parent's setUp runs -- see TestCluster10o_RecorderEndToEnd.
+        _skip_unless_postgresql(self)
         super().setUp()
         usage_metrics.clear_all()
         usage_metrics.recorder.reset()

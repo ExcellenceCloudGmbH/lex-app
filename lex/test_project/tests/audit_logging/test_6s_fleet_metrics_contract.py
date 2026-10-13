@@ -1,13 +1,15 @@
-"""The audit-table contract the Instance Controller's fleet-metrics collector reads.
+"""The audit-table contract the lex-analytics collector reads.
 
 Intent: fleet metrics (LEX-749) counts writes, writers (K1) and calculation runs (K3)
-from each instance's audit tables. The SQL that does it lives in the Instance
-Controller (lex-analytics), not here. These tests pin the columns and the behaviour
-that SQL depends on, so a lex-app change that would silently break the collector fails
-lex-app's own suite first:
+from each instance's audit tables. The SQL that does it lives in the lex-analytics
+collector, not here. These tests pin the columns and the behaviour that SQL depends
+on, so a lex-app change that would silently break the collector fails lex-app's own
+suite first:
 
 * the columns exist, and the timestamps are ``timestamptz``;
-* API keys keep their name, which is how K1 leaves them out of the writers (spec §4.3);
+* only the existence of the author column was pinned here before; 6.126 now checks
+  whether an API key's audit entries actually carry its name (they do not -- BUG-034
+  -- so K1's name-match exclusion of API-key writers does not fire yet);
 * a finished calculation run leaves audit rows that carry its terminal ``is_calculated``
   in the payload and share the request's calculation id: one run, however many rows;
 * a plain edit of a calculation row is audited with ``is_calculated = NOT_CALCULATED``, so
@@ -16,7 +18,7 @@ lex-app's own suite first:
   collector's K3 rule, to exactly one finished run — the create's own entry never
   counts as a second one.
 
-Cluster 6s — scenarios 6.121-6.125. Type: I and E.
+Cluster 6s — scenarios 6.121-6.126. Type: I and E.
 Covers: lex/audit_logging/models/AuditLog.py, lex/audit_logging/models/AuditLogStatus.py,
 lex/audit_logging/utils/calculation_audit.py, lex/api/views/model_entries/One.py.
 Run: python -m lex pytest lex/test_project/tests/audit_logging/test_6s_fleet_metrics_contract.py -v
@@ -33,7 +35,7 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
-from .models import ALL_MODELS, AUDIT_ATOMIC, AuditAtomicCalc
+from .models import ALL_MODELS, AUDIT_ATOMIC, AUDIT_SIMPLE, AuditAtomicCalc
 from ..calculations.models import ON_CREATE, ON_CREATE_MODELS, OnCreateCalc
 
 import pytest
@@ -47,10 +49,9 @@ def _group_key(audit_log: AuditLog) -> str:
     """The collector's run key for one audit row: ``resource:calculation_id``.
 
     An empty ``calculation_id`` or the model field's ``'test_id'`` sentinel means the
-    row is its own run, keyed by its own id instead — the same rule
-    ``fleet_metrics/sources/instance_db.py``'s ``_CALCULATIONS_SQL`` encodes as
-    ``COALESCE(NULLIF(NULLIF(calculation_id, ''), 'test_id'), 'row-' || id)`` (read-only
-    reference in lex-analytics; not imported here).
+    row is its own run, keyed by its own id instead — the same rule the lex-analytics
+    collector's instance-database reads encode as
+    ``COALESCE(NULLIF(NULLIF(calculation_id, ''), 'test_id'), 'row-' || id)``.
     """
     calc_id = audit_log.calculation_id
     tail = calc_id if calc_id not in (None, "", "test_id") else f"row-{audit_log.id}"
@@ -132,7 +133,7 @@ class TestCluster06s_AuditColumns(TestCase):
             missing = {c for c in columns if (table, c) not in present}
             self.assertEqual(
                 missing, set(),
-                f"{table} lost columns the Instance Controller's fleet-metrics SQL reads: {sorted(missing)}",
+                f"{table} lost columns the lex-analytics collector's fleet-metrics SQL reads: {sorted(missing)}",
             )
         for key in self.TIMESTAMPTZ:
             self.assertEqual(types.get(key), "timestamp with time zone", f"{key} must stay timestamptz")
@@ -230,6 +231,33 @@ class TestCluster06s_CalculationRunContract(E2ETestCase):
         self.assertEqual(
             {(row.payload or {}).get("is_calculated") for row in rows}, {"NOT_CALCULATED"},
             "A plain edit must not look like a finished run to the collector",
+        )
+
+    # -- 6.126 ---------------------------------------------------------
+    @pytest.mark.xfail(
+        strict=True,
+        reason="BUG-034: AuditLog.author reads request.user, which stays AnonymousUser "
+        "for an API-key-only call; it never carries the key's name.",
+    )
+    def test_6_126_an_api_key_s_audit_author_is_its_own_name(self) -> None:
+        """
+        Scenario 6.126: an API key's writes should be its own, not a person's.
+        Given: a caller authenticated with an API key named "Nightly import".
+        When: it creates a record through the REST API.
+        Then: the resulting AuditLog.author should equal the key's name -- how K1 would
+              leave API-key writers out of the people it counts (spec §4.3). It does
+              not today: see BUG-034.
+        """
+        self.authenticate_as_api_key(name="Nightly import")
+        response = self.client.post(
+            self.url_create(AUDIT_SIMPLE), data={"name": "created-by-key", "value": 1}, format="json",
+        )
+        self.assertEqual(response.status_code, 201, f"Create failed: {response.status_code}")
+
+        entry = AuditLog.objects.get(resource=AUDIT_SIMPLE, action="create", object_id=response.data["id"])
+        self.assertEqual(
+            entry.author, "Nightly import",
+            "K1 excludes API-key writers by matching this field against the key's name.",
         )
 
 
