@@ -1025,8 +1025,8 @@ first release carries no Prometheus dependency at all.
 | Retention through December | 180 days configured; 500 GiB volume in production | confirm the depth actually held (below) |
 | Scrape configs, exporters, recording rules, Prometheus storage | — | **none** |
 
-**Cost.** About eight instant or range queries per instance-day, roughly 500 a night for
-the fleet. Each touches a few series: the test cluster's ingress controller holds about
+**Cost.** About 7 to 15 instant or range queries per instance-day (more on a day with
+starts), roughly 450 to 900 a night for the fleet. Each touches a few series: the test cluster's ingress controller holds about
 120 active request series at a time. That is less than one person scrolling a per-instance dashboard. Operational
 effort is nil: the collector's own heartbeat covers it, and a failed Prometheus source
 marks itself without blocking the database sources. A day on which Prometheus holds no
