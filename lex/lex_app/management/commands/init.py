@@ -153,6 +153,18 @@ def _is_non_fatal_keycloak_import_timeout(sync_manager: "KeycloakSyncManager") -
     return bool(error and error.get("kind") in NON_FATAL_KEYCLOAK_IMPORT_ERROR_KINDS)
 
 
+def project_app_label() -> str | None:
+    """The project's own app, or None when lex runs without one.
+
+    settings.py installs the project folder as an app unless its name starts
+    with "lex" (a framework checkout), so this is that folder's name when
+    settings installed it.
+    """
+    from lex.lex_app.settings import repo_name
+
+    return repo_name if apps.is_installed(repo_name) else None
+
+
 def get_missing_keycloak_env() -> list[str]:
     missing: list[str] = []
     for key in KEYCLOAK_ENV_VARS:
@@ -1527,6 +1539,14 @@ class Command(BaseCommand):
             database_alias = self._database_alias_from_migrate_args(migrate_extra)
             if create_new:
                 mm_pos, mm_opts = self._parse_extra_args(makemigrations_extra or "")
+                # Only the project's own models. For every app, makemigrations
+                # writes a migration into site-packages for any installed
+                # package whose models drift from the migrations it ships, and
+                # the package's next migration conflicts with that file. An
+                # app named on --makemigrations-args still decides.
+                project = project_app_label()
+                if not mm_pos and project:
+                    mm_pos = [project]
                 self.stdout.write("Creating new migrations for model changes...")
                 call_command(
                     "makemigrations",

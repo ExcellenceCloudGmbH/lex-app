@@ -317,7 +317,7 @@ INSTALLED_APPS = [
     "rest_framework_api_key",
     "django.contrib.postgres",
     "django_db_views",
-    "oauth2_authcodeflow",
+    "lex.lex_app.vendored.apps.OAuth2AuthCodeFlowConfig",  # oauth2_authcodeflow
     "lex.legacy_data.apps.LegacyDataConfig",
 ]
 
@@ -480,7 +480,11 @@ for _db_config in DATABASES.values():
     if "postgresql" in _db_config.get("ENGINE", ""):
         _db_config["DISABLE_SERVER_SIDE_CURSORS"] = True
 
-MIGRATION_MODULES = {}
+# lex ships the api-key app's migrations: its package's own leave id and
+# hashed_key narrower than its keys (see lex/lex_app/vendored).
+MIGRATION_MODULES = {
+    "rest_framework_api_key": "lex.lex_app.vendored.rest_framework_api_key.migrations",
+}
 
 
 # CELERY STUFF
