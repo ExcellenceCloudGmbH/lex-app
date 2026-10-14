@@ -45,16 +45,21 @@ pytestmark = pytest.mark.audit_logging
 TERMINAL_STATES = ("SUCCESS", "ERROR", "ABORTED", "CANCELLED")
 
 
+#: Calculation ids that name no run (the lex-analytics collector's list).
+PLACEHOLDER_CALCULATION_IDS = (None, "", "test_id", "default", "undefined", "null")
+
+
 def _group_key(audit_log: AuditLog) -> str:
     """The collector's run key for one audit row: ``resource:calculation_id``.
 
-    An empty ``calculation_id`` or the model field's ``'test_id'`` sentinel means the
-    row is its own run, keyed by its own id instead — the same rule the lex-analytics
-    collector's instance-database reads encode as
-    ``COALESCE(NULLIF(NULLIF(calculation_id, ''), 'test_id'), 'row-' || id)``.
+    A ``calculation_id`` that names no run means the row is its own run, keyed by its
+    own id instead: NULL, empty, the model field's ``'test_id'`` default, and the
+    placeholders a client sends when it has no run id (``'default'``, ``'undefined'``,
+    ``'null'``). That is the rule the lex-analytics collector's instance-database
+    reads apply.
     """
     calc_id = audit_log.calculation_id
-    tail = calc_id if calc_id not in (None, "", "test_id") else f"row-{audit_log.id}"
+    tail = calc_id if calc_id not in PLACEHOLDER_CALCULATION_IDS else f"row-{audit_log.id}"
     return f"{audit_log.resource}:{tail}"
 
 
