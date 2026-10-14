@@ -6,6 +6,25 @@
 Streamlit component), `process-admin-general-client` (grid filters, a filter bar, the embed bridge),
 `lex-app-docs` (three pages)
 
+## Amendments
+
+Found while the implementation plans were written against the source:
+
+1. **`as_of` and `serializer` are query parameters** of `filter_values`, as they are for the list
+   POST: the shared mixin reads both from the URL. The request body carries `field`, `filterModel`,
+   `selected`, `search` and `limit`.
+2. **The per-row permission count is capped by rows read**: `LEX_FILTER_VALUES_ROW_SCAN_LIMIT`
+   (default 50,000). Past it the answer is `truncated`. `LEX_FILTER_VALUES_SCAN_LIMIT` still caps
+   distinct values.
+3. **Only the list's own columns** can be listed: a field with `__` (a related path) is not
+   filterable by `filter_values`.
+4. **Column-menu lists ask for up to 1,000 values**, and AG's search box filters only those. Searching
+   the server is the filter bar's job.
+5. **Removing a column from the bar keeps its filter**; the column header still shows it. Unticking
+   values is how a filter is cleared.
+6. **First-load embed filters** apply to the first list mounted in the embed whose resource appears in
+   the path the embed opened with. Host `filter` messages apply to the list mounted when they arrive.
+
 ## The problem
 
 A review page needs to narrow one table with several values per column at once (for example two or
@@ -119,9 +138,10 @@ the new shapes. It stays the one server-side translator.
 
 ### 3. Backend: the filter-values endpoint
 
-`POST api/model_entries/<model>/filter_values`
+`POST api/model_entries/<model>/filter_values?as_of=<instant>&serializer=<name>` (both optional,
+read exactly as the list POST reads them)
 
-Request:
+Request body:
 
 ```json
 {
@@ -129,9 +149,7 @@ Request:
   "filterModel": { "status": { "filterType": "set", "values": ["open", "closed"] } },
   "selected": ["north"],
   "search": "no",
-  "limit": 200,
-  "as_of": null,
-  "serializer": "default"
+  "limit": 200
 }
 ```
 
