@@ -126,6 +126,21 @@ class TestCluster01aw_PlainRunIsSetUp(TestCase):
         self.assertEqual(loaded, "from-this-root", "the given root's .env must be loaded")
         self.assertEqual(returned, root.resolve())
 
+    def test_1_393_the_settings_warning_policy_holds_for_the_tests(self):
+        """Scenario 1.393 (third half): the warnings a run reports are the ones `lex
+        pytest` reported. The settings install lex's warning policy
+        (LEX_SUPPRESS_WARNINGS) when imported; `lex pytest` imported them before pytest
+        started, so its tests ran under that policy, and a plain run must too."""
+        quiet = _run_pytest(f"{TARGETS_REL}/warning_target.py")
+        loud = _run_pytest(
+            f"{TARGETS_REL}/warning_target.py", extra_env={"LEX_SUPPRESS_WARNINGS": "False"}
+        )
+
+        self.assertEqual(quiet.returncode, 0, _output(quiet))
+        self.assertNotIn("lex-1aw-warning-probe", quiet.stdout, _output(quiet))
+        self.assertEqual(loud.returncode, 0, _output(loud))
+        self.assertIn("lex-1aw-warning-probe", loud.stdout, _output(loud))
+
     # -- 1.394 ---------------------------------------------------------
     def test_1_394_a_project_without_lex_tests_is_left_alone(self):
         """
@@ -358,3 +373,72 @@ class TestCluster01aw_CopiedSetupCoexists(TestCase):
         setup_databases.assert_not_called()
         teardown.assert_not_called()
         self.assertFalse(config.stash[pytest_plugin._RUN].test_environment)
+
+
+class TestCluster01aw_LexPytestSharesThePlugin(TestCase):
+    """Cluster 1aw: `lex pytest` and `lex pytest-groups` hand setup to the plugin."""
+
+    def _config(self, root: Path):
+        from lex.tools.test_groups import GroupConfig, LexTestConfig
+
+        (root / "Tests").mkdir()
+        return LexTestConfig(
+            project_root=root, source="test", tests_entrypoint="Tests",
+            report_output_dir="reports", global_receivers=[],
+            email={"from_email": "", "from_name": "", "reply_to": "", "subject_prefix": ""},
+            groups=[GroupConfig(name="init", description="", receivers=[])],
+            group_assignments={},
+        )
+
+    # -- 1.403 ---------------------------------------------------------
+    def test_1_403_lex_pytest_passes_the_plugin_and_sets_nothing_up_itself(self):
+        """
+        Scenario 1.403: one implementation
+        Given: `lex pytest` with no target
+        When: it calls pytest
+        Then: it passes the plugin module with `-p no:lex` ahead of the entrypoint,
+              and sets the test environment and database up itself no more
+        """
+        from click.testing import CliRunner
+
+        from lex.bin.lex import lex
+
+        # The database and environment calls are stubbed so that a `pytest_cmd` that
+        # still makes them cannot touch the suite's own test database or environment.
+        with tempfile.TemporaryDirectory() as tmp:
+            config = self._config(Path(tmp))
+            with patch("lex.bin.lex.os.chdir"), patch("lex.bin.lex._bootstrap_django"), \
+                    patch("lex.bin.lex._has_explicit_pytest_target", return_value=False), \
+                    patch("lex.tools.test_groups.resolve_config", return_value=config), \
+                    patch("django.test.utils.setup_test_environment") as setup, \
+                    patch("django.test.utils.teardown_test_environment"), \
+                    patch("django.test.runner.DiscoverRunner.setup_databases") as setup_databases, \
+                    patch("django.test.runner.DiscoverRunner.teardown_databases"), \
+                    patch("pytest.main", return_value=0) as pytest_main:
+                result = CliRunner().invoke(lex, ["pytest", "-q"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        args, kwargs = pytest_main.call_args
+        self.assertEqual(args[0], ["-p", "no:lex", "Tests", "-q"])
+        self.assertIs(kwargs["plugins"][0], pytest_plugin)
+        setup.assert_not_called()
+        setup_databases.assert_not_called()
+
+    def test_1_403_lex_pytest_groups_passes_the_plugin(self):
+        """Scenario 1.403 (second half): the collect-only listing gets Django and the
+        markers from the same plugin."""
+        from click.testing import CliRunner
+
+        from lex.bin.lex import lex
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = self._config(Path(tmp))
+            with patch("lex.bin.lex.os.chdir"), patch("lex.bin.lex._bootstrap_django"), \
+                    patch("lex.tools.test_groups.resolve_config", return_value=config), \
+                    patch("pytest.main", return_value=0) as pytest_main:
+                result = CliRunner().invoke(lex, ["pytest-groups"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        args, kwargs = pytest_main.call_args
+        self.assertEqual(args[0][:3], ["-p", "no:lex", "--collect-only"])
+        self.assertIs(kwargs["plugins"][0], pytest_plugin)

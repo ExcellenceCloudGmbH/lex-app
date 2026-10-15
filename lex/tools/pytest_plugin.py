@@ -18,7 +18,8 @@ Like ``lex/tools/django_bootstrap.py``, this module imports nothing from Django 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ class _Run:
     db_runner: Any = None
     old_db_config: Any = None
     converter_patch: Any = None
+    warning_filters: list = field(default_factory=list)
 
 
 _RUN = pytest.StashKey[_Run]()
@@ -90,8 +92,13 @@ def pytest_load_initial_conftests(early_config: pytest.Config) -> None:
 
     import django
 
+    filters_before = list(warnings.filters)
     django.setup()
-    early_config.stash[_RUN] = _Run(root=root, test_config=test_config)
+    early_config.stash[_RUN] = _Run(
+        root=root,
+        test_config=test_config,
+        warning_filters=[f for f in warnings.filters if f not in filters_before],
+    )
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -105,6 +112,8 @@ def pytest_configure(config: pytest.Config) -> None:
     run = config.stash.get(_RUN, None)
     if run is None:
         return
+
+    _reinstall_warning_filters(run.warning_filters)
 
     if config.pluginmanager.hasplugin("django"):
         raise pytest.UsageError(
@@ -131,6 +140,25 @@ def pytest_configure(config: pytest.Config) -> None:
         return
 
     _set_up_test_run(run)
+
+
+def _reinstall_warning_filters(filters: list) -> None:
+    """Put back the warning filters ``django.setup()`` installed.
+
+    Importing the settings installs lex's warning policy (``LEX_SUPPRESS_WARNINGS``).
+    pytest runs ``pytest_load_initial_conftests`` inside a ``warnings.catch_warnings()``
+    block, so filters installed there are dropped when the hook returns. `lex pytest`
+    imported the settings before pytest started, and its tests ran under them;
+    reinstalled here, outside that block, both runs report the same warnings.
+    """
+    for action, message, category, module, lineno in reversed(filters):
+        warnings.filterwarnings(
+            action,
+            message=message.pattern if message is not None else "",
+            category=category,
+            module=module.pattern if module is not None else "",
+            lineno=lineno,
+        )
 
 
 def _set_up_test_run(run: _Run) -> None:

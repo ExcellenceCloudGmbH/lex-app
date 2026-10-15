@@ -995,97 +995,22 @@ def pytest_cmd(ctx):
         else:
             coverage_error = "coverage.py is not available in this environment."
 
-    # Bootstrap Django after starting report coverage so app/model import-time
-    # code is included in the measured project coverage.
-    _bootstrap_django()
-
-    # Stand up Django's test database the same way `manage.py test` /
-    # DiscoverRunner.run_tests() does:
-    #   1. setup_test_environment() — installs the test client, RequestFactory
-    #      patches, deprecation-warning filter etc.
-    #   2. DiscoverRunner.setup_databases() — runs migrations and re-points
-    #      ``connection.settings_dict["NAME"]`` so any TestCase /
-    #      TransactionTestCase / SimpleTestCase subclass that touches the ORM
-    #      hits the configured test DB.
-    # Without this, every unittest.TestCase-derived test errors at setUp with
-    # `database "<prod name>" does not exist` because Django's runner machinery
-    # never ran.
-    #
-    # ``keepdb=True`` on purpose: the K8S/GCP/DOCKER settings set
-    # ``TEST["NAME"] == DATABASE_NAME`` (the instance's own DB), so on a
-    # deployed instance the "test DB" already exists — keepdb reuses it and
-    # runs migrations against it (no DROP/CREATE), matching the pre-cutover
-    # behaviour where pytest ran directly against the live/clone DB. This needs
-    # no CREATEDB / database-ownership privilege on the app role. In CI, where
-    # the DB is missing, setup_databases still CREATEs it (the CI Postgres user
-    # is a superuser). With ``keepdb=False`` Django instead force-drops and
-    # recreates ``DATABASE_NAME`` on every run, which requires CREATEDB +
-    # ownership the Terraform-provisioned app role does not have (and would be
-    # dropping the instance's own database) — see rc184 regression / af2a6ea.
-    from django.test.runner import DiscoverRunner
-    from django.test.utils import setup_test_environment, teardown_test_environment
-
-    setup_test_environment()
-    _db_runner = DiscoverRunner(verbosity=1, interactive=False, keepdb=True)
-    # Limit test-DB creation to the `default` alias. Django's own
-    # ``manage.py test`` path inspects every collected ``TestCase`` for
-    # its ``databases`` attribute (defaults to ``{"default"}``) and
-    # passes that set in here, so unused aliases like ``GCP`` / ``K8S``
-    # / ``DOCKER-COMPOSE`` are skipped. We bypass that discovery (pytest
-    # owns collection now), so without ``aliases=`` Django would try to
-    # CREATE test_<name> on every alias and fail on the ones whose host
-    # env vars aren't set in CI (e.g. ``GCP`` resolves to host
-    # ``envvar_not_existing`` → DNS error).
-    _old_db_config = _db_runner.setup_databases(aliases={"default"})
-
-    # Make ``register_converter`` idempotent for the duration of the pytest
-    # run. ``lex/process_admin/sites/process_admin_site.py:_get_urls`` calls
-    # ``register_converter(create_model_converter(...), "model")`` every time
-    # ``processAdminSite.urls`` is accessed, and Django's ``register_converter``
-    # raises ``ValueError: Converter 'model' is already registered.`` on the
-    # second call. With ``lex test`` only one cluster ran per invocation so
-    # the issue rarely surfaced, and ``E2ETestCase._rebuild_urls`` already
-    # installs a local idempotent patch around its own reload of
-    # ``lex_app.urls``. Pytest now runs every cluster in one process; a
-    # plain ``TestCase`` (e.g. ``TestCluster01p_UrlConfResolves``) calling
-    # ``reverse()`` after an E2E test reloaded ``lex_app.urls`` hits the
-    # unpatched register and aborts collection. Installing the patch at the
-    # runner level — once, around ``pytest.main()`` — covers every test
-    # class (E2E and plain alike) without modifying framework code, and
-    # matches the existing pattern in ``_e2e_test_case.py`` /
-    # ``test_user_model_registration.py`` / ``test_api_user_journey.py`` /
-    # ``test_bitemporal.py``.
-    from django.urls import converters as _django_converters
-    from django.urls.converters import REGISTERED_CONVERTERS as _REGISTERED_CONVERTERS
-    from unittest.mock import patch as _patch
-
-    _real_register_converter = _django_converters.register_converter
-
-    def _idempotent_register_converter(converter, type_name):
-        _REGISTERED_CONVERTERS.pop(type_name, None)
-        return _real_register_converter(converter, type_name)
-
-    _converter_patch = _patch(
-        "lex.process_admin.sites.process_admin_site.register_converter",
-        new=_idempotent_register_converter,
-    )
-    _converter_patch.start()
+    # lex's pytest plugin sets Django, the test environment and the test database
+    # up, and undoes them afterwards -- the code a plain pytest run (PyCharm's
+    # runner, VS Code) gets through the `pytest11` entry point. It is passed in
+    # directly so it runs even where that entry point is not installed (an editable
+    # install made before it existed); `-p no:lex` stops pytest loading the same
+    # module a second time through the entry point. django.setup() runs inside
+    # pytest.main(), after coverage started, so import-time code is still measured.
+    from lex.tools import pytest_plugin
 
     started_at = time.perf_counter()
     try:
-        exit_code = _pytest.main(forwarded, plugins=[plugin])
+        exit_code = _pytest.main(["-p", "no:lex", *forwarded], plugins=[pytest_plugin, plugin])
     except LexTestConfigError as exc:
         # Raised from pytest_collection_modifyitems on marker/group mismatch.
         raise click.ClickException(str(exc)) from exc
     finally:
-        try:
-            _converter_patch.stop()
-        except Exception:
-            pass
-        try:
-            _db_runner.teardown_databases(_old_db_config)
-        finally:
-            teardown_test_environment()
         plugin.run_duration = f"{time.perf_counter() - started_at:.1f} s"
         if coverage_runner is not None:
             try:
