@@ -53,3 +53,16 @@
 **Scenario range:** 4.75 – 4.79. **Test file:** `lex/test_project/tests/permissions/test_4n_reflex_permissions.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Covers `lex/lex_app/reflex/auth.py`. Batch: [4n](batches.md).
 
 ---
+
+### 4o. filter_values and read permissions
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 4.80 | Field hidden on some rows | Counted only on rows that allow it | ✅ |
+| 4.81 | Rows hidden by permission_read | Never counted, in any column | ✅ |
+| 4.82 | Field readable on no row | 200 with an empty list | ✅ |
+| 4.83 | Field the serializer does not expose | 400 "is not filterable" | ✅ |
+
+**Scenario range:** 4.80 – 4.83. **Test file:** `lex/test_project/tests/permissions/test_4o_filter_values_permissions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-15). Covers `lex/api/views/model_entries/FilterValues.py`. Batch: [4o](batches.md).
+
+---

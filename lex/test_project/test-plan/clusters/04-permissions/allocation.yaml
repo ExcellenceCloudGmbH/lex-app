@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 79
+max_scenario: 83
 letters:
   a:
     title: ''
@@ -147,3 +147,17 @@ letters:
       model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of
       five mutations of that code (keep grants across users, keep them across sign-out, count record
       grants, cache the raw token, return the cached list itself) fails exactly one scenario.
+  o:
+    title: filter_values honours row and field read permissions
+    scenarios: 4.80-4.83
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Value lists come from filter_values, outside the serializer that hides fields per row in the
+      grid. RowFieldItem hides region on private rows and denies hidden rows. 4.80 counts region
+      only where readable, 4.81 never counts hidden rows, 4.82 gives an empty list for a field
+      readable on no row, 4.83 refuses a field the requested serializer does not expose. Mutation:
+      forcing _count_per_row's readable-field membership test to always succeed fails 4.80 and 4.82.

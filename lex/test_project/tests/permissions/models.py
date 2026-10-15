@@ -226,6 +226,41 @@ class OwnedItem(LexModel):
         return self.name
 
 
+class RowFieldItem(LexModel):
+    """Cluster 4o fixture: a field hidden on some rows, and some rows hidden entirely."""
+
+    title = models.CharField(max_length=200)
+    region = models.CharField(max_length=64, blank=True, default="")
+    is_private = models.BooleanField(default=False)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.title
+
+    def permission_read(self, uc):
+        if self.title.startswith("hidden"):
+            return PermissionResult.deny("cluster 4o: hidden row")
+        if self.is_private:
+            return PermissionResult.allow_all_except(
+                {"region"}, "cluster 4o: a private row hides its region",
+            )
+        return PermissionResult.allow_all("cluster 4o: open row")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 4o: edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, ExportDeniedItem, OwnedItem]
 
 # URL names expected by process_admin_rest_api — lowercased model name.

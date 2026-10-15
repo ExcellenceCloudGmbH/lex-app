@@ -78,3 +78,14 @@ list itself — each fail exactly one of these scenarios. The rule for record gr
 must not open a check on the whole model.
 
 ---
+
+## Batch 4o — filter_values honours row and field read permissions (4.80-4.83)
+
+- **Type:** E
+- **Files covered:** `lex/api/views/model_entries/FilterValues.py`
+- **Test file:** `lex/test_project/tests/permissions/test_4o_filter_values_permissions.py`
+- **Test classes:** `TestCluster04o_FilterValuesPermissions`
+- **Fixtures:** new `RowFieldItem`; `FieldLevelItem`
+- **Status:** complete — 4 pass
+
+---
