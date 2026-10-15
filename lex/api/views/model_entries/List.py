@@ -35,6 +35,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from lex.api.utils import can_read_from_payload
+from lex.api.utils.filterable_fields import is_plain_text_field
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
 from lex.core.models.LexModel import UserContext
@@ -618,9 +619,12 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
 
         A key is the stored value as a string -- ``"5"``, ``"true"``, an ISO
         date, a related primary key. ``None`` stands for blank, which SQL ``IN``
-        never matches, so it is reported separately. A key that cannot be
-        converted is a 400 naming the field: answering with more rows than the
-        user asked for is worse than refusing.
+        never matches, so it is reported separately. On a plain text column an
+        empty-string key means the same thing: a stored ``""`` is blank there
+        too (see ``_build_filter_q``), so it is folded into the same bucket
+        instead of being matched via ``__in`` as the literal string ``""``.
+        A key that cannot be converted is a 400 naming the field: answering
+        with more rows than the user asked for is worse than refusing.
         """
         model_field = self._get_model_field(field)
         target_field = getattr(model_field, "target_field", None)
@@ -630,11 +634,12 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
             convert = _bool_from_key
         else:
             convert = model_field.to_python
+        blank_matches_empty_string = is_plain_text_field(model_field)
 
         converted: list = []
         include_blank = False
         for raw in values:
-            if raw is None:
+            if raw is None or (blank_matches_empty_string and raw == ""):
                 include_blank = True
                 continue
             try:
@@ -694,7 +699,15 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
             converted, include_blank = self._set_filter_values(field, values)
             condition: Optional[Q] = Q(**{f"{field}__in": converted}) if converted else None
             if include_blank:
-                blank = Q(**{f"{field}__isnull": True})
+                model_field = self._get_model_field(field)
+                if is_plain_text_field(model_field):
+                    # A plain text column stores blank two ways -- NULL and
+                    # "" -- and the grid's value list folds them into one
+                    # "(Blank)" entry (see FilterValues._fold_blank), so
+                    # ticking it here must match both too.
+                    blank = Q(**{f"{field}__isnull": True}) | Q(**{field: ""})
+                else:
+                    blank = Q(**{f"{field}__isnull": True})
                 condition = blank if condition is None else (condition | blank)
             return condition
 

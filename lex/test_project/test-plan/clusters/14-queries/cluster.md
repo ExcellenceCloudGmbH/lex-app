@@ -135,6 +135,18 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
 | 14.49 | as_of | Values of that instant, not of now | ✅ |
 | 14.50 | Bad key in another filter | 400 naming that field | ✅ |
 | 14.51 | Two counting paths | Database and per-row counts give identical answers | ✅ |
+| 14.52 | Credential-shaped column | Refused even behind a custom serializer's `fields = "__all__"`; no stored secret leaks | ✅ |
+| 14.53 | Ticked FK key visibility | A readable row's name is shown; a hidden-row-only or nonexistent key keeps its own key as label | ✅ |
+| 14.54 | Serializer field source mismatch | A `SerializerMethodField` and a renamed (`source=`) field are both refused | ✅ |
+| 14.55 | No permission methods at all | Database path; counts match a plain tally; no warning logged | ✅ |
+| 14.56 | `can_read` override with `permission_read` open | Per-row path; a masked row's field is not counted | ✅ |
+| 14.57 | Continuous columns | Decimal, float and date-time are refused — no value list | ✅ |
+| 14.58 | Method guard | GET and HEAD are 405 | ✅ |
+| 14.59 | Truncation and limit bounds | Both scan limits truncate; `limit` clamps to 1-1000, non-integer defaults to 200 | ✅ |
+| 14.60 | Default-permission identity + faceting | The literal-default identity holds; the database path facets correctly | ✅ |
+| 14.61 | Blank folding | `""` and `NULL` are one "(Blank)" bucket; the list's own set filter matches both | ✅ |
+| 14.62 | Integer ordering | Numeric order (2 before 10), not lexicographic | ✅ |
+| 14.63 | `selected` handling | JSON `true` normalises to `"true"`; capped at 1,000; search gates re-adding a missing ticked value | ✅ |
 
 ---
 

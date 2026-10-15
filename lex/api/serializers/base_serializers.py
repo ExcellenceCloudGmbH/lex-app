@@ -742,38 +742,79 @@ class LexSerializer(serializers.ModelSerializer):
         CALCULATION_ID_NAME, HAS_CALCULATION_LOG_NAME,
     })
 
-    def to_representation(self, instance):
-        request = self.context.get('request')
+    def _resolve_permission_target(self, instance):
+        """The instance permission checks should run against, and its capability flags.
 
-        # Resolve the target instance for permission checks
+        Unwraps a History / MetaHistory wrapper when the wrapper class itself
+        declares neither ``can_read`` nor ``permission_read`` (i.e. it isn't a
+        LexModel), so permission checks always run against a real LexModel.
+        """
         caps = _get_capabilities(type(instance))
-
         if not caps['has_can_read'] and not caps['has_permission_read']:
             target_instance = self._unwrap_instance(instance)
             target_caps = _get_capabilities(type(target_instance))
         else:
             target_instance = instance
             target_caps = caps
+        return target_instance, target_caps
 
-        # Normal visible fields for concrete models
+    def readable_field_names(self, instance, request, base_user_context=None) -> set:
+        """Which model field names ``request`` may read on ``instance``.
+
+        Extracted, unchanged, from the per-instance visibility decision
+        ``to_representation`` used to make inline: unwrap when the class
+        declares neither ``can_read`` nor ``permission_read``; legacy
+        ``can_read(request)`` first (``False`` -> hidden, ``True`` -> all
+        fields, else the returned names); else ``permission_read`` (not
+        ``allowed`` -> hidden; ``get_fields``; a bare truthy/falsy result ->
+        all / none); else all fields. An empty set means the row is hidden.
+
+        ``base_user_context``, when given, must be a
+        ``UserContext.from_request_base(request)`` built ONCE by the caller
+        (e.g. ``FilterValues``' per-row scan, over up to
+        ``LEX_FILTER_VALUES_ROW_SCAN_LIMIT`` rows). It lets the default
+        (unoverridden) ``can_read`` path compute the same answer
+        ``can_read`` would -- ``permission_read`` + ``get_fields`` -- by
+        reusing that cached context, instead of calling ``can_read`` itself,
+        whose own ``UserContext.from_request`` queries ``user.groups`` fresh
+        on every call: fine once per request, not once per row. An
+        overridden ``can_read`` has arbitrary behaviour, so it is still
+        called exactly as today. Without ``base_user_context`` (the
+        ``to_representation`` call site), behaviour is exactly today's.
+        """
+        target_instance, target_caps = self._resolve_permission_target(instance)
+        original_instance = instance if target_instance is not instance else None
+
         visible_fields = None
 
         # 1. Try Legacy 'can_read'
         if target_caps['has_can_read']:
-            raw_visible_fields = target_instance.can_read(request)
-            if raw_visible_fields is False:
-                return {}
-            if raw_visible_fields is True:
-                visible_fields = self._get_cached_field_names(type(target_instance))
+            if base_user_context is not None and type(target_instance).can_read is LexModel.can_read:
+                # The default can_read is just permission_read + get_fields
+                # over the full field set -- compute that directly so the
+                # per-row scan reuses the cached base context instead of
+                # building a fresh one (can_read's own UserContext.from_request)
+                # for every single row.
+                user_context = base_user_context.with_instance(
+                    request, target_instance, original_instance=original_instance,
+                )
+                result = target_instance.permission_read(user_context)
+                visible_fields = result.get_fields(target_instance._get_all_field_names())
             else:
-                visible_fields = self._normalize_field_names(raw_visible_fields)
+                raw_visible_fields = target_instance.can_read(request)
+                if raw_visible_fields is False:
+                    return set()
+                if raw_visible_fields is True:
+                    visible_fields = self._get_cached_field_names(type(target_instance))
+                else:
+                    visible_fields = self._normalize_field_names(raw_visible_fields)
 
         # 2. Try New System 'permission_read'
         elif target_caps['has_permission_read']:
             user_context = self._get_user_context(request, target_instance)
             result = target_instance.permission_read(user_context)
             if hasattr(result, "allowed") and not result.allowed:
-                return {}  # Hide entirely
+                return set()  # Hide entirely
 
             all_fields = self._get_cached_field_names(type(target_instance))
             if hasattr(result, "get_fields"):
@@ -788,6 +829,14 @@ class LexSerializer(serializers.ModelSerializer):
             visible_fields = self._get_cached_field_names(type(instance))
         else:
             visible_fields = self._normalize_field_names(visible_fields)
+
+        return visible_fields
+
+    def to_representation(self, instance):
+        request = self.context.get('request')
+
+        target_instance, _ = self._resolve_permission_target(instance)
+        visible_fields = self.readable_field_names(instance, request)
 
         if not visible_fields:
             return {}

@@ -5,23 +5,27 @@ must match what the grid itself would show, so the view inherits the list view's
 queryset (``as_of`` included), its read filter and its filter translation, and
 applies every filter EXCEPT the column's own: a column's list shows what the
 other filters leave, so a ticked value can always be unticked and others added.
+
+The value list must never show a value the user could not see in the grid
+(design spec §3.7 / §8): not a row the read filter hides, not a field value a
+per-row ``permission_read`` / ``can_read`` hides, and not a foreign key's name
+resolved from a row the user cannot read.
 """
 
 from __future__ import annotations
 
 import logging
 from collections import Counter
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from django.conf import settings
-from django.core.exceptions import FieldDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import BooleanField, CharField, Count, Model, QuerySet, TextField
+from django.db.models import BooleanField, Count, IntegerField, Model, QuerySet
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from lex.api.serializers.base_serializers import LexSerializer
-from lex.api.utils.filterable_fields import is_value_list_field
+from lex.api.serializers.base_serializers import LexSerializer, _get_capabilities
+from lex.api.utils.filterable_fields import is_plain_text_field, value_list_field
 from lex.api.views.model_entries.List import ListModelEntries, normalize_field_path
 from lex.core.models.LexModel import LexModel, UserContext
 
@@ -56,14 +60,48 @@ def value_key(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _capability_target(model_class):
+    """The class whose ``permission_read`` / ``can_read`` decide this model's
+    masking -- ``model_class`` itself when it is a LexModel, else its
+    ``instance_type`` (for a History / MetaHistory wrapper class used
+    directly as a container's model), else ``model_class`` unchanged."""
+    if isinstance(model_class, type) and issubclass(model_class, LexModel):
+        return model_class
+    instance_type = getattr(model_class, "instance_type", None)
+    if isinstance(instance_type, type):
+        return instance_type
+    return model_class
+
+
 def uses_default_read_permission(model_class: type[Model]) -> bool:
-    """True when reads are all-or-nothing per row, so a database count is exact."""
-    target = model_class
-    if not (isinstance(target, type) and issubclass(target, LexModel)):
-        target = getattr(model_class, "instance_type", None)
-    if not (isinstance(target, type) and issubclass(target, LexModel)):
-        return False
-    return getattr(target, "permission_read", None) is LexModel.permission_read
+    """True when every readable row shows every field, so a database count is exact.
+
+    True when EITHER:
+
+    * the LexModel target (the model, or its ``instance_type``) overrides
+      neither ``permission_read`` nor ``can_read`` -- the row filter
+      (``filter_backends._handle_lexmodel_default``) and the serializer
+      (``LexSerializer.readable_field_names``) both allow everything by
+      default in that case, so there is nothing for a per-row scan to find
+      that the database aggregate would miss; or
+    * the target keeps BOTH at their literal LexModel default implementation
+      -- ``to_representation`` always tries ``can_read`` first (every
+      LexModel has one), so a ``permission_read`` override alone is not
+      enough to guarantee the database aggregate is exact; both must be
+      untouched.
+    """
+    target = _capability_target(model_class)
+
+    if (
+        isinstance(target, type)
+        and issubclass(target, LexModel)
+        and getattr(target, "permission_read", None) is LexModel.permission_read
+        and getattr(target, "can_read", None) is LexModel.can_read
+    ):
+        return True
+
+    caps = _get_capabilities(target)
+    return not caps["has_permission_read"] and not caps["has_can_read"]
 
 
 def _bounded_limit(raw: Any) -> int:
@@ -87,7 +125,12 @@ class FilterValues(ListModelEntries):
 
         body = request.data if isinstance(request.data, dict) else {}
         field = normalize_field_path(str(body.get("field") or "")).strip()
-        model_field = self._filterable_field(field)
+        serializer = self.get_serializer()
+        model_field = self._filterable_field(serializer, field)
+        is_plain_text = is_plain_text_field(model_field)
+        is_relation = bool(
+            getattr(model_field, "is_relation", False) and getattr(model_field, "related_model", None)
+        )
 
         filter_model = body.get("filterModel") or {}
         if not isinstance(filter_model, dict):
@@ -97,25 +140,55 @@ class FilterValues(ListModelEntries):
             for key, value in filter_model.items()
             if normalize_field_path(str(key or "")).strip() != field
         }
-        selected = body.get("selected") or []
-        if not isinstance(selected, list):
+
+        raw_selected = body.get("selected") or []
+        if not isinstance(raw_selected, list):
             raise ValidationError({"selected": "must be a list"})
-        selected_keys: List[Optional[str]] = [None if key is None else str(key) for key in selected]
+        selected_keys: List[Optional[str]] = []
+        for raw in raw_selected[:MAX_LIMIT]:
+            key = value_key(raw)
+            if is_plain_text and key == "":
+                key = None
+            selected_keys.append(key)
+
         search = str(body.get("search") or "").strip()
         limit = _bounded_limit(body.get("limit", DEFAULT_LIMIT))
 
-        queryset = self.filter_queryset(self.get_queryset())
-        queryset = self._apply_filter_model(queryset, other_filters)
-        searched_in_database = bool(search) and self._is_plain_text(model_field)
+        # The read filter and as_of, nothing else -- the base every other
+        # filter (and the ticked-foreign-key visibility probe below) builds on.
+        base_queryset = self.filter_queryset(self.get_queryset())
+        queryset = self._apply_filter_model(base_queryset, other_filters)
+        searched_in_database = bool(search) and is_plain_text
         if searched_in_database:
             queryset = queryset.filter(**{f"{field}__icontains": search})
 
-        if uses_default_read_permission(queryset.model):
+        # A serializer that is not a LexSerializer (e.g. auth.User's) applies
+        # no per-row field filter at all, so the database aggregate is exact
+        # regardless of permission_read / can_read.
+        use_database = not isinstance(serializer, LexSerializer) or uses_default_read_permission(queryset.model)
+        if use_database:
             counts, truncated = self._count_in_database(queryset, field)
         else:
-            counts, truncated = self._count_per_row(request, queryset, model_field)
+            counts, truncated = self._count_per_row(request, queryset, model_field, serializer)
 
-        labels = self._labels(model_field, set(counts) | set(selected_keys))
+        if is_plain_text:
+            counts = self._fold_blank(counts)
+
+        visible_keys = set(counts)
+        ticked = {key for key in selected_keys if key is not None}
+        missing = ticked - visible_keys
+        if missing and is_relation:
+            # A foreign key's name is sensitive: resolve it only for ticked
+            # keys a readable row actually carries, checked the same way the
+            # real counts were (database or per-row), ignoring every OTHER
+            # filter -- the question here is visibility, not the current
+            # facet. Every other missing key keeps its own key as its label.
+            confirmed = self._confirm_visible(
+                request, base_queryset, field, model_field, sorted(missing), use_database, serializer,
+            )
+            missing = missing & confirmed
+
+        labels = self._labels(model_field, visible_keys | missing)
         items = [
             {"key": key, "label": labels.get(key, key or BLANK_LABEL), "count": count}
             for key, count in counts.items()
@@ -123,45 +196,47 @@ class FilterValues(ListModelEntries):
         if search and not searched_in_database:
             needle = search.casefold()
             items = [item for item in items if needle in item["label"].casefold()]
-        items.sort(key=lambda item: (item["key"] is None, item["label"].casefold()))
+
+        # Blank last always. Ties broken by key: sort by key first (a stable
+        # sort keeps this as the secondary order), then by the column's real
+        # ordering -- numeric for a plain integer column, label otherwise --
+        # so both counting paths produce the same order for the same data.
+        items.sort(key=lambda item: (item["key"] is None, "" if item["key"] is None else str(item["key"])))
+        is_numeric_order = isinstance(model_field, IntegerField) and not getattr(model_field, "choices", None)
+        if is_numeric_order:
+            items.sort(key=lambda item: (item["key"] is None, _safe_int(item["key"])))
+        else:
+            items.sort(key=lambda item: (item["key"] is None, item["label"].casefold()))
 
         truncated = truncated or len(items) > limit
         items = items[:limit]
         shown = {item["key"] for item in items}
+        needle = search.casefold() if search else None
         for key in selected_keys:
-            if key not in shown:
-                items.append(
-                    {"key": key, "label": labels.get(key, key or BLANK_LABEL), "count": counts.get(key, 0)}
-                )
-                shown.add(key)
+            if key in shown:
+                continue
+            label = labels.get(key, key or BLANK_LABEL)
+            if needle is not None and needle not in label.casefold():
+                continue
+            items.append({"key": key, "label": label, "count": counts.get(key, 0)})
+            shown.add(key)
 
         return Response({"values": items, "truncated": truncated})
 
     # -- which column ------------------------------------------------------
 
-    def _filterable_field(self, field: str):
+    def _filterable_field(self, serializer, field: str):
         """The model field behind ``field``, or a 400.
 
-        It must be a field of the requested serializer -- a column the user can
-        see in this list -- and a real column or foreign key on the model. One
-        answer for every refusal, so the response never says which fields exist.
+        Delegates to :func:`value_list_field` -- the one place that decides
+        which columns a value list can cover, shared with ``Meta.filter_bar``
+        -- and raises the single generic refusal when it returns ``None``, so
+        the response never says which fields exist.
         """
-        refusal = ValidationError({"field": f"{field!r} is not filterable."})
-        if not field or "__" in field:
-            raise refusal
-        if field not in self.get_serializer().fields:
-            raise refusal
-        try:
-            model_field = self._ag_model_class._meta.get_field(field)
-        except FieldDoesNotExist:
-            raise refusal
-        if not is_value_list_field(model_field):
-            raise refusal
+        model_field = value_list_field(serializer.fields, self._ag_model_class, field)
+        if model_field is None:
+            raise ValidationError({"field": f"{field!r} is not filterable."})
         return model_field
-
-    @staticmethod
-    def _is_plain_text(model_field) -> bool:
-        return isinstance(model_field, (CharField, TextField)) and not model_field.choices
 
     # -- counting ----------------------------------------------------------
 
@@ -183,35 +258,78 @@ class FilterValues(ListModelEntries):
         return counts, len(rows) > limit
 
     def _count_per_row(
-        self, request, queryset: QuerySet, model_field
+        self, request, queryset: QuerySet, model_field, serializer
     ) -> Tuple[Dict[Optional[str], int], bool]:
-        """Count only rows whose ``permission_read`` lets this user read the field."""
-        base_context = UserContext.from_request_base(request)
+        """Count only rows whose ``readable_field_names`` includes this field.
+
+        ``serializer`` is the SAME instance used to resolve ``field`` and
+        must be a :class:`LexSerializer` (``post`` only takes this path when
+        it is). One base context is built for the whole scan -- not one per
+        row, which would mean one ``user.groups`` query per row.
+        """
+        base_user_context = UserContext.from_request_base(request)
         name = model_field.name
         attname = model_field.attname
         max_rows = row_scan_limit()
         counts: Counter = Counter()
         truncated = False
+        skipped = 0
 
         for scanned, row in enumerate(queryset.order_by().iterator(chunk_size=ROW_CHUNK_SIZE), start=1):
             if scanned > max_rows:
                 truncated = True
                 break
-            target = row if isinstance(row, LexModel) else LexSerializer._unwrap_instance(row)
             try:
-                result = target.permission_read(base_context.with_instance(request, target))
+                visible = serializer.readable_field_names(row, request, base_user_context=base_user_context)
             except Exception:
-                logger.warning("permission_read raised while listing %s values; row skipped", name, exc_info=True)
+                skipped += 1
                 continue
-            if not result.allowed or name not in result.get_fields({name}):
+            if name not in visible:
                 continue
             counts[value_key(getattr(row, attname))] += 1
+
+        if skipped:
+            logger.warning(
+                "filter_values: readable_field_names raised for %d row(s) while listing %r; skipped",
+                skipped, name,
+            )
 
         limit = scan_limit()
         if len(counts) > limit:
             truncated = True
             counts = Counter(dict(counts.most_common(limit)))
         return dict(counts), truncated
+
+    def _confirm_visible(
+        self,
+        request,
+        base_queryset: QuerySet,
+        field: str,
+        model_field,
+        candidate_keys: list,
+        use_database: bool,
+        serializer,
+    ) -> Set[Optional[str]]:
+        """Which of ``candidate_keys`` a row the user may read actually carries."""
+        probe_queryset = self._apply_filter_model(
+            base_queryset, {field: {"filterType": "set", "values": candidate_keys}},
+        )
+        if use_database:
+            probe_counts, _ = self._count_in_database(probe_queryset, field)
+        else:
+            probe_counts, _ = self._count_per_row(request, probe_queryset, model_field, serializer)
+        return set(probe_counts)
+
+    @staticmethod
+    def _fold_blank(counts: Dict[Optional[str], int]) -> Dict[Optional[str], int]:
+        """On a plain text column a stored ``""`` is blank too -- fold its
+        count into the ``None`` bucket so the grid shows one "(Blank)" entry
+        instead of two indistinguishable ones."""
+        if "" not in counts:
+            return counts
+        folded = dict(counts)
+        folded[None] = folded.get(None, 0) + folded.pop("")
+        return folded
 
     # -- labels ------------------------------------------------------------
 
@@ -243,3 +361,10 @@ class FilterValues(ListModelEntries):
         for key in present:
             labels.setdefault(key, key)
         return labels
+
+
+def _safe_int(key: Any) -> int:
+    try:
+        return int(key)
+    except (TypeError, ValueError):
+        return 0

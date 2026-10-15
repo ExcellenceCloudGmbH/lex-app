@@ -16,6 +16,21 @@ single model covers the full AG Grid filter contract:
     * ``metadata``          JSONField            → JSON lookup path
     * ``category``          ForeignKey           → group / pivot / sort through
                                                     a relational field
+    * ``note``              CharField(null=True) → blank-folding ("" and NULL
+                                                    are the same bucket)
+    * ``ratio``              FloatField           → refused by filter_values
+                                                    (continuous, no value list)
+    * ``api_key``           CharField             → credential-shaped name,
+                                                    refused by filter_values
+                                                    whatever the serializer
+
+``QueryMaskedItem`` overrides ``can_read`` to hide ``category`` per row
+(cluster 14g's per-row field-masking fixture: 14.53, 14.56).
+
+``QueryOpenItem`` overrides neither ``permission_read`` nor ``can_read`` at
+all -- cluster 14g's "default permissions" fixture (14.55, 14.59, 14.60):
+the read filter and the serializer both fall through to allow-everything, so
+a database count is exact without any row-by-row check.
 
 Rule #3: no cross-cluster imports — stood up fresh here.
 """
@@ -81,6 +96,9 @@ class QueryItem(LexModel):
         on_delete=models.SET_NULL,
         related_name="items",
     )
+    note = models.CharField(max_length=200, null=True, blank=True, default="")
+    ratio = models.FloatField(default=0.0)
+    api_key = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         app_label = "lex_app"
@@ -104,9 +122,89 @@ class QueryItem(LexModel):
         return True
 
 
-ALL_MODELS = [QueryCategory, QueryItem]
+class QueryMaskedItem(LexModel):
+    """``category`` is hidden via ``can_read`` whenever ``visible`` is False.
+
+    Cluster 14g's per-row field-masking fixture: ``permission_read`` is kept
+    permissive (every row stays visible to the grid) while ``can_read`` --
+    which ``to_representation`` always tries first -- excludes ``category``
+    on masked rows. This is what ``filter_values`` must mirror: masked rows
+    must not contribute to ``category``'s counts, and a foreign key only a
+    masked row refers to must not get that row's name as its label.
+    """
+
+    name = models.CharField(max_length=200)
+    visible = models.BooleanField(default=True)
+    category = models.ForeignKey(
+        QueryCategory,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="masked_items",
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 14g: masked item read-open")
+
+    def can_read(self, request):
+        if self.visible:
+            return True
+        return {"id", "name", "visible"}  # category excluded on masked rows
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 14g: masked item edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+class QueryOpenItem(models.Model):
+    """A plain Django model -- no ``LexModel``, so no ``permission_read`` /
+    ``can_read`` at all, inherited or otherwise.
+
+    Cluster 14g's "declares neither" fixture (14.55, 14.59, 14.60). This has
+    to NOT be a ``LexModel`` subclass: a LexModel that simply skips
+    overriding ``permission_read`` still has it, inherited and unchanged --
+    which is the OTHER case ``uses_default_read_permission`` covers (the
+    literal-identity one), and which the row filter's
+    ``_get_default_permission_target`` fast path reads Keycloak UMA
+    ``request.user_permissions`` for, excluding every row for a plain test
+    user who carries none. Only a model with no such method at all --
+    ``_get_capabilities`` reporting both flags False -- reaches
+    ``_handle_lexmodel_default``'s generic "allow by default" fallthrough
+    and ``LexSerializer.readable_field_names``'s "all fields" fallthrough:
+    so a database aggregate already answers exactly what the grid shows,
+    with no per-row scan and no permission-check warnings.
+    """
+
+    name = models.CharField(max_length=200)
+    status = models.CharField(
+        max_length=16, choices=QUERY_STATUS_CHOICES, default=QUERY_STATUS_ACTIVE,
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+ALL_MODELS = [QueryCategory, QueryItem, QueryMaskedItem, QueryOpenItem]
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
 CATEGORY = "querycategory"
 ITEM = "queryitem"
+MASKED_ITEM = "querymaskeditem"
+OPEN_ITEM = "queryopenitem"
 
