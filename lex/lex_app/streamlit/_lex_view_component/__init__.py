@@ -78,6 +78,8 @@ def render_lex_view_component(
     height: int = 800,
     expected_origin: Optional[str] = None,
     key: Optional[str] = None,
+    filters: Optional[dict] = None,
+    filters_token: Optional[str] = None,
 ) -> Optional[dict]:
     """Render the bidirectional lex_view component.
 
@@ -100,6 +102,12 @@ def render_lex_view_component(
         Stable Streamlit key so the component state survives re-runs.
         Defaults to the URL itself — different embeds in the same script
         get their own component slot automatically.
+    filters : dict, optional
+        The host's filters, already normalised by ``lex_view``. Posted into the
+        frame when they change after it loaded.
+    filters_token : str, optional
+        The same filters as a URL-safe token; added to the iframe URL on first
+        load, and compared to decide whether a change must be posted.
 
     Returns
     -------
@@ -114,6 +122,8 @@ def render_lex_view_component(
         url=url,
         height=height,
         expected_origin=expected_origin,
+        filters=filters,
+        filters_token=filters_token,
         key=key,
         default=None,
     )

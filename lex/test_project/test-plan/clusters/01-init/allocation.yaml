@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 385
+max_scenario: 399
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1250,3 +1250,18 @@ letters:
       without the test project's environment and with the suite's checkout first on PYTHONPATH.
       Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
       set main() answers without Django fails both, because Django setup crashes in that directory.
+
+  aw:
+    title: lex_view filters, filter_bar and on_filter
+    scenarios: 1.393-1.399
+    status: complete
+    tests:
+      pass: 11
+      skip: 0
+      xfail: 0
+    note: >-
+      lex_view(filters=, filter_bar=, on_filter=). Filters ride the component's arguments, never its
+      URL or key, because the URL is the component's identity and a changed URL remounts the frame.
+      1.393-1.398 pin that, the component choice, the filter_bar and emit_filter parameters, and
+      refusals at the call. 1.399 runs the shim's decision function under node (skipped without
+      node): post only to a loaded frame, only named filters, only when they differ.

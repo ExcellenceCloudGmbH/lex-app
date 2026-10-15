@@ -29,6 +29,7 @@
   -->
   <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
 
+  <script src="filter_sync.js"></script>
   <script>
     // ── Streamlit bridge minimal shim ────────────────────────────────
     // We avoid importing Streamlit's npm package — this is the public
@@ -70,6 +71,52 @@
     let _expectedOrigin = null;
     let _lastEventId = null;
     let _rendered = false;
+
+    // ── Host filters (see filter_sync.js) ────────────────────────────
+    let _frameLoaded = false;
+    let _desiredFilters = null;
+    let _desiredFiltersToken = null;
+    let _frameFiltersToken = null;
+
+    function withFiltersParam(url, token) {
+      if (!token) return url;
+      try {
+        const u = new URL(url, window.location.href);
+        u.searchParams.set("filters", token);
+        return u.toString();
+      } catch (e) {
+        return url;
+      }
+    }
+
+    function postFiltersToFrame(frame) {
+      let childOrigin = null;
+      try {
+        childOrigin = new URL(frame.dataset.url, window.location.href).origin;
+      } catch (e) {
+        /* relative/opaque URL — never post with "*" */
+      }
+      if (!frame.contentWindow || !childOrigin) return;
+      frame.contentWindow.postMessage(
+        {
+          source: HOST_SOURCE_TAG,
+          version: PROTOCOL_VERSION,
+          type: "filter",
+          payload: { filters: _desiredFilters },
+        },
+        childOrigin
+      );
+      _frameFiltersToken = _desiredFiltersToken;
+    }
+
+    function syncFilters(frame) {
+      const post = LexViewFilterSync.shouldPost({
+        loaded: _frameLoaded,
+        desired: _desiredFiltersToken,
+        current: _frameFiltersToken,
+      });
+      if (post) postFiltersToFrame(frame);
+    }
 
     // ── Outbound: Streamlit host → lex-app (theme handshake) ────────
     // The host's colour scheme rides the iframe URL as `?theme=` (boot
@@ -114,12 +161,24 @@
       // changed. Streamlit re-fires RENDER on every script rerun, and
       // re-pointing src on every rerun would reload the embedded React
       // app and wipe the user's grid state.
+      _desiredFilters = args.filters || null;
+      _desiredFiltersToken = args.filters_token || null;
+
       if (!_rendered || frame.dataset.url !== url) {
-        frame.src = url;
+        // The first load carries the filters in the URL; `dataset.url` keeps
+        // the URL WITHOUT them, so a filter change is never a navigation.
+        frame.src = withFiltersParam(url, _desiredFiltersToken);
         frame.dataset.url = url;
+        _frameFiltersToken = _desiredFiltersToken;
+        _frameLoaded = false;
         _rendered = true;
-        // Announce the host theme once the embedded app is loaded.
-        frame.addEventListener("load", () => postThemeToFrame(frame), { once: true });
+        frame.addEventListener("load", () => {
+          _frameLoaded = true;
+          postThemeToFrame(frame);
+          syncFilters(frame);
+        }, { once: true });
+      } else {
+        syncFilters(frame);
       }
 
       Streamlit.setFrameHeight(height);

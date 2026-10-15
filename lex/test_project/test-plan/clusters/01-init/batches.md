@@ -1722,3 +1722,13 @@ to know any other way. The option takes `lex._version.__version__`.
 **Mutations: two of two fail a test.** Reading the version from the package metadata fails 1.384
 (`0.0.0.dev0` against the stamped label). Dropping `--version` from the set `main()` answers without
 setting Django up fails both: Django setup crashes in `release-smoke`.
+
+## Batch 1aw — lex_view filters, filter_bar and on_filter (1.393-1.399)
+
+- **Type:** U
+- **Files covered:** `lex/lex_app/streamlit/embed.py`, `lex/lex_app/streamlit/_lex_view_component/__init__.py`,
+  `lex/lex_app/streamlit/_lex_view_component/frontend/filter_sync.js`, `…/frontend/index.html`
+- **Test file:** `lex/test_project/tests/init/test_1aw_lex_view_filters.py`
+- **Test classes:** `TestCluster1aw_LexViewFilters`
+- **Fixtures:** none
+- **Status:** complete

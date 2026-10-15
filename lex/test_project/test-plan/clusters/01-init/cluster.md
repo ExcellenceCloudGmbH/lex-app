@@ -444,3 +444,15 @@ does not remove user launch configurations.
 | 1.385 | answered from anywhere | in a directory that is no project, and that Django cannot load as an app, `lex --version` exits 0 with one version line |
 
 **Scenario range:** 1.384 – 1.385. **Test file:** `lex/test_project/tests/init/test_1au_lex_version.py`. **Type:** U. **Status:** ✅ Complete (2026-10-03). Batch: [1au](batches.md).
+
+### 1aw. lex_view filters
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 1.393 | Filters reach the component | Not in the URL; normalised dict and matching token as arguments | ✅ |
+| 1.394 | Filters select the component | No plain iframe when `filters` is given | ✅ |
+| 1.395 | filter_bar | `a,b`; empty means hide; absent sends nothing | ✅ |
+| 1.396 | on_filter | `emit_filter=true` | ✅ |
+| 1.397 | Malformed arguments | TypeError at the call | ✅ |
+| 1.398 | A filter change is not a new frame | Same URL, different token | ✅ |
+| 1.399 | When the shim posts | Loaded, named and changed only; index.html uses the function | ✅ |
