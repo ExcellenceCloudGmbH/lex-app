@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -8,8 +9,10 @@ from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.core.exceptions import FieldDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import (
     Avg,
+    BooleanField,
     Case,
     Count,
     F,
@@ -26,6 +29,7 @@ from django.db.models import (
 from django.http import QueryDict
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -38,6 +42,25 @@ from lex.core.models.LexModel import UserContext
 
 MAX_PIVOT_COMBINATIONS = 200
 AgColumn = Dict[str, Optional[str]]
+
+
+logger = logging.getLogger(__name__)
+
+_TRUE_KEYS = {"true", "1", "t", "yes"}
+_FALSE_KEYS = {"false", "0", "f", "no"}
+
+
+def _bool_from_key(raw: Any) -> bool:
+    """A value-list key for a boolean column. Django's own ``to_python`` rejects
+    ``"true"`` and ``"false"``, which are exactly what the grid sends."""
+    if isinstance(raw, bool):
+        return raw
+    text = str(raw).strip().lower()
+    if text in _TRUE_KEYS:
+        return True
+    if text in _FALSE_KEYS:
+        return False
+    raise ValueError(f"{raw!r} is not a boolean")
 
 
 def _safe_key(value: Any) -> str:
@@ -590,6 +613,38 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
 
         return queryset.filter(combined)
 
+    def _set_filter_values(self, field: str, values: list) -> Tuple[list, bool]:
+        """Convert a Set filter's keys to the column's Python values.
+
+        A key is the stored value as a string -- ``"5"``, ``"true"``, an ISO
+        date, a related primary key. ``None`` stands for blank, which SQL ``IN``
+        never matches, so it is reported separately. A key that cannot be
+        converted is a 400 naming the field: answering with more rows than the
+        user asked for is worse than refusing.
+        """
+        model_field = self._get_model_field(field)
+        target_field = getattr(model_field, "target_field", None)
+        if getattr(model_field, "is_relation", False) and target_field is not None:
+            convert = target_field.to_python
+        elif isinstance(model_field, BooleanField):
+            convert = _bool_from_key
+        else:
+            convert = model_field.to_python
+
+        converted: list = []
+        include_blank = False
+        for raw in values:
+            if raw is None:
+                include_blank = True
+                continue
+            try:
+                converted.append(convert(raw))
+            except (DjangoValidationError, TypeError, ValueError) as exc:
+                raise ValidationError(
+                    {"filterModel": {field: f"{raw!r} is not a valid value for {field}."}}
+                ) from exc
+        return converted, include_blank
+
     def _build_filter_q(self, field: str, model: Any) -> Optional[Q]:
         if model in (None, ""):
             return None
@@ -630,10 +685,35 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         filter_type = str(model.get("filterType") or ("date" if has_date_keys else "text"))
 
         if filter_type == "set":
-            values = model.get("values") or []
-            if not isinstance(values, list) or not values:
+            values = model.get("values")
+            if not isinstance(values, list):
                 return None
-            return Q(**{f"{field}__in": values})
+            if not values:
+                # AG Grid's Set filter with nothing ticked means "no rows".
+                return Q(pk__in=[])
+            converted, include_blank = self._set_filter_values(field, values)
+            condition: Optional[Q] = Q(**{f"{field}__in": converted}) if converted else None
+            if include_blank:
+                blank = Q(**{f"{field}__isnull": True})
+                condition = blank if condition is None else (condition | blank)
+            return condition
+
+        if filter_type == "multi":
+            children = model.get("filterModels")
+            if not isinstance(children, list):
+                return None
+            conditions = [
+                self._build_filter_q(field, child)
+                for child in children
+                if child not in (None, "")
+            ]
+            conditions = [condition for condition in conditions if condition is not None]
+            if not conditions:
+                return None
+            combined = conditions[0]
+            for condition in conditions[1:]:
+                combined &= condition
+            return combined
 
         operation_type = str(model.get("type") or model.get("operator") or "contains")
 
@@ -779,6 +859,7 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
                 return ~base
             return base
 
+        logger.info("Ignoring unknown filterType %r for field %r", filter_type, field)
         return None
 
     def _apply_group_key_filters(

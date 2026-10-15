@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 35
+max_scenario: 41
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -86,3 +86,17 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  f:
+    title: Value-list filters — Set keys converted, blanks, empty selections, Multi
+    scenarios: 14.36-14.41
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      The grid's value-list filter sends string keys, null for blank and a Multi model for a
+      condition plus a list. _build_filter_q converted nothing (a "false" key 500ed on a boolean),
+      matched no blank (SQL IN skips NULL), treated an empty selection as "no filter", and dropped
+      Multi entirely, widening the result. 14.36-14.39 pin each answer, 14.40 that a bad key is a
+      400 naming the field, 14.41 that an unknown filterType still means "no filter" and is logged.

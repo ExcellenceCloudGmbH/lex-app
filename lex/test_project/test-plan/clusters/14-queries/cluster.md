@@ -110,6 +110,17 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
   budgets.
 - ❌ **Export-specific layout / FK display names**. Cluster 13.
 
+### 14f. Value-list filters
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 14.36 | Set keys arrive as strings | Integer, `"false"`, ISO date and related-pk keys each match their rows | ✅ |
+| 14.37 | Blank in a value list | `null` matches empty cells, alone or beside a value | ✅ |
+| 14.38 | Nothing ticked | An empty `values` list matches no rows | ✅ |
+| 14.39 | Multi filter | Condition and list on one column are ANDed; a null half is skipped | ✅ |
+| 14.40 | Unconvertible key | 400 naming the field | ✅ |
+| 14.41 | Unknown filterType | Ignored as before, and logged with field and type | ✅ |
+
 ---
 
 ## Planned Expansions — Coverage-Driven Sub-Clusters
