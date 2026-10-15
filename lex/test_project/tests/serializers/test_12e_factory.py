@@ -315,7 +315,12 @@ class TestCluster12e_FactoryContract(SimpleTestCase):
 
     # -- 12.35 ---------------------------------------------------------
     def test_12_35_wrap_custom_serializer_preserves_hide_actions_column(self) -> None:
-        """Scenario 12.35: ``Meta.hide_actions_column`` survives wrapping."""
+        """Scenario 12.35: ``Meta.hide_actions_column`` survives wrapping.
+
+        ``filter_bar`` comes back ``[]`` (cluster 10o): neither this Meta nor
+        ``WideItem`` declares one, so ``_resolve_filter_bar`` has nothing to
+        resolve.
+        """
 
         class HiddenActionsSerializer(drf_serializers.ModelSerializer):
             class Meta:
@@ -326,7 +331,10 @@ class TestCluster12e_FactoryContract(SimpleTestCase):
         wrapped = _wrap_custom_serializer(HiddenActionsSerializer, WideItem)
 
         self.assertTrue(wrapped.Meta.hide_actions_column)
-        self.assertEqual(wrapped.get_list_ui_options(), {"hide_actions_column": True})
+        self.assertEqual(
+            wrapped.get_list_ui_options(),
+            {"hide_actions_column": True, "filter_bar": []},
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -45,3 +45,15 @@
 **Scenario range:** 10.82. **Test file:** `lex/test_project/tests/api_layer/test_10d_reflex_search_exclusion.py`. **Type:** I. **Status:** ✅ Complete (2026-09-28). Covers `lex/api/views/global_search_for_models/Search.py`. Batch: [10d](batches.md).
 
 ---
+
+### 10o. list_ui.filter_bar
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 10.83 | Declared on the serializer | `Meta.filter_bar` reaches `list_ui.filter_bar` in order | ✅ |
+| 10.84 | Declared on the model | Model attribute is the fallback; none means `[]` | ✅ |
+| 10.85 | Not a value-list column | Unknown, JSON and related-path names dropped with a warning each | ✅ |
+
+**Scenario range:** 10.83-10.85. **Test file:** `lex/test_project/tests/api_layer/test_10o_list_ui_filter_bar.py`. **Type:** U. **Status:** ✅ Complete (2026-10-15). Covers `lex/api/serializers/base_serializers.py` (`get_list_ui_options`, `_resolve_filter_bar`), `lex/api/views/model_info/Fields.py` (`create_list_ui_info`). Batch: [10o](batches.md).
+
+---

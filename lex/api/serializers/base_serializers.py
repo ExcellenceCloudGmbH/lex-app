@@ -19,6 +19,7 @@ from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
     strip_sensitive_fields,
 )
+from lex.api.utils.filterable_fields import is_value_list_field, value_list_field
 
 ID_FIELD_NAME = "id_field"
 SHORT_DESCR_NAME = "short_description"
@@ -280,6 +281,63 @@ class LexClearableImageField(LexClearableFileField, serializers.ImageField):
     """Image variant of :class:`LexClearableFileField` (same clear semantics)."""
 
 
+def _resolve_filter_bar(meta, serializer_fields) -> list:
+    """The columns a list shows in its filter bar by default.
+
+    ``Meta.filter_bar`` on the serializer, else a ``filter_bar`` attribute on
+    the model, so a list without a custom serializer can still declare one.
+    Names that are not value-list columns are dropped with a warning; a
+    duplicate is dropped silently; order is preserved.
+
+    A name is kept only when :func:`value_list_field` accepts it against
+    ``serializer_fields`` -- the exact resolver the ``filter_values`` endpoint
+    uses (``lex/api/utils/filterable_fields.py``), not the weaker model-only
+    :func:`is_value_list_field` alone -- so the bar can never name a column
+    the endpoint would refuse (a renamed ``source``, a ``SerializerMethodField``,
+    or a name absent from the serializer are all refused here exactly as they
+    are there).
+
+    ``serializer_fields`` is ``None`` when ``get_list_ui_options`` could not
+    instantiate the serializer to read ``cls().fields`` (see the ``try/except``
+    there). That did not happen for any ``LexSerializer`` subclass exercised
+    here -- including every serializer under test -- but as a defensive
+    fallback for one whose ``__init__`` does raise without a request context,
+    this falls back to the weaker, model-only check (:func:`is_value_list_field`),
+    which cannot see the serializer's ``source`` remapping or a
+    ``SerializerMethodField`` shadowing the name.
+    """
+    model = getattr(meta, "model", None)
+    raw = getattr(meta, "filter_bar", None)
+    if raw is None and model is not None:
+        raw = getattr(model, "filter_bar", None)
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        raw = [raw]
+
+    names: list = []
+    for name in raw:
+        accepted = False
+        if model is not None and isinstance(name, str) and name:
+            if serializer_fields is not None:
+                accepted = value_list_field(serializer_fields, model, name) is not None
+            elif "__" not in name:
+                try:
+                    model_field = model._meta.get_field(name)
+                except Exception:
+                    model_field = None
+                accepted = model_field is not None and is_value_list_field(model_field)
+        if not accepted:
+            logger.warning(
+                "filter_bar: %r is not a value-list column of %s; dropped",
+                name, getattr(model, "__name__", model),
+            )
+            continue
+        if name not in names:
+            names.append(name)
+    return names
+
+
 # --- UPDATED PERMISSION-AWARE BASE SERIALIZER ---
 class LexSerializer(serializers.ModelSerializer):
     """
@@ -361,8 +419,23 @@ class LexSerializer(serializers.ModelSerializer):
     def get_list_ui_options(cls) -> dict:
         """Expose serializer-level frontend list options via ``Meta``."""
         meta = getattr(cls, "Meta", None)
+        try:
+            # An unbound instance (no request context) -- exactly how
+            # ``Fields.get`` itself builds a serializer to read `.fields`.
+            # Needed so `_resolve_filter_bar` can apply the same
+            # `value_list_field` check `filter_values` enforces (source
+            # remapping / SerializerMethodField shadowing), not just the
+            # weaker model-only check.
+            serializer_fields = cls().fields
+        except Exception:
+            # Defensive only: no LexSerializer subclass exercised so far
+            # (including every one under test) raises here. If some other
+            # subclass's __init__ ever does, _resolve_filter_bar falls back
+            # to the model-only check rather than letting list_ui itself fail.
+            serializer_fields = None
         return {
             "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+            "filter_bar": _resolve_filter_bar(meta, serializer_fields),
         }
 
     # ------------------------------------------------------------------

@@ -155,6 +155,7 @@ def create_list_ui_info(serializer):
     meta = getattr(serializer_class, "Meta", None)
     return {
         "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+        "filter_bar": [],
     }
 
 
