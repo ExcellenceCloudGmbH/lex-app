@@ -385,6 +385,7 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "a model with no permission methods at all must use the database path",
         )
         expected = self._list_field_tally(OPEN_ITEM, "status")
+        self.assertTrue(expected, "the scenario is only meaningful if the list endpoint shows some rows")
         with patch("lex.api.views.model_entries.FilterValues.logger.warning") as mock_warning:
             counts = self._counts("status", model=OPEN_ITEM)
         mock_warning.assert_not_called()
@@ -675,6 +676,13 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
 
         meta_name = meta._meta.model_name
         expected_meta = self._list_field_tally(meta_name, "category")
+        self.assertTrue(
+            expected_meta, "the scenario is only meaningful if the list endpoint shows some rows",
+        )
+        self.assertIn(
+            str(self.beta.pk), expected_meta,
+            "the visible row's category must actually appear in the list endpoint's own tally",
+        )
         actual_meta = self._counts("category", model=meta_name)
         self.assertEqual(
             actual_meta, expected_meta, "metahistorical filter_values must match its own list POST",
@@ -686,6 +694,13 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         hist_name = hist._meta.model_name
         query = "?" + urllib.parse.urlencode({"as_of": timezone.now().isoformat()})
         expected_hist = self._list_field_tally(hist_name, "category", query=query)
+        self.assertTrue(
+            expected_hist, "the scenario is only meaningful if the list endpoint shows some rows",
+        )
+        self.assertIn(
+            str(self.beta.pk), expected_hist,
+            "the visible row's category must actually appear in the list endpoint's own tally",
+        )
         actual_hist = self._counts("category", model=hist_name, query=query)
         self.assertEqual(
             actual_hist, expected_hist,
@@ -748,14 +763,16 @@ class _QueryItemAllFieldsSerializer(drf_serializers.ModelSerializer):
     credential-shaped ones -- the exact shape LEX-702 guards against, used here
     to prove ``filter_values`` refuses them independently of the serializer.
     Also masks ``status`` behind a ``SerializerMethodField``, and re-sources
-    ``amount`` (a real column) from ``name`` (a DIFFERENT real column), to
-    exercise the serializer-field-source check against a field that would
-    otherwise pass the "is this a real model field" check on its OWN name --
-    only the source mismatch can catch it.
+    ``note`` -- a plain text column the type allowlist would otherwise accept
+    on its own name -- from ``name``, a DIFFERENT real, otherwise-filterable
+    column. Unlike a column the type allowlist refuses outright (e.g. a
+    DecimalField), ``note`` would PASS ``is_value_list_field`` if asked for
+    directly, so this case exercises the serializer-field-source check on
+    its own: only the source mismatch -- not the type check -- can catch it.
     """
 
     status = drf_serializers.SerializerMethodField()
-    amount = drf_serializers.CharField(source="name", read_only=True)
+    note = drf_serializers.CharField(source="name", read_only=True)
 
     class Meta:
         model = QueryItem
@@ -810,15 +827,21 @@ class TestCluster14g_SerializerDependentRefusals(E2ETestCase):
     def test_14_54_a_serializer_field_whose_source_is_another_column_is_refused(self):
         """
         Scenario 14.54: the grid shows the serializer's field, not the raw column
-        Given: a SerializerMethodField named "status", and "amount" -- a REAL column -- re-sourced
-               from "name", a DIFFERENT real column
+        Given: a SerializerMethodField named "status", and "note" -- a plain text column the type
+               allowlist would otherwise accept -- re-sourced from "name", a DIFFERENT real,
+               otherwise-filterable column
         When: each is asked for
         Then: both are 400 "is not filterable"; an ordinary same-name field still works
+
+        Each field runs as its own ``subTest`` so a regression in the source check for ONE of them
+        (e.g. "note", which the type allowlist alone would never catch) is never masked by the
+        other ("status") already failing for an unrelated reason.
         """
-        for field in ("status", "amount"):
-            resp = self._post({"field": field, "filterModel": {}})
-            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r}: {resp.data}")
-            self.assertIn("not filterable", str(resp.data), field)
+        for field in ("status", "note"):
+            with self.subTest(field=field):
+                resp = self._post({"field": field, "filterModel": {}})
+                self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r}: {resp.data}")
+                self.assertIn("not filterable", str(resp.data), field)
 
         # Positive control: an ordinary field on the same custom serializer still works.
         resp = self._post({"field": "name", "filterModel": {}})

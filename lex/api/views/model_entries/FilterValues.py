@@ -83,8 +83,10 @@ def uses_default_read_permission(model_class: type[Model]) -> bool:
 
     True when EITHER:
 
-    * the LexModel target (the model, or its ``instance_type``) overrides
-      neither ``permission_read`` nor ``can_read`` -- the row filter
+    * the LexModel target -- the model itself, or the root tracked model
+      reached by walking the WHOLE History / MetaHistory ``instance_type``
+      chain (see ``_capability_target``) -- overrides neither
+      ``permission_read`` nor ``can_read`` -- the row filter
       (``filter_backends._handle_lexmodel_default``) and the serializer
       (``LexSerializer.readable_field_names``) both allow everything by
       default in that case, so there is nothing for a per-row scan to find
@@ -230,7 +232,17 @@ class FilterValues(ListModelEntries):
         # sort keeps this as the secondary order), then by the column's real
         # ordering -- numeric for a plain integer column, label otherwise --
         # so both counting paths produce the same order for the same data.
-        items.sort(key=lambda item: (item["key"] is None, "" if item["key"] is None else str(item["key"])))
+        # The tie-break itself is numeric whenever the key IS an integer
+        # (a foreign key's primary key, or an integer column) -- a string
+        # comparison disagrees with the numeric one across a digit boundary
+        # (e.g. "10" sorts before "9"), and a foreign key's keys are
+        # auto-incrementing integers even though the column itself is a
+        # relation, not an IntegerField.
+        tie_break_numeric = is_relation or isinstance(model_field, IntegerField)
+        if tie_break_numeric:
+            items.sort(key=lambda item: (item["key"] is None, _safe_int(item["key"])))
+        else:
+            items.sort(key=lambda item: (item["key"] is None, "" if item["key"] is None else str(item["key"])))
         is_numeric_order = isinstance(model_field, IntegerField) and not getattr(model_field, "choices", None)
         if is_numeric_order:
             items.sort(key=lambda item: (item["key"] is None, _safe_int(item["key"])))
