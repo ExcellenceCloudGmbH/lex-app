@@ -51,9 +51,10 @@ anything under `lex.lex_app` evaluates Django settings, which read the environme
 `.env` must be loaded before that first import. The module imports nothing from Django or
 `lex.lex_app` at import time.
 
-**Activation.** The project root is `$PROJECT_ROOT` when set, otherwise
-`find_project_root()` from the directory pytest was invoked in (the same rule as
-`django_bootstrap.project_root()`). The plugin is active when that root holds a
+**Activation.** The project root is found the way the settings find it:
+`find_project_root()` from `$PROJECT_ROOT` when set, otherwise from the directory
+pytest was invoked in (`lex.runtime_config.resolve_project_root`). The plugin is
+active when that root holds a
 `lex_test_config.yaml`, or `$LEX_TEST_CONFIG_PAYLOAD` is set (the same two sources
 `resolve_config()` accepts). Otherwise it does nothing at all. `-p no:lex` switches it off.
 
@@ -99,7 +100,8 @@ stands down the same way. The copied file can then be deleted.
 when `lex_test_config.yaml` loads:
 
 - `.run/Tests.run.xml` — type `tests`, factory `py.test`, target type `PATH`, target
-  `$PROJECT_DIR$/<tests_entrypoint>`, working directory the project root, the project's
+  `<project root>/<tests_entrypoint>` as an absolute path (as the other generated
+  configurations write theirs), working directory the project root, the project's
   `.env`, `PYTHONUNBUFFERED=1` and `CELERY_ACTIVE=False`;
 - `.run/Tests_<group>.run.xml` per configured group — the same, with `-m <group>`.
 
@@ -155,3 +157,7 @@ PyCharm install, shows the lex-app test passing instead of the collection error.
   way because it passes the module directly.
 - Paths use `as_posix()` throughout; the known copied conftest runs on Windows.
 - A project gets this by upgrading lex-app; nothing else is required.
+- lex-app's own CI-helper tests under `.github/scripts/` get a `pytest.ini` with
+  `-p no:lex -p no:django`: this repository has a `lex_test_config.yaml`, so with
+  lex-app installed the plugin would otherwise set Django and the shared test
+  database up for those plain tests.
