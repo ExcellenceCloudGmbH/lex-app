@@ -311,3 +311,50 @@ class TestCluster01aw_MarkersAndFailures(TestCase):
 
         self.assertIn("-p no:django", str(raised.exception))
         self.assertEqual(config.pluginmanager.registered, [], "nothing may be registered first")
+
+
+class TestCluster01aw_CopiedSetupCoexists(TestCase):
+    """Cluster 1aw: projects that copied the setup into a conftest are not broken."""
+
+    # -- 1.402 ---------------------------------------------------------
+    def test_1_402_a_copied_setup_finds_the_work_done(self):
+        """
+        Scenario 1.402 (first half): the plugin goes first
+        Given: a project conftest that copied `lex pytest`'s setup and guards on it
+        When: a plain pytest run loads both
+        Then: the plugin's pytest_configure ran first, the copy stood down, and the
+              test passes -- no "setup_test_environment() was already called"
+        """
+        # Through PYTEST_PLUGINS, not -p: pytest registers -p plugins before entry-point
+        # plugins and PYTEST_PLUGINS after them, the way it registers conftests. Hooks
+        # are called last-registered first, so only this order shows `tryfirst` working.
+        result = _run_pytest(
+            "-s", f"{TARGETS_REL}/django_db_target.py",
+            extra_env={"PYTEST_PLUGINS": "lex.test_project.tests.init.pytest_plugin_targets.copied_setup_plugin"},
+        )
+
+        self.assertEqual(result.returncode, 0, _output(result))
+        self.assertIn("COPIED-SETUP: stood down", result.stdout, _output(result))
+
+    def test_1_402_the_plugin_stands_down_when_set_up_already(self):
+        """
+        Scenario 1.402 (second half): something else went first
+        Given: a test environment already set up (this suite's own, by `lex pytest`)
+        When: the plugin configures and unconfigures a run
+        Then: it sets nothing up and tears nothing down
+        """
+        from django.test.utils import _TestState
+
+        self.assertTrue(hasattr(_TestState, "saved_data"), "precondition: run under `lex pytest`")
+        config = _fake_config()
+
+        with patch("django.test.utils.setup_test_environment") as setup, \
+                patch("django.test.runner.DiscoverRunner.setup_databases") as setup_databases, \
+                patch("django.test.utils.teardown_test_environment") as teardown:
+            pytest_plugin.pytest_configure(config)
+            pytest_plugin.pytest_unconfigure(config)
+
+        setup.assert_not_called()
+        setup_databases.assert_not_called()
+        teardown.assert_not_called()
+        self.assertFalse(config.stash[pytest_plugin._RUN].test_environment)
