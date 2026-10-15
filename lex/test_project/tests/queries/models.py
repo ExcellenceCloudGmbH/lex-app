@@ -200,11 +200,90 @@ class QueryOpenItem(models.Model):
         return self.name
 
 
-ALL_MODELS = [QueryCategory, QueryItem, QueryMaskedItem, QueryOpenItem]
+class QueryDefaultPermissionItem(LexModel):
+    """A real LexModel that overrides NEITHER ``permission_read`` NOR
+    ``can_read`` -- both stay the literal inherited default.
+
+    Cluster 14g's "default permissions, through the real endpoint" fixture
+    (14.60), distinct from ``QueryOpenItem``: that one has no such methods
+    AT ALL (a plain Django model), which is ``uses_default_read_permission``'s
+    OTHER True branch. This one exercises the identity branch -- the row
+    filter's ``_get_default_permission_target`` fast path, keyed on Keycloak
+    UMA ``request.user_permissions`` -- which needs a real-looking global
+    read grant to show any rows at all for a test user who otherwise carries
+    none; see ``_grant_global_read`` in the test file.
+    """
+
+    name = models.CharField(max_length=200)
+    status = models.CharField(
+        max_length=16, choices=QUERY_STATUS_CHOICES, default=QUERY_STATUS_ACTIVE,
+    )
+    category = models.ForeignKey(
+        QueryCategory,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="default_perm_items",
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class QueryScopedFieldItem(LexModel):
+    """``permission_read`` always allows the ROW but excludes
+    ``secret_field`` unless the caller's Keycloak scopes include ``"read"``;
+    ``can_read`` is left at the LexModel default (unoverridden).
+
+    Cluster 14g's API-key fast-path parity fixture (14.66). ``permission_read``
+    being an override (not the literal default) keeps the row filter off its
+    restrictive UMA fast path regardless of auth method -- ``allow_fields``
+    always sets ``allowed=True``, so the row is never excluded either way --
+    which isolates the thing actually under test: whether
+    ``readable_field_names``'s per-row fast path sees an API-key caller's
+    OWN scopes (``DEFAULT_API_KEY_SCOPES`` includes ``"read"``) the same way
+    ``can_read(request)`` -- the grid's own path -- would.
+    """
+
+    name = models.CharField(max_length=200)
+    secret_field = models.CharField(max_length=64, blank=True, default="classified")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def permission_read(self, uc):
+        if "read" in uc.keycloak_scopes:
+            return PermissionResult.allow_all("cluster 14g: read scope present")
+        return PermissionResult.allow_fields({"id", "name"}, "cluster 14g: read scope absent")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 14g: scoped item edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+ALL_MODELS = [
+    QueryCategory, QueryItem, QueryMaskedItem, QueryOpenItem,
+    QueryDefaultPermissionItem, QueryScopedFieldItem,
+]
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
 CATEGORY = "querycategory"
 ITEM = "queryitem"
 MASKED_ITEM = "querymaskeditem"
 OPEN_ITEM = "queryopenitem"
+DEFAULT_PERM_ITEM = "querydefaultpermissionitem"
+SCOPED_FIELD_ITEM = "queryscopedfielditem"
 

@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 63
+max_scenario: 66
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -102,10 +102,10 @@ letters:
       400 naming the field, 14.41 that an unknown filterType still means "no filter" and is logged.
   g:
     title: filter_values — a column's values with counts under the other filters
-    scenarios: 14.42-14.63
+    scenarios: 14.42-14.66
     status: complete
     tests:
-      pass: 22
+      pass: 25
       skip: 0
       xfail: 0
     note: >-
@@ -134,3 +134,30 @@ letters:
       stored keys and capped at 1,000, and a search-missed ticked value is not added back (14.63);
       14.58 pins the POST-only route; 14.59 the two scan limits and limit clamping. GET and HEAD
       were already 405 before this round -- 14.58 only confirms it stays that way.
+      Fix round 2 (14.64-14.66), after a re-review: uses_default_read_permission's capability
+      target now walks the WHOLE instance_type chain (reusing
+      base_serializers._resolve_history_source_model) instead of one level, so a meta-history
+      container -- whose instance_type is the historical class, not the root tracked model -- no
+      longer wrongly takes the database path and leaks a hidden row's values (14.64, also covering
+      historical ?as_of=, whose queryset resolves through the meta-history table); 14.56 now also
+      calls uses_default_read_permission directly against a throwaway model that overrides ONLY
+      can_read, proving the check needs BOTH identities, not just permission_read's (verified by a
+      documented mutation: deleting the can_read identity check makes 14.56 fail); 14.65 pins the
+      round-1 groups-query bound explicitly (CaptureQueriesContext, 5 rows vs 20, verified by a
+      mutation that disables the fast path and makes the query count scale); 14.60 now exercises a
+      real LexModel keeping BOTH methods at their literal default through the real endpoint (a
+      Keycloak-UMA grant installed by replacing KeycloakPermissionsMiddleware.__call__ for the
+      test, never a real Keycloak call), with values/counts/labels derived from the list endpoint's
+      own response rather than hard-coded, and 14.55 does the same; an unconvertible ticked foreign
+      key is converted with the target field's to_python before the visibility probe and left out
+      of it rather than raised as a 400 (14.53); the per-row scan and its FK-visibility probe now
+      share one aggregated warning per request; 14.54's renamed-field case now names a real column
+      (amount) re-sourced from another real column (name), since the former case was refused for
+      being a nonexistent field regardless of the source check (verified by a mutation); 14.62
+      gained an equal-label tie ordered by key; 14.63 also asserts no "True" key leaks in. A
+      separate addendum closed a parity gap the fast path introduced: it resolved permission_read
+      through with_instance, which recomputes keycloak_scopes from user_permissions and so drops an
+      API-key caller's own scopes (identity.scopes, carried on the early-return API-key context)
+      that can_read(request)'s own from_request call would not have dropped; readable_field_names
+      now skips the fast path for an API-key request (UserContext._api_key_context(request) is not
+      None, checked once per scan) and calls can_read directly instead, matching the grid (14.66).

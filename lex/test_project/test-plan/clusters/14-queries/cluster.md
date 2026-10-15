@@ -136,17 +136,20 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
 | 14.50 | Bad key in another filter | 400 naming that field | ✅ |
 | 14.51 | Two counting paths | Database and per-row counts give identical answers | ✅ |
 | 14.52 | Credential-shaped column | Refused even behind a custom serializer's `fields = "__all__"`; no stored secret leaks | ✅ |
-| 14.53 | Ticked FK key visibility | A readable row's name is shown; a hidden-row-only or nonexistent key keeps its own key as label | ✅ |
-| 14.54 | Serializer field source mismatch | A `SerializerMethodField` and a renamed (`source=`) field are both refused | ✅ |
-| 14.55 | No permission methods at all | Database path; counts match a plain tally; no warning logged | ✅ |
-| 14.56 | `can_read` override with `permission_read` open | Per-row path; a masked row's field is not counted | ✅ |
+| 14.53 | Ticked FK key visibility | A readable row's name is shown; a hidden-row-only, nonexistent or unconvertible key keeps its own key as a 0-count label, never a 400 | ✅ |
+| 14.54 | Serializer field source mismatch | A `SerializerMethodField`, and a real column re-sourced from another real column, are both refused | ✅ |
+| 14.55 | No permission methods at all | Database path; counts match the list endpoint's own tally; no warning logged | ✅ |
+| 14.56 | `can_read`-only override disqualifies the database path | Per-row path; a masked row's field is not counted; `uses_default_read_permission` needs BOTH identities, proven by a mutation | ✅ |
 | 14.57 | Continuous columns | Decimal, float and date-time are refused — no value list | ✅ |
 | 14.58 | Method guard | GET and HEAD are 405 | ✅ |
 | 14.59 | Truncation and limit bounds | Both scan limits truncate; `limit` clamps to 1-1000, non-integer defaults to 200 | ✅ |
-| 14.60 | Default-permission identity + faceting | The literal-default identity holds; the database path facets correctly | ✅ |
+| 14.60 | Default-permission LexModel end to end | A real LexModel keeping both identities default lists values/counts/labels matching the list endpoint, under a facet filter | ✅ |
 | 14.61 | Blank folding | `""` and `NULL` are one "(Blank)" bucket; the list's own set filter matches both | ✅ |
-| 14.62 | Integer ordering | Numeric order (2 before 10), not lexicographic | ✅ |
-| 14.63 | `selected` handling | JSON `true` normalises to `"true"`; capped at 1,000; search gates re-adding a missing ticked value | ✅ |
+| 14.62 | Integer ordering | Numeric order (2 before 10), not lexicographic; an equal label falls back to key order | ✅ |
+| 14.63 | `selected` handling | JSON `true` normalises to `"true"` (never `"True"`); capped at 1,000; search gates re-adding a missing ticked value | ✅ |
+| 14.64 | Meta-history / as-of-history masking | A meta-history or `?as_of=` historical container resolves back to the tracked model's `can_read`, matching its own list endpoint | ✅ |
+| 14.65 | Groups-query bound | The per-row scan issues the same `auth_group` query count at 5 and at 20 rows, proven by a mutation | ✅ |
+| 14.66 | API-key fast-path parity | An API-key caller's own scopes reach the per-row fast path; `filter_values` matches the list endpoint | ✅ |
 
 ---
 

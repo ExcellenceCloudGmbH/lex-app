@@ -14,7 +14,20 @@ design never meant to get a value list, or a per-row ``can_read`` override
 silently skipped because the database path was taken anyway. These scenarios
 pin the design spec's §1 (which column types get a value list), §3.7 / §8 (a
 value list never shows what the grid hides) and the blank-folding rule.
-Cluster 14g — scenarios 14.42–14.63. Type: E.
+
+Fix round 2 (14.64–14.66): a re-review found three gaps left by round 1 --
+a meta-history container still took the database path (walking only one
+``instance_type`` level instead of the whole chain), the per-row scan had no
+bound on how many ``auth_group`` queries it issues, and the per-row fast path
+dropped an API-key caller's own scopes (it resolves them through
+``with_instance``, which an API-key ``UserContext`` does not carry
+``user_permissions`` for) where ``can_read`` itself would not have. Several
+existing scenarios were also tightened: 14.56 now pins that BOTH
+``permission_read`` and ``can_read`` must be the literal default (not just
+one), 14.54's renamed-field case now names a real column, 14.55/14.60 derive
+their expected counts from the list endpoint instead of hard-coding them, and
+an unconvertible ticked foreign-key key is now a silent 0 rather than a 400.
+Cluster 14g — scenarios 14.42–14.66. Type: E.
 Covers: lex/api/views/model_entries/FilterValues.py, lex/api/utils/filterable_fields.py,
 lex/api/serializers/base_serializers.py (readable_field_names), lex/api/views/model_entries/List.py
 (blank folding on plain text columns), lex/process_admin/sites/process_admin_site.py (route).
@@ -25,31 +38,39 @@ from __future__ import annotations
 
 import time
 import urllib.parse
+from collections import Counter
 from datetime import date
 from unittest.mock import patch
 
 import pytest
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework import serializers as drf_serializers
 from rest_framework import status
 
-from lex.api.views.model_entries.FilterValues import _bounded_limit, uses_default_read_permission
+from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddleware
+from lex.api.views.model_entries.FilterValues import _bounded_limit, uses_default_read_permission, value_key
 from lex.core.models.LexModel import LexModel
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import (
     ALL_MODELS,
+    DEFAULT_PERM_ITEM,
     ITEM,
     MASKED_ITEM,
     OPEN_ITEM,
     QUERY_STATUS_ACTIVE,
     QUERY_STATUS_ARCHIVED,
     QUERY_STATUS_DRAFT,
+    SCOPED_FIELD_ITEM,
     QueryCategory,
+    QueryDefaultPermissionItem,
     QueryItem,
     QueryMaskedItem,
     QueryOpenItem,
+    QueryScopedFieldItem,
 )
 
 pytestmark = pytest.mark.queries
@@ -98,6 +119,54 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
     def _counts(self, field: str, filter_model=None, query: str = "", model: str = ITEM, **extra) -> dict:
         data = self._values(field, filter_model, query, model=model, **extra)
         return {item["key"]: item["count"] for item in data["values"]}
+
+    def _list_field_tally(self, model: str, field: str, filter_model=None, query: str = "") -> dict:
+        """POST the AG Grid list endpoint for ``model`` and tally ``field``
+        across the returned rows: the "what the grid actually shows" oracle
+        14.55, 14.60 and 14.64 compare ``filter_values`` against, instead of
+        hard-coding the expected counts.
+
+        The list endpoint serialises a field as its native JSON type (e.g. a
+        foreign key as a bare integer); ``filter_values`` always answers in
+        its own wire-key form (``value_key``). Convert here so the two are
+        actually comparable -- the point of this oracle is what the SAME
+        data looks like through each endpoint, not JSON type trivia.
+        """
+        resp = self.client.post(
+            self.url_list(model) + query,
+            data={"filterModel": filter_model or {}, "startRow": 0, "endRow": 1000},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        return dict(Counter(value_key(row[field]) for row in resp.data["rowData"] if field in row))
+
+    def _grant_global_read(self, model_class) -> None:
+        """Install a Keycloak-UMA global-read grant for ``model_class``'s
+        resource, for the duration of the current test.
+
+        A model with the literal default ``permission_read`` routes the row
+        filter through ``_apply_default_permission_read_filter``, which
+        reads ``request.user_permissions`` -- a real-looking grant there (not
+        a real Keycloak call: ``KeycloakPermissionsMiddleware.__call__`` is
+        replaced for this test only) is the only way a plain test user, who
+        carries no such grant by default, sees any row of such a model at
+        all. The SAME grant also satisfies ``UserContext.from_request``'s own
+        scope resolution (``_resolve_keycloak_scopes`` uses the identical
+        ``"<app_label>.<ClassName>"`` resource-name formula), so
+        ``can_read``'s default body sees ``"read"`` too.
+        """
+        resource = f"{model_class._meta.app_label}.{model_class.__name__}"
+        grant = [{"rsname": resource, "scopes": ["read"]}]
+
+        def _fake_call(mw_self, request):
+            request.user_permissions = grant
+            request.userinfo = {}
+            request.client_roles = []
+            return mw_self.get_response(request)
+
+        patcher = patch.object(KeycloakPermissionsMiddleware, "__call__", _fake_call)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     # -- 14.42 ---------------------------------------------------------
     def test_14_42_counts_follow_the_other_filters_not_the_columns_own(self):
@@ -262,15 +331,17 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
     def test_14_53_a_ticked_foreign_key_never_borrows_a_hidden_rows_name(self):
         """
         Scenario 14.53: labels respect visibility, not just existence
-        Given: one category a readable row carries, one only a masked row carries, one no row carries
-        When: category values are asked for with all three ticked, under a filter matching no rows
-        Then: all three are listed at 0; only the readable category's real name appears anywhere
+        Given: one category a readable row carries, one only a masked row carries, one no row
+               carries, and one ticked key that cannot even convert to a primary key
+        When: category values are asked for with all four ticked, under a filter matching no rows
+        Then: all are listed at 0; only the readable category's real name appears anywhere, and the
+              unconvertible key is a 0-count entry, never a 400
         """
         nothing = {"visible": {"filterType": "set", "values": []}}
         phantom_pk = str(self.beta.pk + self.gamma.pk + 10_000)
         data = self._values(
             "category", nothing,
-            selected=[str(self.beta.pk), str(self.gamma.pk), phantom_pk],
+            selected=[str(self.beta.pk), str(self.gamma.pk), phantom_pk, "abc"],
             model=MASKED_ITEM,
         )
         by_key = {item["key"]: item for item in data["values"]}
@@ -291,6 +362,12 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         )
         self.assertNotIn("QCat<gamma>", str(data), "a masked row's category name must never appear")
 
+        self.assertEqual(
+            by_key["abc"], {"key": "abc", "label": "abc", "count": 0},
+            "a ticked key that cannot even convert to the target field's type must be a 0-count "
+            "entry with its own key as label, never a 400",
+        )
+
     # -- 14.54 ---------------------------------------------------------
     # (see TestCluster14g_SerializerDependentRefusals below -- needs a custom
     # serializer, so it shares that class's fixture with 14.52.)
@@ -301,28 +378,53 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         Scenario 14.55: nothing to check means nothing to scan
         Given: a model that overrides neither permission_read nor can_read
         When: its status values are asked for
-        Then: the counts match a plain tally of the rows, and no warning is logged
+        Then: the counts match what the list endpoint itself shows, and no warning is logged
         """
         self.assertTrue(
             uses_default_read_permission(QueryOpenItem),
             "a model with no permission methods at all must use the database path",
         )
+        expected = self._list_field_tally(OPEN_ITEM, "status")
         with patch("lex.api.views.model_entries.FilterValues.logger.warning") as mock_warning:
             counts = self._counts("status", model=OPEN_ITEM)
         mock_warning.assert_not_called()
-        self.assertEqual(
-            counts, {QUERY_STATUS_ACTIVE: 2, QUERY_STATUS_ARCHIVED: 1},
-            "counts must match a plain tally of the rows",
-        )
+        self.assertEqual(counts, expected, "counts must match what the list endpoint shows")
 
     # -- 14.56 ---------------------------------------------------------
     def test_14_56_can_read_masking_is_honoured_even_with_permission_read_open(self):
         """
-        Scenario 14.56: can_read is still checked, even though it is not permission_read
-        Given: a model whose permission_read is permissive but can_read hides category on some rows
-        When: category values are asked for
-        Then: the per-row path is used, and the masked row's category is not counted
+        Scenario 14.56: BOTH methods must be the default, not just permission_read
+        Given: (a) a model that keeps the literal default permission_read and overrides ONLY
+               can_read, and (b) a model whose permission_read is permissive but can_read hides
+               category on some rows
+        When: (a) uses_default_read_permission is asked directly, and (b) category values are
+              asked for through the real endpoint
+        Then: (a) it is False -- can_read alone being non-default is enough to disqualify the
+              database path, even though permission_read is untouched; (b) the per-row path is
+              used, and the masked row's category is not counted
         """
+        class _DefaultPermissionReadOnly(LexModel):
+            """permission_read is the literal LexModel default; can_read is
+            the ONLY override. Exists purely for the identity check below --
+            never registered for HTTP routing, since a literal-default
+            permission_read would otherwise route every request through the
+            Keycloak-UMA row filter, which this throwaway class has no real
+            grant for and does not need one to answer a class-level question.
+            """
+
+            class Meta:
+                app_label = "lex_app"
+                abstract = True
+
+            def can_read(self, request):
+                return {"id"}
+
+        self.assertFalse(
+            uses_default_read_permission(_DefaultPermissionReadOnly),
+            "can_read alone being overridden must be enough to disqualify the database path, "
+            "even with permission_read left at its literal default",
+        )
+
         self.assertFalse(
             uses_default_read_permission(QueryMaskedItem),
             "can_read is overridden, so the database path must not be used",
@@ -387,10 +489,15 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
     # -- 14.60 ---------------------------------------------------------
     def test_14_60_default_permission_identity_and_database_path_faceting(self):
         """
-        Scenario 14.60: the default-permission identity, and faceting on the database path
-        Given: a LexModel subclass that overrides neither method, and QueryOpenItem's rows
-        When: status values are asked for under a name facet filter, unpatched
-        Then: the identity check holds, and the facet narrows the database-path answer correctly
+        Scenario 14.60: the default-permission identity, and a real default-permission LexModel
+        end to end
+        Given: (a) a LexModel subclass that overrides neither method, and (b) a real LexModel
+               (``QueryDefaultPermissionItem``) that ALSO keeps both at their literal default, with
+               a choice column and rows under two categories
+        When: (a) uses_default_read_permission is asked directly, and (b) status values are asked
+              for under a category facet filter, through the real endpoint, unpatched
+        Then: (a) it is True; (b) the database path is used, and the values, counts and labels
+              match what the list endpoint itself shows for the same facet
         """
 
         class _UntouchedPermissionModel(LexModel):
@@ -404,11 +511,39 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
             "the database path",
         )
 
-        other = {"name": {"filterType": "set", "values": ["open-a", "open-c"]}}
-        counts = self._counts("status", other, model=OPEN_ITEM)
+        # A real, HTTP-routed LexModel with BOTH methods at their literal
+        # default needs a real-looking Keycloak-UMA grant to show any rows
+        # at all -- see _grant_global_read.
+        self._grant_global_read(QueryDefaultPermissionItem)
+        QueryDefaultPermissionItem.objects.create(
+            name="d-alpha-active", status=QUERY_STATUS_ACTIVE, category=self.alpha,
+        )
+        QueryDefaultPermissionItem.objects.create(
+            name="d-alpha-archived", status=QUERY_STATUS_ARCHIVED, category=self.alpha,
+        )
+        QueryDefaultPermissionItem.objects.create(
+            name="d-beta-active", status=QUERY_STATUS_ACTIVE, category=self.beta,
+        )
+        self.assertTrue(
+            uses_default_read_permission(QueryDefaultPermissionItem),
+            "a real LexModel keeping both methods at their literal default must use the "
+            "database path",
+        )
+
+        facet = {"category": {"filterType": "set", "values": [str(self.alpha.pk)]}}
+        expected_counts = self._list_field_tally(DEFAULT_PERM_ITEM, "status", facet)
+        data = self._values("status", facet, model=DEFAULT_PERM_ITEM)
+        actual_counts = {item["key"]: item["count"] for item in data["values"]}
+        actual_labels = {item["key"]: item["label"] for item in data["values"]}
+
         self.assertEqual(
-            counts, {QUERY_STATUS_ACTIVE: 1, QUERY_STATUS_ARCHIVED: 1},
-            "the facet filter must narrow the database-path answer",
+            actual_counts, expected_counts,
+            "the facet filter must narrow the database-path answer to match the list endpoint",
+        )
+        self.assertEqual(
+            actual_labels,
+            {QUERY_STATUS_ACTIVE: "Active", QUERY_STATUS_ARCHIVED: "Archived"},
+            "labels must be the choice labels, not the raw keys",
         )
 
     # -- 14.61 ---------------------------------------------------------
@@ -449,10 +584,11 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
     # -- 14.62 ---------------------------------------------------------
     def test_14_62_integer_columns_sort_numerically_not_lexicographically(self):
         """
-        Scenario 14.62: 2 before 10
-        Given: counts of 2 and 10 on an integer column
-        When: its values are asked for
-        Then: they come back in numeric order, not lexicographic ("10" before "2") order
+        Scenario 14.62: 2 before 10, and an equal label falls back to key order
+        Given: counts of 2 and 10 on an integer column, and two categories with the same str()
+        When: each column's values are asked for
+        Then: the integer column comes back in numeric order, not lexicographic ("10" before "2")
+              order; the two equal-labelled categories come back ordered by key
         """
         QueryItem.objects.filter(name="alpha-small").update(count=2)
         QueryItem.objects.filter(name="alpha-mid").update(count=10)
@@ -460,6 +596,22 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         self.assertEqual(
             keys, ["0", "2", "7", "9", "10"],
             f"integer keys must sort numerically, got {keys!r}",
+        )
+
+        dup1 = QueryCategory.objects.create(name="dup")
+        dup2 = QueryCategory.objects.create(name="dup")
+        QueryItem.objects.create(name="tie-1", category=dup1)
+        QueryItem.objects.create(name="tie-2", category=dup2)
+        dup_keys = (str(dup1.pk), str(dup2.pk))
+        cat_items = self._values("category")["values"]
+        self.assertEqual(
+            {i["label"] for i in cat_items if i["key"] in dup_keys}, {"QCat<dup>"},
+            "both categories must share the same label for this to be a real tie",
+        )
+        ordered_dup_keys = [i["key"] for i in cat_items if i["key"] in dup_keys]
+        self.assertEqual(
+            ordered_dup_keys, sorted(dup_keys, key=int),
+            f"an equal label must be ordered by key, got {ordered_dup_keys!r}",
         )
 
     # -- 14.63 ---------------------------------------------------------
@@ -474,6 +626,7 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         data = self._values("is_active", selected=[True])
         keys = {i["key"] for i in data["values"]}
         self.assertIn("true", keys, 'a JSON true must normalise to the "true" key, not "True"')
+        self.assertNotIn("True", keys, 'Python\'s str(True) == "True" must never leak into a key')
 
         over_limit = [f"nonexistent-{i}" for i in range(1005)]
         resp = self._post({"field": "name", "filterModel": {}, "selected": over_limit})
@@ -500,18 +653,109 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         )
         self.assertEqual(statuses[QUERY_STATUS_ARCHIVED], "Archived")
 
+    # -- 14.64 ---------------------------------------------------------
+    def test_14_64_meta_history_and_as_of_history_honour_per_row_masking(self):
+        """
+        Scenario 14.64: a meta-history or as-of-historical container is not a shortcut
+        Given: QueryMaskedItem's existing visible/masked rows
+        When: category values are asked for on its metahistorical container, and on its
+              historical container with ?as_of=
+        Then: neither counts nor names the hidden row's category -- matching what the list POST
+              on each container shows
+        """
+        hist = QueryMaskedItem.history.model
+        meta = hist.meta_history.model
+
+        for model_class in (hist, meta):
+            self.assertFalse(
+                uses_default_read_permission(model_class),
+                f"{model_class.__name__} must resolve back to QueryMaskedItem's own can_read "
+                "override (walking the WHOLE instance_type chain), not take the database path",
+            )
+
+        meta_name = meta._meta.model_name
+        expected_meta = self._list_field_tally(meta_name, "category")
+        actual_meta = self._counts("category", model=meta_name)
+        self.assertEqual(
+            actual_meta, expected_meta, "metahistorical filter_values must match its own list POST",
+        )
+        self.assertNotIn(
+            str(self.gamma.pk), actual_meta, "the masked row's category must not be counted",
+        )
+
+        hist_name = hist._meta.model_name
+        query = "?" + urllib.parse.urlencode({"as_of": timezone.now().isoformat()})
+        expected_hist = self._list_field_tally(hist_name, "category", query=query)
+        actual_hist = self._counts("category", model=hist_name, query=query)
+        self.assertEqual(
+            actual_hist, expected_hist,
+            "historical ?as_of= filter_values must match its own list POST",
+        )
+        self.assertNotIn(
+            str(self.gamma.pk), actual_hist,
+            "the masked row's category must not be counted as_of either",
+        )
+
+    # -- 14.65 ---------------------------------------------------------
+    def test_14_65_per_row_scan_issues_a_bounded_number_of_groups_queries(self):
+        """
+        Scenario 14.65: one base context per request, not one per row
+        Given: QueryItem's 5 setUp rows, then 20 rows (4x)
+        When: filter_values asks for "status" values each time
+        Then: the number of auth_group / auth_user_groups queries does not grow with the row count
+        """
+
+        def _groups_queries() -> int:
+            with CaptureQueriesContext(connection) as ctx:
+                resp = self._post({"field": "status", "filterModel": {}})
+            self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+            return sum(
+                1 for q in ctx.captured_queries
+                if "auth_user_groups" in q["sql"] or "auth_group" in q["sql"]
+            )
+
+        small = _groups_queries()  # the 5 rows already created in setUp
+        for i in range(15):
+            QueryItem.objects.create(name=f"bound-{i}", status=QUERY_STATUS_ACTIVE)
+        large = _groups_queries()  # 20 rows -- 4x
+
+        self.assertEqual(
+            small, large,
+            f"groups queries must not scale with row count: {small} at 5 rows, {large} at 20 rows",
+        )
+
+    # -- 14.66 ---------------------------------------------------------
+    def test_14_66_api_key_callers_own_scopes_reach_the_fast_path(self):
+        """
+        Scenario 14.66: an API-key caller's own scopes must not be dropped
+        Given: a model whose field-level masking depends on keycloak_scopes, under API-key auth
+        When: secret_field values are asked for
+        Then: the counts match what the list POST shows for the same field and caller
+        """
+        QueryScopedFieldItem.objects.create(name="a", secret_field="alpha-secret")
+        QueryScopedFieldItem.objects.create(name="b", secret_field="beta-secret")
+        self.authenticate_as_api_key()
+
+        expected = self._list_field_tally(SCOPED_FIELD_ITEM, "secret_field")
+        self.assertTrue(expected, "the scenario is only meaningful if the grid itself shows the field")
+        data = self._values("secret_field", model=SCOPED_FIELD_ITEM)
+        actual = {item["key"]: item["count"] for item in data["values"]}
+        self.assertEqual(actual, expected, "filter_values must match the grid for an API-key caller")
+
 
 class _QueryItemAllFieldsSerializer(drf_serializers.ModelSerializer):
     """Exposes every ``QueryItem`` column via ``fields = "__all__"``, including
     credential-shaped ones -- the exact shape LEX-702 guards against, used here
     to prove ``filter_values`` refuses them independently of the serializer.
-    Also masks ``status`` behind a ``SerializerMethodField`` and renames
-    ``name`` under ``renamed_name``, to exercise the serializer-field-source
-    check.
+    Also masks ``status`` behind a ``SerializerMethodField``, and re-sources
+    ``amount`` (a real column) from ``name`` (a DIFFERENT real column), to
+    exercise the serializer-field-source check against a field that would
+    otherwise pass the "is this a real model field" check on its OWN name --
+    only the source mismatch can catch it.
     """
 
     status = drf_serializers.SerializerMethodField()
-    renamed_name = drf_serializers.CharField(source="name", read_only=True)
+    amount = drf_serializers.CharField(source="name", read_only=True)
 
     class Meta:
         model = QueryItem
@@ -566,11 +810,12 @@ class TestCluster14g_SerializerDependentRefusals(E2ETestCase):
     def test_14_54_a_serializer_field_whose_source_is_another_column_is_refused(self):
         """
         Scenario 14.54: the grid shows the serializer's field, not the raw column
-        Given: a SerializerMethodField named "status" and a field "renamed_name" sourced from "name"
+        Given: a SerializerMethodField named "status", and "amount" -- a REAL column -- re-sourced
+               from "name", a DIFFERENT real column
         When: each is asked for
         Then: both are 400 "is not filterable"; an ordinary same-name field still works
         """
-        for field in ("status", "renamed_name"):
+        for field in ("status", "amount"):
             resp = self._post({"field": field, "filterModel": {}})
             self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r}: {resp.data}")
             self.assertIn("not filterable", str(resp.data), field)

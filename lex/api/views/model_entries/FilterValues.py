@@ -24,7 +24,7 @@ from django.db.models import BooleanField, Count, IntegerField, Model, QuerySet
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from lex.api.serializers.base_serializers import LexSerializer, _get_capabilities
+from lex.api.serializers.base_serializers import LexSerializer, _get_capabilities, _resolve_history_source_model
 from lex.api.utils.filterable_fields import is_plain_text_field, value_list_field
 from lex.api.views.model_entries.List import ListModelEntries, normalize_field_path
 from lex.core.models.LexModel import LexModel, UserContext
@@ -62,15 +62,20 @@ def value_key(value: Any) -> Optional[str]:
 
 def _capability_target(model_class):
     """The class whose ``permission_read`` / ``can_read`` decide this model's
-    masking -- ``model_class`` itself when it is a LexModel, else its
-    ``instance_type`` (for a History / MetaHistory wrapper class used
-    directly as a container's model), else ``model_class`` unchanged."""
-    if isinstance(model_class, type) and issubclass(model_class, LexModel):
-        return model_class
-    instance_type = getattr(model_class, "instance_type", None)
-    if isinstance(instance_type, type):
-        return instance_type
-    return model_class
+    masking -- ``model_class`` itself, or the root tracked model when
+    ``model_class`` is a History / MetaHistory wrapper.
+
+    Reuses :func:`_resolve_history_source_model`, which walks the WHOLE
+    ``instance_type`` chain (not just one level): a meta-history class's own
+    ``instance_type`` is its historical class, not the root tracked model,
+    so a single-level walk stops one short and resolves to a class that
+    itself declares neither method -- making ``uses_default_read_permission``
+    wrongly answer True (database path) for a model whose real masking
+    (e.g. ``QueryMaskedItem.can_read``) would otherwise hide values from the
+    grid. Both the read filter and the serializer unwrap all the way to the
+    root tracked model, so this must too.
+    """
+    return _resolve_history_source_model(model_class) or model_class
 
 
 def uses_default_read_permission(model_class: type[Model]) -> bool:
@@ -166,10 +171,12 @@ class FilterValues(ListModelEntries):
         # no per-row field filter at all, so the database aggregate is exact
         # regardless of permission_read / can_read.
         use_database = not isinstance(serializer, LexSerializer) or uses_default_read_permission(queryset.model)
+        total_skipped = 0
         if use_database:
             counts, truncated = self._count_in_database(queryset, field)
         else:
-            counts, truncated = self._count_per_row(request, queryset, model_field, serializer)
+            counts, truncated, skipped = self._count_per_row(request, queryset, model_field, serializer)
+            total_skipped += skipped
 
         if is_plain_text:
             counts = self._fold_blank(counts)
@@ -183,10 +190,32 @@ class FilterValues(ListModelEntries):
             # real counts were (database or per-row), ignoring every OTHER
             # filter -- the question here is visibility, not the current
             # facet. Every other missing key keeps its own key as its label.
-            confirmed = self._confirm_visible(
-                request, base_queryset, field, model_field, sorted(missing), use_database, serializer,
+            # A key that cannot even convert to the target field's type
+            # (stale client state, not a live user-typed filter) can never
+            # match a row either way -- probe only the ones that could, so
+            # one bad ticked key never turns into a 400 for the whole list.
+            target_to_python = model_field.target_field.to_python
+            convertible = []
+            for key in missing:
+                try:
+                    target_to_python(key)
+                except (DjangoValidationError, TypeError, ValueError):
+                    continue
+                convertible.append(key)
+            if convertible:
+                confirmed, probe_skipped = self._confirm_visible(
+                    request, base_queryset, field, model_field, sorted(convertible), use_database, serializer,
+                )
+                total_skipped += probe_skipped
+                missing = missing & confirmed
+            else:
+                missing = set()
+
+        if total_skipped:
+            logger.warning(
+                "filter_values: readable_field_names raised for %d row(s) while listing %r; skipped",
+                total_skipped, field,
             )
-            missing = missing & confirmed
 
         labels = self._labels(model_field, visible_keys | missing)
         items = [
@@ -259,15 +288,21 @@ class FilterValues(ListModelEntries):
 
     def _count_per_row(
         self, request, queryset: QuerySet, model_field, serializer
-    ) -> Tuple[Dict[Optional[str], int], bool]:
+    ) -> Tuple[Dict[Optional[str], int], bool, int]:
         """Count only rows whose ``readable_field_names`` includes this field.
 
         ``serializer`` is the SAME instance used to resolve ``field`` and
         must be a :class:`LexSerializer` (``post`` only takes this path when
         it is). One base context is built for the whole scan -- not one per
-        row, which would mean one ``user.groups`` query per row.
+        row, which would mean one ``user.groups`` query per row -- and
+        whether the request is API-key authenticated is likewise decided
+        once per scan (see ``readable_field_names``). Returns the rows
+        skipped by a raised check too, so a caller that makes more than one
+        pass (the main count and the ticked-foreign-key visibility probe)
+        can log one combined warning instead of one per pass.
         """
         base_user_context = UserContext.from_request_base(request)
+        is_api_key_request = UserContext._api_key_context(request) is not None
         name = model_field.name
         attname = model_field.attname
         max_rows = row_scan_limit()
@@ -280,7 +315,9 @@ class FilterValues(ListModelEntries):
                 truncated = True
                 break
             try:
-                visible = serializer.readable_field_names(row, request, base_user_context=base_user_context)
+                visible = serializer.readable_field_names(
+                    row, request, base_user_context=base_user_context, is_api_key_request=is_api_key_request,
+                )
             except Exception:
                 skipped += 1
                 continue
@@ -288,17 +325,11 @@ class FilterValues(ListModelEntries):
                 continue
             counts[value_key(getattr(row, attname))] += 1
 
-        if skipped:
-            logger.warning(
-                "filter_values: readable_field_names raised for %d row(s) while listing %r; skipped",
-                skipped, name,
-            )
-
         limit = scan_limit()
         if len(counts) > limit:
             truncated = True
             counts = Counter(dict(counts.most_common(limit)))
-        return dict(counts), truncated
+        return dict(counts), truncated, skipped
 
     def _confirm_visible(
         self,
@@ -309,16 +340,18 @@ class FilterValues(ListModelEntries):
         candidate_keys: list,
         use_database: bool,
         serializer,
-    ) -> Set[Optional[str]]:
-        """Which of ``candidate_keys`` a row the user may read actually carries."""
+    ) -> Tuple[Set[Optional[str]], int]:
+        """Which of ``candidate_keys`` a row the user may read actually carries,
+        and how many rows this probe had to skip (for the caller's combined
+        warning)."""
         probe_queryset = self._apply_filter_model(
             base_queryset, {field: {"filterType": "set", "values": candidate_keys}},
         )
         if use_database:
             probe_counts, _ = self._count_in_database(probe_queryset, field)
-        else:
-            probe_counts, _ = self._count_per_row(request, probe_queryset, model_field, serializer)
-        return set(probe_counts)
+            return set(probe_counts), 0
+        probe_counts, _, skipped = self._count_per_row(request, probe_queryset, model_field, serializer)
+        return set(probe_counts), skipped
 
     @staticmethod
     def _fold_blank(counts: Dict[Optional[str], int]) -> Dict[Optional[str], int]:
