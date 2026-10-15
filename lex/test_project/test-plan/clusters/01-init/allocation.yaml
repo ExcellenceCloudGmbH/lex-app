@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 385
+max_scenario: 404
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1250,3 +1250,23 @@ letters:
       without the test project's environment and with the suite's checkout first on PYTHONPATH.
       Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
       set main() answers without Django fails both, because Django setup crashes in that directory.
+  aw:
+    title: A plain pytest run -- PyCharm, VS Code, a terminal -- is set up like `lex pytest`
+    scenarios: 1.393-1.404
+    status: complete
+    tests:
+      pass: 18
+      skip: 0
+      xfail: 0
+    note: >-
+      PyCharm's runner calls pytest.main() directly, so none of `lex pytest`'s setup ran and
+      its test tree showed one collection error ("settings are not configured") instead of the
+      tests; projects copied the setup into a root conftest.py. lex/tools/pytest_plugin.py,
+      the pytest11 entry point `lex`, now does it in any project with a lex_test_config.yaml,
+      and `lex pytest` / `lex pytest-groups` pass the same module with `-p no:lex`. The
+      child-process scenarios run `python -m pytest` without the suite's environment, with
+      the entry point registered through a temporary dist-info, so they take pytest's
+      autoload path whatever is installed. pytest runs pytest_load_initial_conftests inside
+      warnings.catch_warnings(), which drops the warning policy the settings install there,
+      so the plugin reinstalls those filters in pytest_configure (1.393, third half). 1av
+      (1.386-1.392) is reserved by an open PR, hence aw.

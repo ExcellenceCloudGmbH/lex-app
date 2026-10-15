@@ -42,15 +42,16 @@ def project_root() -> Path:
     return Path(find_project_root(os.getcwd())).resolve()
 
 
-def prepare_environment() -> Path:
+def prepare_environment(root: Path | str | None = None) -> Path:
     """Give this process the environment ``lex/bin/lex.py`` gives its own.
 
     The same steps in the same order: the project's ``.env`` (never overriding
     a variable the process already has), the settings module,
     ``PROJECT_ROOT``, and the package directory on ``sys.path``. Safe to call
-    any number of times. Returns the project root.
+    any number of times. Returns the project root -- ``root`` when given (the
+    pytest plugin passes the root it resolved), else :func:`project_root`.
     """
-    root = project_root()
+    root = Path(root).resolve() if root is not None else project_root()
     load_project_env_file(root)
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
     os.environ.setdefault("PROJECT_ROOT", root.as_posix())
