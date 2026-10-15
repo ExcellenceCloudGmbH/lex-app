@@ -442,3 +442,95 @@ class TestCluster01aw_LexPytestSharesThePlugin(TestCase):
         args, kwargs = pytest_main.call_args
         self.assertEqual(args[0][:3], ["-p", "no:lex", "--collect-only"])
         self.assertIs(kwargs["plugins"][0], pytest_plugin)
+
+
+class TestCluster01aw_TestRunConfigurations(TestCase):
+    """Cluster 1aw: `lex setup` writes the suite and each group as test configurations."""
+
+    def _project(self, root: Path, *, with_config: bool) -> None:
+        (root / "Tests").mkdir()
+        (root / ".env").write_text("", encoding="utf-8")
+        if with_config:
+            (root / "lex_test_config.yaml").write_text(
+                "tests_entrypoint: Tests\n"
+                "groups:\n"
+                "  - {name: alpha, description: first}\n"
+                "  - {name: beta, description: second}\n",
+                encoding="utf-8",
+            )
+
+    def _pycharm(self, path: Path) -> dict:
+        import json
+        from xml.etree import ElementTree
+
+        configuration = ElementTree.parse(path).getroot().find(".//configuration")
+        options = {o.attrib["name"]: o.attrib.get("value", "") for o in configuration.findall("option")}
+        return {
+            "attrs": dict(configuration.attrib),
+            "options": options,
+            "target": json.loads(options["_new_target"]),
+            "target_type": json.loads(options["_new_targetType"]),
+            "arguments": json.loads(options["_new_additionalArguments"]),
+            "env": {e.attrib["name"]: e.attrib["value"] for e in configuration.findall("./envs/env")},
+        }
+
+    # -- 1.404 ---------------------------------------------------------
+    def test_1_404_the_suite_and_each_group_become_test_configurations(self):
+        """
+        Scenario 1.404: one click to PyCharm's test tree
+        Given: a project whose lex_test_config.yaml declares groups alpha and beta
+        When: the run configurations are generated
+        Then: PyCharm gets Tests, Tests: alpha and Tests: beta as pytest
+              configurations on tests_entrypoint (-m <group> for a group), and VS
+              Code gets the same three as pytest launch entries
+        """
+        import json
+
+        from generate_pycharm_configs import generate_pycharm_configs, generate_vscode_configs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            self._project(root, with_config=True)
+            generate_pycharm_configs(root)
+            generate_vscode_configs(root)
+
+            suite = self._pycharm(root / ".run" / "Tests.run.xml")
+            alpha = self._pycharm(root / ".run" / "Tests_alpha.run.xml")
+            beta_exists = (root / ".run" / "Tests_beta.run.xml").exists()
+            launch = json.loads((root / ".vscode" / "launch.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(beta_exists, "every group gets a configuration")
+        self.assertEqual(suite["attrs"]["type"], "tests")
+        self.assertEqual(suite["attrs"]["factoryName"], "py.test")
+        self.assertEqual(suite["attrs"]["name"], "Tests")
+        self.assertEqual(suite["target_type"], "PATH")
+        self.assertEqual(suite["target"], (root / "Tests").as_posix())
+        self.assertEqual(suite["arguments"], "")
+        self.assertEqual(suite["options"]["WORKING_DIRECTORY"], str(root))
+        self.assertEqual(suite["env"], {"PYTHONUNBUFFERED": "1", "CELERY_ACTIVE": "False"})
+        self.assertEqual(alpha["attrs"]["name"], "Tests: alpha")
+        self.assertEqual(alpha["arguments"], "-m alpha")
+
+        by_name = {c["name"]: c for c in launch["configurations"]}
+        self.assertEqual(by_name["LEX: Tests"]["module"], "pytest")
+        self.assertEqual(by_name["LEX: Tests"]["args"], ["Tests"])
+        self.assertEqual(by_name["LEX: Tests: beta"]["args"], ["-m", "beta", "Tests"])
+        self.assertEqual(by_name["LEX: Tests"]["env"], {"PYTHONUNBUFFERED": "1", "CELERY_ACTIVE": "False"})
+
+    def test_1_404_no_test_configurations_without_a_test_config(self):
+        """Scenario 1.404 (second half): a project without lex_test_config.yaml gets
+        the usual configurations and no test ones."""
+        import json
+
+        from generate_pycharm_configs import generate_pycharm_configs, generate_vscode_configs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            self._project(root, with_config=False)
+            generate_pycharm_configs(root)
+            generate_vscode_configs(root)
+            run_files = sorted(p.name for p in (root / ".run").glob("Tests*.run.xml"))
+            launch = json.loads((root / ".vscode" / "launch.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(run_files, [])
+        self.assertFalse(any(c["name"].startswith("LEX: Tests") for c in launch["configurations"]))
