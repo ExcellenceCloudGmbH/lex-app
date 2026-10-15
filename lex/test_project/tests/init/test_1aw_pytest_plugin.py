@@ -120,10 +120,13 @@ class TestCluster01aw_PlainRunIsSetUp(TestCase):
             (root / ".env").write_text("LEX_1AW_PROBE=from-this-root\n", encoding="utf-8")
             with patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("LEX_1AW_PROBE", None)
+                before = dict(os.environ)
                 returned = django_bootstrap.prepare_environment(root)
-                loaded = os.environ.get("LEX_1AW_PROBE")
+                added = {key: value for key, value in os.environ.items() if before.get(key) != value}
 
-        self.assertEqual(loaded, "from-this-root", "the given root's .env must be loaded")
+        self.assertEqual(
+            added.get("LEX_1AW_PROBE"), "from-this-root", "the given root's .env must be loaded"
+        )
         self.assertEqual(returned, root.resolve())
 
     def test_1_393_the_settings_warning_policy_holds_for_the_tests(self):
