@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 41
+max_scenario: 51
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -100,3 +100,19 @@ letters:
       matched no blank (SQL IN skips NULL), treated an empty selection as "no filter", and dropped
       Multi entirely, widening the result. 14.36-14.39 pin each answer, 14.40 that a bad key is a
       400 naming the field, 14.41 that an unknown filterType still means "no filter" and is logged.
+  g:
+    title: filter_values — a column's values with counts under the other filters
+    scenarios: 14.42-14.51
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      New endpoint for the grid's value-list filters and filter bar. Subclasses ListModelEntries, so
+      as_of, the read filter and the 14f translation are the list's own. 14.42 pins that a column's
+      own filter is left out and the others narrow; 14.43 keys and labels per type; 14.44 a ticked
+      value at 0; 14.45 search (database for text, labels for foreign keys); 14.46 limit and
+      truncated, with ticked values kept past the cut; 14.47 order; 14.48 refusals; 14.49 as_of;
+      14.50 bad keys in other filters; 14.51 the database and per-row counts agree. Field-level
+      permissions are cluster 4o.

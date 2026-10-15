@@ -121,6 +121,21 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
 | 14.40 | Unconvertible key | 400 naming the field | ✅ |
 | 14.41 | Unknown filterType | Ignored as before, and logged with field and type | ✅ |
 
+### 14g. filter_values
+
+| # | Scenario | What We Assert | Status |
+|---|----------|----------------|--------|
+| 14.42 | Narrowing | A column's own filter is ignored for its list; another column's filter narrows it | ✅ |
+| 14.43 | Keys and labels | Choice labels, `str(related)`, Yes/No, ISO dates, "(Blank)" | ✅ |
+| 14.44 | Ticked value removed by other filters | Listed with count 0 | ✅ |
+| 14.45 | Search | Text matches values in the database; foreign keys match labels | ✅ |
+| 14.46 | Limit | Cut to `limit` with `truncated`; ticked values kept past the cut | ✅ |
+| 14.47 | Order | Labels ascend case-insensitively; blank last | ✅ |
+| 14.48 | Not filterable | Unknown, JSON, related path, serializer-only and empty fields are 400 | ✅ |
+| 14.49 | as_of | Values of that instant, not of now | ✅ |
+| 14.50 | Bad key in another filter | 400 naming that field | ✅ |
+| 14.51 | Two counting paths | Database and per-row counts give identical answers | ✅ |
+
 ---
 
 ## Planned Expansions — Coverage-Driven Sub-Clusters

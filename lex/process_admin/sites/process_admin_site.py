@@ -11,6 +11,7 @@ from lex.api.views.file_operations.FileDownload import FileDownloadView
 from lex.api.views.file_operations.ModelExport import ModelExportView
 from lex.api.views.global_search_for_models.Search import Search
 from lex.api.views.model_entries.CalculationLogTreeView import CalculationLogTreeView
+from lex.api.views.model_entries.FilterValues import FilterValues
 from lex.api.views.model_entries.History import HistoryModelEntry
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.Many import ManyModelEntries
@@ -200,6 +201,11 @@ class ProcessAdminSite:
                 "api/model_entries/<model:model_container>/list",
                 ListModelEntries.as_view(),
                 name="model-entries-list",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/filter_values",
+                FilterValues.as_view(),
+                name="model-entries-filter-values",
             ),
             path(
                 "api/model_entries/<model:model_container>/<str:calculationId>/one/<int:pk>",
