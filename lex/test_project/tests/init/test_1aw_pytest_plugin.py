@@ -174,3 +174,140 @@ class TestCluster01aw_PlainRunIsSetUp(TestCase):
         module = importlib.import_module(_declared_entry_point())
         for hook in ("pytest_load_initial_conftests", "pytest_configure", "pytest_unconfigure"):
             self.assertTrue(callable(getattr(module, hook, None)), f"{hook} is missing")
+
+
+# The DOCKER-COMPOSE target with its variables removed names host "envvar_not_existing".
+# Django's start-up never connects in this repository, so only an actual database
+# setup fails against it.
+_UNREACHABLE_DATABASE = {"DATABASE_DEPLOYMENT_TARGET": "DOCKER-COMPOSE"}
+_UNREACHABLE_DROPPED = ("DATABASE_DOMAIN", "DATABASE_NAME", "POSTGRES_PASSWORD")
+
+
+class _FakePluginManager:
+    """Just the three calls pytest_configure() makes on config.pluginmanager."""
+
+    def __init__(self, active: frozenset[str] = frozenset()):
+        self._active = set(active)
+        self.registered: list = []
+
+    def hasplugin(self, name: str) -> bool:
+        return name in self._active
+
+    def get_plugins(self) -> list:
+        return list(self.registered)
+
+    def register(self, plugin, name=None):
+        self.registered.append(plugin)
+
+
+def _fake_config(*, collectonly: bool = False, active: frozenset[str] = frozenset()):
+    """A config holding what pytest_load_initial_conftests() stashes for this repo."""
+    from types import SimpleNamespace
+
+    from lex.tools.test_groups import resolve_config
+
+    config = SimpleNamespace(
+        stash=pytest.Stash(),
+        option=SimpleNamespace(collectonly=collectonly),
+        pluginmanager=_FakePluginManager(active),
+    )
+    config.stash[pytest_plugin._RUN] = pytest_plugin._Run(
+        root=REPO_ROOT, test_config=resolve_config(REPO_ROOT)
+    )
+    return config
+
+
+class TestCluster01aw_MarkersAndFailures(TestCase):
+    """Cluster 1aw: collect-only, group markers, and how setup failures are reported."""
+
+    # -- 1.397 ---------------------------------------------------------
+    def test_1_397_collect_only_needs_no_database(self):
+        """
+        Scenario 1.397: listing tests touches no database
+        Given: settings pointing at a database host that does not exist
+        When: `pytest --collect-only` lists the model-importing target
+        Then: it lists the test and exits 0 -- Django and markers set up, no database
+        """
+        result = _run_pytest(
+            "--collect-only", "-q", f"{TARGETS_REL}/django_db_target.py",
+            extra_env=_UNREACHABLE_DATABASE, drop=_UNREACHABLE_DROPPED,
+        )
+
+        self.assertEqual(result.returncode, 0, _output(result))
+        self.assertIn("test_settings_and_test_database", result.stdout, _output(result))
+
+    # -- 1.398 ---------------------------------------------------------
+    def test_1_398_a_database_that_cannot_be_set_up_stops_the_run(self):
+        """
+        Scenario 1.398: a clear failure before any test
+        Given: the same unreachable database
+        When: the target runs for real
+        Then: exit code 4 with "Could not set up the test database", and no test ran
+        """
+        result = _run_pytest(
+            f"{TARGETS_REL}/django_db_target.py",
+            extra_env=_UNREACHABLE_DATABASE, drop=_UNREACHABLE_DROPPED,
+        )
+
+        self.assertEqual(result.returncode, 4, _output(result))
+        self.assertIn("Could not set up the test database", result.stdout + result.stderr, _output(result))
+        self.assertNotIn("passed", result.stdout, _output(result))
+
+    # -- 1.399 ---------------------------------------------------------
+    def test_1_399_configured_groups_are_markers(self):
+        """
+        Scenario 1.399 (first half): no unknown-marker warning
+        Given: a module marked `init`, a group lex_test_config.yaml declares
+        When: it is collected with unknown-marker warnings turned into errors
+        Then: collection succeeds -- the plugin registered the groups as markers
+        """
+        result = _run_pytest(
+            "--collect-only", "-q", "-W", "error::pytest.PytestUnknownMarkWarning",
+            f"{TARGETS_REL}/marked_target.py",
+        )
+
+        self.assertEqual(result.returncode, 0, _output(result))
+
+    def test_1_399_an_undeclared_marker_aborts_the_run(self):
+        """
+        Scenario 1.399 (second half): the same rule `lex pytest` enforces
+        Given: a module carrying a marker no group declares
+        When: a plain pytest run collects it
+        Then: exit code 4, naming the marker -- as under `lex pytest`
+        """
+        result = _run_pytest("--collect-only", "-q", f"{TARGETS_REL}/undeclared_marker_target.py")
+
+        self.assertEqual(result.returncode, 4, _output(result))
+        self.assertIn("not_a_configured_group", result.stdout + result.stderr, _output(result))
+
+    # -- 1.400 ---------------------------------------------------------
+    def test_1_400_an_invalid_test_config_is_a_usage_error(self):
+        """
+        Scenario 1.400: invalid lex test config
+        Given: a workflow payload without `tests_entrypoint`
+        When: a plain pytest run starts
+        Then: exit code 4 with the loader's own message
+        """
+        result = _run_pytest(
+            f"{TARGETS_REL}/marked_target.py",
+            extra_env={"LEX_TEST_CONFIG_PAYLOAD": '{"groups": []}'},
+        )
+
+        self.assertEqual(result.returncode, 4, _output(result))
+        self.assertIn("tests_entrypoint", result.stdout + result.stderr, _output(result))
+
+    # -- 1.401 ---------------------------------------------------------
+    def test_1_401_pytest_django_alongside_is_refused(self):
+        """
+        Scenario 1.401: two plugins setting Django's test environment up
+        Given: pytest-django active in the same run
+        When: the plugin configures the run
+        Then: a UsageError says to add `-p no:django`, before anything is set up
+        """
+        config = _fake_config(active=frozenset({"django"}))
+
+        with self.assertRaises(pytest.UsageError) as raised:
+            pytest_plugin.pytest_configure(config)
+
+        self.assertIn("-p no:django", str(raised.exception))
+        self.assertEqual(config.pluginmanager.registered, [], "nothing may be registered first")
