@@ -21,7 +21,7 @@
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 19 | 112 | 62 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 13 | 67 | 31 | 0 | 0 |
+| 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
 | 14. AG Grid Query Endpoint | 8 | 42 | 9 | 0 | 0 |
 | 15. Calculation Logging Surface | 11 | 51 | 32 | 0 | 0 |
@@ -305,6 +305,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 12k | A credential-shaped column never reaches a response | 12.49-12.53 | complete | 5 | 0 | 0 | LEX-702 / BUG-F-033 backend half. auth.User was served through model_entries WITH its Django password hash, and the LEAST-privileged account could read the MOST-privileged account's -- verified on a clean harness, HTTP 200. The FK hover card then painted it wherever a grid held an FK to User. NOT a permission bypass, and that is the whole point of the cluster. Field-level read scoping works correctly on that endpoint (admin gets nav, the restricted viewer's payload omits the key). Two things went around it: UserModelSerializer is a plain DRF ModelSerializer and not a LexSerializer, so can_read / permission_read never ran for it at all; and a model declaring neither hook falls through to "all fields" even inside LexSerializer. So the fix cannot be a permission rule -- it is a name-based refusal, at two enforcement points, plus an allowlist replacing fields = "__all__". Matching is exact-name plus unambiguous suffixes, deliberately NOT the substring search the frontend's hover-card denylist uses: `hash` would swallow content_hash and `auth` would swallow author, and a silently missing field is its own bug. 12.53 pins both directions. There WAS a unit test asserting Meta.fields == "__all__" -- it encoded the bug. Rewritten inverted in lex/tests/unit/api/test_model_entry_provider_mixin.py. |
 | 12l | Serializer choice per caller and strict input | 12.63-12.67 | complete | 5 | 0 | 0 | Strict input is opt-in (it is not a security fix and could refuse clients that send extra keys). |
 | 12m | A closed record does not offer Calculate, and says why | 12.58-12.62 | complete | 5 | 0 | 0 | 12.58 a closed record's lex_reserved_scopes.edit leaves out is_calculated, which greys its Calculate button, and keeps the fields the user may edit; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the model's reason in lex_reserved_calculation_closed_reason, for the greyed button's tooltip; 12.61 an open record's row carries null; 12.62 the reason survives a read permission that hides other fields. Follows 12l (12.54-12.57). |
+| 12n | Read context built once per request | 12.68 | complete | 1 | 0 | 0 | A model that overrides can_read is still asked through it; only LexModel's own can_read takes the cached context. |
 
 ## 13. Export Endpoint (`exports`)
 
