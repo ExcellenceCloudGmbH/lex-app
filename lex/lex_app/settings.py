@@ -354,6 +354,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # LEX_BEARER_STATELESS=true: bearer requests do not create a session row.
+    "lex.authentication.middleware.StatelessBearerSessionMiddleware",
     "oauth2_authcodeflow.middleware.BearerAuthMiddleware",
     # Project middleware from lex_config.MIDDLEWARE_EXTRA["after_auth"]: runs once
     # request.user is known from session/bearer and before the login check, so it

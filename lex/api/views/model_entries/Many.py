@@ -107,9 +107,8 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
                 exception=exc,
             )
             raise
-        broadcast_model_mutation(
-            self.kwargs['model_container'].model_class._meta.model_name, "updated"
-        )
+        model_class = self.kwargs['model_container'].model_class
+        broadcast_model_mutation(model_class._meta.model_name, "updated", target=model_class)
         pk_name = self.kwargs['model_container'].pk_name
         return Response([d[pk_name] for d in serializer.data])
 
@@ -141,7 +140,6 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
                 exception=exc,
             )
             raise
-        broadcast_model_mutation(
-            self.kwargs['model_container'].model_class._meta.model_name, "deleted"
-        )
+        model_class = self.kwargs['model_container'].model_class
+        broadcast_model_mutation(model_class._meta.model_name, "deleted", target=model_class)
         return Response(deleted_ids)

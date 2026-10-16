@@ -98,7 +98,11 @@ def update_calculation_status(
         "payload": payload,
     }
 
-    sync_channel_group_send("update_calculation_status", message)
+    from lex.core import realtime
+
+    # One shared group by default; the record's groups with MUTATION_GROUPS.
+    for group in realtime.event_groups("update_calculation_status", instance):
+        sync_channel_group_send(group, message)
 
 
 def _resolve_calculation_id(instance, record_id: str) -> Optional[str]:
