@@ -34,9 +34,12 @@ def is_value_list_field(model_field) -> bool:
     """True for the column types the design lists as getting a value list.
 
     An allowlist, not a denylist: a column qualifies only by being one of a
-    known-safe shape. Decimal, float, date-time, binary, UUID, JSON, file and
-    many-to-many columns are refused by omission, not by name, so a new
-    Django field type is refused until someone decides it belongs here.
+    known-safe shape. Long text (``TextField``), decimal, float, date-time,
+    binary, UUID, JSON, file and many-to-many columns are refused by
+    omission, not by name, so a new Django field type is refused until
+    someone decides it belongs here. "Text" in the design's table means
+    ``CharField``: a ``TextField``'s values are near-unique bodies, so a list
+    of them is useless and costly, and the column keeps its text condition.
     A credential-shaped name (``secret``, ``api_key``, a ``*_token`` suffix,
     ...) is refused whatever its type -- the value list must never offer a
     stored secret as a choice, even behind a custom serializer that
@@ -59,7 +62,7 @@ def is_value_list_field(model_field) -> bool:
 
     if isinstance(model_field, BooleanField):
         return True
-    if isinstance(model_field, (CharField, TextField)):
+    if isinstance(model_field, CharField):
         return True
     # DateTimeField subclasses DateField -- every value is an instant, so it
     # must be excluded explicitly before the DateField check below.
@@ -97,13 +100,27 @@ def renders_rows_as_stored(serializer_class) -> bool:
     return True
 
 
+def model_offers_value_lists(model_class) -> bool:
+    """False when the model opts out with ``lex_value_lists = False``.
+
+    Checked on the model and on the tracked model a History / MetaHistory
+    container records, so an opted-out model's history tables are covered
+    too.
+    """
+    from lex.api.serializers.base_serializers import _resolve_history_source_model  # see module docstring
+
+    root = _resolve_history_source_model(model_class) or model_class
+    return all(getattr(candidate, "lex_value_lists", True) for candidate in (model_class, root))
+
+
 def value_lists_offered(serializer_class, model_class) -> bool:
     """Whether any column of ``model_class`` can get a value list through ``serializer_class``.
 
-    The checks that need no serializer instance; :func:`value_list_field`
-    applies them first.
+    The checks that need no serializer instance -- the model's opt-out and
+    :func:`renders_rows_as_stored`; :func:`value_list_field` applies them
+    first.
     """
-    return renders_rows_as_stored(serializer_class)
+    return model_offers_value_lists(model_class) and renders_rows_as_stored(serializer_class)
 
 
 def _renders_value_as_stored(serializer_field) -> bool:
@@ -125,6 +142,7 @@ def value_list_field(serializer, model_class, name: str) -> Optional[Any]:
     endpoint's ``value_list`` flag, so none of them can name a column the
     others would refuse. ``None`` when:
 
+    * the model opts out of value lists (:func:`model_offers_value_lists`);
     * the serializer class rewrites its rows (:func:`renders_rows_as_stored`);
     * ``name`` is not a field of the serializer, or is a write-only field
       (``HiddenField`` included) the grid never renders;

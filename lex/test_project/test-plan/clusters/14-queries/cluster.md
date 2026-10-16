@@ -140,7 +140,7 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
 | 14.54 | Serializer field source mismatch | A `SerializerMethodField`, and a real column re-sourced from another real column, are both refused | ✅ |
 | 14.55 | No permission methods at all | Database path; counts match the list endpoint's own tally; no warning logged | ✅ |
 | 14.56 | `can_read`-only override disqualifies the database path | Per-row path; a masked row's field is not counted; `uses_default_read_permission` needs BOTH identities, proven by a mutation | ✅ |
-| 14.57 | Continuous columns | Decimal, float and date-time are refused — no value list | ✅ |
+| 14.57 | Continuous columns and long text | Decimal, float, date-time and `TextField` are refused — no value list | ✅ |
 | 14.58 | Method guard | GET and HEAD are 405 | ✅ |
 | 14.59 | Truncation and limit bounds | Both scan limits truncate; `limit` clamps to 1-1000, non-integer defaults to 200 | ✅ |
 | 14.60 | Default-permission LexModel end to end | A real LexModel keeping both identities default lists values/counts/labels matching the list endpoint, under a facet filter | ✅ |
@@ -150,6 +150,10 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
 | 14.64 | Meta-history / as-of-history masking | A meta-history or `?as_of=` historical container resolves back to the tracked model's `can_read`, matching its own list endpoint | ✅ |
 | 14.65 | Groups-query bound | The per-row scan issues the same `auth_group` query count at 5 and at 20 rows, proven by a mutation | ✅ |
 | 14.66 | API-key fast-path parity | An API-key caller's own scopes reach the per-row fast path; `filter_values` matches the list endpoint | ✅ |
+| 14.67 | `to_field` foreign-key labels | Labelled from the row whose target field holds the key, not a primary-key look-alike; a raising `__str__` leaves the key as label | ✅ |
+| 14.68 | Shipped boolean shape | A Set with JSON `true` / `false` filters the list POST | ✅ |
+| 14.69 | Group level | Set (with blank, and empty) and Multi filters narrow the groups and their counts | ✅ |
+| 14.70 | Model opt-out | `AuditLog` (`lex_value_lists = False`) refuses its columns with the standard 400 | ✅ |
 
 ---
 

@@ -23,6 +23,8 @@ single model covers the full AG Grid filter contract:
     * ``api_key``           CharField             → credential-shaped name,
                                                     refused by filter_values
                                                     whatever the serializer
+    * ``summary``           TextField             → long text: a text condition
+                                                    only, no value list
 
 ``QueryMaskedItem`` overrides ``can_read`` to hide ``category`` per row
 (cluster 14g's per-row field-masking fixture: 14.53, 14.56).
@@ -31,6 +33,10 @@ single model covers the full AG Grid filter contract:
 all -- cluster 14g's "default permissions" fixture (14.55, 14.59, 14.60):
 the read filter and the serializer both fall through to allow-everything, so
 a database count is exact without any row-by-row check.
+
+``QueryLedgerEntry`` points at ``QueryLedger`` through ``to_field="number"``,
+so its foreign-key column stores a ledger's number, not its primary key
+(14.67).
 
 Rule #3: no cross-cluster imports — stood up fresh here.
 """
@@ -99,6 +105,7 @@ class QueryItem(LexModel):
     note = models.CharField(max_length=200, null=True, blank=True, default="")
     ratio = models.FloatField(default=0.0)
     api_key = models.CharField(max_length=64, blank=True, default="")
+    summary = models.TextField(blank=True, default="")
 
     class Meta:
         app_label = "lex_app"
@@ -274,9 +281,76 @@ class QueryScopedFieldItem(LexModel):
         return True
 
 
+class QueryLedger(LexModel):
+    """A foreign-key target reached by ``number``, a unique column that is
+    not its primary key. A ledger named ``unprintable`` has a ``__str__``
+    that raises, as a broken project ``__str__`` would.
+    """
+
+    number = models.IntegerField(unique=True)
+    name = models.CharField(max_length=64)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:
+        if self.name == "unprintable":
+            raise ValueError("cluster 14g: this ledger cannot be printed")
+        return f"Ledger<{self.name}>"
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 14g: ledger read-open")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 14g: ledger edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+class QueryLedgerEntry(LexModel):
+    """Points at a ledger by its ``number`` (``to_field``), not its primary key."""
+
+    name = models.CharField(max_length=64)
+    ledger = models.ForeignKey(
+        QueryLedger,
+        to_field="number",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="entries",
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 14g: ledger entry read-open")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 14g: ledger entry edit-open")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [
     QueryCategory, QueryItem, QueryMaskedItem, QueryOpenItem,
-    QueryDefaultPermissionItem, QueryScopedFieldItem,
+    QueryDefaultPermissionItem, QueryScopedFieldItem, QueryLedger, QueryLedgerEntry,
 ]
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
@@ -286,4 +360,5 @@ MASKED_ITEM = "querymaskeditem"
 OPEN_ITEM = "queryopenitem"
 DEFAULT_PERM_ITEM = "querydefaultpermissionitem"
 SCOPED_FIELD_ITEM = "queryscopedfielditem"
+LEDGER_ENTRY = "queryledgerentry"
 

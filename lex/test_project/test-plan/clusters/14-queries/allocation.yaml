@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 66
+max_scenario: 70
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -102,10 +102,10 @@ letters:
       400 naming the field, 14.41 that an unknown filterType still means "no filter" and is logged.
   g:
     title: filter_values — a column's values with counts under the other filters
-    scenarios: 14.42-14.66
+    scenarios: 14.42-14.70
     status: complete
     tests:
-      pass: 25
+      pass: 29
       skip: 0
       xfail: 0
     note: >-
@@ -161,3 +161,17 @@ letters:
       that can_read(request)'s own from_request call would not have dropped; readable_field_names
       now skips the fast path for an API-key request (UserContext._api_key_context(request) is not
       None, checked once per scan) and calls can_read directly instead, matching the grid (14.66).
+      Final review (14.67-14.70, 14.57 widened): is_value_list_field accepts CharField but no longer
+      TextField -- long text keeps its text condition only (14.57 now also refuses QueryItem.summary);
+      is_plain_text_field still covers both for database search and blank folding. A model opts out
+      with lex_value_lists = False, checked on the model and on the tracked model a history
+      container records (model_offers_value_lists); AuditLog opts out because its read permission is
+      decided per entry, and 14.70 refuses its id, author, resource and action. Foreign-key labels
+      are looked up and keyed by the FK's target field, so a to_field FK (QueryLedgerEntry.ledger ->
+      QueryLedger.number) is labelled from the ledger whose number it stores, not from a decoy whose
+      primary key equals it, and a __str__ that raises leaves the key as its label instead of a 500
+      (14.67). 14.68 pins the shipped boolean shape (JSON true / false in a Set) on the list POST and
+      14.69 Set and Multi -- with blank and an empty selection -- on the group level; neither needed
+      a code change, and each fails under a matching mutation (str() of a JSON boolean; blanks
+      dropped and an empty selection ignored). TestCluster14g_SerializerDependentRefusals registers
+      its api_serializers restore with addCleanup before the change.

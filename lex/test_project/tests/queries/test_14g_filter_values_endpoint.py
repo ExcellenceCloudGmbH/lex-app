@@ -27,10 +27,20 @@ existing scenarios were also tightened: 14.56 now pins that BOTH
 one), 14.54's renamed-field case now names a real column, 14.55/14.60 derive
 their expected counts from the list endpoint instead of hard-coding them, and
 an unconvertible ticked foreign-key key is now a silent 0 rather than a 400.
-Cluster 14g — scenarios 14.42–14.66. Type: E.
+
+Final review (14.67–14.70, and 14.57 widened): long text gets no value list
+(a ``TextField``'s values are near-unique bodies), a model can opt out with
+``lex_value_lists = False`` -- ``AuditLog`` does, because its read permission
+is decided per entry -- and a foreign key declared with ``to_field`` is
+labelled from the row its stored value names, not from the row whose primary
+key happens to equal it. The list's own translation is pinned for the boolean
+shape the frontend ships and for grouped rows.
+Cluster 14g — scenarios 14.42–14.70. Type: E.
 Covers: lex/api/views/model_entries/FilterValues.py, lex/api/utils/filterable_fields.py,
 lex/api/serializers/base_serializers.py (readable_field_names), lex/api/views/model_entries/List.py
-(blank folding on plain text columns), lex/process_admin/sites/process_admin_site.py (route).
+(blank folding on plain text columns, Set and Multi on the group level),
+lex/process_admin/sites/process_admin_site.py (route), lex/audit_logging/models/AuditLog.py
+(``lex_value_lists``).
 Run: python -m lex pytest lex/test_project/tests/queries/test_14g_filter_values_endpoint.py -v
 """
 
@@ -52,6 +62,7 @@ from rest_framework import status
 
 from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddleware
 from lex.api.views.model_entries.FilterValues import _bounded_limit, uses_default_read_permission, value_key
+from lex.audit_logging.models.AuditLog import AuditLog
 from lex.core.models.LexModel import LexModel
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
@@ -59,6 +70,7 @@ from .models import (
     ALL_MODELS,
     DEFAULT_PERM_ITEM,
     ITEM,
+    LEDGER_ENTRY,
     MASKED_ITEM,
     OPEN_ITEM,
     QUERY_STATUS_ACTIVE,
@@ -68,6 +80,8 @@ from .models import (
     QueryCategory,
     QueryDefaultPermissionItem,
     QueryItem,
+    QueryLedger,
+    QueryLedgerEntry,
     QueryMaskedItem,
     QueryOpenItem,
     QueryScopedFieldItem,
@@ -438,14 +452,15 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         )
 
     # -- 14.57 ---------------------------------------------------------
-    def test_14_57_continuous_columns_have_no_value_list(self):
+    def test_14_57_continuous_columns_and_long_text_have_no_value_list(self):
         """
-        Scenario 14.57: no value list for continuous values
-        Given: decimal, float and date-time columns
+        Scenario 14.57: no value list for continuous values or long text
+        Given: decimal, float and date-time columns, and a TextField column
         When: each is asked for
-        Then: each is a 400 "is not filterable"
+        Then: each is a 400 "is not filterable" -- "text" in the design's table means CharField;
+              a TextField keeps its text condition only
         """
-        for field in ("amount", "ratio", "created_at_ts"):
+        for field in ("amount", "ratio", "created_at_ts", "summary"):
             resp = self._post({"field": field, "filterModel": {}})
             self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r}: {resp.data}")
             self.assertIn("not filterable", str(resp.data), field)
@@ -757,6 +772,130 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         actual = {item["key"]: item["count"] for item in data["values"]}
         self.assertEqual(actual, expected, "filter_values must match the grid for an API-key caller")
 
+    # -- 14.67 ---------------------------------------------------------
+    def test_14_67_a_to_field_foreign_key_is_labelled_from_the_row_it_names(self):
+        """
+        Scenario 14.67: a foreign key that stores another column than the primary key
+        Given: entries pointing at ledgers through to_field="number"; one ledger's number equals a
+               DIFFERENT ledger's primary key, one number equals no primary key, and one ledger's
+               __str__ raises
+        When: the ledger values are asked for, without and with the unprintable ledger's entry
+        Then: each key is labelled with str() of the ledger whose NUMBER it is, never with the
+              ledger whose primary key happens to match; the unprintable ledger is labelled with its
+              key, and the request still answers
+        """
+        decoy = QueryLedger.objects.create(number=70_001, name="decoy")
+        north = QueryLedger.objects.create(number=decoy.pk, name="north")
+        south = QueryLedger.objects.create(number=90_001, name="south")
+        broken = QueryLedger.objects.create(number=80_001, name="unprintable")
+        broken.number = broken.pk  # found by its primary key AND by its number
+        broken.save()
+        QueryLedgerEntry.objects.create(name="e-north", ledger=north)
+        QueryLedgerEntry.objects.create(name="e-south", ledger=south)
+        QueryLedgerEntry.objects.create(name="e-broken", ledger=broken)
+
+        printable = {"name": {"filterType": "set", "values": ["e-north", "e-south"]}}
+        labels = {i["key"]: i["label"] for i in self._values("ledger", printable, model=LEDGER_ENTRY)["values"]}
+        self.assertEqual(
+            labels,
+            {str(north.number): "Ledger<north>", str(south.number): "Ledger<south>"},
+            "a key is the stored number, and its label is that ledger's -- not the decoy whose "
+            "primary key equals it",
+        )
+
+        data = self._values("ledger", model=LEDGER_ENTRY)
+        labels = {i["key"]: i["label"] for i in data["values"]}
+        self.assertEqual(
+            labels[str(broken.number)], str(broken.number),
+            "a ledger whose __str__ raises is labelled with its key",
+        )
+        self.assertNotIn("Ledger<decoy>", str(data), "no entry points at the decoy")
+
+    # -- 14.68 ---------------------------------------------------------
+    def test_14_68_the_shipped_boolean_filter_shape_filters_the_list(self):
+        """
+        Scenario 14.68: the boolean filter the frontend ships today
+        Given: four active rows and one inactive row
+        When: the list is asked for under a Set filter carrying JSON booleans, [true] then [false]
+        Then: each returns exactly the rows holding that value
+        """
+        def _names(values):
+            resp = self.client.post(
+                self.url_list(ITEM),
+                data={"filterModel": {"is_active": {"filterType": "set", "values": values}},
+                      "startRow": 0, "endRow": 100},
+                format="json",
+            )
+            self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+            return {row["name"] for row in resp.data["rowData"]}
+
+        self.assertEqual(
+            _names([True]), {"alpha-small", "beta-mid", "beta-big", "loose"},
+            "a JSON true ticks the active rows",
+        )
+        self.assertEqual(_names([False]), {"alpha-mid"}, "a JSON false ticks the inactive row")
+
+    # -- 14.69 ---------------------------------------------------------
+    def test_14_69_a_group_level_request_honours_set_and_multi_filters(self):
+        """
+        Scenario 14.69: grouped rows are filtered like flat ones
+        Given: rows grouped by status (the list's group level)
+        When: the groups are asked for under a Set filter with a value and blank, a Multi filter,
+              a blank-only Set and an empty selection
+        Then: each group's count covers only the matching rows, and an empty selection gives no
+              groups at all
+        """
+        def _groups(filter_model):
+            resp = self.client.post(
+                self.url_list(ITEM),
+                data={
+                    "startRow": 0, "endRow": 100,
+                    "rowGroupCols": [{"id": "status", "field": "status"}], "groupKeys": [],
+                    "valueCols": [], "pivotCols": [], "pivotMode": False, "sortModel": [],
+                    "filterModel": filter_model,
+                },
+                format="json",
+            )
+            self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+            return {row["status"]: row["__childCount"] for row in resp.data["rowData"]}, resp.data["rowCount"]
+
+        with_blank = {"category": {"filterType": "set", "values": [str(self.alpha.pk), None]}}
+        self.assertEqual(
+            _groups(with_blank)[0], {QUERY_STATUS_ACTIVE: 2, QUERY_STATUS_ARCHIVED: 1},
+            "a value and blank: the two alpha rows and the row with no category",
+        )
+        multi = {"name": {"filterType": "multi", "filterModels": [
+            {"filterType": "text", "type": "contains", "filter": "mid"},
+            {"filterType": "set", "values": ["alpha-mid", "beta-mid", "loose"]},
+        ]}}
+        self.assertEqual(
+            _groups(multi)[0], {QUERY_STATUS_ARCHIVED: 1, QUERY_STATUS_DRAFT: 1},
+            "both halves of a Multi filter apply to the groups",
+        )
+        blank_only = {"created_on": {"filterType": "set", "values": [None]}}
+        self.assertEqual(_groups(blank_only)[0], {QUERY_STATUS_ACTIVE: 1}, "blank alone finds the undated row")
+        self.assertEqual(
+            _groups({"status": {"filterType": "set", "values": []}}), ({}, 0),
+            "nothing ticked means no groups, not every group",
+        )
+
+    # -- 14.70 ---------------------------------------------------------
+    def test_14_70_a_model_that_opts_out_lists_no_column(self):
+        """
+        Scenario 14.70: AuditLog opts out of value lists
+        Given: AuditLog (lex_value_lists = False) with a stored entry
+        When: the columns its serializer exposes that would otherwise get a value list -- id,
+              author, resource and action (choices) -- are asked for
+        Then: each is the standard 400 "is not filterable", and the stored author never appears
+        """
+        AuditLog.objects.create(author="audit-author-14-70", resource="queryitem", action="create", payload={})
+        for field in ("id", "author", "resource", "action"):
+            with self.subTest(field=field):
+                resp = self._post({"field": field, "filterModel": {}}, model="auditlog")
+                self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, f"{field!r}: {resp.data}")
+                self.assertIn("not filterable", str(resp.data), field)
+                self.assertNotIn("audit-author-14-70", resp.content.decode(), field)
+
 
 class _QueryItemAllFieldsSerializer(drf_serializers.ModelSerializer):
     """Exposes every ``QueryItem`` column via ``fields = "__all__"``, including
@@ -785,27 +924,29 @@ class _QueryItemAllFieldsSerializer(drf_serializers.ModelSerializer):
 class TestCluster14g_SerializerDependentRefusals(E2ETestCase):
     """Cluster 14g: refusals that depend on what a CUSTOM serializer exposes.
 
-    ``QueryItem.api_serializers`` is mutated for the duration of this class
-    only (installed before ``super().setUp()`` rebuilds the URLconf's model
-    containers, restored on teardown) so the other test class's fixtures
-    never see it.
+    ``QueryItem.api_serializers`` is mutated for each test of this class only
+    (installed before ``super().setUp()`` rebuilds the URLconf's model
+    containers) so the other test class's fixtures never see it. The restore
+    is registered with ``addCleanup`` before the attribute changes, so it runs
+    even when ``setUp`` itself fails.
     """
 
     e2e_models = ALL_MODELS
 
     def setUp(self):
-        self._had_api_serializers = hasattr(QueryItem, "api_serializers")
-        self._original_api_serializers = getattr(QueryItem, "api_serializers", None)
+        had_api_serializers = hasattr(QueryItem, "api_serializers")
+        original_api_serializers = getattr(QueryItem, "api_serializers", None)
+
+        def _restore():
+            if had_api_serializers:
+                QueryItem.api_serializers = original_api_serializers
+            elif hasattr(QueryItem, "api_serializers"):
+                del QueryItem.api_serializers
+
+        self.addCleanup(_restore)
         QueryItem.api_serializers = {"all_fields": _QueryItemAllFieldsSerializer}
         super().setUp()
         self.row = QueryItem.objects.create(name="x", api_key="super-secret-value-123")
-
-    def tearDown(self):
-        super().tearDown()
-        if self._had_api_serializers:
-            QueryItem.api_serializers = self._original_api_serializers
-        elif hasattr(QueryItem, "api_serializers"):
-            del QueryItem.api_serializers
 
     def _post(self, body: dict, query: str = "?serializer=all_fields"):
         return self.client.post(self.url_filter_values(ITEM) + query, data=body, format="json")

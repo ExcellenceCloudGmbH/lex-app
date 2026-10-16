@@ -386,15 +386,28 @@ class FilterValues(ListModelEntries):
         present = [key for key in keys if key is not None]
 
         if getattr(model_field, "is_relation", False) and getattr(model_field, "related_model", None):
-            primary_keys = []
+            # A foreign key stores its target field's value -- the primary
+            # key, or the column ``to_field`` names -- so the related rows are
+            # found and keyed by that field, never by a primary key that
+            # merely equals the stored value.
+            target_field = model_field.target_field
+            target_values = []
             for key in present:
                 try:
-                    primary_keys.append(model_field.target_field.to_python(key))
+                    target_values.append(target_field.to_python(key))
                 except (DjangoValidationError, TypeError, ValueError):
                     continue
-            related = model_field.related_model._default_manager.filter(pk__in=primary_keys)
+            related = model_field.related_model._default_manager.filter(
+                **{f"{target_field.name}__in": target_values}
+            )
             for obj in related:
-                labels[value_key(obj.pk)] = str(obj)
+                key = value_key(getattr(obj, target_field.attname))
+                try:
+                    labels[key] = str(obj)
+                except Exception:
+                    # A __str__ that raises must not fail the whole list;
+                    # the key stays its own label (set below).
+                    continue
         elif isinstance(model_field, BooleanField):
             for key in present:
                 labels[key] = TRUE_LABEL if key == "true" else FALSE_LABEL
