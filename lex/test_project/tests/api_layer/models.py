@@ -129,7 +129,43 @@ class ApiLayerCalc(CalculationModel):
         return None
 
 
+class ApiProjectItem(LexModel):
+    """Row-level read rule for the project-API tests: "hidden" rows are unreadable."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def permission_read(self, user_context):
+        if self.name == "hidden":
+            return PermissionResult.deny("cluster 10o: hidden row")
+        return PermissionResult.allow_all("cluster 10o")
+
+    def permission_edit(self, user_context):
+        return PermissionResult.allow_all("cluster 10o")
+
+    def permission_create(self, user_context):
+        return True
+
+    def permission_delete(self, user_context):
+        return True
+
+    def permission_list(self, user_context):
+        return True
+
+    def save(self, *args, **kwargs):
+        if self.name == "explode":
+            raise RuntimeError("cluster 10p: save failed on purpose")
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
+PROJECT_MODELS = [ApiProjectItem]
+API_PROJECT_ITEM = "apiprojectitem"
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"

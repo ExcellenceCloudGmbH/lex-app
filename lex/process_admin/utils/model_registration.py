@@ -18,7 +18,6 @@ class ModelRegistration:
 
     This class manages the registration of different types of models including:
     - HTML Report models
-    - Process models
     - Standard models with bitemporal history tracking
     - CalculationModel instances with aborted calculation handling
     """
@@ -41,7 +40,6 @@ class ModelRegistration:
                             When False, history is skipped for every model.
         """
         from lex.process_admin.settings import processAdminSite
-        from lex.core.models.Process import Process
         from lex.core.models.HTMLReport import HTMLReport
         from lex.core.models.CalculationModel import CalculationModel
         from django.contrib.auth.models import User
@@ -64,7 +62,7 @@ class ModelRegistration:
         for model in models:
             try:
                 # Validate before any registration work
-                if not (issubclass(model, HTMLReport) or issubclass(model, Process)):
+                if not issubclass(model, HTMLReport):
                     _model_name = model.__name__.lower()
                     _exclusion = get_model_exclusion_reason(model)
                     _is_already_tracked = _exclusion == "Already has history tracking"
@@ -79,8 +77,6 @@ class ModelRegistration:
 
                 if issubclass(model, HTMLReport):
                     cls._register_html_report(model)
-                elif issubclass(model, Process):
-                    cls._register_process_model(model)
                 elif not issubclass(model, type) and not model._meta.abstract:
                     result = cls._register_standard_model(
                         model,
@@ -133,20 +129,12 @@ class ModelRegistration:
         processAdminSite.registerHTMLReport(model_name, model)
         processAdminSite.register([model])
 
-    @classmethod
-    def _register_process_model(cls, model: Type[models.Model]) -> None:
-        from lex.process_admin.settings import processAdminSite
-
-        model_name = model.__name__.lower()
-        processAdminSite.registerProcess(model_name, model)
-        processAdminSite.register([model])
-
     # ── Reserved names managed by the framework ──
     # Class names that user models must not use.
     _RESERVED_CLASS_NAMES = frozenset({
         'LexModel', 'LexManager', 'CalculationModel',
         'History', 'MetaHistory', 'StandardHistory',
-        'Process', 'HTMLReport', 'PermissionResult', 'UserContext',
+        'HTMLReport', 'PermissionResult', 'UserContext',
     })
 
     # Prefixes that collide with auto-generated history model names.

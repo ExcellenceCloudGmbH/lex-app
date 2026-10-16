@@ -38,7 +38,11 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
 
     def filter_queryset(self, request, queryset, view):
         model_class = view.kwargs["model_container"].model_class
-        name = model_class.__name__
+        return self.restrict(request, queryset, model_class.__name__)
+
+    def restrict(self, request, queryset, name=None):
+        """Return the rows of ``queryset`` the requesting user may read."""
+        name = name or queryset.model.__name__
 
         # AuditLogStatus and CalculationLog handlers always permit every row,
         # so skip the per-row loop entirely for them.
@@ -260,3 +264,12 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         if excluded:
             return queryset.exclude(pk__in=excluded)
         return queryset
+
+
+def apply_read_restriction(queryset, request):
+    """Rows of ``queryset`` the user behind ``request`` may read.
+
+    The same rule the generic list endpoint applies, for use by project
+    endpoints and actions (see :func:`lex.api.project.visible_queryset`).
+    """
+    return UserReadRestrictionFilterBackend().restrict(request, queryset)
