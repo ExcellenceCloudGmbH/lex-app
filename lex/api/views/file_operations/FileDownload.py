@@ -1,12 +1,17 @@
 import os
 from io import BytesIO
 
+from django.core.exceptions import FieldDoesNotExist, ValidationError
+from django.db import models
 from django.http import FileResponse, JsonResponse
 from django_sharepoint_storage.SharePointCloudStorageUtils import get_server_relative_path
 from django_sharepoint_storage.SharePointContext import SharePointContext
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
+
+from lex.api.security import is_readable, read_result
+from lex.core.security_flags import strict
 
 
 # Assuming HasAPIKey is imported from your custom permissions
@@ -19,15 +24,36 @@ class FileDownloadView(APIView):
     def get(self, request, *args, **kwargs):
         # 1. Fetch the model and instance
         model = kwargs['model_container'].model_class
+        pk = request.query_params.get('pk')
+        field_name = request.query_params.get('field')
+        if not pk or not field_name:
+            return JsonResponse({"error": "Both 'pk' and 'field' are required."}, status=400)
+
+        # Only real file fields can be downloaded; any other attribute is "not found".
+        try:
+            field = model._meta.get_field(field_name)
+        except FieldDoesNotExist:
+            field = None
+        if not isinstance(field, models.FileField):
+            return JsonResponse({"error": "File not found"}, status=404)
+
         # Using filter().first() is safer than [0] to avoid IndexError if not found
-        instance = model.objects.filter(pk=request.query_params['pk']).first()
+        try:
+            instance = model.objects.filter(pk=pk).first()
+        except (ValueError, TypeError, ValidationError):
+            instance = None
 
         if not instance:
             return JsonResponse({"error": "File not found"}, status=404)
 
+        # The caller must be allowed to read the record and this field (LEX_SEC_READ_SURFACES).
+        if strict("READ_SURFACES") and not self._may_read_file(request, instance, field_name):
+            return JsonResponse({"error": "File not found"}, status=404)
+
         # 2. Get the file field object safely
-        field_name = request.query_params['field']
         file_obj = getattr(instance, field_name)
+        if not file_obj:
+            return JsonResponse({"error": "File not found"}, status=404)
 
         storage_type = os.getenv("STORAGE_TYPE", "LOCAL")
 
@@ -61,5 +87,18 @@ class FileDownloadView(APIView):
             # .path provides the absolute OS-specific path automatically.
             try:
                 return FileResponse(open(file_obj.path, 'rb'))
+            except NotImplementedError:
+                # A field with its own (non-filesystem) storage has no .path.
+                return FileResponse(file_obj.open('rb'))
             except FileNotFoundError:
                 return JsonResponse({"error": "File not found on server"}, status=404)
+
+    @staticmethod
+    def _may_read_file(request, instance, field_name):
+        if not is_readable(request, instance):
+            return False
+        result = read_result(request, instance)
+        if not result.allowed:
+            return False
+        all_fields = {f.name for f in instance._meta.fields}
+        return field_name in set(result.get_fields(all_fields))

@@ -11,11 +11,12 @@ from django.db.models import (
     AutoField,
     JSONField
 )
+from lex.api.security import serializer_allowed
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
 from lex.api.views.permissions.UserPermission import UserPermission
 from lex.core.fields import PDFField, XLSXField
 from rest_framework import serializers as drf_serializers
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.fields import empty
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -172,11 +173,13 @@ class Fields(APIView):
             else container.serializers_map
         )
 
-        if serializer_name not in serializers_map:
-            raise APIException(
+        allowed = [name for name in serializers_map if serializer_allowed(model, request, name)]
+        if serializer_name not in allowed:
+            # 400 like the entry endpoints, not a 500: the client asked for something unknown.
+            raise ValidationError(
                 {
                     "error": f"Unknown serializer '{serializer_name}' for model '{model._meta.model_name}'",
-                    "available": list(serializers_map.keys()),
+                    "available": allowed,
                 }
             )
 

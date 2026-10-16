@@ -47,6 +47,32 @@ def visible_queryset(model_or_queryset, request):
     return apply_read_restriction(queryset, request)
 
 
+def serialize_for(request, instance_or_queryset, serializer_class, *, many: bool = False):
+    """Serialize with the caller's read permission applied.
+
+    Rows ``permission_read`` refuses are left out (``None`` for a single
+    instance); fields it withholds are removed from each row. Fields the
+    serializer declares that are not model fields (computed values) are kept —
+    the serializer's own field list stays the positive list.
+    """
+    from lex.api.security import read_result
+
+    def visible(instance, data):
+        result = read_result(request, instance)
+        if not result.allowed:
+            return None
+        model_fields = {f.name for f in instance._meta.fields}
+        readable = set(result.get_fields(model_fields))
+        return {key: value for key, value in data.items() if key not in model_fields or key in readable}
+
+    context = {"request": request}
+    if many:
+        instances = list(instance_or_queryset)
+        rows = serializer_class(instances, many=True, context=context).data
+        return [row for row in (visible(i, d) for i, d in zip(instances, rows)) if row is not None]
+    return visible(instance_or_queryset, serializer_class(instance_or_queryset, context=context).data)
+
+
 def strict_serializer(serializer_class):
     """Make a DRF serializer reject keys it does not declare (400).
 

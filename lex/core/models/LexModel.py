@@ -1059,6 +1059,38 @@ class LexModel(LifecycleModel):
             return PermissionResult.allow_all("Keycloak read scope")
         return PermissionResult.deny("No read permission")
 
+    @classmethod
+    def permission_read_queryset(cls, user_context: UserContext, queryset):
+        """
+        Optional: restrict a whole queryset to the rows a user may read, in SQL.
+
+        Return the restricted queryset, or ``None`` (the default) to fall back
+        to ``permission_read`` per row. When defined, list endpoints, exports,
+        search and project endpoints use it instead of evaluating
+        ``permission_read`` row by row — one query instead of one Python call
+        per row. It decides *which rows* are visible; ``permission_read`` still
+        decides *which fields* of a visible row are shown.
+
+        Example::
+
+            @classmethod
+            def permission_read_queryset(cls, user_context, queryset):
+                if user_context.is_superuser:
+                    return queryset
+                return queryset.filter(owner=user_context.user)
+        """
+        return None
+
+    @classmethod
+    def permission_serializer(cls, user_context: UserContext, name: str) -> bool:
+        """
+        Optional: decide who may request serializer ``name`` (``?serializer=<name>``).
+
+        A refused name answers 400 exactly like an unknown one. Default: every
+        registered serializer is available to every caller.
+        """
+        return True
+
     def permission_edit(self, user_context: UserContext) -> PermissionResult:
         """
         Override this method to control which fields users can edit.

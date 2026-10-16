@@ -1,5 +1,7 @@
 from django.contrib.postgres.search import SearchVector
+from lex.api.views.model_entries.filter_backends import apply_read_restriction
 from lex.api.views.permissions.UserPermission import UserPermission
+from lex.core.security_flags import strict
 from lex.process_admin.models.ModelCollection import ModelCollection
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -25,6 +27,9 @@ class Search(APIView):
                 tempMatch = model.model_class.objects.annotate(search=SearchVector(*[f.name for f in fields if
                                                                                      f.get_internal_type() not in EXCLUDED_TYPES])).filter(
                     search=query)
+                if strict("READ_SURFACES"):
+                    # Only rows the caller may read are search results (LEX_SEC_READ_SURFACES).
+                    tempMatch = apply_read_restriction(tempMatch, request)
                 for match in tempMatch:
                     if UserPermission().has_object_permission(request=request, view=temp_view, obj=match):
                         matchObj = {"id": str(match.pk), "type": model.title, "model": model.id,

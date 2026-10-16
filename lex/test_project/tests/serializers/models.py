@@ -296,6 +296,15 @@ class AttachmentItem(LexModel):
     class Meta:
         app_label = "lex_app"
 
+    # The 12h scenarios are about clearing files, not permissions: open
+    # read/edit so lex 3.0's secure defaults (404 for unreadable records,
+    # enforced permission_edit) do not stand in the way.
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12h")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 12h")
+
     def __str__(self) -> str:  # pragma: no cover
         return self.name
 
@@ -319,3 +328,78 @@ TAGGABLE = "taggableitem"
 EDIT_SCOPED = "editscopeditem"
 ATTACHMENT = "attachmentitem"
 
+
+# ---------------------------------------------------------------------------
+# Cluster 12l — serializer exposure and strict input
+# ---------------------------------------------------------------------------
+
+
+class ChoosySerializerItem(LexModel):
+    """Two serializers; "full" is for superusers only (permission_serializer)."""
+
+    name = models.CharField(max_length=200)
+    margin = models.IntegerField(default=0)
+
+    class Meta:
+        app_label = "lex_app"
+
+    @classmethod
+    def permission_serializer(cls, user_context, name):
+        return name != "full" or user_context.is_superuser
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12l")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 12l")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+class StrictInputItem(LexModel):
+    """Opts in to strict input on the generic endpoints."""
+
+    name = models.CharField(max_length=200)
+    note = models.CharField(max_length=200, blank=True, default="")
+    lex_strict_input = True
+
+    class Meta:
+        app_label = "lex_app"
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12l")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 12l")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
+from rest_framework import serializers as _drf  # noqa: E402
+
+
+class _ChoosyDefaultSerializer(_drf.ModelSerializer):
+    class Meta:
+        model = ChoosySerializerItem
+        fields = ["id", "name"]
+
+
+class _ChoosyFullSerializer(_drf.ModelSerializer):
+    class Meta:
+        model = ChoosySerializerItem
+        fields = ["id", "name", "margin"]
+
+
+ChoosySerializerItem.api_serializers = {"default": _ChoosyDefaultSerializer, "full": _ChoosyFullSerializer}
+
+EXPOSURE_MODELS = [ChoosySerializerItem, StrictInputItem]
+CHOOSY = "choosyserializeritem"
+STRICT_INPUT = "strictinputitem"
