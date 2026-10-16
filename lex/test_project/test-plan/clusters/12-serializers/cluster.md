@@ -127,3 +127,21 @@ cluster-2 models are too shallow; we need a model with one of every
 **Why a regression matters:** an active button that can only ever be refused sends the user into an error for every closed record, and a greyed one without the reason tells them they lack permission when they don't.
 
 **Scenario range:** 12.58 – 12.62. **Test file:** `lex/test_project/tests/serializers/test_12m_closed_record_scopes.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.58 a closed record's edit scopes leave out `is_calculated` and keep `note`; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the reason; 12.61 an open record carries null; 12.62 the reason survives a narrow read permission. Follows 12l (12.54 – 12.57).
+
+### 12l. Serializer choice per caller and strict input ✅
+
+**What it tests:** permission_serializer refuses a serializer like an unknown one; EXPOSE_AUTO_SERIALIZER=False drops the generated alias; the Fields view answers 400 for unknown serializers; lex_strict_input refuses unknown and server-set keys while accepting the frontend's id/lex_reserved keys; models without the opt-in ignore unknown keys as before.
+
+**Why a regression matters:** One forgotten serializer key could expose every column; an actor sent by a client must never reach the database.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.63 | refused serializer | 400 with available=['default']; superuser 200 with margin |
+| 12.64 | auto alias withheld | alias present by default; only project serializers with False |
+| 12.65 | Fields view unknown serializer | 400 (formerly 500) |
+| 12.66 | strict input | unknown key and created_by 400 UNKNOWN_FIELDS; frontend keys accepted |
+| 12.67 | no opt-in | unknown key ignored, created |
+
+**Scenario range:** 12.63-12.67. **Test file:** `lex/test_project/tests/serializers/test_12l_serializer_exposure.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py`, `lex/api/views/model_info/Fields.py`, `lex/api/serializers/base_serializers.py` (EXPOSE_AUTO_SERIALIZER), `lex/api/security.py` (serializer_allowed, strict_input_denial), `lex/api/views/model_entries/One.py`. Batch: [12l](batches.md).
+
+---

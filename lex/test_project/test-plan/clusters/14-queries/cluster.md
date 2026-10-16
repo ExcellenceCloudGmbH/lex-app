@@ -941,3 +941,23 @@ Inspecting the cluster showed 13.9 (`groupKeyPaths`) is already covered by `test
 ---
 
 > **Back to:** [Test Plan Index](index.md) | **See also:** [Why the Shift](why-the-shift.md) | [Expected Results](expected-results.md) | [Progress](progress.md)
+
+### 14f. Filter and ordering allow-list ✅
+
+**What it tests:** Filters and ordering only on serialized fields, limit_choices_to keys, lex_filterable_fields and the primary key; relations follow the related model's rules; AG Grid ignores hidden columns; '__all__' and LEX_SEC_FILTERS=false restore the old behaviour.
+
+**Why a regression matters:** A filter on a never-returned field (salary__gte, is_pep=true) reveals its values one request at a time.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 14.36 | hidden field filter | name filter works; salary 400 FILTER_NOT_ALLOWED |
+| 14.37 | hidden field ordering | -name works; salary 400 |
+| 14.38 | relations | owner__name works; owner__internal_code 400 |
+| 14.39 | limit_choices_to keys | is_active filter works for the picker |
+| 14.40 | opt-outs | '__all__' model and LEX_SEC_FILTERS=false apply the filter |
+| 14.41 | AG Grid | hidden filter/sort ignored, all rows |
+| 14.42 | primary key | id filter works |
+
+**Scenario range:** 14.36-14.42. **Test file:** `lex/test_project/tests/queries/test_14f_filter_allow_list.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/filter_policy.py`, `lex/api/views/model_entries/List.py` (apply_query_param_filters, apply_ordering, _is_valid_field_path). Batch: [14f](batches.md).
+
+---

@@ -72,3 +72,34 @@
 **Scenario range:** 4.80-4.85. **Test file:** `lex/test_project/tests/permissions/test_4o_generic_api_gate_and_redirects.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/middleware/generic_api_gate.py`, `lex/authentication/middleware.py` (OidcRedirectGuardMiddleware), MIDDLEWARE in `lex/lex_app/settings.py`. Batch: [4o](batches.md).
 
 ---
+
+### 4p. Secure permission defaults on the generic REST API ✅
+
+**What it tests:** FAIL_CLOSED, NOT_FOUND, EDIT and READ_SURFACES on every endpoint they apply to, each with its legacy opt-out where behaviour changed; permission_read_queryset deciding rows in SQL; one permission_read evaluation per listed row.
+
+**Why a regression matters:** A permission method is only as good as its enforcement: before 3.0 a raising check allowed, PATCH ignored permission_edit, bulk delete ignored permission_delete, and history, search, export and downloads ignored permission_read.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.86 | raising read check hides its row | list shows only the healthy row; legacy 500 (pre-3.0) |
+| 4.87 | raising create check refuses | 500, nothing stored; legacy stores |
+| 4.88 | unreadable record not found | 404; legacy 200 {} |
+| 4.89 | unreadable record not changeable | PATCH and DELETE 404, row unchanged |
+| 4.90 | bulk respects visibility | GET drops the hidden row; DELETE 404, nothing deleted |
+| 4.91 | disallowed field | 400 EDIT_NOT_ALLOWED naming the field; allowed field 200 |
+| 4.92 | unchanged values not an edit | 200 |
+| 4.93 | record without edit right | 400; legacy applies |
+| 4.94 | bulk PATCH | 400, nothing changed |
+| 4.95 | bulk DELETE | 400 DELETE_NOT_ALLOWED with ids; legacy deletes |
+| 4.96 | run_step | PATCH 400 EDIT_NOT_ALLOWED; create 400 CREATE_NOT_ALLOWED |
+| 4.97 | history of unreadable record | 404; readable 200 |
+| 4.98 | global search | only readable rows; legacy both |
+| 4.99 | export | two of three rows |
+| 4.100 | file download | 400 without params, 404 non-file field, 404 hidden record, 200 bytes |
+| 4.101 | HTMLReport.permission_view | 404 regular, 200 superuser, anonymous refused, unknown 404 |
+| 4.102 | permission_read_queryset | only public rows listed; private detail 404 |
+| 4.103 | one evaluation per row | three rows, three permission_read calls |
+
+**Scenario range:** 4.86-4.103. **Test file:** `lex/test_project/tests/permissions/test_4p_secure_defaults.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/process_admin/views/model_relation_views.py` (Overview), `lex/core/models/{LexModel,HTMLReport}.py`, `lex/api/serializers/base_serializers.py`. Batch: [4p](batches.md).
+
+---

@@ -92,3 +92,17 @@ must not open a check on the whole model.
 | Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the frontend is served from the site's own origin or a configured dev origin. |
+
+### Batch 4p — Secure permission defaults on the generic REST API ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.86-4.103 |
+| Type | E |
+| Files covered | `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/process_admin/views/model_relation_views.py` (Overview), `lex/core/models/{LexModel,HTMLReport}.py`, `lex/api/serializers/base_serializers.py` |
+| Test file | `lex/test_project/tests/permissions/test_4p_secure_defaults.py` |
+| Test classes | `TestCluster04p_FailClosedAndNotFound`, `TestCluster04p_EditEnforcement`, `TestCluster04p_ReadSurfaces`, `TestCluster04p_ReadRulesAtScale` |
+| Fixtures | `RaisingReadItem`, `QuerysetRuleItem`, `SecretDocument` (FileField) plus the existing ProtectedItem/KeycloakItem/FilterBackendItem; a superuser-only HTMLReport registered for one test |
+| Tests landed | **18 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |

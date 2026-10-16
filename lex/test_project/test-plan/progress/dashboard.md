@@ -13,7 +13,7 @@
 | 1. Init — Project Bootstrap | 48 | 395 | 437 | 0 | 0 |
 | 2. CRUD via REST API | 12 | 116 | 24 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 15 | 85 | 29 | 2 | 0 |
+| 4. Permissions | 16 | 103 | 47 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
@@ -21,9 +21,9 @@
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 17 | 101 | 51 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 12 | 62 | 26 | 0 | 0 |
+| 12. Serializer Contract | 13 | 67 | 31 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
-| 14. AG Grid Query Endpoint | 7 | 35 | 2 | 0 | 0 |
+| 14. AG Grid Query Endpoint | 8 | 42 | 9 | 0 | 0 |
 | 15. Calculation Logging Surface | 11 | 51 | 32 | 0 | 0 |
 
 ## 1. Init — Project Bootstrap (`init`)
@@ -140,6 +140,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4m | `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass | 4.66-4.70 | complete | 5 | 0 | 0 | scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit order + subclass contract |
 | 4n | Keycloak UMA permissions in Reflex dashboards | 4.75-4.79 | complete | 5 | 0 | 0 | current_permissions / has_permission / current_access_token (lex/lex_app/reflex/auth.py) -- the Reflex counterpart of st.session_state.permissions, which the Streamlit proxy fills. One KeycloakManager lookup per access token, again after a refresh; a failed lookup keeps the same user's grants and never hands them to another user; sign-out clears them; has_permission counts model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of five mutations of that code (keep grants across users, keep them across sign-out, count record grants, cache the raw token, return the cached list itself) fails exactly one scenario. |
 | 4o | Generic API gate and OIDC redirect guard | 4.80-4.85 | complete | 6 | 0 | 0 | The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the frontend is served from the site's own origin or a configured dev origin. |
+| 4p | Secure permission defaults on the generic REST API | 4.86-4.103 | complete | 18 | 0 | 0 | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -292,6 +293,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 12i | Foreign-key display names in the read contract (BUG-F-003 backend fix) | 12.42-12.45 | complete | 4 | 0 | 0 | additive companion `<fk>__short_description` = str(related) emitted alongside the raw FK id on both list and detail paths; list resolves names in one batched pk__in query per FK (mirrors ModelExport._apply_foreign_key_display_names), detail resolves per-instance; raw id untouched so filtering/editing unaffected; null FK → null companion. Resolves the backend root cause of frontend BUG-F-003 (FK columns rendered as bare ids) |
 | 12j | Datetime write→read round trip under the aware-UTC convention | 12.46-12.48 | complete | 3 | 0 | 0 | live regression gates for the USE_TZ=True cutover — a client that sends an explicit instant (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone; summer round trip, year-end midnight across the winter offset, and a truthful designated instant. Frontend twin datetimeConventionRoundTrip.test.ts. |
 | 12k | A credential-shaped column never reaches a response | 12.49-12.53 | complete | 5 | 0 | 0 | LEX-702 / BUG-F-033 backend half. auth.User was served through model_entries WITH its Django password hash, and the LEAST-privileged account could read the MOST-privileged account's -- verified on a clean harness, HTTP 200. The FK hover card then painted it wherever a grid held an FK to User. NOT a permission bypass, and that is the whole point of the cluster. Field-level read scoping works correctly on that endpoint (admin gets nav, the restricted viewer's payload omits the key). Two things went around it: UserModelSerializer is a plain DRF ModelSerializer and not a LexSerializer, so can_read / permission_read never ran for it at all; and a model declaring neither hook falls through to "all fields" even inside LexSerializer. So the fix cannot be a permission rule -- it is a name-based refusal, at two enforcement points, plus an allowlist replacing fields = "__all__". Matching is exact-name plus unambiguous suffixes, deliberately NOT the substring search the frontend's hover-card denylist uses: `hash` would swallow content_hash and `auth` would swallow author, and a silently missing field is its own bug. 12.53 pins both directions. There WAS a unit test asserting Meta.fields == "__all__" -- it encoded the bug. Rewritten inverted in lex/tests/unit/api/test_model_entry_provider_mixin.py. |
+| 12l | Serializer choice per caller and strict input | 12.63-12.67 | complete | 5 | 0 | 0 | Strict input is opt-in (it is not a security fix and could refuse clients that send extra keys). |
 | 12m | A closed record does not offer Calculate, and says why | 12.58-12.62 | complete | 5 | 0 | 0 | 12.58 a closed record's lex_reserved_scopes.edit leaves out is_calculated, which greys its Calculate button, and keeps the fields the user may edit; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the model's reason in lex_reserved_calculation_closed_reason, for the greyed button's tooltip; 12.61 an open record's row carries null; 12.62 the reason survives a read permission that hides other fields. Follows 12l (12.54-12.57). |
 
 ## 13. Export Endpoint (`exports`)
@@ -316,6 +318,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 14c | AG Grid POST — grouping, aggregation, pivot | 14.15-14.20 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14d | Edge cases |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14e | Secondary filter / sort branches (April 21) | 14.21-14.25 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 14f | Filter and ordering allow-list | 14.36-14.42 | complete | 7 | 0 | 0 | Framework models (audit log, audit status, calculation log, history tables) are exempt because the bundled frontend filters them by internal fields. |
 | 14h |  | 14.30-14.33 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14i | A date with no time means the whole day | 14.34-14.35 | complete | 2 | 0 | 0 | LEX-714. 14.12 covered the time-bearing branch of the DateTimeField date filter; the DATE-ONLY branch beside it had no test, which is how it stayed correct and unreachable at the same time. The grid's AGDateTimeFilter hard-coded format='YYYY-MM-DDTHH:mm:ss', so a date the user picked with no time still arrived as `2026-03-10T00:00:00`. _ag_filter_has_time read that as time-bearing and _build_filter_q answered with `>= 00:00:00 AND < 00:00:01` -- a one-second window at midnight. Every other row that day was silently excluded and the grid looked healthy. 14.34 pins the whole-day comparison (alpha-mid is stamped 13:30:45, so only `__date` finds it). 14.35 pins the contrast -- a midnight stamp is an INSTANT, not a day, and returns nothing. Both strings name the same day; only one of them means it. 14.35 is deliberately pinning current behaviour rather than a bug: it is the contract the frontend fix now depends on, so if a midnight stamp ever starts meaning a whole day, the grid's new time checkbox becomes a lie in the other direction. Backend needed no change. The frontend half is F3.62-F3.65. |
 
