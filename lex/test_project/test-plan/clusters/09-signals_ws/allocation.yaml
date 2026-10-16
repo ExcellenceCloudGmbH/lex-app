@@ -1,7 +1,7 @@
 cluster: 9
 slug: signals_ws
 title: Signals & WebSocket
-max_scenario: 51
+max_scenario: 52
 letters:
   a:
     title: ''
@@ -89,12 +89,12 @@ letters:
       ModelMutationSignal.
   i:
     title: "CRUD endpoints pass their broadcast target"
-    scenarios: 9.49-9.51
+    scenarios: 9.49-9.52
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-
-      An update goes to the groups of the record as loaded before the change (One's view-local instance);
-      a record that moves between groups notifies only the old group. Pinned, open for review.
+      An update reaches the groups of the record before and after the change (One's view-local instance
+      and the copy DRF saved), each group once, so a record that moves between groups notifies both.

@@ -5,12 +5,15 @@ Intent
 Scoped realtime delivery (``lex_config.MUTATION_GROUPS``) and the
 ``broadcast_mutations = False`` opt-out both decide per record, so the
 generic endpoints must pass what changed: the single-record endpoint
-(``One``) passes the created, updated or deleted instance; the bulk endpoint
-(``Many``) passes the model class, since one event covers many rows.
+(``One``) passes the created, updated or deleted instance — for an update
+both the record as it was and as it is now, so a record that moved between
+groups reaches both; the bulk endpoint (``Many``) passes the model class,
+since one event covers many rows. Each group gets an event once.
 
-Cluster 9i — scenarios 9.49–9.51. Type: E.
+Cluster 9i — scenarios 9.49–9.52. Type: E.
 Covers: lex/api/views/model_entries/One.py (create/update/delete broadcasts),
-lex/api/views/model_entries/Many.py (bulk delete broadcast).
+lex/api/views/model_entries/Many.py (bulk delete broadcast),
+lex/core/signals/ModelMutationSignal.py (previous).
 Run: python -m lex pytest lex/test_project/tests/signals_ws/test_9i_crud_broadcast_targets.py -v
 """
 
@@ -21,6 +24,7 @@ from urllib.parse import urlencode
 
 import pytest
 
+from lex.core.signals.ModelMutationSignal import broadcast_model_mutation
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import BROADCAST_MODELS, SIG_PLAIN, SigPlainItem
@@ -68,11 +72,11 @@ class TestCluster09i_CrudBroadcastTargets(E2ETestCase):
         Scenario 9.49: One passes the record itself.
         Given: MUTATION_GROUPS naming a group per record name
         When: a SigPlainItem "a" is created, renamed to "b" and deleted through One
-        Then: "created" and "updated" reach "model_data_update.row-a" — an
-              update is sent to the groups of the record as it was loaded,
-              i.e. whoever had it on screen — and "deleted" reaches
-              "model_data_update.row-b"; each carries the record's id and goes
-              to no other group.
+        Then: "created" reaches "model_data_update.row-a"; "updated" reaches
+              "model_data_update.row-b" (who may see it now) and
+              "model_data_update.row-a" (who had it on screen); "deleted"
+              reaches "model_data_update.row-b"; each carries the record's id
+              and goes to no other group.
         """
         self.use_lex_extensions(**HOOKS)
         created = self.client.post(self.url_create(SIG_PLAIN), {"name": "a"}, format="json")
@@ -87,6 +91,7 @@ class TestCluster09i_CrudBroadcastTargets(E2ETestCase):
             self._mutations(),
             [
                 ("model_data_update.row-a", "created", record_id),
+                ("model_data_update.row-b", "updated", record_id),
                 ("model_data_update.row-a", "updated", record_id),
                 ("model_data_update.row-b", "deleted", record_id),
             ],
@@ -122,3 +127,22 @@ class TestCluster09i_CrudBroadcastTargets(E2ETestCase):
             query = urlencode([("ids", item.pk) for item in items])
             self.assertEqual(self.client.delete(f"{self.url_many(SIG_PLAIN)}?{query}").status_code, 200)
         self.assertEqual(self._mutations(), [])
+
+    # -- 9.52 ----------------------------------------------------------
+    def test_9_52_each_group_hears_an_update_once(self) -> None:
+        """
+        Scenario 9.52: before and after groups are merged, not repeated.
+        Given: an update whose record stays in its group ("a" before and after)
+        When: it is broadcast with both versions, first without hooks, then
+              with MUTATION_GROUPS/USER_GROUPS
+        Then: without hooks the shared "model_data_update" group gets one
+              event; with them "model_data_update.row-a" gets one event.
+        """
+        before, after = SigPlainItem(pk=7, name="a"), SigPlainItem(pk=7, name="a")
+        record_id = f"{SIG_PLAIN}_7"
+        broadcast_model_mutation(SIG_PLAIN, "updated", record_id, target=after, previous=before)
+        self.assertEqual(self._mutations(), [("model_data_update", "updated", record_id)])
+        self.sent.clear()
+        self.use_lex_extensions(**HOOKS)
+        broadcast_model_mutation(SIG_PLAIN, "updated", record_id, target=after, previous=before)
+        self.assertEqual(self._mutations(), [("model_data_update.row-a", "updated", record_id)])

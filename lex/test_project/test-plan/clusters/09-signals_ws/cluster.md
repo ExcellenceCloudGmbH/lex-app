@@ -42,16 +42,17 @@
 
 ### 9i. CRUD endpoints pass their broadcast target ✅
 
-**What it tests:** Create, update and delete through One reach the record's groups with its id; a bulk delete through many/ reaches the model's groups once; broadcast_mutations = False silences both endpoints.
+**What it tests:** Create, update and delete through One reach the record's groups with its id, an update those before and after the change, each once; a bulk delete through many/ reaches the model's groups once; broadcast_mutations = False silences both endpoints.
 
 **Why a regression matters:** Scoped delivery and the opt-out decide per record; an endpoint that does not pass its target would send a tenant's activity to everyone, or ignore the opt-out.
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 9.49 | single-record events | created/updated to the loaded record's group, deleted to the renamed record's group, with the record id |
+| 9.49 | single-record events | created to row-a; updated to row-b and row-a (after and before the rename); deleted to row-b; with the record id |
 | 9.50 | bulk events | one deleted event to the model's group |
 | 9.51 | opted-out model | nothing sent from One or Many |
+| 9.52 | unchanged groups | one event per group, scoped and unscoped |
 
-**Scenario range:** 9.49-9.51. **Test file:** `lex/test_project/tests/signals_ws/test_9i_crud_broadcast_targets.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/One.py` (create/update/delete broadcasts), `lex/api/views/model_entries/Many.py` (bulk delete broadcast). Batch: [9i](batches.md).
+**Scenario range:** 9.49-9.52. **Test file:** `lex/test_project/tests/signals_ws/test_9i_crud_broadcast_targets.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/One.py` (create/update/delete broadcasts), `lex/api/views/model_entries/Many.py` (bulk delete broadcast), `lex/core/signals/ModelMutationSignal.py` (previous). Batch: [9i](batches.md).
 
 ---

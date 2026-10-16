@@ -18,7 +18,7 @@
 | 6. Audit Logging | 19 | 122 | 25 | 3 | 0 |
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
-| 9. Signals & WebSocket | 9 | 51 | 23 | 0 | 0 |
+| 9. Signals & WebSocket | 9 | 52 | 24 | 0 | 0 |
 | 10. API Layer | 20 | 116 | 66 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 13 | 67 | 31 | 0 | 0 |
@@ -250,7 +250,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 9f | Core health/calculation/log WebSocket consumers (coverage task #620) | 9.37-9.42 | complete | 6 | 0 | 0 | scenarios 9.37–9.42; public backend-health socket, calculations group fan-out, per-record calculation-log stream, and shutdown `disconnect_all` tracking |
 | 9g | `lex.core.signals` star import — `__all__` names only what the package provides | 9.43 | complete | 1 | 0 | 0 | `from lex.core.signals import *` raised AttributeError. The profile handlers create_profile and save_profile were deleted from CalculationSignals.py in February and their import into the package a day later, but both names stayed in `__all__`; a star import binds every name there, so it failed and took the calculation-signal API with it. Both names are dropped. 9.43 runs the star import and requires the three re-exported functions to be CalculationSignals' own. |
 | 9h | Scoped realtime delivery | 9.44-9.48 | complete | 5 | 0 | 0 | The duplicate MODEL_MUTATION_GROUP constant was removed; the consumer imports it from ModelMutationSignal. |
-| 9i | CRUD endpoints pass their broadcast target | 9.49-9.51 | complete | 3 | 0 | 0 | An update goes to the groups of the record as loaded before the change (One's view-local instance); a record that moves between groups notifies only the old group. Pinned, open for review. |
+| 9i | CRUD endpoints pass their broadcast target | 9.49-9.52 | complete | 4 | 0 | 0 | An update reaches the groups of the record before and after the change (One's view-local instance and the copy DRF saved), each group once, so a record that moves between groups notifies both. |
 
 ## 10. API Layer (`api_layer`)
 
