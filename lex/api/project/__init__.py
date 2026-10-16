@@ -10,6 +10,7 @@ Mount a module with ``urlpatterns`` through ``lex_config.API_URLCONF`` (under
 
 See the "Custom API endpoints" page of the lex-app docs.
 """
+from lex.api.actions import lex_action
 from lex.api.errors import LexActionError
 from lex.api.project.views import (
     LexAPIView,
@@ -24,6 +25,7 @@ __all__ = [
     "LexAPIView",
     "LexWebhookView",
     "LexActionError",
+    "lex_action",
     "serialize_for",
     "strict_serializer",
     "verify_hmac_sha256",
