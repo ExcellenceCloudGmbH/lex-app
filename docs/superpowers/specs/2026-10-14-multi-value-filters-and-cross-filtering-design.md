@@ -46,6 +46,11 @@ Found while the implementation plans were written against the source:
     changed inside the frame.
 12. **Amendment 2 caps the count.** The read filter's own per-row pass is the list's and is not
     capped by `LEX_FILTER_VALUES_ROW_SCAN_LIMIT`.
+13. **Value lists are positive selections.** A value list starts with nothing ticked and has no
+    "select all": ticked values are included, and nothing ticked means no filter, in the column
+    menu and the filter bar alike. AG applies an empty Set as no filter, so the UI never produces
+    an empty selection, and a host's empty list clears that field like `None`. The server still
+    reads an explicit empty Set (`values: []`) as "no rows", for direct API callers.
 
 ## The problem
 
@@ -320,8 +325,9 @@ lex_view("order_line", filters={"order": ids}, key="lines")
   request, so a page cannot widen what a user sees.
 - Host messages are accepted only from the parent frame with the `lex-app-host` tag, and their
   fields are checked against the list's filterable columns.
-- A blank value filters as blank, and an empty selection filters as "no rows", consistently in the
-  grid, export and "Select All Records".
+- A blank value filters as blank, consistently in the grid, export and "Select All Records". An
+  explicit empty Set filters as "no rows" on the server; the UI and hosts clear a field instead
+  (Amendment 13).
 
 ## Error handling
 

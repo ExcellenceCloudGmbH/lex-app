@@ -649,7 +649,8 @@ def lex_view(
         model) and ``row_count``.
     filters : dict, optional
         Field name to stored values: a list, one value, or ``None`` to clear
-        the field. An empty list matches no rows. Applied on first load and,
+        the field. An empty list also clears the field, as ticking nothing
+        does in the grid's value lists. Applied on first load and,
         when changed on a later rerun, posted into the frame without reloading
         it. Filters on fields not named here, set by the user, stay. Filters
         whose token is longer than 2,000 characters (a long id list) are not
