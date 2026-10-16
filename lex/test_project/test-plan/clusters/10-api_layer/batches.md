@@ -117,3 +117,17 @@
 | Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project uses. |
+
+### Batch 10s — Record and collection actions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.106-10.112 |
+| Type | E |
+| Files covered | `lex/api/actions.py` (lex_action, actions_for, ModelActionView), action routes in `lex/process_admin/sites/process_admin_site.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10s_record_actions.py` |
+| Test classes | `TestCluster10s_RecordActions` |
+| Fixtures | `ActionItem` with approve, explode, download, unguarded and batch actions |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | calculate=true/cancel=true stay as they are; actions are additive. |

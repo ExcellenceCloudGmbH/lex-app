@@ -97,3 +97,17 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Status | ✅ Complete — paired with 7t. Checked to fail when the run shares the create's entry, or is filed under the create request's id |
 
 ---
+
+### Batch 6s — Audit entries for actions ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.121-6.122 |
+| Type | E |
+| Files covered | `lex/api/actions.py` (ModelActionView._audit) |
+| Test file | `lex/test_project/tests/audit_logging/test_6s_action_audit.py` |
+| Test classes | `TestCluster06s_ActionAudit` |
+| Fixtures | `AuditActionItem` with a close action; AuditLog and AuditLogStatus tables |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The entry is written in the action's transaction, so a failed run leaves none (10.109). |

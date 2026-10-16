@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 120
+max_scenario: 122
 letters:
   a:
     title: ''
@@ -177,3 +177,13 @@ letters:
       6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update'
       under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's
       entry is 'failure' with a traceback while the create's entry stays 'success'.
+  s:
+    title: "Audit entries for actions"
+    scenarios: 6.121-6.122
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      The entry is written in the action's transaction, so a failed run leaves none (10.109).
