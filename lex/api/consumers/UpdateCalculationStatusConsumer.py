@@ -8,15 +8,42 @@ from lex.core.signals.ActiveCalculationStateStore import ActiveCalculationStateS
 logger = logging.getLogger(__name__)
 
 
+def _snapshot_for(user):
+    """Active calculations the socket's user may hear about (all, unless scoped)."""
+    from django.apps import apps
+
+    from lex.core import realtime
+
+    snapshot = ActiveCalculationStateStore.snapshot()
+    if not realtime.scoped():
+        return snapshot
+    allowed = set(realtime.socket_groups("update_calculation_status", user))
+    visible = []
+    for entry in snapshot:
+        try:
+            model = apps.get_model(entry.get("model_label"))
+            instance = model._default_manager.filter(pk=entry.get("record_pk")).first()
+        except Exception:
+            instance = None
+        if instance is not None and allowed & set(realtime.event_groups("update_calculation_status", instance)):
+            visible.append(entry)
+    return visible
+
+
 class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
     active_consumers = set()
 
     async def connect(self):
-        await self.channel_layer.group_add(f'update_calculation_status', self.channel_name)
+        from lex.core import realtime
+
+        user = (getattr(self, "scope", None) or {}).get("user")
+        self.group_names = await sync_to_async(realtime.socket_groups)('update_calculation_status', user)
+        for group in self.group_names:
+            await self.channel_layer.group_add(group, self.channel_name)
         await self.accept()
         self.active_consumers.add(self)
 
-        snapshot = await sync_to_async(ActiveCalculationStateStore.snapshot)()
+        snapshot = await sync_to_async(_snapshot_for)(user)
         await self.send(text_data=json.dumps({
             "type": "calculation_reconciliation",
             "payload": {
@@ -25,7 +52,8 @@ class UpdateCalculationStatusConsumer(AsyncWebsocketConsumer):
         }))
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(f'update_calculation_status', self.channel_name)
+        for group in getattr(self, "group_names", ['update_calculation_status']):
+            await self.channel_layer.group_discard(group, self.channel_name)
         self.active_consumers.discard(self)
         await super().disconnect(close_code)
 

@@ -91,7 +91,7 @@ class OneModelEntry(
         """
         model_name = instance._meta.model_name
         broadcast_model_mutation(
-            model_name, "updated", f"{model_name}_{instance.pk}"
+            model_name, "updated", f"{model_name}_{instance.pk}", target=instance
         )
 
     def _mark_calculation_started(self, instance, calculation_record, calculation_id):
@@ -657,7 +657,10 @@ class OneModelEntry(
             record_id = (
                 f"{model_name}_{created_id}" if created_id is not None else None
             )
-            broadcast_model_mutation(model_name, "created", record_id)
+            broadcast_model_mutation(
+                model_name, "created", record_id,
+                target=getattr(self, "_created_instance", None) or model_container.model_class,
+            )
 
             created = getattr(self, "_created_instance", None)
             if self._calculates_on_create(created):
@@ -681,7 +684,7 @@ class OneModelEntry(
                 record_id = f"{model_name}_{instance.pk}"
                 try:
                     response = super().destroy(request, *args, **kwargs)
-                    broadcast_model_mutation(model_name, "deleted", record_id)
+                    broadcast_model_mutation(model_name, "deleted", record_id, target=instance)
                     return response
                 except Exception as e:
                     self._log_failed_request_audit_if_needed(

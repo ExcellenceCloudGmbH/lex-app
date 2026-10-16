@@ -115,3 +115,35 @@ class OidcRedirectGuardMiddleware:
             if not cls._origin_allowed(f"{parsed.scheme}://{parsed.netloc}", request):
                 return True
         return False
+
+
+class StatelessBearerSessionMiddleware:
+    """Keep bearer requests from creating a session (``LEX_BEARER_STATELESS=true``).
+
+    ``oauth2_authcodeflow``'s ``BearerAuthMiddleware`` saves a new session for
+    every bearer request without a session cookie — one ``django_session`` row
+    per API call from a token client. Placed right before it, this middleware
+    makes that request's session non-persisting, so the user is authenticated
+    from the token and nothing is written. Default (unset): no effect.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        import os
+
+        stateless = os.getenv("LEX_BEARER_STATELESS", "").strip().lower() in ("1", "true", "yes", "on")
+        session = getattr(request, "session", None)
+        if (
+            stateless
+            and session is not None
+            and request.headers.get("Authorization", "").startswith("Bearer ")
+            and not session.session_key
+        ):
+            session.save = _do_not_persist
+        return self.get_response(request)
+
+
+def _do_not_persist(*args, **kwargs):
+    return None
