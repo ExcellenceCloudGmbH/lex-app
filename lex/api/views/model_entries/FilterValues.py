@@ -70,10 +70,9 @@ def _capability_target(model_class):
     ``instance_type`` is its historical class, not the root tracked model,
     so a single-level walk stops one short and resolves to a class that
     itself declares neither method -- making ``uses_default_read_permission``
-    wrongly answer True (database path) for a model whose real masking
-    (e.g. ``QueryMaskedItem.can_read``) would otherwise hide values from the
-    grid. Both the read filter and the serializer unwrap all the way to the
-    root tracked model, so this must too.
+    wrongly answer True (database path) for a model whose ``can_read`` hides
+    fields per row. Both the read filter and the serializer unwrap all the
+    way to the root tracked model, so this must too.
     """
     return _resolve_history_source_model(model_class) or model_class
 
@@ -81,21 +80,22 @@ def _capability_target(model_class):
 def uses_default_read_permission(model_class: type[Model]) -> bool:
     """True when every readable row shows every field, so a database count is exact.
 
-    True when EITHER:
+    The read filter has already removed the rows the user may not see; the
+    question is whether a remaining row can still hide a field. It cannot when
+    the target -- the model itself, or the root tracked model of a History /
+    MetaHistory container (see ``_capability_target``) -- declares neither
+    ``permission_read`` nor ``can_read``:
 
-    * the LexModel target -- the model itself, or the root tracked model
-      reached by walking the WHOLE History / MetaHistory ``instance_type``
-      chain (see ``_capability_target``) -- overrides neither
-      ``permission_read`` nor ``can_read`` -- the row filter
-      (``filter_backends._handle_lexmodel_default``) and the serializer
-      (``LexSerializer.readable_field_names``) both allow everything by
-      default in that case, so there is nothing for a per-row scan to find
-      that the database aggregate would miss; or
-    * the target keeps BOTH at their literal LexModel default implementation
-      -- ``to_representation`` always tries ``can_read`` first (every
-      LexModel has one), so a ``permission_read`` override alone is not
-      enough to guarantee the database aggregate is exact; both must be
-      untouched.
+    * a plain Django model has neither method: the read filter allows every
+      row and the serializer shows every field;
+    * a LexModel that keeps BOTH LexModel defaults (checked by identity) goes
+      through the Keycloak UMA read filter, which drops unreadable rows in the
+      database (a record-level grant admits that record only), and the default
+      ``permission_read`` is all-or-nothing, so a readable row shows every
+      field. Overriding either method disqualifies it: ``to_representation``
+      asks ``can_read`` first, and either one can hide fields per row.
+
+    Every other model is counted row by row.
     """
     target = _capability_target(model_class)
 

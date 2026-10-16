@@ -44,6 +44,8 @@ Found while the implementation plans were written against the source:
     only. A host `filter` message that arrives before any list is mounted is kept and applied to the
     first list that mounts. Re-passing the same filters on a rerun does not override what the user
     changed inside the frame.
+12. **Amendment 2 caps the count.** The read filter's own per-row pass is the list's and is not
+    capped by `LEX_FILTER_VALUES_ROW_SCAN_LIMIT`.
 
 ## The problem
 

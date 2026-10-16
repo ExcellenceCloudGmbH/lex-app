@@ -65,3 +65,18 @@ writing-plan batch blocks were recorded for this cluster.
 | Status | ✅ Complete — two independent traps in one declaration. (1) The helpers are written against a `FieldFile` (`create_excel_file_from_dfs` ends in `self.save(name, content, save=False)`, a FieldFile API) but lived only on the field class, so the spelling customers reach for first raised `AttributeError: 'FieldFile' object has no attribute 'create_excel_file_from_dfs'` inside a Celery worker, naming no code they wrote. `attr_class = XLSXFieldFile` binds the *same function objects*, so both spellings resolve to one implementation and the ~30 unbound call sites across the estate are untouched. (2) `max_length = 300` was dead — `FileField.__init__` setdefaults 100 and `Field.__init__` shadows the class attribute — so every bare `XLSXField()`/`PDFField()` was `varchar(100)`, over which Django's storage *silently truncates and suffixes* rather than raising. **Downstream impact:** apps get one `AlterField` per report column on their next `makemigrations`; `lex_migrate` runs it by default, so the widening lands on deploy. No lex-app model uses either field, so no migration ships in this repo. |
 
 ---
+
+### Batch 13i — An export under a value-list filter holds the rows the list shows ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 13.46 |
+| Type | E |
+| Files covered | `lex/api/views/file_operations/ModelExport.py` (the AG export paths), `lex/api/views/model_entries/List.py` (`_build_filter_q`'s Set branch, which the export shares) |
+| Test file | `lex/test_project/tests/exports/test_13i_value_list_filters.py` |
+| Test classes | `TestCluster13i_ValueListFilters` (13.46 a Set with one category and blank, and an empty selection, listed and exported on the pandas path and the universal streaming path) |
+| Fixtures | `ExportCategory`, `ExportItem`, `FastExportItem` (13b / 13e setup); the Keycloak `export` scope granted by patching `UserContext._resolve_keycloak_scopes`, as 13e does |
+| Tests landed | **1 pass / 0 fail** (2 subtests) |
+| Status | ✅ Complete — the design's §8 promise that a blank filters as blank and an empty selection as "no rows" consistently in the grid and the export. Mutations: the pre-14f Set translation fails it, and so does an export that drops the filter model while the list keeps it. |
+
+---

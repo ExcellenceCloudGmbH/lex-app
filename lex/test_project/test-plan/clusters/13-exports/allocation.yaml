@@ -1,7 +1,7 @@
 cluster: 13
 slug: exports
 title: Export Endpoint
-max_scenario: 45
+max_scenario: 46
 letters:
   a:
     title: Legacy (non-AG) export path
@@ -95,3 +95,21 @@ letters:
       Django's storage silently truncates and suffixes the filename. Both fields now setdefault their
       advertised width. Downstream apps get one AlterField per report column on their next
       makemigrations.
+  i:
+    title: An export under a value-list filter holds the rows the list shows
+    scenarios: '13.46'
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      The grid, its export and Select All read one filter model; the export paths filter through
+      ListModelEntries._apply_filter_model, the list's own Set and Multi translation (14f). 13.46
+      lists and exports under a Set ticking one category and blank, and under an empty selection,
+      on the pandas path (ExportItem, its own permission_export) and the universal streaming path
+      (FastExportItem with the export scope, as in 13e): the sheet holds exactly the list's rows
+      (alpha and the blank row), and nothing ticked exports nothing -- the export's "No data" 404.
+      A pin of behaviour the 14f translation already gives the export. Mutations: the pre-14f Set
+      translation (blanks dropped, empty selection ignored) fails it, and so does an export that
+      drops the grid's filter model while the list keeps it (both subtests).
