@@ -107,6 +107,13 @@ def test_the_postgres_credentials_are_the_default_targets():
     block = settings[settings.index('"default": {', settings.index("DATABASES = {")):]
     block = block[: block.index("},")]
     for key, value in check.DEFAULT_TARGET.items():
+        if key == "port":
+            # The port follows DATABASE_PORT; unset, it is the value the check uses.
+            assert '"PORT": database_port' in block, "port drifted from settings.py"
+            assert f'database_port = os.getenv("DATABASE_PORT", "{value}")' in settings, (
+                "port default drifted from settings.py"
+            )
+            continue
         assert f'"{key.upper()}": "{value}"' in block, f"{key} drifted from settings.py"
 
 

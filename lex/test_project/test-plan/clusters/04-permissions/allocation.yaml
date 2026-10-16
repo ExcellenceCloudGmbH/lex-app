@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 110
+max_scenario: 113
 letters:
   a:
     title: ''
@@ -181,3 +181,13 @@ letters:
     note: >-
       LexAPIKey lives in an underscore module so model discovery does not register it with the generic API
       (key hashes are never listed).
+  r:
+    title: "Audit authors for users without names"
+    scenarios: 4.111-4.113
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Same fallback as the model's created_by (LexModel._normalize_audit_actor).

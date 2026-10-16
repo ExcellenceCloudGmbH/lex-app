@@ -120,3 +120,17 @@ must not open a check on the whole model.
 | Tests landed | **7 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | LexAPIKey lives in an underscore module so model discovery does not register it with the generic API (key hashes are never listed). |
+
+### Batch 4r — Audit authors for users without names ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.111-4.113 |
+| Type | E |
+| Files covered | `lex/audit_logging/mixins/AuditLogMixin.py` (log_change author), `lex/audit_logging/mixins/BulkAuditLogMixin.py` (log_change author, _audit_author) |
+| Test file | `lex/test_project/tests/permissions/test_4r_audit_authors.py` |
+| Test classes | `TestCluster04r_AuditAuthors` |
+| Fixtures | `KeycloakItem`; framework tables `AuditLog`, `AuditLogStatus`; scoped `LexAPIKey`s |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Same fallback as the model's created_by (LexModel._normalize_audit_actor). |

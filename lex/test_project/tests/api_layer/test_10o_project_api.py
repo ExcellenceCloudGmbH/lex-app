@@ -65,13 +65,24 @@ class TestCluster10o_ProjectApi(E2ETestCase):
         Scenario 10.83: the Process structure endpoint no longer exists.
         Given: lex 3.0, where the Process model type was removed
         When: /api/process/anything is resolved
-        Then: it falls through to the frontend catch-all instead of an API view,
-              and lex.core.models exports no Process class.
+        Then: it falls through to the frontend catch-all instead of an API view;
+              lex.core.models exports no Process class; registration no longer
+              reserves or registers it; the model-structure node types and the
+              view modules no longer know it.
         """
         self.assertIs(resolve("/api/process/anything").func, serve_react)
         import lex.core.models as core_models
+        import lex.process_admin.models.utils as structure_utils
+        from lex.api.views import ModelStructureObtainView
+        from lex.process_admin.utils.model_registration import ModelRegistration
+        from lex.process_admin.views import model_relation_views
 
         self.assertNotIn("Process", core_models.__all__)
+        self.assertNotIn("Process", ModelRegistration._RESERVED_CLASS_NAMES)
+        self.assertFalse(hasattr(ModelRegistration, "_register_process_model"))
+        self.assertFalse(hasattr(structure_utils, "Process"))
+        self.assertFalse(hasattr(model_relation_views, "ProcessStructure"))
+        self.assertFalse(hasattr(ModelStructureObtainView, "ProcessStructure"))
 
     # -- 10.84 ---------------------------------------------------------
     def test_10_84_project_endpoint_requires_sign_in(self) -> None:
@@ -125,11 +136,19 @@ class TestCluster10o_ProjectApi(E2ETestCase):
         Then: the readable row answers 200; the denied row and the missing id
               both answer 404 — indistinguishable.
         """
+        from lex.api.views.model_entries.filter_backends import apply_read_restriction
+
         visible = ApiProjectItem.objects.create(name="visible")
         hidden = ApiProjectItem.objects.create(name="hidden")
         self.assertEqual(self.client.get(f"{PREFIX}items/{visible.pk}").json()["name"], "visible")
         self.assertEqual(self.client.get(f"{PREFIX}items/{hidden.pk}").status_code, 404)
         self.assertEqual(self.client.get(f"{PREFIX}items/999999").status_code, 404)
+        # The same rule, exposed for project code: the list endpoint's restriction.
+        request = self.client.get(f"{PREFIX}whoami").wsgi_request
+        self.assertEqual(
+            list(apply_read_restriction(ApiProjectItem.objects.all(), request).values_list("name", flat=True)),
+            ["visible"],
+        )
 
     # -- 10.88 ---------------------------------------------------------
     def test_10_88_strict_serializer_rejects_unknown_keys(self) -> None:

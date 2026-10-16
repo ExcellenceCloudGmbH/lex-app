@@ -10,13 +10,13 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 48 | 395 | 437 | 0 | 0 |
+| 1. Init — Project Bootstrap | 49 | 397 | 439 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 17 | 110 | 54 | 2 | 0 |
+| 4. Permissions | 18 | 113 | 57 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 19 | 122 | 25 | 3 | 0 |
-| 7. Calculation State Machine | 22 | 239 | 96 | 0 | 0 |
+| 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 19 | 112 | 62 | 0 | 0 |
@@ -66,6 +66,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 1.381 loads both kinds of rxconfig.py in a fresh interpreter, as a Reflex worker does; 1.382 runs Reflex Enterprise's own registration and Reflex's own lifespan runner against a real frontend socket. Mutations: four of four fail a test (no call, no `starlette_app` guard, no guard at all, the replacement keeping the name `app`). Verified outside the suite with the platform's start script (development mode, backend and Vite on two ports, the public origin as REFLEX_URL): pages, Vite's assets and socket, a backend-served image, and the event socket's state updates in a browser, all through the backend's one port. |
 | 1au | `lex --version` — the version /health reports, answered from anywhere | 1.384-1.385 | complete | 2 | 0 | 0 | `lex --version` answered "No such option": main() already sent --version past the Django bootstrap, but the group never declared the option. It now prints `lex, version X`, where X is lex._version.__version__ -- the version /health reports -- and not the package metadata: an image built from a git ref stamps lex/_version.py after `pip install`, while the metadata stays frozen at 0.0.0.dev0. Both scenarios run the CLI in a fresh interpreter, from a directory named release-smoke, without the test project's environment and with the suite's checkout first on PYTHONPATH. Mutations: reading the version from the package metadata fails 1.384; dropping --version from the set main() answers without Django fails both, because Django setup crashes in that directory. |
 | 1av | Project extension keys, environment switches and security flags | 1.386-1.395 | complete | 10 | 0 | 0 | Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks 1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks 1.392. |
+| 1aw | lex create_api_key | 1.396-1.397 | complete | 2 | 0 | 0 | Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]). |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -143,6 +144,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4o | Generic API gate and OIDC redirect guard | 4.80-4.85 | complete | 6 | 0 | 0 | The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the frontend is served from the site's own origin or a configured dev origin. |
 | 4p | Secure permission defaults on the generic REST API | 4.86-4.103 | complete | 18 | 0 | 0 | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |
 | 4q | Scoped API keys (LexAPIKey) | 4.104-4.110 | complete | 7 | 0 | 0 | LexAPIKey lives in an underscore module so model discovery does not register it with the generic API (key hashes are never listed). |
+| 4r | Audit authors for users without names | 4.111-4.113 | complete | 3 | 0 | 0 | Same fallback as the model's created_by (LexModel._normalize_audit_actor). |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -213,6 +215,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 7t | calculate_on_create starts a run when the app creates a record | 7.222-7.227 | complete | 6 | 0 | 0 | A model opts in with calculate_on_create = True; a create through the form or the REST API then starts the run the way a Calculate click does - off the request thread, through Celery when it is on. 7.222 the run reaches SUCCESS; 7.223 a failing run leaves the record created and in ERROR; 7.224 no flag, no run; 7.225 a record created in code does not calculate; 7.226 the flag as a property decides per record; 7.227 with Celery on, the run is dispatched from the calculation thread pool, never inline on the request thread. |
 | 7u | A closed record is never calculated again | 7.228-7.237 | complete | 10 | 0 | 0 | A model closes a record through calculation_closed_reason(). 7.228 a save that sets a closed record IN_PROGRESS calculates nothing and keeps its status; 7.229 the rest of that save is still written; 7.230 an open record calculates as before; 7.231 a calculation that starts a closed child skips it, still ends in SUCCESS, and names the child and the reason in its own log; 7.232-7.234 closed generated rows keep their values on the streaming path, the materialized fallback and the Celery calc_and_save task; 7.235 answering True closes; 7.236 a record created closed (its calculation_closed_reason() answers a reason) does not calculate on create, and nothing of a run happens for it: no registration, broadcast, cache entry, run audit entry or history row; 7.237 the method sees the status from before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not. |
 | 7v | Database context in background calculations | 7.238-7.239 | complete | 2 | 0 | 0 | The pool thread is replaced by an inline call so the assertion is deterministic; the wrapping happens inside _background_calculate either way. |
+| 7w | DB_CONTEXT in lex's on_commit callbacks | 7.240-7.243 | complete | 4 | 0 | 0 | The test creates the CalculatedModelUpdateHandler that app start normally creates. |
 
 ## 8. Celery & Async (`celery_async`)
 

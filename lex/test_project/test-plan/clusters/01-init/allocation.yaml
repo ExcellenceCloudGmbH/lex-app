@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 395
+max_scenario: 397
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1263,3 +1263,13 @@ letters:
       per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks
       1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks
       1.392.
+  aw:
+    title: "lex create_api_key"
+    scenarios: 1.396-1.397
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]).

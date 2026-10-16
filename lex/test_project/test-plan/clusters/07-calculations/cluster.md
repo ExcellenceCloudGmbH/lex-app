@@ -156,3 +156,20 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 **Scenario range:** 7.238-7.239. **Test file:** `lex/test_project/tests/calculations/test_7v_db_context_thread.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/One.py` (_calculate_in_background), `lex/core/db_context.py` (for_background). Batch: [7v](batches.md).
 
 ---
+
+### 7w. DB_CONTEXT in lex's on_commit callbacks ✅
+
+**What it tests:** Each of lex's own commit callbacks runs after the hook was told the initiating user (local=True); nothing runs before the commit; without DB_CONTEXT the callbacks run and the hook is never called.
+
+**Why a regression matters:** Under row-level security a callback without the caller's context sees an anonymous user: recalculations and log lines would silently find no rows.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 7.240 | as_transaction recalculation | runs after (user, local=True) |
+| 7.241 | calculation state bookkeeping | both callbacks after (user, local=True); markers set |
+| 7.242 | deferred CalculationLog write | persisted after (user, local=True) |
+| 7.243 | no hook | callbacks run; hook never called |
+
+**Scenario range:** 7.240-7.243. **Test file:** `lex/test_project/tests/calculations/test_7w_db_context_on_commit.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/core/transactions/transactions.py` (as_transaction), `lex/core/models/CalculationModel.py` (state persistence registration), `lex/audit_logging/models/CalculationLog.py` (log), `lex/core/db_context.py` (on_commit). Batch: [7w](batches.md).
+
+---
