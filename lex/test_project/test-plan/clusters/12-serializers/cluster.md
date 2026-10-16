@@ -145,3 +145,17 @@ cluster-2 models are too shallow; we need a model with one of every
 **Scenario range:** 12.63-12.67. **Test file:** `lex/test_project/tests/serializers/test_12l_serializer_exposure.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py`, `lex/api/views/model_info/Fields.py`, `lex/api/serializers/base_serializers.py` (EXPOSE_AUTO_SERIALIZER), `lex/api/security.py` (serializer_allowed, strict_input_denial), `lex/api/views/model_entries/One.py`. Batch: [12l](batches.md).
 
 ---
+
+### 12n. Read context built once per request ✅
+
+**What it tests:** Listing 3 rows and 30 rows without the list filter reads the user's groups the same number of times, and every row is returned.
+
+**Why a regression matters:** BUG-011: one auth_group query per row made a 500-row list run 500 extra queries wherever the serializer decides rows itself.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.68 | group lookups do not grow with rows | 3 and 30 rows returned; equal auth_group query counts |
+
+**Scenario range:** 12.68. **Test file:** `lex/test_project/tests/serializers/test_12n_read_context_reuse.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/serializers/base_serializers.py` (to_representation, LexModel can_read branch). Batch: [12n](batches.md).
+
+---
