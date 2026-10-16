@@ -1,7 +1,7 @@
 cluster: 9
 slug: signals_ws
 title: Signals & WebSocket
-max_scenario: 48
+max_scenario: 51
 letters:
   a:
     title: ''
@@ -87,3 +87,14 @@ letters:
     note: >-
       The duplicate MODEL_MUTATION_GROUP constant was removed; the consumer imports it from
       ModelMutationSignal.
+  i:
+    title: "CRUD endpoints pass their broadcast target"
+    scenarios: 9.49-9.51
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      An update goes to the groups of the record as loaded before the change (One's view-local instance);
+      a record that moves between groups notifies only the old group. Pinned, open for review.

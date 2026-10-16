@@ -79,3 +79,17 @@
 | Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | The duplicate MODEL_MUTATION_GROUP constant was removed; the consumer imports it from ModelMutationSignal. |
+
+### Batch 9i — CRUD endpoints pass their broadcast target ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.49-9.51 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/One.py` (create/update/delete broadcasts), `lex/api/views/model_entries/Many.py` (bulk delete broadcast) |
+| Test file | `lex/test_project/tests/signals_ws/test_9i_crud_broadcast_targets.py` |
+| Test classes | `TestCluster09i_CrudBroadcastTargets` |
+| Fixtures | `SigPlainItem` (permissive plain LexModel); MUTATION_GROUPS/USER_GROUPS hooks; patched `sync_channel_group_send` |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | An update goes to the groups of the record as loaded before the change (One's view-local instance); a record that moves between groups notifies only the old group. Pinned, open for review. |
