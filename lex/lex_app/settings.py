@@ -315,6 +315,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_api_key",
+    "drf_spectacular",
     "django.contrib.postgres",
     "django_db_views",
     "oauth2_authcodeflow",
@@ -344,19 +345,31 @@ MIDDLEWARE = [
     # on any asset the browser has not cached yet. Placed high so it wraps the
     # response on the way out, which is what GZipMiddleware requires.
     "django.middleware.gzip.GZipMiddleware",
+    # Project middleware from lex_config.MIDDLEWARE_EXTRA["first"] (no-op when unset).
+    "lex.core.middleware.project_slots.ProjectFirstSlot",
+    # next/fail on /oidc/* must stay on an allowed origin (LEX_SEC_OIDC_REDIRECT).
+    "lex.authentication.middleware.OidcRedirectGuardMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "oauth2_authcodeflow.middleware.BearerAuthMiddleware",
+    # Project middleware from lex_config.MIDDLEWARE_EXTRA["after_auth"]: runs once
+    # request.user is known from session/bearer and before the login check, so it
+    # may authenticate the request itself (no-op when unset).
+    "lex.core.middleware.project_slots.ProjectAfterAuthSlot",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
     "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
+    # Who may use lex's generic api/* endpoints (lex_config.GENERIC_API, default "all").
+    "lex.api.middleware.generic_api_gate.GenericApiGateMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
     "oauth2_authcodeflow.middleware.RefreshAccessTokenMiddleware",
     "lex.api.middleware.keycloak_permissions.KeycloakPermissionsMiddleware",
+    # Project middleware from lex_config.MIDDLEWARE_EXTRA["last"] (no-op when unset).
+    "lex.core.middleware.project_slots.ProjectLastSlot",
 ]
 
 ROOT_URLCONF = "lex_app.urls"
@@ -382,6 +395,8 @@ WSGI_APPLICATION = "lex_app.wsgi.application"
 DISABLE_SERVER_SIDE_CURSORS = True
 
 db_username = os.getenv("POSTGRES_USERNAME", "django")
+# Port of every PostgreSQL target; 5432 unless DATABASE_PORT says otherwise.
+database_port = os.getenv("DATABASE_PORT", "5432")
 kubernetes = not os.getenv("KUBERNETES_ENGINE", "NONE") == "NONE"
 
 CACHES = {
@@ -426,7 +441,7 @@ DATABASES = {
         "USER": "django",
         "PASSWORD": "lundadminlocal",
         "HOST": "localhost",
-        "PORT": "5432",
+        "PORT": database_port,
     },
     "GCP": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
@@ -434,7 +449,7 @@ DATABASES = {
         "USER": db_username,
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "envvar_not_existing"),
         "HOST": os.getenv("DATABASE_DOMAIN", "envvar_not_existing"),
-        "PORT": "5432",
+        "PORT": database_port,
         "TEST": {
             "NAME": os.getenv("DATABASE_NAME", "envvar_not_existing"),
         },
@@ -445,7 +460,7 @@ DATABASES = {
         "USER": db_username,
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "envvar_not_existing"),
         "HOST": os.getenv("DATABASE_DOMAIN", "envvar_not_existing"),
-        "PORT": "5432",
+        "PORT": database_port,
         "TEST": {
             "NAME": os.getenv("DATABASE_NAME", "envvar_not_existing"),
         },
@@ -456,7 +471,7 @@ DATABASES = {
         "USER": db_username,
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "envvar_not_existing"),
         "HOST": os.getenv("DATABASE_DOMAIN", "envvar_not_existing"),
-        "PORT": "5432",
+        "PORT": database_port,
         "OPTIONS": {"sslmode": "disable"},
         "TEST": {
             "NAME": os.getenv("DATABASE_NAME", "envvar_not_existing"),
@@ -760,16 +775,31 @@ CORS_ALLOWED_ORIGINS = [
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        # Delegates to lex_config.AUTHENTICATION_CLASSES; returns None when unset.
+        "lex.authentication.authentication_backends.project.LexProjectAuthentication",
         "lex.authentication.authentication_backends.BearerMiddlewareAuthentication.BearerMiddlewareAuthentication",
         "rest_framework.authentication.SessionAuthentication",
         # other authentication classes, if needed
     ],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "TEST_REQUEST_DEFAULT_FORMAT": "json",
+    # Same bodies as DRF unless configured; see lex.api.errors.
+    "EXCEPTION_HANDLER": "lex.api.errors.lex_exception_handler",
+    # OpenAPI for project endpoints (lex_config.SCHEMA); nothing runs until requested.
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # FIXME: maybe use this at some point (for giving individual access rights):
     # "DEFAULT_PERMISSION_CLASSES": ['rest_framework_api_key.permissions.HasAPIKey' | 'rest_framework.permissions.IsAuthenticated']
 }
 API_KEY_CUSTOM_HEADER = "HTTP_API_KEY"
+
+# OpenAPI schema of the project API (see lex.api.schema and lex_config.SCHEMA).
+SPECTACULAR_SETTINGS = {
+    "TITLE": "API",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "PREPROCESSING_HOOKS": ["lex.api.schema.include_configured_paths"],
+}
 
 if os.getenv("SENDGRID_API_KEY", "envvar_not_existing") != "envvar_not_existing":
     SENDGRID_API_KEY = os.environ["SENDGRID_API_KEY"]
@@ -791,6 +821,19 @@ CORS_ORIGIN_WHITELIST = [
     "http://localhost:8000",
     "*",
 ]
+
+# LEX_CORS_ALLOWED_ORIGINS (comma-separated) replaces the permissive defaults
+# above: only the listed origins may make credentialed cross-origin requests.
+_lex_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("LEX_CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if _lex_cors_origins:
+    CORS_ORIGIN_ALLOW_ALL = False
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = _lex_cors_origins
+    CORS_ORIGIN_WHITELIST = _lex_cors_origins
 
 LANGUAGE_CODE = "en-us"
 

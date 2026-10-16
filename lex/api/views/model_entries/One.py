@@ -23,6 +23,7 @@ from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.calculation_closing import calculation_closed_reason
+from lex.api.errors import error_detail, restructure_response, structured_format
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 from lex.core.models.CalculationModel import (
     CalculationModel,
@@ -524,7 +525,10 @@ class OneModelEntry(
         ``APIException`` responses, because DRF's public contract is a
         400 with field-level details.
         """
-        return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+        response = Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
+        if structured_format():
+            return restructure_response(exc, response)
+        return response
 
     def create(self, request, *args, **kwargs):
         self.reset_failed_audit_log_state()
@@ -597,7 +601,7 @@ class OneModelEntry(
                     exception=e,
                 )
                 raise APIException(
-                    {"error": f"{e} ", "traceback": traceback.format_exc()}
+                    error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                 ) from e
 
             # Notify open list views (other tabs / users / embedded grids) that
@@ -646,7 +650,7 @@ class OneModelEntry(
                         related_instance=instance,
                     )
                     raise APIException(
-                        {"error": f"{e} ", "traceback": traceback.format_exc()}
+                        error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
 
     def update(self, request, *args, **kwargs):
@@ -730,7 +734,7 @@ class OneModelEntry(
                         related_instance=instance,
                     )
                     raise APIException(
-                        {"error": f"{e} ", "traceback": traceback.format_exc()}
+                        error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
 
                 if noop_response is not None:
@@ -781,7 +785,7 @@ class OneModelEntry(
                             related_instance=instance,
                         )
                         raise APIException(
-                            {"error": f"Bitemporal update failed: {e}", "traceback": traceback.format_exc()}
+                            error_detail({"error": f"Bitemporal update failed: {e}", "traceback": traceback.format_exc()})
                         ) from e
 
                 # STANDARD UPDATE LOGIC (Main Models)
@@ -884,13 +888,13 @@ class OneModelEntry(
                     )
 
                     raise APIException(
-                        {
+                        error_detail({
                             "message": f"{resolve_exception_detail(exc) or str(exc)} ",
                             "traceback": resolve_exception_traceback(
                                 exc,
                                 fallback=traceback.format_exc(),
                             ),
-                        }
+                        })
                     ) from exc
 
                 except ValidationError as e:
@@ -911,7 +915,7 @@ class OneModelEntry(
                         related_instance=instance,
                     )
                     raise APIException(
-                        {"error": f"{e} ", "traceback": traceback.format_exc()}
+                        error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
                 finally:
                     self._calculate_requested = False

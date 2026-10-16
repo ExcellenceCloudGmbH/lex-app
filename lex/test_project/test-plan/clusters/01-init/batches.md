@@ -1722,3 +1722,17 @@ to know any other way. The option takes `lex._version.__version__`.
 **Mutations: two of two fail a test.** Reading the version from the package metadata fails 1.384
 (`0.0.0.dev0` against the stamped label). Dropping `--version` from the set `main()` answers without
 setting Django up fails both: Django setup crashes in `release-smoke`.
+
+### Batch 1av — Project extension keys, environment switches and security flags ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.386-1.395 |
+| Type | U |
+| Files covered | `lex/core/extensions.py`, `lex/core/config.py`, `lex/core/security_flags.py`, `lex/lex_app/settings.py` (DATABASE_PORT, LEX_CORS_ALLOWED_ORIGINS), `lex/core/middleware/project_slots.py`, `lex/lex_app/urls.py` (prefix check) |
+| Test file | `lex/test_project/tests/init/test_1av_project_extensions.py` |
+| Test classes | `TestCluster01av_ProjectExtensions` |
+| Fixtures | temporary lex_config.py via PROJECT_ROOT; fresh interpreters for the settings module; sample middleware classes in the test module |
+| Tests landed | **10 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks 1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks 1.392. |

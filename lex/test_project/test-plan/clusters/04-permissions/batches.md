@@ -78,3 +78,17 @@ list itself — each fail exactly one of these scenarios. The rule for record gr
 must not open a check on the whole model.
 
 ---
+
+### Batch 4o — Generic API gate and OIDC redirect guard ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.80-4.85 |
+| Type | U + E |
+| Files covered | `lex/api/middleware/generic_api_gate.py`, `lex/authentication/middleware.py` (OidcRedirectGuardMiddleware), MIDDLEWARE in `lex/lex_app/settings.py` |
+| Test file | `lex/test_project/tests/permissions/test_4o_generic_api_gate_and_redirects.py` |
+| Test classes | `TestCluster04o_GenericApiGate`, `TestCluster04o_OidcRedirectGuard`, `TestCluster04o_GateAndGuardWiring` |
+| Fixtures | RequestFactory requests with stand-in users; the E2E client for the wiring scenarios |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the frontend is served from the site's own origin or a configured dev origin. |

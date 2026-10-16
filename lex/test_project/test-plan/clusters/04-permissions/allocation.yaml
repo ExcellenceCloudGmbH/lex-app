@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 79
+max_scenario: 85
 letters:
   a:
     title: ''
@@ -147,3 +147,14 @@ letters:
       model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of
       five mutations of that code (keep grants across users, keep them across sign-out, count record
       grants, cache the raw token, return the cached list itself) fails exactly one scenario.
+  o:
+    title: "Generic API gate and OIDC redirect guard"
+    scenarios: 4.80-4.85
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the
+      frontend is served from the site's own origin or a configured dev origin.

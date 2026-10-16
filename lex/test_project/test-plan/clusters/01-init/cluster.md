@@ -444,3 +444,26 @@ does not remove user launch configurations.
 | 1.385 | answered from anywhere | in a directory that is no project, and that Django cannot load as an app, `lex --version` exits 0 with one version line |
 
 **Scenario range:** 1.384 – 1.385. **Test file:** `lex/test_project/tests/init/test_1au_lex_version.py`. **Type:** U. **Status:** ✅ Complete (2026-10-03). Batch: [1au](batches.md).
+
+### 1av. Project extension keys, environment switches and security flags ✅
+
+**What it tests:** lex_config extension keys have defaults that leave lex unchanged, are read lazily and fail loudly on a bad import path; DATABASE_PORT and LEX_CORS_ALLOWED_ORIGINS are read when settings load; the security flags are on by default with LEX_LEGACY_SECURITY / LEX_SEC_<FLAG> opt-outs; middleware slots pass through or run project middleware in order; a project prefix overlapping lex's routes is refused.
+
+**Why a regression matters:** A silently ignored hook (a typo in DB_CONTEXT) turns a security feature off; a default that differs from today changes every project.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.386 | defaults leave lex unchanged | every key equals its default; GENERIC_API all; no hook |
+| 1.387 | lex_config values read lazily | raw values stored; dotted hook resolved |
+| 1.388 | unresolvable hook raises | ImproperlyConfigured for bad DB_CONTEXT, GENERIC_API, API_PREFIX |
+| 1.389 | override scoped and validated | value inside block only; unknown key KeyError |
+| 1.390 | DATABASE_PORT | 5432 by default, 6543 when set, every PostgreSQL alias |
+| 1.391 | LEX_CORS_ALLOWED_ORIGINS | allow-all by default; only the listed origins when set |
+| 1.392 | security flags default on | umbrella off switch; per-flag value wins both ways |
+| 1.393 | tracebacks follow DEBUG | off without DEBUG; on with DEBUG, LEX_API_TRACEBACKS or legacy |
+| 1.394 | middleware slots | empty slot passes through; configured slot runs in order |
+| 1.395 | project prefix collision | api/, api/model_entries/x/, oidc/, admin/ refused |
+
+**Scenario range:** 1.386-1.395. **Test file:** `lex/test_project/tests/init/test_1av_project_extensions.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/core/extensions.py`, `lex/core/config.py`, `lex/core/security_flags.py`, `lex/lex_app/settings.py` (DATABASE_PORT, LEX_CORS_ALLOWED_ORIGINS), `lex/core/middleware/project_slots.py`, `lex/lex_app/urls.py` (prefix check). Batch: [1av](batches.md).
+
+---

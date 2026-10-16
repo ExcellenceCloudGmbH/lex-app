@@ -562,6 +562,22 @@ class E2ETestCase(TransactionTestCase):
         finally:
             converter_patch.stop()
 
+    def use_lex_extensions(self, **values):
+        """Apply ``lex_config`` extension keys for the rest of this test.
+
+        Overrides the keys (see :mod:`lex.core.extensions`), rebuilds the URL
+        configuration so ``API_URLCONF``/``SCHEMA`` routes are mounted, and
+        undoes both when the test ends.
+        """
+        from lex.api.project.public_paths import reset_public_path_cache
+        from lex.core.extensions import override_extensions
+
+        self.addCleanup(self._rebuild_urls)
+        self.addCleanup(reset_public_path_cache)
+        self.enterContext(override_extensions(**values))
+        reset_public_path_cache()
+        self._rebuild_urls()
+
     def _url(self, view_name: str, **kwargs):
         """Reverse a ``process_admin_rest_api`` URL."""
         from django.urls import reverse

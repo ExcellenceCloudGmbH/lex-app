@@ -45,3 +45,61 @@
 **Scenario range:** 10.82. **Test file:** `lex/test_project/tests/api_layer/test_10d_reflex_search_exclusion.py`. **Type:** I. **Status:** ✅ Complete (2026-09-28). Covers `lex/api/views/global_search_for_models/Search.py`. Batch: [10d](batches.md).
 
 ---
+
+### 10o. Project API endpoints mounted through lex; Process route removed ✅
+
+**What it tests:** LexAPIView endpoints need sign-in unless public; PUBLIC_PATHS and public=True skip the login check; one transaction per request rolls back on an error answer; lookups apply read permission (404); strict_serializer refuses unknown keys; ensure_csrf sets the cookie; a signed webhook acts as its service user; nothing is mounted without configuration; api/process/<name> is gone.
+
+**Why a regression matters:** Project endpoints that bypass sign-in, commit half a failed request or leak unreadable rows would reintroduce the problems lex already solves for its own endpoints.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.83 | Process route gone | api/process/x resolves to the frontend catch-all; no Process export, registration entry, structure node or view class left |
+| 10.84 | sign-in required | 200 for a signed-in caller, never 200 anonymously |
+| 10.85 | public paths | public=True and PUBLIC_PATHS answer anonymously; signed-in caller recognised |
+| 10.86 | rollback on error answer | 409 LexActionError body; the written row does not exist |
+| 10.87 | lookup applies read permission | readable 200; denied and missing ids both 404; apply_read_restriction returns the same rows |
+| 10.88 | strict input | extra key 400 naming it; valid input 200 |
+| 10.89 | CSRF bootstrap | csrftoken cookie set |
+| 10.90 | signed webhook | valid HMAC 200 as the service user with the raw body; wrong signature 401 |
+| 10.91 | unconfigured | would-be project path falls to the catch-all |
+
+**Scenario range:** 10.83-10.91. **Test file:** `lex/test_project/tests/api_layer/test_10o_project_api.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/lex_app/urls.py`, `lex/api/project/` (views, public_paths), `lex/authentication/middleware.py` (public paths), `lex/process_admin/sites/process_admin_site.py` (Process removed). Batch: [10o](batches.md).
+
+---
+
+### 10p. Error bodies: no tracebacks by default, structured on request ✅
+
+**What it tests:** A failing generic create answers 500 with its error but without a traceback unless DEBUG, LEX_API_TRACEBACKS or legacy mode; DRF field errors keep their shape unless LEX_ERROR_FORMAT=structured; project endpoints answer {code, detail, error, fields}; DB_ERROR_MAPPER turns database errors into business codes; EXCEPTION_HANDLER replaces lex's handler.
+
+**Why a regression matters:** Tracebacks in production responses reveal source paths and SQL; changing DRF's default bodies would break the bundled frontend's error display.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.92 | no traceback by default | 500 with error, no traceback, on CRUD and run_step (CreateOrUpdate) |
+| 10.93 | tracebacks when allowed | LEX_API_TRACEBACKS, legacy, DEBUG |
+| 10.94 | DRF bodies unchanged | field dict without code; structured on project endpoints and with LEX_ERROR_FORMAT |
+| 10.95 | project errors structured | 500 INTERNAL_ERROR without exception text |
+| 10.96 | DB_ERROR_MAPPER | 500 without, 409 TRIGGER_REFUSED with the mapper |
+| 10.97 | handler override | project handler's 418 returned |
+
+**Scenario range:** 10.92-10.97. **Test file:** `lex/test_project/tests/api_layer/test_10p_error_contract.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/errors.py`, error bodies in `lex/api/views/model_entries/One.py` and `process_flow/CreateOrUpdate.py`, REST_FRAMEWORK EXCEPTION_HANDLER. Batch: [10p](batches.md).
+
+---
+
+### 10q. OpenAPI schema of the project API ✅
+
+**What it tests:** With SCHEMA set the schema endpoint documents only the project prefix with the configured title and version, lists bearerAuth, serves a public Redoc page, and `lex schema --validate --file` writes it; without SCHEMA nothing is served.
+
+**Why a regression matters:** Client generation and integrator docs depend on a valid schema that does not leak lex's generic endpoints.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.98 | schema covers the project API | title, version, only project paths |
+| 10.99 | security schemes and docs | bearerAuth; docs page 200 |
+| 10.100 | CLI | valid YAML with only project paths |
+| 10.101 | unconfigured | schema and docs fall to the catch-all |
+
+**Scenario range:** 10.98-10.101. **Test file:** `lex/test_project/tests/api_layer/test_10q_openapi_schema.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/schema.py`, `lex/api/schema_extensions.py`, `lex/api/management/commands/schema.py`, schema routes in `lex/lex_app/urls.py`. Batch: [10q](batches.md).
+
+---

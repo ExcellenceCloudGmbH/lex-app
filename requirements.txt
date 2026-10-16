@@ -10,6 +10,7 @@ XlsxWriter
 pandas
 openpyxl
 djangorestframework
+drf-spectacular==0.28.0
 django-sendgrid-v5
 redis
 celery

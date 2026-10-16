@@ -61,3 +61,45 @@
 > `ModelExport.py` (cluster 13f), `List.py` AG-Grid path (14f), `base_serializers.py` (12g) keep their forecasted homes.
 
 ---
+
+### Batch 10o — Project API endpoints mounted through lex; Process route removed ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.83-10.91 |
+| Type | E |
+| Files covered | `lex/lex_app/urls.py`, `lex/api/project/` (views, public_paths), `lex/authentication/middleware.py` (public paths), `lex/process_admin/sites/process_admin_site.py` (Process removed) |
+| Test file | `lex/test_project/tests/api_layer/test_10o_project_api.py` |
+| Test classes | `TestCluster10o_ProjectApi`, `TestCluster10o_ProjectApiUnmounted` |
+| Fixtures | `api_layer/_project_api.py` as API_URLCONF; `ApiProjectItem` (row-level read rule); `use_lex_extensions` helper on E2ETestCase |
+| Tests landed | **9 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | E2ETestCase.use_lex_extensions overrides the extension keys and rebuilds the URL configuration for one test, undoing both afterwards. |
+
+### Batch 10p — Error bodies: no tracebacks by default, structured on request ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.92-10.97 |
+| Type | E |
+| Files covered | `lex/api/errors.py`, error bodies in `lex/api/views/model_entries/One.py` and `process_flow/CreateOrUpdate.py`, REST_FRAMEWORK EXCEPTION_HANDLER |
+| Test file | `lex/test_project/tests/api_layer/test_10p_error_contract.py` |
+| Test classes | `TestCluster10p_ErrorContract` |
+| Fixtures | `ApiProjectItem` whose save() raises for name 'explode'; `_project_api.py` crash and database-failure views |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The traceback stays in the audit log's failure entry; only the HTTP body loses it. |
+
+### Batch 10q — OpenAPI schema of the project API ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.98-10.101 |
+| Type | E |
+| Files covered | `lex/api/schema.py`, `lex/api/schema_extensions.py`, `lex/api/management/commands/schema.py`, schema routes in `lex/lex_app/urls.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10q_openapi_schema.py` |
+| Test classes | `TestCluster10q_OpenApiSchema` |
+| Fixtures | `_project_api.py`; SCHEMA with title, version and public=True |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | drf-spectacular 0.28.0 is pinned in requirements.txt and installed in INSTALLED_APPS; nothing runs until a schema is requested. |

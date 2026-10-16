@@ -33,7 +33,6 @@ from lex.process_admin.models.ModelProcessAdmin import ModelProcessAdmin
 from lex.process_admin.views.model_relation_views import (
     ModelStructureObtainView,
     Overview,
-    ProcessStructure,
 )
 from lex.utilities.decorators.singleton import LexSingleton
 
@@ -54,7 +53,6 @@ class ProcessAdminSite:
         self.auto_include_missing_models_in_structure = True
         self.model_styling = {}
         self.html_reports = {}
-        self.processes = {}
         self.widget_structure = []
 
         self.initialized = False
@@ -74,9 +72,6 @@ class ProcessAdminSite:
 
     def registerHTMLReport(self, name, report):
         self.html_reports[name] = report
-
-    def registerProcess(self, name, process):
-        self.processes[name] = process
 
     def register_model_structure(
         self,
@@ -152,9 +147,6 @@ class ProcessAdminSite:
         # Define the function that returns the HTML report
         return self.html_reports[report_name].get_html(user)
 
-    def get_process_structure_func(self, process_name):
-        return self.processes[process_name]()
-
     # TODO: Put urls definitions in the correct place (e.g. in a urls.py file)
     def _get_urls(self):
         register_converter(
@@ -185,11 +177,6 @@ class ProcessAdminSite:
                 "api/htmlreport/<str:report_name>",
                 Overview.as_view(HTML_reports=self.html_reports),
                 name="htmlreports",
-            ),
-            path(
-                "api/process/<str:process_name>",
-                ProcessStructure.as_view(processes=self.processes),
-                name="process",
             ),
             path('api/auth/streamlit-token/', StreamlitTokenView.as_view(), name='streamlit_token'),
 

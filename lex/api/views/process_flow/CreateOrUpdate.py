@@ -3,6 +3,7 @@ from contextlib import nullcontext
 
 from django.db import transaction
 from django.db.models.signals import post_save
+from lex.api.errors import error_detail
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import DestroyOneWithPayloadMixin
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
 from lex.core.models.LexModel import should_use_atomic_model_operations
@@ -33,7 +34,7 @@ class CreateOrUpdate(ModelEntryProviderMixin, DestroyOneWithPayloadMixin, Retrie
                     response = CreateModelMixin.create(self, request, *args, **kwargs)
         except Exception as e:
             print(e)
-            raise APIException({"error": f"{e} ", "traceback": traceback.format_exc()})
+            raise APIException(error_detail({"error": f"{e} ", "traceback": traceback.format_exc()}))
 
         post_save.connect(update_handler)
         return response

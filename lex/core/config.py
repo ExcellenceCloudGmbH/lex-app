@@ -2,7 +2,7 @@ import importlib.util
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 #: Built-in serializer name used by the framework when no override is configured.
 DEFAULT_SERIALIZER_NAME = "default"
@@ -24,6 +24,13 @@ class LexProjectConfig:
     #: A special ``"__default__"`` key applies to all models without an
     #: explicit override.
     tab_display_names: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    #: Raw values of the project extension keys (see
+    #: :mod:`lex.core.extensions`). Only keys present in ``lex_config.py`` are
+    #: stored; nothing is imported or validated here — resolution happens
+    #: lazily, after the app registry is ready.
+    extensions: Dict[str, Any] = field(default_factory=dict)
+    #: The exception raised while executing ``lex_config.py``, if any.
+    load_error: Optional[BaseException] = None
 
     _loaded: bool = False
 
@@ -77,8 +84,18 @@ class LexProjectConfig:
                 if isinstance(raw_tab_names, dict):
                     config.tab_display_names = raw_tab_names
 
+                # Project extension keys: stored raw, resolved lazily.
+                from lex.core.extensions import EXTENSION_KEYS
+
+                config.extensions = {
+                    key: getattr(module, key)
+                    for key in EXTENSION_KEYS
+                    if hasattr(module, key)
+                }
+
                 config._loaded = True
             except Exception as e:
+                config.load_error = e
                 print(f"Error loading project config: {e}")
 
         return config  
