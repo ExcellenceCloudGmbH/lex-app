@@ -103,3 +103,23 @@
 **Scenario range:** 4.86-4.103. **Test file:** `lex/test_project/tests/permissions/test_4p_secure_defaults.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/process_admin/views/model_relation_views.py` (Overview), `lex/core/models/{LexModel,HTMLReport}.py`, `lex/api/serializers/base_serializers.py`. Batch: [4p](batches.md).
 
 ---
+
+### 4q. Scoped API keys (LexAPIKey) ✅
+
+**What it tests:** A scoped key's scopes drive the default permission methods; requests run as the key's user (created_by names the user, no CSRF needed); keys work only below their path prefixes; revoked and expired keys are ignored; extra header names and a project resolver work; classic keys keep their behaviour.
+
+**Why a regression matters:** A classic key is an all-scope identity on every model; an integration key must be limited to what its integration needs.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.104 | scopes drive permissions | read key sees the row, list-only key none |
+| 4.105 | acts as its user | create without CSRF; created_by names the service user |
+| 4.106 | path prefixes | 404 outside api/elsewhere/ |
+| 4.107 | revoked/expired | no data |
+| 4.108 | extra headers | X-Project-Key authenticates |
+| 4.109 | resolver | custom- keys resolve to the resolver's user |
+| 4.110 | classic key unchanged | detail 200 with data |
+
+**Scenario range:** 4.104-4.110. **Test file:** `lex/test_project/tests/permissions/test_4q_scoped_api_keys.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/authentication/models/_api_keys.py`, migration 0002_lexapikey, `lex/api/utils/api_key_requests.py`, `lex/authentication/middleware.py`, `lex/authentication/authentication_backends/api_keys.py`, `lex/api/middleware/keycloak_permissions.py`, `lex/core/models/LexModel.py` ('*' scope grant), `filter_backends.py`. Batch: [4q](batches.md).
+
+---

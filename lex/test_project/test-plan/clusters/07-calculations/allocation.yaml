@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 237
+max_scenario: 239
 letters:
   a:
     title: ''
@@ -227,3 +227,14 @@ letters:
       record created closed (its calculation_closed_reason() answers a reason) does not calculate on
       create, and nothing of a run happens for it: no registration, broadcast, cache entry, run audit entry or history row; 7.237 the method sees the status from
       before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not.
+  v:
+    title: "Database context in background calculations"
+    scenarios: 7.238-7.239
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      The pool thread is replaced by an inline call so the assertion is deterministic; the wrapping
+      happens inside _background_calculate either way.

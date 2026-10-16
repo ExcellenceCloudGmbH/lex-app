@@ -103,3 +103,20 @@
 **Scenario range:** 10.98-10.101. **Test file:** `lex/test_project/tests/api_layer/test_10q_openapi_schema.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/schema.py`, `lex/api/schema_extensions.py`, `lex/api/management/commands/schema.py`, schema routes in `lex/lex_app/urls.py`. Batch: [10q](batches.md).
 
 ---
+
+### 10r. Database context per request and per after-commit callback ✅
+
+**What it tests:** Each request runs in one transaction where the database knows the user; the setting does not leak into the next request; without DB_CONTEXT there is no extra transaction; on_commit callbacks run in a fresh transaction with the user.
+
+**Why a regression matters:** Row-level security fails open or closed exactly where the context is missing.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.102 | request knows the user | probe sees e2e_user; hook local=True inside a transaction |
+| 10.103 | no leak | anonymous request after it sees '' |
+| 10.104 | no hook | no call, no transaction |
+| 10.105 | on_commit | callback sees the user in a transaction |
+
+**Scenario range:** 10.102-10.105. **Test file:** `lex/test_project/tests/api_layer/test_10r_db_context.py`. **Type:** I + E. **Status:** ✅ Complete (2026-10-16). Covers `lex/core/db_context.py` (LexDbContextMiddleware, apply, on_commit), `lex/api/project/views.py` (LexAPIView.initial), MIDDLEWARE. Batch: [10r](batches.md).
+
+---

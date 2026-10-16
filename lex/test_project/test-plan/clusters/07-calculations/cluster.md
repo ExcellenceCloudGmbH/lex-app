@@ -141,3 +141,18 @@ In sync mode (`CELERY_ACTIVE=False`) a calculation runs inside the web/ASGI proc
 **Scenario range:** 7.228 – 7.237. **Test file:** `lex/test_project/tests/calculations/test_7u_closed_calculations.py`. **Type:** E. **Status:** ✅ Complete. 7.228 no run, status kept; 7.229 the rest of the save written; 7.230 an open record calculates; 7.231 the parent skips its closed child and logs why; 7.232–7.234 closed batch rows kept on the streaming, materialized and Celery paths; 7.235 `True` closes; 7.236 closed beats `calculate_on_create`, with none of a run's side effects; 7.237 closed once SUCCESS runs once. Paired with 2l (the button's 409) and 12m (the greyed button).
 
 ---
+
+### 7v. Database context in background calculations ✅
+
+**What it tests:** A Calculate click's thread applies the clicking user's database context (local=False) and resets it; without DB_CONTEXT nothing is called.
+
+**Why a regression matters:** Row-level security would otherwise hide every row from the calculation, or show it rows of the previous user on a pooled connection.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 7.238 | thread runs as the user | (e2e_user, False) then (None, False) |
+| 7.239 | no hook | never called |
+
+**Scenario range:** 7.238-7.239. **Test file:** `lex/test_project/tests/calculations/test_7v_db_context_thread.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/views/model_entries/One.py` (_calculate_in_background), `lex/core/db_context.py` (for_background). Batch: [7v](batches.md).
+
+---

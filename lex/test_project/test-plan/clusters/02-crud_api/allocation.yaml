@@ -1,7 +1,7 @@
 cluster: 2
 slug: crud_api
 title: CRUD via REST API
-max_scenario: 116
+max_scenario: 121
 letters:
   a:
     title: Create (POST)
@@ -130,3 +130,14 @@ letters:
       the edit keeps its status; 2.114 closing a record through an edit keeps its status; 2.115
       reopening it resets it like any edit of an open record; 2.116 an open record's edit still
       resets it to NOT_CALCULATED.
+  m:
+    title: "Public identifiers (lex_lookup_field)"
+    scenarios: 2.117-2.121
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      Responses keep integer ids, id_field and FK values, so the bundled frontend's type-sensitive id
+      matching is untouched.

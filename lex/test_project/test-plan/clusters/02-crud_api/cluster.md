@@ -89,3 +89,21 @@
 **Scenario range:** 2.110 – 2.116. **Test file:** `lex/test_project/tests/crud_api/test_2l_calculate_closed_record.py`. **Type:** E. **Status:** ✅ Complete. 2.110 409 with the reason, status unchanged, no run marked in progress; 2.111 an open record still gets 202; 2.112 `True` gets the default message; 2.113 a closed record's other fields stay editable and keep its status; 2.114 closing through an edit keeps the status; 2.115 reopening resets like any edit; 2.116 an open record's edit still resets. Covers `lex/api/views/model_entries/One.py`.
 
 ---
+
+### 2m. Public identifiers (lex_lookup_field) ✅
+
+**What it tests:** Read, change, delete and history by uuid with the same bodies as the integer routes; unknown uuid 404; lex_lookup_allow_pk=False closes the integer routes; a non-UUID lookup field is refused at registration.
+
+**Why a regression matters:** Guessable integer ids leak record counts and differ between systems; changing ids in payloads would break the bundled frontend.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 2.117 | read/update/delete by uuid | same body as the integer route; change and delete apply |
+| 2.118 | unknown uuid | 404 |
+| 2.119 | history by uuid | two versions |
+| 2.120 | integer route closed | 404 by id, 200 by uuid |
+| 2.121 | lookup field validated | ValueError for a CharField |
+
+**Scenario range:** 2.117-2.121. **Test file:** `lex/test_project/tests/crud_api/test_2m_public_identifiers.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers lookup routes in `lex/process_admin/sites/process_admin_site.py`, `lex/api/views/model_entries/One.py` (get_object), `History.py`, `lex/api/views/file_operations/FileDownload.py` (lookup=), `lex/process_admin/utils/model_registration.py` (_validate_lookup_field). Batch: [2m](batches.md).
+
+---

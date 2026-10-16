@@ -111,3 +111,17 @@ closed once the edit is applied keeps its status; an open one, reopened ones inc
 before. Nothing else about edits changes: closing stops only the calculation.
 
 ---
+
+### Batch 2m — Public identifiers (lex_lookup_field) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 2.117-2.121 |
+| Type | E |
+| Files covered | lookup routes in `lex/process_admin/sites/process_admin_site.py`, `lex/api/views/model_entries/One.py` (get_object), `History.py`, `lex/api/views/file_operations/FileDownload.py` (lookup=), `lex/process_admin/utils/model_registration.py` (_validate_lookup_field) |
+| Test file | `lex/test_project/tests/crud_api/test_2m_public_identifiers.py` |
+| Test classes | `TestCluster02m_PublicIdentifiers` |
+| Fixtures | `PublicIdItem` (unique UUIDField, lex_lookup_field='uuid') |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Responses keep integer ids, id_field and FK values, so the bundled frontend's type-sensitive id matching is untouched. |
