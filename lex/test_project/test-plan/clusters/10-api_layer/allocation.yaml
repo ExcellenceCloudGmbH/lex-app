@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 82
+max_scenario: 101
 letters:
   a:
     title: ''
@@ -143,3 +143,35 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  o:
+    title: "Project API endpoints mounted through lex; Process route removed"
+    scenarios: 10.83-10.91
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      E2ETestCase.use_lex_extensions overrides the extension keys and rebuilds the URL configuration for
+      one test, undoing both afterwards.
+  p:
+    title: "Error bodies: no tracebacks by default, structured on request"
+    scenarios: 10.92-10.97
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      The traceback stays in the audit log's failure entry; only the HTTP body loses it.
+  q:
+    title: "OpenAPI schema of the project API"
+    scenarios: 10.98-10.101
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      drf-spectacular 0.28.0 is pinned in requirements.txt and installed in INSTALLED_APPS; nothing runs
+      until a schema is requested.

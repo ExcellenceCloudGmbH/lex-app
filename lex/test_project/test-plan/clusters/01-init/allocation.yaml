@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 385
+max_scenario: 395
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1250,3 +1250,16 @@ letters:
       without the test project's environment and with the suite's checkout first on PYTHONPATH.
       Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
       set main() answers without Django fails both, because Django setup crashes in that directory.
+  av:
+    title: "Project extension keys, environment switches and security flags"
+    scenarios: 1.386-1.395
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once
+      per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks
+      1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks
+      1.392.

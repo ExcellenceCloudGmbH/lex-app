@@ -10,16 +10,16 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 47 | 385 | 427 | 0 | 0 |
+| 1. Init — Project Bootstrap | 48 | 395 | 437 | 0 | 0 |
 | 2. CRUD via REST API | 12 | 116 | 24 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 14 | 79 | 23 | 2 | 0 |
+| 4. Permissions | 15 | 85 | 29 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
 | 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
-| 10. API Layer | 14 | 82 | 32 | 0 | 0 |
+| 10. API Layer | 17 | 101 | 51 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 12 | 62 | 26 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -65,6 +65,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 1at | A Reflex development run behind one port — Reflex Enterprise's single-port proxy gets the Starlette app | 1.381-1.383 | complete | 3 | 0 | 0 | A pod exposes one port and a Reflex development run has two servers, so the platform starts the dashboards in Reflex Enterprise's single-port mode (REFLEX_USE_SINGLE_PORT): the backend answers its own routes and proxies every other path to Vite. On reflex-enterprise 0.9.6 with Reflex 0.9.12 the mode only logged "Unable to find the base Starlette app", and every page 404'd: Reflex passes a lifespan task the Reflex app as `app` and the Starlette app as `starlette_app`, and the proxy names its parameter `app`. lex_auth_plugin() -- which every project's rxconfig.py calls, lex_config() included -- replaces the module's function with one taking `starlette_app`; Reflex Enterprise imports it when it builds the app, after rxconfig.py has run. A proxy without an `app` parameter (a fixed release, the stand-in without asgiproxy, the replacement itself) is left alone.
 1.381 loads both kinds of rxconfig.py in a fresh interpreter, as a Reflex worker does; 1.382 runs Reflex Enterprise's own registration and Reflex's own lifespan runner against a real frontend socket. Mutations: four of four fail a test (no call, no `starlette_app` guard, no guard at all, the replacement keeping the name `app`). Verified outside the suite with the platform's start script (development mode, backend and Vite on two ports, the public origin as REFLEX_URL): pages, Vite's assets and socket, a backend-served image, and the event socket's state updates in a browser, all through the backend's one port. |
 | 1au | `lex --version` — the version /health reports, answered from anywhere | 1.384-1.385 | complete | 2 | 0 | 0 | `lex --version` answered "No such option": main() already sent --version past the Django bootstrap, but the group never declared the option. It now prints `lex, version X`, where X is lex._version.__version__ -- the version /health reports -- and not the package metadata: an image built from a git ref stamps lex/_version.py after `pip install`, while the metadata stays frozen at 0.0.0.dev0. Both scenarios run the CLI in a fresh interpreter, from a directory named release-smoke, without the test project's environment and with the suite's checkout first on PYTHONPATH. Mutations: reading the version from the package metadata fails 1.384; dropping --version from the set main() answers without Django fails both, because Django setup crashes in that directory. |
+| 1av | Project extension keys, environment switches and security flags | 1.386-1.395 | complete | 10 | 0 | 0 | Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks 1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks 1.392. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -138,6 +139,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4l | User API endpoint *(blocked — see §6 decision #2)* |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4m | `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass | 4.66-4.70 | complete | 5 | 0 | 0 | scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit order + subclass contract |
 | 4n | Keycloak UMA permissions in Reflex dashboards | 4.75-4.79 | complete | 5 | 0 | 0 | current_permissions / has_permission / current_access_token (lex/lex_app/reflex/auth.py) -- the Reflex counterpart of st.session_state.permissions, which the Streamlit proxy fills. One KeycloakManager lookup per access token, again after a refresh; a failed lookup keeps the same user's grants and never hands them to another user; sign-out clears them; has_permission counts model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of five mutations of that code (keep grants across users, keep them across sign-out, count record grants, cache the raw token, return the cached list itself) fails exactly one scenario. |
+| 4o | Generic API gate and OIDC redirect guard | 4.80-4.85 | complete | 6 | 0 | 0 | The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the frontend is served from the site's own origin or a configured dev origin. |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -257,6 +259,9 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 10m | Calculation-log tree pagination + N+1 fix | 10.61-10.66 | complete | 6 | 0 | 0 | scenarios 10.61–10.66; `CalculationLogTreeView` now paginates (limit/offset) and resolves child ids in one query (`assertNumQueries(3)` pins N+1 gone) instead of loading every row  |
 | 10n |  | 10.67-10.69 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 10o | Project API endpoints mounted through lex; Process route removed | 10.83-10.91 | complete | 9 | 0 | 0 | E2ETestCase.use_lex_extensions overrides the extension keys and rebuilds the URL configuration for one test, undoing both afterwards. |
+| 10p | Error bodies: no tracebacks by default, structured on request | 10.92-10.97 | complete | 6 | 0 | 0 | The traceback stays in the audit log's failure entry; only the HTTP body loses it. |
+| 10q | OpenAPI schema of the project API | 10.98-10.101 | complete | 4 | 0 | 0 | drf-spectacular 0.28.0 is pinned in requirements.txt and installed in INSTALLED_APPS; nothing runs until a schema is requested. |
 
 ## 11. Stress & Performance (`stress`)
 

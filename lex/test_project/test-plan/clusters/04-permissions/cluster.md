@@ -53,3 +53,22 @@
 **Scenario range:** 4.75 – 4.79. **Test file:** `lex/test_project/tests/permissions/test_4n_reflex_permissions.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Covers `lex/lex_app/reflex/auth.py`. Batch: [4n](batches.md).
 
 ---
+
+### 4o. Generic API gate and OIDC redirect guard ✅
+
+**What it tests:** GENERIC_API all/superuser/off decides access to lex's generic api/* (404 when closed) without touching the project API or the health check; next/fail on /oidc/* must be relative, the site's origin or a trusted origin (CSRF_TRUSTED_ORIGINS wildcards included), with the legacy opt-outs.
+
+**Why a regression matters:** A project serving its own API would otherwise expose every column of every model through the generic endpoints; the OIDC views were an open redirect.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.80 | gate modes | all/superuser/off per path and user; project prefix and api/health stay open |
+| 4.81 | redirect targets | relative, own, CORS and wildcard origins pass; foreign, protocol-relative, javascript: get 400 |
+| 4.82 | redirect opt-out | LEX_SEC_OIDC_REDIRECT=false and legacy pass |
+| 4.83 | default gate wiring | regular user gets 200 on api/model-structure |
+| 4.84 | superuser gate wiring | 404 NOT_FOUND for a regular user, 200 for a superuser, health 200 |
+| 4.85 | guard wiring | foreign next answers 400 REDIRECT_NOT_ALLOWED before the OIDC view |
+
+**Scenario range:** 4.80-4.85. **Test file:** `lex/test_project/tests/permissions/test_4o_generic_api_gate_and_redirects.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/middleware/generic_api_gate.py`, `lex/authentication/middleware.py` (OidcRedirectGuardMiddleware), MIDDLEWARE in `lex/lex_app/settings.py`. Batch: [4o](batches.md).
+
+---
