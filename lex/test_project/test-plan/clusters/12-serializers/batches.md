@@ -103,3 +103,17 @@
 | Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Strict input is opt-in (it is not a security fix and could refuse clients that send extra keys). |
+
+### Batch 12n — Read context built once per request ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.68 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (to_representation, LexModel can_read branch) |
+| Test file | `lex/test_project/tests/serializers/test_12n_read_context_reuse.py` |
+| Test classes | `TestCluster12n_ReadContextReuse` |
+| Fixtures | `TagItem` (LexModel's own can_read and permission_read); list with filter backends switched off |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | A model that overrides can_read is still asked through it; only LexModel's own can_read takes the cached context. |
