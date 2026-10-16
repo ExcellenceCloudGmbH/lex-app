@@ -79,13 +79,21 @@ must not open a check on the whole model.
 
 ---
 
-## Batch 4o — filter_values honours row and field read permissions (4.80-4.83)
+## Batch 4o — filter_values honours row and field read permissions (4.80-4.87)
 
 - **Type:** E
-- **Files covered:** `lex/api/views/model_entries/FilterValues.py`
+- **Files covered:** `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`
+  (`value_list_field`, `renders_rows_as_stored`), `lex/api/serializers/base_serializers.py`
+  (`_wrap_custom_serializer`'s `KEEPS_FIELD_VALUES` mark), `lex/api/views/model_entries/filter_backends.py`
+  (the read filter 4.81 and 4.87 rely on)
 - **Test file:** `lex/test_project/tests/permissions/test_4o_filter_values_permissions.py`
 - **Test classes:** `TestCluster04o_FilterValuesPermissions`
-- **Fixtures:** new `RowFieldItem`; `FieldLevelItem`
-- **Status:** complete — 4 pass
+- **Fixtures:** new `RowFieldItem`; `FieldLevelItem`; `KeycloakItem` (4.87); serializers registered on
+  `RowFieldItem.api_serializers` for one test each (4.84-4.86)
+- **Status:** complete — 8 pass
+- **Final review (4.84-4.87):** a write-only field, a field class with its own `to_representation` and
+  every field of a serializer that rewrites its rows are refused with the standard 400; on the
+  database path a record-level grant limits the count to that record. Mutation: the read filter
+  replaced by the identity fails 4.87 alone.
 
 ---

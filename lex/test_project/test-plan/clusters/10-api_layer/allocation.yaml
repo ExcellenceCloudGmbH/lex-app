@@ -155,10 +155,9 @@ letters:
       The filter bar's default columns travel in list_ui. 10.83 reads Meta.filter_bar, 10.84 falls
       back to a model attribute and defaults to an empty bar, 10.85 drops names that are not
       value-list columns (unknown, JSON, related paths) with one warning each and de-duplicates.
-      _resolve_filter_bar resolves each name with value_list_field(serializer_fields, model, name) --
-      the same resolver filter_values uses (lex/api/utils/filterable_fields.py) -- not the weaker
-      model-only is_value_list_field alone, so the bar can never name a column the endpoint would
-      refuse. get_list_ui_options (a classmethod) builds serializer_fields from cls().fields, which
-      instantiated cleanly for every serializer exercised here (confirmed empirically); a serializer
-      whose __init__ raises falls back to the model-only check. Fallout: test_10i's 10.25 exact
-      list_ui dicts gained filter_bar: [].
+      _resolve_filter_bar resolves each name with value_list_field(serializer, model, name) -- the
+      same resolver filter_values uses (lex/api/utils/filterable_fields.py), given the cls()
+      instance get_list_ui_options builds -- so the bar can never name a column the endpoint would
+      refuse. A serializer that cannot build its fields without a request is logged at DEBUG and
+      checked without them: value_lists_offered (the serializer-class check) and the column type.
+      Fallout: test_10i's 10.25 exact list_ui dicts gained filter_bar: [].

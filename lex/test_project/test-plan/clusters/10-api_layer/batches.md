@@ -70,14 +70,12 @@
 - **Test classes:** `TestCluster10o_ListUiFilterBar`
 - **Fixtures:** `SchemaItem`
 - **Status:** complete — 3 pass
-- **Note:** per task ruling, `_resolve_filter_bar(meta, serializer_fields)` decides each name with
-  `value_list_field(serializer_fields, model, name)` (Task 2, shared with the `filter_values`
-  endpoint) rather than the weaker model-only `is_value_list_field(model_field)` check alone, so the
-  bar can never name a column the endpoint would refuse. `get_list_ui_options` (a classmethod) builds
-  `serializer_fields` from `cls().fields`; this instantiated cleanly (confirmed empirically with a
-  temporary debug probe, since removed) for every serializer under test, so the model-only fallback
-  path is defensive-only here. Fallout: `test_10i_fields_view_and_list_ui.py`'s 10.25 and
-  `test_12e_factory.py`'s 12.35 pinned exact `list_ui` / `get_list_ui_options()` dicts and both were
-  updated to include `filter_bar: []`.
+- **Note:** `_resolve_filter_bar(serializer_class, serializer)` decides each name with
+  `value_list_field(serializer, model, name)`, the resolver the `filter_values` endpoint uses, given
+  the `cls()` instance `get_list_ui_options` builds, so the bar can never name a column the endpoint
+  would refuse. A serializer that cannot build its fields without a request is logged at DEBUG and
+  checked without them (`value_lists_offered` and the column type). Fallout:
+  `test_10i_fields_view_and_list_ui.py`'s 10.25 and `test_12e_factory.py`'s 12.35 pinned exact
+  `list_ui` / `get_list_ui_options()` dicts and both were updated to include `filter_bar: []`.
 
 ---

@@ -274,7 +274,7 @@ class FilterValues(ListModelEntries):
         -- and raises the single generic refusal when it returns ``None``, so
         the response never says which fields exist.
         """
-        model_field = value_list_field(serializer.fields, self._ag_model_class, field)
+        model_field = value_list_field(serializer, self._ag_model_class, field)
         if model_field is None:
             raise ValidationError({"field": f"{field!r} is not filterable."})
         return model_field

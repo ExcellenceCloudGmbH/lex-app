@@ -24,6 +24,9 @@ Found while the implementation plans were written against the source:
    values is how a filter is cleared.
 6. **First-load embed filters** apply to the first list mounted in the embed whose resource appears in
    the path the embed opened with. Host `filter` messages apply to the list mounted when they arrive.
+9. **Only what the grid renders can be listed.** A write-only field, a field whose class overrides
+   `to_representation` outside DRF, and every field of a serializer class that overrides
+   `to_representation` are not filterable.
 
 ## The problem
 

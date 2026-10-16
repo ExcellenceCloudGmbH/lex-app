@@ -19,7 +19,12 @@ from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
     strip_sensitive_fields,
 )
-from lex.api.utils.filterable_fields import is_value_list_field, value_list_field
+from lex.api.utils.filterable_fields import (
+    KEEPS_FIELD_VALUES,
+    is_value_list_field,
+    value_list_field,
+    value_lists_offered,
+)
 
 ID_FIELD_NAME = "id_field"
 SHORT_DESCR_NAME = "short_description"
@@ -281,7 +286,7 @@ class LexClearableImageField(LexClearableFileField, serializers.ImageField):
     """Image variant of :class:`LexClearableFileField` (same clear semantics)."""
 
 
-def _resolve_filter_bar(meta, serializer_fields) -> list:
+def _resolve_filter_bar(serializer_class, serializer) -> list:
     """The columns a list shows in its filter bar by default.
 
     ``Meta.filter_bar`` on the serializer, else a ``filter_bar`` attribute on
@@ -289,23 +294,17 @@ def _resolve_filter_bar(meta, serializer_fields) -> list:
     Names that are not value-list columns are dropped with a warning; a
     duplicate is dropped silently; order is preserved.
 
-    A name is kept only when :func:`value_list_field` accepts it against
-    ``serializer_fields`` -- the exact resolver the ``filter_values`` endpoint
-    uses (``lex/api/utils/filterable_fields.py``), not the weaker model-only
-    :func:`is_value_list_field` alone -- so the bar can never name a column
-    the endpoint would refuse (a renamed ``source``, a ``SerializerMethodField``,
-    or a name absent from the serializer are all refused here exactly as they
-    are there).
+    A name is kept only when :func:`value_list_field` accepts it for
+    ``serializer`` -- the resolver the ``filter_values`` endpoint uses -- so
+    the bar can never name a column the endpoint would refuse.
 
-    ``serializer_fields`` is ``None`` when ``get_list_ui_options`` could not
-    instantiate the serializer to read ``cls().fields`` (see the ``try/except``
-    there). That did not happen for any ``LexSerializer`` subclass exercised
-    here -- including every serializer under test -- but as a defensive
-    fallback for one whose ``__init__`` does raise without a request context,
-    this falls back to the weaker, model-only check (:func:`is_value_list_field`),
-    which cannot see the serializer's ``source`` remapping or a
-    ``SerializerMethodField`` shadowing the name.
+    ``serializer`` is ``None`` when ``get_list_ui_options`` could not build
+    the serializer's fields without a request. The checks that need no
+    instance still apply then (:func:`value_lists_offered`, and the column
+    type), but a field's ``source``, ``write_only`` flag and field class
+    cannot be seen.
     """
+    meta = getattr(serializer_class, "Meta", None)
     model = getattr(meta, "model", None)
     raw = getattr(meta, "filter_bar", None)
     if raw is None and model is not None:
@@ -319,9 +318,9 @@ def _resolve_filter_bar(meta, serializer_fields) -> list:
     for name in raw:
         accepted = False
         if model is not None and isinstance(name, str) and name:
-            if serializer_fields is not None:
-                accepted = value_list_field(serializer_fields, model, name) is not None
-            elif "__" not in name:
+            if serializer is not None:
+                accepted = value_list_field(serializer, model, name) is not None
+            elif "__" not in name and value_lists_offered(serializer_class, model):
                 try:
                     model_field = model._meta.get_field(name)
                 except Exception:
@@ -420,22 +419,21 @@ class LexSerializer(serializers.ModelSerializer):
         """Expose serializer-level frontend list options via ``Meta``."""
         meta = getattr(cls, "Meta", None)
         try:
-            # An unbound instance (no request context) -- exactly how
-            # ``Fields.get`` itself builds a serializer to read `.fields`.
-            # Needed so `_resolve_filter_bar` can apply the same
-            # `value_list_field` check `filter_values` enforces (source
-            # remapping / SerializerMethodField shadowing), not just the
-            # weaker model-only check.
-            serializer_fields = cls().fields
-        except Exception:
-            # Defensive only: no LexSerializer subclass exercised so far
-            # (including every one under test) raises here. If some other
-            # subclass's __init__ ever does, _resolve_filter_bar falls back
-            # to the model-only check rather than letting list_ui itself fail.
-            serializer_fields = None
+            # Unbound, as ``Fields.get`` builds it; the fields are built here
+            # too, so a serializer that cannot build them without a request
+            # falls back below instead of failing the whole list_ui.
+            serializer = cls()
+            _ = serializer.fields
+        except Exception as exc:
+            logger.debug(
+                "list_ui: %s for %s could not be built without a request (%r); "
+                "filter_bar is checked without its fields",
+                cls.__name__, getattr(getattr(meta, "model", None), "__name__", None), exc,
+            )
+            serializer = None
         return {
             "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
-            "filter_bar": _resolve_filter_bar(meta, serializer_fields),
+            "filter_bar": _resolve_filter_bar(cls, serializer),
         }
 
     # ------------------------------------------------------------------
@@ -1191,6 +1189,9 @@ def _wrap_custom_serializer(custom_cls, model_class):
                     representation["id"] = pk_value
             return representation
 
+        # Only `id` is touched, so every other field keeps the value its
+        # field class rendered (see filterable_fields.renders_rows_as_stored).
+        setattr(_to_representation_with_id, KEEPS_FIELD_VALUES, True)
         wrapped_cls.to_representation = _to_representation_with_id
     return wrapped_cls
 
