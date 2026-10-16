@@ -73,14 +73,27 @@ class TestCluster10p_ErrorContract(E2ETestCase):
         Given: DEBUG off, default security flags, a model whose save() raises
         When: the row is created through the generic CRUD endpoint
         Then: HTTP 500, the body still names the error under "error",
-              and it contains no "traceback".
+              and it contains no "traceback" — on the CRUD endpoint and on
+              run_step (CreateOrUpdate) alike.
         """
+        from django.urls import reverse
+
+        from lex.test_project.tests._e2e_test_case import _MockContainer
+
         with _env():
             response = self._create_exploding_row()
+            run_step = self.client.patch(
+                reverse("process_admin_rest_api:run_step",
+                        kwargs={"model_container": _MockContainer(API_PROJECT_ITEM), "pk": 999999}),
+                {"name": "explode"}, format="json",
+            )
         self.assertEqual(response.status_code, 500)
         body = response.json()
         self.assertIn("save failed on purpose", body["error"])
         self.assertNotIn("traceback", body)
+        self.assertEqual(run_step.status_code, 500)
+        self.assertIn("save failed on purpose", run_step.json()["error"])
+        self.assertNotIn("traceback", run_step.json())
 
     # -- 10.93 ---------------------------------------------------------
     def test_10_93_tracebacks_return_when_allowed(self) -> None:
