@@ -24,6 +24,7 @@ Found while the implementation plans were written against the source:
    values is how a filter is cleared.
 6. **First-load embed filters** apply to the first list mounted in the embed whose resource appears in
    the path the embed opened with. Host `filter` messages apply to the list mounted when they arrive.
+   (See 11 for messages that arrive before a list.)
 7. **Long text has no value list.** `TextField` columns keep their text condition only; "text" in
    §1's table means `CharField`.
 8. **A model can opt out of value lists** with `lex_value_lists = False`: `filter_values` refuses
@@ -37,6 +38,12 @@ Found while the implementation plans were written against the source:
     `GET api/model_info/<model>/fields` carries `value_list: true|false`, decided by the same
     resolver as `filter_values` for the requested serializer. The frontend offers Set and Multi
     value lists only where it is true.
+11. **Embed filter delivery.** After every frame load the component treats the frame as holding
+    only the filters its URL carried, and re-posts the current host filters when they differ.
+    Filters whose token would exceed 2,000 characters are not put in the URL and arrive by message
+    only. A host `filter` message that arrives before any list is mounted is kept and applied to the
+    first list that mounts. Re-passing the same filters on a rerun does not override what the user
+    changed inside the frame.
 
 ## The problem
 

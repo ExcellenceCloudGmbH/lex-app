@@ -1723,7 +1723,7 @@ to know any other way. The option takes `lex._version.__version__`.
 (`0.0.0.dev0` against the stamped label). Dropping `--version` from the set `main()` answers without
 setting Django up fails both: Django setup crashes in `release-smoke`.
 
-## Batch 1aw — lex_view filters, filter_bar and on_filter (1.393-1.399)
+## Batch 1aw — lex_view filters, filter_bar and on_filter (1.393-1.401)
 
 - **Type:** U
 - **Files covered:** `lex/lex_app/streamlit/embed.py`, `lex/lex_app/streamlit/_lex_view_component/__init__.py`,
@@ -1731,4 +1731,8 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 - **Test file:** `lex/test_project/tests/init/test_1aw_lex_view_filters.py`
 - **Test classes:** `TestCluster1aw_LexViewFilters`
 - **Fixtures:** none
-- **Status:** complete
+- **Status:** complete — 14 pass (node-dependent tests skip without node)
+- **Final review (1.400-1.401):** every frame load resets what the frame is taken to hold to the
+  filters its URL carried (`filter_sync.afterLoad`, run from one persistent load handler), so the
+  host's filters are re-posted when they differ; a filters token over 2,000 characters stays out of
+  the URL (`url_filters_token`) and is delivered by message only.

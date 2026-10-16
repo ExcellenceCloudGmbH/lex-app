@@ -77,6 +77,9 @@
     let _desiredFilters = null;
     let _desiredFiltersToken = null;
     let _frameFiltersToken = null;
+    // The token the frame's URL carried at its last navigation; null when
+    // Python left it out of the URL (too long) or there were no filters.
+    let _urlFiltersToken = null;
 
     function withFiltersParam(url, token) {
       if (!token) return url;
@@ -165,23 +168,39 @@
       _desiredFiltersToken = args.filters_token || null;
 
       if (!_rendered || frame.dataset.url !== url) {
-        // The first load carries the filters in the URL; `dataset.url` keeps
-        // the URL WITHOUT them, so a filter change is never a navigation.
-        frame.src = withFiltersParam(url, _desiredFiltersToken);
+        // The first load carries the filters in the URL when Python allowed
+        // the token there (url_filters_token); a longer one arrives by
+        // message after load. `dataset.url` keeps the URL WITHOUT them, so a
+        // filter change is never a navigation.
+        _urlFiltersToken = args.url_filters_token || null;
+        frame.src = withFiltersParam(url, _urlFiltersToken);
         frame.dataset.url = url;
-        _frameFiltersToken = _desiredFiltersToken;
+        _frameFiltersToken = _urlFiltersToken;
         _frameLoaded = false;
         _rendered = true;
-        frame.addEventListener("load", () => {
-          _frameLoaded = true;
-          postThemeToFrame(frame);
-          syncFilters(frame);
-        }, { once: true });
       } else {
         syncFilters(frame);
       }
 
       Streamlit.setFrameHeight(height);
+    });
+
+    // ── Every load of the frame ──────────────────────────────────────
+    // Not only the first: a reload or a sign-in round trip starts a fresh app
+    // that holds only the filters its URL carried and never saw a message
+    // posted to the page before it. So after EVERY load the theme is
+    // announced again and the host's filters are posted when they differ.
+    document.getElementById("frame").addEventListener("load", (ev) => {
+      if (!_rendered) return; // the initial about:blank document
+      const frame = ev.currentTarget;
+      const after = LexViewFilterSync.afterLoad({
+        urlToken: _urlFiltersToken,
+        desired: _desiredFiltersToken,
+      });
+      _frameLoaded = true;
+      _frameFiltersToken = after.current;
+      postThemeToFrame(frame);
+      if (after.post) postFiltersToFrame(frame);
     });
 
     // ── Inbound: lex-app → Streamlit ─────────────────────────────────

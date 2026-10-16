@@ -456,3 +456,5 @@ does not remove user launch configurations.
 | 1.397 | Malformed arguments | TypeError at the call | ✅ |
 | 1.398 | A filter change is not a new frame | Same URL, different token | ✅ |
 | 1.399 | When the shim posts | Loaded, named and changed only; index.html uses the function | ✅ |
+| 1.400 | A long filters token | Over 2,000 characters it stays out of the URL and is posted after load; at 2,000 it rides the URL | ✅ |
+| 1.401 | Every load resets the frame | After a new load, host filters that differ from the URL's are posted again; equal ones are not | ✅ |

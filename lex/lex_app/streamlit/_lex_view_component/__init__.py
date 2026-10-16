@@ -80,6 +80,7 @@ def render_lex_view_component(
     key: Optional[str] = None,
     filters: Optional[dict] = None,
     filters_token: Optional[str] = None,
+    url_filters_token: Optional[str] = None,
 ) -> Optional[dict]:
     """Render the bidirectional lex_view component.
 
@@ -104,10 +105,17 @@ def render_lex_view_component(
         get their own component slot automatically.
     filters : dict, optional
         The host's filters, already normalised by ``lex_view``. Posted into the
-        frame when they change after it loaded.
+        frame after a load, or on a later render, whenever the frame does not
+        already hold them.
     filters_token : str, optional
-        The same filters as a URL-safe token; added to the iframe URL on first
-        load, and compared to decide whether a change must be posted.
+        The same filters as a URL-safe token, compared to decide whether they
+        must be posted.
+    url_filters_token : str, optional
+        The token to put in the iframe URL when the frame (re)navigates, or
+        ``None`` to leave it out -- ``lex_view`` leaves out a token too long
+        for a URL, and those filters then arrive by message only. After every
+        load the frame is taken to hold exactly the filters this token
+        carried.
 
     Returns
     -------
@@ -124,6 +132,7 @@ def render_lex_view_component(
         expected_origin=expected_origin,
         filters=filters,
         filters_token=filters_token,
+        url_filters_token=url_filters_token,
         key=key,
         default=None,
     )

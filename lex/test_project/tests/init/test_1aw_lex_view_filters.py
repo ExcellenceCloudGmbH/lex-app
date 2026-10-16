@@ -6,8 +6,12 @@ passing one's selection or filters into the other. The filters therefore ride
 the component's arguments, never its URL or key: the URL is the component's
 identity, and changing it remounts the frame and wipes the user's grid state.
 The first load carries them in the iframe URL; later changes are posted, once
-the frame has loaded, only when they differ from what the frame has.
-Cluster 01-init, batch 1aw — scenarios 1.393–1.399. Type: U.
+the frame has loaded, only when they differ from what the frame has. Every load
+-- a reload, a sign-in round trip -- starts an app holding only the filters its
+URL carried, so the shim re-posts the host's filters when they differ. A token
+longer than 2,000 characters (a long id list) stays out of the URL, where it
+could hit a 414 and land in access logs, and arrives by message only.
+Cluster 01-init, batch 1aw — scenarios 1.393–1.401. Type: U.
 Covers: lex/lex_app/streamlit/embed.py (``lex_view``, ``normalise_filters``,
 ``encode_filters_token``), lex/lex_app/streamlit/_lex_view_component/__init__.py,
 lex/lex_app/streamlit/_lex_view_component/frontend/filter_sync.js and index.html.
@@ -49,6 +53,16 @@ def _capture_component(monkeypatch) -> dict:
 
 def _query(url: str) -> dict:
     return urllib.parse.parse_qs(urllib.parse.urlparse(url).query, keep_blank_values=True)
+
+
+def _run_shim(program: str) -> list:
+    """Run ``program`` under node with filter_sync.js loaded as ``s``; it prints JSON."""
+    script = FRONTEND / "filter_sync.js"
+    out = subprocess.run(
+        ["node", "-e", f"const s = require({json.dumps(str(script))});" + program],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return json.loads(out)
 
 
 class TestCluster1aw_LexViewFilters:
@@ -180,3 +194,79 @@ class TestCluster1aw_LexViewFilters:
         assert '<script src="filter_sync.js"></script>' in html, "the shim loads the decision function"
         assert 'type: "filter"' in html, "the shim posts filter messages"
         assert "LexViewFilterSync.shouldPost" in html, "and uses the tested function to decide"
+
+    def test_01_400_a_long_filters_token_is_left_out_of_the_url(self, monkeypatch):
+        """
+        Scenario 1.400: a long filter list is never put in the frame's URL
+        Given: filters whose token is exactly 2,000 characters, filters whose token is 2,002, and a
+               long id list
+        When: lex_view renders each
+        Then: only the 2,000-character token is offered for the URL (url_filters_token); for the
+              longer ones it is None, while the component still gets the filters and their token,
+              so they are delivered by message after load
+        """
+        from lex.lex_app.streamlit.embed import lex_view
+
+        captured = _capture_component(monkeypatch)
+        envelope = len('{"order":""}')  # compact JSON around the one string value
+        lex_view("invoice", filters={"order": "x" * (1500 - envelope)})  # 1,500 bytes -> 2,000 chars
+        assert len(captured["filters_token"]) == 2000
+        assert captured["url_filters_token"] == captured["filters_token"], "at the limit it rides the URL"
+
+        lex_view("invoice", filters={"order": "x" * (1501 - envelope)})  # 1,501 bytes -> 2,002 chars
+        assert len(captured["filters_token"]) == 2002
+        assert captured["url_filters_token"] is None, "over the limit it stays out of the URL"
+
+        ids = list(range(10_000, 10_600))
+        lex_view("invoice", filters={"order": ids})
+        assert len(captured["filters_token"]) > 2000
+        assert captured["url_filters_token"] is None
+        assert "filters" not in _query(captured["url"])
+        assert captured["filters"] == {"order": ids}, "the filters still reach the component, to be posted"
+        assert _decode(captured["filters_token"]) == {"order": ids}
+
+    @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+    def test_01_400_filters_left_out_of_the_url_are_posted_after_load(self):
+        """
+        Scenario 1.400 (shim): filters left out of the URL arrive by message
+        Given: a frame whose URL carried no filters token
+        When: it loads, with host filters and without
+        Then: the shim treats the frame as holding no filters and posts the host's; with no host
+              filters it posts nothing
+        """
+        results = _run_shim(
+            "console.log(JSON.stringify(["
+            "s.afterLoad({urlToken: null, desired: 'long-token'}),"
+            "s.afterLoad({urlToken: null, desired: null}),"
+            "]));"
+        )
+        assert results == [
+            {"current": None, "post": True},
+            {"current": None, "post": False},
+        ], results
+
+    @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+    def test_01_401_every_load_resets_what_the_frame_holds(self):
+        """
+        Scenario 1.401: a new load forgets what was posted before it
+        Given: a frame whose URL carried filters "a", to which "b" was posted later
+        When: the frame loads again -- a reload or a sign-in round trip
+        Then: the frame is taken to hold "a" again, so host filters "b" are posted again; host
+              filters equal to the URL's "a" are not posted; the shim runs this after every load
+        """
+        results = _run_shim(
+            "const posted = 'b';"  # what an earlier sync posted; a load must not trust it
+            "console.log(JSON.stringify(["
+            "s.afterLoad({urlToken: 'a', desired: posted}),"
+            "s.afterLoad({urlToken: 'a', desired: 'a'}),"
+            "]));"
+        )
+        assert results == [
+            {"current": "a", "post": True},
+            {"current": "a", "post": False},
+        ], results
+
+        html = (FRONTEND / "index.html").read_text()
+        assert "LexViewFilterSync.afterLoad" in html, "the shim decides after a load with the tested function"
+        assert "args.url_filters_token" in html, "the URL carries only the token Python allows in it"
+        assert "{ once: true }" not in html, "the load handler runs after every load, not the first only"

@@ -488,6 +488,11 @@ def _resolve_base_url() -> str:
     ).rstrip("/")
 
 
+# Longest filters token put in the iframe URL. A longer one -- a long id list --
+# risks a 414 and lands in access logs, so it is delivered by message only.
+MAX_URL_FILTERS_TOKEN = 2000
+
+
 def _filter_scalar(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -567,15 +572,26 @@ def lex_view(
 
     Two modes
     ---------
-    * **Plain iframe (legacy).** No ``on_*`` flag and no ``serializer``
-      requesting event-bearing behaviour → renders ``components.iframe``
-      and returns ``None``. Existing call sites are unchanged.
+    * **Plain iframe (legacy).** No ``on_*`` flag and ``filters=None`` →
+      renders ``components.iframe`` and returns ``None``. Existing call
+      sites are unchanged.
     * **Bidirectional component.** At least one of ``on_create``,
-      ``on_update``, ``on_select``, ``on_navigate``, ``on_flow_step`` is
-      ``True`` → renders the lex_view custom component which forwards
-      ``postMessage`` events from the React app back to Python.
+      ``on_update``, ``on_delete``, ``on_select``, ``on_navigate``,
+      ``on_flow_step``, ``on_filter`` is ``True``, or ``filters`` is a dict
+      (that alone selects it) → renders the lex_view custom component,
+      which forwards ``postMessage`` events from the React app back to
+      Python and posts later filter changes into the frame.
       ``lex_view(...)`` then returns the latest event envelope (or
       ``None`` until the first event arrives).
+
+    The two modes are different Streamlit elements: a page that switches an
+    embed with no ``on_*`` flag between a ``filters`` dict and
+    ``filters=None`` across reruns remounts the frame, which resets its grid,
+    each time. To clear one field, keep passing a dict and give that field
+    ``None`` (``{"region": None}``). Re-passing the same filters on a rerun
+    posts nothing, so it does not override what the user changed inside the
+    frame; filters that differ from the ones the frame last received are
+    posted, and replace the filters on the fields they name.
 
     See ``docs/features/access-and-ui/lex_view callbacks.md`` for the
     event envelope schema and the per-type payload contracts.
@@ -635,7 +651,9 @@ def lex_view(
         Field name to stored values: a list, one value, or ``None`` to clear
         the field. An empty list matches no rows. Applied on first load and,
         when changed on a later rerun, posted into the frame without reloading
-        it. Filters on fields not named here, set by the user, stay.
+        it. Filters on fields not named here, set by the user, stay. Filters
+        whose token is longer than 2,000 characters (a long id list) are not
+        put in the frame's URL; they are posted once the frame has loaded.
     filter_bar : list of str, optional
         The columns shown in the embed's filter bar; ``[]`` hides the bar.
     theme : str
@@ -799,13 +817,20 @@ def lex_view(
             if parsed_base.scheme and parsed_base.netloc
             else None
         )
+        filters_token = encode_filters_token(filters_payload) if filters_payload is not None else None
+        url_filters_token = (
+            filters_token
+            if filters_token is not None and len(filters_token) <= MAX_URL_FILTERS_TOKEN
+            else None
+        )
         return render_lex_view_component(
             url=final_url,
             height=height,
             expected_origin=expected_origin,
             key=key,
             filters=filters_payload,
-            filters_token=encode_filters_token(filters_payload) if filters_payload is not None else None,
+            filters_token=filters_token,
+            url_filters_token=url_filters_token,
         )
 
     # Legacy iframe path. Streamlit's components.iframe accepts width as

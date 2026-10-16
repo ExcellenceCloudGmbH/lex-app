@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 399
+max_scenario: 401
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1253,10 +1253,10 @@ letters:
 
   aw:
     title: lex_view filters, filter_bar and on_filter
-    scenarios: 1.393-1.399
+    scenarios: 1.393-1.401
     status: complete
     tests:
-      pass: 11
+      pass: 14
       skip: 0
       xfail: 0
     note: >-
@@ -1265,3 +1265,11 @@ letters:
       1.393-1.398 pin that, the component choice, the filter_bar and emit_filter parameters, and
       refusals at the call. 1.399 runs the shim's decision function under node (skipped without
       node): post only to a loaded frame, only named filters, only when they differ.
+      Final review: the shim no longer treats "last posted" as what the frame holds. After every
+      load -- a reload, a sign-in round trip -- filter_sync.afterLoad takes the frame to hold only
+      the filters its URL carried and re-posts the host's when they differ; index.html runs it from
+      one persistent load handler (it was a once-only listener). A token over
+      MAX_URL_FILTERS_TOKEN = 2,000 characters is left out of the URL (url_filters_token is None)
+      and arrives by message only. 1.400 pins the boundary (a 2,000-character token rides the URL,
+      2,002 does not) and the post after a URL-less load; 1.401 that a new load re-posts filters
+      that differ from the URL's and not ones equal to them.
