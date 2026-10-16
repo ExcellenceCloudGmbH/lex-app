@@ -94,7 +94,15 @@ class CeleryCalculationContext:
         self._model_context_backup = None
 
     def __enter__(self):
+        self._db_context = None
         if self.context:
+            # The database sees the user who started the task (lex_config.DB_CONTEXT).
+            from lex.core import db_context as lex_db_context
+
+            self._db_context = lex_db_context.for_background(
+                lex_db_context.user_from_operation_context(self.context)
+            )
+            self._db_context.__enter__()
             logger.warning(f"Operation Context {self.context}")
             new_context = deepcopy(self.context)
             new_context['calculation_id'] = self.context.get('calculation_id', None)
@@ -115,6 +123,9 @@ class CeleryCalculationContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if getattr(self, "_db_context", None) is not None:
+            self._db_context.__exit__(exc_type, exc_val, exc_tb)
+            self._db_context = None
         if self._op_token is not None:
             operation_context.reset(self._op_token)
         if self._model_context_backup is not None:

@@ -25,9 +25,13 @@ class FileDownloadView(APIView):
         # 1. Fetch the model and instance
         model = kwargs['model_container'].model_class
         pk = request.query_params.get('pk')
+        lookup = request.query_params.get('lookup')
         field_name = request.query_params.get('field')
-        if not pk or not field_name:
-            return JsonResponse({"error": "Both 'pk' and 'field' are required."}, status=400)
+        lookup_field = getattr(model, "lex_lookup_field", None)
+        if not (pk or (lookup and lookup_field)) or not field_name:
+            return JsonResponse({"error": "Both 'pk' (or 'lookup') and 'field' are required."}, status=400)
+        if pk and lookup_field and getattr(model, "lex_lookup_allow_pk", True) is False:
+            return JsonResponse({"error": "File not found"}, status=404)
 
         # Only real file fields can be downloaded; any other attribute is "not found".
         try:
@@ -39,7 +43,8 @@ class FileDownloadView(APIView):
 
         # Using filter().first() is safer than [0] to avoid IndexError if not found
         try:
-            instance = model.objects.filter(pk=pk).first()
+            criteria = {"pk": pk} if pk else {lookup_field: lookup}
+            instance = model.objects.filter(**criteria).first()
         except (ValueError, TypeError, ValidationError):
             instance = None
 

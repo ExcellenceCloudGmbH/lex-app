@@ -112,7 +112,7 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         for perm in user_permissions:
             if not isinstance(perm, Mapping):
                 continue
-            if perm.get("rsname") != resource_name:
+            if perm.get("rsname") not in (resource_name, "*"):
                 continue
 
             scopes = perm.get("scopes") or ()

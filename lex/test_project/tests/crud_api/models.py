@@ -10,6 +10,8 @@ mechanics, not access control (covered in Cluster 4).
 
 from __future__ import annotations
 
+import uuid as _uuid
+
 from django.db import models
 from lex.core.models.LexModel import LexModel, PermissionResult
 
@@ -70,7 +72,35 @@ class TrackedItem(LexModel):
         return True
 
 
+class PublicIdItem(LexModel):
+    """Cluster 2m: addressed by a public uuid (lex_lookup_field)."""
+
+    uuid = models.UUIDField(default=_uuid.uuid4, unique=True, editable=False)
+    name = models.CharField(max_length=200)
+    lex_lookup_field = "uuid"
+
+    class Meta:
+        app_label = "lex_app"
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 2m")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 2m")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [SimpleItem, TrackedItem]
+PUBLIC_ID_MODELS = [PublicIdItem]
+PUBLIC_ID = "publiciditem"
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
 SIMPLE = "simpleitem"

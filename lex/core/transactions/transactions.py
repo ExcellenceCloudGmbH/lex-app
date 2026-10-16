@@ -1,4 +1,5 @@
 from django.db import transaction
+from lex.core import db_context as lex_db_context
 
 from lex.core.calculated_updates.ObjectsToRecalculateStore import ObjectsToRecalculateStore
 from lex.core.calculated_updates.update_handler import CalculatedModelUpdateHandler
@@ -12,7 +13,7 @@ def as_transaction(func):
             CalculatedModelUpdateHandler.set_post_save_behaviour(
                 lambda entry: ObjectsToRecalculateStore.insert(entry)
             )
-            transaction.on_commit(ObjectsToRecalculateStore.do_recalculations)
+            lex_db_context.on_commit(ObjectsToRecalculateStore.do_recalculations)
             func()
             CalculatedModelUpdateHandler.reset_post_save_behaviour()
 

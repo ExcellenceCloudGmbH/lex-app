@@ -60,7 +60,7 @@ class BulkAuditLogMixin(AuditLogMixin):
         user = self.request.user if hasattr(self.request, 'user') else None
         resource = target.__name__.lower() if isinstance(target, type) else target.__class__.__name__.lower()
         audit_log = AuditLog.objects.create(
-            author=f"{str(user)}" if user else None,
+            author=(_audit_author(user) or "") if user else None,
             resource=resource,
             action=action,
             payload=payload,
@@ -165,3 +165,10 @@ class BulkAuditLogMixin(AuditLogMixin):
             if audit_logs and not is_atomic_block:
                 self._failed_audit_logged = True
             raise
+
+
+def _audit_author(user):
+    """A user without names is recorded by username, not as " " (BUG-007)."""
+    from lex.core.models.LexModel import LexModel
+
+    return LexModel._normalize_audit_actor(user)

@@ -9,6 +9,7 @@ from uuid import uuid4
 from django.core.exceptions import FieldDoesNotExist
 from django.core.files.base import File
 from django.db import transaction
+from lex.core import db_context as lex_db_context
 from django.db.models import Model, QuerySet
 from lex.api.utils.Context import OperationContext
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import (
@@ -37,7 +38,7 @@ from lex.core.models.LexModel import should_use_atomic_model_operations
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.exceptions import NotFound, PermissionDenied
-from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
+from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView, get_object_or_404
 from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -58,8 +59,24 @@ class OneModelEntry(
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
 
     def get_object(self):
-        """The addressed record; one the caller may not read is "not found" (LEX_SEC_NOT_FOUND)."""
-        instance = super().get_object()
+        """The addressed record; one the caller may not read is "not found" (LEX_SEC_NOT_FOUND).
+
+        A model with ``lex_lookup_field`` is also addressed by that uuid
+        (``.../one/<uuid>``); ``lex_lookup_allow_pk = False`` refuses the
+        integer route for it.
+        """
+        model_class = self.kwargs["model_container"].model_class
+        lookup_field = getattr(model_class, "lex_lookup_field", None)
+        lookup = self.kwargs.get("lookup")
+        if lookup is not None:
+            if not lookup_field:
+                raise NotFound()
+            instance = get_object_or_404(self.filter_queryset(self.get_queryset()), **{lookup_field: lookup})
+            self.check_object_permissions(self.request, instance)
+        else:
+            if lookup_field and getattr(model_class, "lex_lookup_allow_pk", True) is False:
+                raise NotFound()
+            instance = super().get_object()
         if strict("NOT_FOUND") and not is_readable(self.request, instance):
             raise NotFound()
         return instance
@@ -136,6 +153,8 @@ class OneModelEntry(
         from django.db import close_old_connections
 
         ctx = copy_context()
+        # The thread has its own database connection: give it the caller's context.
+        started_by = getattr(self.request, "user", None)
 
         def _invoke_calculate_hook():
             # Runs inside ``ctx.run(...)`` below so the
@@ -189,7 +208,8 @@ class OneModelEntry(
 
         def _background_calculate():
             try:
-                ctx.run(_invoke_calculate_hook)
+                with lex_db_context.for_background(started_by):
+                    ctx.run(_invoke_calculate_hook)
             except Exception as exc:
                 logger.error(
                     "Background calculation failed for %s: %s",
@@ -641,7 +661,7 @@ class OneModelEntry(
 
             created = getattr(self, "_created_instance", None)
             if self._calculates_on_create(created):
-                transaction.on_commit(lambda: self._calculate_after_create(created))
+                lex_db_context.on_commit(lambda: self._calculate_after_create(created))
                 # Once started, the run shows in the answer: the form gets the
                 # record back already IN_PROGRESS.
                 response.data = self.get_serializer(created).data

@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 
 from django.db import models, transaction
+from lex.core import db_context as lex_db_context
 
 from lex.core.mixins.ModelModificationRestriction import (
     AdminReportsModificationRestriction,
@@ -304,7 +305,7 @@ class CalculationLog(models.Model):
                         )
                         logger.warning(f"Fallback logging: {message}")
 
-                transaction.on_commit(persist_after_commit, using=db_alias)
+                lex_db_context.on_commit(persist_after_commit, using=db_alias)
             else:
                 cls._persist_message(context_info, message, logger)
 

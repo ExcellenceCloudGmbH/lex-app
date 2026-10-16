@@ -35,7 +35,7 @@ class TestCluster06c_ActorResolution(E2ETestCase):
     e2e_models = ALL_MODELS
 
     # -- 6.7 -----------------------------------------------------------
-    @unittest.expectedFailure  # BUG-007 (open): actor not populated via API create — sibling of BUG-004; revisit once the authenticated-context stamping step is reviewed
+    # BUG-007 resolved in 3.0: a user without first/last name is recorded by username.
     def test_6_7_authenticated_user_becomes_created_by(self) -> None:
         """
         Scenario 6.7: Authenticated API caller → ``created_by`` is

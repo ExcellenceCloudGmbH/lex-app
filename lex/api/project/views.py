@@ -145,6 +145,14 @@ class LexAPIView(APIView):
         except (queryset.model.DoesNotExist, ValueError, TypeError) as exc:
             raise Http404 from exc
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        # DRF may have authenticated a different user than the middleware saw
+        # (a project authentication class): tell the database (DB_CONTEXT).
+        from lex.core import db_context
+
+        db_context.apply(request.user, local=True)
+
     def dispatch(self, request, *args, **kwargs):
         calculation_id = f"api_{uuid.uuid4().hex}"
         atomic = transaction.atomic() if self.atomic else nullcontext()

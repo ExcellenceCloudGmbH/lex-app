@@ -61,6 +61,14 @@ class KeycloakPermissionsMiddleware:
             if auth_header.startswith("Bearer "):
                 access_token = auth_header[7:].strip()
 
+        if not access_token:
+            # A scoped API key brings its own scopes (lex.authentication.LexAPIKey).
+            from lex.api.utils.api_key_requests import get_scoped_api_key, scoped_key_permissions
+
+            scoped_key = get_scoped_api_key(request)
+            if scoped_key is not None:
+                request.user_permissions = scoped_key_permissions(scoped_key)
+
         if access_token:
             kc_manager = KeycloakManager()
             try:
