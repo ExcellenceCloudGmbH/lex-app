@@ -217,3 +217,17 @@ record had before it (7.237).
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | The pool thread is replaced by an inline call so the assertion is deterministic; the wrapping happens inside _background_calculate either way. |
+
+### Batch 7w — DB_CONTEXT in lex's on_commit callbacks ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 7.240-7.243 |
+| Type | U |
+| Files covered | `lex/core/transactions/transactions.py` (as_transaction), `lex/core/models/CalculationModel.py` (state persistence registration), `lex/audit_logging/models/CalculationLog.py` (log), `lex/core/db_context.py` (on_commit) |
+| Test file | `lex/test_project/tests/calculations/test_7w_db_context_on_commit.py` |
+| Test classes | `TestCluster07w_DbContextOnCommit` |
+| Fixtures | none (django TestCase, captureOnCommitCallbacks, a stub operation context) |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The test creates the CalculatedModelUpdateHandler that app start normally creates. |
