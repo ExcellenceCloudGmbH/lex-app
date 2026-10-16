@@ -33,6 +33,10 @@ Found while the implementation plans were written against the source:
 9. **Only what the grid renders can be listed.** A write-only field, a field whose class overrides
    `to_representation` outside DRF, and every field of a serializer class that overrides
    `to_representation` are not filterable.
+10. **The fields endpoint says which columns have a value list**: every field of
+    `GET api/model_info/<model>/fields` carries `value_list: true|false`, decided by the same
+    resolver as `filter_values` for the requested serializer. The frontend offers Set and Multi
+    value lists only where it is true.
 
 ## The problem
 

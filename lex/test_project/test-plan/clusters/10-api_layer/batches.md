@@ -62,14 +62,19 @@
 
 ---
 
-## Batch 10o — list_ui.filter_bar (10.83-10.85)
+## Batch 10o — list_ui.filter_bar and the fields endpoint's value_list flag (10.83-10.87)
 
 - **Type:** U
-- **Files covered:** `lex/api/serializers/base_serializers.py`, `lex/api/views/model_info/Fields.py`
+- **Files covered:** `lex/api/serializers/base_serializers.py`, `lex/api/views/model_info/Fields.py`,
+  `lex/api/utils/filterable_fields.py`
 - **Test file:** `lex/test_project/tests/api_layer/test_10o_list_ui_filter_bar.py`
 - **Test classes:** `TestCluster10o_ListUiFilterBar`
-- **Fixtures:** `SchemaItem`
-- **Status:** complete — 3 pass
+- **Fixtures:** `SchemaItem`; `ValueListItem`, `ValueListOptOutItem`, `FilterBarColumnItem` and
+  `AuditLog` (final review; no tables -- `Fields.get` is called directly)
+- **Status:** complete — 5 pass
+- **Final review (10.86-10.87):** every field descriptor carries `value_list`, decided by
+  `value_list_field` for the requested serializer instance; a `filter_bar` that is not a list of names
+  gives no bar and one warning instead of a `TypeError`.
 - **Note:** `_resolve_filter_bar(serializer_class, serializer)` decides each name with
   `value_list_field(serializer, model, name)`, the resolver the `filter_values` endpoint uses, given
   the `cls()` instance `get_list_ui_options` builds, so the bar can never name a column the endpoint

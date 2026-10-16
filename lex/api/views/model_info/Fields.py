@@ -12,6 +12,7 @@ from django.db.models import (
     JSONField
 )
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
+from lex.api.utils.filterable_fields import value_list_field
 from lex.api.views.permissions.UserPermission import UserPermission
 from lex.core.fields import PDFField, XLSXField
 from rest_framework import serializers as drf_serializers
@@ -198,6 +199,7 @@ class Fields(APIView):
             source = drf_field.source or fname
 
             # 1) Try Django model field first
+            model_backed = True
             try:
                 mfield = model._meta.get_field(source)
                 info = create_field_info(mfield)
@@ -207,6 +209,7 @@ class Fields(APIView):
                 info["is_groupable"] = True
 
             except Exception:
+                model_backed = False
                 # 2) Fallback: derive entirely from the DRF field
                 # Determine type
                 ftype = DEFAULT_TYPE_NAME
@@ -257,6 +260,12 @@ class Fields(APIView):
                         info["target"] = drf_field.queryset.model._meta.model_name
                     except Exception:
                         pass
+
+            # Whether filter_values lists this field's values through this
+            # serializer -- the same resolver, so the frontend offers a Set or
+            # Multi value list only where the endpoint answers. A field with
+            # no column behind it never has one.
+            info["value_list"] = model_backed and value_list_field(serializer, model, fname) is not None
 
             fields_info.append(info)
 

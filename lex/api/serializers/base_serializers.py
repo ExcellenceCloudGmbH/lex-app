@@ -292,7 +292,9 @@ def _resolve_filter_bar(serializer_class, serializer) -> list:
     ``Meta.filter_bar`` on the serializer, else a ``filter_bar`` attribute on
     the model, so a list without a custom serializer can still declare one.
     Names that are not value-list columns are dropped with a warning; a
-    duplicate is dropped silently; order is preserved.
+    duplicate is dropped silently; order is preserved. Anything but a list,
+    a tuple or a single name -- ``True``, or the model's own column when the
+    model has a field called ``filter_bar`` -- gives no bar and one warning.
 
     A name is kept only when :func:`value_list_field` accepts it for
     ``serializer`` -- the resolver the ``filter_values`` endpoint uses -- so
@@ -309,10 +311,16 @@ def _resolve_filter_bar(serializer_class, serializer) -> list:
     raw = getattr(meta, "filter_bar", None)
     if raw is None and model is not None:
         raw = getattr(model, "filter_bar", None)
-    if not raw:
+    if raw is None:
         return []
     if isinstance(raw, str):
-        raw = [raw]
+        raw = [raw] if raw else []
+    elif not isinstance(raw, (list, tuple)):
+        logger.warning(
+            "filter_bar of %s must be a list of field names, not %r; no bar",
+            getattr(model, "__name__", model), raw,
+        )
+        return []
 
     names: list = []
     for name in raw:
