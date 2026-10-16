@@ -20,7 +20,7 @@ from lex.api.serializers.sensitive_fields import (
     strip_sensitive_fields,
 )
 from lex.api.utils.filterable_fields import (
-    KEEPS_FIELD_VALUES,
+    _KEEPS_FIELD_VALUES,
     is_value_list_field,
     value_list_field,
     value_lists_offered,
@@ -1199,7 +1199,8 @@ def _wrap_custom_serializer(custom_cls, model_class):
 
         # Only `id` is touched, so every other field keeps the value its
         # field class rendered (see filterable_fields.renders_rows_as_stored).
-        setattr(_to_representation_with_id, KEEPS_FIELD_VALUES, True)
+        # Framework-private mark -- see filterable_fields._KEEPS_FIELD_VALUES.
+        setattr(_to_representation_with_id, _KEEPS_FIELD_VALUES, True)
         wrapped_cls.to_representation = _to_representation_with_id
     return wrapped_cls
 

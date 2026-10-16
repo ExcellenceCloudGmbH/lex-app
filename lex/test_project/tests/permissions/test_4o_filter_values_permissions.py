@@ -24,6 +24,7 @@ from collections import Counter
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth.models import User
 from rest_framework import serializers as drf_serializers
 from rest_framework import status
 
@@ -31,13 +32,14 @@ from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddlewar
 from lex.api.views.model_entries.FilterValues import uses_default_read_permission
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
-from .models import FieldLevelItem, KeycloakItem, RowFieldItem
+from .models import FieldLevelItem, KeycloakItem, OwnedItem, RowFieldItem
 
 pytestmark = pytest.mark.permissions
 
 ROWS = "rowfielditem"
 FIELD_LEVEL = "fieldlevelitem"
 KEYCLOAK = "keycloakitem"
+OWNED = "owneditem"
 REGIONS = ("north", "south", "west")
 TITLES = ("open-1", "open-2", "private-1", "private-2", "hidden-1")
 
@@ -97,6 +99,24 @@ class _MaskedAttributeRegion(drf_serializers.ModelSerializer):
         fields = ["id", "title", "region"]
 
 
+class _OwnerIdOnly(drf_serializers.ModelSerializer):
+    """Exposes only the related user's id -- the grid never sees the username."""
+
+    class Meta:
+        model = User
+        fields = ["id"]
+
+
+class _NestedOwner(drf_serializers.ModelSerializer):
+    """owner is served through a nested serializer: the grid shows {'id': ...}, not str(user)."""
+
+    owner = _OwnerIdOnly(read_only=True)
+
+    class Meta:
+        model = OwnedItem
+        fields = ["id", "name", "owner"]
+
+
 class _BlanksPrivateTitles(drf_serializers.ModelSerializer):
     """Rewrites its rows: a private row's title is rendered empty."""
 
@@ -114,7 +134,7 @@ class _BlanksPrivateTitles(drf_serializers.ModelSerializer):
 class TestCluster04o_FilterValuesPermissions(E2ETestCase):
     """Cluster 4o: filter_values honours row and field read permissions."""
 
-    e2e_models = [RowFieldItem, FieldLevelItem, KeycloakItem]
+    e2e_models = [RowFieldItem, FieldLevelItem, KeycloakItem, OwnedItem]
 
     def setUp(self):
         super().setUp()
@@ -292,9 +312,12 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
         Given: a serializer whose region field class renders every value as "(redacted)" (its own
                to_representation), one whose region field class reads "(masked)" instead of the
                stored value (its own get_attribute), and in both a title field class that only
-               inherits DRF's methods
-        When: region and title values are asked for through each
-        Then: region is the standard 400 and no stored region appears; title is listed
+               inherits DRF's methods; separately, an FK column served through a nested serializer
+               (fields = ["id"]) -- the grid sees only the related row's id, never its str()
+        When: region and title values are asked for through each, and the FK column through the
+              nested serializer
+        Then: region is the standard 400 and no stored region appears; title is listed; the FK
+              column is the standard 400 and the related row's str() appears nowhere in the response
         """
         self._use_serializers({"redacted": _RedactedRegion, "masked": _MaskedAttributeRegion})
         for override, query, placeholder in (
@@ -311,6 +334,39 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
                     "open-1", self._counts(ROWS, "title", query),
                     "a field class that only inherits DRF's methods keeps its value list",
                 )
+
+        with self.subTest(override="nested_serializer"):
+            had = hasattr(OwnedItem, "api_serializers")
+            original = getattr(OwnedItem, "api_serializers", None)
+
+            def _restore():
+                if had:
+                    OwnedItem.api_serializers = original
+                elif hasattr(OwnedItem, "api_serializers"):
+                    delattr(OwnedItem, "api_serializers")
+
+            self.addCleanup(_restore)
+            OwnedItem.api_serializers = {"nested": _NestedOwner}
+
+            # The framework gives User a custom __str__ -- "{first_name} {last_name}"
+            # (model_registration.py) -- so the leak check below must look for what
+            # str(owner) actually renders, not the username.
+            owner = User.objects.create(username="nested-fk-owner", first_name="Secret", last_name="Owner")
+            created = OwnedItem.objects.create(name="owned-1", owner=owner)
+            # OwnedItem keeps both default permission_read and can_read (cluster 4i's
+            # helper is exercised directly, not through this path -- see its model
+            # docstring), so -- exactly like 4.87's KeycloakItem -- the database path
+            # denies everything without an explicit per-record grant.
+            self._grant_record_read(OwnedItem, created.pk)
+
+            rows = self._list_rows(OWNED, "?serializer=nested")
+            row = next(r for r in rows if r.get("name") == "owned-1")
+            self.assertEqual(
+                row.get("owner"), {"id": owner.pk},
+                "premise: the grid shows only the nested serializer's id, never str(owner)",
+            )
+
+            self._assert_refused(OWNED, "owner", "?serializer=nested", (str(owner),))
 
     # -- 4.86 ----------------------------------------------------------
     def test_04_86_a_serializer_that_rewrites_its_rows_lists_no_column(self):

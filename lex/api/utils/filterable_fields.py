@@ -15,10 +15,13 @@ from typing import Any, Optional
 
 from django.core.exceptions import FieldDoesNotExist
 from django.db.models import BooleanField, CharField, DateField, DateTimeField, IntegerField, TextField
+from rest_framework import serializers
 
-# Marks a ``to_representation`` that leaves every field's value as its field
-# class rendered it (the framework's wrapper that only re-adds ``id``).
-KEEPS_FIELD_VALUES = "_lex_keeps_field_values"
+# Framework-private. Marks a ``to_representation`` that leaves every field's
+# value as its field class rendered it. Only the framework's own ``id``
+# wrapper (``_wrap_custom_serializer``) ever sets this -- it is not a public
+# opt-in, and no project serializer should set or rely on it.
+_KEEPS_FIELD_VALUES = "__lex_keeps_field_values"
 
 
 def is_plain_text_field(model_field) -> bool:
@@ -87,13 +90,13 @@ def renders_rows_as_stored(serializer_class) -> bool:
     (``_wrap_custom_serializer``) puts ``LexSerializer`` ahead of the custom
     class, so the whole hierarchy is walked, not just the first definition
     found; the framework's own wrapper that only re-adds ``id`` carries the
-    ``KEEPS_FIELD_VALUES`` mark.
+    framework-private ``_KEEPS_FIELD_VALUES`` mark.
     """
     from lex.api.serializers.base_serializers import LexSerializer  # see module docstring
 
     for klass in getattr(serializer_class, "__mro__", ()):
         method = vars(klass).get("to_representation")
-        if method is None or klass is LexSerializer or getattr(method, KEEPS_FIELD_VALUES, False):
+        if method is None or klass is LexSerializer or getattr(method, _KEEPS_FIELD_VALUES, False):
             continue
         if not getattr(method, "__module__", "").startswith("rest_framework."):
             return False
@@ -130,7 +133,19 @@ def _renders_value_as_stored(serializer_field) -> bool:
     ``to_representation`` on every field, so a class that defines either one
     itself (to mask, round or reformat) can show the grid something other
     than the stored value. A class that only inherits DRF's methods passes.
+
+    A nested serializer (a ``BaseSerializer``, which includes the
+    ``ListSerializer`` DRF substitutes for ``many=True``) is refused before
+    that walk, not by it: ``Serializer.get_attribute`` is plain ``Field``'s,
+    unmodified, and ``Serializer.to_representation`` is still defined in a
+    ``rest_framework.*`` module, so both would otherwise pass -- even though
+    what they render is a nested dict built from the related row (often just
+    ``{"id": ...}``), not that row's own value. A ``filter_values`` label
+    built from ``str(related_object)`` would show the whole related row
+    regardless of what the nested serializer actually publishes.
     """
+    if isinstance(serializer_field, serializers.BaseSerializer):
+        return False
     for method_name in ("get_attribute", "to_representation"):
         method = getattr(type(serializer_field), method_name, None)
         if not getattr(method, "__module__", "").startswith("rest_framework."):
@@ -155,7 +170,8 @@ def value_list_field(serializer, model_class, name: str) -> Optional[Any]:
       source ``"*"`` and a renamed field (``source="other_column"``) shows
       another column;
     * the field class reads or renders the value with a ``get_attribute`` or
-      ``to_representation`` of its own (:func:`_renders_value_as_stored`);
+      ``to_representation`` of its own, or is itself a nested serializer
+      (:func:`_renders_value_as_stored`);
     * it is not a real column or foreign key on the model of a type
       :func:`is_value_list_field` accepts.
     """

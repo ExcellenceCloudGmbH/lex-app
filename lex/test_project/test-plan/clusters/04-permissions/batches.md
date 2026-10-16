@@ -83,17 +83,19 @@ must not open a check on the whole model.
 
 - **Type:** E
 - **Files covered:** `lex/api/views/model_entries/FilterValues.py`, `lex/api/utils/filterable_fields.py`
-  (`value_list_field`, `renders_rows_as_stored`), `lex/api/serializers/base_serializers.py`
-  (`_wrap_custom_serializer`'s `KEEPS_FIELD_VALUES` mark), `lex/api/views/model_entries/filter_backends.py`
-  (the read filter 4.81 and 4.87 rely on)
+  (`value_list_field`, `renders_rows_as_stored`, `_renders_value_as_stored`),
+  `lex/api/serializers/base_serializers.py` (`_wrap_custom_serializer`'s `_KEEPS_FIELD_VALUES` mark),
+  `lex/api/views/model_entries/filter_backends.py` (the read filter 4.81 and 4.87 rely on)
 - **Test file:** `lex/test_project/tests/permissions/test_4o_filter_values_permissions.py`
 - **Test classes:** `TestCluster04o_FilterValuesPermissions`
-- **Fixtures:** new `RowFieldItem`; `FieldLevelItem`; `KeycloakItem` (4.87); serializers registered on
-  `RowFieldItem.api_serializers` for one test each (4.84-4.86)
+- **Fixtures:** new `RowFieldItem`; `FieldLevelItem`; `KeycloakItem` (4.87); `OwnedItem` (4.85's nested-
+  serializer subtest, with a per-record Keycloak grant like 4.87's); serializers registered on
+  `RowFieldItem.api_serializers` for one test each (4.84-4.86), and on `OwnedItem.api_serializers` for
+  the 4.85 nested-serializer subtest
 - **Status:** complete — 8 pass
 - **Final review (4.84-4.87):** a write-only field, a field class with its own `get_attribute` or
-  `to_representation` and every field of a serializer that rewrites its rows are refused with the
-  standard 400; on the database path a record-level grant limits the count to that record. Mutation:
-  the read filter replaced by the identity fails 4.87 alone.
+  `to_representation`, a nested serializer on an FK column, and every field of a serializer that
+  rewrites its rows are refused with the standard 400; on the database path a record-level grant
+  limits the count to that record. Mutation: the read filter replaced by the identity fails 4.87 alone.
 
 ---

@@ -22,10 +22,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth.models import User
 from django.test import SimpleTestCase
 from rest_framework import serializers as drf_serializers
 
 from lex.api.serializers.base_serializers import LexSerializer, get_serializer_map_for_model
+from lex.api.utils.filterable_fields import value_list_field
+from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import UserModelSerializer
 from lex.api.views.model_info.Fields import Fields, create_list_ui_info
 from lex.audit_logging.models.AuditLog import AuditLog
 
@@ -127,11 +130,15 @@ class TestCluster10o_ListUiFilterBar(SimpleTestCase):
         Given: a model with a char, integer, boolean, date, foreign-key and choice column, a
                TextField, a decimal, a JSON column and a credential-shaped name; a serializer that
                publishes the credential-shaped name, makes a column write-only and shows a column
-               under another field name; a model and AuditLog that opt out
+               under another field name; a model and AuditLog that opt out; auth.User, whose list
+               and filter_values always render through UserModelSerializer's allowlist regardless
+               of the requested serializer name
         When: GET .../fields is answered for each serializer
         Then: value_list is true exactly for the char, integer, boolean, date, foreign-key and choice
               columns; false for the TextField, decimal, JSON, credential-shaped, write-only and
-              renamed fields; false for every column of a model that opts out
+              renamed fields; false for every column of a model that opts out; for auth.User every
+              flag agrees with what filter_values would accept through UserModelSerializer, with
+              is_active, is_staff and is_superuser false on both sides
         """
         flags = dict(_value_list_flags(ValueListItem))
         for name in ("name", "count", "active", "day", "target", "status"):
@@ -159,6 +166,25 @@ class TestCluster10o_ListUiFilterBar(SimpleTestCase):
                 self.assertEqual(
                     [name for name, flag in opted_out if flag], [],
                     "a model with lex_value_lists = False has no value list on any column",
+                )
+
+        with self.subTest(model="auth.User"):
+            # auth.User always renders through UserModelSerializer's allowlist
+            # (LEX-702), not whatever the "default" auto serializer map holds --
+            # the fields endpoint must compute value_list against that same
+            # choice, or the flag can say true for a column filter_values 400s.
+            user_flags = dict(_value_list_flags(User))
+            list_serializer = UserModelSerializer()
+            for name, flag in user_flags.items():
+                with self.subTest(field=name):
+                    self.assertIs(
+                        flag, value_list_field(list_serializer, User, name) is not None,
+                        f"{name}: the fields flag disagrees with what filter_values would accept",
+                    )
+            for name in ("is_active", "is_staff", "is_superuser"):
+                self.assertIs(
+                    user_flags[name], False,
+                    f"{name} is not a UserModelSerializer column and must not offer a value list",
                 )
 
     # -- 10.87 ---------------------------------------------------------

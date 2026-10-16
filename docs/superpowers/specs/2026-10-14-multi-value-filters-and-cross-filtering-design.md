@@ -25,8 +25,8 @@ Found while the implementation plans were written against the source:
 6. **First-load embed filters** apply to the first list mounted in the embed whose resource appears in
    the path the embed opened with. Host `filter` messages apply to the list mounted when they arrive.
    (See 11 for messages that arrive before a list.)
-7. **Long text has no value list.** `TextField` columns keep their text condition only; "text" in
-   §1's table means `CharField`.
+7. **Long text has no value list.** `TextField` columns without `choices` keep their text condition
+   only; "text" in §1's table means `CharField`.
 8. **A model can opt out of value lists** with `lex_value_lists = False`: `filter_values` refuses
    its columns and the fields endpoint marks them `value_list: false`. `AuditLog` opts out — its
    read permission is decided per entry against the entry's target record, so a count would have to
