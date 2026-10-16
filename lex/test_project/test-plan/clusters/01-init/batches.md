@@ -1736,3 +1736,17 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 | Tests landed | **10 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks 1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks 1.392. |
+
+### Batch 1aw — lex create_api_key ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.396-1.397 |
+| Type | U |
+| Files covered | `lex/authentication/management/commands/create_api_key.py` |
+| Test file | `lex/test_project/tests/init/test_1aw_create_api_key.py` |
+| Test classes | `TestCluster01aw_CreateApiKey` |
+| Fixtures | none (django TestCase, a plain User) |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]). |

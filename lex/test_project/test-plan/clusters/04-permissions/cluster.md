@@ -123,3 +123,19 @@
 **Scenario range:** 4.104-4.110. **Test file:** `lex/test_project/tests/permissions/test_4q_scoped_api_keys.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/authentication/models/_api_keys.py`, migration 0002_lexapikey, `lex/api/utils/api_key_requests.py`, `lex/authentication/middleware.py`, `lex/authentication/authentication_backends/api_keys.py`, `lex/api/middleware/keycloak_permissions.py`, `lex/core/models/LexModel.py` ('*' scope grant), `filter_backends.py`. Batch: [4q](batches.md).
 
 ---
+
+### 4r. Audit authors for users without names ✅
+
+**What it tests:** A nameless key user is the audit author by username on a single create and on a bulk delete; a named user is still recorded as first and last name.
+
+**Why a regression matters:** BUG-007: audit rows of service accounts named nobody (" "), so nobody could tell who changed the data.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.111 | nameless user on create | author is the username |
+| 4.112 | nameless user on bulk delete | both rows name the username |
+| 4.113 | named user | author is "Ada Lovelace" as before |
+
+**Scenario range:** 4.111-4.113. **Test file:** `lex/test_project/tests/permissions/test_4r_audit_authors.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/audit_logging/mixins/AuditLogMixin.py` (log_change author), `lex/audit_logging/mixins/BulkAuditLogMixin.py` (log_change author, _audit_author). Batch: [4r](batches.md).
+
+---

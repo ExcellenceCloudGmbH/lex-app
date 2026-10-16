@@ -3,7 +3,7 @@ slug: calculations
 title: Calculation State Machine
 test_dirs:
 - calculations
-max_scenario: 239
+max_scenario: 243
 letters:
   a:
     title: ''
@@ -238,3 +238,13 @@ letters:
     note: >-
       The pool thread is replaced by an inline call so the assertion is deterministic; the wrapping
       happens inside _background_calculate either way.
+  w:
+    title: "DB_CONTEXT in lex's on_commit callbacks"
+    scenarios: 7.240-7.243
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      The test creates the CalculatedModelUpdateHandler that app start normally creates.

@@ -54,11 +54,11 @@
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 10.83 | Process route gone | api/process/x resolves to the frontend catch-all; no Process export |
+| 10.83 | Process route gone | api/process/x resolves to the frontend catch-all; no Process export, registration entry, structure node or view class left |
 | 10.84 | sign-in required | 200 for a signed-in caller, never 200 anonymously |
 | 10.85 | public paths | public=True and PUBLIC_PATHS answer anonymously; signed-in caller recognised |
 | 10.86 | rollback on error answer | 409 LexActionError body; the written row does not exist |
-| 10.87 | lookup applies read permission | readable 200; denied and missing ids both 404 |
+| 10.87 | lookup applies read permission | readable 200; denied and missing ids both 404; apply_read_restriction returns the same rows |
 | 10.88 | strict input | extra key 400 naming it; valid input 200 |
 | 10.89 | CSRF bootstrap | csrftoken cookie set |
 | 10.90 | signed webhook | valid HMAC 200 as the service user with the raw body; wrong signature 401 |
@@ -76,7 +76,7 @@
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 10.92 | no traceback by default | 500 with error, no traceback |
+| 10.92 | no traceback by default | 500 with error, no traceback, on CRUD and run_step (CreateOrUpdate) |
 | 10.93 | tracebacks when allowed | LEX_API_TRACEBACKS, legacy, DEBUG |
 | 10.94 | DRF bodies unchanged | field dict without code; structured on project endpoints and with LEX_ERROR_FORMAT |
 | 10.95 | project errors structured | 500 INTERNAL_ERROR without exception text |
