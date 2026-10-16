@@ -96,8 +96,15 @@ def on_commit(callback: Callable[[], Any], using: Optional[str] = None) -> None:
     ``SET LOCAL`` no longer holds; it gets a fresh transaction with the same
     user. Without DB_CONTEXT this is plain ``transaction.on_commit``.
     """
+    def register(fn):
+        # Plain on_commit(fn) when no alias is given, exactly as the call sites did before.
+        if using is None:
+            transaction.on_commit(fn)
+        else:
+            transaction.on_commit(fn, using=using)
+
     if hook() is None:
-        transaction.on_commit(callback, using=using)
+        register(callback)
         return
     user = user_from_operation_context()
 
@@ -106,7 +113,7 @@ def on_commit(callback: Callable[[], Any], using: Optional[str] = None) -> None:
             apply(user, local=True)
             callback()
 
-    transaction.on_commit(run, using=using)
+    register(run)
 
 
 class LexDbContextMiddleware:
