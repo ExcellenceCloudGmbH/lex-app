@@ -15,11 +15,11 @@
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 17 | 110 | 54 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
-| 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
+| 6. Audit Logging | 19 | 122 | 25 | 3 | 0 |
 | 7. Calculation State Machine | 22 | 239 | 96 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
-| 10. API Layer | 18 | 105 | 55 | 0 | 0 |
+| 10. API Layer | 19 | 112 | 62 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 13 | 67 | 31 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -185,6 +185,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 6p | Calculation-log cache backfill buffer cap |  | complete | 5 | 0 | 0 | scenarios 6.109–6.113; bounds `CacheManager.store_message` to a 256 KB tail (+ applies `CACHE_TIMEOUT`) so opening a long calc log can't OOM the backend |
 | 6q | Root-calculation detection ignores heading frames | 6.117-6.118 | complete | 2 | 0 | 0 | heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation` must skip them via get_root_model()/get_current_model() |
 | 6r | A run started by a create has its own audit entry | 6.119-6.120 | complete | 2 | 0 | 0 | 6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update' under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's entry is 'failure' with a traceback while the create's entry stays 'success'. |
+| 6s | Audit entries for actions | 6.121-6.122 | complete | 2 | 0 | 0 | The entry is written in the action's transaction, so a failed run leaves none (10.109). |
 
 ## 7. Calculation State Machine (`calculations`)
 
@@ -268,6 +269,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10p | Error bodies: no tracebacks by default, structured on request | 10.92-10.97 | complete | 6 | 0 | 0 | The traceback stays in the audit log's failure entry; only the HTTP body loses it. |
 | 10q | OpenAPI schema of the project API | 10.98-10.101 | complete | 4 | 0 | 0 | drf-spectacular 0.28.0 is pinned in requirements.txt and installed in INSTALLED_APPS; nothing runs until a schema is requested. |
 | 10r | Database context per request and per after-commit callback | 10.102-10.105 | complete | 4 | 0 | 0 | Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project uses. |
+| 10s | Record and collection actions | 10.106-10.112 | complete | 7 | 0 | 0 | calculate=true/cancel=true stay as they are; actions are additive. |
 
 ## 11. Stress & Performance (`stress`)
 

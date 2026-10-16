@@ -83,3 +83,18 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Scenario range:** 6.119 – 6.120. **Test file:** `lex/test_project/tests/audit_logging/test_6r_create_triggered_run_audit.py`. **Type:** E. **Status:** ✅ Complete. 6.119 two entries, both 'success'; 6.120 the run's entry is 'failure' with a traceback, the create's stays 'success'.
 
 ---
+
+### 6s. Audit entries for actions ✅
+
+**What it tests:** Every action run writes one audit entry (model, record, caller, action name, calculation id, status success); an unknown action writes none.
+
+**Why a regression matters:** Actions change data outside the CRUD endpoints; without an entry those changes would be invisible in the audit trail.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 6.121 | action run audited | one entry with lex_action, id, calculation_id, author, success |
+| 6.122 | unknown action | 404, no entry |
+
+**Scenario range:** 6.121-6.122. **Test file:** `lex/test_project/tests/audit_logging/test_6s_action_audit.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/actions.py` (ModelActionView._audit). Batch: [6s](batches.md).
+
+---

@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 105
+max_scenario: 112
 letters:
   a:
     title: ''
@@ -186,3 +186,13 @@ letters:
     note: >-
       Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project
       uses.
+  s:
+    title: "Record and collection actions"
+    scenarios: 10.106-10.112
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      calculate=true/cancel=true stay as they are; actions are additive.
