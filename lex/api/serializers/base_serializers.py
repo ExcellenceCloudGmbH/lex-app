@@ -798,7 +798,14 @@ class LexSerializer(serializers.ModelSerializer):
         # 1. Try Legacy 'can_read'
         elif target_caps['has_can_read']:
             try:
-                raw_visible_fields = target_instance.can_read(request)
+                if request is not None and type(target_instance).can_read is _lex_model_can_read():
+                    # LexModel.can_read is permission_read with a context built from
+                    # the request; build it from this serializer's cached base
+                    # instead of querying the user's groups once per row (BUG-011).
+                    result = target_instance.permission_read(self._get_user_context(request, target_instance))
+                    raw_visible_fields = result.get_fields(target_instance._get_all_field_names())
+                else:
+                    raw_visible_fields = target_instance.can_read(request)
             except Exception:
                 if _fail_closed():
                     logger.exception("can_read raised for %s; record withheld", type(target_instance).__name__)

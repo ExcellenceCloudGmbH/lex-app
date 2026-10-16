@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 67
+max_scenario: 68
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -157,3 +157,14 @@ letters:
       xfail: 0
     note: >-
       Strict input is opt-in (it is not a security fix and could refuse clients that send extra keys).
+  n:
+    title: "Read context built once per request"
+    scenarios: 12.68
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      A model that overrides can_read is still asked through it; only LexModel's own can_read takes the
+      cached context.
