@@ -1,7 +1,7 @@
 cluster: 9
 slug: signals_ws
 title: Signals & WebSocket
-max_scenario: 43
+max_scenario: 48
 letters:
   a:
     title: ''
@@ -76,3 +76,14 @@ letters:
       a day later, but both names stayed in `__all__`; a star import binds every name there, so it failed
       and took the calculation-signal API with it. Both names are dropped. 9.43 runs the star import and
       requires the three re-exported functions to be CalculationSignals' own.
+  h:
+    title: "Scoped realtime delivery"
+    scenarios: 9.44-9.48
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      The duplicate MODEL_MUTATION_GROUP constant was removed; the consumer imports it from
+      ModelMutationSignal.

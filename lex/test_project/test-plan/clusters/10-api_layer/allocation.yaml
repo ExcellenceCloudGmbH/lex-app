@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 112
+max_scenario: 116
 letters:
   a:
     title: ''
@@ -196,3 +196,13 @@ letters:
       xfail: 0
     note: >-
       calculate=true/cancel=true stay as they are; actions are additive.
+  t:
+    title: "Keycloak calls and session rows per request"
+    scenarios: 10.113-10.116
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b).
