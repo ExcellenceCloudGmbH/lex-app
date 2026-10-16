@@ -163,9 +163,11 @@ letters:
       forcing _count_per_row's readable-field membership test to always succeed fails 4.80 and 4.82.
       Final review -- only what the grid renders can be listed: value_list_field now takes the
       requested serializer instance and refuses a write-only field, extra_kwargs or HiddenField
-      (4.84), a field whose class defines its own to_representation (4.85), and every field of a
-      serializer whose class hierarchy defines to_representation outside LexSerializer and DRF
-      (4.86). The whole MRO is walked because a wrapped custom serializer puts LexSerializer ahead
+      (4.84), a field whose class takes get_attribute or to_representation from outside
+      rest_framework -- DRF's Serializer.to_representation calls both on every field; no framework
+      field class overrides either for a value-list column type, so nothing is whitelisted (4.85,
+      one subtest per method), and every field of a serializer whose class hierarchy defines
+      to_representation outside LexSerializer and DRF (4.86). The whole MRO is walked because a wrapped custom serializer puts LexSerializer ahead
       of the custom class; the framework's id-only wrapper carries KEEPS_FIELD_VALUES. 4.87 pins the
       read filter on the database path: KeycloakItem keeps both read methods at the LexModel
       default, and a record-level UMA grant on one of three rows lists only that row's label.

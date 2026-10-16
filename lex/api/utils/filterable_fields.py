@@ -124,13 +124,18 @@ def value_lists_offered(serializer_class, model_class) -> bool:
 
 
 def _renders_value_as_stored(serializer_field) -> bool:
-    """True when the field class renders the stored value with DRF's own method.
+    """True when the field class reads and renders the stored value with DRF's own methods.
 
-    A class that only inherits DRF's ``to_representation`` passes; one that
-    defines its own (to mask, round or reformat) does not.
+    ``Serializer.to_representation`` calls ``get_attribute`` and then
+    ``to_representation`` on every field, so a class that defines either one
+    itself (to mask, round or reformat) can show the grid something other
+    than the stored value. A class that only inherits DRF's methods passes.
     """
-    method = getattr(type(serializer_field), "to_representation", None)
-    return getattr(method, "__module__", "").startswith("rest_framework.")
+    for method_name in ("get_attribute", "to_representation"):
+        method = getattr(type(serializer_field), method_name, None)
+        if not getattr(method, "__module__", "").startswith("rest_framework."):
+            return False
+    return True
 
 
 def value_list_field(serializer, model_class, name: str) -> Optional[Any]:
@@ -149,8 +154,8 @@ def value_list_field(serializer, model_class, name: str) -> Optional[Any]:
     * the field's ``source`` is not itself -- a ``SerializerMethodField`` has
       source ``"*"`` and a renamed field (``source="other_column"``) shows
       another column;
-    * the field class renders the value with a ``to_representation`` of its
-      own (:func:`_renders_value_as_stored`);
+    * the field class reads or renders the value with a ``get_attribute`` or
+      ``to_representation`` of its own (:func:`_renders_value_as_stored`);
     * it is not a real column or foreign key on the model of a type
       :func:`is_value_list_field` accepts.
     """

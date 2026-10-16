@@ -91,9 +91,9 @@ must not open a check on the whole model.
 - **Fixtures:** new `RowFieldItem`; `FieldLevelItem`; `KeycloakItem` (4.87); serializers registered on
   `RowFieldItem.api_serializers` for one test each (4.84-4.86)
 - **Status:** complete — 8 pass
-- **Final review (4.84-4.87):** a write-only field, a field class with its own `to_representation` and
-  every field of a serializer that rewrites its rows are refused with the standard 400; on the
-  database path a record-level grant limits the count to that record. Mutation: the read filter
-  replaced by the identity fails 4.87 alone.
+- **Final review (4.84-4.87):** a write-only field, a field class with its own `get_attribute` or
+  `to_representation` and every field of a serializer that rewrites its rows are refused with the
+  standard 400; on the database path a record-level grant limits the count to that record. Mutation:
+  the read filter replaced by the identity fails 4.87 alone.
 
 ---

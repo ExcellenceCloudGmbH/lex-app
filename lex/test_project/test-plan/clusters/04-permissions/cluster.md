@@ -63,7 +63,7 @@
 | 4.82 | Field readable on no row | 200 with an empty list | ✅ |
 | 4.83 | Field the serializer does not expose | 400 "is not filterable" | ✅ |
 | 4.84 | Write-only field (`extra_kwargs`, `HiddenField`) | 400 "is not filterable"; no stored value in the response | ✅ |
-| 4.85 | Field class with its own `to_representation` | 400; a class that only inherits DRF's rendering is still listed | ✅ |
+| 4.85 | Field class with its own `to_representation` or `get_attribute` | 400 for each; a class that only inherits DRF's methods is still listed | ✅ |
 | 4.86 | Serializer class that rewrites its rows | No column listed through it; the default serializer still lists them | ✅ |
 | 4.87 | Record-level read grant, database path | Only the granted row is counted; other rows' values never appear | ✅ |
 

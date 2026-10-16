@@ -6,8 +6,8 @@ field on some rows; a value list must count neither, and a field the user can
 read on no row must give an empty list rather than an error. A field the
 serializer does not expose must be refused even though the model has it, and so
 must a field the grid never shows as stored: a write-only field, a field whose
-class rewrites its value, and every field of a serializer that rewrites its
-rows. On the database path (a LexModel with the default read permission) the
+class reads or renders something other than the stored value, and every field
+of a serializer that rewrites its rows. On the database path (a LexModel with the default read permission) the
 read filter alone decides which rows count, so a record-level grant must limit
 the list to that record. A regression leaks values of hidden fields or rows to
 anyone who opens a filter.
@@ -68,12 +68,28 @@ class _RedactedText(drf_serializers.CharField):
         return "(redacted)"
 
 
+class _MaskedAttributeText(drf_serializers.CharField):
+    """A field class that reads a placeholder instead of the row's stored value."""
+
+    def get_attribute(self, instance):
+        return "(masked)"
+
+
 class _PlainText(drf_serializers.CharField):
-    """A field subclass that keeps DRF's own rendering."""
+    """A field subclass that keeps DRF's own reading and rendering."""
 
 
 class _RedactedRegion(drf_serializers.ModelSerializer):
     region = _RedactedText()
+    title = _PlainText()
+
+    class Meta:
+        model = RowFieldItem
+        fields = ["id", "title", "region"]
+
+
+class _MaskedAttributeRegion(drf_serializers.ModelSerializer):
+    region = _MaskedAttributeText()
     title = _PlainText()
 
     class Meta:
@@ -272,22 +288,29 @@ class TestCluster04o_FilterValuesPermissions(E2ETestCase):
     # -- 4.85 ----------------------------------------------------------
     def test_04_85_a_field_class_that_rewrites_its_value_is_refused(self):
         """
-        Scenario 4.85: the grid shows what the field class renders, not the column
-        Given: a serializer whose region field class renders every value as "(redacted)", and
-               whose title field class only inherits DRF's rendering
-        When: region and title values are asked for through it
+        Scenario 4.85: the grid shows what the field class reads and renders, not the column
+        Given: a serializer whose region field class renders every value as "(redacted)" (its own
+               to_representation), one whose region field class reads "(masked)" instead of the
+               stored value (its own get_attribute), and in both a title field class that only
+               inherits DRF's methods
+        When: region and title values are asked for through each
         Then: region is the standard 400 and no stored region appears; title is listed
         """
-        self._use_serializers({"redacted": _RedactedRegion})
-        rows = self._list_rows(ROWS, "?serializer=redacted")
-        rendered = {row["region"] for row in rows if "region" in row}
-        self.assertEqual(rendered, {"(redacted)"}, "premise: the grid shows only the placeholder")
+        self._use_serializers({"redacted": _RedactedRegion, "masked": _MaskedAttributeRegion})
+        for override, query, placeholder in (
+            ("to_representation", "?serializer=redacted", "(redacted)"),
+            ("get_attribute", "?serializer=masked", "(masked)"),
+        ):
+            with self.subTest(override=override):
+                rows = self._list_rows(ROWS, query)
+                rendered = {row["region"] for row in rows if "region" in row}
+                self.assertEqual(rendered, {placeholder}, "premise: the grid shows only the placeholder")
 
-        self._assert_refused(ROWS, "region", "?serializer=redacted", REGIONS)
-        self.assertIn(
-            "open-1", self._counts(ROWS, "title", "?serializer=redacted"),
-            "a field class that only inherits DRF's to_representation keeps its value list",
-        )
+                self._assert_refused(ROWS, "region", query, REGIONS)
+                self.assertIn(
+                    "open-1", self._counts(ROWS, "title", query),
+                    "a field class that only inherits DRF's methods keeps its value list",
+                )
 
     # -- 4.86 ----------------------------------------------------------
     def test_04_86_a_serializer_that_rewrites_its_rows_lists_no_column(self):
