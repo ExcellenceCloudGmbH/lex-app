@@ -163,8 +163,86 @@ class ApiProjectItem(LexModel):
         return self.name
 
 
+from django.http import HttpResponse  # noqa: E402
+from rest_framework import serializers as _drf  # noqa: E402
+
+from lex.api.errors import LexActionError  # noqa: E402
+from lex.api.project import lex_action  # noqa: E402
+
+
+class _ApproveInput(_drf.Serializer):
+    note = _drf.CharField()
+
+
+class _BatchInput(_drf.Serializer):
+    count = _drf.IntegerField(min_value=1, max_value=5)
+
+
+class ActionItem(LexModel):
+    """Cluster 10s: actions beyond CRUD. "locked" rows are readable but not editable."""
+
+    name = models.CharField(max_length=200)
+    status = models.CharField(max_length=20, default="draft")
+    note = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        if self.name == "hidden":
+            return PermissionResult.deny("cluster 10s: hidden")
+        return PermissionResult.allow_all("cluster 10s")
+
+    def permission_edit(self, uc):
+        if self.status == "locked":
+            return PermissionResult.deny("cluster 10s: locked")
+        return PermissionResult.allow_all("cluster 10s")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+    @classmethod
+    def permission_download(cls, uc):
+        return uc.is_superuser
+
+    @lex_action(permission="edit", input=_ApproveInput)
+    def approve(self, context, data):
+        self.status = "approved"
+        self.note = data["note"]
+        self.save()
+        return {"status": self.status, "by": getattr(context.user, "username", None)}
+
+    @lex_action(permission="edit")
+    def explode(self, context, data):
+        ActionItem.objects.create(name="side-effect")
+        raise LexActionError("Cannot do that now.", code="NOT_NOW", status_code=409)
+
+    @lex_action(methods=("get",), permission="permission_download")
+    def download(self, context, data):
+        response = HttpResponse(f"name\n{self.name}\n", content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{self.pk}.csv"'
+        return response
+
+    @lex_action()
+    def unguarded(self, context, data):  # no permission declared: always refused
+        return {"ran": True}
+
+    @lex_action(detail=False, permission="create", input=_BatchInput)
+    def batch(cls, context, data):
+        created = [ActionItem.objects.create(name=f"batch-{i}") for i in range(data["count"])]
+        return {"ids": [item.pk for item in created]}
+
+
 ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
 PROJECT_MODELS = [ApiProjectItem]
+ACTION_MODELS = [ActionItem]
+ACTION_ITEM = "actionitem"
 API_PROJECT_ITEM = "apiprojectitem"
 
 API_SIMPLE = "apisimpleitem"

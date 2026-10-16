@@ -87,7 +87,37 @@ class AuditNonAtomicCalc(CalculationModel):
             )
 
 
+from lex.api.project import lex_action  # noqa: E402
+
+
+class AuditActionItem(LexModel):
+    """Cluster 6s: an action whose run must leave an audit entry."""
+
+    name = models.CharField(max_length=200)
+    closed = models.BooleanField(default=False)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 6s")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 6s")
+
+    def permission_list(self, uc):
+        return True
+
+    @lex_action(permission="edit")
+    def close(self, context, data):
+        self.closed = True
+        self.save()
+        return {"closed": True}
+
+
 ALL_MODELS = [AuditSimpleItem, AuditAtomicCalc, AuditNonAtomicCalc]
+ACTION_MODELS = [AuditActionItem]
+AUDIT_ACTION = "auditactionitem"
 
 AUDIT_SIMPLE = "auditsimpleitem"
 AUDIT_ATOMIC = "auditatomiccalc"

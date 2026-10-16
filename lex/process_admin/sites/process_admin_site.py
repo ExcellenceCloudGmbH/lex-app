@@ -11,6 +11,7 @@ from lex.api.views.file_operations.FileDownload import FileDownloadView
 from lex.api.views.file_operations.ModelExport import ModelExportView
 from lex.api.views.global_search_for_models.Search import Search
 from lex.api.views.model_entries.CalculationLogTreeView import CalculationLogTreeView
+from lex.api.actions import ModelActionView
 from lex.api.views.model_entries.History import HistoryModelEntry
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.Many import ManyModelEntries
@@ -208,6 +209,22 @@ class ProcessAdminSite:
                 "api/model_entries/<model:model_container>/<str:calculationId>/history/<uuid:lookup>",
                 HistoryModelEntry.as_view(),
                 name="model-history-list-by-lookup",
+            ),
+            # Actions declared with @lex_action (lex.api.actions).
+            path(
+                "api/model_entries/<model:model_container>/<str:calculationId>/one/<int:pk>/action/<str:action>",
+                ModelActionView.as_view(),
+                name="model-record-action",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/<str:calculationId>/one/<uuid:lookup>/action/<str:action>",
+                ModelActionView.as_view(),
+                name="model-record-action-by-lookup",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/<str:calculationId>/action/<str:action>",
+                ModelActionView.as_view(),
+                name="model-collection-action",
             ),
             path(
                 "api/model_entries/<model:model_container>/<str:calculationId>/history/<int:pk>",
