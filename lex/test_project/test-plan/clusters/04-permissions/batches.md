@@ -134,3 +134,17 @@ must not open a check on the whole model.
 | Tests landed | **3 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Same fallback as the model's created_by (LexModel._normalize_audit_actor). |
+
+### Batch 4s — API-key read decided by the serializer ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.114 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (_get_can_read_context) |
+| Test file | `lex/test_project/tests/permissions/test_4s_api_key_read_context.py` |
+| Test classes | `TestCluster04s_ApiKeyReadContext` |
+| Fixtures | `KeycloakItem` (default permissions); classic `APIKey` via authenticate_as_api_key; LEX_SEC_NOT_FOUND=false |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |

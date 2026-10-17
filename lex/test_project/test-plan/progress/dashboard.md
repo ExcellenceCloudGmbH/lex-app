@@ -13,7 +13,7 @@
 | 1. Init — Project Bootstrap | 49 | 397 | 439 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 18 | 113 | 57 | 2 | 0 |
+| 4. Permissions | 19 | 114 | 58 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 19 | 122 | 25 | 3 | 0 |
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
@@ -145,6 +145,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4p | Secure permission defaults on the generic REST API | 4.86-4.103 | complete | 18 | 0 | 0 | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |
 | 4q | Scoped API keys (LexAPIKey) | 4.104-4.110 | complete | 7 | 0 | 0 | LexAPIKey lives in an underscore module so model discovery does not register it with the generic API (key hashes are never listed). |
 | 4r | Audit authors for users without names | 4.111-4.113 | complete | 3 | 0 | 0 | Same fallback as the model's created_by (LexModel._normalize_audit_actor). |
+| 4s | API-key read decided by the serializer | 4.114 | complete | 1 | 0 | 0 | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |
 
 ## 5. History & Bitemporal (`history`)
 
