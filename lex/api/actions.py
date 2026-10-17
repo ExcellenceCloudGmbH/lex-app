@@ -54,6 +54,9 @@ OpenAPI schema, ``summary``, ``description``, ``operation_id``, ``tags``,
 ``responses`` (extra statuses) and ``media="multipart"`` for file uploads.
 ``input`` and ``output`` may be dotted paths to the serializer classes; ``many=True`` documents an
 output that is a list of ``output``.
+
+A model inherits the actions of its bases, a projection those of the model it projects.
+``lex_actions = ("name", ...)`` on a model names the actions it offers; the others do not exist on it.
 """
 from __future__ import annotations
 
@@ -182,6 +185,9 @@ def actions_for(model_class) -> Dict[str, ActionSpec]:
             spec = getattr(target, _ATTR, None)
             if isinstance(spec, ActionSpec):
                 found[spec.name] = spec
+    allowed = getattr(model_class, "lex_actions", None)
+    if allowed is not None:  # e.g. a projection that offers none or only some of its base model's actions
+        found = {name: spec for name, spec in found.items() if name in set(allowed)}
     _registry[model_class] = found
     return found
 

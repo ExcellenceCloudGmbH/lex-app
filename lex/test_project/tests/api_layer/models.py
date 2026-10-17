@@ -372,8 +372,23 @@ class ActionItemCard(ActionItem):
 
 
 _CardSerializer.Meta.model = ActionItemCard
+
+
+class ActionItemTile(ActionItem):
+    """A projection of ActionItem that offers only one of its actions (lex_actions)."""
+
+    lex_read_model = True
+    lex_actions = ("ping",)
+    api_serializers = {"default": _CardSerializer}
+
+    class Meta:
+        app_label = "lex_app"
+        proxy = True
+
+
 READ_SUMMARY = "actionitemsummary"
 ACTION_CARD = "actionitemcard"
+ACTION_TILE = "actionitemtile"
 
 # ---------------------------------------------------------------------------
 # Cluster 10z: the public shape of the generic API (uuid only, no lex fields, documented)
