@@ -13,7 +13,7 @@ and an OpenAPI document with one operation per exposed model, operation and
 action — stable operation ids, uuid path parameters, the action's input and
 output, the project's error body — that a typed client is generated from.
 
-Cluster 10z — scenarios 10.144–10.149. Type: E.
+Cluster 10z — scenarios 10.144–10.149, 10.151. Type: E.
 Covers: lex/process_admin/sites/process_admin_site.py (short routes, _with_calculation_id),
 lex/api/serializers/relations.py (LexLookupRelatedField), lex/api/views/model_entries/List.py
 (_resolve_lookup by public id), lex/api/serializers/base_serializers.py (_wrap_without_internal_fields),
@@ -32,7 +32,8 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.test_project.tests._e2e_test_case import E2ETestCase, _MockContainer
 
-from .models import PUBLIC_API_MODELS, PUBLIC_DOCUMENT, PUBLIC_FOLDER, PublicApiDocument, PublicApiFolder
+from .models import (ACTION_ITEM, ACTION_MODELS, PUBLIC_API_MODELS, PUBLIC_DOCUMENT, PUBLIC_FOLDER, ActionItem,
+                     PublicApiDocument, PublicApiFolder)
 
 pytestmark = pytest.mark.api_layer
 
@@ -51,7 +52,7 @@ def _short(name, model, **kwargs):
 class TestCluster10z_PublicGenericApi(E2ETestCase):
     """Cluster 10z: what a project's clients see of the generic API."""
 
-    e2e_models = PUBLIC_API_MODELS
+    e2e_models = PUBLIC_API_MODELS + ACTION_MODELS
     e2e_framework_models = [AuditLog, AuditLogStatus]
 
     def setUp(self) -> None:
@@ -205,3 +206,23 @@ class TestCluster10z_PublicGenericApi(E2ETestCase):
         PublicApiDocument.objects.create(title="A", folder=self.archive)
         listed = self.client.get(_short("model-collection-action", PUBLIC_DOCUMENT, action="titles"))
         self.assertEqual(listed.json(), [{"title": "A"}, {"title": "B"}])
+
+    # -- 10.151 --------------------------------------------------------
+    def test_10_151_a_model_without_a_lookup_field_on_the_short_paths(self) -> None:
+        """
+        Scenario 10.151: the short paths the document names exist for an integer key too.
+        Given: ActionItem, without lex_lookup_field
+        When: one row is read, its history listed and a record action run on the short paths
+        Then: 200 each; the routes resolve to the -short names the generic gate maps.
+        """
+        from django.urls import resolve
+
+        item = ActionItem.objects.create(name="draft one")
+        base = f"/api/model_entries/{ACTION_ITEM}/one/{item.pk}"
+        self.assertEqual(resolve(base).url_name, "model-one-entry-read-update-delete-short")
+        self.assertEqual(resolve(f"{base}/history").url_name, "model-history-list-short")
+        self.assertEqual(resolve(f"{base}/action/ping").url_name, "model-record-action-short")
+        read = self.client.get(base)
+        self.assertEqual(read.status_code, 200, read.content[:300])
+        self.assertEqual(self.client.get(f"{base}/history").status_code, 200)
+        self.assertEqual(self.client.post(f"{base}/action/ping", {}, format="json").json(), {"pong": True})

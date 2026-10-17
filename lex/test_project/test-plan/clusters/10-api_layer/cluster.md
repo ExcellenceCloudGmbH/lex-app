@@ -265,7 +265,8 @@
 | 10.147 | one operation per exposed model and action | operation ids and paths; GET action query input; POST body; error body; clean components |
 | 10.148 | the document validates | lex schema --validate --fail-on-warn succeeds |
 | 10.149 | an action answers with a list | many=True documents an array of the output; the call answers the list |
+| 10.151 | a model without a lookup field on the short paths | one, history and record action by integer key answer 200 on the -short routes |
 
-**Scenario range:** 10.144-10.149. **Test file:** `lex/test_project/tests/api_layer/test_10z_public_generic_api.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths), `lex/api/actions.py` (many). Batch: [10z](batches.md).
+**Scenario range:** 10.144-10.149, 10.151. **Test file:** `lex/test_project/tests/api_layer/test_10z_public_generic_api.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths), `lex/api/actions.py` (many). Batch: [10z](batches.md).
 
 ---

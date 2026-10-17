@@ -216,6 +216,22 @@ class ProcessAdminSite:
                 _with_calculation_id(ModelActionView.as_view()),
                 name="model-collection-action-short",
             ),
+            # A model without lex_lookup_field is addressed by its integer key on the short paths too
+            path(
+                "api/model_entries/<model:model_container>/one/<int:pk>",
+                _with_calculation_id(OneModelEntry.as_view()),
+                name="model-one-entry-read-update-delete-short",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/one/<int:pk>/history",
+                _with_calculation_id(HistoryModelEntry.as_view()),
+                name="model-history-list-short",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/one/<int:pk>/action/<str:action>",
+                _with_calculation_id(ModelActionView.as_view()),
+                name="model-record-action-short",
+            ),
             path(
                 "api/model_entries/<model:model_container>/<str:calculationId>/one/<int:pk>",
                 OneModelEntry.as_view(),

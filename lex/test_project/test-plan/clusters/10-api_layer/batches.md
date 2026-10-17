@@ -220,7 +220,7 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 10.144-10.149 |
+| Scenario range | 10.144-10.149, 10.151 |
 | Type | E |
 | Files covered | `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths) |
 | Test file | `lex/test_project/tests/api_layer/test_10z_public_generic_api.py` |
