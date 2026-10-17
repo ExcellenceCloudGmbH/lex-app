@@ -351,6 +351,47 @@ def _coerce_value(model_field, value):
     return value
 
 
+_CONVERSION_FAILED = object()
+
+
+def _typed_value_converter(model_field):
+    """The conversion callable for a stored-value key, shared by the POST
+    Set filter (``ListModelEntries._set_filter_values``) and the GET
+    ``__exact``/``__in`` query-param path (:func:`_coerce_typed_value`), so
+    both turn the same raw string into the same Python value: the target
+    field's ``to_python`` for a foreign key, :func:`_bool_from_key` for a
+    boolean column (Django's own ``to_python`` rejects the ``"true"`` /
+    ``"false"`` strings both send), and the field's own ``to_python``
+    otherwise.
+    """
+    target_field = getattr(model_field, "target_field", None)
+    if getattr(model_field, "is_relation", False) and target_field is not None:
+        return target_field.to_python
+    if isinstance(model_field, BooleanField):
+        return _bool_from_key
+    return model_field.to_python
+
+
+def _coerce_typed_value(model_field, raw: Any) -> Any:
+    """Convert one GET ``__exact``/``__in`` value the same way a Set
+    filter's key converts (see :func:`_typed_value_converter`) -- by the
+    column's own type, not the legacy string-sniffing :func:`_coerce_value`
+    (which lowers any ``null``/``none``/``true``/``false`` spelling for
+    EVERY field type, before any type-specific logic runs). A value that
+    fails to convert (a bad id, an unparseable key, ...) is reported via the
+    ``_CONVERSION_FAILED`` sentinel so the caller can drop it -- the GET
+    path's existing behaviour for a value it cannot use. Unlike
+    ``_set_filter_values`` (the POST filterModel path, where the caller is
+    actively building a filter), this never raises: a 400 here would reject
+    an otherwise-valid list request over one bad query-string value.
+    """
+    convert = _typed_value_converter(model_field)
+    try:
+        return convert(raw)
+    except (DjangoValidationError, TypeError, ValueError):
+        return _CONVERSION_FAILED
+
+
 _BLANK_TRUE_KEYS = {"true"}
 _BLANK_FALSE_KEYS = {"false"}
 
@@ -414,12 +455,27 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
             combined_blank |= _build_blank_q(field_path, model_field, flag)
         return combined_blank
 
+    # `__in` carries a value-list Set filter's ticked keys (repeated, or one
+    # comma-joined param) -- converted by the column's own type exactly as
+    # the POST Set filter converts them (`_set_filter_values`), not by the
+    # legacy, type-blind `_coerce_value` (C1): a CharField key that happens
+    # to spell "none"/"true" must stay that literal string, not become
+    # Python `None`/`True` the way it would for every other field type too.
+    # A key that fails to convert (bad id, ...) is dropped -- same as any
+    # other value this GET path cannot use -- never a 400; if every key
+    # fails, the whole param is ignored (no filtering by this field) rather
+    # than silently matching zero rows via an empty `IN`.
     if lookup_path.endswith("__in"):
         if len(cleaned) == 1 and isinstance(cleaned[0], str) and "," in cleaned[0]:
             items = [x for x in cleaned[0].split(",") if x != ""]
         else:
             items = cleaned
-        coerced = [_coerce_value(model_field, v) for v in items]
+        coerced = [
+            v for v in (_coerce_typed_value(model_field, item) for item in items)
+            if v is not _CONVERSION_FAILED
+        ]
+        if not coerced:
+            return None
         return Q(**{lookup_path: coerced})
 
     if lookup_path.endswith("__range"):
@@ -431,6 +487,26 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
             return None
         coerced = [_coerce_value(model_field, p) for p in parts]
         return Q(**{lookup_path: coerced})
+
+    # An explicit `__exact` suffix gets the same column-type conversion as
+    # `__in` above (C1) -- a value-list Set filter's single ticked key sends
+    # exactly this shape (`field__exact=<key>`). A bare key with no suffix
+    # at all (`lookup_path == field_path`) is NOT this branch -- it falls
+    # through to the legacy `_coerce_value` below, so an existing caller's
+    # `?field=null` keeps meaning `IS NULL` exactly as before.
+    if lookup_path == f"{field_path}__exact":
+        coerced_values = [
+            v for v in (_coerce_typed_value(model_field, v) for v in cleaned)
+            if v is not _CONVERSION_FAILED
+        ]
+        if not coerced_values:
+            return None
+        if len(coerced_values) == 1:
+            return Q(**{lookup_path: coerced_values[0]})
+        combined = Q()
+        for v in coerced_values:
+            combined |= Q(**{lookup_path: v})
+        return combined
 
     if len(cleaned) == 1:
         return Q(**{lookup_path: _coerce_value(model_field, cleaned[0])})
@@ -688,15 +764,15 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         instead of being matched via ``__in`` as the literal string ``""``.
         A key that cannot be converted is a 400 naming the field: answering
         with more rows than the user asked for is worse than refusing.
+
+        The conversion itself (``_typed_value_converter``) is shared with the
+        GET list endpoint's ``__exact``/``__in`` query-param lookups, so a
+        value-list key converts identically whichever way it reaches the
+        server -- only the failure handling differs (a 400 here; the GET
+        path drops an unconvertible value instead, see ``_coerce_typed_value``).
         """
         model_field = self._get_model_field(field)
-        target_field = getattr(model_field, "target_field", None)
-        if getattr(model_field, "is_relation", False) and target_field is not None:
-            convert = target_field.to_python
-        elif isinstance(model_field, BooleanField):
-            convert = _bool_from_key
-        else:
-            convert = model_field.to_python
+        convert = _typed_value_converter(model_field)
         blank_matches_empty_string = is_plain_text_field(model_field)
 
         converted: list = []

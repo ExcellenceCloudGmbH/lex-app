@@ -39,6 +39,13 @@ CALCULATION_CLOSED_REASON_NAME = "lex_reserved_calculation_closed_reason"
 
 # --- MODULE-LEVEL CACHES (populated lazily, persist for process lifetime) ---
 
+# (serializer_class, dropped filter_bar name) pairs already warned about --
+# a serializer class is reused for every request it serves, so without this
+# a misconfigured filter_bar re-logged its WARNING on every fields-info
+# request (e.g. every page load of a list naming a non-value-list column).
+# Warn once per process per pair; see _resolve_filter_bar.
+_filter_bar_dropped_warned: set[tuple[type, str]] = set()
+
 # Cache: LexModel base field names (identical for every LexModel subclass)
 _lexmodel_fields: set | None = None
 
@@ -291,10 +298,14 @@ def _resolve_filter_bar(serializer_class, serializer) -> list:
 
     ``Meta.filter_bar`` on the serializer, else a ``filter_bar`` attribute on
     the model, so a list without a custom serializer can still declare one.
-    Names that are not value-list columns are dropped with a warning; a
-    duplicate is dropped silently; order is preserved. Anything but a list,
-    a tuple or a single name -- ``True``, or the model's own column when the
-    model has a field called ``filter_bar`` -- gives no bar and one warning.
+    Names that are not value-list columns are dropped with a warning, logged
+    at most once per process for a given (serializer class, name) pair --
+    the same serializer class answers every request it serves, so without
+    this a misconfigured filter_bar would re-log on every fields-info
+    request; a duplicate is dropped silently; order is preserved. Anything
+    but a list, a tuple or a single name -- ``True``, or the model's own
+    column when the model has a field called ``filter_bar`` -- gives no bar
+    and one warning.
 
     A name is kept only when :func:`value_list_field` accepts it for
     ``serializer`` -- the resolver the ``filter_values`` endpoint uses -- so
@@ -335,10 +346,13 @@ def _resolve_filter_bar(serializer_class, serializer) -> list:
                     model_field = None
                 accepted = model_field is not None and is_value_list_field(model_field)
         if not accepted:
-            logger.warning(
-                "filter_bar: %r is not a value-list column of %s; dropped",
-                name, getattr(model, "__name__", model),
-            )
+            warn_key = (serializer_class, name)
+            if warn_key not in _filter_bar_dropped_warned:
+                _filter_bar_dropped_warned.add(warn_key)
+                logger.warning(
+                    "filter_bar: %r is not a value-list column of %s; dropped",
+                    name, getattr(model, "__name__", model),
+                )
             continue
         if name not in names:
             names.append(name)

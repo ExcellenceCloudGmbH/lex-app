@@ -167,6 +167,7 @@ GET-driven select-all undercounted the `""` rows the POST path already treats as
 |---|----------|----------------|
 | 14.71 | `?field__blank=true` | Matches the NULL and `""` rows on a plain text column; only the NULL row on a non-text column |
 | 14.72 | `?field__blank=false`, and `?field__blank!=true` | Both return the non-blank rows, on both column shapes; (fix round 1) a related path's `__blank` (e.g. `category__name__blank`) is ignored like a JSON sub-path -- only a direct column, including a FK's own `category__blank`, is supported |
+| 14.73 | `?col__exact=`, `?col__in=` (fix round 2, C1) | Convert each value by the column's own type -- a literal `"none"`/`"true"` string on a char/choice column stays that string (never `IS NULL` / a bool); a boolean and a foreign-key column still convert correctly; a bare `?col=null` (no suffix) keeps meaning `IS NULL` via the untouched legacy path |
 
 **Fix round 1:** a review found the first pass wrongly supported a related path -- `field_path`
 containing another model's column (e.g. `category__name`, reached through the `category` FK) still
@@ -175,7 +176,24 @@ built a real `Q`, when only a column directly on this model should. 14.72 gained
 (`metadata__key__blank`, already correct and now a regression guard). The guard in
 `_build_query_from_values` now also checks that `field_path` carries no `"__"` of its own.
 
-**Status:** ✅ Complete — 2 pass. Covers `lex/test_project/tests/queries/test_14j_blank_query_param.py`.
+**Fix round 2 (C1, final review):** `__exact` and `__in` shared the same `_coerce_value` as every
+other lookup, which -- before any field-type logic -- lowered any `"null"`/`"none"` spelling to
+Python `None` and any `"true"`/`"false"` spelling to a bool, for EVERY column. A value-list Set
+filter's "Select All" / group-selection fetch sends exactly this shape (`field__exact=<key>`, or
+repeated `field__in=<key>`), so a `CharField`/choice column whose stored key is literally `"none"`
+resolved to `IS NULL` and matched the blank rows instead of the `"none"` row the grid shows; inside
+`__in` the same key converted to `None` and dropped out. 14.73 pins that `__exact`/`__in` now convert
+by the column's type instead -- the same conversion the POST Set filter already applies
+(`_set_filter_values`), now shared via `_typed_value_converter`/`_coerce_typed_value` rather than
+duplicated: a foreign key's target field's `to_python`, a boolean's `_bool_from_key`, the field's own
+`to_python` otherwise. An unconvertible value is dropped (the whole param ignored if none survive),
+never a 400 -- a GET list request stays a read, unlike the POST filterModel path. Bare keys and every
+other lookup suffix are untouched, so `?field=null` still means `IS NULL` for existing callers. The
+same change also gave `_resolve_filter_bar`'s "dropped" warning (cluster 10o,
+`lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name) dedup, so a
+misconfigured `filter_bar` no longer re-logs on every fields-info request.
+
+**Status:** ✅ Complete — 3 pass. Covers `lex/test_project/tests/queries/test_14j_blank_query_param.py`.
 
 ---
 

@@ -60,6 +60,11 @@ Found while the implementation plans were written against the source:
       origin is on the list. With the setting unset, framing and the other bridge events and messages
       behave as before, and the `filter` channel stays off. A `filter` event reports a row count with
       no user action, so a page that may frame lex-app must be named before it can read one.
+15. **Echoes and group counts.** A host that feeds an embed's `filter` event back into it changes
+    nothing: fields whose ticked keys already match are skipped, and a Multi filter's condition half
+    is kept. Echoing an older event after the user's next change can still undo that change; hosts
+    should pass filters on, not echo them. On a grouped table, `row_count` is the number of top-level
+    groups.
 
 ## The problem
 

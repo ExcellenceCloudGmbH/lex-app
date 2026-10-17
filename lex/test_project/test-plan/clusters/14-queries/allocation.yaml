@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 72
+max_scenario: 73
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -177,10 +177,10 @@ letters:
       its api_serializers restore with addCleanup before the change.
   j:
     title: GET list — the __blank query-param lookup suffix
-    scenarios: 14.71-14.72
+    scenarios: 14.71-14.73
     status: complete
     tests:
-      pass: 2
+      pass: 3
       skip: 0
       xfail: 0
     note: >-
@@ -196,4 +196,16 @@ letters:
       path (e.g. category__name__blank) is ignored exactly like a JSON sub-path, both ruled out in
       14.72's fix-round-1 sub-cases after a review found the first pass wrongly applied the related
       path as if it resolved to a column on this model; a direct FK column's own blank state (e.g.
-      category__blank) is unaffected and stays supported.
+      category__blank) is unaffected and stays supported. Fix round 2 (C1, final review of
+      feat/multi-value-filters): the same GET grammar's __exact and __in ran every value through
+      _coerce_value regardless of field type, which lowered any "null"/"none" spelling to Python
+      None and any "true"/"false" spelling to a bool for EVERY column -- so a value-list Set
+      filter's own stored key "none" on a CharField/choice column resolved to IS NULL instead of
+      matching the literal row, and the same key inside __in silently dropped out. 14.73 pins that
+      __exact and __in now convert each value by the column's own type, reusing the POST Set
+      filter's conversion helper (_set_filter_values, now built on shared _typed_value_converter /
+      _coerce_typed_value) instead of duplicating it: a foreign key's target field's to_python, a
+      boolean's _bool_from_key, the field's own to_python otherwise. A value that fails that
+      conversion is dropped (the whole param ignored if none survive) rather than ever becoming a
+      400 on a GET read. Bare keys and every other lookup suffix keep the legacy, type-blind
+      _coerce_value unchanged, so ?field=null still means IS NULL for existing callers.
