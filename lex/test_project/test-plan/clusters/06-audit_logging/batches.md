@@ -125,3 +125,17 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | fields keeps nested keys and turns every value (lists included) into None; the action's own name and record id stay. |
+
+### Batch 6u — Audit entries name a record by its public id ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.129 |
+| Type | E |
+| Files covered | `lex/audit_logging/models/AuditLog.py` (object_ref), `lex/audit_logging/migrations/0008_auditlog_object_ref.py`, `lex/audit_logging/mixins/AuditLogMixin.py` (_object_ref) |
+| Test file | `lex/test_project/tests/audit_logging/test_6u_audit_object_ref.py` |
+| Test classes | `TestCluster06u_AuditObjectRef` |
+| Fixtures | PublicIdItem (lex_lookup_field = uuid, cluster 2m) |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | object_id stays for integer keys; object_ref holds the lex_lookup_field value. |

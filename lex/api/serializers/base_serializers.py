@@ -194,6 +194,12 @@ class FilteredListSerializer(serializers.ListSerializer):
     def to_representation(self, data):
         iterable = data.all() if isinstance(data, models.Manager) else data
         child = self.child
+        prepare = getattr(type(child), "lex_prepare_page", None)
+        if prepare is not None:
+            # Computed fields of the whole page at once (read models, overviews).
+            iterable = list(iterable)
+            prepare(iterable, child.context)
+            child.context["_lex_page_prepared"] = True
         # Suppress the child's per-instance FK name resolution while building
         # the list — we resolve names in a single batched query per FK below
         # (one query per FK field, not one per row) to stay N-safe.
@@ -781,6 +787,9 @@ class LexSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         request = self.context.get('request')
+        prepare = getattr(type(self), "lex_prepare_page", None)
+        if prepare is not None and not self.context.get("_lex_page_prepared"):
+            prepare([instance], self.context)
 
         # Resolve the target instance for permission checks
         caps = _get_capabilities(type(instance))

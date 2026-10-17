@@ -29,6 +29,8 @@ class AuditLog(LexModel):
     content_type = models.ForeignKey(
         ContentType, on_delete=models.CASCADE, null=True, blank=True
     )
+    # The record's public id (lex_lookup_field, e.g. a uuid), where object_id cannot hold it.
+    object_ref = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     object_id = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:

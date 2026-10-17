@@ -205,6 +205,12 @@ def validate_configuration() -> None:
     from lex.core.permission_source import database_models
 
     database_models()
+    from django.apps import apps
+
+    from lex.core.read_models import validate as validate_read_model
+
+    for model in apps.get_models():
+        validate_read_model(model)
     if request_scope.config() is not None:
         request_scope.resolver()
     for name in HOOK_KEYS:

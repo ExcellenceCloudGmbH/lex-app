@@ -117,3 +117,17 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Scenario range:** 6.123-6.128. **Test file:** `lex/test_project/tests/audit_logging/test_6t_audit_policy.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/audit_logging/utils/policy.py`, `lex/audit_logging/mixins/AuditLogMixin.py`, `lex/audit_logging/mixins/BulkAuditLogMixin.py`, `lex/audit_logging/utils/InitialDataAuditLogger.py`, `lex/audit_logging/utils/calculation_audit.py`, `lex/api/actions.py` (_audit), `lex/core/models/LexModel.py` (_resolve_request_audit_actor), `lex/core/extensions.py`. Batch: [6t](batches.md).
 
 ---
+
+### 6u. Audit entries name a record by its public id ✅
+
+**What it tests:** Create, update and delete entries of a uuid-addressed record carry its uuid in object_ref.
+
+**Why a regression matters:** Projects hide integer keys from their users; an audit trail that names records only by them cannot be matched to what users and integrators see.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 6.129 | entries carry the public id | object_ref = uuid and object_id = pk for create, update, delete |
+
+**Scenario range:** 6.129. **Test file:** `lex/test_project/tests/audit_logging/test_6u_audit_object_ref.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/audit_logging/models/AuditLog.py` (object_ref), `lex/audit_logging/migrations/0008_auditlog_object_ref.py`, `lex/audit_logging/mixins/AuditLogMixin.py` (_object_ref). Batch: [6u](batches.md).
+
+---

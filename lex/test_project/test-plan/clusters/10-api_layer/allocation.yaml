@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 131
+max_scenario: 137
 letters:
   a:
     title: ''
@@ -236,3 +236,13 @@ letters:
       xfail: 0
     note: >-
       A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows.
+  x:
+    title: "Read models: views and projections on the generic endpoints"
+    scenarios: 10.132-10.137
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      A proxy inherits its base table's history manager; the history endpoint and as_of check is_read_model first, so a projection never shows the base table's history.

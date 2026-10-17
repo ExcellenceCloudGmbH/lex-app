@@ -466,8 +466,12 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
             raise NotFound()
 
     def get_queryset(self):
+        from lex.core.read_models import list_queryset
+
         queryset = super().get_queryset()
         model_class = self.kwargs["model_container"].model_class
+        # The model's default selection of its list (lex_list_queryset); records stay reachable.
+        queryset = list_queryset(model_class, queryset, self.request)
         queryset = apply_query_param_filters(queryset, self.request.query_params, model_class, request=self.request)
         queryset = apply_ordering(
             queryset, self.request.query_params.get("ordering"), model_class, request=self.request

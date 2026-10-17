@@ -15,11 +15,11 @@
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 23 | 135 | 79 | 2 | 0 |
 | 5. History & Bitemporal | 15 | 131 | 37 | 6 | 3 |
-| 6. Audit Logging | 20 | 128 | 31 | 3 | 0 |
+| 6. Audit Logging | 21 | 129 | 32 | 3 | 0 |
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 9 | 52 | 24 | 0 | 0 |
-| 10. API Layer | 23 | 131 | 82 | 0 | 0 |
+| 10. API Layer | 24 | 137 | 88 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -197,6 +197,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 6r | A run started by a create has its own audit entry | 6.119-6.120 | complete | 2 | 0 | 0 | 6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update' under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's entry is 'failure' with a traceback while the create's entry stays 'success'. |
 | 6s | Audit entries for actions | 6.121-6.122 | complete | 2 | 0 | 0 | The entry is written in the action's transaction, so a failed run leaves none (10.109). |
 | 6t | What the audit log stores: AUDIT_PAYLOAD and AUDIT_ACTOR | 6.123-6.128 | complete | 6 | 0 | 0 | fields keeps nested keys and turns every value (lists included) into None; the action's own name and record id stay. |
+| 6u | Audit entries name a record by its public id | 6.129 | complete | 1 | 0 | 0 | object_id stays for integer keys; object_ref holds the lex_lookup_field value. |
 
 ## 7. Calculation State Machine (`calculations`)
 
@@ -288,6 +289,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10u | Schema, docs and CLI share the SCHEMA settings | 10.117-10.121 | complete | 5 | 0 | 0 | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |
 | 10v | Every error of a generic endpoint reaches the exception handler | 10.122-10.127 | complete | 6 | 0 | 0 | Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would. |
 | 10w | The scope a request acts in (REQUEST_SCOPE) | 10.128-10.131 | complete | 5 | 0 | 0 | A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows. |
+| 10x | Read models: views and projections on the generic endpoints | 10.132-10.137 | complete | 6 | 0 | 0 | A proxy inherits its base table's history manager; the history endpoint and as_of check is_read_model first, so a projection never shows the base table's history. |
 
 ## 11. Stress & Performance (`stress`)
 

@@ -239,6 +239,74 @@ class ActionItem(LexModel):
         return {"ids": [item.pk for item in created]}
 
 
+# ---------------------------------------------------------------------------
+# Cluster 10x: read models (a view and a projection over ActionItem rows)
+
+from lex.core.models.LexReadModel import LexReadModel  # noqa: E402
+
+
+class ActionItemSummary(LexReadModel):
+    """A database view over ActionItem (created by the test with CreateView)."""
+
+    id = models.IntegerField(primary_key=True)
+    name = models.CharField(max_length=200)
+    status = models.CharField(max_length=20)
+    approved = models.BooleanField()
+
+    class Meta:
+        app_label = "lex_app"
+        managed = False
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 10x")
+
+    def permission_list(self, uc):
+        return True
+
+    def permission_flag(self, uc):
+        return True
+
+    @lex_action(permission="permission_flag")
+    def flag(self, context, data):
+        return {"flagged": self.name}
+
+
+class _CardSerializer(_drf.ModelSerializer):
+    shout = _drf.SerializerMethodField()
+    prepared = []
+
+    class Meta:
+        model = None  # set below
+        fields = ["id", "name", "status", "shout"]
+
+    @classmethod
+    def lex_prepare_page(cls, instances, context):
+        cls.prepared.append(len(instances))
+        context["shouts"] = {item.pk: item.name.upper() for item in instances}
+
+    def get_shout(self, obj):
+        return self.context["shouts"][obj.pk]
+
+
+class ActionItemCard(ActionItem):
+    """A projection of ActionItem: its own serializer and list selection, nothing to write."""
+
+    lex_read_model = True
+    api_serializers = {"default": _CardSerializer}
+
+    class Meta:
+        app_label = "lex_app"
+        proxy = True
+
+    @classmethod
+    def lex_list_queryset(cls, queryset, request):
+        return queryset.exclude(status="locked")
+
+
+_CardSerializer.Meta.model = ActionItemCard
+READ_SUMMARY = "actionitemsummary"
+ACTION_CARD = "actionitemcard"
+
 ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
 PROJECT_MODELS = [ApiProjectItem]
 ACTION_MODELS = [ActionItem]

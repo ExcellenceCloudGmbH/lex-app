@@ -141,6 +141,7 @@ class AuditLogMixin:
         if related_instance is not None and getattr(related_instance, "pk", None) is not None:
             audit_log.content_type = _safe_get_content_type(related_instance.__class__)
             audit_log.object_id = related_instance.pk
+            audit_log.object_ref = _object_ref(related_instance)
             audit_log.save()
 
         AuditLogStatus.objects.filter(audit_log=audit_log).update(
@@ -235,6 +236,7 @@ class AuditLogMixin:
         audit_log = self.log_change("update", instance, payload=payload, calculation_id=calculation_id)
         audit_log.content_type = _safe_get_content_type(instance.__class__)
         audit_log.object_id = instance.pk
+        audit_log.object_ref = _object_ref(instance)
         audit_log.save()
         return audit_log
 
@@ -247,6 +249,7 @@ class AuditLogMixin:
             audit_log.payload = _stored(payload)
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
+            audit_log.object_ref = _object_ref(instance)
             audit_log.save()
             AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return instance
@@ -281,6 +284,7 @@ class AuditLogMixin:
                 updated_payload['id'] = instance.pk
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
+            audit_log.object_ref = _object_ref(instance)
             audit_log.payload = _stored(updated_payload)
             audit_log.save()
             # When a background calculation is pending (HTTP 202 path),
@@ -310,6 +314,7 @@ class AuditLogMixin:
         serializer = self.get_serializer(instance)
         payload = _serialize_payload(serializer.data) or {}
         instance_pk = instance.pk
+        instance_ref = _object_ref(instance)
         if isinstance(payload, dict):
             payload['id'] = instance_pk
         audit_log = self.log_change("delete", instance, payload=payload)
@@ -317,6 +322,7 @@ class AuditLogMixin:
             _delete_with_retry(instance)
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance_pk
+            audit_log.object_ref = instance_ref
             audit_log.save()
             AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
         except Exception as e:
@@ -341,3 +347,10 @@ def _stored(payload):
     from lex.audit_logging.utils.policy import audit_payload
 
     return audit_payload(payload)
+
+
+def _object_ref(instance):
+    """The record's public id (lex_lookup_field), for records not addressed by their integer key."""
+    lookup_field = getattr(type(instance), "lex_lookup_field", None)
+    value = getattr(instance, lookup_field, None) if lookup_field else None
+    return str(value) if value is not None else None

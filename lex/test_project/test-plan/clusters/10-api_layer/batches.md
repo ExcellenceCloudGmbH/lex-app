@@ -187,3 +187,17 @@
 | Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows. |
+
+### Batch 10x — Read models: views and projections on the generic endpoints ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.132-10.137 |
+| Type | U + E |
+| Files covered | `lex/core/read_models.py` (is_read_model, validate, list_queryset, CreateView), `lex/core/models/LexReadModel.py`, `lex/lex_app/simple_history_config.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (writes refused, as_of), `lex/api/views/model_entries/List.py`, `lex/api/views/model_entries/History.py`, `lex/api/serializers/base_serializers.py` (lex_prepare_page), `lex/core/extensions.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10x_read_models.py` |
+| Test classes | `TestCluster10x_ReadModelUnit`, `TestCluster10x_ReadModels` |
+| Fixtures | ActionItemSummary (a security_invoker view over ActionItem created with CreateView), ActionItemCard (a proxy projection with its own serializer, list selection and page preparation) |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | A proxy inherits its base table's history manager; the history endpoint and as_of check is_read_model first, so a projection never shows the base table's history. |
