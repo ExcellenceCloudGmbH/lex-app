@@ -33,5 +33,13 @@
 - **Files covered:** `lex/api/views/model_entries/List.py`
 - **Test file:** `lex/test_project/tests/queries/test_14j_blank_query_param.py`
 - **Test classes:** `TestCluster14j_BlankQueryParam`
-- **Fixtures:** `QueryItem` (`note` — a plain text column; `created_on` — a non-text column)
+- **Fixtures:** `QueryItem` (`note` — a plain text column; `created_on` — a non-text column;
+  `category` — a direct FK column, fix round 1; `metadata` — a JSON column, fix round 1),
+  `QueryCategory` (fix round 1)
 - **Status:** complete — 2 pass
+- **Fix round 1:** a review found `__blank` wrongly applied to a related path (`category__name__blank`
+  built a real filter instead of being ignored, since `field_path` "category__name" has no gap
+  against `lookup_path` the way a JSON sub-path does). `_build_query_from_values` now also requires
+  `field_path` to carry no `"__"` of its own; 14.72 gained two sub-cases pinning the related-path
+  and JSON-sub-path shapes both ignored (200, every row), the latter a regression guard since it
+  already passed.

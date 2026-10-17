@@ -192,5 +192,8 @@ letters:
       (is_plain_text_field), NULL only otherwise -- instead of handing Django a field__blank lookup
       it would reject. 14.71 pins ?field__blank=true on both column shapes; 14.72 that
       ?field__blank=false and the equivalent ?field__blank!=true both return the non-blank rows.
-      Guarded to a direct column (and a related path, which resolves through the same mechanism); a
-      JSON sub-path is left unresolved, same as any other unsupported suffix.
+      Restricted to a direct column on this model (field_path has no "__" of its own): a related
+      path (e.g. category__name__blank) is ignored exactly like a JSON sub-path, both ruled out in
+      14.72's fix-round-1 sub-cases after a review found the first pass wrongly applied the related
+      path as if it resolved to a column on this model; a direct FK column's own blank state (e.g.
+      category__blank) is unaffected and stays supported.

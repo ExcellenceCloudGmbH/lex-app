@@ -33,7 +33,7 @@ from datetime import date
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 from rest_framework import status
 
-from .models import ALL_MODELS, ITEM, QueryItem
+from .models import ALL_MODELS, ITEM, QueryCategory, QueryItem
 
 import pytest
 
@@ -49,8 +49,15 @@ class TestCluster14j_BlankQueryParam(E2ETestCase):
         # `note`: a plain text column (CharField, no choices) -- blank
         # means NULL or "". `created_on`: a non-text column (DateField) --
         # blank means NULL only (there is no "" state for a DateField).
+        # `category`: a direct FK column (its own `__blank` stays
+        # supported); only `alpha` has one set, so a wrongly-applied
+        # `category__name__blank` filter (treating the related path as
+        # supported) would exclude it -- proving the guard, not just
+        # failing to crash.
+        self.cat = QueryCategory.objects.create(name="cat-alpha")
         self.alpha = QueryItem.objects.create(
             name="alpha", note="filled", created_on=date(2026, 1, 1),
+            category=self.cat,
         )
         self.beta = QueryItem.objects.create(
             name="beta", note=None, created_on=date(2026, 2, 1),
@@ -104,6 +111,18 @@ class TestCluster14j_BlankQueryParam(E2ETestCase):
         filters`` already routes through ``.exclude()``) both return
         exactly the rows ``blank=true`` leaves out -- the non-blank rows --
         on both a plain text column and a non-text column.
+
+        14.72(a): ``__blank`` is restricted to a direct column.
+        ``?category__name__blank=true`` names a related path (``category``
+        is a FK, ``name`` is a column on the *related* model, not this
+        one) -- it must be ignored exactly like an unsupported suffix, not
+        silently treated as if it were ``category``'s own blank state.
+
+        14.72(b): ``?metadata__key__blank=true`` names a JSON sub-path
+        (``metadata`` is a ``JSONField``) -- also ignored, and never a 500
+        from Django rejecting a literal ``field__blank`` lookup. This is a
+        regression guard: the generic ``Q(**{lookup_path: value})`` branch
+        would otherwise receive ``metadata__key__blank`` verbatim.
         """
         self._seed()
 
@@ -133,6 +152,28 @@ class TestCluster14j_BlankQueryParam(E2ETestCase):
         self.assertEqual(
             self._names(resp), {"alpha", "beta", "gamma"},
             f"created_on__blank!=true must return the non-blank rows; got {self._names(resp)!r}",
+        )
+
+        all_names = {"alpha", "beta", "gamma", "delta"}
+
+        # -- 14.72(a): a related path's own `__blank` is ignored -- only a
+        # direct column (e.g. `category__blank` itself) supports `__blank`.
+        resp = self.list_get(ITEM, {"category__name__blank": "true"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), all_names,
+            "category__name__blank is a related path, not a direct column, "
+            f"and must be ignored (every seeded row returned); got {self._names(resp)!r}",
+        )
+
+        # -- 14.72(b): a JSON sub-path's `__blank` is ignored the same way
+        # -- regression guard: never a 500 from an unresolvable Django lookup.
+        resp = self.list_get(ITEM, {"metadata__key__blank": "true"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), all_names,
+            "metadata__key__blank is a JSON sub-path and must be ignored, "
+            f"never a 500; got {self._names(resp)!r}",
         )
 
 

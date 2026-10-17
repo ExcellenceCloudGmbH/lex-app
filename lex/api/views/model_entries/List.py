@@ -196,7 +196,9 @@ SAFE_LOOKUPS = {
     # Not a real Django lookup -- accepted here so `_resolve_lookup` treats
     # `field__blank` as a safe suffix like any other. `_build_query_from_values`
     # builds its `Q` itself (NULL, or NULL-or-"" on a plain text column)
-    # instead of ever handing Django a `field__blank` lookup.
+    # instead of ever handing Django a `field__blank` lookup. Like every
+    # other entry in this set, it shadows a JSON key literally named
+    # "blank" when that key is the terminal path segment.
     "blank",
 }
 
@@ -389,16 +391,20 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
 
     # `__blank` is handled here, not by Django -- it isn't a real lookup, so
     # it must never reach the generic `Q(**{lookup_path: ...})` below.
-    # Guarded to a direct column: a JSON sub-path's `lookup_path` carries
-    # extra segments beyond `field_path` + the suffix (e.g.
-    # "data__path__blank" vs. field_path "data"), and the single-column Q
-    # this builds would silently drop the sub-path, so that shape is
-    # ignored -- same as any other unsupported suffix -- rather than
-    # handed to Django as a bogus lookup. A related-field path (e.g.
-    # "category__name__blank") has no such gap (field_path ==
-    # "category__name") and is supported the same as a direct column.
+    # Restricted to a direct column: `field_path` itself must name a single
+    # column on THIS model, with no "__" of its own. That rule excludes two
+    # shapes: a JSON sub-path, whose `lookup_path` carries extra segments
+    # beyond `field_path` + the suffix (e.g. "data__path__blank" vs.
+    # field_path "data") -- the single-column Q below would silently drop
+    # the sub-path; and a related path crossing a relation (e.g.
+    # "category__name__blank", field_path "category__name") -- that names a
+    # *different* column's blank state on the related model, not a blank
+    # state of this one. Both are ignored -- same as any other unsupported
+    # suffix -- rather than ever handed to Django as a bogus lookup. A
+    # direct FK column's own blank state (e.g. "category__blank", field_path
+    # "category", no "__") is unaffected and stays supported.
     if lookup_path.endswith("__blank"):
-        if lookup_path != f"{field_path}__blank":
+        if "__" in field_path or lookup_path != f"{field_path}__blank":
             return None
         flags = [flag for flag in (_parse_blank_flag(v) for v in cleaned) if flag is not None]
         if not flags:

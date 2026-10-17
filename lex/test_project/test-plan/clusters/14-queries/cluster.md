@@ -166,7 +166,14 @@ GET-driven select-all undercounted the `""` rows the POST path already treats as
 | # | Scenario | What We Assert |
 |---|----------|----------------|
 | 14.71 | `?field__blank=true` | Matches the NULL and `""` rows on a plain text column; only the NULL row on a non-text column |
-| 14.72 | `?field__blank=false`, and `?field__blank!=true` | Both return the non-blank rows, on both column shapes |
+| 14.72 | `?field__blank=false`, and `?field__blank!=true` | Both return the non-blank rows, on both column shapes; (fix round 1) a related path's `__blank` (e.g. `category__name__blank`) is ignored like a JSON sub-path -- only a direct column, including a FK's own `category__blank`, is supported |
+
+**Fix round 1:** a review found the first pass wrongly supported a related path -- `field_path`
+containing another model's column (e.g. `category__name`, reached through the `category` FK) still
+built a real `Q`, when only a column directly on this model should. 14.72 gained two sub-cases:
+`category__name__blank` must be ignored (200, every row), the same as the JSON sub-path case
+(`metadata__key__blank`, already correct and now a regression guard). The guard in
+`_build_query_from_values` now also checks that `field_path` carries no `"__"` of its own.
 
 **Status:** ✅ Complete — 2 pass. Covers `lex/test_project/tests/queries/test_14j_blank_query_param.py`.
 
