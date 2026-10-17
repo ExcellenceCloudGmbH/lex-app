@@ -94,9 +94,11 @@ class TestCluster10y_HardenedActions(E2ETestCase):
 
         seen = []
         with mock.patch.object(ActionItem, "permission_never", autospec=True,
-                               side_effect=lambda self, uc: seen.append(operation_context.get().get("request_obj")) or False):
+                               side_effect=lambda self, uc: seen.append((operation_context.get().get("request_obj"),
+                                                                         uc.request)) or False):
             self.client.post(_url(self.item, "hidden_action"), {}, format="json")
-        self.assertTrue(seen and seen[0], "the permission runs inside the operation context, with the request")
+        self.assertTrue(seen and seen[0][0], "the permission runs inside the operation context, with the request")
+        self.assertIsNotNone(seen[0][1], "and its UserContext carries the request")
         bound = self.client.post(_url(self.item, "state_bound"), {}, format="json")
         self.assertEqual((bound.status_code, bound.json()["code"]), (409, "WRONG_STATE"))
         self.use_lex_extensions(ACTION_DENIED="not_found")
