@@ -85,10 +85,18 @@ class TestCluster10y_HardenedActions(E2ETestCase):
         Given: hidden_action (denied="not_found"), state_bound (its permission raises 409),
                spend refused with ACTION_DENIED="not_found"
         When: they run
-        Then: 404 NOT_FOUND; 409 WRONG_STATE; 404 for the refused spend.
+        Then: 404 NOT_FOUND (the permission saw the request in the operation context); 409 WRONG_STATE;
+              404 for the refused spend.
         """
         hidden = self.client.post(_url(self.item, "hidden_action"), {}, format="json")
         self.assertEqual((hidden.status_code, hidden.json()["code"]), (404, "NOT_FOUND"))
+        from lex.api.utils.Context import operation_context
+
+        seen = []
+        with mock.patch.object(ActionItem, "permission_never", autospec=True,
+                               side_effect=lambda self, uc: seen.append(operation_context.get().get("request_obj")) or False):
+            self.client.post(_url(self.item, "hidden_action"), {}, format="json")
+        self.assertTrue(seen and seen[0], "the permission runs inside the operation context, with the request")
         bound = self.client.post(_url(self.item, "state_bound"), {}, format="json")
         self.assertEqual((bound.status_code, bound.json()["code"]), (409, "WRONG_STATE"))
         self.use_lex_extensions(ACTION_DENIED="not_found")

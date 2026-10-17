@@ -318,16 +318,16 @@ class ModelActionView(APIView):
 
         context_target = instance if instance is not None else model_class()
         user_context = UserContext.from_request(request, context_target)
-        if not self._permitted(spec, model_class, instance, request, user_context, data,
-                               guarded, create_allowed, delete_allowed, edit_violations):
-            if denied_answer(spec) == "not_found":
-                raise NotFound()
-            raise LexActionError(f"You may not run '{spec.name}' here.", code="ACTION_NOT_ALLOWED")
-
         calculation_id = kwargs.get("calculationId") or f"action_{uuid.uuid4().hex}"
         atomic = transaction.atomic() if spec.atomic else _null()
         try:
+            # The permission runs in the operation context too: it may need the request (its scope, its key).
             with OperationContext(request, calculation_id):
+                if not self._permitted(spec, model_class, instance, request, user_context, data,
+                                       guarded, create_allowed, delete_allowed, edit_violations):
+                    if denied_answer(spec) == "not_found":
+                        raise _Refused(NotFound())
+                    raise _Refused(LexActionError(f"You may not run '{spec.name}' here.", code="ACTION_NOT_ALLOWED"))
                 with atomic:
                     db_context.apply(request.user, local=True, scope=scope)
                     logging_target = instance if instance is not None else model_class
@@ -337,6 +337,8 @@ class ModelActionView(APIView):
                         else:
                             result = spec.function(model_class, user_context, data)
                     self._audit(request, spec, model_class, instance, data, calculation_id, "success")
+        except _Refused as refused:
+            raise refused.error from None  # a refusal is not a failed run: no audit entry
         except Exception as exc:
             self._audit_failure(request, spec, model_class, instance, data, calculation_id, exc)
             raise
@@ -480,6 +482,14 @@ class ModelActionView(APIView):
 
     def delete(self, request, *args, **kwargs):
         return self._dispatch_action(request, *args, **kwargs)
+
+
+class _Refused(Exception):
+    """The permission refused the run (carries the answer)."""
+
+    def __init__(self, error):
+        super().__init__(str(error))
+        self.error = error
 
 
 class _null:
