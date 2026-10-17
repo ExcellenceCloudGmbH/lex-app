@@ -194,6 +194,10 @@ class _CountInput(_drf.Serializer):
     prefix = _drf.CharField(max_length=20)
 
 
+class _RenamedOutput(_drf.Serializer):
+    title = _drf.CharField()
+
+
 class ActionItem(LexModel):
     """Cluster 10s: actions beyond CRUD. "locked" rows are readable but not editable."""
 
@@ -410,7 +414,8 @@ class PublicApiDocument(LexModel):
     class Meta:
         app_label = "lex_app"
 
-    @lex_action(permission="edit", input=_RenameInput, summary="Rename the document")
+    @lex_action(permission="edit", input="lex.test_project.tests.api_layer.models._RenameInput",
+                output="lex.test_project.tests.api_layer.models._RenamedOutput", summary="Rename the document")
     def rename(self, context, data):
         self.title = data["title"]
         self.save()

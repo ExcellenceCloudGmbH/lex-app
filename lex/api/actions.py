@@ -52,6 +52,7 @@ More options: ``status`` (success status, e.g. 201), ``headers`` (e.g.
 ``lex_config.THROTTLE_RATES``, answered 429 when exceeded) and, for the
 OpenAPI schema, ``summary``, ``description``, ``operation_id``, ``tags``,
 ``responses`` (extra statuses) and ``media="multipart"`` for file uploads.
+``input`` and ``output`` may be dotted paths to the serializer classes.
 """
 from __future__ import annotations
 
@@ -181,7 +182,20 @@ def actions_for(model_class) -> Dict[str, ActionSpec]:
     return found
 
 
+def resolve_serializer(value):
+    """An action's input or output: a serializer class, or its dotted path (resolved on first use).
+
+    A dotted path lets a model declare actions whose serializers live in a module that imports the model.
+    """
+    if isinstance(value, str):
+        from django.utils.module_loading import import_string
+
+        return import_string(value)
+    return value
+
+
 def _strict_input(serializer_class, data, context):
+    serializer_class = resolve_serializer(serializer_class)
     serializer = serializer_class(data=data, context=context)
     if hasattr(data, "keys"):
         unknown = sorted(set(data.keys()) - set(serializer.fields))
@@ -442,8 +456,9 @@ class ModelActionView(APIView):
             response = Response(status=status.HTTP_204_NO_CONTENT)
         elif spec.output is not None:
             many = isinstance(result, (list, tuple)) or hasattr(result, "model")
+            output = resolve_serializer(spec.output)
             response = Response(
-                spec.output(result, many=many, context={"request": request, "view": self}).data, status=status_code
+                output(result, many=many, context={"request": request, "view": self}).data, status=status_code
             )
         else:
             response = Response(result, status=status_code)

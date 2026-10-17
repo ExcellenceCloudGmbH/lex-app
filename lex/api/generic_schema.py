@@ -173,7 +173,7 @@ def generic_endpoints() -> List[Tuple[str, str, str, Any]]:
         return []
     from drf_spectacular.types import OpenApiTypes
 
-    from lex.api.actions import actions_for
+    from lex.api.actions import actions_for, resolve_serializer
     from lex.api.middleware.generic_api_gate import exposed_operations
 
     short = bool(config.get("short_paths", True))
@@ -221,13 +221,14 @@ def generic_endpoints() -> List[Tuple[str, str, str, Any]]:
             reading = list(spec.methods) == ["get"]
             parameters = list(on_record if spec.detail else on_model)
             request = None
-            if spec.input is not None:
+            action_input = resolve_serializer(spec.input)
+            if action_input is not None:
                 if reading:
-                    parameters.append(spec.input)
+                    parameters.append(action_input)
                 else:
-                    request = spec.input
+                    request = action_input
             success = spec.status or 200
-            output = spec.output if spec.output is not None else OpenApiTypes.OBJECT
+            output = resolve_serializer(spec.output) if spec.output is not None else OpenApiTypes.OBJECT
             if output is OpenApiTypes.BINARY:
                 # A file: any content type (the action's HttpResponse sets the real one).
                 responses = {(success, "application/octet-stream"): OpenApiTypes.BINARY}

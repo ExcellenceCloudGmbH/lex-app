@@ -158,7 +158,8 @@ class TestCluster10z_PublicGenericApi(E2ETestCase):
         count = schema["paths"][f"{base}/publicapidocument/action/count"]["get"]
         self.assertIn("prefix", [p["name"] for p in count.get("parameters", [])])
         rename = schema["paths"][f"{base}/publicapidocument/one/{{uuid}}/action/rename"]["post"]
-        self.assertIn("requestBody", rename)
+        self.assertIn("requestBody", rename)  # declared by dotted path, resolved on first use
+        self.assertIn("RenamedOutput", rename["responses"]["200"]["content"]["application/json"]["schema"]["$ref"])
         self.assertEqual(rename["summary"], "Rename the document")
         retrieve = schema["paths"][f"{base}/publicapidocument/one/{{uuid}}"]["get"]
         self.assertIn("PublicError", retrieve["responses"]["404"]["content"]["application/json"]["schema"]["$ref"])
