@@ -267,6 +267,24 @@ class ModelRegistration:
                 f"history tracking and must not be redefined."
             )
 
+        # 4. A public lookup field must be a unique UUIDField.
+        cls._validate_lookup_field(model)
+
+    @staticmethod
+    def _validate_lookup_field(model: Type[models.Model]) -> None:
+        lookup = getattr(model, "lex_lookup_field", None)
+        if not lookup:
+            return
+        try:
+            field = model._meta.get_field(lookup)
+        except Exception:
+            field = None
+        if not isinstance(field, models.UUIDField) or not (field.unique or field.primary_key):
+            raise ValueError(
+                f"Model '{model.__name__}' sets lex_lookup_field = {lookup!r}, which must name a "
+                f"unique UUIDField (e.g. uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False))."
+            )
+
     @classmethod
     def _register_standard_model(
         cls,

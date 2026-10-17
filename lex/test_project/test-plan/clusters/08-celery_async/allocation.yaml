@@ -1,7 +1,7 @@
 cluster: 8
 slug: celery_async
 title: Celery & Async
-max_scenario: 153
+max_scenario: 156
 letters:
   a:
     title: a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26)
@@ -152,3 +152,14 @@ letters:
       because a failed calculation rolls its writes back (pinned so a future partial-commit change
       cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery
       task names; all three calculate methods share one module and would otherwise collide.
+  d:
+    title: "Database context in Celery tasks"
+    scenarios: 8.154-8.156
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Only a propagated context triggers the session-level call, so the synchronous fallback never
+      overrides the request's SET LOCAL.

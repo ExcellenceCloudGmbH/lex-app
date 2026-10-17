@@ -192,8 +192,11 @@ class AuditLogMixin:
         user = self.request.user if hasattr(self.request, 'user') else None
         resource = target.__name__.lower() if isinstance(target, type) else target.__class__.__name__.lower()
 
+        from lex.core.models.LexModel import LexModel
+
         audit_log = AuditLog.objects.create(
-            author=f"{str(user)}" if user else None,
+            # A user without names is recorded by username, not as " " (BUG-007).
+            author=(LexModel._normalize_audit_actor(user) or "") if user else None,
             resource=resource,
             action=action,
             payload=payload,

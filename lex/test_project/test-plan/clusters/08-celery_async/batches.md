@@ -195,3 +195,17 @@
 | Note | Two assertions had to be strengthened before they could detect the defect, and both are worth remembering. (1) `edited_by`: a worker resolves the same fallback actor the fixture already carried, so an identical overwrite was invisible — 8.147 now seeds a distinct sentinel via `queryset.update()`. (2) The failing calc is deliberately `is_atomic = False`: under `is_atomic = True` the raise rolls the whole calculation back and would hide any stamp. Fixture note — the decorated tasks require explicit Celery task names; Celery derives a default name from `module.func_name` and all three `calculate` methods share one fixture module, so without them the last registration silently wins and one model runs another's body. |
 
 ---
+
+### Batch 8d — Database context in Celery tasks ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 8.154-8.156 |
+| Type | U |
+| Files covered | `lex/lex_app/celery_tasks.py` (CeleryCalculationContext), `lex/core/db_context.py` |
+| Test file | `lex/test_project/tests/celery_async/test_8d_db_context.py` |
+| Test classes | `TestCluster08d_DbContextInTasks` |
+| Fixtures | a recording DB_CONTEXT hook; propagated contexts shaped like CeleryTaskDispatcher's |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Only a propagated context triggers the session-level call, so the synchronous fallback never overrides the request's SET LOCAL. |

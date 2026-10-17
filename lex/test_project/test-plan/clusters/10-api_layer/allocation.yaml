@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 101
+max_scenario: 105
 letters:
   a:
     title: ''
@@ -175,3 +175,14 @@ letters:
     note: >-
       drf-spectacular 0.28.0 is pinned in requirements.txt and installed in INSTALLED_APPS; nothing runs
       until a schema is requested.
+  r:
+    title: "Database context per request and per after-commit callback"
+    scenarios: 10.102-10.105
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project
+      uses.

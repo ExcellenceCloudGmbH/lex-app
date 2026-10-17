@@ -363,6 +363,8 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
     "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
+    # One transaction per request with lex_config.DB_CONTEXT applied (no-op when unset).
+    "lex.core.db_context.LexDbContextMiddleware",
     # Who may use lex's generic api/* endpoints (lex_config.GENERIC_API, default "all").
     "lex.api.middleware.generic_api_gate.GenericApiGateMiddleware",
     "oauth2_authcodeflow.middleware.RefreshSessionMiddleware",
@@ -777,6 +779,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         # Delegates to lex_config.AUTHENTICATION_CLASSES; returns None when unset.
         "lex.authentication.authentication_backends.project.LexProjectAuthentication",
+        # Scoped API keys act as their user (no session, so no CSRF check).
+        "lex.authentication.authentication_backends.api_keys.LexAPIKeyAuthentication",
         "lex.authentication.authentication_backends.BearerMiddlewareAuthentication.BearerMiddlewareAuthentication",
         "rest_framework.authentication.SessionAuthentication",
         # other authentication classes, if needed

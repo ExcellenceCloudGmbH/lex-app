@@ -107,6 +107,34 @@ must not open a check on the whole model.
 | Status | ✅ Complete |
 | Note | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |
 
+### Batch 4q — Scoped API keys (LexAPIKey) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.104-4.110 |
+| Type | E |
+| Files covered | `lex/authentication/models/_api_keys.py`, migration 0002_lexapikey, `lex/api/utils/api_key_requests.py`, `lex/authentication/middleware.py`, `lex/authentication/authentication_backends/api_keys.py`, `lex/api/middleware/keycloak_permissions.py`, `lex/core/models/LexModel.py` ('*' scope grant), `filter_backends.py` |
+| Test file | `lex/test_project/tests/permissions/test_4q_scoped_api_keys.py` |
+| Test classes | `TestCluster04q_ScopedApiKeys` |
+| Fixtures | a service user; `KeycloakItem` (default permissions); keys created with LexAPIKey.objects.create_key; a resolver function in the test module |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | LexAPIKey lives in an underscore module so model discovery does not register it with the generic API (key hashes are never listed). |
+
+### Batch 4r — Audit authors for users without names ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.111-4.113 |
+| Type | E |
+| Files covered | `lex/audit_logging/mixins/AuditLogMixin.py` (log_change author), `lex/audit_logging/mixins/BulkAuditLogMixin.py` (log_change author, _audit_author) |
+| Test file | `lex/test_project/tests/permissions/test_4r_audit_authors.py` |
+| Test classes | `TestCluster04r_AuditAuthors` |
+| Fixtures | `KeycloakItem`; framework tables `AuditLog`, `AuditLogStatus`; scoped `LexAPIKey`s |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Same fallback as the model's created_by (LexModel._normalize_audit_actor). |
+
 ### Batch 4s — API-key read decided by the serializer ✅
 
 | Property | Value |

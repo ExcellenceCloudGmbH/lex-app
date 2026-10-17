@@ -198,6 +198,17 @@ class ProcessAdminSite:
                 OneModelEntry.as_view(),
                 name="model-one-entry-create",
             ),
+            # Records of models with lex_lookup_field, addressed by their public uuid.
+            path(
+                "api/model_entries/<model:model_container>/<str:calculationId>/one/<uuid:lookup>",
+                OneModelEntry.as_view(),
+                name="model-one-entry-by-lookup",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/<str:calculationId>/history/<uuid:lookup>",
+                HistoryModelEntry.as_view(),
+                name="model-history-list-by-lookup",
+            ),
             path(
                 "api/model_entries/<model:model_container>/<str:calculationId>/history/<int:pk>",
                 HistoryModelEntry.as_view(),

@@ -10,16 +10,16 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 48 | 395 | 437 | 0 | 0 |
-| 2. CRUD via REST API | 12 | 116 | 24 | 0 | 0 |
+| 1. Init — Project Bootstrap | 49 | 397 | 439 | 0 | 0 |
+| 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 17 | 114 | 48 | 2 | 0 |
+| 4. Permissions | 19 | 114 | 58 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
-| 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
-| 8. Celery & Async | 15 | 153 | 89 | 12 | 0 |
+| 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
+| 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
-| 10. API Layer | 17 | 101 | 51 | 0 | 0 |
+| 10. API Layer | 18 | 105 | 55 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -66,6 +66,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 1.381 loads both kinds of rxconfig.py in a fresh interpreter, as a Reflex worker does; 1.382 runs Reflex Enterprise's own registration and Reflex's own lifespan runner against a real frontend socket. Mutations: four of four fail a test (no call, no `starlette_app` guard, no guard at all, the replacement keeping the name `app`). Verified outside the suite with the platform's start script (development mode, backend and Vite on two ports, the public origin as REFLEX_URL): pages, Vite's assets and socket, a backend-served image, and the event socket's state updates in a browser, all through the backend's one port. |
 | 1au | `lex --version` — the version /health reports, answered from anywhere | 1.384-1.385 | complete | 2 | 0 | 0 | `lex --version` answered "No such option": main() already sent --version past the Django bootstrap, but the group never declared the option. It now prints `lex, version X`, where X is lex._version.__version__ -- the version /health reports -- and not the package metadata: an image built from a git ref stamps lex/_version.py after `pip install`, while the metadata stays frozen at 0.0.0.dev0. Both scenarios run the CLI in a fresh interpreter, from a directory named release-smoke, without the test project's environment and with the suite's checkout first on PYTHONPATH. Mutations: reading the version from the package metadata fails 1.384; dropping --version from the set main() answers without Django fails both, because Django setup crashes in that directory. |
 | 1av | Project extension keys, environment switches and security flags | 1.386-1.395 | complete | 10 | 0 | 0 | Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks 1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks 1.392. |
+| 1aw | lex create_api_key | 1.396-1.397 | complete | 2 | 0 | 0 | Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]). |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -108,6 +109,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 2j | Instance API-key extraction and matching | 2.97-2.107 | complete | 11 | 0 | 0 | scenarios 2.97–2.107; `get_raw_api_key` (KeyParser hit + header fallback + prefix strip + edge cases) + `is_instance_api_key_request` (match/mismatch/no-env-var/no-key |
 | 2k | A create that starts a calculation answers straight away | 2.108-2.109 | complete | 2 | 0 | 0 | 2.108 a POST to a calculate_on_create model answers 201 with is_calculated IN_PROGRESS while the run is still held open, and the run finishes in SUCCESS afterwards; 2.109 a calculation model without the flag answers NOT_CALCULATED, as before. |
 | 2l | A closed record - Calculate is refused with its reason, the rest stays editable | 2.110-2.116 | complete | 7 | 0 | 0 | 2.110 the Calculate PATCH on a record whose calculation_closed_reason() answers a reason gets 409 with that reason in detail, the key the frontend shows; the record keeps its status and no run is marked in progress. 2.111 an open record still gets 202; 2.112 a method answering True gets the framework's default message. 2.113 a closed record's other fields stay editable and the edit keeps its status; 2.114 closing a record through an edit keeps its status; 2.115 reopening it resets it like any edit of an open record; 2.116 an open record's edit still resets it to NOT_CALCULATED. |
+| 2m | Public identifiers (lex_lookup_field) | 2.117-2.121 | complete | 5 | 0 | 0 | Responses keep integer ids, id_field and FK values, so the bundled frontend's type-sensitive id matching is untouched. |
 
 ## 3. Validation Hooks (`validation_hooks`)
 
@@ -141,6 +143,8 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4n | Keycloak UMA permissions in Reflex dashboards | 4.75-4.79 | complete | 5 | 0 | 0 | current_permissions / has_permission / current_access_token (lex/lex_app/reflex/auth.py) -- the Reflex counterpart of st.session_state.permissions, which the Streamlit proxy fills. One KeycloakManager lookup per access token, again after a refresh; a failed lookup keeps the same user's grants and never hands them to another user; sign-out clears them; has_permission counts model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of five mutations of that code (keep grants across users, keep them across sign-out, count record grants, cache the raw token, return the cached list itself) fails exactly one scenario. |
 | 4o | Generic API gate and OIDC redirect guard | 4.80-4.85 | complete | 6 | 0 | 0 | The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the frontend is served from the site's own origin or a configured dev origin. |
 | 4p | Secure permission defaults on the generic REST API | 4.86-4.103 | complete | 18 | 0 | 0 | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |
+| 4q | Scoped API keys (LexAPIKey) | 4.104-4.110 | complete | 7 | 0 | 0 | LexAPIKey lives in an underscore module so model discovery does not register it with the generic API (key hashes are never listed). |
+| 4r | Audit authors for users without names | 4.111-4.113 | complete | 3 | 0 | 0 | Same fallback as the model's created_by (LexModel._normalize_audit_actor). |
 | 4s | API-key read decided by the serializer | 4.114 | complete | 1 | 0 | 0 | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |
 
 ## 5. History & Bitemporal (`history`)
@@ -210,6 +214,8 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 7s | Calculations must not move edited_at / edited_by (Celery-OFF + startup) | 7.205-7.221 | complete | 17 | 0 | 0 | Audit-column contract for the sync dispatch paths and the startup recovery sweep. Covers SUCCESS/ERROR/CANCELLED terminal states, child-record output rows, created_at immutability, IN_PROGRESS-at-restart -> ABORTED (7.211 both columns, 7.217 authorship via a distinct sentinel), and a recovery-tracked row. Includes three negative controls (real user edit stamps; a user edit after a calculation still stamps; an explicit edited_at override is honoured) that guard against a fix over-suppressing genuine edits. 17 pass, including the reported case driven through the real HTTP calculate=true endpoint (7.219 interrupted -> restart -> ABORTED leaves edited_at/edited_by unchanged; 7.220 the stamp is absent before any completion could revert it; 7.221 a genuine HTTP field edit still stamps). -- these paths were already correct; the batch pins them so the BUG-028 fix cannot regress them. |
 | 7t | calculate_on_create starts a run when the app creates a record | 7.222-7.227 | complete | 6 | 0 | 0 | A model opts in with calculate_on_create = True; a create through the form or the REST API then starts the run the way a Calculate click does - off the request thread, through Celery when it is on. 7.222 the run reaches SUCCESS; 7.223 a failing run leaves the record created and in ERROR; 7.224 no flag, no run; 7.225 a record created in code does not calculate; 7.226 the flag as a property decides per record; 7.227 with Celery on, the run is dispatched from the calculation thread pool, never inline on the request thread. |
 | 7u | A closed record is never calculated again | 7.228-7.237 | complete | 10 | 0 | 0 | A model closes a record through calculation_closed_reason(). 7.228 a save that sets a closed record IN_PROGRESS calculates nothing and keeps its status; 7.229 the rest of that save is still written; 7.230 an open record calculates as before; 7.231 a calculation that starts a closed child skips it, still ends in SUCCESS, and names the child and the reason in its own log; 7.232-7.234 closed generated rows keep their values on the streaming path, the materialized fallback and the Celery calc_and_save task; 7.235 answering True closes; 7.236 a record created closed (its calculation_closed_reason() answers a reason) does not calculate on create, and nothing of a run happens for it: no registration, broadcast, cache entry, run audit entry or history row; 7.237 the method sees the status from before the run, so a record that closes itself once SUCCESS runs exactly once, nested or not. |
+| 7v | Database context in background calculations | 7.238-7.239 | complete | 2 | 0 | 0 | The pool thread is replaced by an inline call so the assertion is deterministic; the wrapping happens inside _background_calculate either way. |
+| 7w | DB_CONTEXT in lex's on_commit callbacks | 7.240-7.243 | complete | 4 | 0 | 0 | The test creates the CalculatedModelUpdateHandler that app start normally creates. |
 
 ## 8. Celery & Async (`celery_async`)
 
@@ -218,6 +224,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 8a | a — Post-task warm shutdown honours the idle-shutdown master switch (Session 85 — June 26) | 8.1-8.5 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8b |  | 8.5-8.6 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 8c | Celery dispatch must not move edited_at / edited_by (BUG-028) | 8.145-8.153 | complete | 9 | 0 | 0 | The two Celery dispatch paths must be audit-indistinguishable. calc_and_save (undecorated) wraps calculation_execution_context(); the lex_shared_task wrapper does not, so a decorated calculate() stamps audit columns on every successful run -- BUG-028. 8.146/8.147/8.149/8.151 assert the correct behaviour; the lex_shared_task wrapper now enters calculation_execution_context(), so these pass as live regression gates (BUG-028 resolved). 8.148 passes because a failed calculation rolls its writes back (pinned so a future partial-commit change cannot silently reintroduce the leak). 8.153 pins the boundary - a decorated calculate() with Celery OFF is clean, so the trigger is decoration AND Celery dispatch, not decoration alone. Fixture note - the decorated tasks need explicit Celery task names; all three calculate methods share one module and would otherwise collide. |
+| 8d | Database context in Celery tasks | 8.154-8.156 | complete | 3 | 0 | 0 | Only a propagated context triggers the session-level call, so the synchronous fallback never overrides the request's SET LOCAL. |
 | 8g | Task infrastructure — `lex/lex_app/celery_tasks.py` | 8.7-8.15 | complete | 9 | 0 | 0 | Redis-free (`celery_tasks.py` |
 | 8h | Dispatcher & local scheduler | 8.16-8.21 | complete | 6 | 0 | 0 | 8.16–8.21; broker-free eager (`celery_tasks.py` 46%→55%, `CeleryTaskDispatcher` 0%→45% |
 | 8i | `celery.py` app config | 8.22-8.30 | complete | 9 | 0 | 0 | 8.22–8.30 (priority/nesting/filters/no-op/propagation |
@@ -264,6 +271,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10o | Project API endpoints mounted through lex; Process route removed | 10.83-10.91 | complete | 9 | 0 | 0 | E2ETestCase.use_lex_extensions overrides the extension keys and rebuilds the URL configuration for one test, undoing both afterwards. |
 | 10p | Error bodies: no tracebacks by default, structured on request | 10.92-10.97 | complete | 6 | 0 | 0 | The traceback stays in the audit log's failure entry; only the HTTP body loses it. |
 | 10q | OpenAPI schema of the project API | 10.98-10.101 | complete | 4 | 0 | 0 | drf-spectacular 0.28.0 is pinned in requirements.txt and installed in INSTALLED_APPS; nothing runs until a schema is requested. |
+| 10r | Database context per request and per after-commit callback | 10.102-10.105 | complete | 4 | 0 | 0 | Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project uses. |
 
 ## 11. Stress & Performance (`stress`)
 

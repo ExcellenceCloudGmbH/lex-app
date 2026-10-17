@@ -96,6 +96,21 @@ class RenameView(LexAPIView):
         return Response({"name": data.validated_data["name"]})
 
 
+class DbContextView(LexAPIView):
+    """Reports what the database was told about the caller (DB_CONTEXT). Public, so
+    an anonymous request can show that nothing leaked from the previous one."""
+
+    public = True
+
+    def get(self, request):
+        from django.db import connection
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_setting('lex.cluster10_user', true)")
+            value = cursor.fetchone()[0]
+        return Response({"db_user": value or ""})
+
+
 class SignedWebhookView(LexWebhookView):
     service_user = "cluster10_webhook"
 
@@ -116,4 +131,5 @@ urlpatterns = [
     path("crash", CrashView.as_view()),
     path("rename", RenameView.as_view()),
     path("hooks/signed", SignedWebhookView.as_view()),
+    path("db-context", DbContextView.as_view()),
 ]

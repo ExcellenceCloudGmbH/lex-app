@@ -59,11 +59,81 @@ def get_raw_api_key(request) -> Optional[str]:
     return None
 
 
+#: ``rsname`` of the synthetic permission a scoped key grants: every resource.
+ANY_RESOURCE = "*"
+
+
+def _extra_header_keys(holder) -> Optional[str]:
+    """Raw key from the project's additional headers (``lex_config.API_KEY_HEADERS``)."""
+    try:
+        from lex.core.extensions import get_setting
+
+        headers = get_setting("API_KEY_HEADERS") or ()
+    except Exception:
+        return None
+    if isinstance(headers, str):
+        headers = [headers]
+    for meta_name in headers:
+        value = holder.META.get(str(meta_name), "")
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def get_scoped_api_key(request):
+    """The :class:`~lex.authentication.models.LexAPIKey` the request presents, or ``None``.
+
+    Revoked and expired keys do not count. ``lex_config.API_KEY_RESOLVER``
+    replaces the lookup (for example with a database function that can read
+    the key table before anyone is signed in under row-level security); it
+    receives the raw key and returns a key object or ``None``.
+    """
+    holder = _get_request_holder(request)
+    cached = getattr(holder, "_lex_scoped_api_key", _UNSET)
+    if cached is not _UNSET:
+        return cached
+
+    key = None
+    raw_key = get_raw_api_key(holder) or _extra_header_keys(holder)
+    if raw_key:
+        try:
+            from lex.core.extensions import get_hook
+
+            resolver = get_hook("API_KEY_RESOLVER")
+            if resolver is not None:
+                key = resolver(raw_key)
+            else:
+                from lex.authentication.models import LexAPIKey
+
+                try:
+                    key = LexAPIKey.objects.get_from_key(raw_key)
+                except LexAPIKey.DoesNotExist:
+                    key = None
+            if key is not None and (getattr(key, "revoked", False) or getattr(key, "has_expired", False)):
+                key = None
+        except Exception:
+            key = None
+
+    setattr(holder, "_lex_scoped_api_key", key)
+    return key
+
+
+def scoped_key_permissions(key) -> list:
+    """The key's scopes as one model-wide permission on every resource."""
+    scopes = [str(scope) for scope in (getattr(key, "scopes", None) or [])]
+    return [{"rsname": ANY_RESOURCE, "resource_set_id": None, "scopes": scopes}]
+
+
 def get_api_key_request_identity(request) -> Optional[APIKeyRequestIdentity]:
     holder = _get_request_holder(request)
     cached_identity = getattr(holder, "_lex_api_key_identity", _UNSET)
     if cached_identity is not _UNSET:
         return cached_identity
+
+    # A scoped key acts as its user; it is never the all-scope technical identity.
+    if get_scoped_api_key(holder) is not None:
+        setattr(holder, "_lex_api_key_identity", None)
+        return None
 
     identity = None
     try:
@@ -83,7 +153,7 @@ def get_api_key_request_identity(request) -> Optional[APIKeyRequestIdentity]:
 
 
 def is_api_key_request(request) -> bool:
-    return get_api_key_request_identity(request) is not None
+    return get_scoped_api_key(request) is not None or get_api_key_request_identity(request) is not None
 
 
 def is_instance_api_key_request(request) -> bool:

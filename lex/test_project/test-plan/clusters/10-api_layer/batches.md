@@ -103,3 +103,17 @@
 | Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | drf-spectacular 0.28.0 is pinned in requirements.txt and installed in INSTALLED_APPS; nothing runs until a schema is requested. |
+
+### Batch 10r — Database context per request and per after-commit callback ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.102-10.105 |
+| Type | I + E |
+| Files covered | `lex/core/db_context.py` (LexDbContextMiddleware, apply, on_commit), `lex/api/project/views.py` (LexAPIView.initial), MIDDLEWARE |
+| Test file | `lex/test_project/tests/api_layer/test_10r_db_context.py` |
+| Test classes | `TestCluster10r_DbContext` |
+| Fixtures | a hook writing the PostgreSQL setting lex.cluster10_user; the public db-context probe in `_project_api.py` |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project uses. |

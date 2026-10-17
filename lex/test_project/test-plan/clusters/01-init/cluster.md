@@ -467,3 +467,18 @@ does not remove user launch configurations.
 **Scenario range:** 1.386-1.395. **Test file:** `lex/test_project/tests/init/test_1av_project_extensions.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/core/extensions.py`, `lex/core/config.py`, `lex/core/security_flags.py`, `lex/lex_app/settings.py` (DATABASE_PORT, LEX_CORS_ALLOWED_ORIGINS), `lex/core/middleware/project_slots.py`, `lex/lex_app/urls.py` (prefix check). Batch: [1av](batches.md).
 
 ---
+
+### 1aw. lex create_api_key ✅
+
+**What it tests:** The command issues a LexAPIKey for an existing user with scopes, path prefixes and expiry, prints the raw key once and stores only its hash; an unknown user is a CommandError and stores nothing.
+
+**Why a regression matters:** Operators issue machine access with this command; a key with the wrong scopes or prefixes, or one printed into logs twice, is a security problem.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.396 | issues a scoped key | stdout is the raw key; user, name, scopes, prefixes, expiry stored; hash only |
+| 1.397 | unknown user | CommandError naming the user; no key stored |
+
+**Scenario range:** 1.396-1.397. **Test file:** `lex/test_project/tests/init/test_1aw_create_api_key.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/authentication/management/commands/create_api_key.py`. Batch: [1aw](batches.md).
+
+---

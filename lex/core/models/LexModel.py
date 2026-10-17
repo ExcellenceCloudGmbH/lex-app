@@ -147,7 +147,8 @@ class UserContext:
             resource_names.add(original_name)
 
         for perm in user_permissions:
-            if perm.get("rsname") not in resource_names:
+            # "*" is the model-wide grant of a scoped API key (lex.authentication.LexAPIKey).
+            if perm.get("rsname") not in resource_names and perm.get("rsname") != "*":
                 continue
             resource_set_id = perm.get("resource_set_id")
             if instance_pk and resource_set_id is not None and instance_pk == str(resource_set_id):
@@ -868,6 +869,12 @@ class LexModel(LifecycleModel):
         if actor is None:
             return None
         actor_str = str(actor).strip()
+        if not actor_str:
+            # lex renders a User as "<first> <last>"; a user without names
+            # (service accounts, scoped API keys) is still someone (BUG-007).
+            get_username = getattr(actor, "get_username", None)
+            username = get_username() if callable(get_username) else getattr(actor, "username", "")
+            actor_str = str(username or getattr(actor, "email", "") or "").strip()
         return actor_str or None
 
     @staticmethod

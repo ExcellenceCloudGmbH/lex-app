@@ -31,7 +31,18 @@ class HistoryModelEntry(ListAPIView):
     def list(self, request, *args, **kwargs):
         model_container = kwargs["model_container"]
         model_class = model_container.model_class
-        pk = kwargs["pk"]
+        pk = kwargs.get("pk")
+        lookup_field = getattr(model_class, "lex_lookup_field", None)
+        if "lookup" in kwargs:
+            # .../history/<uuid> for models with lex_lookup_field
+            row = model_class._default_manager.filter(**{lookup_field: kwargs["lookup"]}).first() if lookup_field else None
+            if row is None and lookup_field and hasattr(model_class, "history"):
+                row = model_class.history.model.objects.filter(**{lookup_field: kwargs["lookup"]}).first()
+            if row is None:
+                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            pk = getattr(row, model_class._meta.pk.attname)
+        elif lookup_field and getattr(model_class, "lex_lookup_allow_pk", True) is False:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
         if not hasattr(model_class, "history"):
             return Response(

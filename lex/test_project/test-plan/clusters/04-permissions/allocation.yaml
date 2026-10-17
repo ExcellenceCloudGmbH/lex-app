@@ -170,6 +170,27 @@ letters:
       No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are
       404 and refused writes 400. Single-record visibility uses permission_read for the record (the
       decision the serializer made before), so classic API keys keep reading what they could read.
+  q:
+    title: "Scoped API keys (LexAPIKey)"
+    scenarios: 4.104-4.110
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      LexAPIKey lives in an underscore module so model discovery does not register it with the generic API
+      (key hashes are never listed).
+  r:
+    title: "Audit authors for users without names"
+    scenarios: 4.111-4.113
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      Same fallback as the model's created_by (LexModel._normalize_audit_actor).
   s:
     title: "API-key read decided by the serializer"
     scenarios: 4.114

@@ -8,6 +8,7 @@ from copy import deepcopy
 from typing import Optional
 
 from django.db import models
+from lex.core import db_context as lex_db_context
 from django.db import transaction
 from django.utils import timezone
 from django_lifecycle import (
@@ -286,7 +287,7 @@ class CalculationModel(LexModel):
 
         state = getattr(obj, "is_calculated", None)
         if transaction.get_connection().in_atomic_block:
-            transaction.on_commit(
+            lex_db_context.on_commit(
                 lambda: cls._apply_in_progress_state_persistence(obj, state)
             )
             return
@@ -370,7 +371,7 @@ class CalculationModel(LexModel):
             return
 
         if transaction.get_connection().in_atomic_block:
-            transaction.on_commit(lambda: cls._mark_terminal_state_persisted(obj))
+            lex_db_context.on_commit(lambda: cls._mark_terminal_state_persisted(obj))
             return
 
         cls._mark_terminal_state_persisted(obj)

@@ -19,6 +19,20 @@ class ApiKeyAwareLoginRequiredMiddleware(LoginRequiredMiddleware):
     ``public = True`` under ``lex_config.API_PREFIX``) need no sign-in either.
     """
 
+    def __call__(self, request):
+        from lex.api.utils.api_key_requests import get_scoped_api_key
+
+        scoped_key = get_scoped_api_key(request)
+        if scoped_key is not None:
+            # The key works only below its allowed path prefixes; elsewhere the
+            # path does not exist for it.
+            if not scoped_key.allows_path(request.path):
+                return JsonResponse({"code": "NOT_FOUND", "detail": "Not found.", "error": "Not found."}, status=404)
+            # The request runs as the key's user: permissions, audit actor and
+            # database context see that user.
+            request.user = scoped_key.user
+        return super().__call__(request)
+
     def is_login_required_for_url(self, request):
         from lex.api.project.public_paths import is_public_path
 

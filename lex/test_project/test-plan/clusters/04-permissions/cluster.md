@@ -104,6 +104,40 @@
 
 ---
 
+### 4q. Scoped API keys (LexAPIKey) ✅
+
+**What it tests:** A scoped key's scopes drive the default permission methods; requests run as the key's user (created_by names the user, no CSRF needed); keys work only below their path prefixes; revoked and expired keys are ignored; extra header names and a project resolver work; classic keys keep their behaviour.
+
+**Why a regression matters:** A classic key is an all-scope identity on every model; an integration key must be limited to what its integration needs.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.104 | scopes drive permissions | read key sees the row, list-only key none |
+| 4.105 | acts as its user | create without CSRF; created_by names the service user |
+| 4.106 | path prefixes | 404 outside api/elsewhere/ |
+| 4.107 | revoked/expired | no data |
+| 4.108 | extra headers | X-Project-Key authenticates |
+| 4.109 | resolver | custom- keys resolve to the resolver's user |
+| 4.110 | classic key unchanged | detail 200 with data |
+
+**Scenario range:** 4.104-4.110. **Test file:** `lex/test_project/tests/permissions/test_4q_scoped_api_keys.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/authentication/models/_api_keys.py`, migration 0002_lexapikey, `lex/api/utils/api_key_requests.py`, `lex/authentication/middleware.py`, `lex/authentication/authentication_backends/api_keys.py`, `lex/api/middleware/keycloak_permissions.py`, `lex/core/models/LexModel.py` ('*' scope grant), `filter_backends.py`. Batch: [4q](batches.md).
+
+---
+
+### 4r. Audit authors for users without names ✅
+
+**What it tests:** A nameless key user is the audit author by username on a single create and on a bulk delete; a named user is still recorded as first and last name.
+
+**Why a regression matters:** BUG-007: audit rows of service accounts named nobody (" "), so nobody could tell who changed the data.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.111 | nameless user on create | author is the username |
+| 4.112 | nameless user on bulk delete | both rows name the username |
+| 4.113 | named user | author is "Ada Lovelace" as before |
+
+**Scenario range:** 4.111-4.113. **Test file:** `lex/test_project/tests/permissions/test_4r_audit_authors.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/audit_logging/mixins/AuditLogMixin.py` (log_change author), `lex/audit_logging/mixins/BulkAuditLogMixin.py` (log_change author, _audit_author). Batch: [4r](batches.md).
+
 ### 4s. API-key read decided by the serializer ✅
 
 **What it tests:** A classic API key reading a record whose visibility the serializer decides itself gets the record, not an empty body.

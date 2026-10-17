@@ -141,3 +141,19 @@
 **Scenario range:** 8.142 – 8.144. **Test file:** `lex/test_project/tests/celery_async/test_8ad_dispatched_task_cancel_marker.py`. **Type:** U. **Status:** ✅ Complete (Session 91 — July 2). Allocated `8ad` (next free letter after `8ac`); 8.142 picks up after cluster-8 scenario max 8.141. Source: `lex/lex_app/celery_tasks.py` (`lex_shared_task` wrapper). 8.142 dispatched run + marker set ⇒ raises `CalculationCancelled` before the wrapped function runs; 8.143 dispatched run + no marker ⇒ marker consulted, function runs normally; 8.144 synchronous run (no context) ⇒ cancel index never consulted, function runs. 3 pass / 0 fail.
 
 ---
+
+### 8d. Database context in Celery tasks ✅
+
+**What it tests:** A task applies the starting user's context and resets it, also when it fails; synchronous mode and projects without DB_CONTEXT are untouched.
+
+**Why a regression matters:** Worker connections are pooled across tasks; a context that is not reset leaks one user's visibility into the next task.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 8.154 | task runs as its user | (alice, False) then (None, False) |
+| 8.155 | reset on failure | last call (None, False) |
+| 8.156 | no context / no hook | never called |
+
+**Scenario range:** 8.154-8.156. **Test file:** `lex/test_project/tests/celery_async/test_8d_db_context.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/lex_app/celery_tasks.py` (CeleryCalculationContext), `lex/core/db_context.py`. Batch: [8d](batches.md).
+
+---
