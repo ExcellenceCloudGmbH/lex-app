@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 82
+max_scenario: 87
 letters:
   a:
     title: ''
@@ -143,3 +143,28 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  o:
+    title: list_ui.filter_bar and the fields endpoint's value_list flag
+    scenarios: 10.83-10.87
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      The filter bar's default columns travel in list_ui. 10.83 reads Meta.filter_bar, 10.84 falls
+      back to a model attribute and defaults to an empty bar, 10.85 drops names that are not
+      value-list columns (unknown, JSON, related paths) with one warning each and de-duplicates.
+      _resolve_filter_bar resolves each name with value_list_field(serializer, model, name) -- the
+      same resolver filter_values uses (lex/api/utils/filterable_fields.py), given the cls()
+      instance get_list_ui_options builds -- so the bar can never name a column the endpoint would
+      refuse. A serializer that cannot build its fields without a request is logged at DEBUG and
+      checked without them: value_lists_offered (the model opt-out and the serializer-class check)
+      and the column type. Fallout: test_10i's 10.25 exact list_ui dicts gained filter_bar: [].
+      Final review: every descriptor of GET api/model_info/<model>/fields carries value_list,
+      computed by value_list_field with the serializer instance Fields.get already builds; a field
+      with no column behind it is false (10.86: char, integer, boolean, date, FK and choice true;
+      TextField, decimal, JSON, credential-shaped, write-only and renamed fields false; every column
+      of ValueListOptOutItem and AuditLog false). A filter_bar that is not a list, a tuple or a
+      single name -- True, or a model column named filter_bar -- gives no bar and one warning where
+      it raised a TypeError and failed the fields request (10.87).

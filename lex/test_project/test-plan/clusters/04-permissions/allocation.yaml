@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 79
+max_scenario: 87
 letters:
   a:
     title: ''
@@ -147,3 +147,29 @@ letters:
       model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of
       five mutations of that code (keep grants across users, keep them across sign-out, count record
       grants, cache the raw token, return the cached list itself) fails exactly one scenario.
+  o:
+    title: filter_values honours row and field read permissions
+    scenarios: 4.80-4.87
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      Value lists come from filter_values, outside the serializer that hides fields per row in the
+      grid. RowFieldItem hides region on private rows and denies hidden rows. 4.80 counts region
+      only where readable, 4.81 never counts hidden rows, 4.82 gives an empty list for a field
+      readable on no row, 4.83 refuses a field the requested serializer does not expose. Mutation:
+      forcing _count_per_row's readable-field membership test to always succeed fails 4.80 and 4.82.
+      Final review -- only what the grid renders can be listed: value_list_field now takes the
+      requested serializer instance and refuses a write-only field, extra_kwargs or HiddenField
+      (4.84), a field whose class takes get_attribute or to_representation from outside
+      rest_framework -- DRF's Serializer.to_representation calls both on every field; no framework
+      field class overrides either for a value-list column type, so nothing is whitelisted (4.85,
+      one subtest per method), and every field of a serializer whose class hierarchy defines
+      to_representation outside LexSerializer and DRF (4.86). The whole MRO is walked because a wrapped custom serializer puts LexSerializer ahead
+      of the custom class; the framework's id-only wrapper carries KEEPS_FIELD_VALUES. 4.87 pins the
+      read filter on the database path: KeycloakItem keeps both read methods at the LexModel
+      default, and a record-level UMA grant on one of three rows lists only that row's label.
+      Mutation: FilterValues.filter_queryset patched to the identity fails 4.87 alone; the other
+      seven pass, because the per-row check also drops denied rows.

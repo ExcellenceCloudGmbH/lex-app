@@ -39,11 +39,16 @@ Usage
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import urllib.parse
+from collections.abc import Mapping
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Dict, List, NamedTuple, Optional, Union
+from uuid import UUID
 
 import streamlit.components.v1 as components
 
@@ -483,6 +488,54 @@ def _resolve_base_url() -> str:
     ).rstrip("/")
 
 
+# Longest filters token put in the iframe URL. A longer one -- a long id list --
+# risks a 414 and lands in access logs, so it is delivered by message only.
+MAX_URL_FILTERS_TOKEN = 2000
+
+
+def _filter_scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, (Decimal, UUID)):
+        return str(value)
+    raise TypeError(
+        f"lex_view(filters=...) values must be strings, numbers, booleans, dates or None; got {value!r}"
+    )
+
+
+def normalise_filters(filters: Any) -> Dict[str, Any]:
+    """``filters`` as JSON-ready data: field name to a list of values, one value, or None."""
+    if not isinstance(filters, Mapping):
+        raise TypeError("lex_view(filters=...) must be a dict of field name to values")
+    normalised: Dict[str, Any] = {}
+    for field, value in filters.items():
+        if not isinstance(field, str) or not field:
+            raise TypeError(f"lex_view(filters=...) keys must be field names; got {field!r}")
+        if isinstance(value, (list, tuple)):
+            normalised[field] = [_filter_scalar(item) for item in value]
+        elif isinstance(value, (set, frozenset)):
+            normalised[field] = sorted((_filter_scalar(item) for item in value), key=repr)
+        else:
+            normalised[field] = _filter_scalar(value)
+    return normalised
+
+
+def encode_filters_token(filters: Dict[str, Any]) -> str:
+    """Base64url of compact, key-sorted JSON: one URL-safe token per filter state."""
+    raw = json.dumps(filters, separators=(",", ":"), sort_keys=True)
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _filter_bar_param(filter_bar: Any) -> str:
+    if isinstance(filter_bar, str) or not isinstance(filter_bar, (list, tuple)):
+        raise TypeError("lex_view(filter_bar=...) must be a list of field names")
+    if not all(isinstance(name, str) and name for name in filter_bar):
+        raise TypeError("lex_view(filter_bar=...) must be a list of field names")
+    return ",".join(filter_bar)
+
+
 def lex_view(
     path: str = "",
     *,
@@ -503,6 +556,9 @@ def lex_view(
     on_select: bool = False,
     on_navigate: bool = False,
     on_flow_step: bool = False,
+    on_filter: bool = False,
+    filters: Optional[Dict[str, Any]] = None,
+    filter_bar: Optional[List[str]] = None,
     extra_params: Optional[Dict[str, str]] = None,
     base_url: Optional[str] = None,
     key: Optional[str] = None,
@@ -516,15 +572,26 @@ def lex_view(
 
     Two modes
     ---------
-    * **Plain iframe (legacy).** No ``on_*`` flag and no ``serializer``
-      requesting event-bearing behaviour → renders ``components.iframe``
-      and returns ``None``. Existing call sites are unchanged.
+    * **Plain iframe (legacy).** No ``on_*`` flag and ``filters=None`` →
+      renders ``components.iframe`` and returns ``None``. Existing call
+      sites are unchanged.
     * **Bidirectional component.** At least one of ``on_create``,
-      ``on_update``, ``on_select``, ``on_navigate``, ``on_flow_step`` is
-      ``True`` → renders the lex_view custom component which forwards
-      ``postMessage`` events from the React app back to Python.
+      ``on_update``, ``on_delete``, ``on_select``, ``on_navigate``,
+      ``on_flow_step``, ``on_filter`` is ``True``, or ``filters`` is a dict
+      (that alone selects it) → renders the lex_view custom component,
+      which forwards ``postMessage`` events from the React app back to
+      Python and posts later filter changes into the frame.
       ``lex_view(...)`` then returns the latest event envelope (or
       ``None`` until the first event arrives).
+
+    The two modes are different Streamlit elements: a page that switches an
+    embed with no ``on_*`` flag between a ``filters`` dict and
+    ``filters=None`` across reruns remounts the frame, which resets its grid,
+    each time. To clear one field, keep passing a dict and give that field
+    ``None`` (``{"region": None}``). Re-passing the same filters on a rerun
+    posts nothing, so it does not override what the user changed inside the
+    frame; filters that differ from the ones the frame last received are
+    posted, and replace the filters on the fields they name.
 
     See ``docs/features/access-and-ui/lex_view callbacks.md`` for the
     event envelope schema and the per-type payload contracts.
@@ -576,6 +643,20 @@ def lex_view(
         the React side wires the AG Grid ``onSelectionChanged`` callback
         only when explicitly requested (it is opt-in because driving
         Streamlit re-runs on every grid click is expensive).
+    on_filter : bool
+        Report filter changes as ``"filter"`` events. Payload: ``resource``,
+        ``filters`` (field → ticked keys), ``filter_model`` (the grid's whole
+        model) and ``row_count``.
+    filters : dict, optional
+        Field name to stored values: a list, one value, or ``None`` to clear
+        the field. An empty list also clears the field, as ticking nothing
+        does in the grid's value lists. Applied on first load and,
+        when changed on a later rerun, posted into the frame without reloading
+        it. Filters on fields not named here, set by the user, stay. Filters
+        whose token is longer than 2,000 characters (a long id list) are not
+        put in the frame's URL; they are posted once the frame has loaded.
+    filter_bar : list of str, optional
+        The columns shown in the embed's filter bar; ``[]`` hides the bar.
     theme : str
         Host colour scheme forwarded to the embedded app — ``"light"``
         (default) or ``"dark"``.  Sent as the ``?theme=`` query parameter
@@ -633,6 +714,9 @@ def lex_view(
 
     raw_url = f"{resolved_base}{path}"
 
+    filters_payload = normalise_filters(filters) if filters is not None else None
+    filter_bar_value = _filter_bar_param(filter_bar) if filter_bar is not None else None
+
     # ── Parse & build query params ──
     parsed = urllib.parse.urlparse(raw_url)
     params: Dict[str, Any] = urllib.parse.parse_qs(parsed.query)
@@ -674,6 +758,9 @@ def lex_view(
     if serializer:
         params["serializer"] = [serializer]
 
+    if filter_bar_value is not None:
+        params["filter_bar"] = [filter_bar_value]
+
     # Theme handshake (host → iframe): boot fallback via query param; the
     # custom-component shim additionally posts a `theme` message on load.
     if theme not in ("light", "dark"):
@@ -695,6 +782,8 @@ def lex_view(
         params["emit_navigate"] = ["true"]
     if on_flow_step:
         params["emit_flow_step"] = ["true"]
+    if on_filter:
+        params["emit_filter"] = ["true"]
 
     # Extra user-supplied params
     if extra_params:
@@ -715,10 +804,10 @@ def lex_view(
     logger.debug("lex_view → %s", final_url)
     # ── Render ──
     callbacks_requested = any(
-        (on_create, on_update, on_delete, on_select, on_navigate, on_flow_step)
+        (on_create, on_update, on_delete, on_select, on_navigate, on_flow_step, on_filter)
     )
 
-    if callbacks_requested:
+    if callbacks_requested or filters_payload is not None:
         # Bidirectional path: custom component returns the latest event.
         # Origin used to gate inbound postMessage events to the resolved
         # frontend base. ``urlparse(resolved_base)`` keeps scheme+netloc
@@ -729,11 +818,20 @@ def lex_view(
             if parsed_base.scheme and parsed_base.netloc
             else None
         )
+        filters_token = encode_filters_token(filters_payload) if filters_payload is not None else None
+        url_filters_token = (
+            filters_token
+            if filters_token is not None and len(filters_token) <= MAX_URL_FILTERS_TOKEN
+            else None
+        )
         return render_lex_view_component(
             url=final_url,
             height=height,
             expected_origin=expected_origin,
             key=key,
+            filters=filters_payload,
+            filters_token=filters_token,
+            url_filters_token=url_filters_token,
         )
 
     # Legacy iframe path. Streamlit's components.iframe accepts width as

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -8,8 +9,10 @@ from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.core.exceptions import FieldDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import (
     Avg,
+    BooleanField,
     Case,
     Count,
     F,
@@ -26,11 +29,13 @@ from django.db.models import (
 from django.http import QueryDict
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from lex.api.utils import can_read_from_payload
+from lex.api.utils.filterable_fields import is_plain_text_field
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
 from lex.core.models.LexModel import UserContext
@@ -38,6 +43,25 @@ from lex.core.models.LexModel import UserContext
 
 MAX_PIVOT_COMBINATIONS = 200
 AgColumn = Dict[str, Optional[str]]
+
+
+logger = logging.getLogger(__name__)
+
+_TRUE_KEYS = {"true", "1", "t", "yes"}
+_FALSE_KEYS = {"false", "0", "f", "no"}
+
+
+def _bool_from_key(raw: Any) -> bool:
+    """A value-list key for a boolean column. Django's own ``to_python`` rejects
+    ``"true"`` and ``"false"``, which are exactly what the grid sends."""
+    if isinstance(raw, bool):
+        return raw
+    text = str(raw).strip().lower()
+    if text in _TRUE_KEYS:
+        return True
+    if text in _FALSE_KEYS:
+        return False
+    raise ValueError(f"{raw!r} is not a boolean")
 
 
 def _safe_key(value: Any) -> str:
@@ -169,6 +193,13 @@ SAFE_LOOKUPS = {
     "date__gte",
     "date__lt",
     "date__lte",
+    # Not a real Django lookup -- accepted here so `_resolve_lookup` treats
+    # `field__blank` as a safe suffix like any other. `_build_query_from_values`
+    # builds its `Q` itself (NULL, or NULL-or-"" on a plain text column)
+    # instead of ever handing Django a `field__blank` lookup. Like every
+    # other entry in this set, it shadows a JSON key literally named
+    # "blank" when that key is the terminal path segment.
+    "blank",
 }
 
 
@@ -320,19 +351,162 @@ def _coerce_value(model_field, value):
     return value
 
 
+_CONVERSION_FAILED = object()
+
+
+def _typed_value_converter(model_field):
+    """The conversion callable for a stored-value key, shared by the POST
+    Set filter (``ListModelEntries._set_filter_values``) and the GET
+    ``__exact``/``__in`` query-param path (:func:`_coerce_typed_value`), so
+    both turn the same raw string into the same Python value: the target
+    field's ``to_python`` for a foreign key, :func:`_bool_from_key` for a
+    boolean column (Django's own ``to_python`` rejects the ``"true"`` /
+    ``"false"`` strings both send), and the field's own ``to_python``
+    otherwise.
+    """
+    target_field = getattr(model_field, "target_field", None)
+    if getattr(model_field, "is_relation", False) and target_field is not None:
+        return target_field.to_python
+    if isinstance(model_field, BooleanField):
+        return _bool_from_key
+    return model_field.to_python
+
+
+def _coerce_typed_value(model_field, raw: Any) -> Any:
+    """Convert one GET ``__exact``/``__in`` value the same way a Set
+    filter's key converts (see :func:`_typed_value_converter`) -- by the
+    column's own type, not the legacy string-sniffing :func:`_coerce_value`
+    (which lowers any ``null``/``none``/``true``/``false`` spelling for
+    EVERY field type, before any type-specific logic runs). A value that
+    fails to convert (a bad id, an unparseable key, ...) is reported via the
+    ``_CONVERSION_FAILED`` sentinel so the caller can drop it -- the GET
+    path's existing behaviour for a value it cannot use. Unlike
+    ``_set_filter_values`` (the POST filterModel path, where the caller is
+    actively building a filter), this never raises: a 400 here would reject
+    an otherwise-valid list request over one bad query-string value.
+
+    A ``JSONField`` is the one exception, and deliberately lives only here --
+    never in :func:`_typed_value_converter`, which the POST Set filter
+    shares -- because a JSON column has no single "column type" to convert a
+    raw string BY the way a foreign key (always an id) or a boolean column
+    (always ``true``/``false``) does: a JSON value's own spelling already
+    says its type (``5`` is a number, ``"5"`` a string, ``true`` a bool,
+    ``null`` is null). ``model_field`` is the SAME ``JSONField`` object
+    whether ``lookup_path`` names the whole column (``metadata__in``) or a
+    sub-path through it (``metadata__key__in``) -- ``_resolve_lookup``'s JSON
+    branch never manufactures a separate ``Field`` for a key -- so both
+    shapes defer to the legacy, ``json.loads``-based :func:`_coerce_value`
+    unchanged, exactly as a bare key or any other lookup suffix already does.
+    Routing either shape through ``_typed_value_converter`` instead would
+    call ``model_field.to_python``, which for ``JSONField`` is the inherited
+    identity ``Field.to_python`` (it never raises, so the fail-closed branch
+    above would not even trigger) -- a numeric/boolean/null-spelled value
+    would survive as an unparsed string and silently stop matching the
+    differently-typed value actually stored.
+    """
+    if _is_json_field(model_field):
+        return _coerce_value(model_field, raw)
+    convert = _typed_value_converter(model_field)
+    try:
+        return convert(raw)
+    except (DjangoValidationError, TypeError, ValueError):
+        return _CONVERSION_FAILED
+
+
+_BLANK_TRUE_KEYS = {"true"}
+_BLANK_FALSE_KEYS = {"false"}
+
+
+def _parse_blank_flag(value: Any) -> Optional[bool]:
+    """``true`` / ``false`` (case-insensitively) for the ``__blank`` GET lookup.
+
+    Deliberately narrower than :func:`_parse_bool` -- only the two literal
+    words are accepted. Anything else is unparseable and the caller drops
+    it, the same way every other unrecognised filter value is skipped
+    rather than guessed at.
+    """
+    text = str(value).strip().lower()
+    if text in _BLANK_TRUE_KEYS:
+        return True
+    if text in _BLANK_FALSE_KEYS:
+        return False
+    return None
+
+
+def _build_blank_q(field_path: str, model_field, want_blank: bool) -> Q:
+    """``Q`` for ``field_path``'s blank state, matching ``_build_filter_q``'s
+    Set-filter blank key: NULL-or-``""`` on a plain text column, NULL only
+    on every other column (see its ``is_plain_text_field`` branch)."""
+    if is_plain_text_field(model_field):
+        blank_q = Q(**{f"{field_path}__isnull": True}) | Q(**{field_path: ""})
+    else:
+        blank_q = Q(**{f"{field_path}__isnull": True})
+    return blank_q if want_blank else ~blank_q
+
+
 def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Optional[Q]:
     cleaned = [v for v in values if v != ""]
     if not cleaned:
         return None
 
-    _, lookup_path, model_field = resolved
+    field_path, lookup_path, model_field = resolved
 
+    # `__blank` is handled here, not by Django -- it isn't a real lookup, so
+    # it must never reach the generic `Q(**{lookup_path: ...})` below.
+    # Restricted to a direct column: `field_path` itself must name a single
+    # column on THIS model, with no "__" of its own. That rule excludes two
+    # shapes: a JSON sub-path, whose `lookup_path` carries extra segments
+    # beyond `field_path` + the suffix (e.g. "data__path__blank" vs.
+    # field_path "data") -- the single-column Q below would silently drop
+    # the sub-path; and a related path crossing a relation (e.g.
+    # "category__name__blank", field_path "category__name") -- that names a
+    # *different* column's blank state on the related model, not a blank
+    # state of this one. Both are ignored -- same as any other unsupported
+    # suffix -- rather than ever handed to Django as a bogus lookup. A
+    # direct FK column's own blank state (e.g. "category__blank", field_path
+    # "category", no "__") is unaffected and stays supported.
+    if lookup_path.endswith("__blank"):
+        if "__" in field_path or lookup_path != f"{field_path}__blank":
+            return None
+        flags = [flag for flag in (_parse_blank_flag(v) for v in cleaned) if flag is not None]
+        if not flags:
+            return None
+        combined_blank = _build_blank_q(field_path, model_field, flags[0])
+        for flag in flags[1:]:
+            combined_blank |= _build_blank_q(field_path, model_field, flag)
+        return combined_blank
+
+    # `__in` carries a value-list Set filter's ticked keys (repeated, or one
+    # comma-joined param) -- converted by the column's own type exactly as
+    # the POST Set filter converts them (`_set_filter_values`), not by the
+    # legacy, type-blind `_coerce_value` (C1): a CharField key that happens
+    # to spell "none"/"true" must stay that literal string, not become
+    # Python `None`/`True` the way it would for every other field type too.
+    # A key that fails to convert (bad id, ...) is dropped -- same as any
+    # other value this GET path cannot use -- never a 400. Exception: a
+    # JSONField (whole column or a sub-path -- `model_field` is the same
+    # JSONField object either way) still goes through the legacy
+    # `_coerce_value` here too, via `_coerce_typed_value`'s own JSON
+    # special-case -- see that function's docstring for why.
     if lookup_path.endswith("__in"):
         if len(cleaned) == 1 and isinstance(cleaned[0], str) and "," in cleaned[0]:
             items = [x for x in cleaned[0].split(",") if x != ""]
         else:
             items = cleaned
-        coerced = [_coerce_value(model_field, v) for v in items]
+        coerced = [
+            v for v in (_coerce_typed_value(model_field, item) for item in items)
+            if v is not _CONVERSION_FAILED
+        ]
+        if not coerced:
+            # `cleaned` (checked above) was non-empty, so a value WAS given
+            # here -- it just didn't survive conversion (or comma-splitting
+            # left nothing, e.g. `?field__in=,`). An unconvertible value can
+            # never equal a stored one, so the correct answer is no rows.
+            # `None` would mean "ignore this param" -- no filtering at all --
+            # which fails OPEN: `?category__in=abc` would match every row,
+            # and a "Select All" bulk action would run over the whole table
+            # instead of nothing.
+            return Q(pk__in=[])
         return Q(**{lookup_path: coerced})
 
     if lookup_path.endswith("__range"):
@@ -344,6 +518,36 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
             return None
         coerced = [_coerce_value(model_field, p) for p in parts]
         return Q(**{lookup_path: coerced})
+
+    # An explicit `__exact` suffix gets the same column-type conversion as
+    # `__in` above (C1) -- a value-list Set filter's single ticked key sends
+    # exactly this shape (`field__exact=<key>`), and the same JSONField
+    # exception applies (see `_coerce_typed_value`). A bare key with no
+    # suffix at all (`lookup_path == field_path`) is NOT this branch -- it
+    # falls through to the legacy `_coerce_value` below, so an existing
+    # caller's `?field=null` keeps meaning `IS NULL` exactly as before. Note
+    # this path-equality guard (rather than `.endswith("__exact")`) already
+    # excludes a JSON sub-path's own `__exact` on its own -- `field_path` for
+    # `metadata__key__exact` is "metadata", so `lookup_path` never equals
+    # `f"{field_path}__exact"` -- it falls through to the legacy branch below
+    # regardless of the JSONField exception just above.
+    if lookup_path == f"{field_path}__exact":
+        coerced_values = [
+            v for v in (_coerce_typed_value(model_field, v) for v in cleaned)
+            if v is not _CONVERSION_FAILED
+        ]
+        if not coerced_values:
+            # Same reasoning as the `__in` branch above: a value was given
+            # but none converted, so no stored value can match -- no rows,
+            # not "ignore this param" (which would fail open and match
+            # every row).
+            return Q(pk__in=[])
+        if len(coerced_values) == 1:
+            return Q(**{lookup_path: coerced_values[0]})
+        combined = Q()
+        for v in coerced_values:
+            combined |= Q(**{lookup_path: v})
+        return combined
 
     if len(cleaned) == 1:
         return Q(**{lookup_path: _coerce_value(model_field, cleaned[0])})
@@ -590,6 +794,42 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
 
         return queryset.filter(combined)
 
+    def _set_filter_values(self, field: str, values: list) -> Tuple[list, bool]:
+        """Convert a Set filter's keys to the column's Python values.
+
+        A key is the stored value as a string -- ``"5"``, ``"true"``, an ISO
+        date, a related primary key. ``None`` stands for blank, which SQL ``IN``
+        never matches, so it is reported separately. On a plain text column an
+        empty-string key means the same thing: a stored ``""`` is blank there
+        too (see ``_build_filter_q``), so it is folded into the same bucket
+        instead of being matched via ``__in`` as the literal string ``""``.
+        A key that cannot be converted is a 400 naming the field: answering
+        with more rows than the user asked for is worse than refusing.
+
+        The conversion itself (``_typed_value_converter``) is shared with the
+        GET list endpoint's ``__exact``/``__in`` query-param lookups, so a
+        value-list key converts identically whichever way it reaches the
+        server -- only the failure handling differs (a 400 here; the GET
+        path drops an unconvertible value instead, see ``_coerce_typed_value``).
+        """
+        model_field = self._get_model_field(field)
+        convert = _typed_value_converter(model_field)
+        blank_matches_empty_string = is_plain_text_field(model_field)
+
+        converted: list = []
+        include_blank = False
+        for raw in values:
+            if raw is None or (blank_matches_empty_string and raw == ""):
+                include_blank = True
+                continue
+            try:
+                converted.append(convert(raw))
+            except (DjangoValidationError, TypeError, ValueError) as exc:
+                raise ValidationError(
+                    {"filterModel": {field: f"{raw!r} is not a valid value for {field}."}}
+                ) from exc
+        return converted, include_blank
+
     def _build_filter_q(self, field: str, model: Any) -> Optional[Q]:
         if model in (None, ""):
             return None
@@ -630,10 +870,43 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
         filter_type = str(model.get("filterType") or ("date" if has_date_keys else "text"))
 
         if filter_type == "set":
-            values = model.get("values") or []
-            if not isinstance(values, list) or not values:
+            values = model.get("values")
+            if not isinstance(values, list):
                 return None
-            return Q(**{f"{field}__in": values})
+            if not values:
+                # AG Grid's Set filter with nothing ticked means "no rows".
+                return Q(pk__in=[])
+            converted, include_blank = self._set_filter_values(field, values)
+            condition: Optional[Q] = Q(**{f"{field}__in": converted}) if converted else None
+            if include_blank:
+                model_field = self._get_model_field(field)
+                if is_plain_text_field(model_field):
+                    # A plain text column stores blank two ways -- NULL and
+                    # "" -- and the grid's value list folds them into one
+                    # "(Blank)" entry (see FilterValues._fold_blank), so
+                    # ticking it here must match both too.
+                    blank = Q(**{f"{field}__isnull": True}) | Q(**{field: ""})
+                else:
+                    blank = Q(**{f"{field}__isnull": True})
+                condition = blank if condition is None else (condition | blank)
+            return condition
+
+        if filter_type == "multi":
+            children = model.get("filterModels")
+            if not isinstance(children, list):
+                return None
+            conditions = [
+                self._build_filter_q(field, child)
+                for child in children
+                if child not in (None, "")
+            ]
+            conditions = [condition for condition in conditions if condition is not None]
+            if not conditions:
+                return None
+            combined = conditions[0]
+            for condition in conditions[1:]:
+                combined &= condition
+            return combined
 
         operation_type = str(model.get("type") or model.get("operator") or "contains")
 
@@ -779,6 +1052,7 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
                 return ~base
             return base
 
+        logger.info("Ignoring unknown filterType %r for field %r", filter_type, field)
         return None
 
     def _apply_group_key_filters(

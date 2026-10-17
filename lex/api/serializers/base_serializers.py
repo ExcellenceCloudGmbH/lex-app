@@ -19,6 +19,12 @@ from lex.api.serializers.sensitive_fields import (
     filter_sensitive_field_names,
     strip_sensitive_fields,
 )
+from lex.api.utils.filterable_fields import (
+    _KEEPS_FIELD_VALUES,
+    is_value_list_field,
+    value_list_field,
+    value_lists_offered,
+)
 
 ID_FIELD_NAME = "id_field"
 SHORT_DESCR_NAME = "short_description"
@@ -32,6 +38,13 @@ HAS_CALCULATION_LOG_NAME = "lex_reserved_has_calculation_log"
 CALCULATION_CLOSED_REASON_NAME = "lex_reserved_calculation_closed_reason"
 
 # --- MODULE-LEVEL CACHES (populated lazily, persist for process lifetime) ---
+
+# (serializer_class, dropped filter_bar name) pairs already warned about --
+# a serializer class is reused for every request it serves, so without this
+# a misconfigured filter_bar re-logged its WARNING on every fields-info
+# request (e.g. every page load of a list naming a non-value-list column).
+# Warn once per process per pair; see _resolve_filter_bar.
+_filter_bar_dropped_warned: set[tuple[type, str]] = set()
 
 # Cache: LexModel base field names (identical for every LexModel subclass)
 _lexmodel_fields: set | None = None
@@ -280,6 +293,72 @@ class LexClearableImageField(LexClearableFileField, serializers.ImageField):
     """Image variant of :class:`LexClearableFileField` (same clear semantics)."""
 
 
+def _resolve_filter_bar(serializer_class, serializer) -> list:
+    """The columns a list shows in its filter bar by default.
+
+    ``Meta.filter_bar`` on the serializer, else a ``filter_bar`` attribute on
+    the model, so a list without a custom serializer can still declare one.
+    Names that are not value-list columns are dropped with a warning, logged
+    at most once per process for a given (serializer class, name) pair --
+    the same serializer class answers every request it serves, so without
+    this a misconfigured filter_bar would re-log on every fields-info
+    request; a duplicate is dropped silently; order is preserved. Anything
+    but a list, a tuple or a single name -- ``True``, or the model's own
+    column when the model has a field called ``filter_bar`` -- gives no bar
+    and one warning.
+
+    A name is kept only when :func:`value_list_field` accepts it for
+    ``serializer`` -- the resolver the ``filter_values`` endpoint uses -- so
+    the bar can never name a column the endpoint would refuse.
+
+    ``serializer`` is ``None`` when ``get_list_ui_options`` could not build
+    the serializer's fields without a request. The checks that need no
+    instance still apply then (:func:`value_lists_offered`, and the column
+    type), but a field's ``source``, ``write_only`` flag and field class
+    cannot be seen.
+    """
+    meta = getattr(serializer_class, "Meta", None)
+    model = getattr(meta, "model", None)
+    raw = getattr(meta, "filter_bar", None)
+    if raw is None and model is not None:
+        raw = getattr(model, "filter_bar", None)
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raw = [raw] if raw else []
+    elif not isinstance(raw, (list, tuple)):
+        logger.warning(
+            "filter_bar of %s must be a list of field names, not %r; no bar",
+            getattr(model, "__name__", model), raw,
+        )
+        return []
+
+    names: list = []
+    for name in raw:
+        accepted = False
+        if model is not None and isinstance(name, str) and name:
+            if serializer is not None:
+                accepted = value_list_field(serializer, model, name) is not None
+            elif "__" not in name and value_lists_offered(serializer_class, model):
+                try:
+                    model_field = model._meta.get_field(name)
+                except Exception:
+                    model_field = None
+                accepted = model_field is not None and is_value_list_field(model_field)
+        if not accepted:
+            warn_key = (serializer_class, name)
+            if warn_key not in _filter_bar_dropped_warned:
+                _filter_bar_dropped_warned.add(warn_key)
+                logger.warning(
+                    "filter_bar: %r is not a value-list column of %s; dropped",
+                    name, getattr(model, "__name__", model),
+                )
+            continue
+        if name not in names:
+            names.append(name)
+    return names
+
+
 # --- UPDATED PERMISSION-AWARE BASE SERIALIZER ---
 class LexSerializer(serializers.ModelSerializer):
     """
@@ -361,8 +440,22 @@ class LexSerializer(serializers.ModelSerializer):
     def get_list_ui_options(cls) -> dict:
         """Expose serializer-level frontend list options via ``Meta``."""
         meta = getattr(cls, "Meta", None)
+        try:
+            # Unbound, as ``Fields.get`` builds it; the fields are built here
+            # too, so a serializer that cannot build them without a request
+            # falls back below instead of failing the whole list_ui.
+            serializer = cls()
+            _ = serializer.fields
+        except Exception as exc:
+            logger.debug(
+                "list_ui: %s for %s could not be built without a request (%r); "
+                "filter_bar is checked without its fields",
+                cls.__name__, getattr(getattr(meta, "model", None), "__name__", None), exc,
+            )
+            serializer = None
         return {
             "hide_actions_column": bool(getattr(meta, "hide_actions_column", False)),
+            "filter_bar": _resolve_filter_bar(cls, serializer),
         }
 
     # ------------------------------------------------------------------
@@ -742,38 +835,94 @@ class LexSerializer(serializers.ModelSerializer):
         CALCULATION_ID_NAME, HAS_CALCULATION_LOG_NAME,
     })
 
-    def to_representation(self, instance):
-        request = self.context.get('request')
+    def _resolve_permission_target(self, instance):
+        """The instance permission checks should run against, and its capability flags.
 
-        # Resolve the target instance for permission checks
+        Unwraps a History / MetaHistory wrapper when the wrapper class itself
+        declares neither ``can_read`` nor ``permission_read`` (i.e. it isn't a
+        LexModel), so permission checks always run against a real LexModel.
+        """
         caps = _get_capabilities(type(instance))
-
         if not caps['has_can_read'] and not caps['has_permission_read']:
             target_instance = self._unwrap_instance(instance)
             target_caps = _get_capabilities(type(target_instance))
         else:
             target_instance = instance
             target_caps = caps
+        return target_instance, target_caps
 
-        # Normal visible fields for concrete models
+    def _resolve_target_and_visible_fields(
+        self, instance, request, base_user_context=None, is_api_key_request=False,
+    ):
+        """Resolve the instance to check permissions against, and which
+        model field names ``request`` may read on it -- in one pass, so a
+        caller that needs both (``to_representation``) unwraps the instance
+        only once, not twice.
+
+        The visibility decision: unwrap when the class declares neither
+        ``can_read`` nor ``permission_read``; legacy ``can_read(request)``
+        first (``False`` -> hidden, ``True`` -> all fields, else the
+        returned names); else ``permission_read`` (not ``allowed`` ->
+        hidden; ``get_fields``; a bare truthy/falsy result -> all / none);
+        else all fields. An empty set means the row is hidden.
+
+        ``base_user_context``, when given, must be a
+        ``UserContext.from_request_base(request)`` built ONCE by the caller
+        (e.g. ``FilterValues``' per-row scan, over up to
+        ``LEX_FILTER_VALUES_ROW_SCAN_LIMIT`` rows), and ``is_api_key_request``
+        whether that same request is API-key authenticated (also decided
+        once per scan, not per row -- see ``UserContext._api_key_context``).
+        Together they let the default (unoverridden) ``can_read`` path
+        compute the same answer ``can_read`` would -- ``permission_read`` +
+        ``get_fields``, resolved for the unwrapped instance only, exactly as
+        ``LexModel.can_read``'s own ``UserContext.from_request(request,
+        self)`` resolves it -- by reusing the cached base context instead of
+        building a fresh one (``can_read``'s own ``UserContext.from_request``
+        queries ``user.groups`` fresh on every call: fine once per request,
+        not once per row). For an API-key request this fast path is skipped
+        and ``can_read`` is called directly instead: an API key's own scopes
+        come from ``UserContext.from_request``'s early ``_api_key_context``
+        return, which ``with_instance`` does not go through (it recomputes
+        scopes from ``user_permissions``, which an API-key context carries
+        as empty) -- so the fast path would silently drop them. An
+        overridden ``can_read`` has arbitrary behaviour, so it is always
+        called exactly as today regardless. Without ``base_user_context``
+        (the ``to_representation`` call site), behaviour is exactly today's.
+        """
+        target_instance, target_caps = self._resolve_permission_target(instance)
+
         visible_fields = None
 
         # 1. Try Legacy 'can_read'
         if target_caps['has_can_read']:
-            raw_visible_fields = target_instance.can_read(request)
-            if raw_visible_fields is False:
-                return {}
-            if raw_visible_fields is True:
-                visible_fields = self._get_cached_field_names(type(target_instance))
+            if (
+                base_user_context is not None
+                and not is_api_key_request
+                and type(target_instance).can_read is LexModel.can_read
+            ):
+                # The default can_read is just permission_read + get_fields
+                # over the full field set -- compute that directly so the
+                # per-row scan reuses the cached base context instead of
+                # building a fresh one (can_read's own UserContext.from_request)
+                # for every single row.
+                user_context = base_user_context.with_instance(request, target_instance)
+                result = target_instance.permission_read(user_context)
+                visible_fields = result.get_fields(target_instance._get_all_field_names())
             else:
-                visible_fields = self._normalize_field_names(raw_visible_fields)
+                raw_visible_fields = target_instance.can_read(request)
+                if raw_visible_fields is False:
+                    return target_instance, set()
+                if raw_visible_fields is True:
+                    visible_fields = self._get_cached_field_names(type(target_instance))
+                else:
+                    visible_fields = self._normalize_field_names(raw_visible_fields)
 
         # 2. Try New System 'permission_read'
         elif target_caps['has_permission_read']:
             user_context = self._get_user_context(request, target_instance)
             result = target_instance.permission_read(user_context)
             if hasattr(result, "allowed") and not result.allowed:
-                return {}  # Hide entirely
+                return target_instance, set()  # Hide entirely
 
             all_fields = self._get_cached_field_names(type(target_instance))
             if hasattr(result, "get_fields"):
@@ -788,6 +937,26 @@ class LexSerializer(serializers.ModelSerializer):
             visible_fields = self._get_cached_field_names(type(instance))
         else:
             visible_fields = self._normalize_field_names(visible_fields)
+
+        return target_instance, visible_fields
+
+    def readable_field_names(
+        self, instance, request, base_user_context=None, is_api_key_request=False,
+    ) -> set:
+        """Which model field names ``request`` may read on ``instance``.
+
+        See ``_resolve_target_and_visible_fields`` for the full decision;
+        this is the half of it most callers (``FilterValues``) need.
+        """
+        _, visible_fields = self._resolve_target_and_visible_fields(
+            instance, request, base_user_context=base_user_context, is_api_key_request=is_api_key_request,
+        )
+        return visible_fields
+
+    def to_representation(self, instance):
+        request = self.context.get('request')
+
+        target_instance, visible_fields = self._resolve_target_and_visible_fields(instance, request)
 
         if not visible_fields:
             return {}
@@ -1042,6 +1211,10 @@ def _wrap_custom_serializer(custom_cls, model_class):
                     representation["id"] = pk_value
             return representation
 
+        # Only `id` is touched, so every other field keeps the value its
+        # field class rendered (see filterable_fields.renders_rows_as_stored).
+        # Framework-private mark -- see filterable_fields._KEEPS_FIELD_VALUES.
+        setattr(_to_representation_with_id, _KEEPS_FIELD_VALUES, True)
         wrapped_cls.to_representation = _to_representation_with_id
     return wrapped_cls
 

@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 385
+max_scenario: 406
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1250,3 +1250,105 @@ letters:
       without the test project's environment and with the suite's checkout first on PYTHONPATH.
       Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
       set main() answers without Django fails both, because Django setup crashes in that directory.
+
+  aw:
+    title: lex_view filters, filter_bar and on_filter
+    scenarios: 1.393-1.401
+    status: complete
+    tests:
+      pass: 14
+      skip: 0
+      xfail: 0
+    note: >-
+      lex_view(filters=, filter_bar=, on_filter=). Filters ride the component's arguments, never its
+      URL or key, because the URL is the component's identity and a changed URL remounts the frame.
+      1.393-1.398 pin that, the component choice, the filter_bar and emit_filter parameters, and
+      refusals at the call. 1.399 runs the shim's decision function under node (skipped without
+      node): post only to a loaded frame, only named filters, only when they differ.
+      Final review: the shim no longer treats "last posted" as what the frame holds. After every
+      load -- a reload, a sign-in round trip -- filter_sync.afterLoad takes the frame to hold only
+      the filters its URL carried and re-posts the host's when they differ; index.html runs it from
+      one persistent load handler (it was a once-only listener). A token over
+      MAX_URL_FILTERS_TOKEN = 2,000 characters is left out of the URL (url_filters_token is None)
+      and arrives by message only. 1.400 pins the boundary (a 2,000-character token rides the URL,
+      2,002 does not) and the post after a URL-less load; 1.401 that a new load re-posts filters
+      that differ from the URL's and not ones equal to them.
+
+  ax:
+    title: 'LEX_EMBED_ALLOWED_ORIGINS -- named sites only may embed lex-app and use its filter bridge'
+    scenarios: 1.402-1.406
+    status: complete
+    tests:
+      pass: 38
+      skip: 0
+      xfail: 0
+    note: >-
+      Amendment 14 of the multi-value-filters design: an unrestricted embed=true exemption plus
+      the new `filter` bridge event (a row count with no user action) meant any site could frame
+      lex-app and read it. LEX_EMBED_ALLOWED_ORIGINS, a comma-separated list of origins, becomes a
+      validated Django setting via parse_embed_allowed_origins (lex/runtime_config.py) -- invalid
+      entries (a path, a wildcard, a non-http scheme, garbage) are dropped with one WARNING naming
+      them, never crashing startup. EmbedXFrameOptionsMiddleware.process_response adds
+      Content-Security-Policy: frame-ancestors 'self' <origins> to every response it already
+      exempts (embed=true, the OIDC path, the embed cookie), merging into an existing CSP header
+      and replacing a stale frame-ancestors directive rather than dropping other directives; an
+      empty/unset list changes nothing. serve_react's config.js rewrite exposes the validated list
+      to the frontend as window.REACT_APP_EMBED_ALLOWED_ORIGINS, comma-joined and escaped with
+      json.dumps so a value can never break out of the JS string literal, a no-op when the
+      placeholder line is absent (older builds). 1.402-1.403 cover the middleware across all three
+      exempt paths plus the CSP-merge boundary; 1.404 covers config.js including the escaping;
+      1.405 covers the parser's validation rules end to end through a real settings-module reload,
+      not just the helper in isolation. The frontend half (gating the `filter` channel on the
+      parent origin) is a separate task.
+
+      Follow-up, same session: EmbedXFrameOptionsMiddleware is not registered in this repo's
+      MIDDLEWARE, so (as found during review) it is not what makes lex-app frameable --
+      serve_react is, via its own @xframe_options_exempt decorator, which bypasses
+      XFrameOptionsMiddleware for every response it returns regardless of the (unregistered)
+      embed middleware. 1.406 moves the restriction to where it actually takes effect:
+      serve_react now applies the same frame-ancestors directive, through a shared
+      merge_frame_ancestors (moved from the middleware module to lex/runtime_config.py so both
+      call sites share one implementation), to its own HTML document responses -- the SPA
+      fallback and any other real .html file it serves (e.g. embed.html) -- and only to those;
+      hashed assets and config.js are untouched. The middleware's own CSP step is unchanged, for
+      deployments that do register it.
+
+      Fix round 2, same session (security review): urlsplit alone let unsafe hosts through.
+      _normalise_origin now IDNA-encodes the host (müller.de -> xn--mller-kva.de; a UnicodeError
+      drops it) and checks the ASCII result against a strict lowercase hostname grammar, which is
+      what actually blocks `;`, a space, a quote, a backslash and `%` -- none of those are
+      rejected by IDNA's nameprep alone. Bracketed hosts (IPv6 literals, and the IPvFuture
+      `[v1.x https:]` shape that injects a bare `https:` CSP source token through its embedded
+      space) are rejected outright before parsing. Default ports (:443 https, :80 http) are
+      dropped so the origin matches a browser's own location.origin/MessageEvent.origin, and a
+      lone trailing slash is accepted (https://x/ is the origin https://x) while any further path
+      is still invalid; dropping the port can now reveal a duplicate that still collapses to one.
+      Separately: LEX_EMBED_ALLOWED_ORIGINS set to only invalid entries (e.g. a wildcard) parsed
+      to [], indistinguishable from unset -- framing was silently unrestricted the moment every
+      configured origin happened to be invalid. A new LEX_EMBED_ORIGINS_CONFIGURED setting
+      (embed_origins_configured in runtime_config.py) distinguishes "unset" from "set but
+      nothing validated"; the latter now fails closed to `frame-ancestors 'self'` on both the
+      middleware and serve_react, logged once from parse_embed_allowed_origins itself ("framing is
+      limited to the app itself"). A new frame_ancestors_directive(origins) builds that directive
+      (empty origins -> 'self' only) for both call sites. merge_frame_ancestors now matches the
+      directive name exactly (its first token) rather than by prefix, and documents that it does
+      not support a comma-joined multi-policy CSP value. serve_react's two LEX_EMBED_* lookups now
+      read django.conf.settings (not the lex.lex_app.settings module) so override_settings reaches
+      them in tests; its document check is now case-insensitive and also matches .htm. No new
+      scenario IDs -- 1.402 and 1.406 each gained a configured-but-all-invalid case, and 1.405
+      gained cases for every invalid host shape plus the fail-closed warning and
+      embed_origins_configured itself.
+
+      Fix round 3, same session (re-review): one further host-validation gap. Python's stdlib
+      IDNA2003 codec and a browser's WHATWG/UTS46 (non-transitional) domain-to-ASCII disagree on
+      four code points -- sharp s (fussball.de folds here to plain-ASCII fussball.de, vs. the
+      browser's xn--fuball-cta.de), final sigma, ZWJ and ZWNJ -- so the two sides compute different
+      Punycode for the same typed host, previously accepted here with no warning. _normalise_origin now
+      rejects a host containing any of the four outright, before encoding, dropped and named in
+      the existing WARNING (fail closed, no round-trip check added -- that would reject valid
+      punycode input). Also: _HOSTNAME_RE now uses .fullmatch() with no anchors instead of
+      .match() + a trailing $, which tolerates a newline just before it. Test fix: the `;` case
+      in 1.405's bracketed-host test used a host that also contained a wildcard, so the existing
+      wildcard pre-check was rejecting it before the grammar check ever ran; changed to a host with
+      only the semicolon, so the grammar is what is actually exercised. Also fixed a doc typo
+      (muller.de -> müller.de) in this note's prior paragraph. No new scenario IDs.

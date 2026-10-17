@@ -83,6 +83,69 @@ class SchemaItem(LexModel):
         return self.name
 
 
+@_permissive
+class ValueListItem(LexModel):
+    """One column per value-list decision the fields endpoint reports (10.86)."""
+
+    name = models.CharField(max_length=200)                     # char
+    count = models.IntegerField(default=0)                      # integer
+    active = models.BooleanField(default=True)                  # boolean
+    day = models.DateField(null=True, blank=True)               # date
+    target = models.ForeignKey(                                 # foreign key
+        SchemaFKTarget,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="value_list_items",
+    )
+    status = models.CharField(                                  # choices
+        max_length=16, default="open",
+        choices=[("open", "Open"), ("closed", "Closed")],
+    )
+    notes = models.TextField(blank=True, default="")            # long text: none
+    amount = models.DecimalField(                               # decimal: none
+        max_digits=12, decimal_places=2, default=0,
+    )
+    payload = models.JSONField(default=dict, blank=True)        # JSON: none
+    api_key = models.CharField(max_length=64, blank=True, default="")  # credential-shaped: none
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+@_permissive
+class ValueListOptOutItem(LexModel):
+    """Opts out of value lists: no column of it gets one (10.86)."""
+
+    lex_value_lists = False
+
+    name = models.CharField(max_length=200)
+    count = models.IntegerField(default=0)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+@_permissive
+class FilterBarColumnItem(LexModel):
+    """Has a column named ``filter_bar``, so the model attribute is that
+    column, not a list of names (10.87)."""
+
+    name = models.CharField(max_length=200)
+    filter_bar = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 class SchemaHiddenItem(LexModel):
     """``permission_list`` returns False — used by 10.14 to prove that
     ``delete_restricted_nodes_from_model_structure`` prunes denied
