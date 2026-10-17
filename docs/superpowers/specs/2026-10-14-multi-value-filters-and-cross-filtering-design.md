@@ -65,6 +65,9 @@ Found while the implementation plans were written against the source:
     is kept. Echoing an older event after the user's next change can still undo that change; hosts
     should pass filters on, not echo them. On a grouped table, `row_count` is the number of top-level
     groups.
+16. **Host filters set value lists only.** A host's `filters`, on the first load or later, replace a
+    column's ticked keys and nothing else. On a column whose filter also has a condition, the
+    condition stays, and `None` or `[]` clears only the ticked keys.
 
 ## The problem
 
