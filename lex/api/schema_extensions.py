@@ -56,3 +56,19 @@ class LexProjectAuthenticationScheme(OpenApiAuthenticationExtension):
             definition = scheme.get_security_definition(auto_schema)
             definitions.extend([definition] if isinstance(scheme.name, str) else list(definition))
         return definitions
+
+
+class LexAPIKeyAuthenticationScheme(OpenApiAuthenticationExtension):
+    """Scoped API keys (``LexAPIKey``) in the ``Api-Key`` header.
+
+    ``priority = -1``: a project that accepts its keys under another header
+    (``lex_config.API_KEY_HEADERS``) describes ``LexAPIKeyAuthentication`` with
+    its own extension, and that one wins.
+    """
+
+    target_class = "lex.authentication.authentication_backends.api_keys.LexAPIKeyAuthentication"
+    name = "apiKeyAuth"
+    priority = -1
+
+    def get_security_definition(self, auto_schema):
+        return {"type": "apiKey", "in": "header", "name": "Api-Key"}
