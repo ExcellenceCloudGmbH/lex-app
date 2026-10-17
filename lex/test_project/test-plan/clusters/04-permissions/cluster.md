@@ -200,8 +200,10 @@
 | 4.126 | calculation logs of readable records only | readable calculation shown; hidden, unbound and unfiltered empty; PDF 404; superuser all |
 | 4.127 | a refusing permission_list hides the list | 404, then 200 with the hook allowing |
 | 4.128 | the gate in the ASGI stack | one GenericApiSocketGate around the authenticated routes |
+| 4.136 | an unknown api path is 404 | the SPA catch-all answers 404 below api/ in strict mode, also under DJANGO_BASE_PATH; legacy keeps the index |
+| 4.137 | the bundled frontend follows the mode | outside mode all a signed-in non-superuser gets 404; anonymous callers and superusers get the page |
 
-**Scenario range:** 4.119-4.128. **Test file:** `lex/test_project/tests/permissions/test_4v_generic_records.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/middleware/generic_api_gate.py` (records mode, exposed_operations, record_operation, GenericApiSocketGate), `lex/lex_app/asgi.py`, `lex/core/extensions.py` (_validate_exposed_models), `lex/api/security.py` (edit_violations for Django auth models, list_denied), `lex/api/views/model_entries/List.py` (initial), `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`. Batch: [4v](batches.md).
+**Scenario range:** 4.119-4.128, 4.136-4.137. **Test file:** `lex/test_project/tests/permissions/test_4v_generic_records.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/middleware/generic_api_gate.py` (records mode, exposed_operations, record_operation, GenericApiSocketGate), `lex/lex_app/asgi.py`, `lex/core/extensions.py` (_validate_exposed_models), `lex/api/security.py` (edit_violations for Django auth models, list_denied), `lex/api/views/model_entries/List.py` (initial), `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`, `lex/react/views.py`. Batch: [4v](batches.md).
 
 ---
 

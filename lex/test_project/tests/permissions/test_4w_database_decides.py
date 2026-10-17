@@ -43,6 +43,18 @@ from lex.test_project.tests._e2e_test_case import E2ETestCase
 
 from .models import DATABASE_RULE, DATABASE_RULE_MODELS, DatabaseRuleItem, ProtectedItem
 
+# These scenarios are strict mode's behaviour: pinned, whatever LEX_LEGACY_SECURITY the run sets (a legacy run keeps
+# the pre-3.0 behaviour, which other clusters cover).
+_STRICT = mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false"})
+
+
+def setUpModule():
+    _STRICT.start()
+
+
+def tearDownModule():
+    _STRICT.stop()
+
 pytestmark = pytest.mark.permissions
 
 ROLE = "cluster4w_app"

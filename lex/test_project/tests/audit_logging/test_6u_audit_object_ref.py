@@ -16,6 +16,8 @@ Run: python -m lex pytest lex/test_project/tests/audit_logging/test_6u_audit_obj
 
 from __future__ import annotations
 
+import os
+from unittest import mock
 import pytest
 from django.urls import reverse
 
@@ -23,6 +25,18 @@ from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
 from lex.test_project.tests._e2e_test_case import E2ETestCase, _MockContainer
 from lex.test_project.tests.crud_api.models import PUBLIC_ID, PUBLIC_ID_MODELS, PublicIdItem
+
+# These scenarios are strict mode's behaviour: pinned, whatever LEX_LEGACY_SECURITY the run sets (a legacy run keeps
+# the pre-3.0 behaviour, which other clusters cover).
+_STRICT = mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false"})
+
+
+def setUpModule():
+    _STRICT.start()
+
+
+def tearDownModule():
+    _STRICT.stop()
 
 pytestmark = pytest.mark.audit_logging
 

@@ -12,8 +12,10 @@ Configure it in ``lex_config.py``::
 
 With ``SCHEMA`` set, ``<API_PREFIX>schema`` serves the OpenAPI document and
 ``<API_PREFIX>docs`` a Redoc page; ``lex schema --file openapi.yaml`` writes
-it for client generation. Only paths under ``include`` are documented; lex's
-generic ``model_entries`` endpoints are left out.
+it for client generation. Only paths under ``include`` are documented, plus —
+with ``SCHEMA["generic"]`` — one operation per exposed model and operation of
+lex's generic endpoints (:mod:`lex.api.generic_schema`); ``SCHEMA["error_component"]``
+names the serializer of their error bodies.
 """
 from __future__ import annotations
 
@@ -48,11 +50,17 @@ def included_prefixes() -> List[str]:
 
 
 def include_configured_paths(endpoints):
-    """drf-spectacular preprocessing hook: keep only the configured prefixes."""
+    """drf-spectacular preprocessing hook: keep only the configured prefixes, add the exposed models' operations.
+
+    The generic endpoints themselves are never documented as routed (their
+    model segment matches every model); with ``SCHEMA["generic"]`` each
+    exposed model gets its own operations instead (lex.api.generic_schema).
+    """
+    from lex.api.generic_schema import generic_endpoints
+
     prefixes = included_prefixes()
-    if not prefixes:
-        return []
-    return [endpoint for endpoint in endpoints if endpoint[0].startswith(tuple(prefixes))]
+    kept = [endpoint for endpoint in endpoints if endpoint[0].startswith(tuple(prefixes))] if prefixes else []
+    return kept + generic_endpoints()
 
 
 def lib_doc_excludes():

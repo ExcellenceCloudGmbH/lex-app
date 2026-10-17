@@ -117,7 +117,7 @@ letters:
       pass: 0
       skip: 0
       xfail: 0
-    note: on disk; per-letter tally folded into cluster top-line in pre-migration dashboard
+    note: "on disk; per-letter tally folded into cluster top-line in pre-migration dashboard; 6.160 (2026-10-17) - a 4xx raised inside model_logging_context is not printed as an error"
   m:
     title: ''
     scenarios: ''

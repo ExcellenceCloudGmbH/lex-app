@@ -26,6 +26,8 @@ Scenarios 10.47 – 10.54.
 
 from __future__ import annotations
 
+import os
+from unittest import mock
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -37,6 +39,18 @@ from django.test import SimpleTestCase
 from lex.api.views.file_operations.FileDownload import FileDownloadView
 
 import pytest
+
+# These scenarios are strict mode's behaviour: pinned, whatever LEX_LEGACY_SECURITY the run sets (a legacy run keeps
+# the pre-3.0 behaviour, which other clusters cover).
+_STRICT = mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false"})
+
+
+def setUpModule():
+    _STRICT.start()
+
+
+def tearDownModule():
+    _STRICT.stop()
 
 pytestmark = pytest.mark.api_layer
 

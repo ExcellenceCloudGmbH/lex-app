@@ -3,7 +3,7 @@ import posixpath
 import re
 from pathlib import Path
 
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.utils._os import safe_join
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.clickjacking import xframe_options_exempt
@@ -26,6 +26,32 @@ _HASHED_ASSET = re.compile(r"^assets/.+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
 _IMMUTABLE = "public, max-age=31536000, immutable"
 
 
+def _api_path(path) -> bool:
+    """Whether ``path`` (below DJANGO_BASE_PATH) lies under ``api/`` — strict mode only (flag NOT_FOUND)."""
+    from lex.core.security_flags import strict
+
+    base = os.getenv("DJANGO_BASE_PATH", "").strip().strip("/")
+    if base and (path == base or path.startswith(f"{base}/")):
+        path = path[len(base):].lstrip("/")
+    return strict("NOT_FOUND") and (path == "api" or path.startswith("api/"))
+
+
+def _closed_to(request) -> bool:
+    """Whether the bundled frontend is closed to this caller: GENERIC_API is not ``"all"`` and the caller is
+    signed in without being a superuser.
+
+    In those modes every lex endpoint the frontend calls (``api/user/``, model structure, search …) is closed to
+    such a caller, so serving the page only produced a screen whose own requests all fail. Anonymous callers
+    still get it, so it can start the sign-in.
+    """
+    from lex.core import extensions
+
+    if extensions.generic_api_mode() == "all":
+        return False
+    user = getattr(request, "user", None)
+    return bool(user is not None and user.is_authenticated and not user.is_superuser)
+
+
 def _no_store(response):
     """Forbid caching -- for anything whose URL outlives its content.
 
@@ -43,6 +69,11 @@ def _no_store(response):
 @xframe_options_exempt
 def serve_react(request, path, document_root=None):
     path = posixpath.normpath(path).lstrip("/")
+    if _api_path(path):
+        # No route under api/ matched: an unknown endpoint is 404, never the app's index.html with 200.
+        raise Http404
+    if _closed_to(request):
+        raise Http404
 
     if path == "config.js":
         config_path = safe_join(document_root, path)

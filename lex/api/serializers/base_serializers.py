@@ -211,7 +211,8 @@ class FilteredListSerializer(serializers.ListSerializer):
             ]
         finally:
             child._skip_fk_display_names = prev_skip
-        self._batch_add_fk_display_names(representations)
+        if getattr(child, "_lex_internal_fields", True):
+            self._batch_add_fk_display_names(representations)
         return representations
 
     def _batch_add_fk_display_names(self, representations: list) -> None:
@@ -932,7 +933,7 @@ class LexSerializer(serializers.ModelSerializer):
         # detail / single-object path. During list serialization this is
         # suppressed (FilteredListSerializer batches it in one query per FK);
         # for a single object one query per FK is fine.
-        if not getattr(self, "_skip_fk_display_names", False):
+        if not getattr(self, "_skip_fk_display_names", False) and getattr(self, "_lex_internal_fields", True):
             self._add_fk_display_names_single(representation)
 
         return representation
@@ -1029,6 +1030,8 @@ def model2serializer(model, fields=None, name_suffix=""):
 
 def _wrap_custom_serializer(custom_cls, model_class):
     meta = getattr(custom_cls, "Meta", type("Meta", (), {}))
+    if getattr(model_class, "lex_api_internal_fields", True) is False:
+        return _wrap_without_internal_fields(custom_cls, model_class, meta)
     run_fields = _calculation_run_fields(model_class)
     existing_fields = getattr(meta, "fields", "__all__")
     if existing_fields != "__all__":
@@ -1122,6 +1125,18 @@ def _wrap_custom_serializer(custom_cls, model_class):
 
         wrapped_cls.to_representation = _to_representation_with_id
     return wrapped_cls
+
+
+def _wrap_without_internal_fields(custom_cls, model_class, meta):
+    """The project's serializer exactly as declared (``lex_api_internal_fields = False``).
+
+    No ``id_field``, ``short_description``, integer ``id``,
+    ``lex_reserved_scopes`` or ``<fk>__short_description``: what the project's
+    clients and integrators see is the project's own positive list.
+    """
+    NewMeta = type("Meta", (meta,), {"model": model_class, "list_serializer_class": FilteredListSerializer})
+    attrs = {"Meta": NewMeta, LEX_SCOPES_NAME: None, "_lex_internal_fields": False}
+    return type(custom_cls.__name__, (LexSerializer, custom_cls), attrs)
 
 
 def _resolve_history_source_model(model_class):

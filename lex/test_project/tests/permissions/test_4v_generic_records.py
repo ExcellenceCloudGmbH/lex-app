@@ -18,7 +18,7 @@ deleting unused files; the calculation log tree and its PDFs show only logs of
 records the caller may read. A model's own ``permission_list`` that refuses
 makes its list answer 404.
 
-Cluster 4v — scenarios 4.119–4.128. Type: U + E.
+Cluster 4v — scenarios 4.119–4.128, 4.136. Type: U + E.
 Covers: lex/api/middleware/generic_api_gate.py (records mode, exposed_operations,
 record_operation, GenericApiSocketGate), lex/lex_app/asgi.py (the gate in the socket stack), lex/core/extensions.py (_validate_exposed_models),
 lex/api/security.py (edit_violations for Django auth models, list_denied),
@@ -30,6 +30,8 @@ Run: python -m lex pytest lex/test_project/tests/permissions/test_4v_generic_rec
 
 from __future__ import annotations
 
+import os
+from unittest import mock
 import asyncio
 
 import pytest
@@ -49,6 +51,18 @@ from lex.audit_logging.models.CalculationLog import CalculationLog
 from lex.core import extensions
 from lex.test_project.tests._e2e_test_case import E2ETestCase, _MockContainer
 from lex.test_project.tests.api_layer.models import ACTION_ITEM, ACTION_MODELS, ActionItem
+
+# These scenarios are strict mode's behaviour: pinned, whatever LEX_LEGACY_SECURITY the run sets (a legacy run keeps
+# the pre-3.0 behaviour, which other clusters cover).
+_STRICT = mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false"})
+
+
+def setUpModule():
+    _STRICT.start()
+
+
+def tearDownModule():
+    _STRICT.stop()
 
 pytestmark = pytest.mark.permissions
 
@@ -187,13 +201,16 @@ class TestCluster04v_RecordsMode(E2ETestCase):
     def test_4_123_actions_of_exposed_models_decide_themselves(self) -> None:
         """
         Scenario 4.123: an exposed model's actions are reachable; its permission still decides.
-        Given: ActionItem exposed for list only; an editable and a locked row
+        Given: ActionItem exposed for actions only, then for list only; an editable and a locked row
         When: approve runs on both, and on a row of a model that is not exposed
-        Then: 200 for the editable row, 400 ACTION_NOT_ALLOWED for the locked one;
-              404 once the model is no longer exposed.
+        Then: with "action" alone the record itself is 404 but its action runs; 200 for the editable
+              row, 400 ACTION_NOT_ALLOWED for the locked one; 404 once the model is no longer exposed.
         """
         item = ActionItem.objects.create(name="invoice")
         locked = ActionItem.objects.create(name="other", status="locked")
+        with _Exposed({"action"}):  # actions only: the record routes stay closed
+            self.assertEqual(self.client.get(_one_url(ACTION_ITEM, item.pk)).status_code, 404)
+            self.assertEqual(self.client.post(_action_url(item, "approve"), {"note": "ok"}, format="json").status_code, 200)
         with _Exposed({"list"}):
             self.assertEqual(self.client.post(_action_url(item, "approve"), {"note": "ok"}, format="json").status_code, 200)
             refused = self.client.post(_action_url(locked, "approve"), {"note": "ok"}, format="json")
@@ -345,3 +362,88 @@ class TestCluster04v_InternalEndpoints(E2ETestCase):
         self.assertEqual(self.client.get(_list_url(ACTION_ITEM)).status_code, 404)
         ActionItem.permission_list = original
         self.assertEqual(self.client.get(_list_url(ACTION_ITEM)).status_code, 200)
+
+
+class TestCluster04v_UnknownApiPaths(SimpleTestCase):
+    """Cluster 4v (unit): what no route under api/ matched is 404, never the app's index.html."""
+
+    # -- 4.136 ---------------------------------------------------------
+    def test_4_136_an_unknown_api_path_is_404(self) -> None:
+        """
+        Scenario 4.136: the SPA catch-all leaves api/ alone.
+        Given: a build with index.html and the catch-all view
+        When: it is asked for api/atrium/funds (a removed endpoint), api and an app route, also below
+              DJANGO_BASE_PATH, in strict and in legacy mode
+        Then: 404 for both api paths in strict mode, the index for the app route; legacy mode keeps
+              serving the index.
+        """
+        import os
+        import tempfile
+        from unittest import mock
+
+        from django.http import Http404
+        from django.test import RequestFactory
+
+        from lex.react.views import serve_react
+
+        with tempfile.TemporaryDirectory() as root:
+            open(os.path.join(root, "index.html"), "w").write("<html></html>")
+
+            def answer(path):
+                try:
+                    return serve_react(RequestFactory().get(f"/{path}"), path, document_root=root).status_code
+                except Http404:
+                    return 404
+
+            with mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false", "DJANGO_BASE_PATH": ""}):
+                self.assertEqual([answer(p) for p in ("api/atrium/funds", "api", "funds/overview")], [404, 404, 200])
+            with mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false", "DJANGO_BASE_PATH": "/portal"}):
+                self.assertEqual([answer(p) for p in ("portal/api/atrium/funds", "portal/funds")], [404, 200])
+            with mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "true", "DJANGO_BASE_PATH": ""}):
+                self.assertEqual(answer("api/atrium/funds"), 200)
+
+    # -- 4.137 ---------------------------------------------------------
+    def test_4_137_the_bundled_frontend_is_404_for_a_signed_in_user_outside_mode_all(self) -> None:
+        """
+        Scenario 4.137: outside mode "all" the bundled frontend is for superusers, like the endpoints it calls.
+        Given: a build with index.html and the catch-all view
+        When: an anonymous caller, a signed-in user and a superuser ask for the app's root in modes records,
+              superuser and all
+        Then: 404 for the signed-in user in records and superuser mode, so no page loads whose own requests
+              (api/user/ …) all answer 404; anonymous callers keep the page (it starts the sign-in); superusers
+              and mode all get it as before.
+        """
+        import os
+        import tempfile
+        from types import SimpleNamespace
+
+        from django.contrib.auth.models import AnonymousUser
+        from django.http import Http404
+
+        from lex.react.views import serve_react
+
+        callers = {
+            "anonymous": AnonymousUser(),
+            "user": SimpleNamespace(is_authenticated=True, is_superuser=False),
+            "superuser": SimpleNamespace(is_authenticated=True, is_superuser=True),
+        }
+
+        with tempfile.TemporaryDirectory() as root:
+            open(os.path.join(root, "index.html"), "w").write("<html></html>")
+
+            def answers():
+                out = {}
+                for name, user in callers.items():
+                    request = RequestFactory().get("/")
+                    request.user = user
+                    try:
+                        out[name] = serve_react(request, "", document_root=root).status_code
+                    except Http404:
+                        out[name] = 404
+                return out
+
+            for mode in ("records", "superuser"):
+                with extensions.override_extensions(GENERIC_API=mode):
+                    self.assertEqual(answers(), {"anonymous": 200, "user": 404, "superuser": 200}, mode)
+            with extensions.override_extensions(GENERIC_API="all"):
+                self.assertEqual(answers(), {"anonymous": 200, "user": 200, "superuser": 200})

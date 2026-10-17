@@ -52,6 +52,11 @@ More options: ``status`` (success status, e.g. 201), ``headers`` (e.g.
 ``lex_config.THROTTLE_RATES``, answered 429 when exceeded) and, for the
 OpenAPI schema, ``summary``, ``description``, ``operation_id``, ``tags``,
 ``responses`` (extra statuses) and ``media="multipart"`` for file uploads.
+``input`` and ``output`` may be dotted paths to the serializer classes; ``many=True`` documents an
+output that is a list of ``output``.
+
+A model inherits the actions of its bases, a projection those of the model it projects.
+``lex_actions = ("name", ...)`` on a model names the actions it offers; the others do not exist on it.
 """
 from __future__ import annotations
 
@@ -97,6 +102,7 @@ class ActionSpec:
     tags: Sequence[str] = ()
     responses: Mapping[int, str] = field(default_factory=dict)
     media: str = "json"
+    many: bool = False
 
 
 @dataclass
@@ -127,6 +133,7 @@ def lex_action(
     tags: Sequence[str] = (),
     responses: Optional[Mapping[int, str]] = None,
     media: str = "json",
+    many: bool = False,
 ):
     """Declare a model method as an action (see the module docstring)."""
     if denied is not None and denied not in DENIED_ANSWERS:
@@ -155,6 +162,7 @@ def lex_action(
             tags=tuple(tags),
             responses=dict(responses or {}),
             media=media,
+            many=many,
         )
         setattr(target, _ATTR, spec)
         return function
@@ -177,11 +185,27 @@ def actions_for(model_class) -> Dict[str, ActionSpec]:
             spec = getattr(target, _ATTR, None)
             if isinstance(spec, ActionSpec):
                 found[spec.name] = spec
+    allowed = getattr(model_class, "lex_actions", None)
+    if allowed is not None:  # e.g. a projection that offers none or only some of its base model's actions
+        found = {name: spec for name, spec in found.items() if name in set(allowed)}
     _registry[model_class] = found
     return found
 
 
+def resolve_serializer(value):
+    """An action's input or output: a serializer class, or its dotted path (resolved on first use).
+
+    A dotted path lets a model declare actions whose serializers live in a module that imports the model.
+    """
+    if isinstance(value, str):
+        from django.utils.module_loading import import_string
+
+        return import_string(value)
+    return value
+
+
 def _strict_input(serializer_class, data, context):
+    serializer_class = resolve_serializer(serializer_class)
     serializer = serializer_class(data=data, context=context)
     if hasattr(data, "keys"):
         unknown = sorted(set(data.keys()) - set(serializer.fields))
@@ -304,16 +328,16 @@ class ModelActionView(APIView):
 
         context_target = instance if instance is not None else model_class()
         user_context = UserContext.from_request(request, context_target)
-        if not self._permitted(spec, model_class, instance, request, user_context, data,
-                               guarded, create_allowed, delete_allowed, edit_violations):
-            if denied_answer(spec) == "not_found":
-                raise NotFound()
-            raise LexActionError(f"You may not run '{spec.name}' here.", code="ACTION_NOT_ALLOWED")
-
         calculation_id = kwargs.get("calculationId") or f"action_{uuid.uuid4().hex}"
         atomic = transaction.atomic() if spec.atomic else _null()
         try:
+            # The permission runs in the operation context too: it may need the request (its scope, its key).
             with OperationContext(request, calculation_id):
+                if not self._permitted(spec, model_class, instance, request, user_context, data,
+                                       guarded, create_allowed, delete_allowed, edit_violations):
+                    if denied_answer(spec) == "not_found":
+                        raise _Refused(NotFound())
+                    raise _Refused(LexActionError(f"You may not run '{spec.name}' here.", code="ACTION_NOT_ALLOWED"))
                 with atomic:
                     db_context.apply(request.user, local=True, scope=scope)
                     logging_target = instance if instance is not None else model_class
@@ -323,6 +347,8 @@ class ModelActionView(APIView):
                         else:
                             result = spec.function(model_class, user_context, data)
                     self._audit(request, spec, model_class, instance, data, calculation_id, "success")
+        except _Refused as refused:
+            raise refused.error from None  # a refusal is not a failed run: no audit entry
         except Exception as exc:
             self._audit_failure(request, spec, model_class, instance, data, calculation_id, exc)
             raise
@@ -442,8 +468,9 @@ class ModelActionView(APIView):
             response = Response(status=status.HTTP_204_NO_CONTENT)
         elif spec.output is not None:
             many = isinstance(result, (list, tuple)) or hasattr(result, "model")
+            output = resolve_serializer(spec.output)
             response = Response(
-                spec.output(result, many=many, context={"request": request, "view": self}).data, status=status_code
+                output(result, many=many, context={"request": request, "view": self}).data, status=status_code
             )
         else:
             response = Response(result, status=status_code)
@@ -465,6 +492,14 @@ class ModelActionView(APIView):
 
     def delete(self, request, *args, **kwargs):
         return self._dispatch_action(request, *args, **kwargs)
+
+
+class _Refused(Exception):
+    """The permission refused the run (carries the answer)."""
+
+    def __init__(self, error):
+        super().__init__(str(error))
+        self.error = error
 
 
 class _null:

@@ -192,7 +192,7 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 10.132-10.137 |
+| Scenario range | 10.132-10.137, 10.150 |
 | Type | U + E |
 | Files covered | `lex/core/read_models.py` (is_read_model, validate, list_queryset, CreateView), `lex/core/models/LexReadModel.py`, `lex/lex_app/simple_history_config.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (writes refused, as_of), `lex/api/views/model_entries/List.py`, `lex/api/views/model_entries/History.py`, `lex/api/serializers/base_serializers.py` (lex_prepare_page), `lex/core/extensions.py` |
 | Test file | `lex/test_project/tests/api_layer/test_10x_read_models.py` |
@@ -215,3 +215,17 @@
 | Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | A permission method taking (user_context, data) receives the validated input; one taking only user_context is called as before, so existing actions are unchanged. |
+
+### Batch 10z — The public shape of the generic API: short paths, uuid relations, no lex fields, OpenAPI ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.144-10.149, 10.151 |
+| Type | E |
+| Files covered | `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths) |
+| Test file | `lex/test_project/tests/api_layer/test_10z_public_generic_api.py` |
+| Test classes | `TestCluster10z_PublicGenericApi` |
+| Fixtures | PublicApiFolder and PublicApiDocument (uuid only, lex_api_internal_fields = False, a LexLookupRelatedField, two actions), SCHEMA with generic and error_component |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Path parameters are typed from the lookup field (uuid, int or string) so lex schema --fail-on-warn stays clean; an action without output is documented as a free-form object. |

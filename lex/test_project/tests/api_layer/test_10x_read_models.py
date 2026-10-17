@@ -39,10 +39,12 @@ from lex.test_project.tests._e2e_test_case import E2ETestCase, _MockContainer
 
 from .models import (
     ACTION_CARD,
+    ACTION_TILE,
     ACTION_MODELS,
     READ_SUMMARY,
     ActionItem,
     ActionItemCard,
+    ActionItemTile,
     ActionItemSummary,
     _CardSerializer,
 )
@@ -91,7 +93,7 @@ class TestCluster10x_ReadModelUnit(SimpleTestCase):
 class TestCluster10x_ReadModels(E2ETestCase):
     """Cluster 10x (end to end): views and projections on the generic endpoints."""
 
-    e2e_models = ACTION_MODELS + [ActionItemCard]
+    e2e_models = ACTION_MODELS + [ActionItemCard, ActionItemTile]
 
     @classmethod
     def setUpClass(cls):
@@ -168,6 +170,29 @@ class TestCluster10x_ReadModels(E2ETestCase):
         approved = self.client.post(action(ACTION_CARD, self.draft.pk, "approve"), {"note": "ok"}, format="json")
         self.assertEqual(approved.status_code, 200, approved.content[:300])
         self.assertEqual(ActionItem.objects.get(pk=self.draft.pk).status, "approved")
+
+    # -- 10.150 --------------------------------------------------------
+    def test_10_150_a_projection_offers_only_the_actions_it_names(self) -> None:
+        """
+        Scenario 10.150: lex_actions narrows the inherited actions.
+        Given: a projection of ActionItem with lex_actions = ("ping",)
+        When: its actions are listed and approve and ping are called on it
+        Then: only ping exists on it: approve answers 404 and changes nothing, ping runs.
+        """
+        from lex.api.actions import actions_for
+
+        self.assertEqual(set(actions_for(ActionItemTile)), {"ping"})
+        self.assertIn("approve", actions_for(ActionItemCard))
+
+        def action(name):
+            return reverse("process_admin_rest_api:model-record-action", kwargs={
+                "model_container": _MockContainer(ACTION_TILE), "calculationId": "c", "pk": self.draft.pk,
+                "action": name})
+
+        refused = self.client.post(action("approve"), {"note": "ok"}, format="json")
+        self.assertEqual(refused.status_code, 404, refused.content[:300])
+        self.assertNotEqual(ActionItem.objects.get(pk=self.draft.pk).status, "approved")
+        self.assertEqual(self.client.post(action("ping"), {}, format="json").status_code, 200)
 
     # -- 10.136 --------------------------------------------------------
     def test_10_136_list_default_and_page_preparation(self) -> None:

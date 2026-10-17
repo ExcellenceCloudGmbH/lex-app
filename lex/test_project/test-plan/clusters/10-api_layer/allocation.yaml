@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 143
+max_scenario: 151
 letters:
   a:
     title: ''
@@ -238,10 +238,10 @@ letters:
       A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows.
   x:
     title: "Read models: views and projections on the generic endpoints"
-    scenarios: 10.132-10.137
+    scenarios: 10.132-10.137, 10.150
     status: complete
     tests:
-      pass: 6
+      pass: 7
       skip: 0
       xfail: 0
     note: >-
@@ -256,3 +256,13 @@ letters:
       xfail: 0
     note: >-
       A permission method taking (user_context, data) receives the validated input; one taking only user_context is called as before, so existing actions are unchanged.
+  z:
+    title: "The public shape of the generic API: short paths, uuid relations, no lex fields, OpenAPI"
+    scenarios: 10.144-10.149, 10.151
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      Path parameters are typed from the lookup field (uuid, int or string) so lex schema --fail-on-warn stays clean; an action without output is documented as a free-form object.

@@ -194,6 +194,29 @@ def _split_safe_lookup_suffix(parts: list[str]) -> Tuple[list[str], Optional[str
 
 @lru_cache(maxsize=2048)
 def _resolve_lookup(model_class: type[Model], raw_lookup: str) -> Optional[ResolvedLookup]:
+    """The field path, lookup and field of a filter key — a foreign key by its target's public id.
+
+    A foreign key to a model that hides its integer key (``lex_lookup_field``
+    with ``lex_lookup_allow_pk = False``) is filtered by that public id:
+    ``?fund=<uuid>`` means ``fund__uuid=<uuid>``.
+    """
+    resolved = _resolve_lookup_raw(model_class, raw_lookup)
+    if not resolved:
+        return resolved
+    field_path, lookup, model_field = resolved
+    target = getattr(model_field, "related_model", None) if getattr(model_field, "many_to_one", False) or getattr(
+        model_field, "one_to_one", False) else None
+    lookup_field = getattr(target, "lex_lookup_field", None) if target is not None else None
+    if not lookup_field or getattr(target, "lex_lookup_allow_pk", True) is not False:
+        return resolved
+    suffix = lookup[len(field_path):].lstrip("_")
+    if suffix not in ("", "exact", "in"):
+        return resolved
+    rewritten = f"{field_path}__{lookup_field}" + (f"__{suffix}" if suffix else "")
+    return (field_path, rewritten, target._meta.get_field(lookup_field))
+
+
+def _resolve_lookup_raw(model_class: type[Model], raw_lookup: str) -> Optional[ResolvedLookup]:
     lookup = normalize_field_path(raw_lookup)
     if not lookup:
         return None

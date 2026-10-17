@@ -1,6 +1,6 @@
 import logging
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, Mapping, Optional, Set, Union
@@ -72,6 +72,8 @@ class UserContext:
     keycloak_scopes: Set[str]  # Available Keycloak scopes for this resource
     user_permissions: tuple[Mapping[str, Any], ...] = tuple()
     client_roles: FrozenSet[str] = frozenset()
+    # The request the context was made from (its scope, whether an API key asks), for permission hooks that need it.
+    request: Any = field(default=None, compare=False, repr=False)
 
     @staticmethod
     def _normalize_permissions(raw_permissions: Any) -> tuple[Mapping[str, Any], ...]:
@@ -206,6 +208,7 @@ class UserContext:
             keycloak_scopes=set(identity.scopes),
             user_permissions=tuple(),
             client_roles=frozenset({"api_key"}),
+            request=request,
         )
 
     @classmethod
@@ -233,6 +236,7 @@ class UserContext:
             keycloak_scopes=keycloak_scopes,
             user_permissions=user_permissions,
             client_roles=client_roles,
+            request=request,
         )
     
     @classmethod
@@ -259,6 +263,7 @@ class UserContext:
             keycloak_scopes=frozenset(),
             user_permissions=user_permissions,
             client_roles=client_roles,
+            request=request,
         )
 
     def with_instance(self, request, instance, original_instance=None):
@@ -285,6 +290,7 @@ class UserContext:
             keycloak_scopes=keycloak_scopes,
             user_permissions=self.user_permissions,
             client_roles=self.client_roles,
+            request=self.request or request,
         )
 
     @classmethod
