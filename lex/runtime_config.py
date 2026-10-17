@@ -14,9 +14,13 @@ logger = logging.getLogger(__name__)
 #: RFC-1123-ish hostname label grammar, lowercase only (the host is lower-cased
 #: before this runs): labels are alphanumeric, may contain internal hyphens, and
 #: never start or end with one. Deliberately stricter than "whatever urlsplit
-#: accepted" -- see ``_normalise_origin``.
+#: accepted" -- see ``_normalise_origin``. Matched with ``.fullmatch()``, not
+#: ``.match()``: with ``.match()``, a trailing ``$`` matches just before a
+#: trailing newline as well as at the true end of the string, so
+#: ``"example.com\n"`` would incorrectly pass. No anchors needed here --
+#: ``fullmatch`` already requires the whole string.
 _HOSTNAME_RE = re.compile(
-    r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$"
+    r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*"
 )
 
 #: The browser drops these from ``location.origin`` / ``MessageEvent.origin``;
@@ -24,6 +28,17 @@ _HOSTNAME_RE = re.compile(
 #: string as one written without it, or two spellings of the same origin would
 #: both appear in the CSP directive and never match the one the browser sends.
 _DEFAULT_PORT = {"http": 80, "https": 443}
+
+#: Code points where Python's stdlib IDNA2003 codec and a browser's WHATWG/UTS46
+#: (non-transitional) domain-to-ASCII disagree: sharp s (U+00DF) case-folds to
+#: "ss" here but Punycode-encodes to ``xn--...-cta`` there; final sigma (U+03C2)
+#: folds to sigma (U+03C3) here but not there; ZWJ (U+200D) and ZWNJ (U+200C)
+#: are dropped here but can survive there. A host containing any of them would
+#: compute different Punycode than the browser does for the same typed domain
+#: -- silently either refusing the operator's real site or, worse, admitting a
+#: different one. Checked on the raw host, before encoding: once encoded, the
+#: divergence has already happened and there's nothing left to detect.
+_IDNA_DIVERGENT_CHARS = frozenset("ßς‍‌")
 
 
 def derive_repo_name(project_root: str | os.PathLike[str] | None, cwd: str | os.PathLike[str] | None = None) -> str:
@@ -114,16 +129,21 @@ def _normalise_origin(candidate: str) -> str | None:
     2. Scheme must be ``http``/``https``; no credentials, query or fragment;
        the path must be empty or exactly ``/`` (the origin of ``https://x/``
        is ``https://x`` -- anything past that single slash is a real path).
-    3. The host is IDNA-encoded (``müller.de`` -> ``xn--mller-kva.de``) --
+    3. Reject a host containing sharp s, final sigma, ZWJ or ZWNJ
+       (``_IDNA_DIVERGENT_CHARS``) before encoding -- Python's IDNA codec and a
+       browser's own domain-to-ASCII disagree on these, so whichever Punycode
+       this step would produce is not reliably the one the browser computes
+       for the same typed host.
+    4. The host is IDNA-encoded (``müller.de`` -> ``xn--mller-kva.de``) --
        this is what makes an internationalised domain safe to put in a header
        at all. A host stringprep/IDNA refuses (control characters, an
        over-length label, ...) raises ``UnicodeError`` here and is dropped.
-    4. The IDNA result must still match a strict ASCII hostname grammar
+    5. The IDNA result must still match a strict ASCII hostname grammar
        (``_HOSTNAME_RE``). IDNA's nameprep step does not reject every
        CSP-meaningful character -- a semicolon, space, quote, backslash or
        percent-encoding all pass IDNA unchanged -- so this is the step that
        actually blocks them from reaching a header.
-    5. The scheme's default port (``:443`` for https, ``:80`` for http) is
+    6. The scheme's default port (``:443`` for https, ``:80`` for http) is
        dropped, so the result matches the form a browser's own
        ``location.origin`` / ``MessageEvent.origin`` takes.
     """
@@ -149,12 +169,15 @@ def _normalise_origin(candidate: str) -> str | None:
     if not hostname:
         return None
 
+    if any(ch in _IDNA_DIVERGENT_CHARS for ch in hostname):
+        return None
+
     try:
         host = hostname.encode("idna").decode("ascii").lower()
     except UnicodeError:
         return None
 
-    if not _HOSTNAME_RE.match(host):
+    if not _HOSTNAME_RE.fullmatch(host):
         return None
 
     try:

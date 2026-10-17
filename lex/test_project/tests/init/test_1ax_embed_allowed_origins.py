@@ -39,8 +39,19 @@ wildcard) parsed to ``[]``, indistinguishable from unset -- silently disabling
 the restriction the operator thought they had turned on. ``LEX_EMBED_ORIGINS_CONFIGURED``
 closes that: set-but-empty now fails closed to ``frame-ancestors 'self'`` (the
 app may still frame itself; nothing else may), on both the middleware and the
-SPA document. The scenario IDs (1.402-1.406) are unchanged from the prior round
--- this round only adds cases to them.
+SPA document.
+
+A re-review found one further host-validation gap: Python's stdlib IDNA2003
+codec and a browser's WHATWG/UTS46 (non-transitional) domain-to-ASCII disagree
+on four code points (sharp s, final sigma, ZWJ, ZWNJ) -- each one folds or
+drops here in a way a browser does not, so the two sides compute different
+Punycode for the same typed host. ``_normalise_origin`` now rejects a host
+containing any of them outright, before encoding, rather than accepting
+whichever side's answer Python happens to produce. The same review also found
+the hostname grammar's ``.match()`` + ``$`` would tolerate a trailing newline
+(``$`` matches just before one); it now uses ``.fullmatch()``. The scenario IDs
+(1.402-1.406) are unchanged across every round -- each one only adds cases to
+the existing numbers.
 
 Cluster 1ax -- scenarios 1.402-1.406. Type: U.
 Covers: lex/runtime_config.py (parse_embed_allowed_origins, merge_frame_ancestors),
@@ -491,6 +502,35 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
             result, ["https://xn--mller-kva.de", "https://reports.example.com"]
         )
 
+    def test_1_405_idna_divergent_hosts_are_rejected(self):
+        """
+        Scenario 1.405 (security fix, re-review): a host where Python's stdlib
+        IDNA2003 and a browser's WHATWG/UTS46 (non-transitional) domain-to-ASCII
+        disagree is dropped, not silently encoded to the wrong domain.
+        Given: "fußball.de" -- IDNA2003 case-folds ß (U+00DF) to "ss", giving the
+               plain-ASCII "fussball.de", while a browser keeps ß and
+               Punycode-encodes the host to "xn--fuball-cta.de", an entirely
+               different domain -- and "ελλάς.gr", whose trailing final sigma
+               (ς, U+03C2) folds to regular sigma (σ) here but not there,
+               producing different Punycode either way
+        When: parse_embed_allowed_origins parses each, alongside one valid origin
+        Then: both are dropped and named in the warning. Accepting either would
+              put a domain in the CSP header that does not match what the
+              operator's actual site resolves to in a browser -- the operator's
+              real site would still be refused framing (or, worse, some other,
+              unintended domain that happens to match the mis-encoded form would
+              be granted it)
+        """
+        raw = "https://reports.example.com,https://fußball.de,https://ελλάς.gr"
+
+        with self.assertLogs("lex.runtime_config", level="WARNING") as captured:
+            result = parse_embed_allowed_origins(raw)
+
+        self.assertEqual(result, ["https://reports.example.com"])
+        message = captured.records[0].getMessage()
+        self.assertIn("https://fußball.de", message, message)
+        self.assertIn("https://ελλάς.gr", message, message)
+
     def test_1_405_bracketed_and_syntax_breaking_hosts_are_rejected(self):
         """
         Scenario 1.405 (security fix): a host is not just "whatever urlsplit accepted".
@@ -506,7 +546,7 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
             "https://reports.example.com,"
             "https://[::1],"
             "https://[v1.x https:],"
-            "https://evil.com;script-src *,"
+            "https://a.com;script-src,"
             "https://evil .com,"
             'https://evil.com",'
             "https://evil.com\\,"
@@ -521,7 +561,7 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
         for bad in (
             "https://[::1]",
             "https://[v1.x https:]",
-            "https://evil.com;script-src *",
+            "https://a.com;script-src",
             "https://evil .com",
             'https://evil.com"',
             "https://evil.com\\",

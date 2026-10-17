@@ -1279,7 +1279,7 @@ letters:
     scenarios: 1.402-1.406
     status: complete
     tests:
-      pass: 37
+      pass: 38
       skip: 0
       xfail: 0
     note: >-
@@ -1314,7 +1314,7 @@ letters:
       deployments that do register it.
 
       Fix round 2, same session (security review): urlsplit alone let unsafe hosts through.
-      _normalise_origin now IDNA-encodes the host (muller.de -> xn--mller-kva.de; a UnicodeError
+      _normalise_origin now IDNA-encodes the host (müller.de -> xn--mller-kva.de; a UnicodeError
       drops it) and checks the ASCII result against a strict lowercase hostname grammar, which is
       what actually blocks `;`, a space, a quote, a backslash and `%` -- none of those are
       rejected by IDNA's nameprep alone. Bracketed hosts (IPv6 literals, and the IPvFuture
@@ -1338,3 +1338,17 @@ letters:
       scenario IDs -- 1.402 and 1.406 each gained a configured-but-all-invalid case, and 1.405
       gained cases for every invalid host shape plus the fail-closed warning and
       embed_origins_configured itself.
+
+      Fix round 3, same session (re-review): one further host-validation gap. Python's stdlib
+      IDNA2003 codec and a browser's WHATWG/UTS46 (non-transitional) domain-to-ASCII disagree on
+      four code points -- sharp s (fussball.de folds here to plain-ASCII fussball.de, vs. the
+      browser's xn--fuball-cta.de), final sigma, ZWJ and ZWNJ -- so the two sides compute different
+      Punycode for the same typed host, previously accepted here with no warning. _normalise_origin now
+      rejects a host containing any of the four outright, before encoding, dropped and named in
+      the existing WARNING (fail closed, no round-trip check added -- that would reject valid
+      punycode input). Also: _HOSTNAME_RE now uses .fullmatch() with no anchors instead of
+      .match() + a trailing $, which tolerates a newline just before it. Test fix: the `;` case
+      in 1.405's bracketed-host test used a host that also contained a wildcard, so the existing
+      wildcard pre-check was rejecting it before the grammar check ever ran; changed to a host with
+      only the semicolon, so the grammar is what is actually exercised. Also fixed a doc typo
+      (muller.de -> müller.de) in this note's prior paragraph. No new scenario IDs.

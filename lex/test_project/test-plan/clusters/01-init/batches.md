@@ -1747,7 +1747,7 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 | Test file | `lex/test_project/tests/init/test_1ax_embed_allowed_origins.py` |
 | Test classes | `TestCluster01ax_MiddlewareAddsFrameAncestors` (1.402), `TestCluster01ax_EmptyAllowListIsANoOp` (1.403), `TestCluster01ax_ConfigJsEmbedOrigins` (1.404), `TestCluster01ax_ParseEmbedAllowedOrigins` + `TestCluster01ax_SettingReadsEnvVar` (1.405), `TestCluster01ax_SpaDocumentCsp` (1.406) |
 | Fixtures | `config_js_build` / `config_js_build_without_placeholder` / `spa_build` (`tmp_path`-based synthetic build dirs, matching the 1ag config.js/caching tests) |
-| Tests landed | **37 pass / 0 fail** (9 subtests) |
+| Tests landed | **38 pass / 0 fail** (9 subtests) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1839,3 +1839,18 @@ unregistered middleware as the mechanism) were both corrected.
 No scenario IDs were added — 1.402 and 1.406 each gained one "configured but all invalid" case, and
 1.405 gained cases for every invalid host shape plus the fail-closed warning and
 `embed_origins_configured` itself, all under their existing numbers.
+
+**Fix round 3, same session (re-review): one further host-validation gap.** Python's stdlib IDNA2003
+codec and a browser's WHATWG/UTS46 (non-transitional) domain-to-ASCII disagree on four code points —
+sharp s, final sigma, ZWJ and ZWNJ — each folding or dropping here in a way a browser does not, so
+the two sides compute different Punycode for the same typed host (`fußball.de` → `fussball.de` here,
+`xn--fuball-cta.de` in a browser). These previously passed with no warning. `_normalise_origin` now
+rejects a host containing any of the four outright, before encoding — dropped and named in the
+existing WARNING, no round-trip check added (one would reject valid Punycode input). Also:
+`_HOSTNAME_RE` now uses `.fullmatch()` with no anchors instead of `.match()` + a trailing `$`, which
+tolerates a newline immediately before it (verified: not independently reachable through
+`_normalise_origin` today, since `urlsplit` already strips `\n`/`\r`/`\t` from the whole candidate
+string before this point — the fix is correct defensive practice regardless of today's reachability).
+Test fix: 1.405's `;`-carrying host case also carried a `*`, so the existing wildcard pre-check was
+rejecting it before the grammar check ever ran; changed to a host with only the semicolon. One new
+test (`test_1_405_idna_divergent_hosts_are_rejected`); 37 → 38. No new scenario IDs.
