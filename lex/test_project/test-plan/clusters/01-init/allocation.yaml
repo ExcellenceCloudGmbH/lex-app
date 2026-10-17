@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 401
+max_scenario: 405
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1273,3 +1273,30 @@ letters:
       and arrives by message only. 1.400 pins the boundary (a 2,000-character token rides the URL,
       2,002 does not) and the post after a URL-less load; 1.401 that a new load re-posts filters
       that differ from the URL's and not ones equal to them.
+
+  ax:
+    title: 'LEX_EMBED_ALLOWED_ORIGINS -- named sites only may embed lex-app and use its filter bridge'
+    scenarios: 1.402-1.405
+    status: complete
+    tests:
+      pass: 20
+      skip: 0
+      xfail: 0
+    note: >-
+      Amendment 14 of the multi-value-filters design: an unrestricted embed=true exemption plus
+      the new `filter` bridge event (a row count with no user action) meant any site could frame
+      lex-app and read it. LEX_EMBED_ALLOWED_ORIGINS, a comma-separated list of origins, becomes a
+      validated Django setting via parse_embed_allowed_origins (lex/runtime_config.py) -- invalid
+      entries (a path, a wildcard, a non-http scheme, garbage) are dropped with one WARNING naming
+      them, never crashing startup. EmbedXFrameOptionsMiddleware.process_response adds
+      Content-Security-Policy: frame-ancestors 'self' <origins> to every response it already
+      exempts (embed=true, the OIDC path, the embed cookie), merging into an existing CSP header
+      and replacing a stale frame-ancestors directive rather than dropping other directives; an
+      empty/unset list changes nothing. serve_react's config.js rewrite exposes the validated list
+      to the frontend as window.REACT_APP_EMBED_ALLOWED_ORIGINS, comma-joined and escaped with
+      json.dumps so a value can never break out of the JS string literal, a no-op when the
+      placeholder line is absent (older builds). 1.402-1.403 cover the middleware across all three
+      exempt paths plus the CSP-merge boundary; 1.404 covers config.js including the escaping;
+      1.405 covers the parser's validation rules end to end through a real settings-module reload,
+      not just the helper in isolation. The frontend half (gating the `filter` channel on the
+      parent origin) is a separate task.

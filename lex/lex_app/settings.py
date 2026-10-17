@@ -32,6 +32,7 @@ from sentry_sdk.integrations.django import DjangoIntegration
 
 from lex.runtime_config import (
     derive_repo_name,
+    parse_embed_allowed_origins,
     resolve_local_sqlite_path,
     resolve_project_root,
 )
@@ -200,6 +201,17 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*." + os.getenv("DOMAIN_HOSTED", "localhost"),
     "http://localhost:3000",
 ]
+
+# Sites allowed to embed lex-app in a frame/iframe and use its embed filter
+# bridge (see lex.core.middleware.embed_xframe.EmbedXFrameOptionsMiddleware and
+# the `filter` bridge event). A comma-separated list of origins
+# (scheme://host[:port]); invalid entries are dropped with a warning. Unset or
+# empty is the documented "off" state: no Content-Security-Policy
+# frame-ancestors directive is added, and the frontend's filter bridge channel
+# stays disabled -- behaviour is unchanged from before this setting existed.
+LEX_EMBED_ALLOWED_ORIGINS = parse_embed_allowed_origins(
+    os.getenv("LEX_EMBED_ALLOWED_ORIGINS")
+)
 
 # Fail fast on missing critical configuration when deployed, instead of silently
 # falling back to "localhost". A missing DOMAIN_HOSTED makes ALLOWED_HOSTS only

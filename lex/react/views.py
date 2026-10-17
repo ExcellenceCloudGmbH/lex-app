@@ -1,3 +1,4 @@
+import json
 import os
 import posixpath
 import re
@@ -64,6 +65,17 @@ def serve_react(request, path, document_root=None):
 
         for key, value in replacements['undefined'].items():
             content = content.replace(f"window.{key} = undefined", f"window.{key} = \"{value}\"")
+
+        # Comma-joined allowed embed origins, from the validated LEX_EMBED_ALLOWED_ORIGINS
+        # setting -- not a raw env var. Escaped with json.dumps (not the naive f'"{value}"'
+        # used above) so a value can never break out of the JS string literal; origins are
+        # already validated, but this is cheap defence in depth. A no-op when the frontend
+        # build predates this placeholder.
+        embed_origins = ",".join(getattr(settings, "LEX_EMBED_ALLOWED_ORIGINS", None) or [])
+        content = content.replace(
+            "window.REACT_APP_EMBED_ALLOWED_ORIGINS = undefined",
+            f"window.REACT_APP_EMBED_ALLOWED_ORIGINS = {json.dumps(embed_origins)}",
+        )
 
         response = HttpResponse(content, content_type='application/javascript')
         # Rewritten from the environment on every request, so never cached.

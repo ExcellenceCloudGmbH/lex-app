@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from lex.tools.project_root import find_project_root
+
+logger = logging.getLogger(__name__)
 
 
 def derive_repo_name(project_root: str | os.PathLike[str] | None, cwd: str | os.PathLike[str] | None = None) -> str:
@@ -77,3 +81,78 @@ def format_db_connection_unicode_error(
         )
 
     return "\n".join(lines)
+
+
+def _normalise_origin(candidate: str) -> str | None:
+    """Return ``candidate`` as ``scheme://host[:port]``, or ``None`` if it is not
+    a bare http(s) origin (no path, query, fragment, credentials or wildcard)."""
+    if "*" in candidate:
+        return None
+
+    try:
+        parts = urlsplit(candidate)
+        if parts.scheme.lower() not in ("http", "https"):
+            return None
+        if not parts.hostname:
+            return None
+        if parts.path or parts.query or parts.fragment:
+            return None
+        if parts.username or parts.password:
+            return None
+        port = parts.port  # raises ValueError on a non-numeric port
+    except ValueError:
+        return None
+
+    origin = f"{parts.scheme.lower()}://{parts.hostname.lower()}"
+    if port is not None:
+        origin += f":{port}"
+    return origin
+
+
+def parse_embed_allowed_origins(raw: str | None) -> list[str]:
+    """Parse ``LEX_EMBED_ALLOWED_ORIGINS`` into a list of normalised origins.
+
+    ``raw`` is the env var's raw comma-separated value. ``None`` or blank means
+    unset, which returns an empty list -- the documented "off" state in which
+    embedding/CSP behaviour is unchanged and the frontend's filter bridge
+    channel stays disabled.
+
+    Each non-empty entry must be exactly ``scheme://host[:port]`` with an
+    ``http`` or ``https`` scheme and no path, query, fragment, credentials or
+    wildcard. Valid entries are normalised (scheme and host lower-cased) and
+    returned in order, with exact duplicates collapsed. An entry that fails
+    validation is dropped rather than widening what the setting allows; every
+    dropped entry is named together in a single WARNING log line so a typo
+    is visible without crashing startup.
+
+    A blank segment from a stray or trailing comma (``"a,,b"`` / ``"a,"``) is
+    silently skipped -- it is a formatting artifact, not a malformed origin.
+    """
+    if not raw or not raw.strip():
+        return []
+
+    valid: list[str] = []
+    invalid: list[str] = []
+    seen: set[str] = set()
+
+    for entry in raw.split(","):
+        candidate = entry.strip()
+        if not candidate:
+            continue
+
+        normalised = _normalise_origin(candidate)
+        if normalised is None:
+            invalid.append(candidate)
+            continue
+
+        if normalised not in seen:
+            seen.add(normalised)
+            valid.append(normalised)
+
+    if invalid:
+        logger.warning(
+            "LEX_EMBED_ALLOWED_ORIGINS: dropping invalid origin(s): %s",
+            ", ".join(invalid),
+        )
+
+    return valid

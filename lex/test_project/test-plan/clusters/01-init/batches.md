@@ -1736,3 +1736,40 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
   filters its URL carried (`filter_sync.afterLoad`, run from one persistent load handler), so the
   host's filters are re-posted when they differ; a filters token over 2,000 characters stays out of
   the URL (`url_filters_token`) and is delivered by message only.
+
+### Batch 1ax — `LEX_EMBED_ALLOWED_ORIGINS`: named sites only may embed lex-app and use its filter bridge ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.402 – 1.405 |
+| Type | U |
+| Files covered | `lex/runtime_config.py` (`parse_embed_allowed_origins`, `_normalise_origin`), `lex/lex_app/settings.py` (`LEX_EMBED_ALLOWED_ORIGINS`), `lex/core/middleware/embed_xframe.py` (`EmbedXFrameOptionsMiddleware.process_response`, `_merge_frame_ancestors`), `lex/react/views.py` (`serve_react`'s `config.js` rewrite) |
+| Test file | `lex/test_project/tests/init/test_1ax_embed_allowed_origins.py` |
+| Test classes | `TestCluster01ax_MiddlewareAddsFrameAncestors` (1.402), `TestCluster01ax_EmptyAllowListIsANoOp` (1.403), `TestCluster01ax_ConfigJsEmbedOrigins` (1.404), `TestCluster01ax_ParseEmbedAllowedOrigins` + `TestCluster01ax_SettingReadsEnvVar` (1.405) |
+| Fixtures | `config_js_build` / `config_js_build_without_placeholder` (`tmp_path`-based synthetic build dirs, matching the 1ag config.js tests) |
+| Tests landed | **20 pass / 0 fail** (3 subtests) |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.402 | CSP added on every exempt path | `embed=true`, the OIDC path, and the `_lex_embed` cookie path each get `Content-Security-Policy: frame-ancestors 'self' <origins>`; a non-exempt response gets none; merging preserves an existing header's other directives and replaces a stale `frame-ancestors` directive instead of duplicating it |
+| 1.403 | Unset/empty changes nothing | With `LEX_EMBED_ALLOWED_ORIGINS == []`, no CSP is added, `X-Frame-Options` is still stripped, and the session/CSRF cookies are still patched to `SameSite=None; Secure` — the pre-existing contract, untouched |
+| 1.404 | `config.js` carries the setting | `window.REACT_APP_EMBED_ALLOWED_ORIGINS` is the comma-joined list escaped with `json.dumps` (never breaking out of the JS string literal, even for an adversarial-looking value), `""` when empty, and absent entirely when the build predates the placeholder |
+| 1.405 | Parsing, normalisation, and the real setting | A path, a wildcard, an `ftp` scheme, embedded credentials, a query string, a fragment, and plain garbage are each dropped; one WARNING names every dropped entry from a single call; valid origins are lower-cased and de-duplicated; a stray/trailing comma is skipped without logging; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS` is confirmed (via a real module reload, not just the helper) to equal `parse_embed_allowed_origins(os.getenv("LEX_EMBED_ALLOWED_ORIGINS"))` |
+
+**Why three different settings-access patterns in one test file.** The middleware reads
+`django.conf.settings` (patched in tests with `override_settings`); `serve_react` reads the plain
+`lex.lex_app.settings` module directly via `from lex.lex_app import settings` (patched with
+`mock.patch.object` on that module, since `override_settings` only touches `django.conf.settings`
+and does not reach it); confirmed empirically — `django.conf.settings._wrapped` and the
+`lex.lex_app.settings` module are two independently-imported objects in this codebase, not aliases
+of each other, so a settings-layer test must match whichever access pattern the source under test
+actually uses. The setting's own derivation is proven by reloading `lex.lex_app.settings` after
+patching `os.environ`, mirroring the pattern the pre-existing 1s cluster uses for its own env-driven
+settings, with the env var and module state restored in cleanup either way.
+
+**Known pre-existing gap (not this batch's scope):** `EmbedXFrameOptionsMiddleware` is not currently
+listed in `lex_app/settings.py`'s `MIDDLEWARE`, in this repo or its docs — it exists and is tested in
+isolation (directly instantiated, as 1402/1403 do) but nothing wires it into the stack here. This
+predates this batch and is unchanged by it; flagged for whoever owns turning the embed feature on
+end to end.
