@@ -48,6 +48,8 @@ class UserModelSerializer(serializers.ModelSerializer):
 
 class ModelEntryProviderMixin:
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
+    # A database error the project maps (DB_ERROR_MAPPER) answers in its shape, not as a 500.
+    lex_maps_db_errors = True
 
     def get_queryset(self):
         from lex.core.services.Bitemporal import get_queryset_as_of

@@ -18,6 +18,12 @@ Flags (name → what "on" means):
 * ``FILTERS``       – list filters/ordering only on fields the user may see.
 * ``TRACEBACKS``    – error responses carry no traceback unless ``DEBUG`` or ``LEX_API_TRACEBACKS=true``.
 * ``OIDC_REDIRECT`` – ``next``/``fail`` on ``/oidc/*`` must be relative or an allowed origin.
+* ``INTERNAL``      – lex's internal endpoints need a superuser: writing to the server log, deleting
+  unused files, editing Django's users and groups; the calculation log tree and its PDFs show only
+  logs of records the caller may read.
+* ``ERRORS``        – generic endpoints raise their errors to the exception handler (the project's
+  ``EXCEPTION_HANDLER`` sees every one) instead of returning bodies past it, and typed errors
+  (``LexActionError``, DRF errors, database errors a project maps) are not wrapped into a 500.
 """
 from __future__ import annotations
 
@@ -34,6 +40,8 @@ FLAGS = (
     "FILTERS",
     "TRACEBACKS",
     "OIDC_REDIRECT",
+    "INTERNAL",
+    "ERRORS",
 )
 
 _TRUE = {"1", "true", "yes", "on"}
@@ -74,6 +82,16 @@ def strict(name: str) -> bool:
     if explicit is not None:
         return explicit
     return not legacy_mode()
+
+
+def is_superuser(request) -> bool:
+    user = getattr(request, "user", None)
+    return bool(user is not None and getattr(user, "is_authenticated", False) and getattr(user, "is_superuser", False))
+
+
+def superuser_only(request) -> bool:
+    """True when ``LEX_SEC_INTERNAL`` keeps an internal endpoint from this caller."""
+    return strict("INTERNAL") and not is_superuser(request)
 
 
 def expose_tracebacks() -> bool:

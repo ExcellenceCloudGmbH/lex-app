@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 118
+max_scenario: 128
 letters:
   a:
     title: ''
@@ -222,3 +222,13 @@ letters:
       xfail: 0
     note: >-
       Importing rest_framework_api_key.admin registers the classic keys.
+  v:
+    title: "Generic records for end users (GENERIC_API records) and lex's internal endpoints"
+    scenarios: 4.119-4.128
+    status: complete
+    tests:
+      pass: 10
+      skip: 0
+      xfail: 0
+    note: >-
+      lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist.

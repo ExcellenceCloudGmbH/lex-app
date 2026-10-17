@@ -98,3 +98,22 @@ When the change was triggered by a calculation, the audit entry's `calculation_i
 **Scenario range:** 6.121-6.122. **Test file:** `lex/test_project/tests/audit_logging/test_6s_action_audit.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/actions.py` (ModelActionView._audit). Batch: [6s](batches.md).
 
 ---
+
+### 6t. What the audit log stores: AUDIT_PAYLOAD and AUDIT_ACTOR ✅
+
+**What it tests:** AUDIT_PAYLOAD full (default), fields (keys only) and none, on generic writes, actions, initial data and calculation runs; AUDIT_ACTOR names the author of every entry and the created_by/edited_by of records written in a request; an unknown mode stops startup.
+
+**Why a regression matters:** Projects with erasure duties cannot leave names, IBANs or tokens in lex's audit tables, which their erasure does not reach.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 6.123 | payload modes | full unchanged; fields keys with None; none {}; typo stops startup |
+| 6.124 | fields only on writes | create and update entries name fields, no value |
+| 6.125 | project names the author | author, created_by, edited_by = user:<pk> |
+| 6.126 | actions follow the same rules | lex_action and id kept; input keys only; pseudonymous author |
+| 6.127 | initial data | logged row has no value |
+| 6.128 | calculation runs | the run's entries hold no value |
+
+**Scenario range:** 6.123-6.128. **Test file:** `lex/test_project/tests/audit_logging/test_6t_audit_policy.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/audit_logging/utils/policy.py`, `lex/audit_logging/mixins/AuditLogMixin.py`, `lex/audit_logging/mixins/BulkAuditLogMixin.py`, `lex/audit_logging/utils/InitialDataAuditLogger.py`, `lex/audit_logging/utils/calculation_audit.py`, `lex/api/actions.py` (_audit), `lex/core/models/LexModel.py` (_resolve_request_audit_actor), `lex/core/extensions.py`. Batch: [6t](batches.md).
+
+---

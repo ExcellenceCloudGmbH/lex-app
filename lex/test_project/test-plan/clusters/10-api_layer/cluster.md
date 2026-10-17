@@ -175,3 +175,22 @@
 **Scenario range:** 10.117-10.121. **Test file:** `lex/test_project/tests/api_layer/test_10u_schema_settings.py`. **Type:** E + U. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/schema.py` (project_schema_settings, ProjectSchemaView, ProjectRedocView), `lex/api/management/commands/schema.py`, `lex/api/schema_extensions.py` (LexAPIKeyAuthenticationScheme). Batch: [10u](batches.md).
 
 ---
+
+### 10v. Every error of a generic endpoint reaches the exception handler ✅
+
+**What it tests:** With LEX_SEC_ERRORS (default) the generic views raise their refusals and not-found answers to the exception handler, so a project handler sees all of them; lex's own handler keeps every old key (message, ids, error) and adds code and detail; a LexActionError, DRF error or mapped database error raised in model code keeps its status instead of a 500; the opt-out restores the old bodies.
+
+**Why a regression matters:** A project that promises one error shape to its clients (codes, translations) cannot keep it if half of lex's errors bypass its handler or arrive as a 500 with the message of an internal exception.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.122 | project handler sees every refusal | missing/unknown field, refused create/edit/delete, hidden history and bulk: all 418 from the handler |
+| 10.123 | default bodies keep their old keys | 403 message + PERMISSION_DENIED; 400 ids + DELETE_NOT_ALLOWED |
+| 10.124 | typed errors from model code keep their status | 409 NOT_NOW on create, update and run_step; nothing stored |
+| 10.125 | database errors reach mapper and handler | 409 TRIGGER_REFUSED; the handler receives the DatabaseError |
+| 10.126 | opt-out keeps the old answers | 500 wrapping and the old 403 body with LEX_SEC_ERRORS=false |
+| 10.127 | export and reports | NO_DATA and NOT_FOUND through the handler; plain 404 error body without it |
+
+**Scenario range:** 10.122-10.127. **Test file:** `lex/test_project/tests/api_layer/test_10v_errors_reach_the_handler.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/errors.py` (error_from_body, raise_or_return, surface), `lex/api/views/model_entries/One.py`, `Many.py`, `History.py`, `lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/file_operations/ModelExport.py`, `lex/process_admin/views/model_relation_views.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py`, `lex/core/security_flags.py` (ERRORS). Batch: [10v](batches.md).
+
+---

@@ -20,6 +20,16 @@ class DeleteUnusedFiles(APIView):
     http_method_names = ["post"]
     permission_classes = [HasAPIKey | IsAuthenticated]
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from rest_framework.exceptions import NotFound
+
+        from lex.core.security_flags import superuser_only
+
+        # Deleting files from the storage is an operator tool (LEX_SEC_INTERNAL).
+        if superuser_only(request):
+            raise NotFound()
+
     def print_failure(self, retry_number, ex):
         print(f"{retry_number}: {ex}")
         if retry_number == 15:

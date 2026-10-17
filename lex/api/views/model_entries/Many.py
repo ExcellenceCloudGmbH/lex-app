@@ -1,6 +1,7 @@
 import logging
 import traceback
 
+from lex.api.errors import raise_or_return
 from lex.api.security import delete_allowed, edit_denial
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend, apply_read_restriction
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
@@ -63,7 +64,7 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
         if not strict("NOT_FOUND"):
             return None
         if self._visible(queryset).count() != queryset.count():
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return raise_or_return(Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND))
         return None
 
     def _edit_denial(self, targets, data):
@@ -93,7 +94,7 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
         targets = list(queryset)
         denial = self._edit_denial(targets, request.data)
         if denial is not None:
-            return denial
+            return raise_or_return(denial)
         serializer = self.get_serializer(queryset, data=request.data, partial=True, many=True)
         try:
             serializer.is_valid(raise_exception=True)
@@ -124,10 +125,10 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
             refused = [instance.pk for instance in targets if not delete_allowed(request, instance)]
             if refused:
                 detail = "You may not delete some of these records."
-                return Response(
+                return raise_or_return(Response(
                     {"code": "DELETE_NOT_ALLOWED", "detail": detail, "error": detail, "ids": refused},
                     status=status.HTTP_400_BAD_REQUEST,
-                )
+                ))
         payloads = [self.get_serializer(instance).data for instance in targets]
         try:
             # Perform bulk delete and log deletion of each instance.

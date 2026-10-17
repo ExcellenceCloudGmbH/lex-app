@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 122
+max_scenario: 128
 letters:
   a:
     title: ''
@@ -187,3 +187,13 @@ letters:
       xfail: 0
     note: >-
       The entry is written in the action's transaction, so a failed run leaves none (10.109).
+  t:
+    title: "What the audit log stores: AUDIT_PAYLOAD and AUDIT_ACTOR"
+    scenarios: 6.123-6.128
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      fields keeps nested keys and turns every value (lists included) into None; the action's own name and record id stay.

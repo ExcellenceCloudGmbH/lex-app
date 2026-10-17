@@ -42,7 +42,8 @@ EXTENSION_DEFAULTS: Dict[str, Any] = {
     "DB_ERROR_MAPPER": None,
     # Per-request / per-task database context, e.g. for row-level security (WP10).
     "DB_CONTEXT": None,
-    # Who may use lex's generic ``api/*`` endpoints: "all", "superuser" or "off" (WP2).
+    # Who may use lex's generic ``api/*`` endpoints: "all", "records", "superuser" or "off" (WP2).
+    # "records": the record routes of models with ``lex_api_exposed`` for everyone signed in, the rest superusers.
     "GENERIC_API": "all",
     # OpenAPI schema for the custom API (WP16).
     "SCHEMA": None,
@@ -58,11 +59,15 @@ EXTENSION_DEFAULTS: Dict[str, Any] = {
     # default, every role. A list: EXECUTE revoked from PUBLIC after every migrate and granted to these roles only
     # (the owner keeps it) - for projects whose application role is restricted (row-level security).
     "BITEMPORAL_FUNCTION_ROLES": None,
+    # Audit log: how much of a payload is stored ("full", "fields", "none") and who is named as author
+    # (a dotted path to actor(user) -> str; also created_by/edited_by). See lex.audit_logging.utils.policy.
+    "AUDIT_PAYLOAD": "full",
+    "AUDIT_ACTOR": None,
 }
 
 EXTENSION_KEYS = tuple(EXTENSION_DEFAULTS)
 
-GENERIC_API_MODES = ("all", "superuser", "off")
+GENERIC_API_MODES = ("all", "records", "superuser", "off")
 MIDDLEWARE_SLOTS = ("first", "after_auth", "last")
 
 _lock = threading.RLock()
@@ -162,7 +167,10 @@ def middleware_extra(slot: str) -> List[Any]:
 
 
 #: Keys holding one callable, resolved eagerly by :func:`validate_configuration`.
-HOOK_KEYS = ("EXCEPTION_HANDLER", "DB_ERROR_MAPPER", "DB_CONTEXT", "API_KEY_RESOLVER", "MUTATION_GROUPS", "USER_GROUPS")
+HOOK_KEYS = (
+    "EXCEPTION_HANDLER", "DB_ERROR_MAPPER", "DB_CONTEXT", "API_KEY_RESOLVER", "MUTATION_GROUPS", "USER_GROUPS",
+    "AUDIT_ACTOR",
+)
 
 
 def validate_configuration() -> None:
@@ -183,6 +191,10 @@ def validate_configuration() -> None:
             f"lex_config.py could not be loaded: {config.load_error!r}"
         ) from config.load_error
     generic_api_mode()
+    _validate_exposed_models()
+    from lex.audit_logging.utils.policy import payload_mode
+
+    payload_mode()
     for name in HOOK_KEYS:
         get_hook(name)
     get_import_list("AUTHENTICATION_CLASSES")
@@ -207,6 +219,28 @@ def validate_configuration() -> None:
     roles = get_setting("BITEMPORAL_FUNCTION_ROLES")
     if roles is not None and (isinstance(roles, str) or not all(isinstance(role, str) for role in roles)):
         raise ImproperlyConfigured("lex_config.BITEMPORAL_FUNCTION_ROLES must be None or a list of role names")
+
+
+def _validate_exposed_models() -> None:
+    """Every ``lex_api_exposed`` names known operations (a typo would close or open the wrong one)."""
+    from django.apps import apps
+
+    from lex.api.middleware.generic_api_gate import GENERIC_OPERATIONS
+
+    for model in apps.get_models():
+        value = getattr(model, "lex_api_exposed", False)
+        if value in (True, False, None):
+            continue
+        if isinstance(value, str) or not all(isinstance(op, str) for op in value):
+            raise ImproperlyConfigured(
+                f"{model.__name__}.lex_api_exposed must be True, False or a set of operations, not {value!r}"
+            )
+        unknown = set(value) - set(GENERIC_OPERATIONS)
+        if unknown:
+            raise ImproperlyConfigured(
+                f"{model.__name__}.lex_api_exposed names unknown operations {sorted(unknown)}; "
+                f"known: {list(GENERIC_OPERATIONS)}"
+            )
 
 
 def reset_extension_cache() -> None:

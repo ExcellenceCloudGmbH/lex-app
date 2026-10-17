@@ -23,7 +23,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from rest_framework import status
 from rest_framework.response import Response
 
-from lex.core.security_flags import strict
+from lex.core.security_flags import strict, superuser_only
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,10 @@ def edit_violations(request, instance, data: Mapping[str, Any], serializer=None,
     from lex.core.models.LexModel import PermissionResult, UserContext
 
     if not hasattr(instance, "permission_edit"):
+        # Django's users, groups and permissions have no permission hooks: only a
+        # superuser may change them through the generic API (LEX_SEC_INTERNAL).
+        if _django_auth_model(type(instance)) and superuser_only(request):
+            return None
         return []
     context = UserContext.from_request(request, instance)
     result = guarded(
@@ -209,6 +213,13 @@ def edit_violations(request, instance, data: Mapping[str, Any], serializer=None,
     return violations
 
 
+def _django_auth_model(model) -> bool:
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.models import Group, Permission
+
+    return model in (get_user_model(), Group, Permission)
+
+
 def edit_denial(request, instance, data: Mapping[str, Any], serializer=None,
                 ignore: Iterable[str] = ()) -> Optional[Response]:
     """The 400 answer for a write the caller may not make, or ``None``.
@@ -237,6 +248,28 @@ def edit_denial(request, instance, data: Mapping[str, Any], serializer=None,
             status=status.HTTP_400_BAD_REQUEST,
         )
     return None
+
+
+def list_denied(request, model_class) -> bool:
+    """A model's own ``permission_list`` refuses the caller (the list then answers 404).
+
+    Only an override is consulted: lex's default hook reads Keycloak scopes and
+    would close every list of a project without them.
+    """
+    from lex.core.models.LexModel import LexModel, UserContext
+
+    hook = getattr(model_class, "permission_list", None)
+    if hook is None or hook is getattr(LexModel, "permission_list", None):
+        return False
+    instance = model_class()
+    allowed = guarded(
+        instance.permission_list,
+        UserContext.from_request(request, instance),
+        deny=False,
+        allow=True,
+        what=f"{model_class.__name__}.permission_list",
+    )
+    return not allowed
 
 
 def delete_allowed(request, instance) -> bool:

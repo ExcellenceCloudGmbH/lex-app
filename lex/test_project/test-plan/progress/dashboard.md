@@ -13,13 +13,13 @@
 | 1. Init — Project Bootstrap | 51 | 408 | 450 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 21 | 118 | 62 | 2 | 0 |
+| 4. Permissions | 22 | 128 | 72 | 2 | 0 |
 | 5. History & Bitemporal | 15 | 131 | 37 | 6 | 3 |
-| 6. Audit Logging | 19 | 122 | 25 | 3 | 0 |
+| 6. Audit Logging | 20 | 128 | 31 | 3 | 0 |
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 9 | 52 | 24 | 0 | 0 |
-| 10. API Layer | 21 | 121 | 71 | 0 | 0 |
+| 10. API Layer | 22 | 127 | 77 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -150,6 +150,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4s | API-key read decided by the serializer | 4.114 | complete | 1 | 0 | 0 | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |
 | 4t | Closed generic API is 404 for anonymous callers | 4.115-4.117 | complete | 3 | 0 | 0 | The session probe api/user/ is exempt from the login check in settings, so the gate now lets anonymous callers reach it. |
 | 4u | Scoped API keys in the admin | 4.118 | complete | 1 | 0 | 0 | Importing rest_framework_api_key.admin registers the classic keys. |
+| 4v | Generic records for end users (GENERIC_API records) and lex's internal endpoints | 4.119-4.128 | complete | 10 | 0 | 0 | lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist. |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -194,6 +195,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 6q | Root-calculation detection ignores heading frames | 6.117-6.118 | complete | 2 | 0 | 0 | heading frames (`model_logging_context("...")`) are presentation-only — `_is_root_calculation` must skip them via get_root_model()/get_current_model() |
 | 6r | A run started by a create has its own audit entry | 6.119-6.120 | complete | 2 | 0 | 0 | 6.119 create and run are two entries - the create's finalised to 'success', the run's an 'update' under its own <model>_<pk>_update_<uuid> calculation id, also 'success'; 6.120 a failed run's entry is 'failure' with a traceback while the create's entry stays 'success'. |
 | 6s | Audit entries for actions | 6.121-6.122 | complete | 2 | 0 | 0 | The entry is written in the action's transaction, so a failed run leaves none (10.109). |
+| 6t | What the audit log stores: AUDIT_PAYLOAD and AUDIT_ACTOR | 6.123-6.128 | complete | 6 | 0 | 0 | fields keeps nested keys and turns every value (lists included) into None; the action's own name and record id stay. |
 
 ## 7. Calculation State Machine (`calculations`)
 
@@ -283,6 +285,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10s | Record and collection actions | 10.106-10.112 | complete | 7 | 0 | 0 | calculate=true/cancel=true stay as they are; actions are additive. |
 | 10t | Keycloak calls and session rows per request | 10.113-10.116 | complete | 4 | 0 | 0 | The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b). |
 | 10u | Schema, docs and CLI share the SCHEMA settings | 10.117-10.121 | complete | 5 | 0 | 0 | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |
+| 10v | Every error of a generic endpoint reaches the exception handler | 10.122-10.127 | complete | 6 | 0 | 0 | Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would. |
 
 ## 11. Stress & Performance (`stress`)
 

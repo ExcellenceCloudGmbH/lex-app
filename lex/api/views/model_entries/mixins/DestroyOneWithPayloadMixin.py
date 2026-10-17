@@ -123,9 +123,11 @@ class DestroyOneWithPayloadMixin:
                 if is_anonymous
                 else status.HTTP_403_FORBIDDEN
             )
-            return response.Response({
+            from lex.api.errors import raise_or_return
+
+            return raise_or_return(response.Response({
                 "message": f"You are not authorized to delete this record in {instance.__class__.__name__}"
-            }, status=deny_status)
+            }, status=deny_status))
 
         serializer = self.get_serializer(instance)
         super().destroy(*args, **kwargs)

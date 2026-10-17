@@ -230,7 +230,7 @@ def ensure_terminal_calculation_audit(
                 author=author,
                 resource=resource,
                 action=action,
-                payload=payload,
+                payload=_stored(payload),
                 calculation_id=calculation_id,
                 content_type=safe_get_content_type(instance.__class__),
                 object_id=instance.pk,
@@ -243,7 +243,7 @@ def ensure_terminal_calculation_audit(
                 audit_log.calculation_id = calculation_id
             audit_log.content_type = safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
-            audit_log.payload = payload
+            audit_log.payload = _stored(payload)
             audit_log.save()
 
         updated_rows = AuditLogStatus.objects.filter(audit_log=audit_log).update(
@@ -260,3 +260,10 @@ def ensure_terminal_calculation_audit(
 
     _update_operation_context_audit_log(audit_log)
     return audit_log
+
+
+def _stored(payload):
+    """The payload as AUDIT_PAYLOAD allows it to be stored."""
+    from lex.audit_logging.utils.policy import audit_payload
+
+    return audit_payload(payload)

@@ -86,6 +86,17 @@ def _build_view():
 # ---------------------------------------------------------------------------
 
 
+
+def _answer(call):
+    """What a client gets: the view's response, or the handler's rendering of the error it raises (LEX_SEC_ERRORS)."""
+    from lex.api.errors import LexActionError
+
+    try:
+        return call()
+    except LexActionError as exc:
+        return exc.as_response()
+
+
 class TestCluster10l_MissingInstance(SimpleTestCase):
     """10.47: pk that does not resolve must return a 404 JsonResponse.
 
@@ -101,14 +112,11 @@ class TestCluster10l_MissingInstance(SimpleTestCase):
         request = _build_request(pk="9999")
         kwargs = _build_kwargs(instance=None)
 
-        response = view.get(request, **kwargs)
+        response = _answer(lambda: view.get(request, **kwargs))
 
-        self.assertIsInstance(
-            response, JsonResponse,
-            "Missing-instance branch must return JsonResponse (not "
-            "FileResponse / not raise DoesNotExist) so the SPA branches "
-            "on the typed JSON error.",
-        )
+        # The typed JSON error, raised to the handler since 3.0 (LEX_SEC_ERRORS):
+        # never a FileResponse, never an uncaught DoesNotExist.
+        self.assertEqual(response.data["error"], "File not found")
         self.assertEqual(
             response.status_code, 404,
             "Missing-pk lookup must surface as 404, not 200 or 500.",
@@ -162,14 +170,11 @@ class TestCluster10l_LocalStorage(SimpleTestCase):
         with patch.dict("os.environ", {"STORAGE_TYPE": "LOCAL"}, clear=False), \
              patch("lex.api.views.file_operations.FileDownload.open",
                    side_effect=FileNotFoundError("no such file"), create=True):
-            response = view.get(request, **kwargs)
+            response = _answer(lambda: view.get(request, **kwargs))
 
-        self.assertIsInstance(
-            response, JsonResponse,
-            "FileNotFoundError must be caught and returned as a typed "
-            "JsonResponse — a raw OSError would surface as a 500 to "
-            "the SPA, masking the 'file gone' diagnostic.",
-        )
+        # FileNotFoundError becomes the typed 404 — a raw OSError would surface
+        # as a 500 to the SPA, masking the 'file gone' diagnostic.
+        self.assertEqual(response.data["error"], "File not found on server")
         self.assertEqual(response.status_code, 404)
 
     def test_10_53_storage_type_unset_defaults_to_local(self):

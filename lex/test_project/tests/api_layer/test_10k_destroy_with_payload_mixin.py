@@ -77,6 +77,17 @@ def _build_view(instance, *, user_authenticated=True, serializer_data=None):
 # ---------------------------------------------------------------------
 # 10.40 — _unwrap_historical_instance
 # ---------------------------------------------------------------------
+
+def _answer(call):
+    """What a client gets: the view's response, or the handler's rendering of the error it raises (LEX_SEC_ERRORS)."""
+    from lex.api.errors import LexActionError
+
+    try:
+        return call()
+    except LexActionError as exc:
+        return exc.as_response()
+
+
 class TestCluster10k_UnwrapHistorical(SimpleTestCase):
     """`_unwrap_historical_instance` four-branch resolver.
 
@@ -247,7 +258,7 @@ class TestCluster10k_DestroyMixin(SimpleTestCase):
             "DestroyOneWithPayloadMixin._unwrap_historical_instance",
             return_value=(instance, None),
         ):
-            resp = view.destroy()
+            resp = _answer(view.destroy)
 
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(
@@ -280,7 +291,7 @@ class TestCluster10k_DestroyMixin(SimpleTestCase):
                 is_superuser=False, groups=[], keycloak_scopes=set(),
                 user_permissions=[], client_roles={},
             )
-            resp = view.destroy()
+            resp = _answer(view.destroy)
 
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertFalse(view._captured["super_destroy_called"])
@@ -301,7 +312,7 @@ class TestCluster10k_DestroyMixin(SimpleTestCase):
             "DestroyOneWithPayloadMixin._unwrap_historical_instance",
             return_value=(instance, None),
         ):
-            resp = view.destroy()
+            resp = _answer(view.destroy)
 
         self.assertEqual(
             resp.status_code, status.HTTP_401_UNAUTHORIZED,

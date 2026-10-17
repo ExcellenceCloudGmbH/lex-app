@@ -20,7 +20,9 @@ import logging
 import os
 from typing import Any, Dict, Mapping, Optional
 
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.db import DatabaseError
+from django.http import Http404
 from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
@@ -143,6 +145,70 @@ def map_database_error(exc: Exception) -> Optional[LexActionError]:
     if mapped is not None and not isinstance(mapped, LexActionError):
         raise TypeError("DB_ERROR_MAPPER must return a LexActionError or None")
     return mapped
+
+
+_STATUS_CODES = {
+    400: "INVALID_REQUEST",
+    401: "NOT_AUTHENTICATED",
+    403: "PERMISSION_DENIED",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    409: "CONFLICT",
+}
+
+
+def errors_raised() -> bool:
+    """Whether generic endpoints raise their errors to the handler (``LEX_SEC_ERRORS``)."""
+    from lex.core.security_flags import strict
+
+    return strict("ERRORS")
+
+
+def error_from_body(data: Any, status_code: int) -> LexActionError:
+    """The ``LexActionError`` for an error body a generic view used to return.
+
+    Every key of the old body is kept, so a client reading ``message``, ``ids``
+    or ``available`` still finds it; ``code``, ``detail`` and ``error`` are
+    added where the old body lacked them.
+    """
+    body: Dict[str, Any] = dict(data) if isinstance(data, Mapping) else {"detail": _first_message(data)}
+    detail = body.pop("detail", None) or body.get("error") or body.get("message") or "The request could not be processed."
+    if body.get("error") == detail:
+        body.pop("error")
+    code = body.pop("code", None) or _STATUS_CODES.get(status_code, "INVALID_REQUEST")
+    fields = body.pop("fields", None)
+    return LexActionError(str(detail), code=str(code), fields=fields, status_code=status_code, **body)
+
+
+def raise_or_return(response: Optional[Response]) -> Optional[Response]:
+    """An error ``Response`` built by a generic view: raised (``LEX_SEC_ERRORS``) or returned as before."""
+    if response is None or not errors_raised():
+        return response
+    raise error_from_body(getattr(response, "data", None), response.status_code)
+
+
+def surface(exc: Exception) -> None:
+    """Re-raise ``exc`` when the exception handler should render it instead of a wrapping 500.
+
+    Called in the ``except`` blocks of the generic views before they wrap an
+    error into ``APIException``. With ``LEX_SEC_ERRORS`` a business error
+    (``LexActionError``), a DRF error (404, 400, ...), Django's ``Http404`` and
+    ``PermissionDenied`` and a database error that ``DB_ERROR_MAPPER`` maps
+    reach the handler unchanged; so does any database error when the project
+    has its own ``EXCEPTION_HANDLER``. Everything else is wrapped as before.
+    """
+    if not errors_raised():
+        return
+    if isinstance(exc, (LexActionError, exceptions.APIException, Http404, DjangoPermissionDenied)):
+        raise exc
+    if isinstance(exc, DatabaseError):
+        mapped = map_database_error(exc)
+        if mapped is not None:
+            raise mapped from exc
+        from lex.core.extensions import get_hook
+
+        if get_hook("EXCEPTION_HANDLER") is not None:
+            raise exc
 
 
 def lex_exception_handler(exc: Exception, context: Dict[str, Any]) -> Optional[Response]:

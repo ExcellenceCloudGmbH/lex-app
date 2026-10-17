@@ -181,3 +181,26 @@
 **Scenario range:** 4.118. **Test file:** `lex/test_project/tests/permissions/test_4u_api_key_admin.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Covers `lex/authentication/admin.py` (register_api_key_admin), `lex/authentication/apps.py` (ready). Batch: [4u](batches.md).
 
 ---
+
+### 4v. Generic records for end users (GENERIC_API records) and lex's internal endpoints ✅
+
+**What it tests:** In mode records a signed-in user reaches exactly the operations an exposed model names, and its actions; every other api/ path, other model, the user list and the sockets answer 404 (superusers keep everything). A misspelt operation stops startup. In every mode only superusers edit Django's users, write to the server log or delete files; the calculation log tree and its PDFs show only logs of readable records; a refusing permission_list makes the list 404.
+
+**Why a regression matters:** Opening the generic API to a product's own clients must not open lex's internal endpoints with it: before this, any signed-in user could rename any other user, read every calculation log and post to the server log.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.119 | exposure values and startup check | True = five operations; a set itself; typo stops startup |
+| 4.120 | route operations | list, create, retrieve, update, delete, action; None for other paths |
+| 4.121 | exposed operations answer users | list/read/create ok; update and delete 404, row unchanged |
+| 4.122 | everything else is 404 for users | not exposed model, user list, model-structure, run_step, log tree: 404; superuser not |
+| 4.123 | actions of exposed models | permission still decides (200 / ACTION_NOT_ALLOWED); 404 when not exposed |
+| 4.124 | sockets follow the generic API | user closed with 4404 in records; superuser and mode all reach the app |
+| 4.125 | users, logs and files need a superuser | EDIT_NOT_ALLOWED on another user; 404 on logs and file cleanup; superuser may edit |
+| 4.126 | calculation logs of readable records only | readable calculation shown; hidden, unbound and unfiltered empty; PDF 404; superuser all |
+| 4.127 | a refusing permission_list hides the list | 404, then 200 with the hook allowing |
+| 4.128 | the gate in the ASGI stack | one GenericApiSocketGate around the authenticated routes |
+
+**Scenario range:** 4.119-4.128. **Test file:** `lex/test_project/tests/permissions/test_4v_generic_records.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/middleware/generic_api_gate.py` (records mode, exposed_operations, record_operation, GenericApiSocketGate), `lex/lex_app/asgi.py`, `lex/core/extensions.py` (_validate_exposed_models), `lex/api/security.py` (edit_violations for Django auth models, list_denied), `lex/api/views/model_entries/List.py` (initial), `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`. Batch: [4v](batches.md).
+
+---

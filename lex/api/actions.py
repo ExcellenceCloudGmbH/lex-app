@@ -231,8 +231,11 @@ class ModelActionView(APIView):
         from lex.core.models.LexModel import LexModel
 
         user = getattr(request, "user", None)
+        from lex.audit_logging.utils.policy import audit_actor, audit_payload
+
+        payload["input"] = audit_payload(payload.get("input"))
         entry = AuditLog.objects.create(
-            author=(LexModel._normalize_audit_actor(user) or "") if user is not None else "",
+            author=(audit_actor(user) or "") if user is not None else "",
             resource=model_class.__name__.lower(),
             action="update",
             payload=_json_safe(payload),

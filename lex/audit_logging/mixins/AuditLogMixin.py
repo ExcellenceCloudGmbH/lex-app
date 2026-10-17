@@ -194,12 +194,14 @@ class AuditLogMixin:
 
         from lex.core.models.LexModel import LexModel
 
+        from lex.audit_logging.utils.policy import audit_actor, audit_payload
+
         audit_log = AuditLog.objects.create(
-            # A user without names is recorded by username, not as " " (BUG-007).
-            author=(LexModel._normalize_audit_actor(user) or "") if user else None,
+            # A user without names is recorded by username, not as " " (BUG-007); AUDIT_ACTOR decides if set.
+            author=(audit_actor(user) or "") if user else None,
             resource=resource,
             action=action,
-            payload=payload,
+            payload=audit_payload(payload),
             calculation_id=calculation_id or self.kwargs.get('calculationId'),
         )
         AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
@@ -242,7 +244,7 @@ class AuditLogMixin:
         try:
             instance = _save_with_retry(serializer)
             payload['id'] = instance.pk
-            audit_log.payload = payload
+            audit_log.payload = _stored(payload)
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
             audit_log.save()
@@ -279,7 +281,7 @@ class AuditLogMixin:
                 updated_payload['id'] = instance.pk
             audit_log.content_type = _safe_get_content_type(instance.__class__)
             audit_log.object_id = instance.pk
-            audit_log.payload = updated_payload
+            audit_log.payload = _stored(updated_payload)
             audit_log.save()
             # When a background calculation is pending (HTTP 202 path),
             # leave the status as 'pending' — the terminal audit
@@ -332,3 +334,10 @@ class AuditLogMixin:
             else:
                 self._failed_audit_logged = True
             raise
+
+
+def _stored(payload):
+    """The payload as AUDIT_PAYLOAD allows it to be stored."""
+    from lex.audit_logging.utils.policy import audit_payload
+
+    return audit_payload(payload)

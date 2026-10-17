@@ -29,6 +29,7 @@ SyncToAsync.single_thread_executor = ThreadPoolExecutor(
     max_workers=int(os.environ.get("ASGI_THREADS", "3"))
 )
 
+from lex.api.middleware.generic_api_gate import GenericApiSocketGate
 from lex.lex_app import routing
 from lex.lex_app.fast_health import (
     health_asgi_app,
@@ -71,7 +72,7 @@ application = ProtocolTypeRouter(
                 # All other WS routes require origin validation + authentication
                 re_path(r"", AllowedHostsOriginValidator(
                     AuthMiddlewareStack(
-                        URLRouter(routing.authenticated_websocket_urlpatterns())
+                        GenericApiSocketGate(URLRouter(routing.authenticated_websocket_urlpatterns()))
                     )
                 )),
             ]
