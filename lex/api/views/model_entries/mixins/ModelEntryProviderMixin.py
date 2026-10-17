@@ -94,7 +94,18 @@ class ModelEntryProviderMixin:
         if fk_fields:
             queryset = queryset.select_related(*fk_fields)
 
-        return queryset
+        from lex.core import request_scope
+
+        # A row outside the request's scope does not exist for it (REQUEST_SCOPE, lex_scope_queryset).
+        return request_scope.scope_queryset(model_class, queryset, self.request)
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from lex.core import request_scope
+
+        # Resolve the scope once DRF knows the user: a refused value answers 404,
+        # an allowed one reaches DB_CONTEXT.
+        request_scope.apply_context(request)
 
     def get_serializer_class(self):
         """

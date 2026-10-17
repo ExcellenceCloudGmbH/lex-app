@@ -13,13 +13,13 @@
 | 1. Init — Project Bootstrap | 51 | 408 | 450 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 22 | 128 | 72 | 2 | 0 |
+| 4. Permissions | 23 | 135 | 79 | 2 | 0 |
 | 5. History & Bitemporal | 15 | 131 | 37 | 6 | 3 |
 | 6. Audit Logging | 20 | 128 | 31 | 3 | 0 |
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 9 | 52 | 24 | 0 | 0 |
-| 10. API Layer | 22 | 127 | 77 | 0 | 0 |
+| 10. API Layer | 23 | 131 | 82 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -151,6 +151,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4t | Closed generic API is 404 for anonymous callers | 4.115-4.117 | complete | 3 | 0 | 0 | The session probe api/user/ is exempt from the login check in settings, so the gate now lets anonymous callers reach it. |
 | 4u | Scoped API keys in the admin | 4.118 | complete | 1 | 0 | 0 | Importing rest_framework_api_key.admin registers the classic keys. |
 | 4v | Generic records for end users (GENERIC_API records) and lex's internal endpoints | 4.119-4.128 | complete | 10 | 0 | 0 | lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist. |
+| 4w | The database decides (lex_permission_source = "database") | 4.129-4.135 | complete | 7 | 0 | 0 | The first-request check is switched off with LEX_DATABASE_DECIDES_CHECK=false in tests that run as the suite's superuser; the database mode is set per test, never on the model class, so the check of the whole suite is not affected. |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -286,6 +287,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10t | Keycloak calls and session rows per request | 10.113-10.116 | complete | 4 | 0 | 0 | The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b). |
 | 10u | Schema, docs and CLI share the SCHEMA settings | 10.117-10.121 | complete | 5 | 0 | 0 | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |
 | 10v | Every error of a generic endpoint reaches the exception handler | 10.122-10.127 | complete | 6 | 0 | 0 | Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would. |
+| 10w | The scope a request acts in (REQUEST_SCOPE) | 10.128-10.131 | complete | 5 | 0 | 0 | A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows. |
 
 ## 11. Stress & Performance (`stress`)
 

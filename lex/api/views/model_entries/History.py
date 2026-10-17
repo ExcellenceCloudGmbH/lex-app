@@ -89,9 +89,13 @@ class HistoryModelEntry(ListAPIView):
 
     @staticmethod
     def _record_readable(request, model_class, HistoryModel, pk_name, pk):
-        live = model_class._default_manager.filter(pk=pk).first()
+        from lex.core import request_scope
+
+        rows = model_class._default_manager.filter(pk=pk)
+        live = rows.first()
         if live is not None:
-            return is_readable(request, live)
+            # A record outside the request's scope (REQUEST_SCOPE) has no history for it either.
+            return request_scope.scope_queryset(model_class, rows, request).exists() and is_readable(request, live)
         # Deleted record: judge by its last known state.
         latest = HistoryModel.objects.filter(**{pk_name: pk}).order_by("-valid_from", "-history_id").first()
         if latest is None:

@@ -53,10 +53,28 @@ def _authenticated(user):
     return user
 
 
-def apply(user, *, local: bool = True) -> None:
-    """Tell the database who is asking (no-op without DB_CONTEXT)."""
+def _accepts_scope(fn) -> bool:
+    import inspect
+
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "scope" or p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters)
+
+
+def apply(user, *, local: bool = True, scope=None) -> None:
+    """Tell the database who is asking (no-op without DB_CONTEXT).
+
+    ``scope`` (see :mod:`lex.core.request_scope`) is passed on when the hook
+    takes a ``scope`` keyword.
+    """
     fn = hook()
-    if fn is not None:
+    if fn is None:
+        return
+    if scope is not None and _accepts_scope(fn):
+        fn(_authenticated(user), local=local, scope=scope)
+    else:
         fn(_authenticated(user), local=local)
 
 

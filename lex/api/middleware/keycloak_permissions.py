@@ -90,6 +90,10 @@ def _cache_set(token: str, permissions, userinfo) -> None:
     except Exception:
         logger.warning("Could not cache Keycloak permissions", exc_info=True)
 
+class _Skipped(Exception):
+    """The permission call is not needed (PERMISSION_SOURCE = \"database\")."""
+
+
 class KeycloakPermissionsMiddleware:
     """
     This middleware is responsible for fetching a user's complete set of UMA (User-Managed Access)
@@ -161,12 +165,22 @@ class KeycloakPermissionsMiddleware:
 
             kc_manager = _shared_manager()
             fetched_permissions = fetched_userinfo = False
+            from lex.core.permission_source import global_source
+
+            # When the database decides, Keycloak's scopes decide nothing: skip that call.
+            skip_permissions = global_source() == "database"
+            if skip_permissions:
+                fetched_permissions = True
             try:
+                if skip_permissions:
+                    raise _Skipped()
                 # Fetch all permissions once and attach them to the request.
                 # This list will be the single source of truth for the rest of the request.
                 permissions = kc_manager.get_uma_permissions(access_token)
                 request.user_permissions = permissions if permissions is not None else []
                 fetched_permissions = permissions is not None
+            except _Skipped:
+                pass
             except Exception as e:
                 # Log any unexpected errors during permission fetching but don't crash the request.
                 # Default to no permissions in case of an error.

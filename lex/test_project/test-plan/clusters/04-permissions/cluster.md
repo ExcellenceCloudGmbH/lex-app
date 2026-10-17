@@ -204,3 +204,23 @@
 **Scenario range:** 4.119-4.128. **Test file:** `lex/test_project/tests/permissions/test_4v_generic_records.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/middleware/generic_api_gate.py` (records mode, exposed_operations, record_operation, GenericApiSocketGate), `lex/lex_app/asgi.py`, `lex/core/extensions.py` (_validate_exposed_models), `lex/api/security.py` (edit_violations for Django auth models, list_denied), `lex/api/views/model_entries/List.py` (initial), `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`. Batch: [4v](batches.md).
 
 ---
+
+### 4w. The database decides (lex_permission_source = "database") ✅
+
+**What it tests:** Per model or globally the database decides: lex's default hooks allow, lists skip the per-row loop, an update the policy does not let through and a refused insert answer 404 without an INSERT fallback, a model's own hook still applies; problems() names a superuser role, missing RLS and table ownership and the guard answers 503; Keycloak's UMA call is skipped.
+
+**Why a regression matters:** A project whose rules live in PostgreSQL would otherwise have every row denied by Keycloak defaults, or rows re-inserted by Django's UPDATE-then-INSERT fallback when a policy hides them; running it without RLS for real would expose every tenant.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.129 | per-model and global source | attribute wins; global key; non-LexModels never; typo stops startup |
+| 4.130 | reads are what the database returns | own rows only, no per-row loop, foreign row 404 |
+| 4.131 | writes the policy refuses answer 404 | create/change/delete ok; foreign insert and locked update 404; no copy inserted |
+| 4.132 | a model's own hook still applies | permission_create False refuses |
+| 4.133 | problems name what lets rows through | superuser and missing RLS named; none with RLS and a restricted role |
+| 4.134 | the guard refuses service | 503 SERVICE_MISCONFIGURED; passes with the check off |
+| 4.135 | UMA call skipped | no UMA call in database mode; userinfo still fetched |
+
+**Scenario range:** 4.129-4.135. **Test file:** `lex/test_project/tests/permissions/test_4w_database_decides.py`. **Type:** U + E (PostgreSQL). **Status:** ✅ Complete (2026-10-17). Covers `lex/core/permission_source.py` (database_decides, problems, is_policy_refusal, DatabaseDecidesGuardMiddleware), `lex/core/models/LexModel.py` (default hooks, _save_row), `lex/api/views/model_entries/filter_backends.py` (restrict), `lex/api/errors.py` (policy refusals), `lex/api/middleware/keycloak_permissions.py`, `lex/core/extensions.py` (PERMISSION_SOURCE), `lex/lex_app/settings.py` (guard in MIDDLEWARE). Batch: [4w](batches.md).
+
+---

@@ -194,3 +194,20 @@
 **Scenario range:** 10.122-10.127. **Test file:** `lex/test_project/tests/api_layer/test_10v_errors_reach_the_handler.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/errors.py` (error_from_body, raise_or_return, surface), `lex/api/views/model_entries/One.py`, `Many.py`, `History.py`, `lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/file_operations/ModelExport.py`, `lex/process_admin/views/model_relation_views.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py`, `lex/core/security_flags.py` (ERRORS). Batch: [10v](batches.md).
 
 ---
+
+### 10w. The scope a request acts in (REQUEST_SCOPE) ✅
+
+**What it tests:** The scope parameter is reserved and never filters; the resolver refuses with 404 and its answer reaches DB_CONTEXT; lex_scope_queryset narrows list, record, history and action lookups; without the parameter the resolver chooses a default.
+
+**Why a regression matters:** Acting as one of several organisations must hold on every generic endpoint, or a user working as tenant A could read tenant B's records through a path that forgot the narrowing.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.128 | configuration and reserved parameter | param read; malformed config stops startup; the query filters by name, never by the scope value |
+| 10.129 | resolver decides, context hears it | 404 for a refused value; DB_CONTEXT got the scope |
+| 10.130 | the scope narrows every way to a row | list, record, history and action of the other scope 404 |
+| 10.131 | the resolver's default | no parameter: default scope, both rows |
+
+**Scenario range:** 10.128-10.131. **Test file:** `lex/test_project/tests/api_layer/test_10w_request_scope.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/request_scope.py`, `lex/core/db_context.py` (apply with scope), `lex/api/views/model_entries/List.py` (reserved parameter), `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (get_queryset, initial), `lex/api/views/model_entries/History.py` (_record_readable), `lex/api/actions.py` (_resolve_instance), `lex/core/extensions.py`. Batch: [10w](batches.md).
+
+---

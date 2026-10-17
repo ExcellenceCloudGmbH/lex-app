@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 127
+max_scenario: 131
 letters:
   a:
     title: ''
@@ -226,3 +226,13 @@ letters:
       xfail: 0
     note: >-
       Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would.
+  w:
+    title: "The scope a request acts in (REQUEST_SCOPE)"
+    scenarios: 10.128-10.131
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows.

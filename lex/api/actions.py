@@ -156,9 +156,12 @@ class ModelActionView(APIView):
         if request.method.lower() not in spec.methods:
             raise MethodNotAllowed(request.method)
 
+        from lex.core import request_scope
+
+        scope = request_scope.resolve(request)
         instance = None
         if detail:
-            instance = self._resolve_instance(model_class, kwargs)
+            instance = self._resolve_instance(model_class, kwargs, request)
             if instance is None or not is_readable(request, instance):
                 raise NotFound()
 
@@ -177,7 +180,7 @@ class ModelActionView(APIView):
         atomic = transaction.atomic() if spec.atomic else _null()
         with OperationContext(request, calculation_id):
             with atomic:
-                db_context.apply(request.user, local=True)
+                db_context.apply(request.user, local=True, scope=scope)
                 self._audit(request, spec, model_class, instance, data, calculation_id)
                 logging_target = instance if instance is not None else model_class
                 with model_logging_context(logging_target):
@@ -188,15 +191,21 @@ class ModelActionView(APIView):
         return self._respond(spec, result, request)
 
     @staticmethod
-    def _resolve_instance(model_class, kwargs):
+    def _resolve_instance(model_class, kwargs, request=None):
+        from lex.core import request_scope
+
         lookup_field = getattr(model_class, "lex_lookup_field", None)
         if "lookup" in kwargs:
             if not lookup_field:
                 return None
-            return model_class._default_manager.filter(**{lookup_field: kwargs["lookup"]}).first()
-        if lookup_field and getattr(model_class, "lex_lookup_allow_pk", True) is False:
+            rows = model_class._default_manager.filter(**{lookup_field: kwargs["lookup"]})
+        elif lookup_field and getattr(model_class, "lex_lookup_allow_pk", True) is False:
             return None
-        return model_class._default_manager.filter(pk=kwargs["pk"]).first()
+        else:
+            rows = model_class._default_manager.filter(pk=kwargs["pk"])
+        if request is not None:
+            rows = request_scope.scope_queryset(model_class, rows, request)
+        return rows.first()
 
     @staticmethod
     def _permitted(spec, model_class, instance, request, user_context,
