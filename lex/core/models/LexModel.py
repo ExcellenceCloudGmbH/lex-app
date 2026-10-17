@@ -890,7 +890,9 @@ class LexModel(LifecycleModel):
         if user is not None:
             is_authenticated = getattr(user, 'is_authenticated', None)
             if is_authenticated is not False:
-                return self._normalize_audit_actor(user)
+                from lex.audit_logging.utils.policy import audit_actor
+
+                return audit_actor(user)
 
         try:
             try:

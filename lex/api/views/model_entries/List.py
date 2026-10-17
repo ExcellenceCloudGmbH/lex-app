@@ -448,6 +448,17 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
     post_as_read = True
     # permission_classes = [IsAuthenticated, KeycloakUMAPermission]
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from rest_framework.exceptions import NotFound
+
+        from lex.api.security import list_denied
+        from lex.core.security_flags import strict
+
+        # A model that refuses the list (its own permission_list) has none for this caller.
+        if strict("NOT_FOUND") and list_denied(request, self.kwargs["model_container"].model_class):
+            raise NotFound()
+
     def get_queryset(self):
         queryset = super().get_queryset()
         model_class = self.kwargs["model_container"].model_class

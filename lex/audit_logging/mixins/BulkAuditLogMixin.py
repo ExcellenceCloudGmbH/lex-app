@@ -59,11 +59,13 @@ class BulkAuditLogMixin(AuditLogMixin):
         payload = _serialize_payload(payload or {})
         user = self.request.user if hasattr(self.request, 'user') else None
         resource = target.__name__.lower() if isinstance(target, type) else target.__class__.__name__.lower()
+        from lex.audit_logging.utils.policy import audit_payload
+
         audit_log = AuditLog.objects.create(
             author=(_audit_author(user) or "") if user else None,
             resource=resource,
             action=action,
-            payload=payload,
+            payload=audit_payload(payload),
             calculation_id=self.kwargs.get('calculationId') if hasattr(self, 'kwargs') else None,
         )
         AuditLogStatus.objects.create(audit_log=audit_log, status='pending')
@@ -95,7 +97,7 @@ class BulkAuditLogMixin(AuditLogMixin):
                     updated_payload['id'] = updated_instance.pk
                 audit_log.content_type = _safe_get_content_type(updated_instance.__class__)
                 audit_log.object_id = updated_instance.pk
-                audit_log.payload = updated_payload
+                audit_log.payload = _stored(updated_payload)
                 audit_log.save()
                 AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return updated_instances
@@ -143,7 +145,7 @@ class BulkAuditLogMixin(AuditLogMixin):
                     updated_payload['id'] = instance_pk
                 audit_log.content_type = _safe_get_content_type(instance.__class__)
                 audit_log.object_id = instance_pk
-                audit_log.payload = updated_payload
+                audit_log.payload = _stored(updated_payload)
                 audit_log.save()
                 AuditLogStatus.objects.filter(audit_log=audit_log).update(status='success', updated_at=timezone.now())
             return deleted_ids
@@ -168,7 +170,14 @@ class BulkAuditLogMixin(AuditLogMixin):
 
 
 def _audit_author(user):
-    """A user without names is recorded by username, not as " " (BUG-007)."""
-    from lex.core.models.LexModel import LexModel
+    """A user without names is recorded by username, not as " " (BUG-007); AUDIT_ACTOR decides if set."""
+    from lex.audit_logging.utils.policy import audit_actor
 
-    return LexModel._normalize_audit_actor(user)
+    return audit_actor(user)
+
+
+def _stored(payload):
+    """The payload as AUDIT_PAYLOAD allows it to be stored."""
+    from lex.audit_logging.utils.policy import audit_payload
+
+    return audit_payload(payload)

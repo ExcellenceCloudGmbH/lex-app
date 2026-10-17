@@ -3,8 +3,8 @@ from contextlib import nullcontext
 
 from django.db import transaction
 from django.db.models.signals import post_save
-from lex.api.errors import error_detail
-from lex.api.security import create_allowed, edit_denial, is_readable
+from lex.api.errors import error_detail, raise_or_return, surface
+from lex.api.security import create_allowed, edit_denial, is_readable, strict_input_denial
 from lex.api.views.model_entries.mixins.DestroyOneWithPayloadMixin import DestroyOneWithPayloadMixin
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
 from lex.core.models.LexModel import should_use_atomic_model_operations
@@ -28,10 +28,16 @@ class CreateOrUpdate(ModelEntryProviderMixin, DestroyOneWithPayloadMixin, Retrie
         if instance is not None:
             denial = edit_denial(request, instance, request.data, serializer=self.get_serializer(instance))
             if denial is not None:
-                return denial
+                return raise_or_return(denial)
         elif strict("EDIT") and not create_allowed(request, model_container.model_class):
             detail = f"You may not create a {model_container.model_class.__name__}."
-            return Response({"code": "CREATE_NOT_ALLOWED", "detail": detail, "error": detail}, status=400)
+            return raise_or_return(
+                Response({"code": "CREATE_NOT_ALLOWED", "detail": detail, "error": detail}, status=400)
+            )
+        # Unknown fields are refused here as on the single-record endpoint (lex_strict_input).
+        strict_denial = strict_input_denial(model_container.model_class, self.get_serializer(instance), request.data)
+        if strict_denial is not None:
+            return raise_or_return(strict_denial)
         try:
             if "next_step" in request.data:
                 post_save.disconnect(update_handler)
@@ -47,7 +53,7 @@ class CreateOrUpdate(ModelEntryProviderMixin, DestroyOneWithPayloadMixin, Retrie
                 else:
                     response = CreateModelMixin.create(self, request, *args, **kwargs)
         except Exception as e:
-            print(e)
+            surface(e)
             raise APIException(error_detail({"error": f"{e} ", "traceback": traceback.format_exc()}))
 
         post_save.connect(update_handler)

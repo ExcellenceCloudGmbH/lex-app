@@ -24,7 +24,9 @@ from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.calculation_closing import calculation_closed_reason
-from lex.api.errors import error_detail, restructure_response, structured_format
+from lex.api.errors import (
+    LexActionError, error_detail, errors_raised, raise_or_return, restructure_response, structured_format, surface,
+)
 from lex.api.security import edit_denial, is_readable, strict_input_denial
 from lex.core.security_flags import strict
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
@@ -563,6 +565,9 @@ class OneModelEntry(
         ``APIException`` responses, because DRF's public contract is a
         400 with field-level details.
         """
+        if errors_raised():
+            # The handler renders it (DRF's 400 with field details, or the project's own shape).
+            raise exc
         response = Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
         if structured_format():
             return restructure_response(exc, response)
@@ -598,12 +603,14 @@ class OneModelEntry(
                     if is_anonymous
                     else status.HTTP_403_FORBIDDEN
                 )
-                return Response(
+                return raise_or_return(Response(
                     {
                         "message": f"You are not authorized to create a record in {model_container.model_class.__name__}"
                     },
                     status=deny_status,
-                )
+                ))
+        except LexActionError:
+            raise  # the refusal itself (LEX_SEC_ERRORS), not a failing check
         except Exception as exc:
             if strict("FAIL_CLOSED"):
                 # A permission check that raises is a server fault, not a grant.
@@ -621,7 +628,7 @@ class OneModelEntry(
 
         strict_denial = strict_input_denial(model_container.model_class, self.get_serializer(), request.data)
         if strict_denial is not None:
-            return strict_denial
+            return raise_or_return(strict_denial)
 
         calculationId = self.kwargs["calculationId"]
 
@@ -651,6 +658,7 @@ class OneModelEntry(
                     payload=getattr(request, "data", {}),
                     exception=e,
                 )
+                surface(e)
                 raise APIException(
                     error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                 ) from e
@@ -703,6 +711,7 @@ class OneModelEntry(
                         exception=e,
                         related_instance=instance,
                     )
+                    surface(e)
                     raise APIException(
                         error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
@@ -727,7 +736,7 @@ class OneModelEntry(
                 denial = edit_denial(request, instance, request.data, serializer=serializer_for_checks) or \
                     strict_input_denial(type(instance), serializer_for_checks, request.data)
                 if denial is not None:
-                    return denial
+                    return raise_or_return(denial)
 
                 # ── Cancel button short-circuit ────────────────────────
                 # PATCH .../{pk}/?cancel=true (or body {"cancel":"true"})
@@ -773,6 +782,9 @@ class OneModelEntry(
                 is_meta = hasattr(model_container.model_class, 'meta_history_id')
 
                 if is_meta:
+                    if errors_raised():
+                        detail = "Modifying Meta-History records is not allowed."
+                        raise LexActionError(detail, code="EDIT_NOT_ALLOWED")
                     raise PermissionDenied("Modifying Meta-History records is not allowed.")
 
                 try:
@@ -798,6 +810,7 @@ class OneModelEntry(
                         exception=e,
                         related_instance=instance,
                     )
+                    surface(e)
                     raise APIException(
                         error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
@@ -849,6 +862,7 @@ class OneModelEntry(
                             exception=e,
                             related_instance=instance,
                         )
+                        surface(e)
                         raise APIException(
                             error_detail({"error": f"Bitemporal update failed: {e}", "traceback": traceback.format_exc()})
                         ) from e
@@ -979,6 +993,7 @@ class OneModelEntry(
                         exception=e,
                         related_instance=instance,
                     )
+                    surface(e)
                     raise APIException(
                         error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e

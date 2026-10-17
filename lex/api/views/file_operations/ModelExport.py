@@ -95,6 +95,16 @@ def _safe_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def _no_data():
+    """Nothing to export: raised to the exception handler (LEX_SEC_ERRORS) or the old JSON body."""
+    from lex.api.errors import error_from_body, errors_raised
+
+    body = {"code": "NO_DATA", "error": "No data available for export"}
+    if errors_raised():
+        raise error_from_body(body, 404)
+    return JsonResponse({'error': 'No data available for export'}, status=404)
+
+
 class ModelExportView(GenericAPIView):
     filter_backends = [UserReadRestrictionFilterBackend, PrimaryKeyListFilterBackend, ForeignKeyFilterBackend]
     model_collection = None
@@ -1324,7 +1334,7 @@ class ModelExportView(GenericAPIView):
                 "[export:%s] universal-stream produced 0 rows in %.3fs",
                 model_name, time.perf_counter() - t_start,
             )
-            return JsonResponse({'error': 'No data available for export'}, status=404)
+            return _no_data()
 
         try:
             file_size = os.path.getsize(tmp_path)
@@ -1546,7 +1556,7 @@ class ModelExportView(GenericAPIView):
                 pass
             logger.info("[export:%s] fast-path produced 0 rows in %.3fs",
                         model_name, time.perf_counter() - t_start)
-            return JsonResponse({'error': 'No data available for export'}, status=404)
+            return _no_data()
 
         try:
             file_size = os.path.getsize(tmp_path)
@@ -1827,7 +1837,7 @@ class ModelExportView(GenericAPIView):
 
         # Check if there's any data to export
         if df.empty:
-            return JsonResponse({'error': 'No data available for export'}, status=404)
+            return _no_data()
 
         hierarchy_depths: List[int] = []
         if AG_GROUP_HIERARCHY_DEPTH_COLUMN in df.columns:

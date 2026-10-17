@@ -250,6 +250,16 @@ class DownloadMarkdownPdf(APIView):
         every existing caller is unaffected.
         """
         obj = CalculationLog.objects.filter(pk=pk).first()
+        from lex.api.views.model_entries.CalculationLogTreeView import calculation_visible
+        from lex.core.security_flags import superuser_only
+
+        # The same rule as the log tree (LEX_SEC_INTERNAL).
+        if obj is not None and superuser_only(request) and not calculation_visible(request, obj.calculationId):
+            obj = None
+        if obj is None and superuser_only(request):
+            from django.http import Http404
+
+            raise Http404()
         include_descendants = _wants_descendants(
             request.query_params.get("include_descendants")
         )

@@ -6,6 +6,7 @@ a specific system-time snapshot using the ``?as_of`` query parameter.
 """
 
 from django.db.models import Prefetch
+from lex.api.errors import raise_or_return
 from lex.api.security import is_readable, read_result
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.permissions.UserPermission import UserPermission
@@ -39,16 +40,16 @@ class HistoryModelEntry(ListAPIView):
             if row is None and lookup_field and hasattr(model_class, "history"):
                 row = model_class.history.model.objects.filter(**{lookup_field: kwargs["lookup"]}).first()
             if row is None:
-                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+                return raise_or_return(Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND))
             pk = getattr(row, model_class._meta.pk.attname)
         elif lookup_field and getattr(model_class, "lex_lookup_allow_pk", True) is False:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return raise_or_return(Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND))
 
         if not hasattr(model_class, "history"):
-            return Response(
-                {"error": f"Model {model_class.__name__} does not track history."},
+            return raise_or_return(Response(
+                {"code": "HISTORY_NOT_TRACKED", "error": f"Model {model_class.__name__} does not track history."},
                 status=status.HTTP_400_BAD_REQUEST,
-            )
+            ))
 
         HistoryModel = model_class.history.model
         pk_name = model_class._meta.pk.name
@@ -56,7 +57,7 @@ class HistoryModelEntry(ListAPIView):
         # The history of a record the caller may not read does not exist for
         # them (LEX_SEC_READ_SURFACES): who changed it and when is data too.
         if strict("READ_SURFACES") and not self._record_readable(request, model_class, HistoryModel, pk_name, pk):
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return raise_or_return(Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND))
         serializers_map = (
             model_container.get_serializers_map()
             if hasattr(model_container, "get_serializers_map")

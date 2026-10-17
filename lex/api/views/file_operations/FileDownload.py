@@ -14,7 +14,14 @@ from lex.api.security import is_readable, read_result
 from lex.core.security_flags import strict
 
 
-# Assuming HasAPIKey is imported from your custom permissions
+def _error(message, status_code):
+    """An error of this view: raised to the exception handler (LEX_SEC_ERRORS) or the old JSON body."""
+    from lex.api.errors import error_from_body, errors_raised
+
+    if errors_raised():
+        raise error_from_body({"error": message}, status_code)
+    return JsonResponse({"error": message}, status=status_code)
+
 
 class FileDownloadView(APIView):
     model_collection = None
@@ -29,9 +36,9 @@ class FileDownloadView(APIView):
         field_name = request.query_params.get('field')
         lookup_field = getattr(model, "lex_lookup_field", None)
         if not (pk or (lookup and lookup_field)) or not field_name:
-            return JsonResponse({"error": "Both 'pk' (or 'lookup') and 'field' are required."}, status=400)
+            return _error("Both 'pk' (or 'lookup') and 'field' are required.", 400)
         if pk and lookup_field and getattr(model, "lex_lookup_allow_pk", True) is False:
-            return JsonResponse({"error": "File not found"}, status=404)
+            return _error("File not found", 404)
 
         # Only real file fields can be downloaded; any other attribute is "not found".
         try:
@@ -39,7 +46,7 @@ class FileDownloadView(APIView):
         except FieldDoesNotExist:
             field = None
         if not isinstance(field, models.FileField):
-            return JsonResponse({"error": "File not found"}, status=404)
+            return _error("File not found", 404)
 
         # Using filter().first() is safer than [0] to avoid IndexError if not found
         try:
@@ -49,16 +56,16 @@ class FileDownloadView(APIView):
             instance = None
 
         if not instance:
-            return JsonResponse({"error": "File not found"}, status=404)
+            return _error("File not found", 404)
 
         # The caller must be allowed to read the record and this field (LEX_SEC_READ_SURFACES).
         if strict("READ_SURFACES") and not self._may_read_file(request, instance, field_name):
-            return JsonResponse({"error": "File not found"}, status=404)
+            return _error("File not found", 404)
 
         # 2. Get the file field object safely
         file_obj = getattr(instance, field_name)
         if not file_obj:
-            return JsonResponse({"error": "File not found"}, status=404)
+            return _error("File not found", 404)
 
         storage_type = os.getenv("STORAGE_TYPE", "LOCAL")
 
@@ -96,7 +103,7 @@ class FileDownloadView(APIView):
                 # A field with its own (non-filesystem) storage has no .path.
                 return FileResponse(file_obj.open('rb'))
             except FileNotFoundError:
-                return JsonResponse({"error": "File not found on server"}, status=404)
+                return _error("File not found on server", 404)
 
     @staticmethod
     def _may_read_file(request, instance, field_name):

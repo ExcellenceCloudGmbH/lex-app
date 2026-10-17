@@ -4,6 +4,7 @@ from lex.process_admin.models.ModelCollection import ModelCollection
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from lex.api.errors import raise_or_return
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
@@ -201,7 +202,7 @@ class Overview(APIView):
         class_name = kwargs["report_name"]
         html_report_class = (self.HTML_reports or {}).get(class_name)
         if html_report_class is None:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return raise_or_return(Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND))
         from lex.api.security import guarded
         from lex.core.models.LexModel import UserContext
 
@@ -213,6 +214,6 @@ class Overview(APIView):
             what=f"{html_report_class.__name__}.permission_view",
         )
         if not allowed:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            return raise_or_return(Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND))
         html = html_report_class().get_html(user)
         return Response(html)

@@ -9,6 +9,7 @@ from django.db.models import Model
 from django.utils import timezone
 from lex.audit_logging.models.AuditLog import AuditLog
 from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
+from lex.audit_logging.utils.policy import audit_payload
 from lex.audit_logging.serializers.AuditLogMixinSerializer import _serialize_payload, generic_instance_payload
 
 # Configure logger for audit operations
@@ -83,7 +84,7 @@ class InitialDataAuditLogger:
                     author="system (initial_data_upload)",
                     resource=resource,
                     action="create",
-                    payload=payload,
+                    payload=audit_payload(payload),
                     calculation_id=calculation_id
                 )
 
@@ -187,7 +188,7 @@ class InitialDataAuditLogger:
                     author="system (initial_data_upload)",
                     resource=resource,
                     action="update",
-                    payload=payload,
+                    payload=audit_payload(payload),
                     calculation_id=calculation_id
                 )
 
@@ -272,7 +273,7 @@ class InitialDataAuditLogger:
                     author="system (initial_data_upload)",
                     resource=resource,
                     action="delete",
-                    payload=payload,
+                    payload=audit_payload(payload),
                     calculation_id=None
                 )
 

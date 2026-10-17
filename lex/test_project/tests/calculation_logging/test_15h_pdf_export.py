@@ -76,6 +76,12 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
 class TestCluster15h_PdfExport(_CalcLogTestCase):
     """GET api/download-pdf/<pk>/ — the exported PDF mirrors the log view."""
 
+    def setUp(self):
+        super().setUp()
+        # These logs belong to no record, so only an operator may read them (LEX_SEC_INTERNAL, 4.126).
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+
     def _download(self, pk) -> bytes:
         url = self._url("download-markdown-pdf", pk=pk)
         response = self.client.get(url)
