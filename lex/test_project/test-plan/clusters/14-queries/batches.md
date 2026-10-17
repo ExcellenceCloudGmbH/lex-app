@@ -27,18 +27,19 @@
 - **Status:** complete — 29 pass (10 original + 12 from fix round 1 + 3 from fix round 2 + 4 from the
   final review, 14.67-14.70; 14.57 widened to a `TextField`)
 
-## Batch 14j — GET list: the `__blank` query-param lookup suffix (14.71-14.73)
+## Batch 14j — GET list: the `__blank` query-param lookup suffix (14.71-14.74)
 
 - **Type:** E
 - **Files covered:** `lex/api/views/model_entries/List.py`
 - **Test file:** `lex/test_project/tests/queries/test_14j_blank_query_param.py`
 - **Test classes:** `TestCluster14j_BlankQueryParam`, `TestCluster14j_ExactAndInTypeConversion`
-  (fix round 2)
+  (fix rounds 2-3)
 - **Fixtures:** `QueryItem` (`note` — a plain text column; `created_on` — a non-text column;
   `category` — a direct FK column, fix round 1; `metadata` — a JSON column, fix round 1; `note`
-  holding the literal strings `"none"`/`"true"` and `is_active`, fix round 2), `QueryCategory`
+  holding the literal strings `"none"`/`"true"` and `is_active`, fix round 2; `metadata` holding a
+  JSON number/string/boolean/empty object under the same key, fix round 3), `QueryCategory`
   (fix round 1, reused fix round 2)
-- **Status:** complete — 3 pass
+- **Status:** complete — 4 pass
 - **Fix round 1:** a review found `__blank` wrongly applied to a related path (`category__name__blank`
   built a real filter instead of being ignored, since `field_path` "category__name" has no gap
   against `lookup_path` the way a JSON sub-path does). `_build_query_from_values` now also requires
@@ -55,9 +56,28 @@
   target field's `to_python`, a boolean's `_bool_from_key`, the field's own `to_python` otherwise --
   via `_typed_value_converter`/`_coerce_typed_value`, a conversion helper factored out of and shared
   with the POST Set filter's `_set_filter_values` rather than duplicated. A value that fails this
-  conversion is dropped (the whole param ignored if none survive), never a 400, since a GET list
-  request stays a read. Bare keys (no lookup suffix) and every other lookup keep the legacy,
-  type-blind `_coerce_value` unchanged, so `?field=null` still means `IS NULL` for existing callers.
+  conversion is dropped, and if NONE of the given values survive the lookup matches no rows
+  (`Q(pk__in=[])`, the same idiom `_build_filter_q` already uses for an explicit empty POST Set
+  filter) rather than ever becoming a 400 or silently matching every row -- returning "no filter"
+  there would fail open (an unconvertible `?category__in=abc` would otherwise match the whole
+  table, and a "Select All" bulk action would then run over everything). 14.73(g)/(h) pin this.
+  Bare keys (no lookup suffix) and every other lookup keep the legacy, type-blind `_coerce_value`
+  unchanged, so `?field=null` still means `IS NULL` for existing callers.
   `_resolve_filter_bar` (`lex/api/serializers/base_serializers.py`, cluster 10o) also gained a
   per-process per-(serializer class, name) dedup on its "dropped" warning in the same change, so a
   misconfigured `filter_bar` no longer re-logs on every fields-info request.
+- **Fix round 3 (residual, same re-review):** a `JSONField` is the one exception to "every other
+  field type stays typed" (fix round 2) -- it keeps the legacy `_coerce_value` on `__exact`/`__in`
+  too, for the whole column and for any sub-path through it, because a JSON value's own spelling
+  already says its type (`5` is a number, `"5"` a string, `true` a bool, `null` is null); there is
+  no single column type to convert a raw query string by. Before this fix a JSON sub-path through
+  `__in` (e.g. `?metadata__key__in=5`) fell back to `_typed_value_converter`'s generic
+  `model_field.to_python`, which for `JSONField` is the inherited identity -- so the raw string
+  `"5"` matched the row storing the JSON **string** `"5"` instead of the row storing the JSON
+  **number** `5`. 14.74 pins the sub-path (a) number, (b) boolean and (c) whole-column shapes on
+  `__in`, plus (d) a sub-path `__exact` regression guard -- that one already fell through to the
+  legacy path untouched, since the `__exact` branch's path-equality guard excludes a JSON sub-path
+  on its own (`"metadata__key__exact" != "metadata__exact"`). The check lives in
+  `_coerce_typed_value` (GET-only), not in the shared `_typed_value_converter`, since `model_field`
+  is the same `JSONField` object for the whole column and for a sub-path alike --
+  `_resolve_lookup`'s JSON branch never manufactures a separate `Field` for a key.

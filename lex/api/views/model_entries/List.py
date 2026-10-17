@@ -384,7 +384,28 @@ def _coerce_typed_value(model_field, raw: Any) -> Any:
     ``_set_filter_values`` (the POST filterModel path, where the caller is
     actively building a filter), this never raises: a 400 here would reject
     an otherwise-valid list request over one bad query-string value.
+
+    A ``JSONField`` is the one exception, and deliberately lives only here --
+    never in :func:`_typed_value_converter`, which the POST Set filter
+    shares -- because a JSON column has no single "column type" to convert a
+    raw string BY the way a foreign key (always an id) or a boolean column
+    (always ``true``/``false``) does: a JSON value's own spelling already
+    says its type (``5`` is a number, ``"5"`` a string, ``true`` a bool,
+    ``null`` is null). ``model_field`` is the SAME ``JSONField`` object
+    whether ``lookup_path`` names the whole column (``metadata__in``) or a
+    sub-path through it (``metadata__key__in``) -- ``_resolve_lookup``'s JSON
+    branch never manufactures a separate ``Field`` for a key -- so both
+    shapes defer to the legacy, ``json.loads``-based :func:`_coerce_value`
+    unchanged, exactly as a bare key or any other lookup suffix already does.
+    Routing either shape through ``_typed_value_converter`` instead would
+    call ``model_field.to_python``, which for ``JSONField`` is the inherited
+    identity ``Field.to_python`` (it never raises, so the fail-closed branch
+    above would not even trigger) -- a numeric/boolean/null-spelled value
+    would survive as an unparsed string and silently stop matching the
+    differently-typed value actually stored.
     """
+    if _is_json_field(model_field):
+        return _coerce_value(model_field, raw)
     convert = _typed_value_converter(model_field)
     try:
         return convert(raw)
@@ -462,7 +483,11 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
     # to spell "none"/"true" must stay that literal string, not become
     # Python `None`/`True` the way it would for every other field type too.
     # A key that fails to convert (bad id, ...) is dropped -- same as any
-    # other value this GET path cannot use -- never a 400.
+    # other value this GET path cannot use -- never a 400. Exception: a
+    # JSONField (whole column or a sub-path -- `model_field` is the same
+    # JSONField object either way) still goes through the legacy
+    # `_coerce_value` here too, via `_coerce_typed_value`'s own JSON
+    # special-case -- see that function's docstring for why.
     if lookup_path.endswith("__in"):
         if len(cleaned) == 1 and isinstance(cleaned[0], str) and "," in cleaned[0]:
             items = [x for x in cleaned[0].split(",") if x != ""]
@@ -496,10 +521,16 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
 
     # An explicit `__exact` suffix gets the same column-type conversion as
     # `__in` above (C1) -- a value-list Set filter's single ticked key sends
-    # exactly this shape (`field__exact=<key>`). A bare key with no suffix
-    # at all (`lookup_path == field_path`) is NOT this branch -- it falls
-    # through to the legacy `_coerce_value` below, so an existing caller's
-    # `?field=null` keeps meaning `IS NULL` exactly as before.
+    # exactly this shape (`field__exact=<key>`), and the same JSONField
+    # exception applies (see `_coerce_typed_value`). A bare key with no
+    # suffix at all (`lookup_path == field_path`) is NOT this branch -- it
+    # falls through to the legacy `_coerce_value` below, so an existing
+    # caller's `?field=null` keeps meaning `IS NULL` exactly as before. Note
+    # this path-equality guard (rather than `.endswith("__exact")`) already
+    # excludes a JSON sub-path's own `__exact` on its own -- `field_path` for
+    # `metadata__key__exact` is "metadata", so `lookup_path` never equals
+    # `f"{field_path}__exact"` -- it falls through to the legacy branch below
+    # regardless of the JSONField exception just above.
     if lookup_path == f"{field_path}__exact":
         coerced_values = [
             v for v in (_coerce_typed_value(model_field, v) for v in cleaned)

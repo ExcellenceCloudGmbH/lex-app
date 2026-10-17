@@ -167,7 +167,8 @@ GET-driven select-all undercounted the `""` rows the POST path already treats as
 |---|----------|----------------|
 | 14.71 | `?field__blank=true` | Matches the NULL and `""` rows on a plain text column; only the NULL row on a non-text column |
 | 14.72 | `?field__blank=false`, and `?field__blank!=true` | Both return the non-blank rows, on both column shapes; (fix round 1) a related path's `__blank` (e.g. `category__name__blank`) is ignored like a JSON sub-path -- only a direct column, including a FK's own `category__blank`, is supported |
-| 14.73 | `?col__exact=`, `?col__in=` (fix round 2, C1) | Convert each value by the column's own type -- a literal `"none"`/`"true"` string on a char/choice column stays that string (never `IS NULL` / a bool); a boolean and a foreign-key column still convert correctly; a bare `?col=null` (no suffix) keeps meaning `IS NULL` via the untouched legacy path |
+| 14.73 | `?col__exact=`, `?col__in=` (fix round 2, C1) | Convert each value by the column's own type -- a literal `"none"`/`"true"` string on a char/choice column stays that string (never `IS NULL` / a bool); a boolean and a foreign-key column still convert correctly; an unconvertible value matches no rows, never every row (fail-closed); a bare `?col=null` (no suffix) keeps meaning `IS NULL` via the untouched legacy path |
+| 14.74 | `?metadata__key__in=`, `?metadata__in=`, `?metadata__key__exact=` (fix round 3) | A `JSONField` keeps the legacy `_coerce_value` on `__exact`/`__in`, for a sub-path and the whole column alike -- a numeric/boolean-spelled key matches only the row whose stored JSON value is actually that type, not the differently-typed row the column-type-aware converter would otherwise match |
 
 **Fix round 1:** a review found the first pass wrongly supported a related path -- `field_path`
 containing another model's column (e.g. `category__name`, reached through the `category` FK) still
@@ -186,14 +187,31 @@ resolved to `IS NULL` and matched the blank rows instead of the `"none"` row the
 by the column's type instead -- the same conversion the POST Set filter already applies
 (`_set_filter_values`), now shared via `_typed_value_converter`/`_coerce_typed_value` rather than
 duplicated: a foreign key's target field's `to_python`, a boolean's `_bool_from_key`, the field's own
-`to_python` otherwise. An unconvertible value is dropped (the whole param ignored if none survive),
-never a 400 -- a GET list request stays a read, unlike the POST filterModel path. Bare keys and every
-other lookup suffix are untouched, so `?field=null` still means `IS NULL` for existing callers. The
-same change also gave `_resolve_filter_bar`'s "dropped" warning (cluster 10o,
-`lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name) dedup, so a
-misconfigured `filter_bar` no longer re-logs on every fields-info request.
+`to_python` otherwise. An unconvertible value is dropped, and if NONE of the given values survive
+the lookup matches no rows (`Q(pk__in=[])`, the same idiom `_build_filter_q` already uses for an
+explicit empty POST Set filter) rather than ever becoming a 400 or silently matching every row --
+returning "no filter" there would fail open (an unconvertible `?category__in=abc` would otherwise
+match the whole table, and a "Select All" bulk action would then run over everything; 14.73(g)/(h)
+pin this). Bare keys and every other lookup suffix are untouched, so `?field=null` still means
+`IS NULL` for existing callers. The same change also gave `_resolve_filter_bar`'s "dropped" warning
+(cluster 10o, `lex/api/serializers/base_serializers.py`) a per-process per-(serializer class, name)
+dedup, so a misconfigured `filter_bar` no longer re-logs on every fields-info request.
 
-**Status:** ✅ Complete — 3 pass. Covers `lex/test_project/tests/queries/test_14j_blank_query_param.py`.
+**Fix round 3 (residual, same re-review):** a `JSONField` is the one exception to fix round 2's
+"every other field type stays typed" -- it keeps the legacy `_coerce_value` on `__exact`/`__in`
+too, for the whole column and for any sub-path through it, because a JSON value's own spelling
+already says its type (`5` is a number, `"5"` a string, `true` a bool, `null` is null); there is no
+single column type to convert a raw query string by. Before this fix a JSON sub-path through `__in`
+(e.g. `?metadata__key__in=5`) fell back to `_typed_value_converter`'s generic `model_field.to_python`,
+which for `JSONField` is the inherited identity -- so the raw string `"5"` matched the row storing
+the JSON **string** `"5"` instead of the row storing the JSON **number** `5`. 14.74 pins the
+sub-path number and boolean cases and the whole-column case on `__in`, plus a sub-path `__exact`
+regression guard -- that one already fell through to the legacy path untouched, since the `__exact`
+branch's path-equality guard excludes a JSON sub-path on its own. The check lives in
+`_coerce_typed_value` (GET-only), not in the shared `_typed_value_converter`, since `model_field` is
+the same `JSONField` object for the whole column and for a sub-path alike.
+
+**Status:** ✅ Complete — 4 pass. Covers `lex/test_project/tests/queries/test_14j_blank_query_param.py`.
 
 ---
 

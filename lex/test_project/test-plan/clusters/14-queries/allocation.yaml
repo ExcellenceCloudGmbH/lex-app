@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 73
+max_scenario: 74
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -177,10 +177,10 @@ letters:
       its api_serializers restore with addCleanup before the change.
   j:
     title: GET list — the __blank query-param lookup suffix
-    scenarios: 14.71-14.73
+    scenarios: 14.71-14.74
     status: complete
     tests:
-      pass: 3
+      pass: 4
       skip: 0
       xfail: 0
     note: >-
@@ -206,6 +206,21 @@ letters:
       filter's conversion helper (_set_filter_values, now built on shared _typed_value_converter /
       _coerce_typed_value) instead of duplicating it: a foreign key's target field's to_python, a
       boolean's _bool_from_key, the field's own to_python otherwise. A value that fails that
-      conversion is dropped (the whole param ignored if none survive) rather than ever becoming a
-      400 on a GET read. Bare keys and every other lookup suffix keep the legacy, type-blind
-      _coerce_value unchanged, so ?field=null still means IS NULL for existing callers.
+      conversion is dropped, and if NONE of the given values survive the whole lookup matches no
+      rows (Q(pk__in=[])) rather than ever becoming a 400 on a GET read -- returning "no filter"
+      there would fail open (an unconvertible ?category__in=abc would otherwise match the whole
+      table). Bare keys and every other lookup suffix keep the legacy, type-blind _coerce_value
+      unchanged, so ?field=null still means IS NULL for existing callers. Fix round 3 (residual,
+      same re-review): a JSONField is the one exception to "every other field type stays typed" --
+      it keeps the legacy _coerce_value on __exact/__in too, for the whole column and for any
+      sub-path, because a JSON value's own spelling already says its type (5 is a number, "5" a
+      string, true a bool, null is null); there is no single column type to convert a raw query
+      string by. Before this fix a JSON sub-path through __in (e.g. ?metadata__key__in=5) fell back
+      to _typed_value_converter's generic model_field.to_python, which for JSONField is the
+      inherited identity -- so the raw string "5" matched the row storing the JSON STRING "5"
+      instead of the row storing the JSON NUMBER 5. 14.74 pins the sub-path and whole-column shapes
+      on both __in and __exact (the __exact sub-path case already fell through to the legacy path
+      untouched, since its path-equality guard excludes a JSON sub-path on its own -- a regression
+      guard, not a new fix). The check lives in _coerce_typed_value (GET-only), not in the shared
+      _typed_value_converter, since model_field is the same JSONField object for the whole column
+      and for a sub-path alike.

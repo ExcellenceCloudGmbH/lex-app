@@ -47,10 +47,29 @@ and every other lookup suffix are untouched: they still run through the
 legacy, best-effort ``_coerce_value``, so an existing caller's
 ``?field=null`` keeps meaning ``IS NULL``.
 
-Cluster 14j — scenarios 14.71-14.73. Type: E.
+14.74 (residual fix, same re-review) narrows 14.73's rule for one field
+type: a ``JSONField`` keeps the legacy ``_coerce_value`` on ``__exact``/
+``__in`` too, for the whole column and for any sub-path alike -- it is the
+one exception to "every other field type stays typed", because a JSON
+value's own spelling already says its type (``5`` is a number, ``"5"`` a
+string, ``true`` a bool, ``null`` is null); there is no single column type
+to convert a raw query string BY the way a foreign key or a boolean column
+has one. Before this fix, ``?metadata__key__in=5`` (a JSON sub-path) went
+through ``_typed_value_converter`` like any other field, which has no
+``JSONField`` case and falls back to ``model_field.to_python`` -- the
+identity function for ``JSONField`` -- so the raw string ``"5"`` reached
+Django unparsed and matched the row storing the JSON *string* ``"5"``
+instead of the row storing the JSON *number* ``5``. The check lives in
+``_coerce_typed_value`` (the GET-only function) and deliberately not in
+``_typed_value_converter`` (shared with the POST Set filter's
+``_set_filter_values``), since ``model_field`` is the same ``JSONField``
+object whether ``lookup_path`` names the whole column or a sub-path through
+it -- ``_resolve_lookup`` never manufactures a separate ``Field`` for a key.
+
+Cluster 14j — scenarios 14.71-14.74. Type: E.
 Covers: lex/api/views/model_entries/List.py (SAFE_LOOKUPS, _resolve_lookup,
 _build_query_from_values, _typed_value_converter, _coerce_typed_value,
-_set_filter_values).
+_is_json_field, _set_filter_values).
 Run: python -m lex pytest lex/test_project/tests/queries/test_14j_blank_query_param.py -v
 """
 
@@ -361,6 +380,95 @@ class TestCluster14j_ExactAndInTypeConversion(E2ETestCase):
             self._names(resp), set(),
             f"count__exact=abc (unconvertible int) must match NO rows, "
             f"never every row; got {self._names(resp)!r}",
+        )
+
+    def _seed_json_values(self):
+        # Four rows whose `metadata` JSON column holds a number, a string,
+        # a boolean and an empty object, under (or as) the same shape -- a
+        # GET __exact/__in filter must distinguish a JSON value's own type,
+        # not just its string spelling. `num_row`/`str_row` pin the exact
+        # confusion _coerce_value's generic "null"/"true"/"false" shortcut
+        # does NOT create here (unlike 14.73's CharField case) -- the
+        # distinction that matters for a JSON column is number-vs-string,
+        # which only `json.loads` resolves, not that shortcut.
+        self.num_row = QueryItem.objects.create(name="num-row", metadata={"key": 5})
+        self.str_row = QueryItem.objects.create(name="str-row", metadata={"key": "5"})
+        self.bool_row = QueryItem.objects.create(name="bool-row", metadata={"key": True})
+        self.empty_row = QueryItem.objects.create(name="empty-row", metadata={})
+
+    # -- 14.74 -------------------------------------------------------------
+    def test_14_74_json_column_keeps_legacy_coercion_for_exact_and_in(self) -> None:
+        """
+        Scenario 14.74: a JSONField keeps the legacy ``_coerce_value`` on
+        ``__exact``/``__in`` (residual fix to 14.73's C1 change).
+        Given: four ``QueryItem`` rows whose ``metadata`` stores
+            ``{"key": 5}`` (a JSON number), ``{"key": "5"}`` (a JSON
+            string), ``{"key": true}`` (a JSON boolean), and ``{}``.
+        When: the list GET endpoint is filtered through ``__in``/``__exact``
+            on a JSON sub-path (``metadata__key``) and on the whole JSON
+            column (``metadata``).
+        Then: the raw query value is parsed the way the legacy
+            ``_coerce_value`` always parsed it (``json.loads``, or the
+            ``null``/``true``/``false`` shortcut ahead of it) -- never left
+            as an unconverted string by the column-type-aware converter
+            14.73 introduced, which has no single "column type" to convert
+            a JSON value by -- so a numeric/boolean-spelled key matches
+            only the row whose stored value is actually that type, on both
+            the sub-path and whole-column shapes, and on both ``__in`` and
+            ``__exact``.
+        """
+        self._seed_json_values()
+
+        # 14.74(a): a JSON sub-path through __in -- the Important
+        # regression this scenario guards. Before the residual fix,
+        # `_coerce_typed_value` routed this through `_typed_value_converter`
+        # -> `model_field.to_python` (JSONField's inherited identity), so
+        # "5" stayed the STRING "5" and matched nothing; `_coerce_value`'s
+        # `json.loads` makes it the int 5, matching only the row that
+        # stores it as a number.
+        resp = self.list_get(ITEM, {"metadata__key__in": "5"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), {"num-row"},
+            f"metadata__key__in=5 must match only the JSON-number row, "
+            f"not the JSON-string row; got {self._names(resp)!r}",
+        )
+
+        # 14.74(b): same sub-path shape, a JSON boolean key.
+        resp = self.list_get(ITEM, {"metadata__key__in": "true"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), {"bool-row"},
+            f"metadata__key__in=true must match only the JSON-boolean row; "
+            f"got {self._names(resp)!r}",
+        )
+
+        # 14.74(c): the whole JSON column through __in (no sub-path) -- the
+        # same `model_field` JSONField object as the sub-path case, so the
+        # same JSON special-case in `_coerce_typed_value` must apply to it
+        # too. The query value is a JSON object literal matched against the
+        # ENTIRE stored document, not just one key.
+        resp = self.list_get(ITEM, {"metadata__in": '{"key":5}'})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), {"num-row"},
+            "metadata__in={\"key\":5} (whole column) must match only the "
+            f"row whose whole metadata equals that document; "
+            f"got {self._names(resp)!r}",
+        )
+
+        # 14.74(d): a JSON sub-path through __exact -- a regression guard,
+        # not a new fix. The __exact branch's path-equality guard
+        # (`lookup_path == f"{field_path}__exact"`) already excludes a JSON
+        # sub-path on its own ("metadata__key__exact" != "metadata__exact"),
+        # so this already fell through to the legacy `_coerce_value` before
+        # the residual fix and must keep doing so.
+        resp = self.list_get(ITEM, {"metadata__key__exact": "5"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), {"num-row"},
+            f"metadata__key__exact=5 must match only the JSON-number row; "
+            f"got {self._names(resp)!r}",
         )
 
 
