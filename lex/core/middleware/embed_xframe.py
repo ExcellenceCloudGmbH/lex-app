@@ -24,10 +24,19 @@ Strategy
       requests (Keycloak redirects + API fetches from the iframe), and
    c. when ``settings.LEX_EMBED_ALLOWED_ORIGINS`` is non-empty, adds
       ``Content-Security-Policy: frame-ancestors 'self' <origins>`` so only
-      those named sites may actually frame lex-app -- stripping
+      those named sites may actually frame *this* response -- stripping
       ``X-Frame-Options`` alone would otherwise exempt every site, not just
       the named ones. An empty/unset list leaves framing exactly as before
       this setting existed.
+
+Note: this middleware is **not currently registered** in this repo's
+``MIDDLEWARE`` (see ``lex/lex_app/settings.py``), so (c) above has no effect
+here today -- it matters only for a deployment that does register it. The SPA
+document itself (``lex/react/views.py::serve_react``) is ``@xframe_options_exempt``,
+so it is never covered by ``XFrameOptionsMiddleware`` *or* this middleware;
+``serve_react`` therefore applies the same ``frame-ancestors`` directive to its
+own HTML document responses directly (see that module), which is what actually
+restricts who may frame lex-app as this repo ships today.
 
 Middleware position
 -------------------
@@ -39,29 +48,10 @@ runs **last** – after both ``XFrameOptionsMiddleware`` (header) and
 from django.conf import settings as django_settings
 from django.utils.deprecation import MiddlewareMixin
 
+from lex.runtime_config import merge_frame_ancestors
+
 _COOKIE_NAME = "_lex_embed"
 _COOKIE_MAX_AGE = 86400  # 24 h – covers the full embed session
-
-
-def _merge_frame_ancestors(existing_csp: str, directive: str) -> str:
-    """Merge a ``frame-ancestors`` directive into an existing CSP header value.
-
-    Replaces an existing ``frame-ancestors`` directive in place if present,
-    otherwise appends the new directive. Every other directive is preserved
-    verbatim, in its original order -- this must never clobber a CSP another
-    part of the stack (or a downstream project) already set.
-    """
-    if not existing_csp:
-        return directive
-
-    parts = [p.strip() for p in existing_csp.split(";") if p.strip()]
-    for i, part in enumerate(parts):
-        if part.lower().startswith("frame-ancestors"):
-            parts[i] = directive
-            break
-    else:
-        parts.append(directive)
-    return "; ".join(parts)
 
 
 class EmbedXFrameOptionsMiddleware(MiddlewareMixin):
@@ -136,7 +126,7 @@ class EmbedXFrameOptionsMiddleware(MiddlewareMixin):
             allowed_origins = getattr(django_settings, "LEX_EMBED_ALLOWED_ORIGINS", [])
             if allowed_origins:
                 directive = "frame-ancestors 'self' " + " ".join(allowed_origins)
-                response["Content-Security-Policy"] = _merge_frame_ancestors(
+                response["Content-Security-Policy"] = merge_frame_ancestors(
                     response.get("Content-Security-Policy", ""), directive
                 )
 

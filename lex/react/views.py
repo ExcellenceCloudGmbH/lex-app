@@ -10,6 +10,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.static import serve as static_serve
 from lex.lex_app import settings
+from lex.runtime_config import merge_frame_ancestors
 
 #: A build asset whose filename contains its own content hash, as the bundler
 #: emits them: ``assets/index-BfLMwcsL.js``. The hash is the whole point -- the
@@ -37,6 +38,32 @@ def _no_store(response):
     response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
+    return response
+
+
+def _apply_embed_csp(response):
+    """Restrict who may frame an HTML document response to
+    ``settings.LEX_EMBED_ALLOWED_ORIGINS``.
+
+    ``serve_react`` is ``@xframe_options_exempt`` -- it must allow being framed
+    at all when ``embed=true`` -- so Django's own ``XFrameOptionsMiddleware``
+    never protects its documents, and nor does ``EmbedXFrameOptionsMiddleware``
+    unless a deployment has registered it. This view's own HTML documents (the
+    SPA fallback, and any other real ``.html`` file it serves, e.g. ``embed.html``)
+    are therefore the one place that actually needs the restriction applied
+    directly. Call only for documents -- never for assets or ``config.js``,
+    where a framing restriction has no meaning.
+
+    Unset/empty ``LEX_EMBED_ALLOWED_ORIGINS`` leaves the response untouched,
+    exactly as before this setting existed.
+    """
+    allowed_origins = getattr(settings, "LEX_EMBED_ALLOWED_ORIGINS", None)
+    if not allowed_origins:
+        return response
+    directive = "frame-ancestors 'self' " + " ".join(allowed_origins)
+    response["Content-Security-Policy"] = merge_frame_ancestors(
+        response.get("Content-Security-Policy", ""), directive
+    )
     return response
 
 
@@ -95,8 +122,15 @@ def serve_react(request, path, document_root=None):
             response["Cache-Control"] = _IMMUTABLE
             return response
         # An unhashed file cannot be told apart from a future version of itself.
-        return _no_store(response)
+        response = _no_store(response)
+        if path.endswith(".html"):
+            # A real, non-fallback HTML entry point (e.g. embed.html) is a
+            # document too -- restrict who may frame it the same as index.html.
+            response = _apply_embed_csp(response)
+        return response
 
     # SPA fallback: index.html names the hashed assets, so it must never be a
-    # stale copy pointing at a build that no longer exists.
-    return _no_store(static_serve(request, "index.html", document_root))
+    # stale copy pointing at a build that no longer exists. It is also the
+    # document every client-routed path ultimately renders, so it is the one
+    # that needs the frame-ancestors restriction applied.
+    return _apply_embed_csp(_no_store(static_serve(request, "index.html", document_root)))

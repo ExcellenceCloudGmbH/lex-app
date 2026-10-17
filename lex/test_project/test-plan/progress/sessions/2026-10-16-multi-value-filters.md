@@ -1,8 +1,8 @@
 ---
 date: 2026-10-16
 clusters: [1, 4, 10, 13, 14]
-tests_added: 85
-suite_tally: "14f 6 pass, 14g 29 pass, 14j 2 pass, 4o 8 pass, 10o 5 pass, 13i 1 pass, 1aw 14 pass, 1ax 20 pass; full suite 1736 pass / 37 fail / 27 skip / 6 xfail / 5 collection errors, every failure in the baseline categories (cluster-15 calculation_logging, reflex/reflex_enterprise not installed, stress timing, the gate self-test)"
+tests_added: 91
+suite_tally: "14f 6 pass, 14g 29 pass, 14j 2 pass, 4o 8 pass, 10o 5 pass, 13i 1 pass, 1aw 14 pass, 1ax 26 pass; full suite 1736 pass / 37 fail / 27 skip / 6 xfail / 5 collection errors, every failure in the baseline categories (cluster-15 calculation_logging, reflex/reflex_enterprise not installed, stress timing, the gate self-test)"
 ---
 
 # Multi-value filters — backend and Streamlit
@@ -29,6 +29,8 @@ message instead.
 so "Select All Records" — which fetches ids through GET, not POST — matches blank the same way
 `_build_filter_q`'s Set branch already does.
 [1ax](../../clusters/01-init/batches.md) adds `LEX_EMBED_ALLOWED_ORIGINS`, so only operator-named
-sites can embed lex-app and use the filter bridge at all: a validated settings parser, a CSP
-`frame-ancestors` directive the embed middleware merges into every response it already exempts, and
-the `config.js` value the frontend reads to gate its own `filter` channel.
+sites can embed lex-app and use the filter bridge at all: a validated settings parser, a shared
+`frame-ancestors` merge both the embed middleware (for deployments that register it) and
+`serve_react`'s own `@xframe_options_exempt` document responses apply — the latter is what actually
+restricts framing today — and the `config.js` value the frontend reads to gate its own `filter`
+channel.

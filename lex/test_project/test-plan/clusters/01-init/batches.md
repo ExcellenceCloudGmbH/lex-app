@@ -1741,13 +1741,13 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.402 – 1.405 |
+| Scenario range | 1.402 – 1.406 |
 | Type | U |
-| Files covered | `lex/runtime_config.py` (`parse_embed_allowed_origins`, `_normalise_origin`), `lex/lex_app/settings.py` (`LEX_EMBED_ALLOWED_ORIGINS`), `lex/core/middleware/embed_xframe.py` (`EmbedXFrameOptionsMiddleware.process_response`, `_merge_frame_ancestors`), `lex/react/views.py` (`serve_react`'s `config.js` rewrite) |
+| Files covered | `lex/runtime_config.py` (`parse_embed_allowed_origins`, `_normalise_origin`, `merge_frame_ancestors`), `lex/lex_app/settings.py` (`LEX_EMBED_ALLOWED_ORIGINS`), `lex/core/middleware/embed_xframe.py` (`EmbedXFrameOptionsMiddleware.process_response`), `lex/react/views.py` (`serve_react`'s `config.js` rewrite and its own document responses' `_apply_embed_csp`) |
 | Test file | `lex/test_project/tests/init/test_1ax_embed_allowed_origins.py` |
-| Test classes | `TestCluster01ax_MiddlewareAddsFrameAncestors` (1.402), `TestCluster01ax_EmptyAllowListIsANoOp` (1.403), `TestCluster01ax_ConfigJsEmbedOrigins` (1.404), `TestCluster01ax_ParseEmbedAllowedOrigins` + `TestCluster01ax_SettingReadsEnvVar` (1.405) |
-| Fixtures | `config_js_build` / `config_js_build_without_placeholder` (`tmp_path`-based synthetic build dirs, matching the 1ag config.js tests) |
-| Tests landed | **20 pass / 0 fail** (3 subtests) |
+| Test classes | `TestCluster01ax_MiddlewareAddsFrameAncestors` (1.402), `TestCluster01ax_EmptyAllowListIsANoOp` (1.403), `TestCluster01ax_ConfigJsEmbedOrigins` (1.404), `TestCluster01ax_ParseEmbedAllowedOrigins` + `TestCluster01ax_SettingReadsEnvVar` (1.405), `TestCluster01ax_SpaDocumentCsp` (1.406) |
+| Fixtures | `config_js_build` / `config_js_build_without_placeholder` / `spa_build` (`tmp_path`-based synthetic build dirs, matching the 1ag config.js/caching tests) |
+| Tests landed | **26 pass / 0 fail** (3 subtests) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
@@ -1756,6 +1756,7 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 | 1.403 | Unset/empty changes nothing | With `LEX_EMBED_ALLOWED_ORIGINS == []`, no CSP is added, `X-Frame-Options` is still stripped, and the session/CSRF cookies are still patched to `SameSite=None; Secure` — the pre-existing contract, untouched |
 | 1.404 | `config.js` carries the setting | `window.REACT_APP_EMBED_ALLOWED_ORIGINS` is the comma-joined list escaped with `json.dumps` (never breaking out of the JS string literal, even for an adversarial-looking value), `""` when empty, and absent entirely when the build predates the placeholder |
 | 1.405 | Parsing, normalisation, and the real setting | A path, a wildcard, an `ftp` scheme, embedded credentials, a query string, a fragment, and plain garbage are each dropped; one WARNING names every dropped entry from a single call; valid origins are lower-cased and de-duplicated; a stray/trailing comma is skipped without logging; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS` is confirmed (via a real module reload, not just the helper) to equal `parse_embed_allowed_origins(os.getenv("LEX_EMBED_ALLOWED_ORIGINS"))` |
+| 1.406 | The SPA document itself carries `frame-ancestors` | The SPA fallback (`index.html`, reached by any client-routed path with no matching file) and a literal, non-fallback `.html` file (`embed.html`) both get `Content-Security-Policy: frame-ancestors 'self' <origins>`; merging into an existing CSP header on that response preserves its other directives; a hashed asset and `config.js` get none; with the setting unset, the SPA fallback gets no added CSP |
 
 **Why three different settings-access patterns in one test file.** The middleware reads
 `django.conf.settings` (patched in tests with `override_settings`); `serve_react` reads the plain
@@ -1768,8 +1769,26 @@ actually uses. The setting's own derivation is proven by reloading `lex.lex_app.
 patching `os.environ`, mirroring the pattern the pre-existing 1s cluster uses for its own env-driven
 settings, with the env var and module state restored in cleanup either way.
 
-**Known pre-existing gap (not this batch's scope):** `EmbedXFrameOptionsMiddleware` is not currently
-listed in `lex_app/settings.py`'s `MIDDLEWARE`, in this repo or its docs — it exists and is tested in
-isolation (directly instantiated, as 1402/1403 do) but nothing wires it into the stack here. This
-predates this batch and is unchanged by it; flagged for whoever owns turning the embed feature on
-end to end.
+**Follow-up (1.406, same session): the SPA document, not the unregistered middleware, is what
+actually makes lex-app frameable.** `serve_react` is decorated `@xframe_options_exempt`, which
+bypasses Django's own `XFrameOptionsMiddleware` for every response that view returns — unrelated to
+whether `EmbedXFrameOptionsMiddleware` is registered. A `frame-ancestors` restriction therefore has
+to sit on `serve_react`'s own document responses to take effect at all, as this repo ships today.
+`merge_frame_ancestors` moved out of the middleware module into `lex/runtime_config.py` (next to
+`parse_embed_allowed_origins`, the other function this feature's two call sites share) so both the
+middleware and `serve_react` merge the directive the same way instead of duplicating the logic.
+`serve_react` applies it to exactly two response shapes — the SPA fallback (`index.html`) and any
+other real `.html` file it serves (e.g. `embed.html`, a second Vite entry point) — and nowhere else:
+hashed assets and `config.js` are not documents and keep behaving exactly as before. The middleware's
+own CSP step (1.402/1.403) is unchanged, since it still matters for any deployment that does register
+it.
+
+**Known pre-existing gap (not this batch's scope, corrected from the original note above):**
+`EmbedXFrameOptionsMiddleware` is not currently listed in `lex_app/settings.py`'s `MIDDLEWARE`, in
+this repo or its docs. The original note here said this meant the middleware's CSP step "has no
+effect" without saying what, if anything, filled the gap — in fact `serve_react`'s own
+`@xframe_options_exempt` makes the SPA document frameable regardless of the middleware's
+registration status, which is why 1.406 was added in the same session to put the restriction on
+`serve_react` directly. The middleware remains unregistered and untouched beyond that; flagged for
+whoever owns turning the embed feature on end to end at the middleware layer too (session cookies,
+CSRF, the OIDC round-trip).

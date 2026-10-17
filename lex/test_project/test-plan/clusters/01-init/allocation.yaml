@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 405
+max_scenario: 406
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1276,10 +1276,10 @@ letters:
 
   ax:
     title: 'LEX_EMBED_ALLOWED_ORIGINS -- named sites only may embed lex-app and use its filter bridge'
-    scenarios: 1.402-1.405
+    scenarios: 1.402-1.406
     status: complete
     tests:
-      pass: 20
+      pass: 26
       skip: 0
       xfail: 0
     note: >-
@@ -1300,3 +1300,15 @@ letters:
       1.405 covers the parser's validation rules end to end through a real settings-module reload,
       not just the helper in isolation. The frontend half (gating the `filter` channel on the
       parent origin) is a separate task.
+
+      Follow-up, same session: EmbedXFrameOptionsMiddleware is not registered in this repo's
+      MIDDLEWARE, so (as found during review) it is not what makes lex-app frameable --
+      serve_react is, via its own @xframe_options_exempt decorator, which bypasses
+      XFrameOptionsMiddleware for every response it returns regardless of the (unregistered)
+      embed middleware. 1.406 moves the restriction to where it actually takes effect:
+      serve_react now applies the same frame-ancestors directive, through a shared
+      merge_frame_ancestors (moved from the middleware module to lex/runtime_config.py so both
+      call sites share one implementation), to its own HTML document responses -- the SPA
+      fallback and any other real .html file it serves (e.g. embed.html) -- and only to those;
+      hashed assets and config.js are untouched. The middleware's own CSP step is unchanged, for
+      deployments that do register it.

@@ -156,3 +156,30 @@ def parse_embed_allowed_origins(raw: str | None) -> list[str]:
         )
 
     return valid
+
+
+def merge_frame_ancestors(existing_csp: str, directive: str) -> str:
+    """Merge a ``frame-ancestors`` directive into an existing CSP header value.
+
+    Shared by every place that adds the embed allow-list's CSP directive --
+    ``EmbedXFrameOptionsMiddleware`` (for deployments that register it) and
+    ``serve_react`` (whose own HTML documents are ``@xframe_options_exempt``,
+    so they are not covered by the middleware at all, registered or not). Both
+    need to add ``frame-ancestors`` without disturbing whatever else already
+    set a ``Content-Security-Policy`` header on that response.
+
+    Replaces an existing ``frame-ancestors`` directive in place if present,
+    otherwise appends the new directive. Every other directive is preserved
+    verbatim, in its original order.
+    """
+    if not existing_csp:
+        return directive
+
+    parts = [p.strip() for p in existing_csp.split(";") if p.strip()]
+    for i, part in enumerate(parts):
+        if part.lower().startswith("frame-ancestors"):
+            parts[i] = directive
+            break
+    else:
+        parts.append(directive)
+    return "; ".join(parts)

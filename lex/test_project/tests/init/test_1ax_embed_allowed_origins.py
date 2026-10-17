@@ -19,11 +19,19 @@ frame lex-app and read its filter events (a dropped validation rule, a CSP
 header that clobbers itself instead of merging, or a value that breaks out of
 the ``config.js`` string literal it is spliced into).
 
-Cluster 1ax -- scenarios 1.402-1.405. Type: U.
-Covers: lex/runtime_config.py (parse_embed_allowed_origins), lex/lex_app/settings.py
-(LEX_EMBED_ALLOWED_ORIGINS), lex/core/middleware/embed_xframe.py
+``EmbedXFrameOptionsMiddleware`` is not registered in this repo's ``MIDDLEWARE``
+today (see batches.md), so it is not what actually makes lex-app frameable --
+``serve_react`` is: it is decorated ``@xframe_options_exempt``, so Django's own
+``XFrameOptionsMiddleware`` never protects its HTML documents. The 1.406 scenario
+pins the ``frame-ancestors`` restriction where it actually takes effect: on
+``serve_react``'s own document responses (the SPA fallback and any other real
+``.html`` file it serves), never on the assets or ``config.js`` beside them.
+
+Cluster 1ax -- scenarios 1.402-1.406. Type: U.
+Covers: lex/runtime_config.py (parse_embed_allowed_origins, merge_frame_ancestors),
+lex/lex_app/settings.py (LEX_EMBED_ALLOWED_ORIGINS), lex/core/middleware/embed_xframe.py
 (EmbedXFrameOptionsMiddleware.process_response), lex/react/views.py (serve_react's
-config.js rewrite).
+config.js rewrite and its own document responses' Content-Security-Policy).
 Run: python -m lex pytest lex/test_project/tests/init/test_1ax_embed_allowed_origins.py -v
 """
 
@@ -478,3 +486,116 @@ class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
         settings_mod = self._reload(None)
 
         self.assertEqual(settings_mod.LEX_EMBED_ALLOWED_ORIGINS, [])
+
+
+# ---------------------------------------------------------------------------
+# 1.406 -- the SPA document itself carries frame-ancestors
+#
+# serve_react is @xframe_options_exempt, so Django's own XFrameOptionsMiddleware
+# never protects it -- the SPA's HTML documents (index.html, the SPA fallback for
+# any client-routed path, and any other real .html entry point such as embed.html)
+# are the one place nothing else restricts who may frame lex-app while
+# EmbedXFrameOptionsMiddleware is unregistered, as it is today (see batches.md).
+# Hashed assets and config.js are not documents and must never get the directive.
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def spa_build(tmp_path):
+    """A minimal SPA build: the shell, a second real HTML entry point (embed.html,
+    as `lex/react/views.py` itself documents it -- a second Vite entry, not a
+    route), a hashed asset, and config.js."""
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<!doctype html><title>lex</title>")
+    (tmp_path / "embed.html").write_text("<!doctype html><title>widgets</title>")
+    (tmp_path / "config.js").write_text("window.REACT_APP_EMBED_ALLOWED_ORIGINS = undefined\n")
+    (tmp_path / "assets" / "index-BfLMwcsL.js").write_text("console.log(1)")
+    return tmp_path
+
+
+class TestCluster01ax_SpaDocumentCsp:
+    """Cluster 1ax: the SPA document responses `serve_react` itself produces
+    carry frame-ancestors -- not just the (unregistered) middleware's responses."""
+
+    def test_1_406_spa_fallback_gets_frame_ancestors_when_origins_set(self, spa_build):
+        """
+        Scenario 1.406: a client-routed path (no matching file) falls back to
+        index.html, which must carry the configured directive.
+        Given: LEX_EMBED_ALLOWED_ORIGINS set to two origins
+        When: a path with no matching file is served (the SPA fallback)
+        Then: the index.html response carries frame-ancestors 'self' <both origins>
+        """
+        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+            response = _serve("some/client/route", spa_build)
+
+        assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
+
+    def test_1_406_literal_html_file_also_gets_frame_ancestors(self, spa_build):
+        """
+        Scenario 1.406: a real, non-fallback .html file is a document too.
+        Given: LEX_EMBED_ALLOWED_ORIGINS set, and embed.html -- a second real Vite
+               entry point served as a literal file, not through the SPA fallback
+        When: embed.html is served
+        Then: it also carries frame-ancestors 'self' <origins> -- the restriction
+              covers every HTML document this view serves, not just index.html
+        """
+        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+            response = _serve("embed.html", spa_build)
+
+        assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
+
+    def test_1_406_existing_csp_on_spa_fallback_keeps_other_directives(self, spa_build):
+        """
+        Scenario 1.406: merging the directive never drops what was already there.
+        Given: LEX_EMBED_ALLOWED_ORIGINS set, and index.html served with a CSP
+               header already carrying an unrelated directive (e.g. set further
+               up the middleware stack, such as SecurityMiddleware's own CSP)
+        When: the SPA fallback response is built
+        Then: the original directive survives, and frame-ancestors is merged in
+              alongside it
+        """
+        existing = HttpResponse("<!doctype html>")
+        existing["Content-Security-Policy"] = "default-src 'self'"
+
+        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS), \
+                mock.patch.object(react_views, "static_serve", return_value=existing):
+            response = _serve("some/client/route", spa_build)
+
+        csp = response["Content-Security-Policy"]
+        assert "default-src 'self'" in csp, csp
+        assert _EXPECTED_FRAME_ANCESTORS in csp, csp
+
+    def test_1_406_hashed_asset_gets_no_frame_ancestors(self, spa_build):
+        """
+        Scenario 1.406: a hashed asset is not a document and never gets the directive.
+        Given: LEX_EMBED_ALLOWED_ORIGINS set, and a content-hashed JS asset
+        When: the asset is served
+        Then: no Content-Security-Policy header is added -- framing restrictions
+              only matter on documents
+        """
+        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+            response = _serve("assets/index-BfLMwcsL.js", spa_build)
+
+        assert "Content-Security-Policy" not in response
+
+    def test_1_406_config_js_gets_no_frame_ancestors(self, spa_build):
+        """
+        Scenario 1.406: config.js is a script, not a document, and never gets the directive.
+        Given: LEX_EMBED_ALLOWED_ORIGINS set
+        When: config.js is served
+        Then: no Content-Security-Policy header is added to it
+        """
+        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+            response = _serve("config.js", spa_build)
+
+        assert "Content-Security-Policy" not in response
+
+    def test_1_406_spa_fallback_has_no_added_csp_when_unset(self, spa_build):
+        """
+        Scenario 1.406: unset/empty behaves exactly as before this change.
+        Given: LEX_EMBED_ALLOWED_ORIGINS == []
+        When: a client-routed path falls back to index.html
+        Then: no Content-Security-Policy header is added
+        """
+        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", []):
+            response = _serve("some/client/route", spa_build)
+
+        assert "Content-Security-Policy" not in response
