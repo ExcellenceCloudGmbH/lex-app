@@ -19,3 +19,28 @@ class ProfileAdmin(admin.ModelAdmin):
     def user__last_name(self, obj):
         return obj.user.last_name
     user__last_name.short_description = 'Last Name'
+
+def register_api_key_admin(site=None):
+    """Register scoped API keys (``LexAPIKey``) in the Django admin.
+
+    lex disables admin autodiscovery (``CustomAdminConfig``), so nothing would
+    register them otherwise. Operators list, revoke and expire keys here; a key
+    created in the admin is shown once, like with ``lex create_api_key``.
+    Importing ``rest_framework_api_key.admin`` also registers the classic keys.
+    """
+    from django.contrib import admin as django_admin
+    from rest_framework_api_key.admin import APIKeyModelAdmin
+
+    from lex.authentication.models import LexAPIKey
+
+    site = site or django_admin.site
+    if site.is_registered(LexAPIKey):
+        return
+
+    class LexAPIKeyAdmin(APIKeyModelAdmin):
+        list_display = (*APIKeyModelAdmin.list_display, "user")
+        list_filter = (*APIKeyModelAdmin.list_filter, "revoked")
+        search_fields = (*APIKeyModelAdmin.search_fields, "user__username")
+        raw_id_fields = ("user",)
+
+    site.register(LexAPIKey, LexAPIKeyAdmin)

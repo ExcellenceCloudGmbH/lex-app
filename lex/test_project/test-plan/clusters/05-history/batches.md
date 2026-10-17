@@ -72,3 +72,17 @@
 | Prereqs | PostgreSQL (the class auto-skips elsewhere); `core` migration 0001 applied to the test DB (the runner's `migrate` does it) |
 | Status | ✅ Complete — 20 pass / 0 fail; history cluster 61 pass / 1 skip / 1 xfail after the change |
 | Note | Design: `docs/superpowers/specs/2026-09-16-bitemporal-activation-applier-design.md`. The tests call `lex_apply_due_activations()` directly — pg_cron's only job is to issue that call (verified on dev in LEX-135); "the moment has arrived" is produced by scheduling *in the past* under a patched lex-app clock, since PostgreSQL's `now()` cannot be patched. 5.110/5.111 the producer arms nothing while the applier heartbeat is fresh and behaves exactly as before while it is not; 5.112–5.114 discovery from the catalog alone (content types deleted; a capitalised, quoted triple; an incomplete triple skipped with a NOTICE while the others apply); 5.115/5.116 the pending view before/after a tick and the age of a row due for 400 days; 5.117 the happy path plus the heartbeat row; 5.118 supersede; 5.119 CANCELLED and orphan rows untouched; 5.120 three due rows converge in one write; 5.121 deletion; 5.122 a row due for a year is applied, not skipped; 5.123 parity with `activate_history_version` on every shared column; 5.124 nothing but the three tables changes; 5.125 the meta flip touches every SCHEDULED version and nothing else; 5.126 due is decided by the instant, not the offset; 5.127 a second tick and the Python task change nothing; 5.128 a poison record fails alone, counted in the heartbeat and named in a WARNING; 5.129 the boundary — one `SELECT` between save and final state with every Python entry point instrumented to fail. Two side findings fixed in the same change: the legacy local-timer path reused its unique `meta_task_name` when a future row was re-chained within one second (now uuid-suffixed like the Celery branch), and `E2ETestCase` now clears the applier heartbeat around every test — it is not a Django model, so the flush never removed it and a kept test DB carried it into batch 5l. |
+
+### Batch 5p — Applier function roles ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 5.130-5.131 |
+| Type | E |
+| Files covered | `lex/core/services/activation_applier.py` (restrict_function_privileges), `lex/core/apps.py` (post_migrate hook), `lex/core/extensions.py` (BITEMPORAL_FUNCTION_ROLES) |
+| Test file | `lex/test_project/tests/history/test_5p_applier_function_roles.py` |
+| Test classes | `TestCluster05p_ApplierFunctionRoles` |
+| Fixtures | two NOLOGIN roles created inside the test transaction |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Idempotent; runs on every migrate, so a later change of the key takes effect at the next migrate. |

@@ -10,16 +10,16 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 49 | 397 | 439 | 0 | 0 |
+| 1. Init — Project Bootstrap | 50 | 401 | 443 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 19 | 114 | 58 | 2 | 0 |
-| 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
+| 4. Permissions | 21 | 118 | 62 | 2 | 0 |
+| 5. History & Bitemporal | 15 | 131 | 37 | 6 | 3 |
 | 6. Audit Logging | 19 | 122 | 25 | 3 | 0 |
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 9 | 52 | 24 | 0 | 0 |
-| 10. API Layer | 20 | 116 | 66 | 0 | 0 |
+| 10. API Layer | 21 | 121 | 71 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -67,6 +67,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 1au | `lex --version` — the version /health reports, answered from anywhere | 1.384-1.385 | complete | 2 | 0 | 0 | `lex --version` answered "No such option": main() already sent --version past the Django bootstrap, but the group never declared the option. It now prints `lex, version X`, where X is lex._version.__version__ -- the version /health reports -- and not the package metadata: an image built from a git ref stamps lex/_version.py after `pip install`, while the metadata stays frozen at 0.0.0.dev0. Both scenarios run the CLI in a fresh interpreter, from a directory named release-smoke, without the test project's environment and with the suite's checkout first on PYTHONPATH. Mutations: reading the version from the package metadata fails 1.384; dropping --version from the set main() answers without Django fails both, because Django setup crashes in that directory. |
 | 1av | Project extension keys, environment switches and security flags | 1.386-1.395 | complete | 10 | 0 | 0 | Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks 1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks 1.392. |
 | 1aw | lex create_api_key | 1.396-1.397 | complete | 2 | 0 | 0 | Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]). |
+| 1ax | Broken lex_config.py stops startup | 1.398-1.401 | complete | 4 | 0 | 0 | Called at the end of LexAppConfig.ready() for project apps. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
@@ -146,6 +147,8 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4q | Scoped API keys (LexAPIKey) | 4.104-4.110 | complete | 7 | 0 | 0 | LexAPIKey lives in an underscore module so model discovery does not register it with the generic API (key hashes are never listed). |
 | 4r | Audit authors for users without names | 4.111-4.113 | complete | 3 | 0 | 0 | Same fallback as the model's created_by (LexModel._normalize_audit_actor). |
 | 4s | API-key read decided by the serializer | 4.114 | complete | 1 | 0 | 0 | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |
+| 4t | Closed generic API is 404 for anonymous callers | 4.115-4.117 | complete | 3 | 0 | 0 | The session probe api/user/ is exempt from the login check in settings, so the gate now lets anonymous callers reach it. |
+| 4u | Scoped API keys in the admin | 4.118 | complete | 1 | 0 | 0 | Importing rest_framework_api_key.admin registers the classic keys. |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -165,6 +168,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 5m | Edit-time correctness + as_of time-travel round trip | 5.98-5.103 | complete | 5 | 0 | 1 | end-to-end edited_at → Z serialization → parse_as_of_datetime → get_queryset_as_of chain; 5.101 xfail(strict) pins BUG-026 (edited_at vs valid_from/sys_from clock-read gap) |
 | 5n | Reconcile floor (PR #695, in flight; reserved, not on this branch) | 5.104-5.109 | in-flight | 0 | 0 | 0 | allocated by PR #695 (feat/bitemporal-activation-reconcile); reserved here so 5o cannot collide with it when both merge |
 | 5o | In-database activation applier (pg_cron → lex_apply_due_activations()) | 5.110-5.129 | complete | 20 | 0 | 0 | the database applies future-dated changes; lex-app only records them and arms its legacy timer only while the applier heartbeat is stale. PostgreSQL only (auto-skip elsewhere). Design: docs/superpowers/specs/2026-09-16-bitemporal-activation-applier-design.md |
+| 5p | Applier function roles | 5.130-5.131 | complete | 2 | 0 | 0 | Idempotent; runs on every migrate, so a later change of the key takes effect at the next migrate. |
 
 ## 6. Audit Logging (`audit_logging`)
 
@@ -277,6 +281,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10r | Database context per request and per after-commit callback | 10.102-10.105 | complete | 4 | 0 | 0 | Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project uses. |
 | 10s | Record and collection actions | 10.106-10.112 | complete | 7 | 0 | 0 | calculate=true/cancel=true stay as they are; actions are additive. |
 | 10t | Keycloak calls and session rows per request | 10.113-10.116 | complete | 4 | 0 | 0 | The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b). |
+| 10u | Schema, docs and CLI share the SCHEMA settings | 10.117-10.121 | complete | 5 | 0 | 0 | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |
 
 ## 11. Stress & Performance (`stress`)
 

@@ -143,6 +143,29 @@ def install_functions(using=None) -> None:
         cursor.execute(SQL_PATH.read_text(encoding="utf-8"))
 
 
+def restrict_function_privileges(roles, using=None) -> int:
+    """Only ``roles`` (and the owner) may run the applier's functions. PostgreSQL only.
+
+    The functions are SECURITY DEFINER: they run with the owner's rights, past row-level security, and PostgreSQL
+    lets every role execute a new function. EXECUTE is revoked from PUBLIC and granted to each role in ``roles``
+    (for example the one the pg_cron job runs as). Idempotent. Returns how many functions were changed.
+    """
+    conn = default_connection if using is None else transaction.get_connection(using)
+    if conn.vendor != "postgresql":
+        return 0
+    changed = 0
+    with conn.cursor() as cursor:
+        for name in FUNCTION_NAMES:
+            cursor.execute("SELECT to_regprocedure(%s)", [f"{name}()"])
+            if cursor.fetchone()[0] is None:
+                continue
+            cursor.execute(f"REVOKE EXECUTE ON FUNCTION {name}() FROM PUBLIC")
+            for role in roles:
+                cursor.execute(f"GRANT EXECUTE ON FUNCTION {name}() TO {conn.ops.quote_name(role)}")
+            changed += 1
+    return changed
+
+
 def apply_due_activations(using=None) -> int:
     """Run one applier tick. Returns the number of records converged."""
     conn = default_connection if using is None else transaction.get_connection(using)

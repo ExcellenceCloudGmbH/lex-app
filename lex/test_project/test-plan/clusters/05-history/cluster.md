@@ -78,3 +78,18 @@
 | 5.127 | Idempotence | Second tick applies 0; Python task after the applier changes nothing |
 | 5.128 | Poison record | Healthy record applied; poison stays `SCHEDULED`; heartbeat `failed=1`; `WARNING` names it |
 | 5.129 | The boundary | One `SELECT` between save and final state; Python entry points instrumented to fail; three tables final |
+
+### 5p. Applier function roles ✅
+
+**What it tests:** With BITEMPORAL_FUNCTION_ROLES set, after migrate only the named role (and the owner) may execute the three functions; unset, every role still may.
+
+**Why a regression matters:** SECURITY DEFINER functions executable by PUBLIC let a role without BYPASSRLS write as the owner.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 5.130 | named roles only | cron role may run all three, any other role none |
+| 5.131 | unset | PostgreSQL default unchanged |
+
+**Scenario range:** 5.130-5.131. **Test file:** `lex/test_project/tests/history/test_5p_applier_function_roles.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/services/activation_applier.py` (restrict_function_privileges), `lex/core/apps.py` (post_migrate hook), `lex/core/extensions.py` (BITEMPORAL_FUNCTION_ROLES). Batch: [5p](batches.md).
+
+---

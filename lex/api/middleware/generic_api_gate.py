@@ -19,6 +19,9 @@ from django.http import JsonResponse
 from lex.core import extensions
 
 _ALWAYS_OPEN = ("api/health",)
+# The bundled frontend probes the session here and starts the OIDC sign-in on
+# 401; an anonymous caller must keep getting the login answer for it.
+_SESSION_PROBE = ("api/user/",)
 
 
 def _base_path() -> str:
@@ -39,10 +42,31 @@ def generic_api_closed_for(request) -> bool:
         return False
     if extensions.get_setting("API_URLCONF") and relative.startswith(extensions.api_prefix()):
         return False
+    user = getattr(request, "user", None)
+    signed_in = user is not None and user.is_authenticated
+    # The session probe answers 401 to an anonymous caller (it is exempt from
+    # the login check), which is how the bundled frontend starts the sign-in.
+    if not signed_in and relative.startswith(_SESSION_PROBE):
+        return False
     if mode == "off":
         return True
+    return not (signed_in and user.is_superuser)
+
+
+def generic_api_hidden_from_anonymous(request) -> bool:
+    """A closed generic path that an anonymous caller should see as missing (404).
+
+    The login check runs before the gate, so without this an anonymous caller
+    would be sent to sign in (302/401) and learn that the path exists. The
+    session probe of the bundled frontend is not closed for anonymous callers,
+    so it keeps its own 401.
+    """
     user = getattr(request, "user", None)
-    return not (user is not None and user.is_authenticated and user.is_superuser)
+    if user is not None and user.is_authenticated:
+        return False
+    if not generic_api_closed_for(request):
+        return False
+    return True
 
 
 class GenericApiGateMiddleware:

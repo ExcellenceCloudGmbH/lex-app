@@ -1,7 +1,7 @@
 cluster: 5
 slug: history
 title: History & Bitemporal
-max_scenario: 129
+max_scenario: 131
 letters:
   a:
     title: ''
@@ -136,3 +136,13 @@ letters:
       skip: 0
       xfail: 0
     note: "the database applies future-dated changes; lex-app only records them and arms its legacy timer only while the applier heartbeat is stale. PostgreSQL only (auto-skip elsewhere). Design: docs/superpowers/specs/2026-09-16-bitemporal-activation-applier-design.md"
+  p:
+    title: "Applier function roles"
+    scenarios: 5.130-5.131
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      Idempotent; runs on every migrate, so a later change of the key takes effect at the next migrate.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+import logging
 from typing import FrozenSet, Optional
 
 from rest_framework_api_key.models import APIKey
@@ -59,6 +60,8 @@ def get_raw_api_key(request) -> Optional[str]:
     return None
 
 
+logger = logging.getLogger(__name__)
+
 #: ``rsname`` of the synthetic permission a scoped key grants: every resource.
 ANY_RESOURCE = "*"
 
@@ -70,6 +73,7 @@ def _extra_header_keys(holder) -> Optional[str]:
 
         headers = get_setting("API_KEY_HEADERS") or ()
     except Exception:
+        logger.exception("lex_config.API_KEY_HEADERS could not be read; extra key headers are ignored")
         return None
     if isinstance(headers, str):
         headers = [headers]
@@ -101,7 +105,13 @@ def get_scoped_api_key(request):
 
             resolver = get_hook("API_KEY_RESOLVER")
             if resolver is not None:
-                key = resolver(raw_key)
+                try:
+                    key = resolver(raw_key)
+                except Exception:
+                    # A failing project resolver refuses the key (fail closed),
+                    # but it is a bug or an outage, not a wrong key: say so.
+                    logger.exception("lex_config.API_KEY_RESOLVER raised; the API key is refused")
+                    key = None
             else:
                 from lex.authentication.models import LexAPIKey
 

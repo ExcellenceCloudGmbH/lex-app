@@ -54,6 +54,10 @@ EXTENSION_DEFAULTS: Dict[str, Any] = {
     # Realtime groups (WP12).
     "MUTATION_GROUPS": None,
     "USER_GROUPS": None,
+    # Database roles that may run the bitemporal applier's SECURITY DEFINER functions. None (default): PostgreSQL's
+    # default, every role. A list: EXECUTE revoked from PUBLIC after every migrate and granted to these roles only
+    # (the owner keeps it) - for projects whose application role is restricted (row-level security).
+    "BITEMPORAL_FUNCTION_ROLES": None,
 }
 
 EXTENSION_KEYS = tuple(EXTENSION_DEFAULTS)
@@ -155,6 +159,54 @@ def middleware_extra(slot: str) -> List[Any]:
             f"lex_config.MIDDLEWARE_EXTRA has unknown slots {sorted(unknown)}; use {MIDDLEWARE_SLOTS}"
         )
     return get_import_list("MIDDLEWARE_EXTRA", config.get(slot, ()))
+
+
+#: Keys holding one callable, resolved eagerly by :func:`validate_configuration`.
+HOOK_KEYS = ("EXCEPTION_HANDLER", "DB_ERROR_MAPPER", "DB_CONTEXT", "API_KEY_RESOLVER", "MUTATION_GROUPS", "USER_GROUPS")
+
+
+def validate_configuration() -> None:
+    """Stop at startup on a broken ``lex_config.py`` instead of running with defaults.
+
+    Without this a ``lex_config.py`` that raises, or a hook path with a typo,
+    would only print a message: every key would silently fall back to its
+    default — the generic API open to everyone (``GENERIC_API = "all"``), no
+    database context, no project middleware. Called from lex's ``ready()``.
+    """
+    from importlib.util import find_spec
+
+    from lex.core.config import LexProjectConfig
+
+    config = LexProjectConfig.load()
+    if config.load_error is not None:
+        raise ImproperlyConfigured(
+            f"lex_config.py could not be loaded: {config.load_error!r}"
+        ) from config.load_error
+    generic_api_mode()
+    for name in HOOK_KEYS:
+        get_hook(name)
+    get_import_list("AUTHENTICATION_CLASSES")
+    for slot in MIDDLEWARE_SLOTS:
+        middleware_extra(slot)
+    urlconf = get_setting("API_URLCONF")
+    if isinstance(urlconf, str):
+        try:
+            found = find_spec(urlconf) is not None
+        except ImportError:
+            found = False
+        if not found:
+            raise ImproperlyConfigured(f"lex_config.API_URLCONF = {urlconf!r} cannot be imported")
+    schema = get_setting("SCHEMA")
+    if schema is not None and not isinstance(schema, dict):
+        raise ImproperlyConfigured("lex_config.SCHEMA must be a dict")
+    headers = get_setting("API_KEY_HEADERS") or ()
+    if isinstance(headers, str):
+        headers = [headers]
+    if not all(isinstance(header, str) for header in headers):
+        raise ImproperlyConfigured("lex_config.API_KEY_HEADERS must be request.META names (strings)")
+    roles = get_setting("BITEMPORAL_FUNCTION_ROLES")
+    if roles is not None and (isinstance(roles, str) or not all(isinstance(role, str) for role in roles)):
+        raise ImproperlyConfigured("lex_config.BITEMPORAL_FUNCTION_ROLES must be None or a list of role names")
 
 
 def reset_extension_cache() -> None:

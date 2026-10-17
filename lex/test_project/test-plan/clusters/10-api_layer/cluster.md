@@ -157,3 +157,21 @@
 **Scenario range:** 10.113-10.116. **Test file:** `lex/test_project/tests/api_layer/test_10t_keycloak_and_bearer_performance.py`. **Type:** U + I. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/middleware/keycloak_permissions.py`, `lex/authentication/middleware.py` (StatelessBearerSessionMiddleware). Batch: [10t](batches.md).
 
 ---
+
+### 10u. Schema, docs and CLI share the SCHEMA settings ✅
+
+**What it tests:** The docs page loads the configured Redoc bundle under the configured title; enum overrides follow the patched settings both ways; scoped keys appear as apiKeyAuth without an authenticator warning and the schema routes stay undocumented; a project extension for the key class wins.
+
+**Why a regression matters:** Projects pin the docs bundle and name their enums; mismatching settings between the served docs and the generated client contract are silent drift.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.117 | docs page settings | redoc@2.1.5 and the title |
+| 10.118 | enum overrides | present inside the patch, gone outside |
+| 10.119 | API-key scheme | apiKeyAuth in header Api-Key; no authenticator warning; schema/docs not documented |
+| 10.120 | project extension | wins over lex's priority -1 |
+| 10.121 | lex base views lend no description | undocumented project view gets none; a documented one keeps its own |
+
+**Scenario range:** 10.117-10.121. **Test file:** `lex/test_project/tests/api_layer/test_10u_schema_settings.py`. **Type:** E + U. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/schema.py` (project_schema_settings, ProjectSchemaView, ProjectRedocView), `lex/api/management/commands/schema.py`, `lex/api/schema_extensions.py` (LexAPIKeyAuthenticationScheme). Batch: [10u](batches.md).
+
+---

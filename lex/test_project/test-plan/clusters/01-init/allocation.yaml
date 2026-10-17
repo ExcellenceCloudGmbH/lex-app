@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 397
+max_scenario: 401
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1273,3 +1273,13 @@ letters:
       xfail: 0
     note: >-
       Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]).
+  ax:
+    title: "Broken lex_config.py stops startup"
+    scenarios: 1.398-1.401
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      Called at the end of LexAppConfig.ready() for project apps.
