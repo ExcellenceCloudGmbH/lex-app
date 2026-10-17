@@ -18,7 +18,7 @@ deleting unused files; the calculation log tree and its PDFs show only logs of
 records the caller may read. A model's own ``permission_list`` that refuses
 makes its list answer 404.
 
-Cluster 4v — scenarios 4.119–4.128. Type: U + E.
+Cluster 4v — scenarios 4.119–4.128, 4.136. Type: U + E.
 Covers: lex/api/middleware/generic_api_gate.py (records mode, exposed_operations,
 record_operation, GenericApiSocketGate), lex/lex_app/asgi.py (the gate in the socket stack), lex/core/extensions.py (_validate_exposed_models),
 lex/api/security.py (edit_violations for Django auth models, list_denied),
@@ -348,3 +348,42 @@ class TestCluster04v_InternalEndpoints(E2ETestCase):
         self.assertEqual(self.client.get(_list_url(ACTION_ITEM)).status_code, 404)
         ActionItem.permission_list = original
         self.assertEqual(self.client.get(_list_url(ACTION_ITEM)).status_code, 200)
+
+
+class TestCluster04v_UnknownApiPaths(SimpleTestCase):
+    """Cluster 4v (unit): what no route under api/ matched is 404, never the app's index.html."""
+
+    # -- 4.136 ---------------------------------------------------------
+    def test_4_136_an_unknown_api_path_is_404(self) -> None:
+        """
+        Scenario 4.136: the SPA catch-all leaves api/ alone.
+        Given: a build with index.html and the catch-all view
+        When: it is asked for api/atrium/funds (a removed endpoint), api and an app route, also below
+              DJANGO_BASE_PATH, in strict and in legacy mode
+        Then: 404 for both api paths in strict mode, the index for the app route; legacy mode keeps
+              serving the index.
+        """
+        import os
+        import tempfile
+        from unittest import mock
+
+        from django.http import Http404
+        from django.test import RequestFactory
+
+        from lex.react.views import serve_react
+
+        with tempfile.TemporaryDirectory() as root:
+            open(os.path.join(root, "index.html"), "w").write("<html></html>")
+
+            def answer(path):
+                try:
+                    return serve_react(RequestFactory().get(f"/{path}"), path, document_root=root).status_code
+                except Http404:
+                    return 404
+
+            with mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false", "DJANGO_BASE_PATH": ""}):
+                self.assertEqual([answer(p) for p in ("api/atrium/funds", "api", "funds/overview")], [404, 404, 200])
+            with mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false", "DJANGO_BASE_PATH": "/portal"}):
+                self.assertEqual([answer(p) for p in ("portal/api/atrium/funds", "portal/funds")], [404, 200])
+            with mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "true", "DJANGO_BASE_PATH": ""}):
+                self.assertEqual(answer("api/atrium/funds"), 200)
