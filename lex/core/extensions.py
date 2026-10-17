@@ -54,6 +54,10 @@ EXTENSION_DEFAULTS: Dict[str, Any] = {
     # Realtime groups (WP12).
     "MUTATION_GROUPS": None,
     "USER_GROUPS": None,
+    # Database roles that may run the bitemporal applier's SECURITY DEFINER functions. None (default): PostgreSQL's
+    # default, every role. A list: EXECUTE revoked from PUBLIC after every migrate and granted to these roles only
+    # (the owner keeps it) - for projects whose application role is restricted (row-level security).
+    "BITEMPORAL_FUNCTION_ROLES": None,
 }
 
 EXTENSION_KEYS = tuple(EXTENSION_DEFAULTS)
@@ -200,6 +204,9 @@ def validate_configuration() -> None:
         headers = [headers]
     if not all(isinstance(header, str) for header in headers):
         raise ImproperlyConfigured("lex_config.API_KEY_HEADERS must be request.META names (strings)")
+    roles = get_setting("BITEMPORAL_FUNCTION_ROLES")
+    if roles is not None and (isinstance(roles, str) or not all(isinstance(role, str) for role in roles)):
+        raise ImproperlyConfigured("lex_config.BITEMPORAL_FUNCTION_ROLES must be None or a list of role names")
 
 
 def reset_extension_cache() -> None:
