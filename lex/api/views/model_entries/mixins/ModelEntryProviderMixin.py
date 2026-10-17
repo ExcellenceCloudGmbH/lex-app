@@ -58,6 +58,12 @@ class ModelEntryProviderMixin:
         queryset = model_class.objects.all()
         
         as_of_param = self.request.query_params.get("as_of")
+        from lex.core.read_models import is_read_model
+
+        if as_of_param and is_read_model(model_class):
+            from lex.api.errors import LexActionError
+
+            raise LexActionError(f"{model_class.__name__} keeps no history.", code="HISTORY_NOT_TRACKED")
         if as_of_param:
             as_of_date = parse_as_of_datetime(as_of_param)
             if as_of_date:
@@ -102,6 +108,15 @@ class ModelEntryProviderMixin:
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         from lex.core import request_scope
+        from lex.core.read_models import is_read_model
+
+        # A read model shows data: anything that would write to it is not allowed (lists read by POST are).
+        container = self.kwargs.get("model_container")
+        reads = request.method in ("GET", "HEAD", "OPTIONS") or getattr(self, "post_as_read", False)
+        if container is not None and is_read_model(container.model_class) and not reads:
+            from rest_framework.exceptions import MethodNotAllowed
+
+            raise MethodNotAllowed(request.method)
 
         # Resolve the scope once DRF knows the user: a refused value answers 404,
         # an allowed one reaches DB_CONTEXT.

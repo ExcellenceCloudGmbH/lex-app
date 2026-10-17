@@ -170,6 +170,9 @@ def get_model_exclusion_reason(model_class):
     # Check for Historical models first (most important check)
     if model_class.__name__.startswith('Historical'):
         return "Historical model (simple_history generated)"
+
+    if getattr(model_class, "lex_read_model", False):
+        return "Read model (shows data, keeps no history)"
     
     if model_name in DJANGO_BUILTIN_MODELS:
         return f"Django built-in model: {model_name}"

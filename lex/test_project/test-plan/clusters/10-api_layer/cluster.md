@@ -211,3 +211,22 @@
 **Scenario range:** 10.128-10.131. **Test file:** `lex/test_project/tests/api_layer/test_10w_request_scope.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/request_scope.py`, `lex/core/db_context.py` (apply with scope), `lex/api/views/model_entries/List.py` (reserved parameter), `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (get_queryset, initial), `lex/api/views/model_entries/History.py` (_record_readable), `lex/api/actions.py` (_resolve_instance), `lex/core/extensions.py`. Batch: [10w](batches.md).
 
 ---
+
+### 10x. Read models: views and projections on the generic endpoints ✅
+
+**What it tests:** Views and projections are listed, filtered, sorted and read; every write and bulk call answers 405 and history 400; actions run on them; a list default leaves rows out of the list only; lex_prepare_page runs once per page and once per single record; CreateView resolves table placeholders, creates a security_invoker view and drops it again.
+
+**Why a regression matters:** Overviews built as Python loops over many endpoints are slow and leak shape; without a read-only guarantee a view could be written to, and without page preparation a computed field costs one query per row.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.132 | no table, no history | views and projections are read models without history; a managed read model stops startup |
+| 10.133 | a view is listed, filtered, sorted and read | 3 rows, filter, ordering, computed column |
+| 10.134 | nothing writes, no history | 405 for create/update/delete/bulk; 400 for history |
+| 10.135 | actions on read models | the view's action; the projection's inherited action writes the base row |
+| 10.136 | list default and page preparation | locked rows left out of the list, still readable; prepared once per page and once for a record |
+| 10.137 | CreateView | real table name, security_invoker on PostgreSQL, deconstruct round-trips |
+
+**Scenario range:** 10.132-10.137. **Test file:** `lex/test_project/tests/api_layer/test_10x_read_models.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/read_models.py` (is_read_model, validate, list_queryset, CreateView), `lex/core/models/LexReadModel.py`, `lex/lex_app/simple_history_config.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (writes refused, as_of), `lex/api/views/model_entries/List.py`, `lex/api/views/model_entries/History.py`, `lex/api/serializers/base_serializers.py` (lex_prepare_page), `lex/core/extensions.py`. Batch: [10x](batches.md).
+
+---

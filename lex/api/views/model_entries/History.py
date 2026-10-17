@@ -45,7 +45,10 @@ class HistoryModelEntry(ListAPIView):
         elif lookup_field and getattr(model_class, "lex_lookup_allow_pk", True) is False:
             return raise_or_return(Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND))
 
-        if not hasattr(model_class, "history"):
+        from lex.core.read_models import is_read_model
+
+        # A read model keeps no history; a projection must not show its base table's.
+        if is_read_model(model_class) or not hasattr(model_class, "history"):
             return raise_or_return(Response(
                 {"code": "HISTORY_NOT_TRACKED", "error": f"Model {model_class.__name__} does not track history."},
                 status=status.HTTP_400_BAD_REQUEST,

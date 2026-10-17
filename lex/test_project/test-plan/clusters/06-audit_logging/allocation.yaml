@@ -1,7 +1,7 @@
 cluster: 6
 slug: audit_logging
 title: Audit Logging
-max_scenario: 128
+max_scenario: 129
 letters:
   a:
     title: ''
@@ -197,3 +197,13 @@ letters:
       xfail: 0
     note: >-
       fields keeps nested keys and turns every value (lists included) into None; the action's own name and record id stay.
+  u:
+    title: "Audit entries name a record by its public id"
+    scenarios: 6.129
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      object_id stays for integer keys; object_ref holds the lex_lookup_field value.
