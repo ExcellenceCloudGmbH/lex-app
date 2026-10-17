@@ -23,6 +23,8 @@ Run: python -m lex pytest lex/test_project/tests/api_layer/test_10z_public_gener
 
 from __future__ import annotations
 
+import os
+from unittest import mock
 import uuid
 
 import pytest
@@ -34,6 +36,18 @@ from lex.test_project.tests._e2e_test_case import E2ETestCase, _MockContainer
 
 from .models import (ACTION_ITEM, ACTION_MODELS, PUBLIC_API_MODELS, PUBLIC_DOCUMENT, PUBLIC_FOLDER, ActionItem,
                      PublicApiDocument, PublicApiFolder)
+
+# These scenarios are strict mode's behaviour: pinned, whatever LEX_LEGACY_SECURITY the run sets (a legacy run keeps
+# the pre-3.0 behaviour, which other clusters cover).
+_STRICT = mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "false"})
+
+
+def setUpModule():
+    _STRICT.start()
+
+
+def tearDownModule():
+    _STRICT.stop()
 
 pytestmark = pytest.mark.api_layer
 
