@@ -120,3 +120,23 @@
 **Scenario range:** 10.102-10.105. **Test file:** `lex/test_project/tests/api_layer/test_10r_db_context.py`. **Type:** I + E. **Status:** ✅ Complete (2026-10-16). Covers `lex/core/db_context.py` (LexDbContextMiddleware, apply, on_commit), `lex/api/project/views.py` (LexAPIView.initial), MIDDLEWARE. Batch: [10r](batches.md).
 
 ---
+
+### 10s. Record and collection actions ✅
+
+**What it tests:** Record actions run with validated input; input is strict; permission and visibility gate every action and an action without a permission is refused; errors roll back; file results pass through and methods are enforced; collection actions run without a record; unknown or misplaced actions are 404.
+
+**Why a regression matters:** Each action is a write path; it must not be weaker than PATCH.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.106 | record action | 200 with the result; row approved |
+| 10.107 | strict input | UNKNOWN_FIELDS; missing note 400; row unchanged |
+| 10.108 | permission and visibility | locked 400, hidden 404, unguarded 400 |
+| 10.109 | rollback | 409 NOT_NOW; side-effect row absent |
+| 10.110 | file result | regular 400, superuser CSV, POST 405 |
+| 10.111 | collection action | three ids; count 9 is 400 |
+| 10.112 | unknown/misplaced | all 404 |
+
+**Scenario range:** 10.106-10.112. **Test file:** `lex/test_project/tests/api_layer/test_10s_record_actions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/actions.py` (lex_action, actions_for, ModelActionView), action routes in `lex/process_admin/sites/process_admin_site.py`. Batch: [10s](batches.md).
+
+---
