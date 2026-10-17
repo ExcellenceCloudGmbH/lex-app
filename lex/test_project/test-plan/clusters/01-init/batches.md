@@ -1764,3 +1764,18 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 | Tests landed | **4 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Called at the end of LexAppConfig.ready() for project apps. |
+
+### Batch 1ay — A Lex project nested in a repository ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.402-1.408 |
+| Type | U |
+| Files covered | `lex/tools/project_root.py` (find_project_root, project_settings_module, apply_settings_module), `lex/tools/django_bootstrap.py` (prepare_environment), `lex/bin/lex.py` (module start) |
+| Test file | `lex/test_project/tests/init/test_1ay_nested_project.py` |
+| Test classes | `TestCluster01ay_NestedProject` |
+| Fixtures | temporary git repository with the project in a subfolder; fresh interpreters without DJANGO_SETTINGS_MODULE, PYTHONPATH, PROJECT_ROOT |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Before, a Lex project inside a monorepo needed GIT_CEILING_DIRECTORIES, PYTHONPATH and DJANGO_SETTINGS_MODULE from a wrapper. |
+

@@ -10,7 +10,7 @@
 
 | Cluster | Batches | Max scenario | Pass | Skip | Xfail |
 |---|---|---|---|---|---|
-| 1. Init — Project Bootstrap | 50 | 401 | 443 | 0 | 0 |
+| 1. Init — Project Bootstrap | 51 | 408 | 450 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
 | 4. Permissions | 21 | 118 | 62 | 2 | 0 |
@@ -68,6 +68,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 1av | Project extension keys, environment switches and security flags | 1.386-1.395 | complete | 10 | 0 | 0 | Scenarios 1.390/1.391 import lex's settings in a fresh interpreter because they are evaluated once per process. Mutations checked by hand: resolving hooks eagerly in LexProjectConfig.load breaks 1.387; swallowing ImportError breaks 1.388; making the umbrella switch win over LEX_SEC_EDIT breaks 1.392. |
 | 1aw | lex create_api_key | 1.396-1.397 | complete | 2 | 0 | 0 | Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]). |
 | 1ax | Broken lex_config.py stops startup | 1.398-1.401 | complete | 4 | 0 | 0 | Called at the end of LexAppConfig.ready() for project apps. |
+| 1ay | A Lex project nested in a repository runs without extra variables | 1.402-1.408 | complete | 7 | 0 | 0 | The folder with lex_config.py is the root before the git toplevel; a settings.py there is the settings module. Mutations checked by hand: skipping the lex_config.py step breaks 1.402/1.405/1.406/1.408; not extending PYTHONPATH breaks 1.408; Lex's settings in prepare_environment breaks 1.406. |
 | 1b | `lex Init` — first-run initialization | 1.6-1.16 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1c | `INITIAL_DATA` loading (part of `lex Init`) |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 1d |  | 1.23-1.30 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |

@@ -16,6 +16,7 @@ import click
 import uvicorn
 from lex._version import __version__ as _LEX_APP_VERSION
 from lex.tools.project_root import (
+    apply_settings_module,
     find_project_root,
     load_project_env_file,
     resolve_llm_working_directory,
@@ -98,7 +99,7 @@ _load_project_env_file(PROJECT_ROOT_DIR)
 # Set essential env vars early so they are available when any downstream code
 # (celery.py, settings.py, asgi.py) eventually triggers Django setup.
 # This is cheap — the expensive part (django.setup()) remains deferred.
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
+apply_settings_module(PROJECT_ROOT_DIR)
 os.environ.setdefault("PROJECT_ROOT", PROJECT_ROOT_DIR.as_posix())
 os.environ.setdefault("LEX_APP_PACKAGE_ROOT", LEX_APP_PACKAGE_ROOT)
 
