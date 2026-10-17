@@ -26,8 +26,9 @@ from lex.core import extensions
 
 _ALWAYS_OPEN = ("api/health",)
 
-#: Operations a model can expose with ``lex_api_exposed`` (mode ``"records"``).
-GENERIC_OPERATIONS = ("list", "retrieve", "create", "update", "delete", "history", "export", "bulk", "file")
+#: Operations a model can expose with ``lex_api_exposed`` (mode ``"records"``). ``"action"`` alone exposes only
+#: the model's actions (every exposed model's actions are reachable; their permission decides).
+GENERIC_OPERATIONS = ("list", "retrieve", "create", "update", "delete", "history", "export", "bulk", "file", "action")
 #: ``lex_api_exposed = True``: the record operations; history, export, bulk and
 #: file download are named explicitly because they show more than a record.
 DEFAULT_EXPOSED = frozenset({"list", "retrieve", "create", "update", "delete"})

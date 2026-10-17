@@ -187,13 +187,16 @@ class TestCluster04v_RecordsMode(E2ETestCase):
     def test_4_123_actions_of_exposed_models_decide_themselves(self) -> None:
         """
         Scenario 4.123: an exposed model's actions are reachable; its permission still decides.
-        Given: ActionItem exposed for list only; an editable and a locked row
+        Given: ActionItem exposed for actions only, then for list only; an editable and a locked row
         When: approve runs on both, and on a row of a model that is not exposed
-        Then: 200 for the editable row, 400 ACTION_NOT_ALLOWED for the locked one;
-              404 once the model is no longer exposed.
+        Then: with "action" alone the record itself is 404 but its action runs; 200 for the editable
+              row, 400 ACTION_NOT_ALLOWED for the locked one; 404 once the model is no longer exposed.
         """
         item = ActionItem.objects.create(name="invoice")
         locked = ActionItem.objects.create(name="other", status="locked")
+        with _Exposed({"action"}):  # actions only: the record routes stay closed
+            self.assertEqual(self.client.get(_one_url(ACTION_ITEM, item.pk)).status_code, 404)
+            self.assertEqual(self.client.post(_action_url(item, "approve"), {"note": "ok"}, format="json").status_code, 200)
         with _Exposed({"list"}):
             self.assertEqual(self.client.post(_action_url(item, "approve"), {"note": "ok"}, format="json").status_code, 200)
             refused = self.client.post(_action_url(locked, "approve"), {"note": "ok"}, format="json")
