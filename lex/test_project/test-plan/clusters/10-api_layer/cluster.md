@@ -170,7 +170,8 @@
 | 10.118 | enum overrides | present inside the patch, gone outside |
 | 10.119 | API-key scheme | apiKeyAuth in header Api-Key; no authenticator warning; schema/docs not documented |
 | 10.120 | project extension | wins over lex's priority -1 |
+| 10.121 | lex base views lend no description | undocumented project view gets none; a documented one keeps its own |
 
-**Scenario range:** 10.117-10.120. **Test file:** `lex/test_project/tests/api_layer/test_10u_schema_settings.py`. **Type:** E + U. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/schema.py` (project_schema_settings, ProjectSchemaView, ProjectRedocView), `lex/api/management/commands/schema.py`, `lex/api/schema_extensions.py` (LexAPIKeyAuthenticationScheme). Batch: [10u](batches.md).
+**Scenario range:** 10.117-10.121. **Test file:** `lex/test_project/tests/api_layer/test_10u_schema_settings.py`. **Type:** E + U. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/schema.py` (project_schema_settings, ProjectSchemaView, ProjectRedocView), `lex/api/management/commands/schema.py`, `lex/api/schema_extensions.py` (LexAPIKeyAuthenticationScheme). Batch: [10u](batches.md).
 
 ---

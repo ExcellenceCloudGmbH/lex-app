@@ -10,9 +10,10 @@ loaded. All three now run under one patched context that also reloads the enum
 overrides; the schema and docs routes stay out of the document. Lex's scoped
 API keys are described in the schema (``apiKeyAuth``, header ``Api-Key``) at
 low priority, so generation no longer warns about an unknown authenticator and
-a project's own description of the same class wins.
+a project's own description of the same class wins. lex's base views are no
+docstring source: an undocumented project view gets no description from them.
 
-Cluster 10u — scenarios 10.117–10.120. Type: E + U.
+Cluster 10u — scenarios 10.117–10.121. Type: E + U.
 Covers: lex/api/schema.py (project_schema_settings, schema views),
 lex/api/management/commands/schema.py, lex/api/schema_extensions.py
 (LexAPIKeyAuthenticationScheme).
@@ -129,3 +130,28 @@ class TestCluster10u_SchemaSettings(E2ETestCase):
         finally:
             registry[:] = before
         self.assertEqual(OpenApiAuthenticationExtension.get_match(LexAPIKeyAuthentication()).name, "apiKeyAuth")
+
+    # -- 10.121 --------------------------------------------------------
+    def test_10_121_lex_base_views_lend_no_description(self) -> None:
+        """
+        Scenario 10.121: an undocumented project view is not described by lex's docstrings.
+        Given: project views built on LexAPIView / LexWebhookView, one of them without a docstring
+        When: drf-spectacular looks up their descriptions
+        Then: the undocumented one gets none (not LexAPIView's "A project endpoint …"), a documented one keeps its own.
+        """
+        from drf_spectacular.plumbing import get_doc
+
+        from lex.api.project import LexAPIView, LexWebhookView
+
+        class Undocumented(LexAPIView):
+            pass
+
+        class UndocumentedHook(LexWebhookView):
+            pass
+
+        class Documented(LexAPIView):
+            """Lists the items."""
+
+        self.assertEqual(get_doc(Undocumented), "")
+        self.assertEqual(get_doc(UndocumentedHook), "")
+        self.assertEqual(get_doc(Documented), "Lists the items.")

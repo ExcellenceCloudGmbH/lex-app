@@ -150,12 +150,12 @@
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 10.117-10.120 |
+| Scenario range | 10.117-10.121 |
 | Type | E + U |
 | Files covered | `lex/api/schema.py` (project_schema_settings, ProjectSchemaView, ProjectRedocView), `lex/api/management/commands/schema.py`, `lex/api/schema_extensions.py` (LexAPIKeyAuthenticationScheme) |
 | Test file | `lex/test_project/tests/api_layer/test_10u_schema_settings.py` |
 | Test classes | `TestCluster10u_SchemaSettings` |
 | Fixtures | the project API fixture (`_project_api`), SCHEMA with REDOC_DIST and ENUM_NAME_OVERRIDES |
-| Tests landed | **4 pass / 0 fail** |
+| Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |

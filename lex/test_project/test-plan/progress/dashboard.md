@@ -19,7 +19,7 @@
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 9 | 52 | 24 | 0 | 0 |
-| 10. API Layer | 21 | 120 | 70 | 0 | 0 |
+| 10. API Layer | 21 | 121 | 71 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -280,7 +280,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10r | Database context per request and per after-commit callback | 10.102-10.105 | complete | 4 | 0 | 0 | Runs against PostgreSQL's set_config/current_setting, the mechanism a row-level-security project uses. |
 | 10s | Record and collection actions | 10.106-10.112 | complete | 7 | 0 | 0 | calculate=true/cancel=true stay as they are; actions are additive. |
 | 10t | Keycloak calls and session rows per request | 10.113-10.116 | complete | 4 | 0 | 0 | The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b). |
-| 10u | Schema, docs and CLI share the SCHEMA settings | 10.117-10.120 | complete | 4 | 0 | 0 | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |
+| 10u | Schema, docs and CLI share the SCHEMA settings | 10.117-10.121 | complete | 5 | 0 | 0 | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |
 
 ## 11. Stress & Performance (`stress`)
 

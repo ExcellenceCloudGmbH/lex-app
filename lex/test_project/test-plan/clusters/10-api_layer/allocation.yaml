@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 120
+max_scenario: 121
 letters:
   a:
     title: ''
@@ -208,10 +208,10 @@ letters:
       The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b).
   u:
     title: "Schema, docs and CLI share the SCHEMA settings"
-    scenarios: 10.117-10.120
+    scenarios: 10.117-10.121
     status: complete
     tests:
-      pass: 4
+      pass: 5
       skip: 0
       xfail: 0
     note: >-

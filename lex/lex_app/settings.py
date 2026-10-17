@@ -805,6 +805,8 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "PREPROCESSING_HOOKS": ["lex.api.schema.include_configured_paths"],
+    # LexAPIView's own docstring must not become the description of a project's endpoints
+    "GET_LIB_DOC_EXCLUDES": "lex.api.schema.lib_doc_excludes",
 }
 
 if os.getenv("SENDGRID_API_KEY", "envvar_not_existing") != "envvar_not_existing":

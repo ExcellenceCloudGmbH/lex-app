@@ -55,6 +55,19 @@ def include_configured_paths(endpoints):
     return [endpoint for endpoint in endpoints if endpoint[0].startswith(tuple(prefixes))]
 
 
+def lib_doc_excludes():
+    """Classes whose docstrings drf-spectacular never uses as an operation description.
+
+    drf-spectacular takes the first docstring along a view's base classes, stopping at its own and DRF's. lex's base
+    views sit before that stop, so a project view without a docstring would be described as "A project endpoint …".
+    """
+    from drf_spectacular.plumbing import get_lib_doc_excludes
+
+    from lex.api.project.views import LexAPIView, LexWebhookView
+
+    return [*get_lib_doc_excludes(), LexAPIView, LexWebhookView]
+
+
 def custom_settings() -> Dict[str, Any]:
     """SPECTACULAR_SETTINGS overrides derived from ``lex_config.SCHEMA``."""
     config = schema_config()
