@@ -159,3 +159,17 @@
 | Tests landed | **5 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own. |
+
+### Batch 10v — Every error of a generic endpoint reaches the exception handler ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.122-10.127 |
+| Type | E |
+| Files covered | `lex/api/errors.py` (error_from_body, raise_or_return, surface), `lex/api/views/model_entries/One.py`, `Many.py`, `History.py`, `lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/file_operations/ModelExport.py`, `lex/process_admin/views/model_relation_views.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py`, `lex/core/security_flags.py` (ERRORS) |
+| Test file | `lex/test_project/tests/api_layer/test_10v_errors_reach_the_handler.py` |
+| Test classes | `TestCluster10v_ErrorsReachTheHandler`, `TestCluster10v_ExportAndReports` |
+| Fixtures | ApiProjectItem with patched permission hooks and save(), a recording EXCEPTION_HANDLER, DB_ERROR_MAPPER, the export models |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would. |

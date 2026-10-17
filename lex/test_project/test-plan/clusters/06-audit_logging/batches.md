@@ -111,3 +111,17 @@ This is the biggest single chunk — 18 files. Split into **three** batches so r
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | The entry is written in the action's transaction, so a failed run leaves none (10.109). |
+
+### Batch 6t — What the audit log stores: AUDIT_PAYLOAD and AUDIT_ACTOR ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 6.123-6.128 |
+| Type | U + E |
+| Files covered | `lex/audit_logging/utils/policy.py`, `lex/audit_logging/mixins/AuditLogMixin.py`, `lex/audit_logging/mixins/BulkAuditLogMixin.py`, `lex/audit_logging/utils/InitialDataAuditLogger.py`, `lex/audit_logging/utils/calculation_audit.py`, `lex/api/actions.py` (_audit), `lex/core/models/LexModel.py` (_resolve_request_audit_actor), `lex/core/extensions.py` |
+| Test file | `lex/test_project/tests/audit_logging/test_6t_audit_policy.py` |
+| Test classes | `TestCluster06t_AuditPayloadUnit`, `TestCluster06t_AuditPolicy`, `TestCluster06t_CalculationRunAudit` |
+| Fixtures | AuditSimpleItem, AuditActionItem, OnCreateCalc (calculate on create), a pseudonymising AUDIT_ACTOR |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | fields keeps nested keys and turns every value (lists included) into None; the action's own name and record id stay. |

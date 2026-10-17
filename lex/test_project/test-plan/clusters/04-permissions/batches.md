@@ -176,3 +176,17 @@ must not open a check on the whole model.
 | Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Importing rest_framework_api_key.admin registers the classic keys. |
+
+### Batch 4v — Generic records for end users (GENERIC_API records) and lex's internal endpoints ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.119-4.128 |
+| Type | U + E |
+| Files covered | `lex/api/middleware/generic_api_gate.py` (records mode, exposed_operations, record_operation, GenericApiSocketGate), `lex/lex_app/asgi.py`, `lex/core/extensions.py` (_validate_exposed_models), `lex/api/security.py` (edit_violations for Django auth models, list_denied), `lex/api/views/model_entries/List.py` (initial), `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py` |
+| Test file | `lex/test_project/tests/permissions/test_4v_generic_records.py` |
+| Test classes | `TestCluster04v_ExposureUnit`, `TestCluster04v_RecordsMode`, `TestCluster04v_SocketGate`, `TestCluster04v_SocketStack`, `TestCluster04v_InternalEndpoints` |
+| Fixtures | ActionItem (cluster 10 models) with lex_api_exposed set per test, CalculationLog rows with and without a record, a second user |
+| Tests landed | **10 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist. |

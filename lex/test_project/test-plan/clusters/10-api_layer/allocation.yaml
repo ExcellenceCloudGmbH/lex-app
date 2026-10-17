@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 121
+max_scenario: 127
 letters:
   a:
     title: ''
@@ -216,3 +216,13 @@ letters:
       xfail: 0
     note: >-
       The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own.
+  v:
+    title: "Every error of a generic endpoint reaches the exception handler"
+    scenarios: 10.122-10.127
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would.
