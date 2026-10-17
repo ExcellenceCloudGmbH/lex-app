@@ -13,11 +13,11 @@ and an OpenAPI document with one operation per exposed model, operation and
 action — stable operation ids, uuid path parameters, the action's input and
 output, the project's error body — that a typed client is generated from.
 
-Cluster 10z — scenarios 10.144–10.148. Type: E.
+Cluster 10z — scenarios 10.144–10.149. Type: E.
 Covers: lex/process_admin/sites/process_admin_site.py (short routes, _with_calculation_id),
 lex/api/serializers/relations.py (LexLookupRelatedField), lex/api/views/model_entries/List.py
 (_resolve_lookup by public id), lex/api/serializers/base_serializers.py (_wrap_without_internal_fields),
-lex/api/generic_schema.py, lex/api/schema.py (include_configured_paths).
+lex/api/generic_schema.py, lex/api/schema.py (include_configured_paths), lex/api/actions.py (many).
 Run: python -m lex pytest lex/test_project/tests/api_layer/test_10z_public_generic_api.py -v
 """
 
@@ -151,6 +151,7 @@ class TestCluster10z_PublicGenericApi(E2ETestCase):
             "publicapidocument_delete": (f"{base}/publicapidocument/one/{{uuid}}", "delete"),
             "publicapidocument_rename": (f"{base}/publicapidocument/one/{{uuid}}/action/rename", "post"),
             "publicapidocument_count": (f"{base}/publicapidocument/action/count", "get"),
+            "publicapidocument_titles": (f"{base}/publicapidocument/action/titles", "get"),
         }
         for operation_id, location in expected.items():
             self.assertEqual(operations.get(operation_id), location, operation_id)
@@ -184,3 +185,23 @@ class TestCluster10z_PublicGenericApi(E2ETestCase):
         with tempfile.NamedTemporaryFile(suffix=".yaml") as target:
             call_command("schema", "--validate", "--fail-on-warn", "--file", target.name)
             self.assertIn(b"publicapidocument_rename", open(target.name, "rb").read())
+
+    # -- 10.149 --------------------------------------------------------
+    def test_10_149_an_action_answers_with_a_list(self) -> None:
+        """
+        Scenario 10.149: an action whose answer is a list says so.
+        Given: a collection action declared with output=_RenamedOutput and many=True
+        When: the schema is generated and the action is called with two documents
+        Then: its 200 response is an array of RenamedOutput; the call answers both titles in order.
+        """
+        from lex.api.schema import generate_schema
+
+        self.use_lex_extensions(SCHEMA=SCHEMA)
+        operation = generate_schema()["paths"]["/api/model_entries/publicapidocument/action/titles"]["get"]
+        answer = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        self.assertEqual(answer["type"], "array")
+        self.assertIn("RenamedOutput", answer["items"]["$ref"])
+        PublicApiDocument.objects.create(title="B", folder=self.inbox)
+        PublicApiDocument.objects.create(title="A", folder=self.archive)
+        listed = self.client.get(_short("model-collection-action", PUBLIC_DOCUMENT, action="titles"))
+        self.assertEqual(listed.json(), [{"title": "A"}, {"title": "B"}])

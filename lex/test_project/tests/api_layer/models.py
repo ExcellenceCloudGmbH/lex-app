@@ -429,6 +429,11 @@ class PublicApiDocument(LexModel):
     def permission_count(cls, uc, data):
         return True
 
+    @lex_action(detail=False, methods=("get",), permission="permission_count", many=True,
+                output="lex.test_project.tests.api_layer.models._RenamedOutput")
+    def titles(cls, context, data):
+        return [{"title": title} for title in cls.objects.order_by("title").values_list("title", flat=True)]
+
 
 class PublicFolderSerializer(_drf.ModelSerializer):
     class Meta:

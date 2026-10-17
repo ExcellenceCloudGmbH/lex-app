@@ -232,6 +232,8 @@ def generic_endpoints() -> List[Tuple[str, str, str, Any]]:
             if output is OpenApiTypes.BINARY:
                 # A file: any content type (the action's HttpResponse sets the real one).
                 responses = {(success, "application/octet-stream"): OpenApiTypes.BINARY}
+            elif spec.many and output is not OpenApiTypes.OBJECT:
+                responses = {success: output(many=True)}  # the action answers with a list of output
             else:
                 responses = {success: output}
             responses.update(_errors(400, 404, *spec.responses))

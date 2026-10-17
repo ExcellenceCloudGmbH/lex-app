@@ -52,7 +52,8 @@ More options: ``status`` (success status, e.g. 201), ``headers`` (e.g.
 ``lex_config.THROTTLE_RATES``, answered 429 when exceeded) and, for the
 OpenAPI schema, ``summary``, ``description``, ``operation_id``, ``tags``,
 ``responses`` (extra statuses) and ``media="multipart"`` for file uploads.
-``input`` and ``output`` may be dotted paths to the serializer classes.
+``input`` and ``output`` may be dotted paths to the serializer classes; ``many=True`` documents an
+output that is a list of ``output``.
 """
 from __future__ import annotations
 
@@ -98,6 +99,7 @@ class ActionSpec:
     tags: Sequence[str] = ()
     responses: Mapping[int, str] = field(default_factory=dict)
     media: str = "json"
+    many: bool = False
 
 
 @dataclass
@@ -128,6 +130,7 @@ def lex_action(
     tags: Sequence[str] = (),
     responses: Optional[Mapping[int, str]] = None,
     media: str = "json",
+    many: bool = False,
 ):
     """Declare a model method as an action (see the module docstring)."""
     if denied is not None and denied not in DENIED_ANSWERS:
@@ -156,6 +159,7 @@ def lex_action(
             tags=tuple(tags),
             responses=dict(responses or {}),
             media=media,
+            many=many,
         )
         setattr(target, _ATTR, spec)
         return function
