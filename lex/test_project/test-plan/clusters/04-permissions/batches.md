@@ -106,3 +106,17 @@ must not open a check on the whole model.
 | Tests landed | **18 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |
+
+### Batch 4s — API-key read decided by the serializer ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.114 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (_get_can_read_context) |
+| Test file | `lex/test_project/tests/permissions/test_4s_api_key_read_context.py` |
+| Test classes | `TestCluster04s_ApiKeyReadContext` |
+| Fixtures | `KeycloakItem` (default permissions); classic `APIKey` via authenticate_as_api_key; LEX_SEC_NOT_FOUND=false |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |

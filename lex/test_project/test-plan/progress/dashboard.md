@@ -13,7 +13,7 @@
 | 1. Init — Project Bootstrap | 48 | 395 | 437 | 0 | 0 |
 | 2. CRUD via REST API | 12 | 116 | 24 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 16 | 103 | 47 | 2 | 0 |
+| 4. Permissions | 17 | 114 | 48 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
@@ -141,6 +141,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4n | Keycloak UMA permissions in Reflex dashboards | 4.75-4.79 | complete | 5 | 0 | 0 | current_permissions / has_permission / current_access_token (lex/lex_app/reflex/auth.py) -- the Reflex counterpart of st.session_state.permissions, which the Streamlit proxy fills. One KeycloakManager lookup per access token, again after a refresh; a failed lookup keeps the same user's grants and never hands them to another user; sign-out clears them; has_permission counts model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of five mutations of that code (keep grants across users, keep them across sign-out, count record grants, cache the raw token, return the cached list itself) fails exactly one scenario. |
 | 4o | Generic API gate and OIDC redirect guard | 4.80-4.85 | complete | 6 | 0 | 0 | The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the frontend is served from the site's own origin or a configured dev origin. |
 | 4p | Secure permission defaults on the generic REST API | 4.86-4.103 | complete | 18 | 0 | 0 | No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are 404 and refused writes 400. Single-record visibility uses permission_read for the record (the decision the serializer made before), so classic API keys keep reading what they could read. |
+| 4s | API-key read decided by the serializer | 4.114 | complete | 1 | 0 | 0 | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |
 
 ## 5. History & Bitemporal (`history`)
 

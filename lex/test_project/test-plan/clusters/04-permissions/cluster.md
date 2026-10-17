@@ -103,3 +103,17 @@
 **Scenario range:** 4.86-4.103. **Test file:** `lex/test_project/tests/permissions/test_4p_secure_defaults.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/process_admin/views/model_relation_views.py` (Overview), `lex/core/models/{LexModel,HTMLReport}.py`, `lex/api/serializers/base_serializers.py`. Batch: [4p](batches.md).
 
 ---
+
+### 4s. API-key read decided by the serializer ✅
+
+**What it tests:** A classic API key reading a record whose visibility the serializer decides itself gets the record, not an empty body.
+
+**Why a regression matters:** Integrations on classic keys would read empty records in legacy mode and in project views.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.114 | classic key read decided by the serializer | 200 with the label |
+
+**Scenario range:** 4.114. **Test file:** `lex/test_project/tests/permissions/test_4s_api_key_read_context.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/serializers/base_serializers.py` (_get_can_read_context). Batch: [4s](batches.md).
+
+---
