@@ -2,7 +2,7 @@
 date: 2026-10-16
 clusters: [1, 4, 10, 13, 14]
 tests_added: 103
-suite_tally: "14f 6 pass, 14g 29 pass, 14j 2 pass, 4o 8 pass, 10o 5 pass, 13i 1 pass, 1aw 14 pass, 1ax 38 pass; full suite 1736 pass / 37 fail / 27 skip / 6 xfail / 5 collection errors (this figure predates batches 14j and 1ax -- it is refreshed by the final regression run, not re-measured per batch), every failure in the baseline categories (cluster-15 calculation_logging, reflex/reflex_enterprise not installed, stress timing, the gate self-test)"
+suite_tally: "14f 6 pass, 14g 29 pass, 14j 2 pass, 4o 8 pass, 10o 5 pass, 13i 1 pass, 1aw 14 pass, 1ax 38 pass; final full suite at e1f5168e 1777 pass / 38 fail / 27 skip / 6 xfail / 5 collection errors (lex-app-v2 baseline c22d24d7: 1672 / 38 / 27 / 6 / 5, the same failing ids), every failure in the baseline categories (cluster-15 calculation_logging, reflex/reflex_enterprise not installed, stress timing, the gate self-test)"
 ---
 
 # Multi-value filters — backend and Streamlit
