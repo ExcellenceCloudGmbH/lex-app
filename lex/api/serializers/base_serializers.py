@@ -326,6 +326,7 @@ class LexSerializer(serializers.ModelSerializer):
     # Per-serializer caches (populated once, reused across all records)
     # ------------------------------------------------------------------
     _base_user_context = None  # Cached UserContext without keycloak scopes
+    _read_context_is_api_key = None  # Cached: does the request carry an API key context?
     _meta_fields_cache: dict = {}  # { model_class: set_of_field_names }
     _concrete_field_map_cache: dict = {}  # { model_class: { field_name: field } }
 
@@ -346,6 +347,18 @@ class LexSerializer(serializers.ModelSerializer):
         """
         base = self._get_base_user_context(request)
         return base.with_instance(request, target_instance, original_instance=original_instance)
+
+    def _get_can_read_context(self, request, target_instance):
+        """The context ``LexModel.can_read`` would build (``UserContext.from_request``),
+        from the cached base: an API-key context as is — it carries the key's
+        scopes and does not depend on the record — any other with the record's
+        keycloak scopes."""
+        base = self._get_base_user_context(request)
+        if self._read_context_is_api_key is None:
+            self._read_context_is_api_key = UserContext._api_key_context(request) is not None
+        if self._read_context_is_api_key:
+            return base
+        return base.with_instance(request, target_instance)
 
     @classmethod
     def _get_cached_field_names(cls, model_class) -> set:
@@ -802,7 +815,7 @@ class LexSerializer(serializers.ModelSerializer):
                     # LexModel.can_read is permission_read with a context built from
                     # the request; build it from this serializer's cached base
                     # instead of querying the user's groups once per row (BUG-011).
-                    result = target_instance.permission_read(self._get_user_context(request, target_instance))
+                    result = target_instance.permission_read(self._get_can_read_context(request, target_instance))
                     raw_visible_fields = result.get_fields(target_instance._get_all_field_names())
                 else:
                     raw_visible_fields = target_instance.can_read(request)

@@ -138,4 +138,16 @@
 
 **Scenario range:** 4.111-4.113. **Test file:** `lex/test_project/tests/permissions/test_4r_audit_authors.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/audit_logging/mixins/AuditLogMixin.py` (log_change author), `lex/audit_logging/mixins/BulkAuditLogMixin.py` (log_change author, _audit_author). Batch: [4r](batches.md).
 
+### 4s. API-key read decided by the serializer ✅
+
+**What it tests:** A classic API key reading a record whose visibility the serializer decides itself gets the record, not an empty body.
+
+**Why a regression matters:** Integrations on classic keys would read empty records in legacy mode and in project views.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.114 | classic key read decided by the serializer | 200 with the label |
+
+**Scenario range:** 4.114. **Test file:** `lex/test_project/tests/permissions/test_4s_api_key_read_context.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/serializers/base_serializers.py` (_get_can_read_context). Batch: [4s](batches.md).
+
 ---

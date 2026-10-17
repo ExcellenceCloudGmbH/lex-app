@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 113
+max_scenario: 114
 letters:
   a:
     title: ''
@@ -191,3 +191,13 @@ letters:
       xfail: 0
     note: >-
       Same fallback as the model's created_by (LexModel._normalize_audit_actor).
+  s:
+    title: "API-key read decided by the serializer"
+    scenarios: 4.114
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering.
