@@ -7,55 +7,74 @@ URL with the same guarantees as its other endpoints::
     from lex.api.project import lex_action
 
     class Invoice(LexModel):
-        @lex_action(permission="edit", input=ApproveInput)
+        @lex_action(permission="edit", input=ApproveInput, status=201)
         def approve(self, context, data):
             self.status = "approved"
             self.save()
             return {"status": self.status}
 
-        @lex_action(detail=False, permission="permission_import")
+        @lex_action(detail=False, permission="permission_import", throttle="imports")
         def import_batch(cls, context, data):
             ...
 
         @classmethod
-        def permission_import(cls, user_context):
+        def permission_import(cls, user_context, data):
             return "finance" in user_context.groups
 
 * ``POST api/model_entries/<model>/<calculationId>/one/<pk>/action/approve``
   (also ``.../one/<uuid>/action/...`` with ``lex_lookup_field``)
 * ``POST api/model_entries/<model>/<calculationId>/action/import_batch``
 
-For each call lex finds the record (404 when it does not exist or the caller
-may not read it), checks the action's permission (400 ``ACTION_NOT_ALLOWED``
-— never 403, which signs the bundled frontend's user out), validates the
-input (unknown keys refused), runs the method in one transaction with the
-caller's database context and audit context, writes an audit-log entry, and
-returns the result: a dict or list (JSON), data for the ``output``
-serializer, ``None`` (204) or any ``HttpResponse`` (files pass through).
+For each call lex finds the record (404 when it does not exist, the caller
+may not read it or it is outside the request's scope), validates the input
+(unknown keys refused; a GET action validates its query parameters), checks
+the action's permission with the validated input, runs the method in one
+transaction with the caller's database context and audit context, writes an
+audit-log entry after it succeeded (a failed run leaves a "failure" entry
+that the rollback does not take with it) and returns the result: a dict or
+list (JSON), data for the ``output`` serializer, ``None`` (204),
+:class:`ActionResult` for a status or headers decided while running, or any
+``HttpResponse`` (files pass through).
 
 ``permission`` is required: ``"edit"``, ``"create"`` or ``"delete"`` use the
 model's ``permission_edit``/``permission_create``/``permission_delete``; any
-other string names a method on the model (``(user_context) -> bool``, a
-classmethod for collection actions). An action without one is refused.
+other string names a method on the model (``(user_context)`` or
+``(user_context, data)`` — a classmethod for collection actions). It may
+return a bool or raise ``LexActionError``/``NotFound`` to answer in its own
+words. A refusal answers 400 ``ACTION_NOT_ALLOWED`` (never 403, which signs
+the bundled frontend's user out), or 404 with ``denied="not_found"`` or
+``lex_config.ACTION_DENIED = "not_found"`` for projects where anything
+outside a caller's access does not exist. An action without a permission is
+refused.
+
+More options: ``status`` (success status, e.g. 201), ``headers`` (e.g.
+``{"Cache-Control": "no-store"}``), ``throttle`` (a scope of
+``lex_config.THROTTLE_RATES``, answered 429 when exceeded) and, for the
+OpenAPI schema, ``summary``, ``description``, ``operation_id``, ``tags``,
+``responses`` (extra statuses) and ``media="multipart"`` for file uploads.
 """
 from __future__ import annotations
 
+import inspect
 import uuid
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.http import HttpResponseBase
 from rest_framework import status
 from rest_framework.exceptions import MethodNotAllowed, NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 from rest_framework_api_key.permissions import HasAPIKey
 
 from lex.api.errors import LexActionError
 
 _ATTR = "_lex_action"
+DENIED_ANSWERS = ("refused", "not_found")
 
 
 @dataclass(frozen=True)
@@ -68,6 +87,25 @@ class ActionSpec:
     output: Any
     permission: Optional[str]
     atomic: bool
+    status: Optional[int] = None
+    headers: Mapping[str, str] = field(default_factory=dict)
+    throttle: Optional[str] = None
+    denied: Optional[str] = None
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    operation_id: Optional[str] = None
+    tags: Sequence[str] = ()
+    responses: Mapping[int, str] = field(default_factory=dict)
+    media: str = "json"
+
+
+@dataclass
+class ActionResult:
+    """An action's answer whose status or headers are decided while it runs."""
+
+    data: Any = None
+    status: Optional[int] = None
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 def lex_action(
@@ -79,8 +117,22 @@ def lex_action(
     output: Any = None,
     permission: Optional[str] = None,
     atomic: bool = True,
+    status: Optional[int] = None,  # noqa: A002
+    headers: Optional[Mapping[str, str]] = None,
+    throttle: Optional[str] = None,
+    denied: Optional[str] = None,
+    summary: Optional[str] = None,
+    description: Optional[str] = None,
+    operation_id: Optional[str] = None,
+    tags: Sequence[str] = (),
+    responses: Optional[Mapping[int, str]] = None,
+    media: str = "json",
 ):
     """Declare a model method as an action (see the module docstring)."""
+    if denied is not None and denied not in DENIED_ANSWERS:
+        raise ImproperlyConfigured(f"lex_action(denied=...) must be one of {DENIED_ANSWERS}, not {denied!r}")
+    if media not in ("json", "multipart"):
+        raise ImproperlyConfigured(f"lex_action(media=...) must be 'json' or 'multipart', not {media!r}")
 
     def decorator(function):
         target = function.__func__ if isinstance(function, (classmethod, staticmethod)) else function
@@ -93,6 +145,16 @@ def lex_action(
             output=output,
             permission=permission,
             atomic=atomic,
+            status=status,
+            headers=dict(headers or {}),
+            throttle=throttle,
+            denied=denied,
+            summary=summary,
+            description=description,
+            operation_id=operation_id,
+            tags=tuple(tags),
+            responses=dict(responses or {}),
+            media=media,
         )
         setattr(target, _ATTR, spec)
         return function
@@ -133,6 +195,58 @@ def _strict_input(serializer_class, data, context):
     return serializer.validated_data
 
 
+def _query_input(request):
+    """A GET action's input: its query parameters, without the request scope's own."""
+    from lex.core import request_scope
+
+    params = request.query_params.dict()
+    scope_param = request_scope.param()
+    if scope_param:
+        params.pop(scope_param, None)
+    return params
+
+
+def _takes_data(method) -> bool:
+    try:
+        parameters = [
+            p for p in inspect.signature(method).parameters.values()
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        ]
+    except (TypeError, ValueError):
+        return False
+    return len(parameters) >= 2
+
+
+def denied_answer(spec) -> str:
+    from lex.core.extensions import get_setting
+
+    answer = spec.denied or get_setting("ACTION_DENIED") or "refused"
+    if answer not in DENIED_ANSWERS:
+        raise ImproperlyConfigured(f"lex_config.ACTION_DENIED must be one of {DENIED_ANSWERS}, not {answer!r}")
+    return answer
+
+
+class ActionThrottle(SimpleRateThrottle):
+    """Rate limit of one action scope (``lex_config.THROTTLE_RATES``), per user (or client address)."""
+
+    def __init__(self, scope):
+        self.scope = scope
+        super().__init__()
+
+    def get_rate(self):
+        from lex.core.extensions import get_setting
+
+        rates = get_setting("THROTTLE_RATES") or {}
+        if self.scope not in rates:
+            raise ImproperlyConfigured(f"lex_config.THROTTLE_RATES has no rate for the action throttle {self.scope!r}")
+        return rates[self.scope]
+
+    def get_cache_key(self, request, view):
+        user = getattr(request, "user", None)
+        ident = user.pk if user is not None and user.is_authenticated else self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
 class ModelActionView(APIView):
     """Runs a declared action (routes in ``ProcessAdminSite``)."""
 
@@ -140,11 +254,30 @@ class ModelActionView(APIView):
     lex_structured_errors = True
     lex_maps_db_errors = True
 
+    def _spec(self):
+        container = self.kwargs.get("model_container")
+        if container is None:
+            return None
+        return actions_for(container.model_class).get(self.kwargs.get("action"))
+
+    def get_permissions(self):
+        from lex.api.views.permissions.UserPermission import UserPermission
+
+        # The model's modification_restriction applies as on its CRUD endpoints.
+        return [*super().get_permissions(), UserPermission()]
+
+    def get_throttles(self):
+        spec = self._spec()
+        throttles = list(super().get_throttles())
+        if spec is not None and spec.throttle:
+            throttles.append(ActionThrottle(spec.throttle))
+        return throttles
+
     def _dispatch_action(self, request, *args, **kwargs):
         from lex.api.security import create_allowed, delete_allowed, edit_violations, guarded, is_readable
         from lex.api.utils.Context import OperationContext
         from lex.audit_logging.utils.ModelContext import model_logging_context
-        from lex.core import db_context
+        from lex.core import db_context, request_scope
         from lex.core.models.LexModel import UserContext
 
         container = kwargs["model_container"]
@@ -156,8 +289,6 @@ class ModelActionView(APIView):
         if request.method.lower() not in spec.methods:
             raise MethodNotAllowed(request.method)
 
-        from lex.core import request_scope
-
         scope = request_scope.resolve(request)
         instance = None
         if detail:
@@ -165,29 +296,36 @@ class ModelActionView(APIView):
             if instance is None or not is_readable(request, instance):
                 raise NotFound()
 
+        # The input first: the permission may depend on it (which step, which amount).
+        reading = request.method.lower() in ("get", "head")
+        data = _query_input(request) if reading else request.data
+        if spec.input is not None:
+            data = _strict_input(spec.input, data, {"request": request, "view": self, "instance": instance})
+
         context_target = instance if instance is not None else model_class()
         user_context = UserContext.from_request(request, context_target)
-        if not self._permitted(spec, model_class, instance, request, user_context,
+        if not self._permitted(spec, model_class, instance, request, user_context, data,
                                guarded, create_allowed, delete_allowed, edit_violations):
-            detail_message = f"You may not run '{spec.name}' here."
-            raise LexActionError(detail_message, code="ACTION_NOT_ALLOWED")
-
-        data = request.data
-        if spec.input is not None:
-            data = _strict_input(spec.input, request.data, {"request": request, "view": self})
+            if denied_answer(spec) == "not_found":
+                raise NotFound()
+            raise LexActionError(f"You may not run '{spec.name}' here.", code="ACTION_NOT_ALLOWED")
 
         calculation_id = kwargs.get("calculationId") or f"action_{uuid.uuid4().hex}"
         atomic = transaction.atomic() if spec.atomic else _null()
-        with OperationContext(request, calculation_id):
-            with atomic:
-                db_context.apply(request.user, local=True, scope=scope)
-                self._audit(request, spec, model_class, instance, data, calculation_id)
-                logging_target = instance if instance is not None else model_class
-                with model_logging_context(logging_target):
-                    if instance is not None:
-                        result = spec.function(instance, user_context, data)
-                    else:
-                        result = spec.function(model_class, user_context, data)
+        try:
+            with OperationContext(request, calculation_id):
+                with atomic:
+                    db_context.apply(request.user, local=True, scope=scope)
+                    logging_target = instance if instance is not None else model_class
+                    with model_logging_context(logging_target):
+                        if instance is not None:
+                            result = spec.function(instance, user_context, data)
+                        else:
+                            result = spec.function(model_class, user_context, data)
+                    self._audit(request, spec, model_class, instance, data, calculation_id, "success")
+        except Exception as exc:
+            self._audit_failure(request, spec, model_class, instance, data, calculation_id, exc)
+            raise
         return self._respond(spec, result, request)
 
     @staticmethod
@@ -208,7 +346,7 @@ class ModelActionView(APIView):
         return rows.first()
 
     @staticmethod
-    def _permitted(spec, model_class, instance, request, user_context,
+    def _permitted(spec, model_class, instance, request, user_context, data,
                    guarded, create_allowed, delete_allowed, edit_violations) -> bool:
         rule = spec.permission
         if not rule:
@@ -223,45 +361,95 @@ class ModelActionView(APIView):
         method = getattr(owner, rule, None)
         if not callable(method):
             return False
-        return bool(guarded(method, user_context, deny=False, allow=True, what=f"{model_class.__name__}.{rule}"))
+        try:
+            allowed = method(user_context, data) if _takes_data(method) else method(user_context)
+        except (LexActionError, NotFound):
+            raise  # the permission answers in its own words
+        except Exception:
+            import logging
+
+            from lex.core.security_flags import strict
+
+            logging.getLogger(__name__).exception("%s.%s raised", model_class.__name__, rule)
+            return not strict("FAIL_CLOSED")
+        return bool(allowed)
 
     @staticmethod
-    def _audit(request, spec, model_class, instance, data, calculation_id):
-        from lex.audit_logging.models.AuditLog import AuditLog
-        from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
-
+    def _audit_payload(spec, instance, data):
         payload: Dict[str, Any] = {"lex_action": spec.name}
         if instance is not None:
             payload["id"] = instance.pk
+            lookup_field = getattr(type(instance), "lex_lookup_field", None)
+            if lookup_field:
+                payload["ref"] = str(getattr(instance, lookup_field, "") or "")
         try:
-            payload["input"] = dict(data) if hasattr(data, "keys") else data
+            raw = dict(data) if hasattr(data, "keys") else data
         except Exception:
-            payload["input"] = None
-        from lex.core.models.LexModel import LexModel
+            raw = None
+        if hasattr(raw, "keys"):
+            # Files are recorded by field name, never by content.
+            raw = {key: (f"<file {getattr(value, 'name', '')}>" if hasattr(value, "read") else value)
+                   for key, value in raw.items()}
+        from lex.audit_logging.utils.policy import audit_payload
 
+        payload["input"] = audit_payload(raw)
+        return payload
+
+    @classmethod
+    def _audit(cls, request, spec, model_class, instance, data, calculation_id, outcome, error=None):
+        from lex.audit_logging.models.AuditLog import AuditLog
+        from lex.audit_logging.models.AuditLogStatus import AuditLogStatus
+        from lex.audit_logging.utils.policy import audit_actor
+
+        payload = cls._audit_payload(spec, instance, data)
         user = getattr(request, "user", None)
-        from lex.audit_logging.utils.policy import audit_actor, audit_payload
-
-        payload["input"] = audit_payload(payload.get("input"))
+        lookup_field = getattr(model_class, "lex_lookup_field", None)
         entry = AuditLog.objects.create(
             author=(audit_actor(user) or "") if user is not None else "",
             resource=model_class.__name__.lower(),
-            action="update",
+            action="action",
             payload=_json_safe(payload),
             calculation_id=calculation_id,
             object_id=instance.pk if instance is not None and isinstance(instance.pk, int) else None,
+            object_ref=str(getattr(instance, lookup_field)) if instance is not None and lookup_field else None,
         )
-        AuditLogStatus.objects.create(audit_log=entry, status="success")
+        AuditLogStatus.objects.create(audit_log=entry, status=outcome, error_traceback=error)
+
+    @classmethod
+    def _audit_failure(cls, request, spec, model_class, instance, data, calculation_id, exc):
+        """The failure entry, in its own transaction: the run's rollback must not take it along."""
+        import logging
+
+        code = getattr(exc, "code", None) or type(exc).__name__
+        try:
+            with transaction.atomic():
+                cls._audit(request, spec, model_class, instance, data, calculation_id, "failure", error=str(code))
+        except Exception:
+            logging.getLogger(__name__).exception("Could not write the failure audit of action %s", spec.name)
 
     def _respond(self, spec, result, request):
         if isinstance(result, HttpResponseBase):
+            for header, value in spec.headers.items():
+                result.setdefault(header, value)
             return result
+        status_code = spec.status or status.HTTP_200_OK
+        headers = dict(spec.headers)
+        if isinstance(result, ActionResult):
+            status_code = result.status or status_code
+            headers.update(result.headers)
+            result = result.data
         if result is None:
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        if spec.output is not None:
+            response = Response(status=status.HTTP_204_NO_CONTENT)
+        elif spec.output is not None:
             many = isinstance(result, (list, tuple)) or hasattr(result, "model")
-            return Response(spec.output(result, many=many, context={"request": request, "view": self}).data)
-        return Response(result)
+            response = Response(
+                spec.output(result, many=many, context={"request": request, "view": self}).data, status=status_code
+            )
+        else:
+            response = Response(result, status=status_code)
+        for header, value in headers.items():
+            response[header] = value
+        return response
 
     def get(self, request, *args, **kwargs):
         return self._dispatch_action(request, *args, **kwargs)

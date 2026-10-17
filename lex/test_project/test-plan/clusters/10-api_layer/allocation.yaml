@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 137
+max_scenario: 143
 letters:
   a:
     title: ''
@@ -246,3 +246,13 @@ letters:
       xfail: 0
     note: >-
       A proxy inherits its base table's history manager; the history endpoint and as_of check is_read_model first, so a projection never shows the base table's history.
+  y:
+    title: "Actions as the operation primitive: input-aware permission, answers, throttle, audit"
+    scenarios: 10.138-10.143
+    status: complete
+    tests:
+      pass: 6
+      skip: 0
+      xfail: 0
+    note: >-
+      A permission method taking (user_context, data) receives the validated input; one taking only user_context is called as before, so existing actions are unchanged.

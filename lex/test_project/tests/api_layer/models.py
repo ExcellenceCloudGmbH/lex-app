@@ -178,6 +178,14 @@ class _BatchInput(_drf.Serializer):
     count = _drf.IntegerField(min_value=1, max_value=5)
 
 
+class _SpendInput(_drf.Serializer):
+    amount = _drf.IntegerField(min_value=0)
+
+
+class _LookInput(_drf.Serializer):
+    q = _drf.CharField(max_length=20)
+
+
 class ActionItem(LexModel):
     """Cluster 10s: actions beyond CRUD. "locked" rows are readable but not editable."""
 
@@ -237,6 +245,54 @@ class ActionItem(LexModel):
     def batch(cls, context, data):
         created = [ActionItem.objects.create(name=f"batch-{i}") for i in range(data["count"])]
         return {"ids": [item.pk for item in created]}
+
+    # -- cluster 10y: hardened actions -------------------------------------
+    def permission_spend(self, uc, data):
+        return data["amount"] <= 100  # the permission sees the validated input
+
+    @lex_action(permission="permission_spend", input=_SpendInput, status=201, headers={"Cache-Control": "no-store"})
+    def spend(self, context, data):
+        self.note = f"spent {data['amount']}"
+        self.save()
+        return {"spent": data["amount"]}
+
+    def permission_never(self, uc):
+        return False
+
+    @lex_action(permission="permission_never", denied="not_found")
+    def hidden_action(self, context, data):  # refused as if it did not exist
+        return {"ran": True}
+
+    def permission_wrong_state(self, uc):
+        raise LexActionError("Not in this state.", code="WRONG_STATE", status_code=409)
+
+    @lex_action(permission="permission_wrong_state")
+    def state_bound(self, context, data):
+        return {"ran": True}
+
+    def permission_look(self, uc, data):
+        return True
+
+    @lex_action(methods=("get",), permission="permission_look", input=_LookInput)
+    def look(self, context, data):
+        return {"q": data["q"], "name": self.name}
+
+    @lex_action(permission="edit")
+    def ping(self, context, data):
+        return {"pong": True}
+
+    @lex_action(permission="edit")
+    def upsert(self, context, data):
+        from lex.api.project import ActionResult
+
+        created = self.note != "upserted"
+        self.note = "upserted"
+        self.save()
+        return ActionResult({"created": created}, status=201 if created else 200, headers={"X-Upsert": "1"})
+
+    @lex_action(permission="edit", atomic=False)
+    def fail_loose(self, context, data):
+        raise LexActionError("Loose failure.", code="LOOSE", status_code=409)
 
 
 # ---------------------------------------------------------------------------

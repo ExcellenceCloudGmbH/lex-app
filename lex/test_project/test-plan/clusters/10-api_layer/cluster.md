@@ -230,3 +230,22 @@
 **Scenario range:** 10.132-10.137. **Test file:** `lex/test_project/tests/api_layer/test_10x_read_models.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/read_models.py` (is_read_model, validate, list_queryset, CreateView), `lex/core/models/LexReadModel.py`, `lex/lex_app/simple_history_config.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (writes refused, as_of), `lex/api/views/model_entries/List.py`, `lex/api/views/model_entries/History.py`, `lex/api/serializers/base_serializers.py` (lex_prepare_page), `lex/core/extensions.py`. Batch: [10x](batches.md).
 
 ---
+
+### 10y. Actions as the operation primitive: input-aware permission, answers, throttle, audit ✅
+
+**What it tests:** The input is validated before the permission, which then decides on it; denied='not_found' and ACTION_DENIED answer 404, a permission's own LexActionError is rendered; status, headers and ActionResult set the answer; a GET action validates its query string; throttle scopes answer 429; the audit entry is written after success (action 'action', object reference) and a failure entry survives the rollback, also for atomic=False.
+
+**Why a regression matters:** With every operation of a product running as an action, a permission that cannot see which step is answered, an always-success audit, or a 400 where the product promises 404 would each break a rule the hand-written endpoints kept.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.138 | the permission sees the validated input | 400 before the permission; 201 + no-store for 50; ACTION_NOT_ALLOWED for 500 |
+| 10.139 | refusals answer as configured | denied=not_found 404; raising permission 409 WRONG_STATE; ACTION_DENIED=not_found 404 |
+| 10.140 | status and headers decided while running | ActionResult: 201 then 200 with its header |
+| 10.141 | GET actions validate their query | 200 echo; 400 missing; 400 UNKNOWN_FIELDS |
+| 10.142 | throttled actions | 200, 200, 429 THROTTLED; a missing rate stops startup |
+| 10.143 | audit after success, failures kept | success entry with action 'action'; failure entries with the code for an atomic and a non-atomic run |
+
+**Scenario range:** 10.138-10.143. **Test file:** `lex/test_project/tests/api_layer/test_10y_hardened_actions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/actions.py` (lex_action options, ActionResult, ActionThrottle, ModelActionView _permitted/_respond/_audit/_audit_failure/get_throttles, denied_answer), `lex/core/extensions.py` (ACTION_DENIED, THROTTLE_RATES, _validate_actions), `lex/audit_logging/models/AuditLog.py` (action choice), `lex/audit_logging/migrations/0009_auditlog_action_choice.py`, `lex/api/project/__init__.py`. Batch: [10y](batches.md).
+
+---

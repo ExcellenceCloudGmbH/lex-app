@@ -69,6 +69,10 @@ EXTENSION_DEFAULTS: Dict[str, Any] = {
     # The scope a request acts in: {"param": "<query parameter>", "resolver": "<dotted path>"}. See
     # lex.core.request_scope.
     "REQUEST_SCOPE": None,
+    # What a refused action answers: "refused" (400 ACTION_NOT_ALLOWED, default) or "not_found" (404).
+    "ACTION_DENIED": "refused",
+    # Rates of action throttles (@lex_action(throttle="<scope>")): {"<scope>": "30/min"}.
+    "THROTTLE_RATES": {},
 }
 
 EXTENSION_KEYS = tuple(EXTENSION_DEFAULTS)
@@ -213,6 +217,7 @@ def validate_configuration() -> None:
         validate_read_model(model)
     if request_scope.config() is not None:
         request_scope.resolver()
+    _validate_actions()
     for name in HOOK_KEYS:
         get_hook(name)
     get_import_list("AUTHENTICATION_CLASSES")
@@ -259,6 +264,28 @@ def _validate_exposed_models() -> None:
                 f"{model.__name__}.lex_api_exposed names unknown operations {sorted(unknown)}; "
                 f"known: {list(GENERIC_OPERATIONS)}"
             )
+
+
+def _validate_actions() -> None:
+    """ACTION_DENIED is known and every action throttle has a rate (a missing one would 500 at runtime)."""
+    from django.apps import apps
+
+    from lex.api.actions import DENIED_ANSWERS, actions_for
+
+    if get_setting("ACTION_DENIED") not in DENIED_ANSWERS:
+        raise ImproperlyConfigured(
+            f"lex_config.ACTION_DENIED must be one of {DENIED_ANSWERS}, not {get_setting('ACTION_DENIED')!r}"
+        )
+    rates = get_setting("THROTTLE_RATES") or {}
+    if not isinstance(rates, dict):
+        raise ImproperlyConfigured("lex_config.THROTTLE_RATES must be a dict of scope -> rate")
+    for model in apps.get_models():
+        for spec in actions_for(model).values():
+            if spec.throttle and spec.throttle not in rates:
+                raise ImproperlyConfigured(
+                    f"{model.__name__}.{spec.name} uses the throttle {spec.throttle!r}, "
+                    "which lex_config.THROTTLE_RATES does not rate"
+                )
 
 
 def reset_extension_cache() -> None:
