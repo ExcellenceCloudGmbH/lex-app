@@ -365,6 +365,12 @@ def apply_query_param_filters(
     reserved = set(RESERVED_QUERY_PARAMS)
     if reserved_params:
         reserved.update(set(reserved_params))
+    from lex.core import request_scope
+
+    # The request scope's parameter (REQUEST_SCOPE) chooses who acts, it filters nothing.
+    scope_param = request_scope.param()
+    if scope_param:
+        reserved.add(scope_param)
 
     for raw_key, values in query_params.lists():
         if raw_key in reserved:

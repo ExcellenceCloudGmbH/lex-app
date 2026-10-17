@@ -173,3 +173,17 @@
 | Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would. |
+
+### Batch 10w — The scope a request acts in (REQUEST_SCOPE) ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.128-10.131 |
+| Type | U + E |
+| Files covered | `lex/core/request_scope.py`, `lex/core/db_context.py` (apply with scope), `lex/api/views/model_entries/List.py` (reserved parameter), `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (get_queryset, initial), `lex/api/views/model_entries/History.py` (_record_readable), `lex/api/actions.py` (_resolve_instance), `lex/core/extensions.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10w_request_scope.py` |
+| Test classes | `TestCluster10w_ScopeUnit`, `TestCluster10w_RequestScope` |
+| Fixtures | ActionItem with a patched lex_scope_queryset, a test resolver refusing one value and defaulting another, a recording DB_CONTEXT |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows. |

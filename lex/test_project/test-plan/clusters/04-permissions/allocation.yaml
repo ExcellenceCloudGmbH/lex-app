@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 128
+max_scenario: 135
 letters:
   a:
     title: ''
@@ -232,3 +232,13 @@ letters:
       xfail: 0
     note: >-
       lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist.
+  w:
+    title: "The database decides (lex_permission_source = \"database\")"
+    scenarios: 4.129-4.135
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The first-request check is switched off with LEX_DATABASE_DECIDES_CHECK=false in tests that run as the suite's superuser; the database mode is set per test, never on the model class, so the check of the whole suite is not affected.

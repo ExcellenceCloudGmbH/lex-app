@@ -42,6 +42,12 @@ def lex_datetime_now() -> datetime:
     return datetime.now(timezone.get_default_timezone()).replace(tzinfo=None)
 
 
+def _database_decides(instance) -> bool:
+    from lex.core.permission_source import database_decides
+
+    return database_decides(type(instance))
+
+
 def should_use_atomic_model_operations(model_or_class) -> bool:
     return not (
         hasattr(model_or_class, "is_atomic")
@@ -565,7 +571,7 @@ class LexModel(LifecycleModel):
                     self._run_hooked_methods(BEFORE_UPDATE, **kwargs)
 
                 self._run_hooked_methods(BEFORE_SAVE, **kwargs)
-                result = base_save(*args, **kwargs)
+                result = self._save_row(base_save, is_new, *args, **kwargs)
                 clear_transient_skip_history_flag()
                 self._run_hooked_methods(AFTER_SAVE, **kwargs)
 
@@ -582,6 +588,29 @@ class LexModel(LifecycleModel):
             raise
         finally:
             clear_transient_skip_history_flag()
+
+    def _save_row(self, base_save, is_new, *args, **kwargs):
+        """Save; when the database decides, an update never turns into an INSERT.
+
+        Django inserts when an UPDATE matches no row. Under row-level security
+        that means a row the caller may read but not write would be inserted
+        again (or fail with a confusing error), so the update is forced and a
+        miss raises RowNotWritable (answered 404).
+        """
+        if is_new or not _database_decides(self) or kwargs.get("force_insert") or args:
+            return base_save(*args, **kwargs)
+        from django.db import DatabaseError
+
+        from lex.core.permission_source import RowNotWritable
+
+        if not kwargs.get("update_fields"):
+            kwargs["force_update"] = True
+        try:
+            return base_save(*args, **kwargs)
+        except DatabaseError as exc:
+            if "did not affect any rows" in str(exc):
+                raise RowNotWritable(f"{type(self).__name__} {self.pk} cannot be written by this caller.") from exc
+            raise
 
     def _finalize_pending_terminal_audit(self):
         pending_terminal_audit = getattr(self, "_pending_terminal_audit", None)
@@ -1063,6 +1092,8 @@ class LexModel(LifecycleModel):
             
         Default: Uses Keycloak 'read' scope for all fields
         """
+        if _database_decides(self):
+            return PermissionResult.allow_all("database decides")
 
         if "read" in user_context.keycloak_scopes:
             return PermissionResult.allow_all("Keycloak read scope")
@@ -1112,6 +1143,8 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'edit' scope for all fields
         """
+        if _database_decides(self):
+            return PermissionResult.allow_all("database decides")
         if "edit" in user_context.keycloak_scopes:
             return PermissionResult.allow_all("Keycloak edit scope")
         return PermissionResult.deny("No edit permission")
@@ -1128,6 +1161,8 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'export' scope for all fields
         """
+        if _database_decides(self):
+            return PermissionResult.allow_all("database decides")
         if "export" in user_context.keycloak_scopes:
             return PermissionResult.allow_all("Keycloak export scope")
         return PermissionResult.deny("No export permission")
@@ -1144,6 +1179,8 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'create' scope
         """
+        if _database_decides(self):
+            return True
         return "create" in user_context.keycloak_scopes
 
     def permission_delete(self, user_context: UserContext) -> bool:
@@ -1158,6 +1195,8 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'delete' scope
         """
+        if _database_decides(self):
+            return True
         return "delete" in user_context.keycloak_scopes
 
     def permission_list(self, user_context: UserContext) -> bool:
@@ -1172,6 +1211,8 @@ class LexModel(LifecycleModel):
 
         Default: Uses Keycloak 'list' scope
         """
+        if _database_decides(self):
+            return True
         return "list" in user_context.keycloak_scopes
 
     # =============================================================================

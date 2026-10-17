@@ -63,6 +63,12 @@ EXTENSION_DEFAULTS: Dict[str, Any] = {
     # (a dotted path to actor(user) -> str; also created_by/edited_by). See lex.audit_logging.utils.policy.
     "AUDIT_PAYLOAD": "full",
     "AUDIT_ACTOR": None,
+    # Who decides visibility and writes: "python" (lex's permission hooks, default) or "database" (row-level
+    # security; per model also lex_permission_source). See lex.core.permission_source.
+    "PERMISSION_SOURCE": "python",
+    # The scope a request acts in: {"param": "<query parameter>", "resolver": "<dotted path>"}. See
+    # lex.core.request_scope.
+    "REQUEST_SCOPE": None,
 }
 
 EXTENSION_KEYS = tuple(EXTENSION_DEFAULTS)
@@ -195,6 +201,12 @@ def validate_configuration() -> None:
     from lex.audit_logging.utils.policy import payload_mode
 
     payload_mode()
+    from lex.core import request_scope
+    from lex.core.permission_source import database_models
+
+    database_models()
+    if request_scope.config() is not None:
+        request_scope.resolver()
     for name in HOOK_KEYS:
         get_hook(name)
     get_import_list("AUTHENTICATION_CLASSES")

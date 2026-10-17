@@ -311,3 +311,25 @@ OWNED = "owneditem"
 RAISING_READ = "raisingreaditem"
 QUERYSET_RULE = "querysetruleitem"
 SECRET_DOCUMENT = "secretdocument"
+
+
+class DatabaseRuleItem(LexModel):
+    """Cluster 4w: no permission hooks of its own — in database mode row-level security decides.
+
+    The tests enable a policy on its table: a caller sees the rows it owns and may change those
+    that are not locked.
+    """
+
+    owner_id = models.IntegerField(default=0)
+    name = models.CharField(max_length=200)
+    locked = models.BooleanField(default=False)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
+DATABASE_RULE_MODELS = [DatabaseRuleItem]
+DATABASE_RULE = "databaseruleitem"

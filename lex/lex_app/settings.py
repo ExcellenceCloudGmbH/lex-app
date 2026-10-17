@@ -365,6 +365,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
     "lex.authentication.middleware.ApiKeyAwareLoginRequiredMiddleware",
+    # Models that let the database decide (lex_permission_source) need row-level security for real:
+    # checked on the first request, 503 otherwise (no-op without such models).
+    "lex.core.permission_source.DatabaseDecidesGuardMiddleware",
     # One transaction per request with lex_config.DB_CONTEXT applied (no-op when unset).
     "lex.core.db_context.LexDbContextMiddleware",
     # Who may use lex's generic api/* endpoints (lex_config.GENERIC_API, default "all").

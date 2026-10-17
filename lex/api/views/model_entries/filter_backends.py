@@ -58,6 +58,11 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
             return queryset
         if name == "AuditLog":
             return self._handle_auditlog(request, queryset)
+        from lex.core.permission_source import database_decides
+
+        # The database already returned only the rows this caller may see.
+        if database_decides(queryset.model):
+            return queryset
         return self._handle_lexmodel_default(request, queryset)
 
     def _apply_permission_read_queryset(self, request, queryset):

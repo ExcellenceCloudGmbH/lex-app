@@ -190,3 +190,17 @@ must not open a check on the whole model.
 | Tests landed | **10 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist. |
+
+### Batch 4w — The database decides (lex_permission_source = "database") ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.129-4.135 |
+| Type | U + E (PostgreSQL) |
+| Files covered | `lex/core/permission_source.py` (database_decides, problems, is_policy_refusal, DatabaseDecidesGuardMiddleware), `lex/core/models/LexModel.py` (default hooks, _save_row), `lex/api/views/model_entries/filter_backends.py` (restrict), `lex/api/errors.py` (policy refusals), `lex/api/middleware/keycloak_permissions.py`, `lex/core/extensions.py` (PERMISSION_SOURCE), `lex/lex_app/settings.py` (guard in MIDDLEWARE) |
+| Test file | `lex/test_project/tests/permissions/test_4w_database_decides.py` |
+| Test classes | `TestCluster04w_SourceUnit`, `TestCluster04w_DatabaseDecides`, `TestCluster04w_Guard`, `TestCluster04w_KeycloakSkipped` |
+| Fixtures | DatabaseRuleItem with row-level security policies enabled per test, a NOLOGIN role the requests run as (SET ROLE), DB_CONTEXT setting app.user_id, a mocked Keycloak manager |
+| Tests landed | **7 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The first-request check is switched off with LEX_DATABASE_DECIDES_CHECK=false in tests that run as the suite's superuser; the database mode is set per test, never on the model class, so the check of the whole suite is not affected. |

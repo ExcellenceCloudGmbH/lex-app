@@ -209,6 +209,10 @@ def surface(exc: Exception) -> None:
 
         if get_hook("EXCEPTION_HANDLER") is not None:
             raise exc
+        from lex.core.permission_source import is_policy_refusal
+
+        if is_policy_refusal(exc):
+            raise LexActionError("Not found.", code="NOT_FOUND", status_code=404) from exc
 
 
 def lex_exception_handler(exc: Exception, context: Dict[str, Any]) -> Optional[Response]:
@@ -228,6 +232,12 @@ def lex_exception_handler(exc: Exception, context: Dict[str, Any]) -> Optional[R
         mapped = map_database_error(exc)
         if mapped is not None:
             return mapped.as_response()
+
+    from lex.core.permission_source import is_policy_refusal
+
+    # The database refused the row (row-level security): for this caller it does not exist.
+    if is_policy_refusal(exc):
+        return LexActionError("Not found.", code="NOT_FOUND", status_code=404).as_response()
 
     response = drf_exception_handler(exc, context)
     if response is None:
