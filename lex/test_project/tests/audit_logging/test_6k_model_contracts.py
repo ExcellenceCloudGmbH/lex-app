@@ -80,17 +80,18 @@ class TestCluster06k_AuditLogModel(SimpleTestCase):
     """
 
     # -- 6.96 ----------------------------------------------------------
-    def test_6_96_action_choices_are_exactly_create_update_delete(self) -> None:
+    def test_6_96_action_choices_are_exactly_the_documented_ones(self) -> None:
         """
         Scenario 6.96: ``AuditLog.ACTION_CHOICES`` must enumerate
-        exactly the three documented operations (``create`` / ``update``
-        / ``delete``). Adding or removing one is a contract change for
-        every consumer that branches on action — the frontend's
-        per-action icon/colour, the audit-log filter dropdown, and the
+        exactly the documented operations: ``create`` / ``update`` /
+        ``delete``, and ``action`` for a model action (``@lex_action``,
+        ext-10). Adding or removing one is a contract change for every
+        consumer that branches on action — the frontend's per-action
+        icon/colour, the audit-log filter dropdown, and the
         compliance-team's CSV export.
 
         A regression that silently introduced (e.g.) ``"bulk_delete"``
-        as a 4th choice would let unknown actions pass the model-level
+        as another choice would let unknown actions pass the model-level
         ``CharField(choices=...)`` validation but break every
         downstream switch statement.
         """
@@ -101,6 +102,7 @@ class TestCluster06k_AuditLogModel(SimpleTestCase):
                 ("create", "Create"),
                 ("update", "Update"),
                 ("delete", "Delete"),
+                ("action", "Action"),
             ),
             "ACTION_CHOICES drift — frontend / scraper consumers branch "
             "on this exact tuple shape. Got: %r" % (choices,),
