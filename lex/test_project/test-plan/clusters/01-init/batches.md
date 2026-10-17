@@ -1750,3 +1750,17 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 | Tests landed | **2 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Scopes are split on commas and blanks dropped (read, list,,edit -> [read, list, edit]). |
+
+### Batch 1ax — Broken lex_config.py stops startup ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.398-1.401 |
+| Type | U |
+| Files covered | `lex/core/extensions.py` (validate_configuration, HOOK_KEYS), `lex/lex_app/apps.py` (_validate_project_configuration), `lex/api/utils/api_key_requests.py` (resolver errors logged) |
+| Test file | `lex/test_project/tests/init/test_1ax_config_validation.py` |
+| Test classes | `TestCluster01ax_ConfigValidation` |
+| Fixtures | temporary PROJECT_ROOT with a lex_config.py per case |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Called at the end of LexAppConfig.ready() for project apps. |

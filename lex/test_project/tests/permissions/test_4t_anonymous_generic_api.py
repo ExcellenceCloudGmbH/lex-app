@@ -11,10 +11,10 @@ session probe ``api/user/`` stays reachable for anonymous callers, so it
 answers its own 401 and operators can still sign in; signed-in non-superusers
 get 404 there as before. Mode ``"all"`` is unchanged.
 
-Cluster 4s — scenarios 4.114–4.116. Type: U + E.
+Cluster 4t — scenarios 4.115–4.117. Type: U + E.
 Covers: lex/api/middleware/generic_api_gate.py (generic_api_hidden_from_anonymous),
 lex/authentication/middleware.py (ApiKeyAwareLoginRequiredMiddleware.is_login_required_for_url).
-Run: python -m lex pytest lex/test_project/tests/permissions/test_4s_anonymous_generic_api.py -v
+Run: python -m lex pytest lex/test_project/tests/permissions/test_4t_anonymous_generic_api.py -v
 """
 
 from __future__ import annotations
@@ -45,13 +45,13 @@ def _request(path, user=None):
     return request
 
 
-class TestCluster04s_AnonymousGenericApiUnit(SimpleTestCase):
-    """Cluster 4s (unit): which anonymous requests skip the login check."""
+class TestCluster04t_AnonymousGenericApiUnit(SimpleTestCase):
+    """Cluster 4t (unit): which anonymous requests skip the login check."""
 
-    # -- 4.114 ---------------------------------------------------------
-    def test_4_114_closed_paths_skip_the_login_check_for_anonymous_callers(self) -> None:
+    # -- 4.115 ---------------------------------------------------------
+    def test_4_115_closed_paths_skip_the_login_check_for_anonymous_callers(self) -> None:
         """
-        Scenario 4.114: the login check steps aside only where the gate answers 404.
+        Scenario 4.115: the login check steps aside only where the gate answers 404.
         Given: GENERIC_API "superuser" and "off", a project API under api/sample/
         When: anonymous and signed-in requests for generic, probe, health and project paths
         Then: generic paths skip the login check for anonymous callers only;
@@ -73,15 +73,15 @@ class TestCluster04s_AnonymousGenericApiUnit(SimpleTestCase):
             self.assertFalse(generic_api_hidden_from_anonymous(_request("/api/model_entries/x/list")))
 
 
-class TestCluster04s_AnonymousGenericApi(E2ETestCase):
-    """Cluster 4s (end to end): what an anonymous caller gets back."""
+class TestCluster04t_AnonymousGenericApi(E2ETestCase):
+    """Cluster 4t (end to end): what an anonymous caller gets back."""
 
     e2e_models: list = []
 
-    # -- 4.115 ---------------------------------------------------------
-    def test_4_115_anonymous_caller_gets_404_from_a_closed_generic_api(self) -> None:
+    # -- 4.116 ---------------------------------------------------------
+    def test_4_116_anonymous_caller_gets_404_from_a_closed_generic_api(self) -> None:
         """
-        Scenario 4.115: no sign-in redirect for a path that "does not exist".
+        Scenario 4.116: no sign-in redirect for a path that "does not exist".
         Given: GENERIC_API="superuser" and an anonymous client
         When: GET /api/model-structure and POST /api/run_step/x/1
         Then: both answer 404 {"code": "NOT_FOUND"}, not a redirect or 401.
@@ -92,10 +92,10 @@ class TestCluster04s_AnonymousGenericApi(E2ETestCase):
             self.assertEqual(response.status_code, 404, response.content[:200])
             self.assertEqual(response.json()["code"], "NOT_FOUND")
 
-    # -- 4.116 ---------------------------------------------------------
-    def test_4_116_session_probe_and_open_mode_keep_the_login_answer(self) -> None:
+    # -- 4.117 ---------------------------------------------------------
+    def test_4_117_session_probe_and_open_mode_keep_the_login_answer(self) -> None:
         """
-        Scenario 4.116: sign-in still works, and the default mode is unchanged.
+        Scenario 4.117: sign-in still works, and the default mode is unchanged.
         Given: an anonymous client
         When: GET /api/user/ with GENERIC_API="superuser", and GET /api/model-structure without GENERIC_API
         Then: neither answers 404 — the probe answers its own 401, the open API the

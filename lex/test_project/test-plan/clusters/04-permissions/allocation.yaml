@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 114
+max_scenario: 118
 letters:
   a:
     title: ''
@@ -201,3 +201,24 @@ letters:
       xfail: 0
     note: >-
       Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering.
+  t:
+    title: "Closed generic API is 404 for anonymous callers"
+    scenarios: 4.115-4.117
+    status: complete
+    tests:
+      pass: 3
+      skip: 0
+      xfail: 0
+    note: >-
+      The session probe api/user/ is exempt from the login check in settings, so the gate now lets
+      anonymous callers reach it.
+  u:
+    title: "Scoped API keys in the admin"
+    scenarios: 4.118
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      Importing rest_framework_api_key.admin registers the classic keys.

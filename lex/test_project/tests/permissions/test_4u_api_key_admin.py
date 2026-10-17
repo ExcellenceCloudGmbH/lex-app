@@ -8,9 +8,9 @@ authentication app now registers it at startup with the user column and a
 revoked filter; registering twice is harmless, and the classic keys of
 djangorestframework-api-key are registered along with it.
 
-Cluster 4t — scenario 4.117. Type: U.
+Cluster 4u — scenario 4.118. Type: U.
 Covers: lex/authentication/admin.py (register_api_key_admin), lex/authentication/apps.py (ready).
-Run: python -m lex pytest lex/test_project/tests/permissions/test_4t_api_key_admin.py -v
+Run: python -m lex pytest lex/test_project/tests/permissions/test_4u_api_key_admin.py -v
 """
 
 from __future__ import annotations
@@ -27,13 +27,13 @@ from lex.authentication.models import LexAPIKey
 pytestmark = pytest.mark.permissions
 
 
-class TestCluster04t_ApiKeyAdmin(SimpleTestCase):
-    """Cluster 4t: LexAPIKey in the admin."""
+class TestCluster04u_ApiKeyAdmin(SimpleTestCase):
+    """Cluster 4u: LexAPIKey in the admin."""
 
-    # -- 4.117 ---------------------------------------------------------
-    def test_4_117_scoped_keys_are_registered_in_the_admin(self) -> None:
+    # -- 4.118 ---------------------------------------------------------
+    def test_4_118_scoped_keys_are_registered_in_the_admin(self) -> None:
         """
-        Scenario 4.117: operators find scoped keys in the admin.
+        Scenario 4.118: operators find scoped keys in the admin.
         Given: lex started (the authentication app's ready() ran), and a fresh admin site
         When: the default site is inspected and register_api_key_admin() runs twice on the fresh one
         Then: LexAPIKey is registered on both with the user column and a revoked

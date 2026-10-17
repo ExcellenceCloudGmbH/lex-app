@@ -148,3 +148,31 @@ must not open a check on the whole model.
 | Tests landed | **1 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |
+
+### Batch 4t — Closed generic API is 404 for anonymous callers ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.115-4.117 |
+| Type | U + E |
+| Files covered | `lex/api/middleware/generic_api_gate.py` (generic_api_hidden_from_anonymous, session probe), `lex/authentication/middleware.py` (is_login_required_for_url) |
+| Test file | `lex/test_project/tests/permissions/test_4t_anonymous_generic_api.py` |
+| Test classes | `TestCluster04t_AnonymousGenericApiUnit`, `TestCluster04t_AnonymousGenericApi` |
+| Fixtures | none (RequestFactory, anonymous APIClient, use_lex_extensions) |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The session probe api/user/ is exempt from the login check in settings, so the gate now lets anonymous callers reach it. |
+
+### Batch 4u — Scoped API keys in the admin ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.118 |
+| Type | U |
+| Files covered | `lex/authentication/admin.py` (register_api_key_admin), `lex/authentication/apps.py` (ready) |
+| Test file | `lex/test_project/tests/permissions/test_4u_api_key_admin.py` |
+| Test classes | `TestCluster04u_ApiKeyAdmin` |
+| Fixtures | a fresh AdminSite |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Importing rest_framework_api_key.admin registers the classic keys. |

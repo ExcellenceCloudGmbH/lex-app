@@ -151,3 +151,33 @@
 **Scenario range:** 4.114. **Test file:** `lex/test_project/tests/permissions/test_4s_api_key_read_context.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/serializers/base_serializers.py` (_get_can_read_context). Batch: [4s](batches.md).
 
 ---
+
+### 4t. Closed generic API is 404 for anonymous callers ✅
+
+**What it tests:** With GENERIC_API superuser or off, closed generic paths skip the login check for anonymous callers and get the gate's 404; api/user/, api/health and the project API keep their answers; mode all is unchanged.
+
+**Why a regression matters:** A sign-in redirect tells an anonymous caller the path exists, against the documented 404; and in superuser mode the bundled frontend could not start the sign-in because its session probe answered 404.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.115 | which anonymous requests skip the login check | closed generic paths only; probe, health, project API and mode all unchanged |
+| 4.116 | anonymous on a closed generic API | 404 NOT_FOUND for GET and POST |
+| 4.117 | session probe and open mode | probe answers its own 401; open mode keeps the login redirect |
+
+**Scenario range:** 4.115-4.117. **Test file:** `lex/test_project/tests/permissions/test_4t_anonymous_generic_api.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/middleware/generic_api_gate.py` (generic_api_hidden_from_anonymous, session probe), `lex/authentication/middleware.py` (is_login_required_for_url). Batch: [4t](batches.md).
+
+---
+
+### 4u. Scoped API keys in the admin ✅
+
+**What it tests:** LexAPIKey (and the classic APIKey) are registered at startup with the user column and a revoked filter; registering twice is harmless.
+
+**Why a regression matters:** The docs send operators to the admin to revoke keys; with admin autodiscovery disabled, nothing registered them.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.118 | admin registration | registered, user column, revoked filter, idempotent |
+
+**Scenario range:** 4.118. **Test file:** `lex/test_project/tests/permissions/test_4u_api_key_admin.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Covers `lex/authentication/admin.py` (register_api_key_admin), `lex/authentication/apps.py` (ready). Batch: [4u](batches.md).
+
+---

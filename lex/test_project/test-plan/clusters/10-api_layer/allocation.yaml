@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 116
+max_scenario: 120
 letters:
   a:
     title: ''
@@ -206,3 +206,13 @@ letters:
       xfail: 0
     note: >-
       The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b).
+  u:
+    title: "Schema, docs and CLI share the SCHEMA settings"
+    scenarios: 10.117-10.120
+    status: complete
+    tests:
+      pass: 4
+      skip: 0
+      xfail: 0
+    note: >-
+      The overridden get() methods keep extend_schema(exclude=True), as drf-spectacular's own.

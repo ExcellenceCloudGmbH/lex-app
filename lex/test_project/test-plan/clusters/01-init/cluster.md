@@ -482,3 +482,20 @@ does not remove user launch configurations.
 **Scenario range:** 1.396-1.397. **Test file:** `lex/test_project/tests/init/test_1aw_create_api_key.py`. **Type:** U. **Status:** ✅ Complete (2026-10-16). Covers `lex/authentication/management/commands/create_api_key.py`. Batch: [1aw](batches.md).
 
 ---
+
+### 1ax. Broken lex_config.py stops startup ✅
+
+**What it tests:** A lex_config.py that raises, a hook or middleware path that does not import, an invalid GENERIC_API, a missing API_URLCONF and non-string key headers each raise ImproperlyConfigured naming the key; a valid or missing config passes; a raising key resolver refuses and logs.
+
+**Why a regression matters:** Before, any of these silently fell back to defaults: the generic API open to everyone, no database context, no project middleware.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.398 | config fails to load | ImproperlyConfigured with the error |
+| 1.399 | unresolvable settings | each names its key (5 subtests) |
+| 1.400 | valid or missing config | passes; hook resolved |
+| 1.401 | resolver raises | key refused; error logged |
+
+**Scenario range:** 1.398-1.401. **Test file:** `lex/test_project/tests/init/test_1ax_config_validation.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/extensions.py` (validate_configuration, HOOK_KEYS), `lex/lex_app/apps.py` (_validate_project_configuration), `lex/api/utils/api_key_requests.py` (resolver errors logged). Batch: [1ax](batches.md).
+
+---
