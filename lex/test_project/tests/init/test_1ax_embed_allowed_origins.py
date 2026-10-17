@@ -27,6 +27,21 @@ pins the ``frame-ancestors`` restriction where it actually takes effect: on
 ``serve_react``'s own document responses (the SPA fallback and any other real
 ``.html`` file it serves), never on the assets or ``config.js`` beside them.
 
+A security review of the first cut found that ``urlsplit`` alone is not enough to
+turn a host into something safe to splice into a CSP header: a non-ASCII host
+produces non-ASCII header bytes (silently dropping the whole directive), and a
+crafted bracketed/whitespace host can inject an extra CSP source token (e.g. a
+bare ``https:`` scheme source), widening -- not narrowing -- who may frame
+lex-app. ``_normalise_origin`` additionally IDNA-encodes the host and checks it
+against a strict hostname grammar; neither step is optional. The review also
+found that ``LEX_EMBED_ALLOWED_ORIGINS`` set to only invalid entries (e.g. a
+wildcard) parsed to ``[]``, indistinguishable from unset -- silently disabling
+the restriction the operator thought they had turned on. ``LEX_EMBED_ORIGINS_CONFIGURED``
+closes that: set-but-empty now fails closed to ``frame-ancestors 'self'`` (the
+app may still frame itself; nothing else may), on both the middleware and the
+SPA document. The scenario IDs (1.402-1.406) are unchanged from the prior round
+-- this round only adds cases to them.
+
 Cluster 1ax -- scenarios 1.402-1.406. Type: U.
 Covers: lex/runtime_config.py (parse_embed_allowed_origins, merge_frame_ancestors),
 lex/lex_app/settings.py (LEX_EMBED_ALLOWED_ORIGINS), lex/core/middleware/embed_xframe.py
@@ -49,7 +64,7 @@ from django.test import RequestFactory, SimpleTestCase, override_settings
 from lex.core.middleware.embed_xframe import EmbedXFrameOptionsMiddleware
 from lex.lex_app import settings as lex_settings
 from lex.react import views as react_views
-from lex.runtime_config import parse_embed_allowed_origins
+from lex.runtime_config import embed_origins_configured, parse_embed_allowed_origins
 
 pytestmark = pytest.mark.init
 
@@ -58,6 +73,7 @@ _ALLOWED_ORIGINS = ["https://reports.example.com", "https://app.example.org:8443
 _EXPECTED_FRAME_ANCESTORS = (
     "frame-ancestors 'self' https://reports.example.com https://app.example.org:8443"
 )
+_SELF_ONLY_DIRECTIVE = "frame-ancestors 'self'"
 
 
 def _run_middleware(request, response):
@@ -182,21 +198,47 @@ class TestCluster01ax_MiddlewareAddsFrameAncestors(SimpleTestCase):
         self.assertNotIn("old.example.com", csp, csp)
         self.assertIn(_EXPECTED_FRAME_ANCESTORS, csp, csp)
 
+    @override_settings(LEX_EMBED_ALLOWED_ORIGINS=[], LEX_EMBED_ORIGINS_CONFIGURED=True)
+    def test_1_402_configured_but_all_invalid_still_gets_self_only_directive(self):
+        """
+        Scenario 1.402 (fail closed): set-but-nothing-valid restricts to 'self', not open.
+        Given: an operator set LEX_EMBED_ALLOWED_ORIGINS to something (e.g. a wildcard
+               that normalised to nothing), so LEX_EMBED_ORIGINS_CONFIGURED is True even
+               though the parsed list is empty
+        When: the middleware processes an embed=true response
+        Then: Content-Security-Policy is exactly frame-ancestors 'self' -- the app may
+              still frame itself, but nothing else may. Silently behaving as if the
+              setting were unset (no CSP at all) would reopen unrestricted framing the
+              moment every configured origin happens to be invalid.
+        """
+        request = RequestFactory().get("/some/view", {"embed": "true"})
+        response = _run_middleware(request, HttpResponse("ok"))
+
+        self.assertEqual(response["Content-Security-Policy"], _SELF_ONLY_DIRECTIVE)
+
 
 # ---------------------------------------------------------------------------
 # 1.403 -- unset/empty setting: no CSP, pre-existing embed behaviour untouched
 # ---------------------------------------------------------------------------
-@override_settings(LEX_EMBED_ALLOWED_ORIGINS=[])
+@override_settings(LEX_EMBED_ALLOWED_ORIGINS=[], LEX_EMBED_ORIGINS_CONFIGURED=False)
 class TestCluster01ax_EmptyAllowListIsANoOp(SimpleTestCase):
     """Cluster 1ax: with no configured origins, behaviour is unchanged from
-    before this setting existed -- no CSP, same X-Frame-Options/cookie handling."""
+    before this setting existed -- no CSP, same X-Frame-Options/cookie handling.
+
+    ``LEX_EMBED_ORIGINS_CONFIGURED`` is pinned False explicitly (not just left to
+    whatever the test environment's real env var happens to be) -- this class is
+    specifically the *unset* case; TestCluster01ax_MiddlewareAddsFrameAncestors
+    covers set-but-empty, which must NOT behave like this one.
+    """
 
     def test_1_403_empty_allowed_origins_adds_no_csp_header(self):
         """
         Scenario 1.403: an empty allow-list never produces a CSP header.
-        Given: LEX_EMBED_ALLOWED_ORIGINS == [] (what both an unset and a blank env
-               var resolve to -- see TestCluster01ax_ParseEmbedAllowedOrigins for
-               the env-parsing boundary itself)
+        Given: LEX_EMBED_ALLOWED_ORIGINS == [] and LEX_EMBED_ORIGINS_CONFIGURED == False
+               (what an unset or a blank env var resolve to -- see
+               TestCluster01ax_ParseEmbedAllowedOrigins for the env-parsing boundary
+               itself, and TestCluster01ax_MiddlewareAddsFrameAncestors for the
+               set-but-empty fail-closed case this is NOT)
         When: the middleware processes an embed=true response
         Then: no Content-Security-Policy header is added
         """
@@ -263,7 +305,7 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
         Then: window.REACT_APP_EMBED_ALLOWED_ORIGINS is the comma-joined list,
               as a properly quoted JS string
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS):
             response = _serve("config.js", config_js_build)
 
         body = response.content.decode()
@@ -281,7 +323,7 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
         Then: window.REACT_APP_EMBED_ALLOWED_ORIGINS = "" -- the frontend sees the
               documented "off" state, never a leftover "undefined"
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", []):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=[], LEX_EMBED_ORIGINS_CONFIGURED=False):
             response = _serve("config.js", config_js_build)
 
         body = response.content.decode()
@@ -298,7 +340,7 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
               placeholder is still rewritten -- the new replacement is a no-op
               when its target text is absent
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS):
             response = _serve("config.js", config_js_build_without_placeholder)
 
         body = response.content.decode()
@@ -318,7 +360,7 @@ class TestCluster01ax_ConfigJsEmbedOrigins:
         (tmp_path / "config.js").write_text("window.REACT_APP_EMBED_ALLOWED_ORIGINS = undefined\n")
         hostile = 'https://evil.example.com";window.pwned=true;//'
 
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", [hostile]):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=[hostile]):
             response = _serve("config.js", tmp_path)
 
         body = response.content.decode()
@@ -430,6 +472,145 @@ class TestCluster01ax_ParseEmbedAllowedOrigins(SimpleTestCase):
 
         self.assertEqual(result, ["https://reports.example.com"])
 
+    def test_1_405_idn_hosts_are_accepted_as_punycode(self):
+        """
+        Scenario 1.405 (security fix): a non-ASCII host is IDNA-encoded, not rejected
+        or passed through raw.
+        Given: an internationalised domain, mixed with an ASCII one
+        When: parse_embed_allowed_origins parses them
+        Then: both come back as their ASCII punycode form -- a raw Unicode host would
+              either break the HTTP header (non-ASCII bytes) or silently lose the
+              whole directive; it must never be spliced in as-is
+        """
+        raw = "https://müller.de,https://reports.example.com"
+
+        with self.assertNoLogs("lex.runtime_config", level="WARNING"):
+            result = parse_embed_allowed_origins(raw)
+
+        self.assertEqual(
+            result, ["https://xn--mller-kva.de", "https://reports.example.com"]
+        )
+
+    def test_1_405_bracketed_and_syntax_breaking_hosts_are_rejected(self):
+        """
+        Scenario 1.405 (security fix): a host is not just "whatever urlsplit accepted".
+        Given: an IPv6-literal-shaped bracketed host, and a bracketed host crafted to
+               inject a bare `https:` CSP source token through the space inside it,
+               alongside hosts carrying `;`, a space, a quote, a backslash and `%`
+        When: parse_embed_allowed_origins parses each, alongside one valid origin
+        Then: every one of them is dropped -- none may reach the CSP header, where
+              a `;`/quote/bare-scheme could inject a new directive or source, and a
+              non-hostname character could break the header some other way
+        """
+        raw = (
+            "https://reports.example.com,"
+            "https://[::1],"
+            "https://[v1.x https:],"
+            "https://evil.com;script-src *,"
+            "https://evil .com,"
+            'https://evil.com",'
+            "https://evil.com\\,"
+            "https://evil.com%0d%0a"
+        )
+
+        with self.assertLogs("lex.runtime_config", level="WARNING") as captured:
+            result = parse_embed_allowed_origins(raw)
+
+        self.assertEqual(result, ["https://reports.example.com"])
+        message = captured.records[0].getMessage()
+        for bad in (
+            "https://[::1]",
+            "https://[v1.x https:]",
+            "https://evil.com;script-src *",
+            "https://evil .com",
+            'https://evil.com"',
+            "https://evil.com\\",
+            "https://evil.com%0d%0a",
+        ):
+            self.assertIn(bad, message, message)
+
+    def test_1_405_default_ports_are_dropped(self):
+        """
+        Scenario 1.405 (browser-origin form): :443 on https and :80 on http vanish.
+        Given: an https origin on :443 and an http origin on :80 -- each one's own
+               scheme's default port
+        When: parse_embed_allowed_origins parses them
+        Then: both come back without a port, matching the form a browser's own
+              MessageEvent.origin would take -- a non-default port (already covered
+              by test_1_405_valid_origins_are_parsed_and_normalised's :8443 case) is
+              kept
+        """
+        result = parse_embed_allowed_origins("https://x.example.com:443,http://y.example.com:80")
+
+        self.assertEqual(result, ["https://x.example.com", "http://y.example.com"])
+
+    def test_1_405_a_lone_trailing_slash_is_accepted(self):
+        """
+        Scenario 1.405 (browser-origin form): a bare trailing slash is not a path.
+        Given: "https://x.example.com/" -- a trailing slash and nothing else
+        When: parse_embed_allowed_origins parses it
+        Then: it is accepted as "https://x.example.com" -- the origin of a URL with
+              an empty path is the same origin regardless of the trailing slash. Any
+              further path segment (covered by the existing .../dashboard case) is
+              still invalid.
+        """
+        result = parse_embed_allowed_origins("https://x.example.com/")
+
+        self.assertEqual(result, ["https://x.example.com"])
+
+    def test_1_405_duplicates_after_port_normalisation_collapse_to_one(self):
+        """
+        Scenario 1.405 (normalisation): dropping the default port can create a
+        duplicate that didn't look like one in the raw value.
+        Given: the same host once with an explicit default port and once without
+        When: parse_embed_allowed_origins parses them
+        Then: only one entry survives, at its first position -- normalising ports
+              before de-duplicating is what makes this collapse at all
+        """
+        result = parse_embed_allowed_origins("https://x.example.com:443,https://x.example.com")
+
+        self.assertEqual(result, ["https://x.example.com"])
+
+    def test_1_405_configured_but_all_invalid_fails_closed_with_a_warning(self):
+        """
+        Scenario 1.405 (fail closed): the parser itself flags "configured but empty".
+        Given: LEX_EMBED_ALLOWED_ORIGINS set to only a wildcard -- syntactically
+               "something", but nothing that survives validation
+        When: parse_embed_allowed_origins parses it
+        Then: it returns [] (as it must -- the wildcard is still invalid) and logs a
+              second WARNING, distinct from the "dropping invalid origin(s)" one,
+              saying framing is limited to the app itself -- this is the signal
+              embed_xframe.py and serve_react use (via LEX_EMBED_ORIGINS_CONFIGURED)
+              to fail closed instead of silently behaving as if nothing were set
+        """
+        with self.assertLogs("lex.runtime_config", level="WARNING") as captured:
+            result = parse_embed_allowed_origins("https://*.example.com")
+
+        self.assertEqual(result, [])
+        messages = [r.getMessage() for r in captured.records]
+        self.assertTrue(
+            any("limited to the app itself" in m for m in messages), messages
+        )
+
+    def test_1_405_embed_origins_configured_distinguishes_blank_from_set(self):
+        """
+        Scenario 1.405: embed_origins_configured answers "was anything written?",
+        not "did anything validate?".
+        Given: None, "", whitespace-only, a valid origin, and a value that is
+               syntactically present but will fail every validation rule
+        When: embed_origins_configured inspects each raw value
+        Then: only the blank/unset forms are False -- a value that is present but
+              invalid is still True, which is exactly the case that must fail closed
+              rather than being treated as unset
+        """
+        for raw in (None, "", "   "):
+            with self.subTest(raw=raw):
+                self.assertFalse(embed_origins_configured(raw))
+
+        for raw in ("https://reports.example.com", "https://*.example.com", "garbage"):
+            with self.subTest(raw=raw):
+                self.assertTrue(embed_origins_configured(raw))
+
 
 class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
     """Cluster 1ax (scenario 1.405): lex.lex_app.settings wires
@@ -487,6 +668,25 @@ class TestCluster01ax_SettingReadsEnvVar(SimpleTestCase):
 
         self.assertEqual(settings_mod.LEX_EMBED_ALLOWED_ORIGINS, [])
 
+    def test_1_405_origins_configured_setting_reflects_env_var(self):
+        """
+        Scenario 1.405 (fail closed): LEX_EMBED_ORIGINS_CONFIGURED is wired the
+        same way LEX_EMBED_ALLOWED_ORIGINS is -- from the real env var, not
+        hand-maintained separately.
+        Given: the env var set to a wildcard-only value (parses to [], but was
+               written), and then unset
+        When: lex.lex_app.settings is (re)imported each time
+        Then: LEX_EMBED_ORIGINS_CONFIGURED is True for the set-but-invalid case and
+              False when unset -- the exact distinction the middleware and
+              serve_react rely on to fail closed instead of wide open
+        """
+        configured = self._reload("https://*.example.com")
+        self.assertEqual(configured.LEX_EMBED_ALLOWED_ORIGINS, [])
+        self.assertIs(configured.LEX_EMBED_ORIGINS_CONFIGURED, True)
+
+        unset = self._reload(None)
+        self.assertIs(unset.LEX_EMBED_ORIGINS_CONFIGURED, False)
+
 
 # ---------------------------------------------------------------------------
 # 1.406 -- the SPA document itself carries frame-ancestors
@@ -523,7 +723,7 @@ class TestCluster01ax_SpaDocumentCsp:
         When: a path with no matching file is served (the SPA fallback)
         Then: the index.html response carries frame-ancestors 'self' <both origins>
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS):
             response = _serve("some/client/route", spa_build)
 
         assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
@@ -537,17 +737,41 @@ class TestCluster01ax_SpaDocumentCsp:
         Then: it also carries frame-ancestors 'self' <origins> -- the restriction
               covers every HTML document this view serves, not just index.html
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS):
             response = _serve("embed.html", spa_build)
+
+        assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
+
+    def test_1_406_literal_htm_file_matched_case_insensitively(self, spa_build):
+        """
+        Scenario 1.406 (minor fix): the document check is case-insensitive and
+        also recognises the .htm extension.
+        Given: LEX_EMBED_ALLOWED_ORIGINS set, and a file named INDEX.HTM -- an
+               unusual case/extension a build could still legitimately emit
+        When: it is served as a literal file
+        Then: it is still recognised as a document and gets the directive
+        """
+        (spa_build / "INDEX.HTM").write_text("<!doctype html><title>upper</title>")
+
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS):
+            response = _serve("INDEX.HTM", spa_build)
 
         assert response["Content-Security-Policy"] == _EXPECTED_FRAME_ANCESTORS
 
     def test_1_406_existing_csp_on_spa_fallback_keeps_other_directives(self, spa_build):
         """
         Scenario 1.406: merging the directive never drops what was already there.
-        Given: LEX_EMBED_ALLOWED_ORIGINS set, and index.html served with a CSP
-               header already carrying an unrelated directive (e.g. set further
-               up the middleware stack, such as SecurityMiddleware's own CSP)
+        Given: LEX_EMBED_ALLOWED_ORIGINS set, and a response carrying a CSP header
+               already. This exact state -- a CSP already present on the response
+               `_apply_embed_csp` receives -- cannot happen through serve_react's
+               own normal flow: nothing runs between `static_serve` building the
+               response and `_apply_embed_csp` seeing it, so in practice that
+               argument's CSP header is always empty (see `_apply_embed_csp`'s
+               docstring for the real-world gotcha this creates with Django's
+               native `SECURE_CSP` instead). `static_serve` is mocked here purely
+               to exercise `merge_frame_ancestors`'s general-purpose "preserve
+               other directives" behaviour through this call site, the same
+               behaviour the middleware's own 1.402 test proves it needs for real.
         When: the SPA fallback response is built
         Then: the original directive survives, and frame-ancestors is merged in
               alongside it
@@ -555,7 +779,7 @@ class TestCluster01ax_SpaDocumentCsp:
         existing = HttpResponse("<!doctype html>")
         existing["Content-Security-Policy"] = "default-src 'self'"
 
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS), \
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS), \
                 mock.patch.object(react_views, "static_serve", return_value=existing):
             response = _serve("some/client/route", spa_build)
 
@@ -571,7 +795,7 @@ class TestCluster01ax_SpaDocumentCsp:
         Then: no Content-Security-Policy header is added -- framing restrictions
               only matter on documents
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS):
             response = _serve("assets/index-BfLMwcsL.js", spa_build)
 
         assert "Content-Security-Policy" not in response
@@ -583,7 +807,7 @@ class TestCluster01ax_SpaDocumentCsp:
         When: config.js is served
         Then: no Content-Security-Policy header is added to it
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", _ALLOWED_ORIGINS):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=_ALLOWED_ORIGINS):
             response = _serve("config.js", spa_build)
 
         assert "Content-Security-Policy" not in response
@@ -591,11 +815,27 @@ class TestCluster01ax_SpaDocumentCsp:
     def test_1_406_spa_fallback_has_no_added_csp_when_unset(self, spa_build):
         """
         Scenario 1.406: unset/empty behaves exactly as before this change.
-        Given: LEX_EMBED_ALLOWED_ORIGINS == []
+        Given: LEX_EMBED_ALLOWED_ORIGINS == [] and LEX_EMBED_ORIGINS_CONFIGURED == False
         When: a client-routed path falls back to index.html
         Then: no Content-Security-Policy header is added
         """
-        with mock.patch.object(react_views.settings, "LEX_EMBED_ALLOWED_ORIGINS", []):
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=[], LEX_EMBED_ORIGINS_CONFIGURED=False):
             response = _serve("some/client/route", spa_build)
 
         assert "Content-Security-Policy" not in response
+
+    def test_1_406_configured_but_all_invalid_still_gets_self_only_directive(self, spa_build):
+        """
+        Scenario 1.406 (fail closed): set-but-nothing-valid restricts to 'self' here too.
+        Given: LEX_EMBED_ALLOWED_ORIGINS == [] but LEX_EMBED_ORIGINS_CONFIGURED == True
+               (an operator configured something; none of it validated)
+        When: a client-routed path falls back to index.html
+        Then: the response carries exactly frame-ancestors 'self' -- the same
+              fail-closed outcome TestCluster01ax_MiddlewareAddsFrameAncestors
+              pins for the middleware, so a deployment can't end up restricted at
+              one layer and wide open at the other
+        """
+        with override_settings(LEX_EMBED_ALLOWED_ORIGINS=[], LEX_EMBED_ORIGINS_CONFIGURED=True):
+            response = _serve("some/client/route", spa_build)
+
+        assert response["Content-Security-Policy"] == _SELF_ONLY_DIRECTIVE

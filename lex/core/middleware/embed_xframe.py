@@ -22,12 +22,15 @@ Strategy
    b. patches the Django **session cookie** and **CSRF cookie** to
       ``SameSite=None; Secure`` so the browser sends them on cross-site
       requests (Keycloak redirects + API fetches from the iframe), and
-   c. when ``settings.LEX_EMBED_ALLOWED_ORIGINS`` is non-empty, adds
-      ``Content-Security-Policy: frame-ancestors 'self' <origins>`` so only
-      those named sites may actually frame *this* response -- stripping
-      ``X-Frame-Options`` alone would otherwise exempt every site, not just
-      the named ones. An empty/unset list leaves framing exactly as before
-      this setting existed.
+   c. when ``settings.LEX_EMBED_ALLOWED_ORIGINS`` is non-empty -- or empty but
+      ``settings.LEX_EMBED_ORIGINS_CONFIGURED`` is True, meaning the setting
+      was set to something that just didn't validate -- adds
+      ``Content-Security-Policy: frame-ancestors 'self' <origins>`` (or
+      ``frame-ancestors 'self'`` alone, in the configured-but-invalid case) so
+      only those named sites, or none at all, may actually frame *this*
+      response. Stripping ``X-Frame-Options`` alone would otherwise exempt
+      every site, not just the named ones. Truly unset/blank leaves framing
+      exactly as before this setting existed.
 
 Note: this middleware is **not currently registered** in this repo's
 ``MIDDLEWARE`` (see ``lex/lex_app/settings.py``), so (c) above has no effect
@@ -48,7 +51,7 @@ runs **last** – after both ``XFrameOptionsMiddleware`` (header) and
 from django.conf import settings as django_settings
 from django.utils.deprecation import MiddlewareMixin
 
-from lex.runtime_config import merge_frame_ancestors
+from lex.runtime_config import frame_ancestors_directive, merge_frame_ancestors
 
 _COOKIE_NAME = "_lex_embed"
 _COOKIE_MAX_AGE = 86400  # 24 h – covers the full embed session
@@ -118,14 +121,20 @@ class EmbedXFrameOptionsMiddleware(MiddlewareMixin):
                     )
 
             # --- Named-site embedding (Content-Security-Policy) ----------- #
-            # LEX_EMBED_ALLOWED_ORIGINS, when non-empty, restricts who may
-            # frame lex-app to the named origins -- `X-Frame-Options` is
-            # already gone above, so without this an empty allow-list is the
-            # only thing stopping this from exempting every site. See
-            # Amendment 14 of the multi-value-filters design.
+            # Stripping `X-Frame-Options` just above means this response can now
+            # be framed by any site, unless something restricts it further. When
+            # LEX_EMBED_ALLOWED_ORIGINS is configured -- non-empty, or set but
+            # normalised to nothing valid (LEX_EMBED_ORIGINS_CONFIGURED) -- this
+            # adds a `frame-ancestors` directive restricting framing to exactly
+            # the named origins, or to the app itself if nothing in the setting
+            # validated (fail closed, never silently wide open). See Amendment 14
+            # of the multi-value-filters design.
             allowed_origins = getattr(django_settings, "LEX_EMBED_ALLOWED_ORIGINS", [])
-            if allowed_origins:
-                directive = "frame-ancestors 'self' " + " ".join(allowed_origins)
+            origins_configured = getattr(
+                django_settings, "LEX_EMBED_ORIGINS_CONFIGURED", False
+            )
+            if allowed_origins or origins_configured:
+                directive = frame_ancestors_directive(allowed_origins)
                 response["Content-Security-Policy"] = merge_frame_ancestors(
                     response.get("Content-Security-Policy", ""), directive
                 )

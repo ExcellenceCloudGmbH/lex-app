@@ -1279,7 +1279,7 @@ letters:
     scenarios: 1.402-1.406
     status: complete
     tests:
-      pass: 26
+      pass: 37
       skip: 0
       xfail: 0
     note: >-
@@ -1312,3 +1312,29 @@ letters:
       fallback and any other real .html file it serves (e.g. embed.html) -- and only to those;
       hashed assets and config.js are untouched. The middleware's own CSP step is unchanged, for
       deployments that do register it.
+
+      Fix round 2, same session (security review): urlsplit alone let unsafe hosts through.
+      _normalise_origin now IDNA-encodes the host (muller.de -> xn--mller-kva.de; a UnicodeError
+      drops it) and checks the ASCII result against a strict lowercase hostname grammar, which is
+      what actually blocks `;`, a space, a quote, a backslash and `%` -- none of those are
+      rejected by IDNA's nameprep alone. Bracketed hosts (IPv6 literals, and the IPvFuture
+      `[v1.x https:]` shape that injects a bare `https:` CSP source token through its embedded
+      space) are rejected outright before parsing. Default ports (:443 https, :80 http) are
+      dropped so the origin matches a browser's own location.origin/MessageEvent.origin, and a
+      lone trailing slash is accepted (https://x/ is the origin https://x) while any further path
+      is still invalid; dropping the port can now reveal a duplicate that still collapses to one.
+      Separately: LEX_EMBED_ALLOWED_ORIGINS set to only invalid entries (e.g. a wildcard) parsed
+      to [], indistinguishable from unset -- framing was silently unrestricted the moment every
+      configured origin happened to be invalid. A new LEX_EMBED_ORIGINS_CONFIGURED setting
+      (embed_origins_configured in runtime_config.py) distinguishes "unset" from "set but
+      nothing validated"; the latter now fails closed to `frame-ancestors 'self'` on both the
+      middleware and serve_react, logged once from parse_embed_allowed_origins itself ("framing is
+      limited to the app itself"). A new frame_ancestors_directive(origins) builds that directive
+      (empty origins -> 'self' only) for both call sites. merge_frame_ancestors now matches the
+      directive name exactly (its first token) rather than by prefix, and documents that it does
+      not support a comma-joined multi-policy CSP value. serve_react's two LEX_EMBED_* lookups now
+      read django.conf.settings (not the lex.lex_app.settings module) so override_settings reaches
+      them in tests; its document check is now case-insensitive and also matches .htm. No new
+      scenario IDs -- 1.402 and 1.406 each gained a configured-but-all-invalid case, and 1.405
+      gained cases for every invalid host shape plus the fail-closed warning and
+      embed_origins_configured itself.

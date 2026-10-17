@@ -1743,31 +1743,34 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 | --- | --- |
 | Scenario range | 1.402 – 1.406 |
 | Type | U |
-| Files covered | `lex/runtime_config.py` (`parse_embed_allowed_origins`, `_normalise_origin`, `merge_frame_ancestors`), `lex/lex_app/settings.py` (`LEX_EMBED_ALLOWED_ORIGINS`), `lex/core/middleware/embed_xframe.py` (`EmbedXFrameOptionsMiddleware.process_response`), `lex/react/views.py` (`serve_react`'s `config.js` rewrite and its own document responses' `_apply_embed_csp`) |
+| Files covered | `lex/runtime_config.py` (`parse_embed_allowed_origins`, `_normalise_origin`, `embed_origins_configured`, `frame_ancestors_directive`, `merge_frame_ancestors`), `lex/lex_app/settings.py` (`LEX_EMBED_ALLOWED_ORIGINS`, `LEX_EMBED_ORIGINS_CONFIGURED`), `lex/core/middleware/embed_xframe.py` (`EmbedXFrameOptionsMiddleware.process_response`), `lex/react/views.py` (`serve_react`'s `config.js` rewrite and its own document responses' `_apply_embed_csp`) |
 | Test file | `lex/test_project/tests/init/test_1ax_embed_allowed_origins.py` |
 | Test classes | `TestCluster01ax_MiddlewareAddsFrameAncestors` (1.402), `TestCluster01ax_EmptyAllowListIsANoOp` (1.403), `TestCluster01ax_ConfigJsEmbedOrigins` (1.404), `TestCluster01ax_ParseEmbedAllowedOrigins` + `TestCluster01ax_SettingReadsEnvVar` (1.405), `TestCluster01ax_SpaDocumentCsp` (1.406) |
 | Fixtures | `config_js_build` / `config_js_build_without_placeholder` / `spa_build` (`tmp_path`-based synthetic build dirs, matching the 1ag config.js/caching tests) |
-| Tests landed | **26 pass / 0 fail** (3 subtests) |
+| Tests landed | **37 pass / 0 fail** (9 subtests) |
 | Status | ✅ Complete |
 
 | Scenario | Title | Asserts |
 | --- | --- | --- |
-| 1.402 | CSP added on every exempt path | `embed=true`, the OIDC path, and the `_lex_embed` cookie path each get `Content-Security-Policy: frame-ancestors 'self' <origins>`; a non-exempt response gets none; merging preserves an existing header's other directives and replaces a stale `frame-ancestors` directive instead of duplicating it |
-| 1.403 | Unset/empty changes nothing | With `LEX_EMBED_ALLOWED_ORIGINS == []`, no CSP is added, `X-Frame-Options` is still stripped, and the session/CSRF cookies are still patched to `SameSite=None; Secure` — the pre-existing contract, untouched |
+| 1.402 | CSP added on every exempt path | `embed=true`, the OIDC path, and the `_lex_embed` cookie path each get `Content-Security-Policy: frame-ancestors 'self' <origins>`; a non-exempt response gets none; merging preserves an existing header's other directives and replaces a stale `frame-ancestors` directive instead of duplicating it; **configured but nothing valid** still gets exactly `frame-ancestors 'self'` (fail closed) |
+| 1.403 | Unset/empty changes nothing | With `LEX_EMBED_ALLOWED_ORIGINS == []` and `LEX_EMBED_ORIGINS_CONFIGURED == False`, no CSP is added, `X-Frame-Options` is still stripped, and the session/CSRF cookies are still patched to `SameSite=None; Secure` — the pre-existing contract, untouched |
 | 1.404 | `config.js` carries the setting | `window.REACT_APP_EMBED_ALLOWED_ORIGINS` is the comma-joined list escaped with `json.dumps` (never breaking out of the JS string literal, even for an adversarial-looking value), `""` when empty, and absent entirely when the build predates the placeholder |
-| 1.405 | Parsing, normalisation, and the real setting | A path, a wildcard, an `ftp` scheme, embedded credentials, a query string, a fragment, and plain garbage are each dropped; one WARNING names every dropped entry from a single call; valid origins are lower-cased and de-duplicated; a stray/trailing comma is skipped without logging; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS` is confirmed (via a real module reload, not just the helper) to equal `parse_embed_allowed_origins(os.getenv("LEX_EMBED_ALLOWED_ORIGINS"))` |
-| 1.406 | The SPA document itself carries `frame-ancestors` | The SPA fallback (`index.html`, reached by any client-routed path with no matching file) and a literal, non-fallback `.html` file (`embed.html`) both get `Content-Security-Policy: frame-ancestors 'self' <origins>`; merging into an existing CSP header on that response preserves its other directives; a hashed asset and `config.js` get none; with the setting unset, the SPA fallback gets no added CSP |
+| 1.405 | Parsing, normalisation, and the real setting | A path, a wildcard, an `ftp` scheme, embedded credentials, a query string, a fragment, and plain garbage are each dropped; one WARNING names every dropped entry from a single call; valid origins are lower-cased and de-duplicated; a stray/trailing comma is skipped without logging; `lex.lex_app.settings.LEX_EMBED_ALLOWED_ORIGINS` is confirmed (via a real module reload, not just the helper) to equal `parse_embed_allowed_origins(os.getenv("LEX_EMBED_ALLOWED_ORIGINS"))`. **Security fix round:** an IDN host is accepted as punycode; a bracketed/IPv6-shaped host, the `[v1.x https:]` injection shape, and hosts carrying `;`, a space, a quote, a backslash or `%` are all rejected; `:443`/`:80` normalise away; a lone trailing `/` is accepted; a duplicate revealed by port-normalisation still collapses to one; a wildcard-only value fails closed with a dedicated WARNING naming the "limited to the app itself" outcome; `embed_origins_configured` and `LEX_EMBED_ORIGINS_CONFIGURED` are each proven directly |
+| 1.406 | The SPA document itself carries `frame-ancestors` | The SPA fallback (`index.html`, reached by any client-routed path with no matching file) and a literal, non-fallback `.html`/`.htm` file (`embed.html`, case-insensitively) both get `Content-Security-Policy: frame-ancestors 'self' <origins>`; merging into an existing CSP header on that response preserves its other directives; a hashed asset and `config.js` get none; with the setting unset, the SPA fallback gets no added CSP; **configured but nothing valid** still gets exactly `frame-ancestors 'self'` |
 
-**Why three different settings-access patterns in one test file.** The middleware reads
-`django.conf.settings` (patched in tests with `override_settings`); `serve_react` reads the plain
-`lex.lex_app.settings` module directly via `from lex.lex_app import settings` (patched with
-`mock.patch.object` on that module, since `override_settings` only touches `django.conf.settings`
-and does not reach it); confirmed empirically — `django.conf.settings._wrapped` and the
-`lex.lex_app.settings` module are two independently-imported objects in this codebase, not aliases
-of each other, so a settings-layer test must match whichever access pattern the source under test
-actually uses. The setting's own derivation is proven by reloading `lex.lex_app.settings` after
-patching `os.environ`, mirroring the pattern the pre-existing 1s cluster uses for its own env-driven
-settings, with the env var and module state restored in cleanup either way.
+**Settings access, corrected from the original note above.** `serve_react`'s two `LEX_EMBED_*`
+lookups now read `django.conf.settings` (imported as `django_settings`), the same as the
+middleware — not the plain `lex.lex_app.settings` module `settings.repo_name` still uses a few
+lines away in the same function. The original note here said these were "three different
+patterns" across the file requiring `mock.patch.object` for `serve_react`'s tests specifically;
+that was true before this fix round and is not any more — every `LEX_EMBED_*`-related test in this
+file now uses `override_settings`. `django.conf.settings._wrapped` and the `lex.lex_app.settings`
+module remain two independently-imported objects in this codebase (confirmed empirically, not an
+assumption), which is still why `TestCluster01ax_SettingReadsEnvVar` proves the setting's own
+derivation by reloading `lex.lex_app.settings` after patching `os.environ` instead of using
+`override_settings` there — that class is specifically testing what the module-level assignment in
+`lex/lex_app/settings.py` computes, not what a deployment's `django.conf.settings` holds at
+request time.
 
 **Follow-up (1.406, same session): the SPA document, not the unregistered middleware, is what
 actually makes lex-app frameable.** `serve_react` is decorated `@xframe_options_exempt`, which
@@ -1792,3 +1795,47 @@ registration status, which is why 1.406 was added in the same session to put the
 `serve_react` directly. The middleware remains unregistered and untouched beyond that; flagged for
 whoever owns turning the embed feature on end to end at the middleware layer too (session cookies,
 CSRF, the OIDC round-trip).
+
+**Fix round 2, same session (security review): `urlsplit` alone was not safe to splice into a
+header.** Two independent problems, both in `_normalise_origin`:
+
+1. A non-ASCII host (`müller.de`) either produces non-ASCII header bytes (dropping the whole CSP)
+   or, worse, a crafted bracketed host with an embedded space — `https://[v1.x https:]` — joins
+   into the directive as a second, bare `https:` CSP source token, widening who may frame lex-app
+   to *every* https site. `_normalise_origin` now rejects any bracketed host outright, IDNA-encodes
+   the rest (`müller.de` → `xn--mller-kva.de`; a `UnicodeError` drops the entry), and checks the
+   ASCII result against a strict lowercase hostname grammar — IDNA's nameprep step does not reject
+   `;`, a space, a quote, a backslash or `%`, so the grammar check is what actually blocks them.
+   Also added: the scheme's default port (`:443`/`:80`) is dropped to match a browser's own
+   `location.origin`, and a lone trailing `/` is accepted (any further path is still invalid) —
+   both needed so an origin written either way normalises to the same, single CSP entry.
+2. `LEX_EMBED_ALLOWED_ORIGINS` set to only invalid entries (a wildcard, say) parsed to `[]`,
+   indistinguishable from unset — framing silently went unrestricted the moment every configured
+   origin happened to be invalid. A new `LEX_EMBED_ORIGINS_CONFIGURED` setting
+   (`embed_origins_configured` in `runtime_config.py`) distinguishes "unset" from "set but nothing
+   validated"; the latter now fails closed to `frame-ancestors 'self'` on both the middleware and
+   `serve_react`, via a new shared `frame_ancestors_directive(origins)` (empty `origins` → `'self'`
+   only). `parse_embed_allowed_origins` logs this case once, separately from the
+   "dropping invalid origin(s)" warning, naming it explicitly ("framing is limited to the app
+   itself").
+
+Minors from the same review, folded into this batch rather than a separate one: `merge_frame_ancestors`
+now matches a directive's name exactly (its first whitespace-separated token) instead of by prefix,
+and documents that it does not support a comma-joined multi-policy CSP value;
+`test_1_406_existing_csp_on_spa_fallback_keeps_other_directives`'s docstring now says plainly that
+the state it mocks (`static_serve` returning a response with a CSP header already on it) cannot
+occur through `serve_react`'s own normal flow — nothing runs between `static_serve` and
+`_apply_embed_csp` — and that `_apply_embed_csp`'s own docstring records the real consequence: a
+deployment enabling Django's native `SECURE_CSP` would have `ContentSecurityPolicyMiddleware` skip
+its own header on every SPA document once this setting is configured, since one is already present
+by the time that middleware's response phase runs; `serve_react`'s document check is now
+case-insensitive and also matches `.htm`; the two `LEX_EMBED_*` lookups in `serve_react` moved from
+the plain `lex.lex_app.settings` module to `django.conf.settings` so `override_settings` reaches
+them, and every test that previously needed `mock.patch.object` to work around that was rewritten
+to use `override_settings`; the middleware's own "why this CSP step exists" comment (previously
+backwards about what stops what) and `settings.py`'s comment (previously naming only the
+unregistered middleware as the mechanism) were both corrected.
+
+No scenario IDs were added — 1.402 and 1.406 each gained one "configured but all invalid" case, and
+1.405 gained cases for every invalid host shape plus the fail-closed warning and
+`embed_origins_configured` itself, all under their existing numbers.

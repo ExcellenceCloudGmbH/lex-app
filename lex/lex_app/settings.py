@@ -32,6 +32,7 @@ from sentry_sdk.integrations.django import DjangoIntegration
 
 from lex.runtime_config import (
     derive_repo_name,
+    embed_origins_configured,
     parse_embed_allowed_origins,
     resolve_local_sqlite_path,
     resolve_project_root,
@@ -203,13 +204,25 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # Sites allowed to embed lex-app in a frame/iframe and use its embed filter
-# bridge (see lex.core.middleware.embed_xframe.EmbedXFrameOptionsMiddleware and
-# the `filter` bridge event). A comma-separated list of origins
-# (scheme://host[:port]); invalid entries are dropped with a warning. Unset or
-# empty is the documented "off" state: no Content-Security-Policy
+# bridge (the `filter` bridge event). lex.react.views.serve_react applies the
+# resulting CSP directive to its own HTML documents -- it is @xframe_options_exempt,
+# so that is what actually restricts framing today; lex.core.middleware.embed_xframe.
+# EmbedXFrameOptionsMiddleware applies the same directive too, for a deployment
+# that registers it (it is not registered in MIDDLEWARE below). A comma-separated
+# list of origins (scheme://host[:port]); invalid entries are dropped with a
+# warning. Unset or empty is the documented "off" state: no Content-Security-Policy
 # frame-ancestors directive is added, and the frontend's filter bridge channel
 # stays disabled -- behaviour is unchanged from before this setting existed.
 LEX_EMBED_ALLOWED_ORIGINS = parse_embed_allowed_origins(
+    os.getenv("LEX_EMBED_ALLOWED_ORIGINS")
+)
+
+# True iff the env var above was set to something non-blank, independent of
+# whether any of it validated. Distinguishing "unset" from "set but nothing
+# valid" (e.g. a wildcard) is what lets the CSP step fail closed
+# (frame-ancestors 'self') in the latter case instead of silently behaving as
+# if framing were never restricted at all.
+LEX_EMBED_ORIGINS_CONFIGURED = embed_origins_configured(
     os.getenv("LEX_EMBED_ALLOWED_ORIGINS")
 )
 
