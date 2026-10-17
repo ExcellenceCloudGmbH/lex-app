@@ -36,12 +36,16 @@ key, ``_bool_from_key`` for a boolean column, and the field's own
 ``to_python`` otherwise -- via a conversion helper shared with
 ``_set_filter_values`` (``_typed_value_converter`` / ``_coerce_typed_value``)
 so both paths treat a stored value identically. A value that fails this
-conversion is dropped (and the whole param ignored if none survive) rather
-than ever becoming a 400 -- unlike the POST filterModel path, a GET list
-request stays a read. Bare keys (``?field=value``, no suffix) and every
-other lookup suffix are untouched: they still run through the legacy,
-best-effort ``_coerce_value``, so an existing caller's ``?field=null``
-keeps meaning ``IS NULL``.
+conversion is dropped rather than ever becoming a 400 -- unlike the POST
+filterModel path, a GET list request stays a read. If NONE of the given
+values survive conversion, the filter matches no rows (``Q(pk__in=[])``),
+never every row: an unconvertible value can never equal a stored one, and
+returning "no filter" there would fail open -- ``?category__in=abc`` would
+otherwise match the whole table, and a "Select All" bulk action would run
+over everything instead of nothing. Bare keys (``?field=value``, no suffix)
+and every other lookup suffix are untouched: they still run through the
+legacy, best-effort ``_coerce_value``, so an existing caller's
+``?field=null`` keeps meaning ``IS NULL``.
 
 Cluster 14j — scenarios 14.71-14.73. Type: E.
 Covers: lex/api/views/model_entries/List.py (SAFE_LOOKUPS, _resolve_lookup,
@@ -252,12 +256,17 @@ class TestCluster14j_ExactAndInTypeConversion(E2ETestCase):
             ``note`` is actually NULL, and a decoy row; the same rows carry
             an ``is_active`` boolean and (for two of them) a ``category`` FK.
         When: the list GET endpoint is filtered through ``__exact`` and
-            ``__in`` on the text, boolean and foreign-key columns, and
-            through a bare key with no suffix.
+            ``__in`` on the text, boolean and foreign-key columns, through a
+            bare key with no suffix, and through ``__in``/``__exact`` values
+            that cannot convert at all (a non-numeric foreign-key key, a
+            non-numeric integer key).
         Then: ``__exact``/``__in`` convert each value by the column's type
             (never confusing a literal "none"/"true" string with NULL or a
             bool), while the bare, suffix-less key keeps meaning NULL for
             ``"null"`` -- the legacy behaviour existing callers depend on.
+            A value that cannot convert at all matches NO rows -- never
+            every row, which would fail open and turn "Select All" into
+            "select the whole table".
         """
         self._seed()
 
@@ -328,6 +337,30 @@ class TestCluster14j_ExactAndInTypeConversion(E2ETestCase):
             self._names(resp), {"eta"},
             f"bare note=null must still mean IS NULL (legacy coercion); "
             f"got {self._names(resp)!r}",
+        )
+
+        # 14.73(g): ForeignKey __in -- a value that CANNOT convert (not a
+        # valid pk) must return NO rows, not every row. A value is never
+        # equal to a stored one it can't even be compared against, so
+        # dropping the unconvertible key and then ignoring the whole param
+        # (as if nothing had been given) would fail OPEN here: the filter
+        # would vanish and "Select All" would select the entire table.
+        resp = self.list_get(ITEM, {"category__in": "abc"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), set(),
+            f"category__in=abc (unconvertible pk) must match NO rows, "
+            f"never every row; got {self._names(resp)!r}",
+        )
+
+        # 14.73(h): the same fail-closed rule for __exact on a plain
+        # (non-relation) typed column -- an IntegerField here.
+        resp = self.list_get(ITEM, {"count__exact": "abc"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._names(resp), set(),
+            f"count__exact=abc (unconvertible int) must match NO rows, "
+            f"never every row; got {self._names(resp)!r}",
         )
 
 

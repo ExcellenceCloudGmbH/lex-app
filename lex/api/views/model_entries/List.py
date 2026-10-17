@@ -462,9 +462,7 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
     # to spell "none"/"true" must stay that literal string, not become
     # Python `None`/`True` the way it would for every other field type too.
     # A key that fails to convert (bad id, ...) is dropped -- same as any
-    # other value this GET path cannot use -- never a 400; if every key
-    # fails, the whole param is ignored (no filtering by this field) rather
-    # than silently matching zero rows via an empty `IN`.
+    # other value this GET path cannot use -- never a 400.
     if lookup_path.endswith("__in"):
         if len(cleaned) == 1 and isinstance(cleaned[0], str) and "," in cleaned[0]:
             items = [x for x in cleaned[0].split(",") if x != ""]
@@ -475,7 +473,15 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
             if v is not _CONVERSION_FAILED
         ]
         if not coerced:
-            return None
+            # `cleaned` (checked above) was non-empty, so a value WAS given
+            # here -- it just didn't survive conversion (or comma-splitting
+            # left nothing, e.g. `?field__in=,`). An unconvertible value can
+            # never equal a stored one, so the correct answer is no rows.
+            # `None` would mean "ignore this param" -- no filtering at all --
+            # which fails OPEN: `?category__in=abc` would match every row,
+            # and a "Select All" bulk action would run over the whole table
+            # instead of nothing.
+            return Q(pk__in=[])
         return Q(**{lookup_path: coerced})
 
     if lookup_path.endswith("__range"):
@@ -500,7 +506,11 @@ def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Opt
             if v is not _CONVERSION_FAILED
         ]
         if not coerced_values:
-            return None
+            # Same reasoning as the `__in` branch above: a value was given
+            # but none converted, so no stored value can match -- no rows,
+            # not "ignore this param" (which would fail open and match
+            # every row).
+            return Q(pk__in=[])
         if len(coerced_values) == 1:
             return Q(**{lookup_path: coerced_values[0]})
         combined = Q()
