@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 62
+max_scenario: 68
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -147,3 +147,24 @@ letters:
       lex_reserved_calculation_closed_reason, for the greyed button's tooltip; 12.61 an open
       record's row carries null; 12.62 the reason survives a read permission that hides other
       fields. Follows 12l (12.54-12.57).
+  l:
+    title: "Serializer choice per caller and strict input"
+    scenarios: 12.63-12.67
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      Strict input is opt-in (it is not a security fix and could refuse clients that send extra keys).
+  n:
+    title: "Read context built once per request"
+    scenarios: 12.68
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      A model that overrides can_read is still asked through it; only LexModel's own can_read takes the
+      cached context.

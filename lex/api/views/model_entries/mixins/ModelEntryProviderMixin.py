@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.permissions.UserPermission import UserPermission
 from rest_framework import serializers
+from lex.api.security import serializer_allowed
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_api_key.permissions import HasAPIKey
@@ -108,11 +109,13 @@ class ModelEntryProviderMixin:
         if issubclass(container.model_class, User):
             return UserModelSerializer
 
-        if choice not in mapping:
+        allowed = [name for name in mapping if serializer_allowed(container.model_class, self.request, name)]
+        if choice not in allowed:
+            # A serializer the caller may not use looks exactly like one that does not exist.
             raise ValidationError(
                 {
                     "error": f"Unknown serializer '{choice}' for model '{container.model_class._meta.model_name}'",
-                    "available": list(mapping.keys()),
+                    "available": allowed,
                 }
             )
 

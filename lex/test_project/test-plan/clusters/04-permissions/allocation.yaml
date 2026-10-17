@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 85
+max_scenario: 114
 letters:
   a:
     title: ''
@@ -158,3 +158,25 @@ letters:
     note: >-
       The guard accepts the bundled frontend's absolute next URLs (window.location.href) because the
       frontend is served from the site's own origin or a configured dev origin.
+  p:
+    title: "Secure permission defaults on the generic REST API"
+    scenarios: 4.86-4.103
+    status: complete
+    tests:
+      pass: 18
+      skip: 0
+      xfail: 0
+    note: >-
+      No new denial answers 403: the bundled frontend signs the user out on 403, so unreadable records are
+      404 and refused writes 400. Single-record visibility uses permission_read for the record (the
+      decision the serializer made before), so classic API keys keep reading what they could read.
+  s:
+    title: "API-key read decided by the serializer"
+    scenarios: 4.114
+    status: complete
+    tests:
+      pass: 1
+      skip: 0
+      xfail: 0
+    note: >-
+      Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering.

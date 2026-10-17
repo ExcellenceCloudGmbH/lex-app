@@ -197,16 +197,25 @@ class TestCluster04e_FilterBackend_DenyAll(AuthenticatedE2ETestCase):
         ``LexSerializer.to_representation`` returning an empty object.
         This pins the customer-visible contract: even if the URL is
         guessed, a fully read-denied row exposes no ``name`` / secret
-        data and no framework-injected ``id``.
+        data and no framework-injected ``id``. Since lex 3.0
+        (LEX_SEC_NOT_FOUND) the row is "not found" (404) — it does not
+        even confirm the id exists; with the legacy opt-out it is the
+        pre-3.0 ``200 {}``.
         """
+        import os
+        from unittest import mock
+
         item = FilterBackendItem.objects.create(name="hidden-detail", is_secret=False)
+        clean = {k: v for k, v in os.environ.items() if not k.startswith(("LEX_SEC_", "LEX_LEGACY_SECURITY"))}
 
-        resp = self.client.get(self.url_detail(FILTER_BACKEND, item.pk))
+        with mock.patch.dict(os.environ, clean, clear=True):
+            resp = self.client.get(self.url_detail(FILTER_BACKEND, item.pk))
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertNotIn("hidden-detail", resp.content.decode())
 
-        self.assertEqual(
-            resp.status_code, status.HTTP_200_OK,
-            msg=f"Detail endpoint currently represents read-deny as 200 + {{}}; got {resp.status_code}",
-        )
+        with mock.patch.dict(os.environ, {**clean, "LEX_LEGACY_SECURITY": "true"}, clear=True):
+            resp = self.client.get(self.url_detail(FILTER_BACKEND, item.pk))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
         data = getattr(resp, "data", None)
         self.assertEqual(
             data, {},

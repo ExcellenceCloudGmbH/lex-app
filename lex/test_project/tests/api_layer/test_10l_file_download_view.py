@@ -29,6 +29,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from django.db.models import FileField
+
 from django.http import FileResponse, JsonResponse
 from django.test import SimpleTestCase
 
@@ -58,15 +60,24 @@ def _build_kwargs(instance=None, *, model_class=None):
     """
     model_class = model_class or MagicMock(name="ModelClass")
     model_class.objects.filter.return_value.first.return_value = instance
+    # lex 3.0 serves only real file fields: the stand-in model reports one.
+    model_class._meta.get_field.return_value = FileField()
+    model_class.lex_lookup_field = None
     container = SimpleNamespace(model_class=model_class)
     return {"model_container": container}
 
 
 def _build_view():
-    """Instantiate the APIView without going through the URL resolver."""
+    """Instantiate the APIView without going through the URL resolver.
+
+    These scenarios pin the storage dispatch; the read-permission check of
+    lex 3.0 (LEX_SEC_READ_SURFACES) is covered by scenario 4.100 and stood in
+    for here.
+    """
     view = FileDownloadView()
     view.kwargs = {}
     view.request = None
+    view._may_read_file = lambda request, instance, field_name: True
     return view
 
 

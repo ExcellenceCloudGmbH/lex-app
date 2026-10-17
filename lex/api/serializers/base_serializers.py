@@ -94,6 +94,30 @@ def _get_model_lookup() -> dict:
 _capability_cache: dict = {}
 
 
+def _fail_closed() -> bool:
+    from lex.core.security_flags import strict
+
+    return strict("FAIL_CLOSED")
+
+
+def _expose_auto_serializer() -> bool:
+    """lex_config.EXPOSE_AUTO_SERIALIZER (default True): keep the generated
+    serializer reachable under its alias when a project overrides "default"."""
+    try:
+        from lex.core.extensions import get_setting
+
+        return bool(get_setting("EXPOSE_AUTO_SERIALIZER"))
+    except Exception:
+        return True
+
+
+def _lex_model_can_read():
+    """LexModel's own can_read wrapper (which delegates to permission_read)."""
+    from lex.core.models.LexModel import LexModel
+
+    return LexModel.can_read
+
+
 def _get_capabilities(model_class: type) -> dict:
     """Return cached capability flags for a model class."""
     caps = _capability_cache.get(model_class)
@@ -302,6 +326,7 @@ class LexSerializer(serializers.ModelSerializer):
     # Per-serializer caches (populated once, reused across all records)
     # ------------------------------------------------------------------
     _base_user_context = None  # Cached UserContext without keycloak scopes
+    _read_context_is_api_key = None  # Cached: does the request carry an API key context?
     _meta_fields_cache: dict = {}  # { model_class: set_of_field_names }
     _concrete_field_map_cache: dict = {}  # { model_class: { field_name: field } }
 
@@ -322,6 +347,18 @@ class LexSerializer(serializers.ModelSerializer):
         """
         base = self._get_base_user_context(request)
         return base.with_instance(request, target_instance, original_instance=original_instance)
+
+    def _get_can_read_context(self, request, target_instance):
+        """The context ``LexModel.can_read`` would build (``UserContext.from_request``),
+        from the cached base: an API-key context as is — it carries the key's
+        scopes and does not depend on the record — any other with the record's
+        keycloak scopes."""
+        base = self._get_base_user_context(request)
+        if self._read_context_is_api_key is None:
+            self._read_context_is_api_key = UserContext._api_key_context(request) is not None
+        if self._read_context_is_api_key:
+            return base
+        return base.with_instance(request, target_instance)
 
     @classmethod
     def _get_cached_field_names(cls, model_class) -> set:
@@ -758,9 +795,35 @@ class LexSerializer(serializers.ModelSerializer):
         # Normal visible fields for concrete models
         visible_fields = None
 
+        # 0. Already decided for this request (the list filter asked first; BUG-011)
+        remembered = None
+        if request is not None and type(target_instance).can_read is _lex_model_can_read():
+            from lex.api.security import recalled
+
+            remembered = recalled(request, "read", target_instance)
+        if remembered is not None:
+            if not remembered.allowed:
+                return {}
+            visible_fields = self._normalize_field_names(
+                remembered.get_fields(self._get_cached_field_names(type(target_instance)))
+            )
+
         # 1. Try Legacy 'can_read'
-        if target_caps['has_can_read']:
-            raw_visible_fields = target_instance.can_read(request)
+        elif target_caps['has_can_read']:
+            try:
+                if request is not None and type(target_instance).can_read is _lex_model_can_read():
+                    # LexModel.can_read is permission_read with a context built from
+                    # the request; build it from this serializer's cached base
+                    # instead of querying the user's groups once per row (BUG-011).
+                    result = target_instance.permission_read(self._get_can_read_context(request, target_instance))
+                    raw_visible_fields = result.get_fields(target_instance._get_all_field_names())
+                else:
+                    raw_visible_fields = target_instance.can_read(request)
+            except Exception:
+                if _fail_closed():
+                    logger.exception("can_read raised for %s; record withheld", type(target_instance).__name__)
+                    return {}
+                raise
             if raw_visible_fields is False:
                 return {}
             if raw_visible_fields is True:
@@ -771,7 +834,13 @@ class LexSerializer(serializers.ModelSerializer):
         # 2. Try New System 'permission_read'
         elif target_caps['has_permission_read']:
             user_context = self._get_user_context(request, target_instance)
-            result = target_instance.permission_read(user_context)
+            try:
+                result = target_instance.permission_read(user_context)
+            except Exception:
+                if _fail_closed():
+                    logger.exception("permission_read raised for %s; record withheld", type(target_instance).__name__)
+                    return {}
+                raise
             if hasattr(result, "allowed") and not result.allowed:
                 return {}  # Hide entirely
 
@@ -1116,7 +1185,7 @@ def get_serializer_map_for_model(model_class, default_fields=None):
         # do not override "default" — and whose tracked source does not
         # either — keep the historical behavior: only the auto-generated
         # serializer is registered, under the "default" key.
-        if should_register_alias:
+        if should_register_alias and _expose_auto_serializer():
             try:
                 from lex.core.config import (
                     DEFAULT_SERIALIZER_NAME,

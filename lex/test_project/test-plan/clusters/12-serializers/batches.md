@@ -89,3 +89,31 @@
 | Status | ✅ Complete — paired with 7u and 2l |
 
 ---
+
+### Batch 12l — Serializer choice per caller and strict input ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.63-12.67 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py`, `lex/api/views/model_info/Fields.py`, `lex/api/serializers/base_serializers.py` (EXPOSE_AUTO_SERIALIZER), `lex/api/security.py` (serializer_allowed, strict_input_denial), `lex/api/views/model_entries/One.py` |
+| Test file | `lex/test_project/tests/serializers/test_12l_serializer_exposure.py` |
+| Test classes | `TestCluster12l_SerializerExposure` |
+| Fixtures | `ChoosySerializerItem` (default/full serializers), `StrictInputItem` (lex_strict_input) |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Strict input is opt-in (it is not a security fix and could refuse clients that send extra keys). |
+
+### Batch 12n — Read context built once per request ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.68 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (to_representation, LexModel can_read branch) |
+| Test file | `lex/test_project/tests/serializers/test_12n_read_context_reuse.py` |
+| Test classes | `TestCluster12n_ReadContextReuse` |
+| Fixtures | `TagItem` (LexModel's own can_read and permission_read); list with filter backends switched off |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | A model that overrides can_read is still asked through it; only LexModel's own can_read takes the cached context. |

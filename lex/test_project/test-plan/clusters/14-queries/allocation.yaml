@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 35
+max_scenario: 42
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -86,3 +86,14 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  f:
+    title: "Filter and ordering allow-list"
+    scenarios: 14.36-14.42
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      Framework models (audit log, audit status, calculation log, history tables) are exempt because the
+      bundled frontend filters them by internal fields.

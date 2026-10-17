@@ -6,6 +6,7 @@ a specific system-time snapshot using the ``?as_of`` query parameter.
 """
 
 from django.db.models import Prefetch
+from lex.api.security import is_readable, read_result
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.permissions.UserPermission import UserPermission
 from rest_framework import status
@@ -13,6 +14,8 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
+
+from lex.core.security_flags import strict
 
 
 class HistoryModelEntry(ListAPIView):
@@ -38,6 +41,11 @@ class HistoryModelEntry(ListAPIView):
 
         HistoryModel = model_class.history.model
         pk_name = model_class._meta.pk.name
+
+        # The history of a record the caller may not read does not exist for
+        # them (LEX_SEC_READ_SURFACES): who changed it and when is data too.
+        if strict("READ_SURFACES") and not self._record_readable(request, model_class, HistoryModel, pk_name, pk):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         serializers_map = (
             model_container.get_serializers_map()
             if hasattr(model_container, "get_serializers_map")
@@ -66,6 +74,17 @@ class HistoryModelEntry(ListAPIView):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _record_readable(request, model_class, HistoryModel, pk_name, pk):
+        live = model_class._default_manager.filter(pk=pk).first()
+        if live is not None:
+            return is_readable(request, live)
+        # Deleted record: judge by its last known state.
+        latest = HistoryModel.objects.filter(**{pk_name: pk}).order_by("-valid_from", "-history_id").first()
+        if latest is None:
+            return True
+        return bool(read_result(request, latest.instance).allowed)
 
     def _get_history_queryset(self, request, HistoryModel, pk_name, pk):
         """Build the queryset, switching between valid-time and system-time."""
@@ -130,12 +149,17 @@ class HistoryModelEntry(ListAPIView):
         # ── System history (Level 2 meta records) ──
         system_history = self._get_system_history(record)
 
+        change_reason = record.history_change_reason
+        if strict("READ_SURFACES") and serializer_class and not snapshot:
+            # A version the caller may not read: no editor or reason either.
+            user_info, change_reason = None, None
+
         return {
             "history_id": record.history_id,
             "valid_from": record.valid_from,
             "valid_to": record.valid_to,
             "history_type": record.history_type,
-            "change_reason": record.history_change_reason,
+            "change_reason": change_reason,
             "user": user_info,
             "snapshot": snapshot,
             "system_history": system_history,

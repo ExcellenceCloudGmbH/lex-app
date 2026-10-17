@@ -1,4 +1,5 @@
 import base64
+import logging
 from collections.abc import Mapping
 from functools import lru_cache
 from urllib.parse import parse_qs
@@ -11,6 +12,11 @@ from lex.api.utils import can_read_from_payload
 from lex.api.utils.helpers import get_default_read_permission_scope
 from lex.core.models.LexModel import LexModel, UserContext
 from rest_framework import filters
+
+from lex.api.security import remember
+from lex.core.security_flags import strict
+
+logger = logging.getLogger(__name__)
 
 
 class PrimaryKeyListFilterBackend(filters.BaseFilterBackend):
@@ -53,6 +59,22 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
         if name == "AuditLog":
             return self._handle_auditlog(request, queryset)
         return self._handle_lexmodel_default(request, queryset)
+
+    def _apply_permission_read_queryset(self, request, queryset):
+        hook = custom_queryset_hook(queryset.model)
+        if hook is None:
+            return None
+        try:
+            restricted = hook(UserContext.from_request_base(request), queryset)
+        except Exception:
+            if strict("FAIL_CLOSED"):
+                logger.exception("%s.permission_read_queryset raised; no rows visible", queryset.model.__name__)
+                return queryset.none()
+            return None
+        if restricted is None:
+            return None
+        # The rows passed the model's SQL rule; per-row checks need not run again.
+        return restricted
 
     def _get_default_permission_target(self, model_class):
         target_model = None
@@ -211,12 +233,20 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
                 if not can_read_from_payload(request, row, base_user_context=base_user_context):
                     excluded.append(row.pk)
             except Exception:
-                pass  # allow-by-default on error
+                if strict("FAIL_CLOSED"):
+                    logger.exception("audit-log visibility check raised for row %s; row hidden", row.pk)
+                    excluded.append(row.pk)
+                # Legacy (LEX_SEC_FAIL_CLOSED=false): allow-by-default on error
         if excluded:
             return queryset.exclude(pk__in=excluded)
         return queryset
 
     def _handle_lexmodel_default(self, request, queryset):
+        # A model can answer for all rows at once, in SQL (permission_read_queryset).
+        restricted = self._apply_permission_read_queryset(request, queryset)
+        if restricted is not None:
+            return restricted
+
         target_model, lookup_field = self._get_default_permission_target(queryset.model)
         if target_model is not None and lookup_field:
             return self._apply_default_permission_read_filter(
@@ -251,6 +281,8 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
                 if target_caps['has_permission_read']:
                     user_context = base_ctx.with_instance(request, target_instance)
                     result = target_instance.permission_read(user_context)
+                    # The serializer asks again for the same row; answer from memory (BUG-011).
+                    remember(request, "read", target_instance, result)
                     if not result.allowed:
                         excluded.append(instance.pk)
                 # Fallback to legacy method
@@ -259,11 +291,25 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
                         excluded.append(instance.pk)
                 # else: allow by default if no permission method
             except Exception:
-                pass  # allow by default on any error
+                if strict("FAIL_CLOSED"):
+                    logger.exception("permission_read raised for %s row %s; row hidden", type(instance).__name__, instance.pk)
+                    excluded.append(instance.pk)
+                # Legacy (LEX_SEC_FAIL_CLOSED=false): allow by default on any error
 
         if excluded:
             return queryset.exclude(pk__in=excluded)
         return queryset
+
+
+def custom_queryset_hook(model):
+    """The model's own ``permission_read_queryset``, or ``None`` when it keeps LexModel's no-op."""
+    if not isinstance(model, type):
+        return None
+    hook = getattr(model, "permission_read_queryset", None)
+    func = getattr(hook, "__func__", None)
+    if func is None or func is LexModel.permission_read_queryset.__func__:
+        return None
+    return hook
 
 
 def apply_read_restriction(queryset, request):

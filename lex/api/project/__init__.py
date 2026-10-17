@@ -14,6 +14,7 @@ from lex.api.errors import LexActionError
 from lex.api.project.views import (
     LexAPIView,
     LexWebhookView,
+    serialize_for,
     strict_serializer,
     verify_hmac_sha256,
     visible_queryset,
@@ -23,6 +24,7 @@ __all__ = [
     "LexAPIView",
     "LexWebhookView",
     "LexActionError",
+    "serialize_for",
     "strict_serializer",
     "verify_hmac_sha256",
     "visible_queryset",
