@@ -30,6 +30,13 @@ class CustomAdminConfig(AdminConfig):
         pass
 
 
+def _validate_project_configuration():
+    """Stop here when the project's ``lex_config.py`` is broken (see ``validate_configuration``)."""
+    from lex.core.extensions import validate_configuration
+
+    validate_configuration()
+
+
 def _create_audit_logger():
     """
     Create an audit logger instance if audit logging is enabled.
@@ -130,6 +137,7 @@ class LexAppConfig(GenericAppConfig):
                 repo=repo_name,
                 is_lex=False
             )
+            _validate_project_configuration()
             generic_app_models = {f"{model.__name__}": model for model in
                                   set(list(apps.get_app_config(repo_name).models.values())
                                       + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
