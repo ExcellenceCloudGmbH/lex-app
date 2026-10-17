@@ -226,8 +226,9 @@
 | 10.135 | actions on read models | the view's action; the projection's inherited action writes the base row |
 | 10.136 | list default and page preparation | locked rows left out of the list, still readable; prepared once per page and once for a record |
 | 10.137 | CreateView | real table name, security_invoker on PostgreSQL, deconstruct round-trips |
+| 10.150 | a projection offers only the actions it names | lex_actions narrows the inherited actions: the others are 404 and absent |
 
-**Scenario range:** 10.132-10.137. **Test file:** `lex/test_project/tests/api_layer/test_10x_read_models.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/read_models.py` (is_read_model, validate, list_queryset, CreateView), `lex/core/models/LexReadModel.py`, `lex/lex_app/simple_history_config.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (writes refused, as_of), `lex/api/views/model_entries/List.py`, `lex/api/views/model_entries/History.py`, `lex/api/serializers/base_serializers.py` (lex_prepare_page), `lex/core/extensions.py`. Batch: [10x](batches.md).
+**Scenario range:** 10.132-10.137, 10.150. **Test file:** `lex/test_project/tests/api_layer/test_10x_read_models.py`. **Type:** U + E. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/read_models.py` (is_read_model, validate, list_queryset, CreateView), `lex/core/models/LexReadModel.py`, `lex/lex_app/simple_history_config.py`, `lex/api/views/model_entries/mixins/ModelEntryProviderMixin.py` (writes refused, as_of), `lex/api/views/model_entries/List.py`, `lex/api/views/model_entries/History.py`, `lex/api/serializers/base_serializers.py` (lex_prepare_page), `lex/core/extensions.py`, `lex/api/actions.py` (lex_actions). Batch: [10x](batches.md).
 
 ---
 
@@ -263,7 +264,8 @@
 | 10.146 | relations by public id | ?folder=<uuid> filters; moved by uuid; unknown uuid 404, nothing created |
 | 10.147 | one operation per exposed model and action | operation ids and paths; GET action query input; POST body; error body; clean components |
 | 10.148 | the document validates | lex schema --validate --fail-on-warn succeeds |
+| 10.149 | an action answers with a list | many=True documents an array of the output; the call answers the list |
 
-**Scenario range:** 10.144-10.148. **Test file:** `lex/test_project/tests/api_layer/test_10z_public_generic_api.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths). Batch: [10z](batches.md).
+**Scenario range:** 10.144-10.149. **Test file:** `lex/test_project/tests/api_layer/test_10z_public_generic_api.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths), `lex/api/actions.py` (many). Batch: [10z](batches.md).
 
 ---

@@ -181,7 +181,7 @@ must not open a check on the whole model.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 4.119-4.128 |
+| Scenario range | 4.119-4.128, 4.136 |
 | Type | U + E |
 | Files covered | `lex/api/middleware/generic_api_gate.py` (records mode, exposed_operations, record_operation, GenericApiSocketGate), `lex/lex_app/asgi.py`, `lex/core/extensions.py` (_validate_exposed_models), `lex/api/security.py` (edit_violations for Django auth models, list_denied), `lex/api/views/model_entries/List.py` (initial), `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py` |
 | Test file | `lex/test_project/tests/permissions/test_4v_generic_records.py` |

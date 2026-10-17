@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 135
+max_scenario: 136
 letters:
   a:
     title: ''
@@ -224,10 +224,10 @@ letters:
       Importing rest_framework_api_key.admin registers the classic keys.
   v:
     title: "Generic records for end users (GENERIC_API records) and lex's internal endpoints"
-    scenarios: 4.119-4.128
+    scenarios: 4.119-4.128, 4.136
     status: complete
     tests:
-      pass: 10
+      pass: 11
       skip: 0
       xfail: 0
     note: >-
