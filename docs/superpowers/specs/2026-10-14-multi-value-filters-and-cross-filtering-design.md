@@ -51,6 +51,15 @@ Found while the implementation plans were written against the source:
     menu and the filter bar alike. AG applies an empty Set as no filter, so the UI never produces
     an empty selection, and a host's empty list clears that field like `None`. The server still
     reads an explicit empty Set (`values: []`) as "no rows", for direct API callers.
+14. **Allowed embedding sites.** `LEX_EMBED_ALLOWED_ORIGINS` (a comma-separated list of origins such as
+    `https://reports.example.com`) names the sites allowed to embed lex-app.
+    - When it is set, embed responses carry `Content-Security-Policy: frame-ancestors 'self' <origins>`,
+      so the browser refuses every other framing site.
+    - `config.js` passes the list to the frontend as `window.REACT_APP_EMBED_ALLOWED_ORIGINS`.
+    - The embed sends `filter` events, and accepts host `filter` messages, only when the parent frame's
+      origin is on the list. With the setting unset, framing and the other bridge events and messages
+      behave as before, and the `filter` channel stays off. A `filter` event reports a row count with
+      no user action, so a page that may frame lex-app must be named before it can read one.
 
 ## The problem
 
