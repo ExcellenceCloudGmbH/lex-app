@@ -186,6 +186,14 @@ class _LookInput(_drf.Serializer):
     q = _drf.CharField(max_length=20)
 
 
+class _RenameInput(_drf.Serializer):
+    title = _drf.CharField(max_length=200)
+
+
+class _CountInput(_drf.Serializer):
+    prefix = _drf.CharField(max_length=20)
+
+
 class ActionItem(LexModel):
     """Cluster 10s: actions beyond CRUD. "locked" rows are readable but not editable."""
 
@@ -362,6 +370,85 @@ class ActionItemCard(ActionItem):
 _CardSerializer.Meta.model = ActionItemCard
 READ_SUMMARY = "actionitemsummary"
 ACTION_CARD = "actionitemcard"
+
+# ---------------------------------------------------------------------------
+# Cluster 10z: the public shape of the generic API (uuid only, no lex fields, documented)
+
+import uuid as _uuid  # noqa: E402
+
+from lex.api.project import LexLookupRelatedField  # noqa: E402
+
+
+@_permissive
+class PublicApiFolder(LexModel):
+    """Addressed by uuid only; exposed for list and read."""
+
+    uuid = models.UUIDField(default=_uuid.uuid4, unique=True, editable=False)
+    name = models.CharField(max_length=200)
+    lex_lookup_field = "uuid"
+    lex_lookup_allow_pk = False
+    lex_api_exposed = {"list", "retrieve"}
+    lex_api_internal_fields = False
+
+    class Meta:
+        app_label = "lex_app"
+
+
+@_permissive
+class PublicApiDocument(LexModel):
+    """Addressed by uuid only, refers to its folder by uuid; exposed with actions."""
+
+    uuid = models.UUIDField(default=_uuid.uuid4, unique=True, editable=False)
+    title = models.CharField(max_length=200)
+    folder = models.ForeignKey(PublicApiFolder, on_delete=models.CASCADE, related_name="documents")
+    lex_lookup_field = "uuid"
+    lex_lookup_allow_pk = False
+    lex_api_exposed = True
+    lex_api_internal_fields = False
+    lex_api_filters = ("folder", "title")
+
+    class Meta:
+        app_label = "lex_app"
+
+    @lex_action(permission="edit", input=_RenameInput, summary="Rename the document")
+    def rename(self, context, data):
+        self.title = data["title"]
+        self.save()
+        return {"title": self.title}
+
+    @lex_action(detail=False, methods=("get",), permission="permission_count", input=_CountInput)
+    def count(cls, context, data):
+        return {"count": cls.objects.filter(title__startswith=data["prefix"]).count()}
+
+    @classmethod
+    def permission_count(cls, uc, data):
+        return True
+
+
+class PublicFolderSerializer(_drf.ModelSerializer):
+    class Meta:
+        model = PublicApiFolder
+        fields = ["uuid", "name"]
+
+
+class PublicDocumentSerializer(_drf.ModelSerializer):
+    folder = LexLookupRelatedField(queryset=PublicApiFolder.objects.all())
+
+    class Meta:
+        model = PublicApiDocument
+        fields = ["uuid", "title", "folder"]
+
+
+class PublicErrorSerializer(_drf.Serializer):
+    code = _drf.CharField()
+    detail = _drf.CharField()
+
+
+PublicApiFolder.api_serializers = {"default": PublicFolderSerializer}
+PublicApiDocument.api_serializers = {"default": PublicDocumentSerializer}
+PUBLIC_API_MODELS = [PublicApiFolder, PublicApiDocument]
+PUBLIC_FOLDER = "publicapifolder"
+PUBLIC_DOCUMENT = "publicapidocument"
 
 ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
 PROJECT_MODELS = [ApiProjectItem]

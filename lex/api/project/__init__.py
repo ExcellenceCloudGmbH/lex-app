@@ -12,6 +12,7 @@ See the "Custom API endpoints" page of the lex-app docs.
 """
 from lex.api.actions import ActionResult, lex_action
 from lex.api.errors import LexActionError
+from lex.api.serializers.relations import LexLookupRelatedField
 from lex.api.project.views import (
     LexAPIView,
     LexWebhookView,
@@ -26,6 +27,7 @@ __all__ = [
     "LexAPIView",
     "LexWebhookView",
     "LexActionError",
+    "LexLookupRelatedField",
     "lex_action",
     "serialize_for",
     "strict_serializer",

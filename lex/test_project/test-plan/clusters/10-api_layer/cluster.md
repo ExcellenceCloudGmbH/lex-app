@@ -249,3 +249,21 @@
 **Scenario range:** 10.138-10.143. **Test file:** `lex/test_project/tests/api_layer/test_10y_hardened_actions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/api/actions.py` (lex_action options, ActionResult, ActionThrottle, ModelActionView _permitted/_respond/_audit/_audit_failure/get_throttles, denied_answer), `lex/core/extensions.py` (ACTION_DENIED, THROTTLE_RATES, _validate_actions), `lex/audit_logging/models/AuditLog.py` (action choice), `lex/audit_logging/migrations/0009_auditlog_action_choice.py`, `lex/api/project/__init__.py`. Batch: [10y](batches.md).
 
 ---
+
+### 10z. The public shape of the generic API: short paths, uuid relations, no lex fields, OpenAPI ✅
+
+**What it tests:** Short paths serve create, read, change, actions and history with a calculation id lex assigns; responses are exactly the project's positive list; relations are written, read and filtered by uuid, an unknown uuid is 404; the schema has one operation per exposed model, operation and action with stable ids, typed uuid parameters, query input of GET actions, request bodies, the project's error body and clean components; lex schema validates without warnings.
+
+**Why a regression matters:** A typed client generated from the schema, and integrators reading it, must never depend on lex's internal fields, integer keys or a meaningless path segment.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.144 | short paths | create/read/change/action/history on paths without calculationId; api_ calculation ids |
+| 10.145 | the project's positive list | rows are exactly uuid, title, folder |
+| 10.146 | relations by public id | ?folder=<uuid> filters; moved by uuid; unknown uuid 404, nothing created |
+| 10.147 | one operation per exposed model and action | operation ids and paths; GET action query input; POST body; error body; clean components |
+| 10.148 | the document validates | lex schema --validate --fail-on-warn succeeds |
+
+**Scenario range:** 10.144-10.148. **Test file:** `lex/test_project/tests/api_layer/test_10z_public_generic_api.py`. **Type:** E. **Status:** ✅ Complete (2026-10-17). Covers `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths). Batch: [10z](batches.md).
+
+---

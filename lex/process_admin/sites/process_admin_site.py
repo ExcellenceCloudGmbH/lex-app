@@ -189,6 +189,33 @@ class ProcessAdminSite:
                 ListModelEntries.as_view(),
                 name="model-entries-list",
             ),
+            # Short paths without the calculationId segment (lex assigns one per request), for clients and
+            # integrators of a project's records; the long forms below stay.
+            path(
+                "api/model_entries/<model:model_container>/one",
+                _with_calculation_id(OneModelEntry.as_view()),
+                name="model-one-entry-create-short",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/one/<uuid:lookup>",
+                _with_calculation_id(OneModelEntry.as_view()),
+                name="model-one-entry-by-lookup-short",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/one/<uuid:lookup>/history",
+                _with_calculation_id(HistoryModelEntry.as_view()),
+                name="model-history-list-by-lookup-short",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/one/<uuid:lookup>/action/<str:action>",
+                _with_calculation_id(ModelActionView.as_view()),
+                name="model-record-action-by-lookup-short",
+            ),
+            path(
+                "api/model_entries/<model:model_container>/action/<str:action>",
+                _with_calculation_id(ModelActionView.as_view()),
+                name="model-collection-action-short",
+            ),
             path(
                 "api/model_entries/<model:model_container>/<str:calculationId>/one/<int:pk>",
                 OneModelEntry.as_view(),
@@ -334,3 +361,16 @@ class ProcessAdminSite:
             "process_admin",
             self.name,
         )  # TODO: what is the name exactly for??
+
+
+def _with_calculation_id(view):
+    """A short-path view: the calculationId a long path carries is assigned per request (api_<uuid>)."""
+    import functools
+    import uuid
+
+    @functools.wraps(view)
+    def wrapped(request, *args, **kwargs):
+        kwargs.setdefault("calculationId", f"api_{uuid.uuid4().hex}")
+        return view(request, *args, **kwargs)
+
+    return wrapped

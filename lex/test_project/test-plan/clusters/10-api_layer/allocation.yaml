@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 143
+max_scenario: 148
 letters:
   a:
     title: ''
@@ -256,3 +256,13 @@ letters:
       xfail: 0
     note: >-
       A permission method taking (user_context, data) receives the validated input; one taking only user_context is called as before, so existing actions are unchanged.
+  z:
+    title: "The public shape of the generic API: short paths, uuid relations, no lex fields, OpenAPI"
+    scenarios: 10.144-10.148
+    status: complete
+    tests:
+      pass: 5
+      skip: 0
+      xfail: 0
+    note: >-
+      Path parameters are typed from the lookup field (uuid, int or string) so lex schema --fail-on-warn stays clean; an action without output is documented as a free-form object.

@@ -215,3 +215,17 @@
 | Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | A permission method taking (user_context, data) receives the validated input; one taking only user_context is called as before, so existing actions are unchanged. |
+
+### Batch 10z — The public shape of the generic API: short paths, uuid relations, no lex fields, OpenAPI ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.144-10.148 |
+| Type | E |
+| Files covered | `lex/process_admin/sites/process_admin_site.py` (short routes, _with_calculation_id), `lex/api/serializers/relations.py` (LexLookupRelatedField), `lex/api/views/model_entries/List.py` (_resolve_lookup by public id), `lex/api/serializers/base_serializers.py` (_wrap_without_internal_fields), `lex/api/generic_schema.py`, `lex/api/schema.py` (include_configured_paths) |
+| Test file | `lex/test_project/tests/api_layer/test_10z_public_generic_api.py` |
+| Test classes | `TestCluster10z_PublicGenericApi` |
+| Fixtures | PublicApiFolder and PublicApiDocument (uuid only, lex_api_internal_fields = False, a LexLookupRelatedField, two actions), SCHEMA with generic and error_component |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | Path parameters are typed from the lookup field (uuid, int or string) so lex schema --fail-on-warn stays clean; an action without output is documented as a free-form object. |
