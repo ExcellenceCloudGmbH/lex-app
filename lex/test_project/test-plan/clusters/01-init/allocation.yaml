@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 401
+max_scenario: 408
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1283,3 +1283,15 @@ letters:
       xfail: 0
     note: >-
       Called at the end of LexAppConfig.ready() for project apps.
+  ay:
+    title: "A Lex project nested in a repository runs without extra variables"
+    scenarios: 1.402-1.408
+    status: complete
+    tests:
+      pass: 7
+      skip: 0
+      xfail: 0
+    note: >-
+      The folder with lex_config.py is the root before the git toplevel; a settings.py there is the
+      settings module. Mutations checked by hand: skipping the lex_config.py step breaks 1.402/1.405/1.406/1.408;
+      not extending PYTHONPATH breaks 1.408; Lex's settings in prepare_environment breaks 1.406.

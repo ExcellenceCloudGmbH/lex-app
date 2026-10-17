@@ -1,9 +1,18 @@
 # lex/tools/project_root.py
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 MARKERS = {".git", "pyproject.toml", "setup.cfg", "manage.py", "requirements.txt", ".idea", ".vscode"}
+
+#: The file only a Lex project root has. A Lex project inside a larger
+#: repository (a monorepo with a web client beside it) is found by this before
+#: the git toplevel is consulted.
+PROJECT_CONFIG_FILE = "lex_config.py"
+
+#: The settings module the CLI uses unless the project brings its own.
+LEX_SETTINGS_MODULE = "lex_app.settings"
 
 
 def _is_safe_root(candidate: Path, home: Path) -> bool:
@@ -28,7 +37,15 @@ def find_project_root(start=None) -> str:
     base = Path(start or os.getcwd()).resolve()
     home = Path.home().resolve()
 
-    # 1) Prefer the git toplevel, but only if it's a safe project root.
+    # 1) The nearest directory holding lex_config.py is the project, even when
+    #    it sits below the git toplevel. Stops at the user's home like step 3.
+    for p in [base] + list(base.parents):
+        if not _is_safe_root(p, home):
+            break
+        if (p / PROJECT_CONFIG_FILE).is_file():
+            return str(p)
+
+    # 2) Prefer the git toplevel, but only if it's a safe project root.
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -46,7 +63,7 @@ def find_project_root(start=None) -> str:
     except Exception:
         pass
 
-    # 2) Walk up looking for a project marker, but stop at the user's
+    # 3) Walk up looking for a project marker, but stop at the user's
     #    home directory so we never silently relocate the project to ``~``.
     for p in [base] + list(base.parents):
         if not _is_safe_root(p, home):
@@ -54,7 +71,7 @@ def find_project_root(start=None) -> str:
         if any((p / m).exists() for m in MARKERS):
             return str(p)
 
-    # 3) Fall back to the starting directory. The caller (e.g. setup-with-ai)
+    # 4) Fall back to the starting directory. The caller (e.g. setup-with-ai)
     #    will operate on the directory the user actually invoked the command
     #    from instead of escaping into ``~`` or ``/``.
     return str(base)
@@ -87,6 +104,42 @@ def load_project_env_file(project_root) -> None:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
         os.environ.setdefault(key, value)
+
+
+def project_settings_module(project_root) -> str:
+    """The Django settings module for ``project_root``.
+
+    A project that keeps a ``settings.py`` at its root uses it as
+    ``<folder>.settings`` -- typically ``from lex_app.settings import *`` plus
+    what the project needs on top, such as its own database connection. Every
+    other project gets ``lex_app.settings``. A folder whose name is not a Python
+    identifier cannot be imported as a package, so it gets ``lex_app.settings``
+    too. The model discovery skips ``settings.py`` already.
+    """
+    root = Path(project_root)
+    if (root / "settings.py").is_file() and root.name.isidentifier():
+        return f"{root.name}.settings"
+    return LEX_SETTINGS_MODULE
+
+
+def apply_settings_module(project_root) -> str:
+    """Set ``DJANGO_SETTINGS_MODULE`` for ``project_root`` unless it is set.
+
+    For a project settings module the folder above the project root goes on
+    ``sys.path``, which makes ``<folder>.settings`` importable before Django
+    reads it, and on ``PYTHONPATH`` for the processes this one starts (a
+    reloading server, a Celery worker). A variable the process already has
+    always wins. Returns the module in effect.
+    """
+    module = os.environ.setdefault("DJANGO_SETTINGS_MODULE", project_settings_module(project_root))
+    if module != LEX_SETTINGS_MODULE:
+        parent = Path(project_root).resolve().parent.as_posix()
+        if parent not in sys.path:
+            sys.path.append(parent)
+        python_path = os.environ.get("PYTHONPATH", "")
+        if parent not in python_path.split(os.pathsep):
+            os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (python_path, parent) if p)
+    return module
 
 
 def resolve_llm_working_directory(explicit_path: str | None = None) -> Path:

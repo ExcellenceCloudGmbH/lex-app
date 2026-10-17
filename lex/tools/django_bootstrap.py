@@ -21,7 +21,7 @@ import os
 import sys
 from pathlib import Path
 
-from lex.tools.project_root import find_project_root, load_project_env_file
+from lex.tools.project_root import apply_settings_module, find_project_root, load_project_env_file
 
 #: The directory holding the ``lex`` package's own top-level modules. The CLI
 #: puts the same directory on ``sys.path`` as ``LEX_APP_PACKAGE_ROOT``, and it is
@@ -46,13 +46,14 @@ def prepare_environment() -> Path:
     """Give this process the environment ``lex/bin/lex.py`` gives its own.
 
     The same steps in the same order: the project's ``.env`` (never overriding
-    a variable the process already has), the settings module,
+    a variable the process already has), the settings module (the project's
+    ``settings.py`` when it has one),
     ``PROJECT_ROOT``, and the package directory on ``sys.path``. Safe to call
     any number of times. Returns the project root.
     """
     root = project_root()
     load_project_env_file(root)
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "lex_app.settings")
+    apply_settings_module(root)
     os.environ.setdefault("PROJECT_ROOT", root.as_posix())
     os.environ.setdefault("LEX_APP_PACKAGE_ROOT", LEX_PACKAGE_DIR.as_posix())
 

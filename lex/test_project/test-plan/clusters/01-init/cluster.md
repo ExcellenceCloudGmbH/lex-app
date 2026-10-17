@@ -498,4 +498,22 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.398-1.401. **Test file:** `lex/test_project/tests/init/test_1ax_config_validation.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Covers `lex/core/extensions.py` (validate_configuration, HOOK_KEYS), `lex/lex_app/apps.py` (_validate_project_configuration), `lex/api/utils/api_key_requests.py` (resolver errors logged). Batch: [1ax](batches.md).
 
+### 1ay. A Lex project nested in a repository ✅
+
+**What it tests:** Inside a git repository, the nearest folder with a lex_config.py is the project root; without one the git toplevel stays. A settings.py at the project root becomes `<folder>.settings` for the CLI, the Reflex bootstrap and the processes they start, importable without PYTHONPATH; an explicit DJANGO_SETTINGS_MODULE wins.
+
+**Why a regression matters:** Otherwise a Lex project in a monorepo loads the wrong folder (lex_config.py not found, models from the repository root) and ignores its own settings, unless every run configuration sets three variables.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.402 | lex_config.py below the git toplevel | project folder, also from a subfolder |
+| 1.403 | no lex_config.py | git toplevel as before |
+| 1.404 | settings module choice | `<folder>.settings` with settings.py; lex_app.settings without or for a non-identifier name |
+| 1.405 | CLI in a nested project | PROJECT_ROOT and settings module set, importable |
+| 1.406 | Reflex bootstrap | same settings module, importable |
+| 1.407 | explicit DJANGO_SETTINGS_MODULE | kept |
+| 1.408 | child processes | find the project settings via PYTHONPATH |
+
+**Scenario range:** 1.402-1.408. **Test file:** `lex/test_project/tests/init/test_1ay_nested_project.py`. **Type:** U. **Status:** ✅ Complete (2026-10-17). Covers `lex/tools/project_root.py`, `lex/tools/django_bootstrap.py`, `lex/bin/lex.py`. Batch: [1ay](batches.md).
+
 ---
