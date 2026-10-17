@@ -48,18 +48,38 @@ def build_model_mutation_message(model_name, action, record_id=None):
     return {"type": MODEL_MUTATION_TYPE, "payload": payload}
 
 
-def broadcast_model_mutation(model_name, action, record_id=None):
+def broadcast_model_mutation(model_name, action, record_id=None, *, target=None, previous=None):
     """Broadcast a CRUD mutation after the current transaction commits.
 
     Safe to call from any synchronous context (REST view, signal handler).
     No-ops when ``model_name`` is empty. The actual send is registered via
     ``transaction.on_commit`` so clients only learn about a change once it is
     durably committed.
+
+    ``target`` (the instance, or the model class for bulk changes) lets a
+    model opt out (``broadcast_mutations = False``) and scopes delivery to
+    the groups of ``lex_config.MUTATION_GROUPS`` (see :mod:`lex.core.realtime`).
+    ``previous`` (the record as it was before an update) adds its groups, so a
+    record that moved between groups reaches both: those that had it on screen
+    and those that may see it now. Each group gets the event once.
     """
     if not model_name:
         return
 
+    from lex.core import realtime
+
+    if target is not None and not realtime.broadcasts(target):
+        return
+    groups = realtime.event_groups(MODEL_MUTATION_GROUP, target) if target is not None else [MODEL_MUTATION_GROUP]
+    if target is not None and previous is not None:
+        groups = list(dict.fromkeys(groups + realtime.event_groups(MODEL_MUTATION_GROUP, previous)))
+    if realtime.scoped() and target is None:
+        groups = []  # nothing says who may see it; a scoped installation sends nothing
+
     message = build_model_mutation_message(model_name, action, record_id)
-    transaction.on_commit(
-        lambda: sync_channel_group_send(MODEL_MUTATION_GROUP, message)
-    )
+
+    def send():
+        for group in groups:
+            sync_channel_group_send(group, message)
+
+    transaction.on_commit(send)

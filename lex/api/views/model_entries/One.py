@@ -88,10 +88,16 @@ class OneModelEntry(
         grids open in other tabs / users / embedded views refresh without a
         manual reload. Calculation-driven refreshes are handled separately by
         the ``update_calculation_status`` broadcast.
+
+        *instance* was loaded before the change; DRF saved a fresh copy
+        (``_updated_instance``). The groups of both hear about it.
         """
         model_name = instance._meta.model_name
+        updated = getattr(self, "_updated_instance", None)
         broadcast_model_mutation(
-            model_name, "updated", f"{model_name}_{instance.pk}"
+            model_name, "updated", f"{model_name}_{instance.pk}",
+            target=instance if updated is None else updated,
+            previous=None if updated is None else instance,
         )
 
     def _mark_calculation_started(self, instance, calculation_record, calculation_id):
@@ -340,7 +346,10 @@ class OneModelEntry(
             # ``CalculationModel.calculate_hook`` checks this flag at
             # entry and returns early without running ``calculate()``.
             serializer.instance._defer_calculate_hook = True
-        return super().perform_update(serializer)
+        result = super().perform_update(serializer)
+        # The record as saved, for the update broadcast's groups.
+        self._updated_instance = serializer.instance
+        return result
 
     def _normalize_temporal_value_for_noop_check(self, value):
         if isinstance(value, datetime):
@@ -657,7 +666,10 @@ class OneModelEntry(
             record_id = (
                 f"{model_name}_{created_id}" if created_id is not None else None
             )
-            broadcast_model_mutation(model_name, "created", record_id)
+            broadcast_model_mutation(
+                model_name, "created", record_id,
+                target=getattr(self, "_created_instance", None) or model_container.model_class,
+            )
 
             created = getattr(self, "_created_instance", None)
             if self._calculates_on_create(created):
@@ -681,7 +693,7 @@ class OneModelEntry(
                 record_id = f"{model_name}_{instance.pk}"
                 try:
                     response = super().destroy(request, *args, **kwargs)
-                    broadcast_model_mutation(model_name, "deleted", record_id)
+                    broadcast_model_mutation(model_name, "deleted", record_id, target=instance)
                     return response
                 except Exception as e:
                     self._log_failed_request_audit_if_needed(
@@ -699,6 +711,8 @@ class OneModelEntry(
         self.reset_failed_audit_log_state()
         # Set by perform_update when an edit leaves the record closed.
         self._status_kept_closed = False
+        # Set by perform_update to the record as saved (update broadcast).
+        self._updated_instance = None
 
         model_container = self.kwargs["model_container"]
         calculationId = self.kwargs["calculationId"]

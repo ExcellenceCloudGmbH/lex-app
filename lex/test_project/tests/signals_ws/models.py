@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from django.db import models
 from lex.core.models.CalculationModel import CalculationModel
-from lex.core.models.LexModel import PermissionResult
+from lex.core.models.LexModel import LexModel, PermissionResult
 
 
 def _permissive(cls):
@@ -47,7 +47,22 @@ class SigAtomicCalc(CalculationModel):
             raise RuntimeError(f"SigAtomicCalc({self.name!r}) failing on purpose")
 
 
+@_permissive
+class SigPlainItem(LexModel):
+    """Cluster 9i: a plain record whose CRUD broadcasts are observed."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+
 ALL_MODELS = [SigAtomicCalc]
+BROADCAST_MODELS = [SigPlainItem]
 
 SIG_ATOMIC = "sigatomiccalc"
+SIG_PLAIN = "sigplainitem"
 

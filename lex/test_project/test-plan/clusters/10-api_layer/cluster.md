@@ -140,3 +140,20 @@
 **Scenario range:** 10.106-10.112. **Test file:** `lex/test_project/tests/api_layer/test_10s_record_actions.py`. **Type:** E. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/actions.py` (lex_action, actions_for, ModelActionView), action routes in `lex/process_admin/sites/process_admin_site.py`. Batch: [10s](batches.md).
 
 ---
+
+### 10t. Keycloak calls and session rows per request ✅
+
+**What it tests:** One KeycloakManager per process; the permission cache is off by default and, when on, answers repeat requests for a token until its expiry (expired tokens never cached); LEX_BEARER_STATELESS stops session rows for bearer clients.
+
+**Why a regression matters:** Each token request built a manager (admin lookup included) and called Keycloak twice; bearer clients created a session row per call.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.113 | one manager | built once for three requests |
+| 10.114 | cache off by default | two Keycloak calls for two requests |
+| 10.115 | cache until expiry | one call for three uses; expired token never cached |
+| 10.116 | stateless bearer | a session row without the switch, none with it |
+
+**Scenario range:** 10.113-10.116. **Test file:** `lex/test_project/tests/api_layer/test_10t_keycloak_and_bearer_performance.py`. **Type:** U + I. **Status:** ✅ Complete (2026-10-16). Covers `lex/api/middleware/keycloak_permissions.py`, `lex/authentication/middleware.py` (StatelessBearerSessionMiddleware). Batch: [10t](batches.md).
+
+---

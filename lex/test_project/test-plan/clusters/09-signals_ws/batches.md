@@ -65,3 +65,31 @@
 | Note | `create_profile` and `save_profile`, `User` receivers that created a `Profile` the module never imported, were deleted from `CalculationSignals.py` in February, and their import into the package a day later. Both names stayed in `__all__`. A star import binds every name there, so `from lex.core.signals import *` raised `AttributeError` and lost the calculation-signal API with it. Both names are dropped. |
 
 ---
+
+### Batch 9h — Scoped realtime delivery ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.44-9.48 |
+| Type | U |
+| Files covered | `lex/core/realtime.py`, `lex/core/signals/ModelMutationSignal.py`, `lex/core/signals/CalculationSignals.py`, `lex/api/consumers/ModelDataUpdateConsumer.py`, `lex/api/consumers/UpdateCalculationStatusConsumer.py` |
+| Test file | `lex/test_project/tests/signals_ws/test_9h_realtime_scoping.py` |
+| Test classes | `TestCluster09h_RealtimeScoping` |
+| Fixtures | stand-in records and users with a tenant; consumers with a mocked channel layer; on_commit run inline |
+| Tests landed | **5 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The duplicate MODEL_MUTATION_GROUP constant was removed; the consumer imports it from ModelMutationSignal. |
+
+### Batch 9i — CRUD endpoints pass their broadcast target ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 9.49-9.52 |
+| Type | E |
+| Files covered | `lex/api/views/model_entries/One.py` (create/update/delete broadcasts), `lex/api/views/model_entries/Many.py` (bulk delete broadcast), `lex/core/signals/ModelMutationSignal.py` (previous) |
+| Test file | `lex/test_project/tests/signals_ws/test_9i_crud_broadcast_targets.py` |
+| Test classes | `TestCluster09i_CrudBroadcastTargets` |
+| Fixtures | `SigPlainItem` (permissive plain LexModel); MUTATION_GROUPS/USER_GROUPS hooks; patched `sync_channel_group_send` |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | An update reaches the groups of the record before and after the change (One's view-local instance and the copy DRF saved), each group once, so a record that moves between groups notifies both. |

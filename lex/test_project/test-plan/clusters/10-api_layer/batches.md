@@ -131,3 +131,17 @@
 | Tests landed | **7 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | calculate=true/cancel=true stay as they are; actions are additive. |
+
+### Batch 10t — Keycloak calls and session rows per request ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.113-10.116 |
+| Type | U + I |
+| Files covered | `lex/api/middleware/keycloak_permissions.py`, `lex/authentication/middleware.py` (StatelessBearerSessionMiddleware) |
+| Test file | `lex/test_project/tests/api_layer/test_10t_keycloak_and_bearer_performance.py` |
+| Test classes | `TestCluster10t_KeycloakManagerAndCache`, `TestCluster10t_StatelessBearer` |
+| Fixtures | a fake KeycloakManager counting instances and UMA calls; unsigned JWT-shaped tokens with exp; a patched bearer backend |
+| Tests landed | **4 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | The shared manager is rebuilt when the KeycloakManager class is replaced (tests patching it, 4.32b). |

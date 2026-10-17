@@ -1,11 +1,12 @@
 import json
 import logging
 
+from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
-logger = logging.getLogger(__name__)
+from lex.core.signals.ModelMutationSignal import MODEL_MUTATION_GROUP
 
-MODEL_MUTATION_GROUP = "model_data_update"
+logger = logging.getLogger(__name__)
 
 
 class ModelDataUpdateConsumer(AsyncWebsocketConsumer):
@@ -21,11 +22,17 @@ class ModelDataUpdateConsumer(AsyncWebsocketConsumer):
     group_name = MODEL_MUTATION_GROUP
 
     async def connect(self):
-        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        from lex.core import realtime
+
+        # One shared group by default; the user's groups with USER_GROUPS/MUTATION_GROUPS.
+        self.group_names = await sync_to_async(realtime.socket_groups)(self.group_name, (getattr(self, "scope", None) or {}).get("user"))
+        for group in self.group_names:
+            await self.channel_layer.group_add(group, self.channel_name)
         await self.accept()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        for group in getattr(self, "group_names", [self.group_name]):
+            await self.channel_layer.group_discard(group, self.channel_name)
         await super().disconnect(close_code)
 
     async def record_mutation(self, event):
