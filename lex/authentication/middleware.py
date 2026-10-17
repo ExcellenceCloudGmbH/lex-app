@@ -34,9 +34,14 @@ class ApiKeyAwareLoginRequiredMiddleware(LoginRequiredMiddleware):
         return super().__call__(request)
 
     def is_login_required_for_url(self, request):
+        from lex.api.middleware.generic_api_gate import generic_api_hidden_from_anonymous
         from lex.api.project.public_paths import is_public_path
 
         if is_public_path(request.path):
+            return False
+        # A closed generic API answers 404 to everyone (GENERIC_API), anonymous
+        # callers included: let them through to the gate instead of to sign-in.
+        if generic_api_hidden_from_anonymous(request):
             return False
         return super().is_login_required_for_url(request)
 
