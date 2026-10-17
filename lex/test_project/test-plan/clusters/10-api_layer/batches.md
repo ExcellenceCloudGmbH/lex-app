@@ -201,3 +201,17 @@
 | Tests landed | **6 pass / 0 fail** |
 | Status | ✅ Complete |
 | Note | A proxy inherits its base table's history manager; the history endpoint and as_of check is_read_model first, so a projection never shows the base table's history. |
+
+### Batch 10y — Actions as the operation primitive: input-aware permission, answers, throttle, audit ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.138-10.143 |
+| Type | E |
+| Files covered | `lex/api/actions.py` (lex_action options, ActionResult, ActionThrottle, ModelActionView _permitted/_respond/_audit/_audit_failure/get_throttles, denied_answer), `lex/core/extensions.py` (ACTION_DENIED, THROTTLE_RATES, _validate_actions), `lex/audit_logging/models/AuditLog.py` (action choice), `lex/audit_logging/migrations/0009_auditlog_action_choice.py`, `lex/api/project/__init__.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10y_hardened_actions.py` |
+| Test classes | `TestCluster10y_HardenedActions` |
+| Fixtures | ActionItem's cluster-10y actions (spend, hidden_action, state_bound, look, ping, upsert, fail_loose), a throttle rate set per test, the audit tables |
+| Tests landed | **6 pass / 0 fail** |
+| Status | ✅ Complete |
+| Note | A permission method taking (user_context, data) receives the validated input; one taking only user_context is called as before, so existing actions are unchanged. |

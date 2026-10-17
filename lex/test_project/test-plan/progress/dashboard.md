@@ -19,7 +19,7 @@
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
 | 8. Celery & Async | 16 | 156 | 92 | 12 | 0 |
 | 9. Signals & WebSocket | 9 | 52 | 24 | 0 | 0 |
-| 10. API Layer | 24 | 137 | 88 | 0 | 0 |
+| 10. API Layer | 25 | 143 | 94 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
 | 12. Serializer Contract | 14 | 68 | 32 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
@@ -290,6 +290,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 10v | Every error of a generic endpoint reaches the exception handler | 10.122-10.127 | complete | 6 | 0 | 0 | Direct-call unit tests of the destroy mixin (10k) and file download (10l) now see the raised LexActionError; they render it as the handler would. |
 | 10w | The scope a request acts in (REQUEST_SCOPE) | 10.128-10.131 | complete | 5 | 0 | 0 | A row outside the scope has no history either: History judges the live row by the scoped queryset before falling back to the last known state of deleted rows. |
 | 10x | Read models: views and projections on the generic endpoints | 10.132-10.137 | complete | 6 | 0 | 0 | A proxy inherits its base table's history manager; the history endpoint and as_of check is_read_model first, so a projection never shows the base table's history. |
+| 10y | Actions as the operation primitive: input-aware permission, answers, throttle, audit | 10.138-10.143 | complete | 6 | 0 | 0 | A permission method taking (user_context, data) receives the validated input; one taking only user_context is called as before, so existing actions are unchanged. |
 
 ## 11. Stress & Performance (`stress`)
 

@@ -9,6 +9,7 @@ class AuditLog(LexModel):
         ('create', 'Create'),
         ('update', 'Update'),
         ('delete', 'Delete'),
+        ('action', 'Action'),
     )
 
     # Remove inherited audit fields from LexModel – AuditLog has its own
