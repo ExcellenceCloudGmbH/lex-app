@@ -13,7 +13,7 @@
 | 1. Init — Project Bootstrap | 51 | 408 | 450 | 0 | 0 |
 | 2. CRUD via REST API | 13 | 121 | 29 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 23 | 136 | 80 | 2 | 0 |
+| 4. Permissions | 23 | 137 | 81 | 2 | 0 |
 | 5. History & Bitemporal | 15 | 131 | 37 | 6 | 3 |
 | 6. Audit Logging | 21 | 129 | 32 | 3 | 0 |
 | 7. Calculation State Machine | 23 | 243 | 100 | 0 | 0 |
@@ -150,7 +150,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4s | API-key read decided by the serializer | 4.114 | complete | 1 | 0 | 0 | Numbered after 4r (feat/ext-3-identity-context) so the stack merges without renumbering. |
 | 4t | Closed generic API is 404 for anonymous callers | 4.115-4.117 | complete | 3 | 0 | 0 | The session probe api/user/ is exempt from the login check in settings, so the gate now lets anonymous callers reach it. |
 | 4u | Scoped API keys in the admin | 4.118 | complete | 1 | 0 | 0 | Importing rest_framework_api_key.admin registers the classic keys. |
-| 4v | Generic records for end users (GENERIC_API records) and lex's internal endpoints | 4.119-4.128, 4.136 | complete | 11 | 0 | 0 | lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist. |
+| 4v | Generic records for end users (GENERIC_API records) and lex's internal endpoints | 4.119-4.128, 4.136-4.137 | complete | 12 | 0 | 0 | lex_api_exposed = True means list, retrieve, create, update and delete; history, export, bulk and file download are named explicitly. Operations a model does not expose answer 404, like a path that does not exist. |
 | 4w | The database decides (lex_permission_source = "database") | 4.129-4.135 | complete | 7 | 0 | 0 | The first-request check is switched off with LEX_DATABASE_DECIDES_CHECK=false in tests that run as the suite's superuser; the database mode is set per test, never on the model class, so the check of the whole suite is not affected. |
 
 ## 5. History & Bitemporal (`history`)
@@ -188,7 +188,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 6i | Serialisers & handlers (incl. bug-§1 LexLogger surface) | 6.50,6.114-6.116 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard. 6.51–6.53 renumbered to 6.114–6.116 on 2026-07-07 (BUG-023) — they collided with letter 6e, which legitimately owns 6.51–6.53 (bulk-delete audit); 6.50 kept. |
 | 6j |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 6k |  | 6.96-6.108 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
-| 6l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
+| 6l |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard; 6.160 (2026-10-17) - a 4xx raised inside model_logging_context is not printed as an error |
 | 6m |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 6n |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |
 | 6o |  |  | complete | 0 | 0 | 0 | on disk; per-letter tally folded into cluster top-line in pre-migration dashboard |

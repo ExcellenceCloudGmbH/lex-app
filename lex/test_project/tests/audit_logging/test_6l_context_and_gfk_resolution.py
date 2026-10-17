@@ -217,6 +217,34 @@ class TestCluster06l_ModelLoggingContext(SimpleTestCase):
         )
 
 
+    def test_6_160_a_refusal_answered_to_the_client_is_not_printed_as_an_error(self):
+        # A 404 or a business refusal raised inside the block (a missing record, an action's
+        # LexActionError) is the request's answer, not a failure: printing "Error in model context"
+        # for it made every expected 404 look like a crash in the server log. A real error still prints.
+        import io
+        from contextlib import redirect_stdout
+
+        from django.http import Http404
+        from rest_framework.exceptions import APIException, NotFound
+
+        from lex.api.errors import LexActionError
+
+        instance = _fake_instance("widget", pk=7)
+        for error in (NotFound(), Http404(), LexActionError("No.", code="REFUSED", status_code=409)):
+            out = io.StringIO()
+            with redirect_stdout(out), self.assertRaises(type(error)):
+                with model_logging_context(instance):
+                    raise error
+            self.assertEqual(out.getvalue(), "", f"{type(error).__name__} must not be printed as an error")
+        for error in (ValueError("boom"), APIException("server side")):
+            out = io.StringIO()
+            with redirect_stdout(out), self.assertRaises(type(error)):
+                with model_logging_context(instance):
+                    raise error
+            self.assertIn("Error in model context", out.getvalue(), type(error).__name__)
+        self.assertIsNone(self._current(), "the stack is popped either way, also after a refusal")
+
+
 # ---------------------------------------------------------------------------
 # 3) safe_get_generic_related_object — GFK resolver "never raises" contract
 # ---------------------------------------------------------------------------

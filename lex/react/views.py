@@ -36,6 +36,22 @@ def _api_path(path) -> bool:
     return strict("NOT_FOUND") and (path == "api" or path.startswith("api/"))
 
 
+def _closed_to(request) -> bool:
+    """Whether the bundled frontend is closed to this caller: GENERIC_API is not ``"all"`` and the caller is
+    signed in without being a superuser.
+
+    In those modes every lex endpoint the frontend calls (``api/user/``, model structure, search …) is closed to
+    such a caller, so serving the page only produced a screen whose own requests all fail. Anonymous callers
+    still get it, so it can start the sign-in.
+    """
+    from lex.core import extensions
+
+    if extensions.generic_api_mode() == "all":
+        return False
+    user = getattr(request, "user", None)
+    return bool(user is not None and user.is_authenticated and not user.is_superuser)
+
+
 def _no_store(response):
     """Forbid caching -- for anything whose URL outlives its content.
 
@@ -55,6 +71,8 @@ def serve_react(request, path, document_root=None):
     path = posixpath.normpath(path).lstrip("/")
     if _api_path(path):
         # No route under api/ matched: an unknown endpoint is 404, never the app's index.html with 200.
+        raise Http404
+    if _closed_to(request):
         raise Http404
 
     if path == "config.js":

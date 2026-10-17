@@ -387,3 +387,49 @@ class TestCluster04v_UnknownApiPaths(SimpleTestCase):
                 self.assertEqual([answer(p) for p in ("portal/api/atrium/funds", "portal/funds")], [404, 200])
             with mock.patch.dict(os.environ, {"LEX_LEGACY_SECURITY": "true", "DJANGO_BASE_PATH": ""}):
                 self.assertEqual(answer("api/atrium/funds"), 200)
+
+    # -- 4.137 ---------------------------------------------------------
+    def test_4_137_the_bundled_frontend_is_404_for_a_signed_in_user_outside_mode_all(self) -> None:
+        """
+        Scenario 4.137: outside mode "all" the bundled frontend is for superusers, like the endpoints it calls.
+        Given: a build with index.html and the catch-all view
+        When: an anonymous caller, a signed-in user and a superuser ask for the app's root in modes records,
+              superuser and all
+        Then: 404 for the signed-in user in records and superuser mode, so no page loads whose own requests
+              (api/user/ …) all answer 404; anonymous callers keep the page (it starts the sign-in); superusers
+              and mode all get it as before.
+        """
+        import os
+        import tempfile
+        from types import SimpleNamespace
+
+        from django.contrib.auth.models import AnonymousUser
+        from django.http import Http404
+
+        from lex.react.views import serve_react
+
+        callers = {
+            "anonymous": AnonymousUser(),
+            "user": SimpleNamespace(is_authenticated=True, is_superuser=False),
+            "superuser": SimpleNamespace(is_authenticated=True, is_superuser=True),
+        }
+
+        with tempfile.TemporaryDirectory() as root:
+            open(os.path.join(root, "index.html"), "w").write("<html></html>")
+
+            def answers():
+                out = {}
+                for name, user in callers.items():
+                    request = RequestFactory().get("/")
+                    request.user = user
+                    try:
+                        out[name] = serve_react(request, "", document_root=root).status_code
+                    except Http404:
+                        out[name] = 404
+                return out
+
+            for mode in ("records", "superuser"):
+                with extensions.override_extensions(GENERIC_API=mode):
+                    self.assertEqual(answers(), {"anonymous": 200, "user": 404, "superuser": 200}, mode)
+            with extensions.override_extensions(GENERIC_API="all"):
+                self.assertEqual(answers(), {"anonymous": 200, "user": 200, "superuser": 200})

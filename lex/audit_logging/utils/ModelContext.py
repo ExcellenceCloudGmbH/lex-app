@@ -128,6 +128,19 @@ _model_context: contextvars.ContextVar[Dict[str, ModelContext]] = contextvars.Co
 #         # 5. Tell contextvars to restore the OLD object it saved.
 #         _model_context.reset(token)
 
+def _answers_the_client(error: Exception) -> bool:
+    """A refusal the request answers on purpose (a 4xx: not found, invalid, not allowed), not a failure in the block."""
+    from django.core.exceptions import PermissionDenied
+    from django.http import Http404
+    from rest_framework.exceptions import APIException
+
+    from lex.api.errors import LexActionError
+
+    if isinstance(error, (Http404, PermissionDenied)):
+        return True
+    return isinstance(error, (APIException, LexActionError)) and error.status_code < 500
+
+
 @contextmanager
 def model_logging_context(instance: Any):
     """
@@ -155,9 +168,10 @@ def model_logging_context(instance: Any):
     try:
         yield
     except Exception as e:
-        # You can access the current instance for logging easily.
-        current_model = _model_context.get()['model_context'].current
-        print(f"Error in model context with instance {current_model}: {e}")
+        if not _answers_the_client(e):
+            # You can access the current instance for logging easily.
+            current_model = _model_context.get()['model_context'].current
+            print(f"Error in model context with instance {current_model}: {e}")
         raise
     finally:
         # Use the token to reset the context variable to its previous state.
