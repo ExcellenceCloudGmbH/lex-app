@@ -1,8 +1,8 @@
 ---
 date: 2026-10-16
 clusters: [1, 4, 10, 13, 14]
-tests_added: 63
-suite_tally: "14f 6 pass, 14g 29 pass, 4o 8 pass, 10o 5 pass, 13i 1 pass, 1aw 14 pass; full suite 1736 pass / 37 fail / 27 skip / 6 xfail / 5 collection errors, every failure in the baseline categories (cluster-15 calculation_logging, reflex/reflex_enterprise not installed, stress timing, the gate self-test)"
+tests_added: 65
+suite_tally: "14f 6 pass, 14g 29 pass, 14j 2 pass, 4o 8 pass, 10o 5 pass, 13i 1 pass, 1aw 14 pass; full suite 1736 pass / 37 fail / 27 skip / 6 xfail / 5 collection errors, every failure in the baseline categories (cluster-15 calculation_logging, reflex/reflex_enterprise not installed, stress timing, the gate self-test)"
 ---
 
 # Multi-value filters — backend and Streamlit
@@ -25,3 +25,6 @@ the rows the list shows, on both the pandas and the streaming export paths.
 [1aw](../../clusters/01-init/batches.md) adds `lex_view(filters=, filter_bar=, on_filter=)`: every
 frame load re-syncs the host's filters, and a filter token too long for the URL is delivered by
 message instead.
+[14j](../../clusters/14-queries/batches.md) adds a `__blank` lookup suffix to the list GET endpoint,
+so "Select All Records" — which fetches ids through GET, not POST — matches blank the same way
+`_build_filter_q`'s Set branch already does.

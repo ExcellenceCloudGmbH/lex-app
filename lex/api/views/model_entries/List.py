@@ -193,6 +193,11 @@ SAFE_LOOKUPS = {
     "date__gte",
     "date__lt",
     "date__lte",
+    # Not a real Django lookup -- accepted here so `_resolve_lookup` treats
+    # `field__blank` as a safe suffix like any other. `_build_query_from_values`
+    # builds its `Q` itself (NULL, or NULL-or-"" on a plain text column)
+    # instead of ever handing Django a `field__blank` lookup.
+    "blank",
 }
 
 
@@ -344,12 +349,64 @@ def _coerce_value(model_field, value):
     return value
 
 
+_BLANK_TRUE_KEYS = {"true"}
+_BLANK_FALSE_KEYS = {"false"}
+
+
+def _parse_blank_flag(value: Any) -> Optional[bool]:
+    """``true`` / ``false`` (case-insensitively) for the ``__blank`` GET lookup.
+
+    Deliberately narrower than :func:`_parse_bool` -- only the two literal
+    words are accepted. Anything else is unparseable and the caller drops
+    it, the same way every other unrecognised filter value is skipped
+    rather than guessed at.
+    """
+    text = str(value).strip().lower()
+    if text in _BLANK_TRUE_KEYS:
+        return True
+    if text in _BLANK_FALSE_KEYS:
+        return False
+    return None
+
+
+def _build_blank_q(field_path: str, model_field, want_blank: bool) -> Q:
+    """``Q`` for ``field_path``'s blank state, matching ``_build_filter_q``'s
+    Set-filter blank key: NULL-or-``""`` on a plain text column, NULL only
+    on every other column (see its ``is_plain_text_field`` branch)."""
+    if is_plain_text_field(model_field):
+        blank_q = Q(**{f"{field_path}__isnull": True}) | Q(**{field_path: ""})
+    else:
+        blank_q = Q(**{f"{field_path}__isnull": True})
+    return blank_q if want_blank else ~blank_q
+
+
 def _build_query_from_values(resolved: ResolvedLookup, values: list[str]) -> Optional[Q]:
     cleaned = [v for v in values if v != ""]
     if not cleaned:
         return None
 
-    _, lookup_path, model_field = resolved
+    field_path, lookup_path, model_field = resolved
+
+    # `__blank` is handled here, not by Django -- it isn't a real lookup, so
+    # it must never reach the generic `Q(**{lookup_path: ...})` below.
+    # Guarded to a direct column: a JSON sub-path's `lookup_path` carries
+    # extra segments beyond `field_path` + the suffix (e.g.
+    # "data__path__blank" vs. field_path "data"), and the single-column Q
+    # this builds would silently drop the sub-path, so that shape is
+    # ignored -- same as any other unsupported suffix -- rather than
+    # handed to Django as a bogus lookup. A related-field path (e.g.
+    # "category__name__blank") has no such gap (field_path ==
+    # "category__name") and is supported the same as a direct column.
+    if lookup_path.endswith("__blank"):
+        if lookup_path != f"{field_path}__blank":
+            return None
+        flags = [flag for flag in (_parse_blank_flag(v) for v in cleaned) if flag is not None]
+        if not flags:
+            return None
+        combined_blank = _build_blank_q(field_path, model_field, flags[0])
+        for flag in flags[1:]:
+            combined_blank |= _build_blank_q(field_path, model_field, flag)
+        return combined_blank
 
     if lookup_path.endswith("__in"):
         if len(cleaned) == 1 and isinstance(cleaned[0], str) and "," in cleaned[0]:

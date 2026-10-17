@@ -1,7 +1,7 @@
 cluster: 14
 slug: queries
 title: AG Grid Query Endpoint
-max_scenario: 70
+max_scenario: 72
 letters:
   a:
     title: GET list — query-param filtering & ordering
@@ -175,3 +175,22 @@ letters:
       a code change, and each fails under a matching mutation (str() of a JSON boolean; blanks
       dropped and an empty selection ignored). TestCluster14g_SerializerDependentRefusals registers
       its api_serializers restore with addCleanup before the change.
+  j:
+    title: GET list — the __blank query-param lookup suffix
+    scenarios: 14.71-14.72
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      "Select All Records" fetches ids through the list GET endpoint's query-param filters, which
+      could only ask field__isnull=true -- so a GET-driven select-all undercounted the "" rows the
+      POST Set filter's blank key (14.37/14.61) already folds in on a plain text column. blank is
+      not a Django lookup: SAFE_LOOKUPS and _resolve_lookup now accept it as a safe suffix, and
+      _build_query_from_values builds the Q itself -- NULL-or-"" on a plain text column
+      (is_plain_text_field), NULL only otherwise -- instead of handing Django a field__blank lookup
+      it would reject. 14.71 pins ?field__blank=true on both column shapes; 14.72 that
+      ?field__blank=false and the equivalent ?field__blank!=true both return the non-blank rows.
+      Guarded to a direct column (and a related path, which resolves through the same mechanism); a
+      JSON sub-path is left unresolved, same as any other unsupported suffix.

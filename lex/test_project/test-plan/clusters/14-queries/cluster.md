@@ -155,6 +155,21 @@ The 14b baseline hits the main text / number / date / set / compound-OR paths. T
 | 14.69 | Group level | Set (with blank, and empty) and Multi filters narrow the groups and their counts | ✅ |
 | 14.70 | Model opt-out | `AuditLog` (`lex_value_lists = False`) refuses its columns with the standard 400 | ✅ |
 
+### 14j. GET list — the `__blank` query-param lookup suffix
+
+"Select All Records" fetches ids through the list GET endpoint's query-param filters, not the
+POST AG Grid endpoint. Its "blank" must match what `_build_filter_q`'s Set branch (14.37/14.61)
+already calls blank: NULL **or** `""` on a plain text column (`is_plain_text_field`), NULL only on
+every other column. The GET grammar could previously only ask `field__isnull=true`, so a
+GET-driven select-all undercounted the `""` rows the POST path already treats as blank.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 14.71 | `?field__blank=true` | Matches the NULL and `""` rows on a plain text column; only the NULL row on a non-text column |
+| 14.72 | `?field__blank=false`, and `?field__blank!=true` | Both return the non-blank rows, on both column shapes |
+
+**Status:** ✅ Complete — 2 pass. Covers `lex/test_project/tests/queries/test_14j_blank_query_param.py`.
+
 ---
 
 ## Planned Expansions — Coverage-Driven Sub-Clusters

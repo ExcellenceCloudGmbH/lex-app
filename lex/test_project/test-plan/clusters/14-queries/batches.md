@@ -26,3 +26,12 @@
   (final review)
 - **Status:** complete — 29 pass (10 original + 12 from fix round 1 + 3 from fix round 2 + 4 from the
   final review, 14.67-14.70; 14.57 widened to a `TextField`)
+
+## Batch 14j — GET list: the `__blank` query-param lookup suffix (14.71-14.72)
+
+- **Type:** E
+- **Files covered:** `lex/api/views/model_entries/List.py`
+- **Test file:** `lex/test_project/tests/queries/test_14j_blank_query_param.py`
+- **Test classes:** `TestCluster14j_BlankQueryParam`
+- **Fixtures:** `QueryItem` (`note` — a plain text column; `created_on` — a non-text column)
+- **Status:** complete — 2 pass
