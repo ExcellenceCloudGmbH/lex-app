@@ -17,7 +17,7 @@ Intent
 * ``LEX_CORS_ALLOWED_ORIGINS`` (comma-separated) replaces the permissive CORS
   defaults when set; unset, CORS is unchanged.
 
-Cluster 1av — scenarios 1.386–1.393. Type: U (1.390–1.391 I).
+Cluster 1av — scenarios 1.386–1.392 and 1.405. Type: U (1.390–1.391 I).
 Covers: lex/tools/project_root.py (find_project_root), lex/bin/lex.py (module
 start), lex/core/config.py (load_error, raw_values, validate_project_config),
 lex/lex_app/apps.py (_validate_project_configuration, async_ready),
@@ -119,10 +119,10 @@ class TestCluster01av_NestedProjectRoot(SimpleTestCase):
         )
         self.assertEqual(seen, [project.as_posix(), "lex_app.settings"])
 
-    # -- 1.393 ---------------------------------------------------------
-    def test_1_393_the_search_stops_below_home(self) -> None:
+    # -- 1.405 ---------------------------------------------------------
+    def test_1_405_the_search_stops_below_home(self) -> None:
         """
-        Scenario 1.393: lex_config.py is looked for only below the user's home.
+        Scenario 1.405: lex_config.py is looked for only below the user's home.
         Given: a folder directly below a temporary "home" holding lex_config.py,
                and a folder with no marker at all
         When: the root is resolved from inside them

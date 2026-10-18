@@ -1,7 +1,7 @@
 ---
 date: 2026-10-18
 clusters: [1, 4, 10, 12]
-tests_added: "28 new scenarios (1.386-1.393, 4.101-4.110, 10.83-10.90, 12.64-12.65); 10.61-10.66 and 15.32-15.38 now read calculation logs as a superuser"
+tests_added: "28 new scenarios (1.386-1.392, 1.405, 4.101-4.110, 10.83-10.90, 12.64-12.65); 10.61-10.66 and 15.32-15.38 now read calculation logs as a superuser"
 suite_tally: "new batches 28 pass / 0 fail; permissions or api_layer or serializers or init or calculation_logging: 960 pass / 9 fail (15b-15e, pre-existing) / 16 skip / 4 xfail; not stress (without test_1aq_reflex_dashboards, 16 pass on its own): 1740 pass / 26 fail / 24 skip / 6 xfail, the same 26 failures as unmodified lex-app-v2"
 ---
 

@@ -24,6 +24,12 @@ VSCODE_CONFIG_PREFIX = "LEX: "
 PYCHARM_IDE = "pycharm"
 VSCODE_IDE = "vscode"
 
+# Test configurations: CELERY_ACTIVE=False so a local run calculates in-process
+# instead of handing work to a Celery worker that may not be running. lex's pytest
+# plugin itself leaves Celery alone, so `lex pytest` elsewhere is unaffected.
+TEST_RUN_CONFIG_ENVS = {"PYTHONUNBUFFERED": "1", "CELERY_ACTIVE": "False"}
+TEST_RUN_CONFIG_NAME = "Tests"
+
 RUN_CONFIGS = (
     {
         "pycharm_filename": "Init.run.xml",
@@ -123,6 +129,71 @@ def _vscode_args(config) -> list[str]:
     ]
 
 
+def _test_run_configs(root: Path) -> list[dict]:
+    """The suite and each test group, from the project's lex_test_config.yaml.
+
+    None when the file is missing or invalid: a project without lex tests gets no
+    test configurations.
+    """
+    from lex.tools.test_groups import LexTestConfigError, load_config
+
+    try:
+        test_config = load_config(root)
+    except LexTestConfigError:
+        return []
+
+    suite = {
+        "name": TEST_RUN_CONFIG_NAME,
+        "pycharm_filename": f"{TEST_RUN_CONFIG_NAME}.run.xml",
+        "target": test_config.tests_entrypoint,
+        "args": (),
+    }
+    groups = [
+        {
+            "name": f"{TEST_RUN_CONFIG_NAME}: {group.name}",
+            "pycharm_filename": f"{TEST_RUN_CONFIG_NAME}_{group.name}.run.xml",
+            "target": test_config.tests_entrypoint,
+            "args": ("-m", group.name),
+        }
+        for group in test_config.groups
+    ]
+    return [suite, *groups]
+
+
+def _xml_json(value: str) -> str:
+    """PyCharm stores a test configuration's target and arguments as JSON strings."""
+    return escape(json.dumps(value), {'"': "&quot;"})
+
+
+def _pycharm_test_config_xml(config, root: Path, project_name: str, env_files_option: str) -> str:
+    """A pytest configuration as PyCharm saves one: type ``tests``, factory ``py.test``,
+    fields ``_new_*`` -- read from PyCharm's ``PyTestFactory`` and ``PyTestsShared``."""
+    target = (root / config["target"]).as_posix()
+    return f"""<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="{escape(config['name'])}" type="tests" factoryName="py.test">
+    <module name="{escape(project_name)}" />
+    {env_files_option}
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+{_render_envs(TEST_RUN_CONFIG_ENVS)}
+    </envs>
+    <option name="SDK_HOME" value="" />
+    <option name="WORKING_DIRECTORY" value="{escape(str(root))}" />
+    <option name="IS_MODULE_SDK" value="true" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+    <option name="_new_keywords" value="{_xml_json('')}" />
+    <option name="_new_parameters" value="{_xml_json('')}" />
+    <option name="_new_additionalArguments" value="{_xml_json(' '.join(config['args']))}" />
+    <option name="_new_target" value="{_xml_json(target)}" />
+    <option name="_new_targetType" value="{_xml_json('PATH')}" />
+    <method v="2" />
+  </configuration>
+</component>"""
+
+
 def detect_ide(environ=None) -> str | None:
     """Return the IDE indicated by process environment markers.
 
@@ -204,6 +275,14 @@ def generate_pycharm_configs(project_root=None):
 </component>"""
         path = runconfigs_dir / config["pycharm_filename"]
         path.write_text(content, encoding="utf-8")
+        print(f"[OK] Generated: {config['pycharm_filename']}")
+
+    for config in _test_run_configs(root):
+        path = runconfigs_dir / config["pycharm_filename"]
+        path.write_text(
+            _pycharm_test_config_xml(config, root, project_name, env_files_option),
+            encoding="utf-8",
+        )
         print(f"[OK] Generated: {config['pycharm_filename']}")
 
     print("\nPyCharm run configurations generated successfully!")
@@ -351,6 +430,22 @@ def _build_vscode_config(config, env_file_exists: bool) -> dict:
     return launch_config
 
 
+def _build_vscode_test_config(config, env_file_exists: bool) -> dict:
+    launch_config = {
+        "name": f"{VSCODE_CONFIG_PREFIX}{config['name']}",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "pytest",
+        "args": [*config["args"], config["target"]],
+        "cwd": "${workspaceFolder}",
+        "console": "integratedTerminal",
+        "env": dict(TEST_RUN_CONFIG_ENVS),
+    }
+    if env_file_exists:
+        launch_config["envFile"] = "${workspaceFolder}/.env"
+    return launch_config
+
+
 def generate_vscode_configs(project_root=None):
     """Generate or merge VS Code launch configurations."""
     root = _resolve_project_root(project_root)
@@ -359,8 +454,9 @@ def generate_vscode_configs(project_root=None):
     launch_path = vscode_dir / "launch.json"
 
     launch_config = _read_existing_launch_config(launch_path)
+    test_configs = _test_run_configs(root)
     generated_config_names = {
-        f"{VSCODE_CONFIG_PREFIX}{config['name']}" for config in RUN_CONFIGS
+        f"{VSCODE_CONFIG_PREFIX}{config['name']}" for config in [*RUN_CONFIGS, *test_configs]
     }
     existing_configs = [
         config
@@ -370,10 +466,10 @@ def generate_vscode_configs(project_root=None):
             and config.get("name") in generated_config_names
         )
     ]
+    env_file_exists = (root / ".env").exists()
     generated_configs = [
-        _build_vscode_config(config, (root / ".env").exists())
-        for config in RUN_CONFIGS
-    ]
+        _build_vscode_config(config, env_file_exists) for config in RUN_CONFIGS
+    ] + [_build_vscode_test_config(config, env_file_exists) for config in test_configs]
 
     existing_inputs = [
         item
@@ -400,7 +496,7 @@ def generate_vscode_configs(project_root=None):
         encoding="utf-8",
     )
     print(f"Generating VS Code run configurations in: {launch_path}")
-    for config in RUN_CONFIGS:
+    for config in [*RUN_CONFIGS, *test_configs]:
         print(f"[OK] Generated: {VSCODE_CONFIG_PREFIX}{config['name']}")
     print("\nVS Code run configurations generated successfully!")
     if (root / ".env").exists():

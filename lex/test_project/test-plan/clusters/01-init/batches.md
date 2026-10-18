@@ -1727,7 +1727,7 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 
 | Property | Value |
 | --- | --- |
-| Scenario range | 1.386 – 1.393 |
+| Scenario range | 1.386 – 1.392, 1.405 |
 | Type | U (1.390–1.391 I) |
 | Files covered | `lex/tools/project_root.py` (`find_project_root`), `lex/bin/lex.py` (module start), `lex/core/config.py` (`load_error`, `raw_values`, `validate_project_config`), `lex/lex_app/apps.py` (`_validate_project_configuration`, `async_ready`), `lex/helpers/cache_tables.py`, `lex/core/apps.py` (`post_migrate`), `lex/lex_app/settings.py` (`LEX_CORS_ALLOWED_ORIGINS`) |
 | Test file | `lex/test_project/tests/init/test_1av_startup_hardening.py` |
@@ -1737,3 +1737,53 @@ setting Django up fails both: Django setup crashes in `release-smoke`.
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
 
 ---
+
+### Batch 1aw — a plain pytest run is set up like `lex pytest`: PyCharm's test tree works ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.393 – 1.404 |
+| Type | U / I |
+| Files covered | `lex/tools/pytest_plugin.py` (new); `lex/tools/django_bootstrap.py` (`prepare_environment(root)`); `lex/bin/lex.py` (`pytest_cmd`); `lex/tools/test_groups.py` (`collect_groups`); `generate_pycharm_configs.py` (test run configurations); `pyproject.toml` (the `pytest11` entry point) |
+| Test file | `lex/test_project/tests/init/test_1aw_pytest_plugin.py` |
+| Test classes | `TestCluster01aw_PlainRunIsSetUp` (1.393–1.396), `TestCluster01aw_MarkersAndFailures` (1.397–1.401), `TestCluster01aw_CopiedSetupCoexists` (1.402), `TestCluster01aw_LexPytestSharesThePlugin` (1.403), `TestCluster01aw_TestRunConfigurations` (1.404) |
+| Fixtures | `pytest_plugin_targets/` — modules a child `python -m pytest` runs by explicit path, never collected by the suite; a temporary dist-info that registers the entry point; `DATABASE_DEPLOYMENT_TARGET=DOCKER-COMPOSE` with its variables removed, for a database that cannot be reached; a stand-in for a copied conftest, loaded through `PYTEST_PLUGINS` |
+| Tests landed | **18 pass / 0 fail** |
+| Status | ✅ Complete |
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.393 | the PyCharm way | `python -m pytest` on a model-importing, database-writing test passes with none of `lex pytest`'s environment; `prepare_environment(root)` loads that root's `.env`; a `UserWarning` stays unreported under the default warning policy and is reported with `LEX_SUPPRESS_WARNINGS=False` |
+| 1.394 | inactive elsewhere | in a directory without `lex_test_config.yaml`, a test sees no settings module and unconfigured Django |
+| 1.395 | the opt-out | `-p no:lex` brings back "settings are not configured" |
+| 1.396 | the entry point | pyproject registers `lex = "lex.tools.pytest_plugin"`, which defines the three hooks |
+| 1.397 | collect-only needs no database | against an unreachable database `--collect-only` lists the test and exits 0 |
+| 1.398 | a database that cannot be set up | the same run for real exits 4 with "Could not set up the test database" and runs no test |
+| 1.399 | groups are markers | a configured group raises no unknown-marker warning; an undeclared marker exits 4 |
+| 1.400 | invalid test config | a payload without `tests_entrypoint` exits 4 with the loader's message |
+| 1.401 | pytest-django alongside | the plugin refuses with a message naming `-p no:django`, registering nothing |
+| 1.402 | a copied conftest | it stands down when the plugin went first; the plugin stands down when the environment was set up already |
+| 1.403 | one implementation | `lex pytest` passes the module with `-p no:lex` and sets nothing up itself; `lex pytest-groups` passes it too |
+| 1.404 | test run configurations | `Tests`, `Tests: <group>` as PyCharm pytest configurations and VS Code pytest launch entries; none without a test config |
+
+**The warning policy.** The settings install lex's warning policy (`LEX_SUPPRESS_WARNINGS`,
+on by default) when imported. pytest runs `pytest_load_initial_conftests` inside
+`warnings.catch_warnings()`, so the filters the settings installed there were dropped when
+the hook returned, and the plugin's runs reported warnings `lex pytest` never had (20 more on
+`init` + `crud_api`). The plugin records the filters `django.setup()` adds and reinstalls them
+at the start of `pytest_configure`, which pytest does not wrap; the two runs report the same
+warnings again (3 and 3 on `init` + `crud_api`).
+
+**Why `PYTEST_PLUGINS` for the copied conftest.** pytest registers `-p` plugins before
+entry-point plugins and `PYTEST_PLUGINS` after them, as it registers conftests. Hooks are
+called last-registered first, so a `-p` stand-in let the ordering pass with `tryfirst`
+removed; through `PYTEST_PLUGINS` removing it fails 1.402.
+
+**Mutations: every scenario fails one.** Dropping `django.setup()` fails 1.393; activating in
+every directory fails 1.394; no collect-only skip fails 1.397; re-raising the database error
+fails 1.398; not registering the groups fails both halves of 1.399; ignoring an invalid config
+fails 1.400; no pytest-django check fails 1.401; removing `tryfirst` and removing the
+`_TestState.saved_data` guard each fail one half of 1.402; not reinstalling the warning filters
+fails 1.393's third half; the old `pytest_cmd` / `collect_groups` fail both halves of 1.403;
+dropping `-m <group>`, leaving VS Code without the test entries, or writing them without a test
+config each fail 1.404.
