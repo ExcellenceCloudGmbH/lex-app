@@ -1,7 +1,7 @@
 cluster: 1
 slug: init
 title: Init — Project Bootstrap
-max_scenario: 385
+max_scenario: 393
 letters:
   a:
     title: '`lex setup` — scaffolding'
@@ -1250,3 +1250,18 @@ letters:
       without the test project's environment and with the suite's checkout first on PYTHONPATH.
       Mutations: reading the version from the package metadata fails 1.384; dropping --version from the
       set main() answers without Django fails both, because Django setup crashes in that directory.
+  av:
+    title: Startup hardening — nested project root, broken lex_config.py, cache tables, CORS origins
+    scenarios: 1.386-1.393
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      v2 security hardening. The nearest folder with lex_config.py is the project root below the git
+      toplevel (1.386-1.387, 1.393; no project settings.py is loaded). A lex_config.py that fails to
+      import or gives INITIAL_DATA, PROJECT_GROUPS, DEFAULT_SERIALIZER_NAME or TAB_DISPLAY_NAMES the
+      wrong type raises ImproperlyConfigured at ready() (1.388-1.389). createcachetable runs after
+      every migrate and before the initial-data load (1.390-1.391). LEX_CORS_ALLOWED_ORIGINS
+      (1.392). Ported reduced from #825, #823, #815; E2 is new.

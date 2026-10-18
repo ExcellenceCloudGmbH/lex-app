@@ -18,7 +18,10 @@ class Search(APIView):
     model_collection: ModelCollection = None
 
     def get(self, request, *args, **kwargs):
-        query = self.kwargs['query']
+        # api/global-search/<query> or api/global-search/?q=<query>
+        query = self.kwargs.get('query') or request.query_params.get('q', '')
+        if not query.strip():
+            return Response("No match found")
         allMatches = []
         for model in self.model_collection.all_containers:
             temp_view = APIView(kwargs={'model_container': model})

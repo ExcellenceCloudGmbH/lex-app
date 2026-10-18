@@ -11,12 +11,19 @@ One place for the checks that every endpoint applies the same way:
 * :func:`refusal` – the 400 body ``{code, detail, error}`` every refusal uses.
 * :func:`guarded` – runs a permission hook; an exception denies when
   ``LEX_SEC_FAIL_CLOSED`` is on (the default) and allows as before when off.
+* :func:`write_denial` – the 400 answer when a non-superuser writes to a
+  history table (``LEX_SEC_HISTORY_WRITE``) or to Django's users and groups
+  (``LEX_SEC_INTERNAL``), or ``None``.
+* :func:`list_denied` – a model's own ``permission_list`` refuses the list.
+* :func:`error_detail` – an error body without its server traceback unless
+  tracebacks may be shown (``LEX_SEC_TRACEBACKS``, ``LEX_API_TRACEBACKS``).
 
 Denials never answer 403: the bundled frontend signs the user out on a 403,
 so a record the caller may not read is 404 and a field it may not edit is 400.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from typing import Any, Callable, Iterable, Mapping, Optional
@@ -24,7 +31,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from rest_framework import status
 from rest_framework.response import Response
 
-from lex.core.security_flags import strict
+from lex.core.security_flags import expose_tracebacks, is_superuser, strict
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +213,71 @@ def edit_violations(request, instance, data: Mapping[str, Any], serializer=None,
         if _changed(serializer, key, raw, instance, name):
             violations.append(key)
     return violations
+
+
+def is_django_auth_model(model) -> bool:
+    """Django's user, group and permission models (no lex permission hooks)."""
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.models import Group, Permission
+
+    return model in (get_user_model(), Group, Permission)
+
+
+@functools.lru_cache(maxsize=None)
+def is_history_model(model) -> bool:
+    """A history table: lex's ``Historical*`` (Level 1) or ``MetaHistorical*`` (Level 2) models."""
+    try:
+        names = {field.name for field in model._meta.get_fields()}
+    except Exception:
+        return False
+    return "history_id" in names or "meta_history_id" in names
+
+
+def write_denial(request, model_class) -> Optional[Response]:
+    """The 400 answer for any write (create, update, delete) the model only allows superusers, or ``None``.
+
+    * History rows are the record of what was true and when; only a superuser
+      may correct them through the API (``LEX_SEC_HISTORY_WRITE``).
+    * Django's users, groups and permissions have no permission hooks; only a
+      superuser may change them through the generic API (``LEX_SEC_INTERNAL``).
+    """
+    if is_superuser(request):
+        return None
+    if strict("HISTORY_WRITE") and is_history_model(model_class):
+        return refusal("EDIT_NOT_ALLOWED", "History records can only be changed by a superuser.")
+    if strict("INTERNAL") and is_django_auth_model(model_class):
+        return refusal("EDIT_NOT_ALLOWED", f"Only a superuser may change a {model_class.__name__}.")
+    return None
+
+
+def list_denied(request, model_class) -> bool:
+    """A model's own ``permission_list`` refuses the caller (the list then answers 404).
+
+    Only an override is consulted: LexModel's default reads the Keycloak
+    ``list`` scope and would close every list of a project without scopes.
+    """
+    from lex.core.models.LexModel import LexModel, UserContext
+
+    hook = getattr(model_class, "permission_list", None)
+    if hook is None or hook is getattr(LexModel, "permission_list", None):
+        return False
+    instance = model_class()
+    allowed = guarded(
+        instance.permission_list,
+        UserContext.from_request(request, instance),
+        deny=False,
+        allow=True,
+        what=f"{model_class.__name__}.permission_list",
+    )
+    return not allowed
+
+
+def error_detail(body: Mapping[str, Any]) -> dict:
+    """``body`` without its ``traceback`` key unless tracebacks may be shown (LEX_SEC_TRACEBACKS)."""
+    cleaned = dict(body)
+    if "traceback" in cleaned and not expose_tracebacks():
+        cleaned.pop("traceback")
+    return cleaned
 
 
 def refusal(code: str, detail: str, **extra) -> Response:

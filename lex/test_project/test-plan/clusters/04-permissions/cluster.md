@@ -85,3 +85,24 @@
 | 4.100 | signed out | the sign-in answer (302/401/403), never 404/200 |
 
 **Scenario range:** 4.80 – 4.100. **Test file:** `lex/test_project/tests/permissions/test_4o_secure_defaults.py`. **Type:** E (4.98–4.99 U). **Status:** ✅ Complete (2026-10-18). Batch: [4o](batches.md).
+
+---
+
+### 4p. Internal tools, Django users, permission_list and history writes ✅
+
+**Gap:** operator endpoints were open to every signed-in user: anyone could delete unused storage files, write to the server log, read every calculation log (and its PDF) and edit Django's users through the generic API — including making themselves superuser. A model's own `permission_list` was ignored by the list endpoint. History rows could be "corrected" by anyone (`One.update`'s bitemporal correction). All on by default; `LEX_LEGACY_SECURITY=true` / `LEX_SEC_INTERNAL|NOT_FOUND|HISTORY_WRITE=false` restore the old behaviour. No new 403.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.101 | delete-unused-files | plain user 404 and no cleanup; `admin` client role and superuser 200; legacy 200 |
+| 4.102 | POST api/logs | plain user 404 with `error`, nothing logged; superuser and legacy 201 |
+| 4.103 | calculation-log tree | readable record's calculation 1, hidden 0, record-less 0, unfiltered 0; superuser and legacy all |
+| 4.104 | calculation-log PDF | readable 200; hidden, record-less and unknown 404; superuser 200 for the record-less log |
+| 4.105 | `auth.User` writes | PATCH, run_step create, bulk delete → 400 `EDIT_NOT_ALLOWED`, nothing changes; superuser PATCH 200 |
+| 4.106 | `permission_list` false | list 404; legacy 200; allowing 200 |
+| 4.107 | PATCH/PUT history row | 400 `EDIT_NOT_ALLOWED` with `error`, history unchanged; superuser 200 |
+| 4.108 | other history writes | DELETE, POST, bulk PATCH/DELETE, run_step, meta-history PATCH → 400 `EDIT_NOT_ALLOWED`, never 403 |
+| 4.109 | opt-out | `LEX_SEC_HISTORY_WRITE=false` applies the correction (200) |
+| 4.110 | main record | PATCH of the record itself still 200 |
+
+**Scenario range:** 4.101 – 4.110. **Test file:** `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [4p](batches.md).

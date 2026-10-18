@@ -1,7 +1,7 @@
 cluster: 12
 slug: serializers
 title: Serializer Contract
-max_scenario: 63
+max_scenario: 65
 letters:
   a:
     title: Read contract — field visibility & framework-managed fields
@@ -160,3 +160,15 @@ letters:
       LexModel.can_read's context from the one it caches per request, so the auth_group queries
       do not grow with the rows. Letter n, not l: 12m refers to a 12l (12.54-12.57) that is not on
       this branch, so l is skipped to avoid a collision when it lands.
+  o:
+    title: History rows are read-only in lex_reserved_scopes for non-superusers
+    scenarios: 12.64-12.65
+    status: complete
+    tests:
+      pass: 2
+      skip: 0
+      xfail: 0
+    note: >-
+      LEX_SEC_HISTORY_WRITE (companion of 4.107-4.110): a serialized Historical* row says edit [] and
+      delete false to non-superusers (single read and list), export as computed; superusers and the
+      opt-out keep the computed scopes. Letter o, not l: 12l is reserved (see 12n).

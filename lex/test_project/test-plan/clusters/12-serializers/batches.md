@@ -104,3 +104,18 @@
 | Status | ✅ Complete — BUG-011 partially resolved; companion 4.96, 4.97 |
 
 ---
+
+### Batch 12o — History rows are read-only in lex_reserved_scopes for non-superusers ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.64 – 12.65 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (`get_lex_reserved_scopes`, `_history_write_closed`), `lex/api/security.py` (`is_history_model`) |
+| Test file | `lex/test_project/tests/serializers/test_12o_history_row_scopes.py` |
+| Test classes | `TestCluster12o_HistoryRowScopes` |
+| Fixtures | cluster-12 `EditScopedItem` and its history rows |
+| Tests landed | **2 pass / 0 fail** |
+| Status | ✅ Complete — companion of [4p](../04-permissions/batches.md) |
+
+---

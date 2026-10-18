@@ -94,3 +94,19 @@ must not open a check on the whole model.
 | Status | ✅ Complete — ported from #816 without `permission_read_queryset`, `permission_serializer`, `HTMLReport.permission_view`, `lex_strict_input`, `EXPOSE_AUTO_SERIALIZER` |
 
 ---
+
+### Batch 4p — Internal tools, Django users, permission_list and history writes ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.101 – 4.110 |
+| Type | E |
+| Files covered | `lex/core/security_flags.py` (`is_superuser`, `superuser_only`), `lex/api/security.py` (`write_denial`, `list_denied`, `is_history_model`), `lex/api/views/sharepoint/DeleteUnusedFiles.py`, `lex/api/views/LexLoggerView/LexLoggerView.py`, `lex/api/views/model_entries/CalculationLogTreeView.py`, `lex/api/views/calculations/DownloadMarkdownPdf.py`, `lex/api/views/model_entries/{One,Many,List}.py`, `lex/api/views/model_entries/mixins/DestroyOneWithPayloadMixin.py`, `lex/api/views/process_flow/CreateOrUpdate.py` |
+| Test file | `lex/test_project/tests/permissions/test_4p_internal_tools_and_history.py` |
+| Test classes | `TestCluster04p_InternalTools` (4.101–4.105), `TestCluster04p_PermissionList` (4.106), `TestCluster04p_HistoryWrites` (4.107–4.110) |
+| Fixtures | `SECURE_DEFAULT_MODELS` (`ProtectedItem`, `FilterBackendItem`), `CalculationLog` rows with and without a record, `auth.User`; SharePoint cleanup, `LexLogger` and PDF rendering stubbed; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **10 pass / 0 fail** |
+| Also changed | 10.61–10.66 drive the tree as a superuser and 15.32–15.38 download as one: their logs belong to no record, which only operators may read now |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
+
+---

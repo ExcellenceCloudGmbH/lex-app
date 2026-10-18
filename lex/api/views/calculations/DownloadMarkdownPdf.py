@@ -2,7 +2,7 @@ import io
 import logging
 
 import markdown2
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from lex.audit_logging.models.CalculationLog import CalculationLog
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -250,6 +250,15 @@ class DownloadMarkdownPdf(APIView):
         every existing caller is unaffected.
         """
         obj = CalculationLog.objects.filter(pk=pk).first()
+        # The same rule as the log tree (LEX_SEC_INTERNAL): a log of a
+        # calculation the caller may not see does not exist for it.
+        from lex.core.security_flags import superuser_only
+
+        if superuser_only(request):
+            from lex.api.views.model_entries.CalculationLogTreeView import calculation_visible
+
+            if obj is None or not calculation_visible(request, obj.calculationId):
+                raise Http404()
         include_descendants = _wants_descendants(
             request.query_params.get("include_descendants")
         )

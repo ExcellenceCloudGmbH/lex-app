@@ -1,7 +1,7 @@
 import logging
 import traceback
 
-from lex.api.security import delete_allowed, edit_denial, refusal
+from lex.api.security import delete_allowed, edit_denial, refusal, write_denial
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend, apply_read_restriction
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
 from lex.audit_logging.mixins.BulkAuditLogMixin import BulkAuditLogMixin
@@ -86,6 +86,9 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
 
     def patch(self, request, *args, **kwargs):
         self.reset_failed_audit_log_state()
+        denial = write_denial(request, self.kwargs['model_container'].model_class)
+        if denial is not None:
+            return denial
         queryset = self.get_filtered_query_set()
         missing = self._invisible_target(queryset)
         if missing is not None:
@@ -115,6 +118,9 @@ class ManyModelEntries(BulkAuditLogMixin, ModelEntryProviderMixin, GenericAPIVie
 
     def delete(self, request, *args, **kwargs):
         self.reset_failed_audit_log_state()
+        denial = write_denial(request, self.kwargs['model_container'].model_class)
+        if denial is not None:
+            return denial
         queryset = self.get_filtered_query_set()
         missing = self._invisible_target(queryset)
         if missing is not None:

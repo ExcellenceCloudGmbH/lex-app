@@ -18,8 +18,13 @@ Flags (name → what "on" means):
 * ``FILTERS``       – list filters/ordering only on fields the user may see.
 * ``TRACEBACKS``    – error responses carry no traceback unless ``DEBUG`` or ``LEX_API_TRACEBACKS=true``.
 * ``OIDC_REDIRECT`` – ``next``/``fail`` on ``/oidc/*`` must be relative or an allowed origin.
-* ``INTERNAL``      – internal tools (file cleanup, log upload, calculation logs, user edits) are restricted.
+* ``INTERNAL``      – internal tools are restricted: deleting unused files needs a superuser or the
+  ``admin`` client role, writing to the server log and editing Django's users and groups need a
+  superuser, and the calculation log tree and its PDFs show only logs of records the caller may read.
 * ``HISTORY_WRITE`` – history tables can only be written by superusers.
+
+``LEX_API_TRACEBACKS=true|false`` decides on its own whether error responses
+may carry a traceback (see :func:`expose_tracebacks`).
 """
 from __future__ import annotations
 
@@ -94,3 +99,35 @@ def is_superuser_or_admin(request) -> bool:
     except Exception:
         return False
     return bool(context.is_superuser or "admin" in (context.groups or set()))
+
+
+def is_superuser(request) -> bool:
+    """Whether the signed-in user behind ``request`` is a Django superuser."""
+    user = getattr(request, "user", None)
+    return bool(
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "is_superuser", False)
+    )
+
+
+def superuser_only(request) -> bool:
+    """True when ``LEX_SEC_INTERNAL`` keeps an internal endpoint from this (non-superuser) caller."""
+    return strict("INTERNAL") and not is_superuser(request)
+
+
+def expose_tracebacks() -> bool:
+    """Whether HTTP error responses may include a server traceback.
+
+    ``LEX_API_TRACEBACKS=true|false`` decides when set. Otherwise a traceback
+    is shown only with ``DEBUG`` on, or when the ``TRACEBACKS`` hardening is
+    switched off (``LEX_SEC_TRACEBACKS=false`` / ``LEX_LEGACY_SECURITY=true``).
+    """
+    explicit = _env_bool("LEX_API_TRACEBACKS")
+    if explicit is not None:
+        return explicit
+    if not strict("TRACEBACKS"):
+        return True
+    from django.conf import settings
+
+    return bool(getattr(settings, "DEBUG", False))

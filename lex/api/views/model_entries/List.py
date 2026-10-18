@@ -448,6 +448,19 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
     post_as_read = True
     # permission_classes = [IsAuthenticated, KeycloakUMAPermission]
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from rest_framework.exceptions import NotFound
+
+        from lex.api.security import list_denied
+        from lex.core.security_flags import strict
+
+        # A model whose own permission_list refuses the caller has no list for
+        # it (LEX_SEC_NOT_FOUND). Runs after authentication and the permission
+        # classes, so a signed-out caller keeps its sign-in answer.
+        if strict("NOT_FOUND") and list_denied(request, self.kwargs["model_container"].model_class):
+            raise NotFound()
+
     def get_queryset(self):
         queryset = super().get_queryset()
         model_class = self.kwargs["model_container"].model_class

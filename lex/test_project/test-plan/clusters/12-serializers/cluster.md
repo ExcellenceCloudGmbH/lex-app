@@ -133,3 +133,14 @@ cluster-2 models are too shallow; we need a model with one of every
 **What it tests:** where the serializer decides rows itself (list filter off, project views), it used to build a fresh `UserContext` per row through `can_read(request)` — one `auth_group` query per row. It now builds `LexModel.can_read`'s context from the one it caches for the request.
 
 **Scenario range:** 12.63. **Test file:** `lex/test_project/tests/serializers/test_12n_read_context_reuse.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Scenario: 12.63 the `auth_group` queries are the same for 3 rows as for 30. Letter n: 12l is referenced by 12m but not on this branch.
+
+### 12o. History rows are read-only in lex_reserved_scopes for non-superusers ✅
+
+**What it tests:** only superusers may write history tables (4p). The bundled frontend's VersionDetailsDrawer shows Delete from `lex_reserved_scopes.delete`, so a history row must say `edit: []` and `delete: false` to everyone else.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.64 | read-only for non-superusers | one-row read and list of a history row: `{edit: [], delete: false, export: <as computed>}`; the main record still offers `x` and delete |
+| 12.65 | superusers and opt-out | delete true, edit includes `x` and `valid_from` |
+
+**Scenario range:** 12.64 – 12.65. **Test file:** `lex/test_project/tests/serializers/test_12o_history_row_scopes.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [12o](batches.md).

@@ -444,3 +444,22 @@ does not remove user launch configurations.
 | 1.385 | answered from anywhere | in a directory that is no project, and that Django cannot load as an app, `lex --version` exits 0 with one version line |
 
 **Scenario range:** 1.384 – 1.385. **Test file:** `lex/test_project/tests/init/test_1au_lex_version.py`. **Type:** U. **Status:** ✅ Complete (2026-10-03). Batch: [1au](batches.md).
+
+---
+
+### 1av. Startup hardening — nested project root, broken lex_config.py, cache tables, CORS origins ✅
+
+**What it tests:** a Lex project in a subfolder of a repository runs with `python -m lex` and no wrapper variables; a broken `lex_config.py` stops startup instead of silently running with defaults; a fresh database no longer needs a manual `createcachetable`; `LEX_CORS_ALLOWED_ORIGINS` narrows CORS.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.386 | lex_config.py marks the root | `backend/` from itself and a subfolder; the git toplevel without the file |
+| 1.387 | CLI in a nested project | fresh `import lex.bin.lex` in `backend/Inputs`: `PROJECT_ROOT=backend/`, settings `lex_app.settings` (a project `settings.py` is not loaded) |
+| 1.388 | config fails to load | `ImproperlyConfigured` naming the error, from `ready()`'s check |
+| 1.389 | wrong key types | each of the four keys (and legacy names) named in the error; a valid file loads; no file passes |
+| 1.390 | after migrate | `post_migrate` creates `default_cache`/`oidc_cache`; a second run is harmless |
+| 1.391 | before the initial-data load | `async_ready` has created the tables by the time it checks for data |
+| 1.392 | `LEX_CORS_ALLOWED_ORIGINS` | unset: allow-all as before; set: only the listed origins |
+| 1.393 | home boundary | `lex_config.py` in the home directory never wins; marker-less folders fall back to themselves |
+
+**Scenario range:** 1.386 – 1.393. **Test file:** `lex/test_project/tests/init/test_1av_startup_hardening.py`. **Type:** U (1.390–1.391 I). **Status:** ✅ Complete (2026-10-18). Batch: [1av](batches.md).

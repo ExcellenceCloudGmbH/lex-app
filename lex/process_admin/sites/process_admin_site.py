@@ -236,6 +236,12 @@ class ProcessAdminSite:
                 Search.as_view(model_collection=self.model_collection),
                 name="global-search",
             ),
+            # The bundled frontend asks api/global-search/?q=<text>.
+            path(
+                "api/global-search/",
+                Search.as_view(model_collection=self.model_collection),
+                name="global-search-query",
+            ),
             path(
                 "api/<model:model_container>/model-permissions",
                 ModelPermissions.as_view(),

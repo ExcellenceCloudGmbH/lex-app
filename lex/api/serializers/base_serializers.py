@@ -447,11 +447,31 @@ class LexSerializer(serializers.ModelSerializer):
     def get_lex_reserved_scopes(self, instance):
         """
         Compute per-record scopes using the new permission system.
+
+        History rows (``Historical*``) tell a non-superuser ``edit: []`` and
+        ``delete: false``: only superusers may write to history tables
+        (``LEX_SEC_HISTORY_WRITE``), and the frontend hides the controls it
+        reads from here.
         """
         request = self.context.get('request')
         if not request:
             return {}
 
+        scopes = self._compute_lex_reserved_scopes(request, instance)
+        if not instance.__class__.__name__.startswith('MetaHistorical') and self._history_write_closed(request, instance):
+            export = scopes.get("export", True) if isinstance(scopes, dict) else True
+            return {"edit": [], "delete": False, "export": bool(export)}
+        return scopes
+
+    @staticmethod
+    def _history_write_closed(request, instance) -> bool:
+        from lex.api.security import is_history_model
+        from lex.core.security_flags import is_superuser, strict
+
+        return strict("HISTORY_WRITE") and is_history_model(type(instance)) and not is_superuser(request)
+
+    def _compute_lex_reserved_scopes(self, request, instance):
+        """The scopes from the record's permission methods (before the history-write rule)."""
         try:
             if instance.__class__.__name__.startswith('MetaHistorical'):
                 return {
