@@ -226,7 +226,57 @@ class OwnedItem(LexModel):
         return self.name
 
 
+class RaisingReadItem(LexModel):
+    """Cluster 4o: a permission_read that raises for one row ("boom")."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        if self.name == "boom":
+            raise RuntimeError("cluster 4o: permission_read failed on purpose")
+        return PermissionResult.allow_all("cluster 4o")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 4o")
+
+    def permission_create(self, uc):
+        raise RuntimeError("cluster 4o: permission_create failed on purpose")
+
+    def permission_list(self, uc):
+        return True
+
+
+class SecretDocument(LexModel):
+    """Cluster 4o: a file on a record that may be hidden."""
+
+    name = models.CharField(max_length=200)
+    is_secret = models.BooleanField(default=False)
+    attachment = models.FileField(upload_to="cluster4o/", blank=True, null=True)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def permission_read(self, uc):
+        if self.is_secret:
+            return PermissionResult.deny("cluster 4o: secret document")
+        return PermissionResult.allow_all("cluster 4o")
+
+    def permission_list(self, uc):
+        return True
+
+
 ALL_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, ExportDeniedItem, OwnedItem]
+SECURE_DEFAULT_MODELS = [ProtectedItem, FieldLevelItem, KeycloakItem, FilterBackendItem, RaisingReadItem,
+                         SecretDocument]
 
 # URL names expected by process_admin_rest_api — lowercased model name.
 PROTECTED = "protecteditem"
@@ -235,4 +285,5 @@ KEYCLOAK = "keycloakitem"
 FILTER_BACKEND = "filterbackenditem"
 EXPORT_DENIED = "exportdenieditem"
 OWNED = "owneditem"
-
+RAISING_READ = "raisingreaditem"
+SECRET_DOCUMENT = "secretdocument"

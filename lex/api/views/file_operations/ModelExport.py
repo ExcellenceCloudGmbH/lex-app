@@ -20,6 +20,7 @@ from django.utils import timezone as _dj_tz
 from django.db.models import QuerySet
 from django.http import FileResponse, JsonResponse
 from lex.api.filters import UserReadRestrictionFilterBackend, ForeignKeyFilterBackend
+from lex.core.security_flags import strict
 from lex.api.utils.temporal import parse_as_of_datetime
 from lex.api.views.model_entries.List import ListModelEntries
 from lex.api.views.model_entries.filter_backends import PrimaryKeyListFilterBackend
@@ -1742,6 +1743,11 @@ class ModelExportView(GenericAPIView):
 
         queryset = ForeignKeyFilterBackend().filter_queryset(request, queryset, None)
         queryset = UserReadRestrictionFilterBackend()._filter_queryset(request, queryset, model_container)
+        if strict("READ_SURFACES"):
+            # Export only rows the caller may read, by the list endpoint's rule (LEX_SEC_READ_SURFACES).
+            from lex.api.views.model_entries.filter_backends import apply_read_restriction
+
+            queryset = apply_read_restriction(queryset, request)
 
         json_data = request.data if isinstance(request.data, dict) else {}
         ag_export_payload = json_data.get("ag_export")

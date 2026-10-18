@@ -45,3 +45,22 @@
 **Scenario range:** 10.82. **Test file:** `lex/test_project/tests/api_layer/test_10d_reflex_search_exclusion.py`. **Type:** I. **Status:** ✅ Complete (2026-09-28). Covers `lex/api/views/global_search_for_models/Search.py`. Batch: [10d](batches.md).
 
 ---
+
+---
+
+### 10o. Error bodies, OIDC redirects, unknown api/ paths, global search ?q=, one KeycloakManager ✅
+
+**What it tests:** error responses of the generic endpoints no longer carry a server traceback by default (`LEX_SEC_TRACEBACKS`, `LEX_API_TRACEBACKS`); `next`/`fail` on `/oidc/*` cannot send a signed-in user to a foreign site (`LEX_SEC_OIDC_REDIRECT`); an unknown endpoint below `api/` is a JSON 404 instead of the SPA's index.html with 200; the `?q=` form of the global search the bundled frontend calls is routed; requests share one KeycloakManager.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 10.83 | no traceback by default | create, run_step and a raising `permission_create` answer 500 with `error`, no `traceback` |
+| 10.84 | traceback when allowed | `LEX_API_TRACEBACKS=true`, legacy, DEBUG show it; `LEX_API_TRACEBACKS=false` wins over DEBUG |
+| 10.85 | redirect targets | relative, own host, `CSRF_TRUSTED_ORIGINS` (wildcard, :3000), CORS origins pass; foreign, `//`, `/\`, `javascript:`, look-alike, userinfo hosts 400 on authenticate, logout, total_logout; other paths not inspected; opt-out passes |
+| 10.86 | guard in the stack | installed before the session middleware; `/oidc/authenticate` and `/oidc/total_logout` with a foreign `next` answer 400 |
+| 10.87 | unknown api/ path | JSON 404 with `error`; `api/health` and a model list still 200 |
+| 10.88 | SPA catch-all | api paths 404, app routes index 200, also below `DJANGO_BASE_PATH`; legacy serves the index |
+| 10.89 | global search `?q=` | `?q=needle` and `/needle` find the row; empty `q` the sentinel |
+| 10.90 | one KeycloakManager | three token requests build one manager and get permissions and roles; no token builds none |
+
+**Scenario range:** 10.83 – 10.90. **Test file:** `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py`. **Type:** E (10.85, 10.88, 10.90 U). **Status:** ✅ Complete (2026-10-18). Batch: [10o](batches.md).

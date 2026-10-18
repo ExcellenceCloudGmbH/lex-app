@@ -3,11 +3,45 @@ from collections import defaultdict
 from lex.api.views.model_entries.serializers.CalculationLogTreeSerializer import CalculationLogTreeSerializer
 # import CalculationLog
 from lex.audit_logging.models.CalculationLog import CalculationLog
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_api_key.permissions import HasAPIKey
+
+from lex.core.security_flags import superuser_only
+
+#: How many logs of one calculation are inspected to find a record the caller may read.
+_VISIBILITY_PROBE = 50
+
+
+def log_target_readable(request, log) -> bool:
+    """Whether the record a calculation log belongs to is one the caller may read."""
+    from lex.api.security import is_readable
+
+    if log.content_type_id is None or log.object_id is None:
+        return False
+    model = log.content_type.model_class()
+    if model is None:
+        return False
+    instance = model._default_manager.filter(pk=log.object_id).first()
+    return instance is not None and is_readable(request, instance)
+
+
+def calculation_visible(request, calculation_id) -> bool:
+    """A calculation's logs are visible when one of them belongs to a record the caller may read."""
+    if not calculation_id:
+        return False
+    logs = (
+        CalculationLog.objects.filter(calculationId=calculation_id)
+        .exclude(content_type=None)
+        .select_related("content_type")
+    )
+    return any(log_target_readable(request, log) for log in logs[:_VISIBILITY_PROBE])
 
 
 class CalculationLogTreeView(APIView):
+    permission_classes = [HasAPIKey | IsAuthenticated]
+
     # Bound how many log rows a single request can materialize and serialize.
     # Without this the view loaded the entire CalculationLog table (or every row
     # for a calculation) into memory at once, which contributed to backend OOMs.
@@ -17,7 +51,12 @@ class CalculationLogTreeView(APIView):
     def get(self, request, *args, **kwargs):
         # Optionally filter by a calculation_id query parameter.
         calculation_id = request.query_params.get('calculation_id')
-        if calculation_id:
+        # Only a superuser sees every log; anyone else the logs of a calculation
+        # on a record they may read (LEX_SEC_INTERNAL). Logs that belong to no
+        # record are operator data.
+        if superuser_only(request) and not calculation_visible(request, calculation_id):
+            logs = CalculationLog.objects.none()
+        elif calculation_id:
             logs = CalculationLog.objects.filter(calculationId=calculation_id)
         else:
             logs = CalculationLog.objects.all()

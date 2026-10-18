@@ -344,6 +344,8 @@ MIDDLEWARE = [
     # on any asset the browser has not cached yet. Placed high so it wraps the
     # response on the way out, which is what GZipMiddleware requires.
     "django.middleware.gzip.GZipMiddleware",
+    # next/fail on /oidc/* must stay on an allowed origin (LEX_SEC_OIDC_REDIRECT).
+    "lex.authentication.middleware.OidcRedirectGuardMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -791,6 +793,20 @@ CORS_ORIGIN_WHITELIST = [
     "http://localhost:8000",
     "*",
 ]
+
+# LEX_CORS_ALLOWED_ORIGINS (comma-separated) replaces the permissive defaults
+# above: only the listed origins may make (credentialed) cross-origin requests.
+# These origins are also accepted as OIDC next/fail targets.
+_lex_cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("LEX_CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if _lex_cors_origins:
+    CORS_ORIGIN_ALLOW_ALL = False
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = _lex_cors_origins
+    CORS_ORIGIN_WHITELIST = _lex_cors_origins
 
 LANGUAGE_CODE = "en-us"
 

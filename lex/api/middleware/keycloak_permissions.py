@@ -1,11 +1,42 @@
 # lex_app/rest_api/middleware.py
 
 import logging
+import threading
 
 from lex.api.views.authentication.KeycloakManager import KeycloakManager
 
 # It's good practice to have a dedicated logger for your middleware
 logger = logging.getLogger(__name__)
+
+_manager = None
+_manager_factory = None
+_manager_lock = threading.Lock()
+
+
+def _shared_manager():
+    """One KeycloakManager per process instead of one per request.
+
+    Building a manager opens admin/UMA/OIDC clients and resolves the client's
+    uuid through the admin API — work that was repeated on every request. The
+    configuration comes from the environment and does not change at runtime.
+    A failed initialisation is not kept, so the next request retries.
+    """
+    global _manager, _manager_factory
+    factory = KeycloakManager  # looked up per call, so a replaced class (tests) takes effect
+    if _manager is None or _manager_factory is not factory:
+        with _manager_lock:
+            if _manager is None or _manager_factory is not factory:
+                _manager = factory()
+                _manager_factory = factory
+    return _manager
+
+
+def _reset_shared_manager():
+    """Forget the shared manager (tests)."""
+    global _manager, _manager_factory
+    _manager = None
+    _manager_factory = None
+
 
 class KeycloakPermissionsMiddleware:
     """
@@ -62,7 +93,7 @@ class KeycloakPermissionsMiddleware:
                 access_token = auth_header[7:].strip()
 
         if access_token:
-            kc_manager = KeycloakManager()
+            kc_manager = _shared_manager()
             try:
                 # Fetch all permissions once and attach them to the request.
                 # This list will be the single source of truth for the rest of the request.

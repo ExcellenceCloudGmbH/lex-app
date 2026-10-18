@@ -1,8 +1,9 @@
 import importlib.util
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 #: Built-in serializer name used by the framework when no override is configured.
 DEFAULT_SERIALIZER_NAME = "default"
@@ -24,6 +25,11 @@ class LexProjectConfig:
     #: A special ``"__default__"`` key applies to all models without an
     #: explicit override.
     tab_display_names: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
+    #: The exception raised while executing ``lex_config.py``, if any.
+    load_error: Optional[BaseException] = None
+    #: The values the file set for the keys above, as written (for validation).
+    raw_values: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     _loaded: bool = False
 
@@ -52,6 +58,17 @@ class LexProjectConfig:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
+                for key, legacy in (
+                    ("INITIAL_DATA", "initial_data_load"),
+                    ("PROJECT_GROUPS", "azure_groups"),
+                    ("DEFAULT_SERIALIZER_NAME", "default_serializer_name"),
+                    ("TAB_DISPLAY_NAMES", "tab_display_names"),
+                ):
+                    for name in (key, legacy):
+                        if hasattr(module, name):
+                            config.raw_values[key] = getattr(module, name)
+                            break
+
                 # Map attributes                                                                   
                 config.initial_data = getattr(module, "INITIAL_DATA", getattr(module,
                                                                               "initial_data_load", None))
@@ -79,9 +96,57 @@ class LexProjectConfig:
 
                 config._loaded = True
             except Exception as e:
+                config.load_error = e
                 print(f"Error loading project config: {e}")
 
         return config  
+
+
+def validate_project_config(config: Optional[LexProjectConfig] = None) -> LexProjectConfig:
+    """Stop at startup on a broken ``lex_config.py`` instead of running with defaults.
+
+    Before, an exception while executing ``lex_config.py`` was only printed and
+    every key silently fell back to its default (no initial data, no groups,
+    the default serializer name) -- a misconfiguration nobody would notice.
+    Raises :class:`~django.core.exceptions.ImproperlyConfigured` when the file
+    fails to load or one of its keys has the wrong type: ``INITIAL_DATA`` (a
+    path), ``PROJECT_GROUPS`` (names), ``DEFAULT_SERIALIZER_NAME`` (a name),
+    ``TAB_DISPLAY_NAMES`` (model name -> {tab: label}). A project without
+    ``lex_config.py`` passes. Called from lex's ``ready()``.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+
+    config = config or LexProjectConfig.load()
+    if config.load_error is not None:
+        raise ImproperlyConfigured(
+            f"lex_config.py could not be loaded: {config.load_error!r}"
+        ) from config.load_error
+    raw = config.raw_values
+    if raw.get("INITIAL_DATA") is not None and not isinstance(raw["INITIAL_DATA"], (str, os.PathLike)):
+        raise ImproperlyConfigured("lex_config.INITIAL_DATA must be a path (a string), or None")
+    if "PROJECT_GROUPS" in raw:
+        groups = raw["PROJECT_GROUPS"]
+        if (
+            not isinstance(groups, (list, tuple, set, frozenset))
+            or not all(isinstance(group, str) for group in groups)
+        ):
+            raise ImproperlyConfigured("lex_config.PROJECT_GROUPS must be a list of group names")
+    if raw.get("DEFAULT_SERIALIZER_NAME") is not None:
+        name = raw["DEFAULT_SERIALIZER_NAME"]
+        if not isinstance(name, str) or not name.strip():
+            raise ImproperlyConfigured("lex_config.DEFAULT_SERIALIZER_NAME must be a non-empty string")
+    if raw.get("TAB_DISPLAY_NAMES") is not None:
+        names = raw["TAB_DISPLAY_NAMES"]
+        if not isinstance(names, Mapping) or not all(
+            isinstance(model, str)
+            and isinstance(labels, Mapping)
+            and all(isinstance(k, str) and isinstance(v, str) for k, v in labels.items())
+            for model, labels in names.items()
+        ):
+            raise ImproperlyConfigured(
+                "lex_config.TAB_DISPLAY_NAMES must map model names to {tab: label} dicts of strings"
+            )
+    return config
 
 
 # ---------------------------------------------------------------------------

@@ -127,3 +127,20 @@ cluster-2 models are too shallow; we need a model with one of every
 **Why a regression matters:** an active button that can only ever be refused sends the user into an error for every closed record, and a greyed one without the reason tells them they lack permission when they don't.
 
 **Scenario range:** 12.58 – 12.62. **Test file:** `lex/test_project/tests/serializers/test_12m_closed_record_scopes.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.58 a closed record's edit scopes leave out `is_calculated` and keep `note`; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the reason; 12.61 an open record carries null; 12.62 the reason survives a narrow read permission. Follows 12l (12.54 – 12.57).
+
+### 12n. The list serializer builds the read context once per request (BUG-011) ✅
+
+**What it tests:** where the serializer decides rows itself (list filter off, project views), it used to build a fresh `UserContext` per row through `can_read(request)` — one `auth_group` query per row. It now builds `LexModel.can_read`'s context from the one it caches for the request.
+
+**Scenario range:** 12.63. **Test file:** `lex/test_project/tests/serializers/test_12n_read_context_reuse.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Scenario: 12.63 the `auth_group` queries are the same for 3 rows as for 30. Letter n: 12l is referenced by 12m but not on this branch.
+
+### 12o. History rows are read-only in lex_reserved_scopes for non-superusers ✅
+
+**What it tests:** only superusers may write history tables (4p). The bundled frontend's VersionDetailsDrawer shows Delete from `lex_reserved_scopes.delete`, so a history row must say `edit: []` and `delete: false` to everyone else.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 12.64 | read-only for non-superusers | one-row read and list of a history row: `{edit: [], delete: false, export: <as computed>}`; the main record still offers `x` and delete |
+| 12.65 | superusers and opt-out | delete true, edit includes `x` and `valid_from` |
+
+**Scenario range:** 12.64 – 12.65. **Test file:** `lex/test_project/tests/serializers/test_12o_history_row_scopes.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Batch: [12o](batches.md).

@@ -1723,6 +1723,21 @@ to know any other way. The option takes `lex._version.__version__`.
 (`0.0.0.dev0` against the stamped label). Dropping `--version` from the set `main()` answers without
 setting Django up fails both: Django setup crashes in `release-smoke`.
 
+### Batch 1av — Startup hardening ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 1.386 – 1.392, 1.405 |
+| Type | U (1.390–1.391 I) |
+| Files covered | `lex/tools/project_root.py` (`find_project_root`), `lex/bin/lex.py` (module start), `lex/core/config.py` (`load_error`, `raw_values`, `validate_project_config`), `lex/lex_app/apps.py` (`_validate_project_configuration`, `async_ready`), `lex/helpers/cache_tables.py`, `lex/core/apps.py` (`post_migrate`), `lex/lex_app/settings.py` (`LEX_CORS_ALLOWED_ORIGINS`) |
+| Test file | `lex/test_project/tests/init/test_1av_startup_hardening.py` |
+| Test classes | `TestCluster01av_NestedProjectRoot`, `TestCluster01av_ConfigValidation`, `TestCluster01av_CacheTables`, `TestCluster01av_CorsOrigins` |
+| Fixtures | temporary git monorepo with `backend/lex_config.py`; temporary `PROJECT_ROOT`s; the test database's cache tables dropped and recreated; fresh interpreters for the CLI and settings |
+| Tests landed | **8 pass / 0 fail** |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
+
+---
+
 ### Batch 1aw — a plain pytest run is set up like `lex pytest`: PyCharm's test tree works ✅
 
 | Property | Value |

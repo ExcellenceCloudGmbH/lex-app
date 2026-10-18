@@ -23,6 +23,8 @@ from lex.audit_logging.utils.CacheManager import CacheManager
 from lex.audit_logging.utils.ModelContext import model_logging_context
 from lex.audit_logging.utils.WebSocketNotifier import WebSocketNotifier
 from lex.core.calculation_closing import calculation_closed_reason
+from lex.api.security import edit_denial, error_detail, is_readable, write_denial
+from lex.core.security_flags import strict
 from lex.core.exceptions import resolve_exception_detail, resolve_exception_traceback
 from lex.core.models.CalculationModel import (
     CalculationModel,
@@ -33,7 +35,7 @@ from lex.core.signals.ModelMutationSignal import broadcast_model_mutation
 from lex.core.models.LexModel import should_use_atomic_model_operations
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, CreateAPIView
 from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 from rest_framework.permissions import IsAuthenticated
@@ -53,6 +55,13 @@ class OneModelEntry(
     # Keep parity with ModelEntryProviderMixin defaults so model-level
     # modification_restriction rules (e.g. legacy read-only) are enforced.
     permission_classes = [HasAPIKey | IsAuthenticated, UserPermission]
+
+    def get_object(self):
+        """The addressed record; one the caller may not read is "not found" (LEX_SEC_NOT_FOUND)."""
+        instance = super().get_object()
+        if strict("NOT_FOUND") and not is_readable(self.request, instance):
+            raise NotFound()
+        return instance
 
     def _broadcast_update(self, instance):
         """Notify open list views that *instance* was updated.
@@ -529,6 +538,11 @@ class OneModelEntry(
     def create(self, request, *args, **kwargs):
         self.reset_failed_audit_log_state()
         model_container = self.kwargs["model_container"]
+        # History tables and Django's users are written by superusers only
+        # (LEX_SEC_HISTORY_WRITE / LEX_SEC_INTERNAL).
+        denial = write_denial(request, model_container.model_class)
+        if denial is not None:
+            return denial
         instance = model_container.model_class()
         # Check create permission using new system
         try:
@@ -562,11 +576,20 @@ class OneModelEntry(
                     },
                     status=deny_status,
                 )
-        except Exception:
-            # Allow by default on permission check error
-            pass
-
-            # return Response(data={}, status=status.HTTP_204_NO_CONTENT, headers={}, exception=e)
+        except Exception as exc:
+            if strict("FAIL_CLOSED"):
+                # A permission check that raises is a server fault, not a grant.
+                logger.exception(
+                    "permission_create of %s raised; create refused (LEX_SEC_FAIL_CLOSED)",
+                    model_container.model_class.__name__,
+                )
+                raise APIException(
+                    error_detail({
+                        "error": f"The permission check for creating a {model_container.model_class.__name__} failed.",
+                        "traceback": traceback.format_exc(),
+                    })
+                ) from exc
+            # Legacy (LEX_SEC_FAIL_CLOSED=false): allow by default on permission check error
 
         calculationId = self.kwargs["calculationId"]
 
@@ -597,7 +620,7 @@ class OneModelEntry(
                     exception=e,
                 )
                 raise APIException(
-                    {"error": f"{e} ", "traceback": traceback.format_exc()}
+                    error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                 ) from e
 
             # Notify open list views (other tabs / users / embedded grids) that
@@ -646,7 +669,7 @@ class OneModelEntry(
                         related_instance=instance,
                     )
                     raise APIException(
-                        {"error": f"{e} ", "traceback": traceback.format_exc()}
+                        error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
 
     def update(self, request, *args, **kwargs):
@@ -660,6 +683,15 @@ class OneModelEntry(
         with OperationContext(request, calculationId):
             instance = self.get_object()
             with model_logging_context(instance):
+                # permission_edit on every write (LEX_SEC_EDIT, BUG-010): a
+                # field the caller may not change answers 400, and a record it
+                # may not edit refuses calculate/cancel as well.
+                denial = write_denial(request, type(instance)) or edit_denial(
+                    request, instance, request.data, serializer=self.get_serializer(instance)
+                )
+                if denial is not None:
+                    return denial
+
                 # ── Cancel button short-circuit ────────────────────────
                 # PATCH .../{pk}/?cancel=true (or body {"cancel":"true"})
                 # asks the framework to revoke the in-progress Celery
@@ -730,7 +762,7 @@ class OneModelEntry(
                         related_instance=instance,
                     )
                     raise APIException(
-                        {"error": f"{e} ", "traceback": traceback.format_exc()}
+                        error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
 
                 if noop_response is not None:
@@ -781,7 +813,7 @@ class OneModelEntry(
                             related_instance=instance,
                         )
                         raise APIException(
-                            {"error": f"Bitemporal update failed: {e}", "traceback": traceback.format_exc()}
+                            error_detail({"error": f"Bitemporal update failed: {e}", "traceback": traceback.format_exc()})
                         ) from e
 
                 # STANDARD UPDATE LOGIC (Main Models)
@@ -884,13 +916,13 @@ class OneModelEntry(
                     )
 
                     raise APIException(
-                        {
+                        error_detail({
                             "message": f"{resolve_exception_detail(exc) or str(exc)} ",
                             "traceback": resolve_exception_traceback(
                                 exc,
                                 fallback=traceback.format_exc(),
                             ),
-                        }
+                        })
                     ) from exc
 
                 except ValidationError as e:
@@ -911,7 +943,7 @@ class OneModelEntry(
                         related_instance=instance,
                     )
                     raise APIException(
-                        {"error": f"{e} ", "traceback": traceback.format_exc()}
+                        error_detail({"error": f"{e} ", "traceback": traceback.format_exc()})
                     ) from e
                 finally:
                     self._calculate_requested = False

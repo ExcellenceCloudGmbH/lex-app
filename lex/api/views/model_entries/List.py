@@ -30,6 +30,7 @@ from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from lex.api.filter_policy import check_path, path_allowed
 from lex.api.utils import can_read_from_payload
 from lex.api.views.model_entries.filter_backends import UserReadRestrictionFilterBackend
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import ModelEntryProviderMixin
@@ -359,6 +360,7 @@ def apply_query_param_filters(
     query_params: QueryDict,
     model_class: type[Model],
     reserved_params: Optional[Iterable[str]] = None,
+    request=None,
 ) -> QuerySet:
     reserved = set(RESERVED_QUERY_PARAMS)
     if reserved_params:
@@ -374,6 +376,9 @@ def apply_query_param_filters(
         resolved = _resolve_lookup(model_class, key)
         if not resolved:
             continue
+        if request is not None:
+            # Only fields the caller can see may filter (LEX_SEC_FILTERS).
+            check_path(model_class, resolved[0], request)
 
         q = _build_query_from_values(resolved, values)
         if q is None:
@@ -389,6 +394,7 @@ def apply_ordering(
     ordering_param: Optional[str],
     model_class: type[Model],
     extra_allowed: Optional[set[str]] = None,
+    request=None,
 ) -> QuerySet:
     if not ordering_param:
         return queryset
@@ -410,6 +416,8 @@ def apply_ordering(
             continue
 
         field_path, _, _ = resolved
+        if request is not None:
+            check_path(model_class, field_path, request)
         order_fields.append(f"-{field_path}" if desc else field_path)
 
     if not order_fields:
@@ -440,11 +448,26 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
     post_as_read = True
     # permission_classes = [IsAuthenticated, KeycloakUMAPermission]
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from rest_framework.exceptions import NotFound
+
+        from lex.api.security import list_denied
+        from lex.core.security_flags import strict
+
+        # A model whose own permission_list refuses the caller has no list for
+        # it (LEX_SEC_NOT_FOUND). Runs after authentication and the permission
+        # classes, so a signed-out caller keeps its sign-in answer.
+        if strict("NOT_FOUND") and list_denied(request, self.kwargs["model_container"].model_class):
+            raise NotFound()
+
     def get_queryset(self):
         queryset = super().get_queryset()
         model_class = self.kwargs["model_container"].model_class
-        queryset = apply_query_param_filters(queryset, self.request.query_params, model_class)
-        queryset = apply_ordering(queryset, self.request.query_params.get("ordering"), model_class)
+        queryset = apply_query_param_filters(queryset, self.request.query_params, model_class, request=self.request)
+        queryset = apply_ordering(
+            queryset, self.request.query_params.get("ordering"), model_class, request=self.request
+        )
 
         return queryset
 
@@ -1243,5 +1266,8 @@ class ListModelEntries(ModelEntryProviderMixin, ListAPIView):
                     return False
                 current_model = field.related_model
 
-        self._ag_field_validity_cache[normalized] = True
-        return True
+        # A field the caller cannot see is treated like one that does not exist (LEX_SEC_FILTERS).
+        request = getattr(self, "request", None)
+        valid = request is None or path_allowed(self._ag_model_class, normalized, request)
+        self._ag_field_validity_cache[normalized] = valid
+        return valid
