@@ -127,3 +127,9 @@ cluster-2 models are too shallow; we need a model with one of every
 **Why a regression matters:** an active button that can only ever be refused sends the user into an error for every closed record, and a greyed one without the reason tells them they lack permission when they don't.
 
 **Scenario range:** 12.58 – 12.62. **Test file:** `lex/test_project/tests/serializers/test_12m_closed_record_scopes.py`. **Type:** E. **Status:** ✅ Complete. Scenarios: 12.58 a closed record's edit scopes leave out `is_calculated` and keep `note`; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the reason; 12.61 an open record carries null; 12.62 the reason survives a narrow read permission. Follows 12l (12.54 – 12.57).
+
+### 12n. The list serializer builds the read context once per request (BUG-011) ✅
+
+**What it tests:** where the serializer decides rows itself (list filter off, project views), it used to build a fresh `UserContext` per row through `can_read(request)` — one `auth_group` query per row. It now builds `LexModel.can_read`'s context from the one it caches for the request.
+
+**Scenario range:** 12.63. **Test file:** `lex/test_project/tests/serializers/test_12n_read_context_reuse.py`. **Type:** E. **Status:** ✅ Complete (2026-10-18). Scenario: 12.63 the `auth_group` queries are the same for 3 rows as for 30. Letter n: 12l is referenced by 12m but not on this branch.

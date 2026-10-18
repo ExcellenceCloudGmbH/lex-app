@@ -1,7 +1,7 @@
 cluster: 4
 slug: permissions
 title: Permissions
-max_scenario: 79
+max_scenario: 100
 letters:
   a:
     title: ''
@@ -147,3 +147,19 @@ letters:
       model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of
       five mutations of that code (keep grants across users, keep them across sign-out, count record
       grants, cache the raw token, return the cached list itself) fails exactly one scenario.
+  o:
+    title: Secure defaults on the generic REST endpoints (v2 security hardening)
+    scenarios: 4.80-4.100
+    status: complete
+    tests:
+      pass: 21
+      skip: 0
+      xfail: 0
+    note: >-
+      lex/core/security_flags.py (nine flags, LEX_LEGACY_SECURITY umbrella, LEX_SEC_<FLAG> override,
+      is_superuser_or_admin) and lex/api/security.py. FAIL_CLOSED (4.80-4.81), NOT_FOUND incl. bulk
+      GET dropping unreadable ids (4.82-4.84), EDIT on PATCH, bulk PATCH/DELETE and run_step with
+      400 {code, detail, error} bodies (4.85-4.90, BUG-010), READ_SURFACES on history, search,
+      export, file download and the HTML report endpoint (4.91-4.95), BUG-011 once-per-row
+      (4.96), API-key read context (4.97), flag resolution (4.98), admin helper (4.99), signed-out
+      callers keep their sign-in answer (4.100). Ported from #816 without the 3.0 extension hooks.

@@ -1,6 +1,7 @@
 import copy
 
 from lex.process_admin.models.ModelCollection import ModelCollection
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -185,13 +186,21 @@ class ModelStylingObtainView(APIView):
 
 
 class Overview(APIView):
+    """GET api/htmlreport/<name>: render a registered HTMLReport.
+
+    Signed-in users or API keys only; an unknown report answers 404.
+    """
+
     http_method_names = ["get"]
+    permission_classes = [HasAPIKey | IsAuthenticated]
     HTML_reports = None
 
     def get(self, request, *args, **kwargs):
         user = request.user
         class_name = kwargs["report_name"]
-        html_report_class = self.HTML_reports[class_name]
+        html_report_class = (self.HTML_reports or {}).get(class_name)
+        if html_report_class is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         html = html_report_class().get_html(user)
         return Response(html)
 

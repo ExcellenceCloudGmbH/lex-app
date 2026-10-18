@@ -78,3 +78,19 @@ list itself — each fail exactly one of these scenarios. The rule for record gr
 must not open a check on the whole model.
 
 ---
+
+### Batch 4o — Secure defaults on the generic REST endpoints ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 4.80 – 4.100 |
+| Type | E (4.98–4.99 U) |
+| Files covered | `lex/core/security_flags.py`, `lex/api/security.py`, `lex/api/views/model_entries/{One,Many,History,filter_backends}.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/views/file_operations/{ModelExport,FileDownload}.py`, `lex/api/filters/GenericFilters.py`, `lex/api/serializers/base_serializers.py`, `lex/process_admin/views/model_relation_views.py` (`Overview`) |
+| Test file | `lex/test_project/tests/permissions/test_4o_secure_defaults.py` |
+| Test classes | `TestCluster04o_FailClosedAndNotFound` (4.80–4.84), `TestCluster04o_EditEnforcement` (4.85–4.90), `TestCluster04o_ReadSurfaces` (4.91–4.95), `TestCluster04o_SignedOut` (4.100), `TestCluster04o_ReadOncePerRow` (4.96), `TestCluster04o_ApiKeyReadContext` (4.97), `TestCluster04o_SecurityFlags` (4.98), `TestCluster04o_SuperuserOrAdmin` (4.99) |
+| Fixtures | `RaisingReadItem`, `SecretDocument` (new in `permissions/models.py`), `ProtectedItem`, `FilterBackendItem`, `KeycloakItem`; `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **21 pass / 0 fail** |
+| Also changed | 4.4 live again (BUG-010 resolved); 4.41 asserts 404 by default and the old `200 {}` under `LEX_LEGACY_SECURITY=true`; 10.47–10.54 mocks report a real `FileField` and stand in for the read check; 12h `AttachmentItem` opens read/edit |
+| Status | ✅ Complete — ported from #816 without `permission_read_queryset`, `permission_serializer`, `HTMLReport.permission_view`, `lex_strict_input`, `EXPOSE_AUTO_SERIALIZER` |
+
+---

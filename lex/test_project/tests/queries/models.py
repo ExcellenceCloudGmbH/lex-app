@@ -104,7 +104,84 @@ class QueryItem(LexModel):
         return True
 
 
+def _open(cls):
+    cls.permission_read = lambda self, uc: PermissionResult.allow_all("cluster 14f")
+    cls.permission_edit = lambda self, uc: PermissionResult.allow_all("cluster 14f")
+    cls.permission_create = lambda self, uc: True
+    cls.permission_delete = lambda self, uc: True
+    cls.permission_list = lambda self, uc: True
+    return cls
+
+
+@_open
+class PolicyOwner(LexModel):
+    """Cluster 14f: related model; ``internal_code`` is never serialized."""
+
+    name = models.CharField(max_length=200)
+    is_active = models.BooleanField(default=True)
+    internal_code = models.CharField(max_length=50, blank=True, default="")
+
+    class Meta:
+        app_label = "lex_app"
+
+
+@_open
+class PolicyItem(LexModel):
+    """Cluster 14f: ``salary`` exists on the model but no serializer returns it."""
+
+    name = models.CharField(max_length=200)
+    salary = models.IntegerField(default=0)
+    owner = models.ForeignKey(
+        PolicyOwner, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="items", limit_choices_to={"is_active": True},
+    )
+
+    class Meta:
+        app_label = "lex_app"
+
+
+@_open
+class PolicyOpenItem(LexModel):
+    """Cluster 14f: opts out of the filter allow-list."""
+
+    name = models.CharField(max_length=200)
+    hidden_score = models.IntegerField(default=0)
+    lex_filterable_fields = "__all__"
+
+    class Meta:
+        app_label = "lex_app"
+
+
+from rest_framework import serializers as _drf  # noqa: E402
+
+
+class _PolicyOwnerSerializer(_drf.ModelSerializer):
+    class Meta:
+        model = PolicyOwner
+        fields = ["id", "name"]
+
+
+class _PolicyItemSerializer(_drf.ModelSerializer):
+    class Meta:
+        model = PolicyItem
+        fields = ["id", "name", "owner"]
+
+
+class _PolicyOpenItemSerializer(_drf.ModelSerializer):
+    class Meta:
+        model = PolicyOpenItem
+        fields = ["id", "name"]
+
+
+PolicyOwner.api_serializers = {"default": _PolicyOwnerSerializer}
+PolicyItem.api_serializers = {"default": _PolicyItemSerializer}
+PolicyOpenItem.api_serializers = {"default": _PolicyOpenItemSerializer}
+
 ALL_MODELS = [QueryCategory, QueryItem]
+POLICY_MODELS = [PolicyOwner, PolicyItem, PolicyOpenItem]
+POLICY_ITEM = "policyitem"
+POLICY_OWNER = "policyowner"
+POLICY_OPEN = "policyopenitem"
 
 # URL names expected by ``process_admin_rest_api`` — lowercased model name.
 CATEGORY = "querycategory"

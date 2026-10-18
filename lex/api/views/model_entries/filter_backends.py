@@ -1,4 +1,5 @@
 import base64
+import logging
 from collections.abc import Mapping
 from functools import lru_cache
 from urllib.parse import parse_qs
@@ -11,6 +12,11 @@ from lex.api.utils import can_read_from_payload
 from lex.api.utils.helpers import get_default_read_permission_scope
 from lex.core.models.LexModel import LexModel, UserContext
 from rest_framework import filters
+
+from lex.api.security import remember
+from lex.core.security_flags import strict
+
+logger = logging.getLogger(__name__)
 
 
 class PrimaryKeyListFilterBackend(filters.BaseFilterBackend):
@@ -38,7 +44,11 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
 
     def filter_queryset(self, request, queryset, view):
         model_class = view.kwargs["model_container"].model_class
-        name = model_class.__name__
+        return self.restrict(request, queryset, model_class.__name__)
+
+    def restrict(self, request, queryset, name=None):
+        """Return the rows of ``queryset`` the requesting user may read."""
+        name = name or queryset.model.__name__
 
         # AuditLogStatus and CalculationLog handlers always permit every row,
         # so skip the per-row loop entirely for them.
@@ -207,7 +217,10 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
                 if not can_read_from_payload(request, row, base_user_context=base_user_context):
                     excluded.append(row.pk)
             except Exception:
-                pass  # allow-by-default on error
+                if strict("FAIL_CLOSED"):
+                    logger.exception("audit-log visibility check raised for row %s; row hidden", row.pk)
+                    excluded.append(row.pk)
+                # Legacy (LEX_SEC_FAIL_CLOSED=false): allow-by-default on error
         if excluded:
             return queryset.exclude(pk__in=excluded)
         return queryset
@@ -247,6 +260,8 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
                 if target_caps['has_permission_read']:
                     user_context = base_ctx.with_instance(request, target_instance)
                     result = target_instance.permission_read(user_context)
+                    # The serializer asks again for the same row; answer from memory (BUG-011).
+                    remember(request, "read", target_instance, result)
                     if not result.allowed:
                         excluded.append(instance.pk)
                 # Fallback to legacy method
@@ -255,8 +270,20 @@ class UserReadRestrictionFilterBackend(filters.BaseFilterBackend):
                         excluded.append(instance.pk)
                 # else: allow by default if no permission method
             except Exception:
-                pass  # allow by default on any error
+                if strict("FAIL_CLOSED"):
+                    logger.exception("permission_read raised for %s row %s; row hidden", type(instance).__name__, instance.pk)
+                    excluded.append(instance.pk)
+                # Legacy (LEX_SEC_FAIL_CLOSED=false): allow by default on any error
 
         if excluded:
             return queryset.exclude(pk__in=excluded)
         return queryset
+
+
+def apply_read_restriction(queryset, request):
+    """Rows of ``queryset`` the user behind ``request`` may read.
+
+    The same rule the generic list endpoint applies, for the endpoints that
+    return or act on records outside it (search, export, bulk, file download).
+    """
+    return UserReadRestrictionFilterBackend().restrict(request, queryset)

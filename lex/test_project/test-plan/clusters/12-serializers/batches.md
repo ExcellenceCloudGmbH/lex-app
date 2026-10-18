@@ -89,3 +89,18 @@
 | Status | ✅ Complete — paired with 7u and 2l |
 
 ---
+
+### Batch 12n — The list serializer builds the read context once per request ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 12.63 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (`to_representation`, `_get_can_read_context`, remembered read answer) |
+| Test file | `lex/test_project/tests/serializers/test_12n_read_context_reuse.py` |
+| Test classes | `TestCluster12n_ReadContextReuse` |
+| Fixtures | cluster-12 `TagItem` |
+| Tests landed | **1 pass / 0 fail** |
+| Status | ✅ Complete — BUG-011 partially resolved; companion 4.96, 4.97 |
+
+---

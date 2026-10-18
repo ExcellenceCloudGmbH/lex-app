@@ -13,7 +13,7 @@
 | 1. Init — Project Bootstrap | 47 | 385 | 427 | 0 | 0 |
 | 2. CRUD via REST API | 12 | 116 | 24 | 0 | 0 |
 | 3. Validation Hooks | 7 | 38 | 6 | 0 | 0 |
-| 4. Permissions | 14 | 79 | 23 | 2 | 0 |
+| 4. Permissions | 15 | 100 | 44 | 2 | 0 |
 | 5. History & Bitemporal | 14 | 129 | 35 | 6 | 3 |
 | 6. Audit Logging | 18 | 120 | 23 | 3 | 0 |
 | 7. Calculation State Machine | 21 | 237 | 94 | 0 | 0 |
@@ -21,9 +21,9 @@
 | 9. Signals & WebSocket | 7 | 43 | 15 | 0 | 0 |
 | 10. API Layer | 14 | 82 | 32 | 0 | 0 |
 | 11. Stress & Performance | 9 | 22 | 0 | 0 | 0 |
-| 12. Serializer Contract | 12 | 62 | 26 | 0 | 0 |
+| 12. Serializer Contract | 13 | 63 | 27 | 0 | 0 |
 | 13. Export Endpoint | 8 | 45 | 15 | 0 | 0 |
-| 14. AG Grid Query Endpoint | 7 | 35 | 2 | 0 | 0 |
+| 14. AG Grid Query Endpoint | 8 | 44 | 11 | 0 | 0 |
 | 15. Calculation Logging Surface | 11 | 51 | 32 | 0 | 0 |
 
 ## 1. Init — Project Bootstrap (`init`)
@@ -138,6 +138,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 4l | User API endpoint *(blocked — see §6 decision #2)* |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 4m | `ApiKeyAwareLoginRequiredMiddleware` — instance API-key bypass | 4.66-4.70 | complete | 5 | 0 | 0 | scenarios 4.66–4.70; instance API-key bypass + DRF key bypass + delegate-to-parent + short-circuit order + subclass contract |
 | 4n | Keycloak UMA permissions in Reflex dashboards | 4.75-4.79 | complete | 5 | 0 | 0 | current_permissions / has_permission / current_access_token (lex/lex_app/reflex/auth.py) -- the Reflex counterpart of st.session_state.permissions, which the Streamlit proxy fills. One KeycloakManager lookup per access token, again after a refresh; a failed lookup keeps the same user's grants and never hands them to another user; sign-out clears them; has_permission counts model-wide grants on <app_label>.<ModelName> only, as the API's default read check does. Each of five mutations of that code (keep grants across users, keep them across sign-out, count record grants, cache the raw token, return the cached list itself) fails exactly one scenario. |
+| 4o | Secure defaults on the generic REST endpoints (v2 security hardening) | 4.80-4.100 | complete | 21 | 0 | 0 | lex/core/security_flags.py (nine flags, LEX_LEGACY_SECURITY umbrella, LEX_SEC_<FLAG> override, is_superuser_or_admin) and lex/api/security.py. FAIL_CLOSED (4.80-4.81), NOT_FOUND incl. bulk GET dropping unreadable ids (4.82-4.84), EDIT on PATCH, bulk PATCH/DELETE and run_step with 400 {code, detail, error} bodies (4.85-4.90, BUG-010), READ_SURFACES on history, search, export, file download and the HTML report endpoint (4.91-4.95), BUG-011 once-per-row (4.96), API-key read context (4.97), flag resolution (4.98), admin helper (4.99), signed-out callers keep their sign-in answer (4.100). Ported from #816 without the 3.0 extension hooks. |
 
 ## 5. History & Bitemporal (`history`)
 
@@ -288,6 +289,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 12j | Datetime write→read round trip under the aware-UTC convention | 12.46-12.48 | complete | 3 | 0 | 0 | live regression gates for the USE_TZ=True cutover — a client that sends an explicit instant (the fixed frontend's toISOString) gets that exact moment back, rendered in the viewer's zone; summer round trip, year-end midnight across the winter offset, and a truthful designated instant. Frontend twin datetimeConventionRoundTrip.test.ts. |
 | 12k | A credential-shaped column never reaches a response | 12.49-12.53 | complete | 5 | 0 | 0 | LEX-702 / BUG-F-033 backend half. auth.User was served through model_entries WITH its Django password hash, and the LEAST-privileged account could read the MOST-privileged account's -- verified on a clean harness, HTTP 200. The FK hover card then painted it wherever a grid held an FK to User. NOT a permission bypass, and that is the whole point of the cluster. Field-level read scoping works correctly on that endpoint (admin gets nav, the restricted viewer's payload omits the key). Two things went around it: UserModelSerializer is a plain DRF ModelSerializer and not a LexSerializer, so can_read / permission_read never ran for it at all; and a model declaring neither hook falls through to "all fields" even inside LexSerializer. So the fix cannot be a permission rule -- it is a name-based refusal, at two enforcement points, plus an allowlist replacing fields = "__all__". Matching is exact-name plus unambiguous suffixes, deliberately NOT the substring search the frontend's hover-card denylist uses: `hash` would swallow content_hash and `auth` would swallow author, and a silently missing field is its own bug. 12.53 pins both directions. There WAS a unit test asserting Meta.fields == "__all__" -- it encoded the bug. Rewritten inverted in lex/tests/unit/api/test_model_entry_provider_mixin.py. |
 | 12m | A closed record does not offer Calculate, and says why | 12.58-12.62 | complete | 5 | 0 | 0 | 12.58 a closed record's lex_reserved_scopes.edit leaves out is_calculated, which greys its Calculate button, and keeps the fields the user may edit; 12.59 an open record still lists it; 12.60 grid rows and the record page carry the model's reason in lex_reserved_calculation_closed_reason, for the greyed button's tooltip; 12.61 an open record's row carries null; 12.62 the reason survives a read permission that hides other fields. Follows 12l (12.54-12.57). |
+| 12n | The list serializer builds the read context once per request (BUG-011) | 12.63 | complete | 1 | 0 | 0 | With the list filter switched off the serializer decides every row itself; it builds LexModel.can_read's context from the one it caches per request, so the auth_group queries do not grow with the rows. Letter n, not l: 12m refers to a 12l (12.54-12.57) that is not on this branch, so l is skipped to avoid a collision when it lands. |
 
 ## 13. Export Endpoint (`exports`)
 
@@ -311,6 +313,7 @@ A token whose cookie exceeds 4096 bytes is dropped by the browser without a word
 | 14c | AG Grid POST — grouping, aggregation, pivot | 14.15-14.20 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14d | Edge cases |  | planned | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14e | Secondary filter / sort branches (April 21) | 14.21-14.25 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
+| 14f | Filter and ordering allow-list (LEX_SEC_FILTERS) | 14.36-14.44 | complete | 9 | 0 | 0 | Filters/ordering only on serialized fields, limit_choices_to keys and lex_filterable_fields ("__all__" opts out); relations follow the related model's list; refusal 400 FILTER_NOT_ALLOWED with a readable error; AG Grid ignores hidden columns. The frontend keeps working: ordering by the primary key is never refused (14.43) and ag-Grid-AutoColumn is ignored, not refused (14.44). Ported from #816. |
 | 14h |  | 14.30-14.33 | complete | 0 | 0 | 0 | counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately recorded |
 | 14i | A date with no time means the whole day | 14.34-14.35 | complete | 2 | 0 | 0 | LEX-714. 14.12 covered the time-bearing branch of the DateTimeField date filter; the DATE-ONLY branch beside it had no test, which is how it stayed correct and unreachable at the same time. The grid's AGDateTimeFilter hard-coded format='YYYY-MM-DDTHH:mm:ss', so a date the user picked with no time still arrived as `2026-03-10T00:00:00`. _ag_filter_has_time read that as time-bearing and _build_filter_q answered with `>= 00:00:00 AND < 00:00:01` -- a one-second window at midnight. Every other row that day was silently excluded and the grid looked healthy. 14.34 pins the whole-day comparison (alpha-mid is stamped 13:30:45, so only `__date` finds it). 14.35 pins the contrast -- a midnight stamp is an INSTANT, not a day, and returns nothing. Both strings name the same day; only one of them means it. 14.35 is deliberately pinning current behaviour rather than a bug: it is the contract the frontend fix now depends on, so if a midnight stamp ever starts meaning a whole day, the grid's new time checkbox becomes a lie in the other direction. Backend needed no change. The frontend half is F3.62-F3.65. |
 

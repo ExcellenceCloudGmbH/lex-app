@@ -941,3 +941,21 @@ Inspecting the cluster showed 13.9 (`groupKeyPaths`) is already covered by `test
 ---
 
 > **Back to:** [Test Plan Index](index.md) | **See also:** [Why the Shift](why-the-shift.md) | [Expected Results](expected-results.md) | [Progress](progress.md)
+
+### 14f. Filter and ordering allow-list (LEX_SEC_FILTERS) ✅
+
+A filter on a field reveals its value even when no response contains it. A list request may only filter and order by the fields of the model's registered serializers, the `limit_choices_to` keys of foreign keys pointing at it, and `lex_filterable_fields` (`"__all__"` opts out); anything else answers 400 `FILTER_NOT_ALLOWED`, and the AG Grid POST treats it as a column that does not exist.
+
+| # | Scenario | What We Assert |
+|---|----------|----------------|
+| 14.36 | serialized fields filter, hidden ones refused | 400 `FILTER_NOT_ALLOWED` naming the field, readable `error` |
+| 14.37 | ordering by a hidden field | 400; visible ordering works |
+| 14.38 | relations | the related model's allow-list applies |
+| 14.39 | `limit_choices_to` keys | stay filterable (FK pickers) |
+| 14.40 | opt-out | `"__all__"` and `LEX_SEC_FILTERS=false` |
+| 14.41 | AG Grid hidden column | ignored, every row returned |
+| 14.42 | primary key filter | allowed |
+| 14.43 | ordering by the primary key | never refused (`ordering=id`, `-id`, `name,id`) |
+| 14.44 | `ag-Grid-AutoColumn` | ignored, not refused, in POST models and GET ordering |
+
+**Status:** ✅ Complete (2026-10-18) — 9 pass. Batch: [14f](batches.md).

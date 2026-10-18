@@ -16,7 +16,7 @@
 | 4.1 | Superuser reads all fields | `permission_read` returns `allow_all` |
 | 4.2 | Regular user reads allowed fields only | API response only includes permitted field names |
 | 4.3 | `allow_all_except` hides sensitive fields | Excluded fields absent from API response |
-| 4.4 | `permission_edit` restricts editable fields | PATCH to restricted field is rejected or ignored |
+| 4.4 | `permission_edit` restricts editable fields | PATCH to restricted field is rejected or ignored (BUG-010 resolved: 400 `EDIT_NOT_ALLOWED`) |
 | 4.5 | `permission_delete` denies deletion | DELETE returns 403 |
 | 4.6 | `permission_create` denies creation | POST returns 403 |
 | 4.7 | Keycloak scope fallback — read scope present | Default `permission_read` allows all fields |
@@ -26,7 +26,7 @@
 | 4.11 | API key context | `client_roles` includes "api_key", scopes from key identity |
 | 4.12 | `with_instance` resolves instance-specific Keycloak scopes | Scopes matched by `rsname` and `resource_set_id` |
 | 4.40 | `permission_export` full deny at the export endpoint (sub-cluster 4h) | POST `/api/<model>/export` → 200 with rows present (read open) but every domain field blanked; only the framework's `{id, created_by, edited_by}` columns may carry data. Pins the union behaviour in `ModelExportView.get_exportable_fields_for_object` against both over-restrictive (rows dropped) and over-permissive (domain leaks) drift. |
-| 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
+| 4.41 | Full `permission_read` deny at the detail endpoint (sub-cluster 4e) | GET `/api/<model>/<id>/` for a row whose `permission_read` returns `deny` → 404 by default (LEX_SEC_NOT_FOUND); with `LEX_LEGACY_SECURITY=true` the old 200 with `{}` and no domain fields / `id` leakage. List endpoints already drop denied rows; this pins the serializer guard for guessed detail URLs. |
 
 ---
 
@@ -53,3 +53,35 @@
 **Scenario range:** 4.75 – 4.79. **Test file:** `lex/test_project/tests/permissions/test_4n_reflex_permissions.py`. **Type:** U. **Status:** ✅ Complete (2026-09-28). Covers `lex/lex_app/reflex/auth.py`. Batch: [4n](batches.md).
 
 ---
+
+---
+
+### 4o. Secure defaults on the generic REST endpoints ✅
+
+**Gap:** permission methods were only enforced where the serializer happened to ask: a raising hook allowed, an unreadable record answered `200 {}`, `permission_edit` was ignored on writes (BUG-010), bulk delete and `run_step` skipped `permission_delete`/`permission_create`, and history, global search, export and file download ignored read permission. The hardening turns every one of these on by default (`lex/core/security_flags.py`; `LEX_LEGACY_SECURITY=true` or `LEX_SEC_<FLAG>=false` restore the old behaviour). No new denial answers 403 — the bundled frontend signs out on 403.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 4.80 | raising `permission_read` | the row is hidden; legacy lets it through and fails 500 |
+| 4.81 | raising `permission_create` | the create is refused (500, nothing stored); legacy stores |
+| 4.82 | unreadable record | 404; legacy `200 {}`; `LEX_SEC_NOT_FOUND=true` wins over the umbrella |
+| 4.83 | PATCH/DELETE unreadable | 404, row unchanged |
+| 4.84 | `/many` | GET drops unreadable ids (200); DELETE naming one answers 404 |
+| 4.85 | disallowed field | 400 `{code: EDIT_NOT_ALLOWED, detail, error, fields}`; allowed field 200 |
+| 4.86 | unchanged values | sending a disallowed field unchanged is not an edit |
+| 4.87 | no edit right | every PATCH refused; legacy applies it |
+| 4.88 | bulk PATCH | 400, nothing changed |
+| 4.89 | bulk DELETE | `permission_delete` per row, 400 `DELETE_NOT_ALLOWED` with ids |
+| 4.90 | run_step | 400 `EDIT_NOT_ALLOWED` / `CREATE_NOT_ALLOWED` |
+| 4.91 | history | 404 for an unreadable record |
+| 4.92 | global search | only readable rows; legacy all |
+| 4.93 | export | only readable rows |
+| 4.94 | file download | 400 without params, 404 for non-file field or unreadable record, 200 bytes |
+| 4.95 | HTML report | signed-in 200, anonymous not 200, unknown 404 |
+| 4.96 | BUG-011 | `permission_read` once per row on a list |
+| 4.97 | API key | the serializer decides a key's read with the key's own context |
+| 4.98 | flags | defaults, umbrella, per-flag override, unknown name |
+| 4.99 | `is_superuser_or_admin` | superuser or `admin` group only |
+| 4.100 | signed out | the sign-in answer (302/401/403), never 404/200 |
+
+**Scenario range:** 4.80 – 4.100. **Test file:** `lex/test_project/tests/permissions/test_4o_secure_defaults.py`. **Type:** E (4.98–4.99 U). **Status:** ✅ Complete (2026-10-18). Batch: [4o](batches.md).
