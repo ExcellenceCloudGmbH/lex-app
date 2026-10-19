@@ -120,6 +120,15 @@ def _lex_model_can_read():
     return LexModel.can_read
 
 
+def _keeps_lex_model_can_read(instance) -> bool:
+    """Whether ``instance`` reads through LexModel's own ``can_read``.
+
+    False for an override, and for a model that declares no ``can_read`` at all
+    (a plain Django model), which the read-once check must not assume has one.
+    """
+    return getattr(type(instance), "can_read", None) is _lex_model_can_read()
+
+
 def _get_capabilities(model_class: type) -> dict:
     """Return cached capability flags for a model class."""
     caps = _capability_cache.get(model_class)
@@ -928,7 +937,7 @@ class LexSerializer(serializers.ModelSerializer):
 
         # 0. Already decided for this request (the list filter asked first; BUG-011)
         remembered = None
-        if request is not None and type(target_instance).can_read is _lex_model_can_read():
+        if request is not None and _keeps_lex_model_can_read(target_instance):
             from lex.api.security import recalled
 
             remembered = recalled(request, "read", target_instance)
@@ -942,7 +951,7 @@ class LexSerializer(serializers.ModelSerializer):
         # 1. Try Legacy 'can_read'
         elif target_caps['has_can_read']:
             try:
-                if request is not None and type(target_instance).can_read is _lex_model_can_read():
+                if request is not None and _keeps_lex_model_can_read(target_instance):
                     # LexModel.can_read is permission_read with a context built from
                     # the request; build it from this serializer's cached base
                     # instead of querying the user's groups once per row (BUG-011).

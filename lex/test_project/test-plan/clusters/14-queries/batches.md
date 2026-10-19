@@ -96,3 +96,18 @@
   `_coerce_typed_value` (GET-only), not in the shared `_typed_value_converter`, since `model_field`
   is the same `JSONField` object for the whole column and for a sub-path alike --
   `_resolve_lookup`'s JSON branch never manufactures a separate `Field` for a key.
+
+### Batch 14l — Value lists and the GET lookups under lex-app-v2's filter allow-list ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 14.84 – 14.86 |
+| Type | E |
+| Files covered | `lex/api/serializers/base_serializers.py` (`_keeps_lex_model_can_read`, `_resolve_target_and_visible_fields`), `lex/api/views/model_entries/FilterValues.py` (inherited `_apply_filter_model`), `lex/api/views/model_entries/List.py` (`apply_query_param_filters`, `_build_query_from_values`), `lex/api/filter_policy.py` |
+| Test file | `lex/test_project/tests/queries/test_14l_value_lists_and_the_filter_allow_list.py` |
+| Test classes | `TestCluster14l_ValueListsAndTheFilterAllowList` |
+| Fixtures | `QueryOpenItem` (14g), `PolicyItem` (14f); `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
+| Tests landed | **3 pass / 0 fail** |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-19-merge-lex-app-v2-secure-defaults.md) |
+
+---

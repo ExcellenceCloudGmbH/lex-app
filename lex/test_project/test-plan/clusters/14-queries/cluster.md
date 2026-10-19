@@ -215,6 +215,16 @@ the same `JSONField` object for the whole column and for a sub-path alike.
 
 ---
 
+### 14l. Value lists and the GET lookups under the filter allow-list ✅
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 14.84 | no permission methods | list GET, AG Grid POST and detail show every row and field; the value list's database count matches |
+| 14.85 | `filterModel` on a hidden field | `filter_values` ignores it as the list POST does; `LEX_SEC_FILTERS=false` applies it on both |
+| 14.86 | GET `__blank`/`__exact`/`__in` on a hidden field | 400 `FILTER_NOT_ALLOWED` like a bare filter; on a serialized field they filter; legacy applies them |
+
+**Scenario range:** 14.84 – 14.86. **Test file:** `lex/test_project/tests/queries/test_14l_value_lists_and_the_filter_allow_list.py`. **Type:** E. **Status:** ✅ Complete (2026-10-19). Batch: [14l](batches.md).
+
 ## Planned Expansions — Coverage-Driven Sub-Clusters
 
 After landing Clusters 1–14 (176+ scenarios, 14 real framework bugs surfaced), a coverage audit (April 21, baseline **42.63%** overall) flagged six source files as "customer-visible, high-impact, low-coverage". Rather than invent new top-level clusters, each gap folds into an **existing** cluster as a new sub-cluster. This keeps the user-journey narrative intact and avoids a "Cluster 15/16/17/…" proliferation.
