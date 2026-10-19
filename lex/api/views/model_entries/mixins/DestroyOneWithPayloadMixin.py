@@ -62,7 +62,15 @@ class DestroyOneWithPayloadMixin:
         
         instance = self.get_object()
         request = self.request
-        
+
+        # History tables and Django's users are deleted by superusers only
+        # (LEX_SEC_HISTORY_WRITE / LEX_SEC_INTERNAL); 400, never 403.
+        from lex.api.security import write_denial
+
+        denial = write_denial(request, type(instance))
+        if denial is not None:
+            return denial
+
         # Unwrap historical instances so we can check permission_delete
         # on the real LexModel even when deleting a HistoricalXxx record.
         target, original_instance = _unwrap_historical_instance(instance)

@@ -27,7 +27,7 @@ from rest_framework.response import Response
 from lex.api.serializers.base_serializers import LexSerializer, _get_capabilities, _resolve_history_source_model
 from lex.api.utils.filterable_fields import is_plain_text_field, value_list_field
 from lex.api.views.model_entries.List import ListModelEntries, normalize_field_path
-from lex.core.models.LexModel import LexModel, UserContext
+from lex.core.models.LexModel import LexModel
 
 logger = logging.getLogger(__name__)
 
@@ -305,16 +305,15 @@ class FilterValues(ListModelEntries):
 
         ``serializer`` is the SAME instance used to resolve ``field`` and
         must be a :class:`LexSerializer` (``post`` only takes this path when
-        it is). One base context is built for the whole scan -- not one per
-        row, which would mean one ``user.groups`` query per row -- and
-        whether the request is API-key authenticated is likewise decided
-        once per scan (see ``readable_field_names``). Returns the rows
-        skipped by a raised check too, so a caller that makes more than one
-        pass (the main count and the ticked-foreign-key visibility probe)
-        can log one combined warning instead of one per pass.
+        it is). ``readable_field_names`` is the serializer's own per-record
+        read decision, so a row counts exactly when the grid would show this
+        field on it: the serializer caches one base context for the whole
+        scan (not one ``user.groups`` query per row) and reuses what the read
+        filter already decided for this request. Returns the rows skipped by
+        a raised check too, so a caller that makes more than one pass (the
+        main count and the ticked-foreign-key visibility probe) can log one
+        combined warning instead of one per pass.
         """
-        base_user_context = UserContext.from_request_base(request)
-        is_api_key_request = UserContext._api_key_context(request) is not None
         name = model_field.name
         attname = model_field.attname
         max_rows = row_scan_limit()
@@ -327,9 +326,7 @@ class FilterValues(ListModelEntries):
                 truncated = True
                 break
             try:
-                visible = serializer.readable_field_names(
-                    row, request, base_user_context=base_user_context, is_api_key_request=is_api_key_request,
-                )
+                visible = serializer.readable_field_names(row, request)
             except Exception:
                 skipped += 1
                 continue

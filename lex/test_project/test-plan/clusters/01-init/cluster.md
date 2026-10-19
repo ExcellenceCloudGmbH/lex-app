@@ -445,6 +445,50 @@ does not remove user launch configurations.
 
 **Scenario range:** 1.384 – 1.385. **Test file:** `lex/test_project/tests/init/test_1au_lex_version.py`. **Type:** U. **Status:** ✅ Complete (2026-10-03). Batch: [1au](batches.md).
 
+---
+
+### 1av. Startup hardening — nested project root, broken lex_config.py, cache tables, CORS origins ✅
+
+**What it tests:** a Lex project in a subfolder of a repository runs with `python -m lex` and no wrapper variables; a broken `lex_config.py` stops startup instead of silently running with defaults; a fresh database no longer needs a manual `createcachetable`; `LEX_CORS_ALLOWED_ORIGINS` narrows CORS.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.386 | lex_config.py marks the root | `backend/` from itself and a subfolder; the git toplevel without the file |
+| 1.387 | CLI in a nested project | fresh `import lex.bin.lex` in `backend/Inputs`: `PROJECT_ROOT=backend/`, settings `lex_app.settings` (a project `settings.py` is not loaded) |
+| 1.388 | config fails to load | `ImproperlyConfigured` naming the error, from `ready()`'s check |
+| 1.389 | wrong key types | each of the four keys (and legacy names) named in the error; a valid file loads; no file passes |
+| 1.390 | after migrate | `post_migrate` creates `default_cache`/`oidc_cache`; a second run is harmless |
+| 1.391 | before the initial-data load | `async_ready` has created the tables by the time it checks for data |
+| 1.392 | `LEX_CORS_ALLOWED_ORIGINS` | unset: allow-all as before; set: only the listed origins |
+| 1.405 | home boundary | `lex_config.py` in the home directory never wins; marker-less folders fall back to themselves |
+
+**Scenario range:** 1.386 – 1.392, 1.405. **Test file:** `lex/test_project/tests/init/test_1av_startup_hardening.py`. **Type:** U (1.390–1.391 I). **Status:** ✅ Complete (2026-10-18). Batch: [1av](batches.md).
+
+---
+
+### 1aw. A plain pytest run is set up like `lex pytest` — PyCharm's test tree works ✅
+
+**What it tests:** that a plain pytest run — PyCharm's runner, VS Code, a terminal — in a project with a `lex_test_config.yaml` gets the setup `lex pytest` does, from lex's pytest plugin, and that `lex pytest` runs on the same plugin.
+
+**Why a regression matters:** PyCharm's test tree showed one collection error and no tests for every lex project, and projects copied `lex pytest`'s setup into their own `conftest.py` to work around it. If the plugin and `lex pytest` drift apart, the same suite passes in one and fails in the other.
+
+| Scenario | Title | Asserts |
+| --- | --- | --- |
+| 1.393 | the PyCharm way | a model-importing, database-writing test passes under `python -m pytest`, with lex's warning policy in force |
+| 1.394 | inactive elsewhere | without a `lex_test_config.yaml` the plugin does nothing |
+| 1.395 | the opt-out | `-p no:lex` switches it off |
+| 1.396 | the entry point | `lex = "lex.tools.pytest_plugin"` in pyproject |
+| 1.397 | collect-only needs no database | an unreachable database does not stop `--collect-only` |
+| 1.398 | a database that cannot be set up | exit code 4 with the database's error, no test run |
+| 1.399 | groups are markers | configured groups are markers; an undeclared marker exits 4 |
+| 1.400 | invalid test config | exit code 4 with the loader's message |
+| 1.401 | pytest-django alongside | refused with a message naming `-p no:django` |
+| 1.402 | a copied conftest | whichever set up first, nothing is set up twice |
+| 1.403 | one implementation | `lex pytest` and `lex pytest-groups` pass the plugin with `-p no:lex` |
+| 1.404 | test run configurations | `Tests` and one per group, for PyCharm and VS Code |
+
+**Scenario range:** 1.393 – 1.404. **Test file:** `lex/test_project/tests/init/test_1aw_pytest_plugin.py`. **Type:** U / I. **Status:** ✅ Complete (2026-10-15). Batch: [1aw](batches.md).
+
 ### 1aw. lex_view filters
 
 | # | Scenario | What We Assert | Status |

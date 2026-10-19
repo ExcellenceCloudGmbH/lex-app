@@ -192,7 +192,27 @@ class ApiLayerCalc(CalculationModel):
         return None
 
 
+@_permissive
+class ExplodingItem(LexModel):
+    """Cluster 10o: saving a row named "explode" fails, so the API answers 500."""
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if self.name == "explode":
+            raise RuntimeError("cluster 10o: save failed on purpose")
+        return super().save(*args, **kwargs)
+
+
 ALL_MODELS = [ApiSimpleItem, SchemaFKTarget, SchemaItem, SchemaHiddenItem, ApiLayerCalc]
+HARDENING_MODELS = [ApiSimpleItem, ExplodingItem]
 
 API_SIMPLE = "apisimpleitem"
 API_LAYER_CALC = "apilayercalc"
+EXPLODING = "explodingitem"

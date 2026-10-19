@@ -62,6 +62,21 @@
 
 ---
 
+### Batch 10o — Error bodies, OIDC redirects, unknown api/ paths, global search ?q=, one KeycloakManager ✅
+
+| Property | Value |
+| --- | --- |
+| Scenario range | 10.83 – 10.90 |
+| Type | E (10.85, 10.88, 10.90 U) |
+| Files covered | `lex/core/security_flags.py` (`expose_tracebacks`), `lex/api/security.py` (`error_detail`), `lex/api/views/model_entries/One.py`, `lex/api/views/process_flow/CreateOrUpdate.py`, `lex/authentication/middleware.py` (`OidcRedirectGuardMiddleware`), `lex/lex_app/settings.py` (`MIDDLEWARE`), `lex/react/views.py`, `lex/process_admin/sites/process_admin_site.py`, `lex/api/views/global_search_for_models/Search.py`, `lex/api/middleware/keycloak_permissions.py` |
+| Test file | `lex/test_project/tests/api_layer/test_10o_error_and_route_hardening.py` |
+| Test classes | `TestCluster10o_Tracebacks`, `TestCluster10o_OidcRedirects`, `TestCluster10o_OidcRedirectInStack`, `TestCluster10o_UnknownApiPaths`, `TestCluster10o_ServeReact`, `TestCluster10o_GlobalSearchQuery`, `TestCluster10o_KeycloakManagerPerProcess` |
+| Fixtures | new `ExplodingItem` (save raises for "explode") and `ApiSimpleItem` in `api_layer/models.py` (`HARDENING_MODELS`); a fake `KeycloakManager`; a temporary SPA build |
+| Tests landed | **8 pass / 0 fail** |
+| Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-18-v2-security-hardening-internal-config.md) |
+
+---
+
 ## Batch 10o — list_ui.filter_bar and the fields endpoint's value_list flag (10.83-10.87)
 
 - **Type:** U

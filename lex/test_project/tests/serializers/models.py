@@ -296,6 +296,15 @@ class AttachmentItem(LexModel):
     class Meta:
         app_label = "lex_app"
 
+    # The 12h scenarios are about clearing files, not permissions: open
+    # read/edit so the secure defaults (404 for unreadable records,
+    # enforced permission_edit) do not stand in the way.
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 12h")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 12h")
+
     def __str__(self) -> str:  # pragma: no cover
         return self.name
 

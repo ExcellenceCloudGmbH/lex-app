@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from django.conf import settings as django_settings
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.utils._os import safe_join
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.clickjacking import xframe_options_exempt
@@ -27,6 +27,14 @@ _HASHED_ASSET = re.compile(r"^assets/.+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
 #: tells the browser not to revalidate on reload, which is the difference between
 #: a 304 round-trip per asset and no request at all.
 _IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+def _api_path(path) -> bool:
+    """Whether ``path`` (below ``DJANGO_BASE_PATH``) lies under ``api/``."""
+    base = os.getenv("DJANGO_BASE_PATH", "").strip().strip("/")
+    if base and (path == base or path.startswith(f"{base}/")):
+        path = path[len(base):].lstrip("/")
+    return path == "api" or path.startswith("api/")
 
 
 def _no_store(response):
@@ -90,6 +98,12 @@ def _apply_embed_csp(response):
 @xframe_options_exempt
 def serve_react(request, path, document_root=None):
     path = posixpath.normpath(path).lstrip("/")
+    from lex.core.security_flags import strict
+
+    if strict("NOT_FOUND") and _api_path(path):
+        # No route under api/ matched: an unknown endpoint answers a JSON 404,
+        # never the app's index.html with 200 (LEX_SEC_NOT_FOUND).
+        return _no_store(JsonResponse({"detail": "Not found.", "error": "Not found."}, status=404))
 
     if path == "config.js":
         config_path = safe_join(document_root, path)

@@ -1,7 +1,7 @@
 cluster: 10
 slug: api_layer
 title: API Layer
-max_scenario: 87
+max_scenario: 90
 letters:
   a:
     title: ''
@@ -143,6 +143,21 @@ letters:
       xfail: 0
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
+  o:
+    title: Error bodies, OIDC redirects, unknown api/ paths, global search ?q=, one KeycloakManager
+    scenarios: 10.83-10.90
+    status: complete
+    tests:
+      pass: 8
+      skip: 0
+      xfail: 0
+    note: >-
+      v2 security hardening. TRACEBACKS (10.83-10.84): no traceback in generic error bodies unless
+      DEBUG, LEX_API_TRACEBACKS=true or the opt-out; error text kept; the explicit switch wins over
+      DEBUG. OIDC_REDIRECT (10.85-10.86): next/fail on /oidc/* relative, own host, CSRF_TRUSTED_ORIGINS
+      or the CORS allow-list, else 400 REDIRECT_NOT_ALLOWED before the OIDC view. Unknown api/ path is
+      a JSON 404, SPA routes keep index.html (10.87-10.88). api/global-search/?q= routed (10.89). One
+      KeycloakManager per process (10.90). Ported from #815, #821 (manager only), #830.
   o:
     title: list_ui.filter_bar and the fields endpoint's value_list flag
     scenarios: 10.83-10.87

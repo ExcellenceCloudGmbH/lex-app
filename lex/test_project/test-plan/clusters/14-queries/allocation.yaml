@@ -87,6 +87,20 @@ letters:
     note: counts folded into cluster top-line in pre-migration dashboard; per-letter tally not separately
       recorded
   f:
+    title: Filter and ordering allow-list (LEX_SEC_FILTERS)
+    scenarios: 14.36-14.44
+    status: complete
+    tests:
+      pass: 9
+      skip: 0
+      xfail: 0
+    note: >-
+      Filters/ordering only on serialized fields, limit_choices_to keys and lex_filterable_fields
+      ("__all__" opts out); relations follow the related model's list; refusal 400
+      FILTER_NOT_ALLOWED with a readable error; AG Grid ignores hidden columns. The frontend keeps
+      working: ordering by the primary key is never refused (14.43) and ag-Grid-AutoColumn is
+      ignored, not refused (14.44). Ported from #816.
+  f:
     title: Value-list filters — Set keys converted, blanks, empty selections, Multi
     scenarios: 14.36-14.41
     status: complete

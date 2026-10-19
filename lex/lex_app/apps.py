@@ -30,6 +30,13 @@ class CustomAdminConfig(AdminConfig):
         pass
 
 
+def _validate_project_configuration():
+    """Stop here when the project's ``lex_config.py`` is broken (see ``validate_project_config``)."""
+    from lex.core.config import validate_project_config
+
+    validate_project_config()
+
+
 def _create_audit_logger():
     """
     Create an audit logger instance if audit logging is enabled.
@@ -130,6 +137,7 @@ class LexAppConfig(GenericAppConfig):
                 repo=repo_name,
                 is_lex=False
             )
+            _validate_project_configuration()
             generic_app_models = {f"{model.__name__}": model for model in
                                   set(list(apps.get_app_config(repo_name).models.values())
                                       + list(apps.get_app_config(repo_name).models.values())) if model.__name__.count("Historical") != 1}
@@ -267,6 +275,12 @@ class LexAppConfig(GenericAppConfig):
         # Validate initial data path before proceeding
         if not self.validate_initial_data_path(project_config.initial_data):
             return
+
+        # The initial-data load writes through the database cache: make sure
+        # its tables exist on a database that was never migrated by lex.
+        from lex.helpers.cache_tables import create_cache_tables
+
+        await sync_to_async(create_cache_tables, thread_sensitive=False)()
 
         if await are_all_models_empty(test, generic_app_models):
             # Prepare audit logging parameters for task execution
