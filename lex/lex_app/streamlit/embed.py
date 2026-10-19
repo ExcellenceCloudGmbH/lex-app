@@ -587,11 +587,11 @@ def lex_view(
     The two modes are different Streamlit elements: a page that switches an
     embed with no ``on_*`` flag between a ``filters`` dict and
     ``filters=None`` across reruns remounts the frame, which resets its grid,
-    each time. To clear one field, keep passing a dict and give that field
+    each time. To untick one field, keep passing a dict and give that field
     ``None`` (``{"region": None}``). Re-passing the same filters on a rerun
     posts nothing, so it does not override what the user changed inside the
     frame; filters that differ from the ones the frame last received are
-    posted, and replace the filters on the fields they name.
+    posted, and replace the ticked values of the fields they name.
 
     See ``docs/features/access-and-ui/lex_view callbacks.md`` for the
     event envelope schema and the per-type payload contracts.
@@ -648,9 +648,10 @@ def lex_view(
         ``filters`` (field → ticked keys), ``filter_model`` (the grid's whole
         model) and ``row_count``.
     filters : dict, optional
-        Field name to stored values: a list, one value, or ``None`` to clear
-        the field. An empty list also clears the field, as ticking nothing
-        does in the grid's value lists. Applied on first load and,
+        Field name to stored values to tick: a list, one value, or ``None``
+        to untick them all. An empty list also unticks them all, as ticking
+        nothing does in the grid's value lists. Only the ticked values change:
+        a condition typed in the field's filter stays. Applied on first load and,
         when changed on a later rerun, posted into the frame without reloading
         it. Filters on fields not named here, set by the user, stay. Filters
         whose token is longer than 2,000 characters (a long id list) are not
