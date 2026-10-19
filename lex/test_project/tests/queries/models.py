@@ -244,14 +244,14 @@ class QueryScopedFieldItem(LexModel):
     ``secret_field`` unless the caller's Keycloak scopes include ``"read"``;
     ``can_read`` is left at the LexModel default (unoverridden).
 
-    Cluster 14g's API-key fast-path parity fixture (14.75). ``permission_read``
-    being an override (not the literal default) keeps the row filter off its
+    Cluster 14g's API-key parity fixture (14.75). ``permission_read`` being
+    an override (not the literal default) keeps the row filter off its
     restrictive UMA fast path regardless of auth method -- ``allow_fields``
     always sets ``allowed=True``, so the row is never excluded either way --
-    which isolates the thing actually under test: whether
-    ``readable_field_names``'s per-row fast path sees an API-key caller's
-    OWN scopes (``DEFAULT_API_KEY_SCOPES`` includes ``"read"``) the same way
-    ``can_read(request)`` -- the grid's own path -- would.
+    which isolates the thing actually under test: whether ``filter_values``
+    counts ``secret_field`` for an API-key caller exactly where the list
+    shows it. Both take the serializer's per-row read decision, which reuses
+    the read filter's answer for the row.
     """
 
     name = models.CharField(max_length=200)

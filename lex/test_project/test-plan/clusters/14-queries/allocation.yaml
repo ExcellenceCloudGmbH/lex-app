@@ -189,6 +189,11 @@ letters:
       a code change, and each fails under a matching mutation (str() of a JSON boolean; blanks
       dropped and an empty selection ignored). TestCluster14g_SerializerDependentRefusals registers
       its api_serializers restore with addCleanup before the change.
+      Merged with lex-app-v2: readable_field_names is now the serializer's single read decision,
+      which reuses the read filter's per-row answer (BUG-011) and withholds a record whose check
+      raises; this branch's base-context fast path and its API-key bypass are gone. 14.75 pins
+      that an API-key caller's value list matches its grid for name and secret_field, whatever the
+      grid shows (the list itself now withholds secret_field from a key).
   j:
     title: GET list — the __blank query-param lookup suffix
     scenarios: 14.80-14.83

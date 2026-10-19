@@ -261,6 +261,43 @@ class RowFieldItem(LexModel):
         return True
 
 
+class ReadCheckRaisesItem(LexModel):
+    """Cluster 4r fixture: ``can_read`` raises for the row named "boom".
+
+    ``permission_read`` admits every row, so the read filter -- which asks
+    ``permission_read`` -- keeps "boom"; only the serializer's own read
+    decision, which asks ``can_read`` first, meets the exception.
+    """
+
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "lex_app"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return self.name
+
+    def can_read(self, request):
+        if self.name == "boom":
+            raise RuntimeError("cluster 4r: can_read failed on purpose")
+        return True
+
+    def permission_read(self, uc):
+        return PermissionResult.allow_all("cluster 4r: every row admitted")
+
+    def permission_edit(self, uc):
+        return PermissionResult.allow_all("cluster 4r")
+
+    def permission_create(self, uc):
+        return True
+
+    def permission_delete(self, uc):
+        return True
+
+    def permission_list(self, uc):
+        return True
+
+
 class RaisingReadItem(LexModel):
     """Cluster 4o: a permission_read that raises for one row ("boom")."""
 
@@ -322,3 +359,4 @@ EXPORT_DENIED = "exportdenieditem"
 OWNED = "owneditem"
 RAISING_READ = "raisingreaditem"
 SECRET_DOCUMENT = "secretdocument"
+READ_CHECK_RAISES = "readcheckraisesitem"

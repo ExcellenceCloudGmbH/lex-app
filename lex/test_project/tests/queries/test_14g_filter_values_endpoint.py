@@ -35,6 +35,12 @@ is decided per entry -- and a foreign key declared with ``to_field`` is
 labelled from the row its stored value names, not from the row whose primary
 key happens to equal it. The list's own translation is pinned for the boolean
 shape the frontend ships and for grouped rows.
+
+Merged with lex-app-v2: the per-row count asks the serializer's own read
+decision, which since lex-app-v2 reuses the read filter's answer for a row
+(BUG-011) and withholds a record whose check raises. This branch's own fast
+path, and its API-key bypass, are gone; 14.75 now pins that an API-key
+caller's value list matches its grid for every field, whatever the grid shows.
 Cluster 14g — scenarios 14.51–14.79. Type: E.
 Covers: lex/api/views/model_entries/FilterValues.py, lex/api/utils/filterable_fields.py,
 lex/api/serializers/base_serializers.py (readable_field_names), lex/api/views/model_entries/List.py
@@ -755,22 +761,28 @@ class TestCluster14g_FilterValuesEndpoint(E2ETestCase):
         )
 
     # -- 14.75 ---------------------------------------------------------
-    def test_14_75_api_key_callers_own_scopes_reach_the_fast_path(self):
+    def test_14_75_an_api_key_callers_value_list_matches_its_grid(self):
         """
-        Scenario 14.75: an API-key caller's own scopes must not be dropped
+        Scenario 14.75: an API-key caller's value list is the one its grid implies
         Given: a model whose field-level masking depends on keycloak_scopes, under API-key auth
-        When: secret_field values are asked for
-        Then: the counts match what the list POST shows for the same field and caller
+        When: name and secret_field values are asked for
+        Then: each count matches what the list POST shows the same caller -- both rows' names,
+              and secret_field exactly as the grid has it. Since lex-app-v2 the list reuses the
+              read filter's per-row answer (BUG-011), and filter_values reuses the same answer
+              through the serializer, so the two cannot disagree about a key's fields.
         """
         QueryScopedFieldItem.objects.create(name="a", secret_field="alpha-secret")
         QueryScopedFieldItem.objects.create(name="b", secret_field="beta-secret")
         self.authenticate_as_api_key()
 
-        expected = self._list_field_tally(SCOPED_FIELD_ITEM, "secret_field")
-        self.assertTrue(expected, "the scenario is only meaningful if the grid itself shows the field")
-        data = self._values("secret_field", model=SCOPED_FIELD_ITEM)
-        actual = {item["key"]: item["count"] for item in data["values"]}
-        self.assertEqual(actual, expected, "filter_values must match the grid for an API-key caller")
+        names = self._list_field_tally(SCOPED_FIELD_ITEM, "name")
+        self.assertEqual(names, {"a": 1, "b": 1}, "premise: the key's grid shows both rows")
+        for field in ("name", "secret_field"):
+            with self.subTest(field=field):
+                expected = self._list_field_tally(SCOPED_FIELD_ITEM, field)
+                data = self._values(field, model=SCOPED_FIELD_ITEM)
+                actual = {item["key"]: item["count"] for item in data["values"]}
+                self.assertEqual(actual, expected, "filter_values must match the grid for an API-key caller")
 
     # -- 14.76 ---------------------------------------------------------
     def test_14_76_a_to_field_foreign_key_is_labelled_from_the_row_it_names(self):

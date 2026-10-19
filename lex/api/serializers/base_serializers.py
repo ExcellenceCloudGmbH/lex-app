@@ -331,7 +331,9 @@ def _resolve_filter_bar(serializer_class, serializer) -> list:
 
     A name is kept only when :func:`value_list_field` accepts it for
     ``serializer`` -- the resolver the ``filter_values`` endpoint uses -- so
-    the bar can never name a column the endpoint would refuse.
+    the bar can never name a column the endpoint would refuse. That check has
+    no request; the fields endpoint drops, per caller, a name the caller may
+    not filter by (``LEX_SEC_FILTERS``), which ``filter_values`` refuses them.
 
     ``serializer`` is ``None`` when ``get_list_ui_options`` could not build
     the serializer's fields without a request. The checks that need no

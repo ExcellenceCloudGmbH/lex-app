@@ -11,6 +11,7 @@ from django.db.models import (
     AutoField,
     JSONField
 )
+from lex.api.filter_policy import path_allowed
 from lex.api.serializers import ID_FIELD_NAME, SHORT_DESCR_NAME
 from lex.api.utils.filterable_fields import value_list_field
 from lex.api.views.model_entries.mixins.ModelEntryProviderMixin import resolve_serializer_class
@@ -277,17 +278,28 @@ class Fields(APIView):
             # Whether filter_values lists this field's values -- through
             # list_serializer, the class the list/filter_values actually use
             # (not necessarily `serializer` above, e.g. for a User subclass),
-            # via the same resolver, so the frontend offers a Set or Multi
-            # value list only where the endpoint answers. A field with no
-            # column behind it never has one.
-            info["value_list"] = model_backed and value_list_field(list_serializer, model, fname) is not None
+            # via the same resolver and for the same caller, so the frontend
+            # offers a Set or Multi value list only where the endpoint answers.
+            # A field with no column behind it never has one.
+            info["value_list"] = model_backed and (
+                value_list_field(list_serializer, model, fname, request=request) is not None
+            )
 
             fields_info.append(info)
+
+        list_ui = dict(create_list_ui_info(serializer))
+        # The bar's names were checked without a request. A column this caller
+        # may not filter by (LEX_SEC_FILTERS) is one filter_values refuses for
+        # them, so it leaves their bar too.
+        if list_ui.get("filter_bar"):
+            list_ui["filter_bar"] = [
+                name for name in list_ui["filter_bar"] if path_allowed(model, name, request)
+            ]
 
         return Response(
             {
                 "fields": fields_info,
                 "id_field": model._meta.pk.name,
-                "list_ui": create_list_ui_info(serializer),
+                "list_ui": list_ui,
             }
         )

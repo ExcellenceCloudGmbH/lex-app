@@ -32,12 +32,11 @@ from lex.api.middleware.keycloak_permissions import KeycloakPermissionsMiddlewar
 from lex.api.views.model_entries.FilterValues import uses_default_read_permission
 from lex.test_project.tests._e2e_test_case import E2ETestCase
 
-from .models import FieldLevelItem, KeycloakItem, OwnedItem, RowFieldItem
+from .models import KeycloakItem, OwnedItem, RowFieldItem
 
 pytestmark = pytest.mark.permissions
 
 ROWS = "rowfielditem"
-FIELD_LEVEL = "fieldlevelitem"
 KEYCLOAK = "keycloakitem"
 OWNED = "owneditem"
 REGIONS = ("north", "south", "west")
@@ -134,7 +133,7 @@ class _BlanksPrivateTitles(drf_serializers.ModelSerializer):
 class TestCluster04q_FilterValuesPermissions(E2ETestCase):
     """Cluster 4q: filter_values honours row and field read permissions."""
 
-    e2e_models = [RowFieldItem, FieldLevelItem, KeycloakItem, OwnedItem]
+    e2e_models = [RowFieldItem, KeycloakItem, OwnedItem]
 
     def setUp(self):
         super().setUp()
@@ -143,8 +142,6 @@ class TestCluster04q_FilterValuesPermissions(E2ETestCase):
         RowFieldItem.objects.create(title="private-1", region="north", is_private=True)
         RowFieldItem.objects.create(title="private-2", region="south", is_private=True)
         RowFieldItem.objects.create(title="hidden-1", region="west")
-        FieldLevelItem.objects.create(public_name="a", sensitive_salary=10)
-        FieldLevelItem.objects.create(public_name="b", sensitive_salary=20)
 
     def _post(self, model: str, body: dict, query: str = ""):
         return self.client.post(self.url_filter_values(model) + query, data=body, format="json")
@@ -239,13 +236,16 @@ class TestCluster04q_FilterValuesPermissions(E2ETestCase):
     def test_04_113_a_field_readable_on_no_row_gives_an_empty_list(self):
         """
         Scenario 4.113: nothing to show is not an error
-        Given: a regular user, who may read only id and public_name
-        When: sensitive_salary values are asked for
-        Then: 200 with no values
+        Given: the other filters keep only the private rows, each of which hides region; region
+               is still a column the caller may filter by, since the open rows show it
+        When: region values are asked for under that filter
+        Then: 200 with no values. (A field withheld on every record -- one the caller may not
+              filter by at all -- is refused like a field that does not exist: 4.122.)
         """
-        resp = self._post(FIELD_LEVEL, {"field": "sensitive_salary", "filterModel": {}})
+        private_only = {"is_private": {"filterType": "set", "values": ["true"]}}
+        resp = self._post(ROWS, {"field": "region", "filterModel": private_only})
         self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
-        self.assertEqual(resp.data["values"], [], "no salary may leak")
+        self.assertEqual(resp.data["values"], [], "no private row's region may leak")
 
     # -- 4.114 ----------------------------------------------------------
     def test_04_114_a_field_the_serializer_does_not_expose_is_refused(self):

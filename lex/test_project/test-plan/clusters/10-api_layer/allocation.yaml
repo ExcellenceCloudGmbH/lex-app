@@ -183,3 +183,6 @@ letters:
       of ValueListOptOutItem and AuditLog false). A filter_bar that is not a list, a tuple or a
       single name -- True, or a model column named filter_bar -- gives no bar and one warning where
       it raised a TypeError and failed the fields request (10.95).
+      Merged with lex-app-v2: value_list also asks the filter allow-list (LEX_SEC_FILTERS) whether
+      the caller may filter by the column, and the bar drops such a column per caller (4.123); 10.94
+      builds its own container, so its helper points the allow-list at that container.

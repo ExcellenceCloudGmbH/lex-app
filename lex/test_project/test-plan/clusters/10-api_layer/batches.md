@@ -87,6 +87,8 @@
 - **Fixtures:** `SchemaItem`; `ValueListItem`, `ValueListOptOutItem`, `FilterBarColumnItem` and
   `AuditLog` (final review; no tables -- `Fields.get` is called directly)
 - **Status:** complete — 5 pass
+- **Merged with lex-app-v2:** `value_list` and `list_ui.filter_bar` also follow the filter
+  allow-list for the caller (4.123); 10.94's helper points the allow-list at the container it builds.
 - **Final review (10.94-10.95):** every field descriptor carries `value_list`, decided by
   `value_list_field` for the requested serializer instance; a `filter_bar` that is not a list of names
   gives no bar and one warning instead of a `TypeError`.

@@ -68,6 +68,19 @@ Found while the implementation plans were written against the source:
 16. **Host filters set value lists only.** A host's `filters`, on the first load or later, replace a
     column's ticked keys and nothing else. On a column whose filter also has a condition, the
     condition stays, and `None` or `[]` clears only the ticked keys.
+17. **lex-app-v2's secure defaults apply to value lists.** `filter_values` answers as the list it
+    mirrors does under lex-app-v2's security switches.
+    - A column the list refuses to filter by (`LEX_SEC_FILTERS`), such as one `permission_read`
+      withholds from the caller on every record, is treated like a field that does not exist:
+      `filter_values` answers 400 "is not filterable", the fields endpoint marks it
+      `value_list: false` for that caller, and `list_ui.filter_bar` leaves it out. This replaces
+      §3.7's empty list for such a field; a field hidden per row on every row the other filters
+      leave still gives an empty list. A `filterModel` entry on such a field is ignored, as the
+      list ignores it.
+    - A row whose permission check raises is not counted (`LEX_SEC_FAIL_CLOSED`), and a model
+      whose `permission_list` refuses the caller has no value list: 404 (`LEX_SEC_NOT_FOUND`).
+    - `LEX_LEGACY_SECURITY=true`, or the matching `LEX_SEC_<FLAG>=false`, restores the previous
+      behaviour, as it does for the list.
 
 ## The problem
 

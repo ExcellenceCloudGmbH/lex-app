@@ -271,10 +271,12 @@ class FilterValues(ListModelEntries):
 
         Delegates to :func:`value_list_field` -- the one place that decides
         which columns a value list can cover, shared with ``Meta.filter_bar``
-        -- and raises the single generic refusal when it returns ``None``, so
-        the response never says which fields exist.
+        and the fields endpoint -- and raises the single generic refusal when
+        it returns ``None``, so the response never says which fields exist. A
+        field the caller may not filter by (``LEX_SEC_FILTERS``) gets the same
+        refusal: the list treats it as a field that does not exist.
         """
-        model_field = value_list_field(serializer, self._ag_model_class, field)
+        model_field = value_list_field(serializer, self._ag_model_class, field, request=self.request)
         if model_field is None:
             raise ValidationError({"field": f"{field!r} is not filterable."})
         return model_field

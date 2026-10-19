@@ -50,13 +50,20 @@ class _ColumnsAsWritten(drf_serializers.ModelSerializer):
 
 
 def _value_list_flags(model, serializer_name: str = "default") -> list:
-    """``(name, value_list)`` per descriptor of ``GET .../fields`` for ``model``, in order."""
+    """``(name, value_list)`` per descriptor of ``GET .../fields`` for ``model``, in order.
+
+    The flag also asks the filter allow-list (LEX_SEC_FILTERS) whether the caller
+    may filter by the column; the allow-list reads the model's serializers from
+    its process-admin container, which this test builds itself, so the
+    allow-list is pointed at the same container.
+    """
     container = SimpleNamespace(
         model_class=model,
         get_serializers_map=lambda: get_serializer_map_for_model(model),
     )
     request = SimpleNamespace(query_params={"serializer": serializer_name})
-    response = Fields().get(request, model_container=container)
+    with patch("lex.api.filter_policy._container", lambda model_class: container if model_class is model else None):
+        response = Fields().get(request, model_container=container)
     return [(info["name"], info["value_list"]) for info in response.data["fields"]]
 
 

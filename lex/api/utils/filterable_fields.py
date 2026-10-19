@@ -153,7 +153,7 @@ def _renders_value_as_stored(serializer_field) -> bool:
     return True
 
 
-def value_list_field(serializer, model_class, name: str) -> Optional[Any]:
+def value_list_field(serializer, model_class, name: str, request=None) -> Optional[Any]:
     """The model field behind ``name``, or ``None`` when it is not filterable.
 
     ``serializer`` is the requested serializer instance, and only a column
@@ -173,7 +173,13 @@ def value_list_field(serializer, model_class, name: str) -> Optional[Any]:
       ``to_representation`` of its own, or is itself a nested serializer
       (:func:`_renders_value_as_stored`);
     * it is not a real column or foreign key on the model of a type
-      :func:`is_value_list_field` accepts.
+      :func:`is_value_list_field` accepts;
+    * ``request`` is given and its caller may not filter by the field
+      (``LEX_SEC_FILTERS``, :func:`lex.api.filter_policy.path_allowed`): the
+      list treats such a field as one that does not exist and ignores a
+      filter on it, so it has no value list either. ``filter_values`` and the
+      fields endpoint pass their request; ``Meta.filter_bar`` validation has
+      none, and the fields endpoint narrows the bar per request instead.
     """
     name = (name or "").strip()
     if not name or "__" in name:
@@ -196,4 +202,9 @@ def value_list_field(serializer, model_class, name: str) -> Optional[Any]:
         return None
     if not is_value_list_field(model_field):
         return None
+    if request is not None:
+        from lex.api.filter_policy import path_allowed
+
+        if not path_allowed(model_class, name, request):
+            return None
     return model_field

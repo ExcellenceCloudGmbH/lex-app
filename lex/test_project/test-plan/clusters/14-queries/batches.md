@@ -108,6 +108,7 @@
 | Test classes | `TestCluster14l_ValueListsAndTheFilterAllowList` |
 | Fixtures | `QueryOpenItem` (14g), `PolicyItem` (14f); `LEX_SEC_*`/`LEX_LEGACY_SECURITY` cleared per test |
 | Tests landed | **3 pass / 0 fail** |
+| Also changed | 14.75 pins grid parity for an API-key caller instead of the bypass this branch's fast path had |
 | Status | ✅ Complete — see [session note](../../progress/sessions/2026-10-19-merge-lex-app-v2-secure-defaults.md) |
 
 ---
