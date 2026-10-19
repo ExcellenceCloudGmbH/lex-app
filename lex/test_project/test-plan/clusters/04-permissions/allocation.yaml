@@ -223,8 +223,9 @@ letters:
       LEX_SEC_FILTERS: a column the caller may not filter by -- FieldLevelItem.sensitive_salary,
       withheld from a regular user on every record -- is the standard 400 "is not filterable"
       (4.122), has value_list false on the fields endpoint and leaves list_ui.filter_bar (4.123);
-      an hr member and LEX_SEC_FILTERS=false get it back. A refusing permission_list makes
-      filter_values 404 like the list (4.124, LEX_SEC_NOT_FOUND). 4.122 and 4.123 failed before
+      an hr member, LEX_SEC_FILTERS=false and LEX_LEGACY_SECURITY=true get it back. A refusing
+      permission_list makes filter_values 404 like the list (4.124, LEX_SEC_NOT_FOUND; the per-flag
+      switch and the umbrella restore 200). 4.122 and 4.123 failed before
       value_list_field took the request (200 with an empty list; value_list true); the others pin
       behaviour the merge already gives. 4.113 moved to a per-row empty list (private rows only),
       since the model-wide case is now 4.122's refusal (spec Amendment 17).

@@ -180,11 +180,12 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
                every row but withholds sensitive_salary on all of them, so the list ignores a
                filter on it
         When: sensitive_salary and public_name values are asked for, by default, with
-              LEX_SEC_FILTERS=false, and as a member of "hr", who may read salaries
+              LEX_SEC_FILTERS=false or LEX_LEGACY_SECURITY=true, and as a member of "hr", who may
+              read salaries
         Then: by default sensitive_salary is the standard 400 "is not filterable" -- the answer for
               a field that does not exist -- with no salary in the body, while public_name is
-              listed; with LEX_SEC_FILTERS=false it is 200 with an empty list (no row shows it);
-              the hr member gets both salaries
+              listed; with either switch it is 200 with an empty list (no row shows it); the hr
+              member gets both salaries
         """
         FieldLevelItem.objects.create(public_name="a", sensitive_salary=10)
         FieldLevelItem.objects.create(public_name="b", sensitive_salary=20)
@@ -197,8 +198,9 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
             self.assertNotIn(salary, body, "no salary may appear")
         self.assertEqual(self._counts(FIELD_LEVEL, "public_name"), {"a": 1, "b": 1}, "a visible field keeps its list")
 
-        with _env(LEX_SEC_FILTERS="false"):
-            self.assertEqual(self._counts(FIELD_LEVEL, "sensitive_salary"), {}, "legacy: 200 with nothing to show")
+        for switch in ({"LEX_SEC_FILTERS": "false"}, {"LEX_LEGACY_SECURITY": "true"}):
+            with self.subTest(switch=switch), _env(**switch):
+                self.assertEqual(self._counts(FIELD_LEVEL, "sensitive_salary"), {}, "legacy: 200 with nothing to show")
 
         self._join_hr()
         self.assertEqual(
@@ -244,9 +246,10 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
         """
         Scenario 4.124: LEX_SEC_NOT_FOUND -- permission_list refuses the caller
         Given: RowFieldItem rows, and a permission_list that refuses this user
-        When: the list and filter_values are asked, by default and with LEX_SEC_NOT_FOUND=false
-        Then: both answer 404 by default and no value appears; with LEX_SEC_NOT_FOUND=false both
-              answer 200 as before
+        When: the list and filter_values are asked, by default and with LEX_SEC_NOT_FOUND=false or
+              LEX_LEGACY_SECURITY=true
+        Then: both answer 404 by default and no value appears; with either switch filter_values
+              answers 200 as before
         """
         RowFieldItem.objects.create(title="open-1", region="north")
         with mock.patch.object(RowFieldItem, "permission_list", lambda self, uc: False):
@@ -258,5 +261,6 @@ class TestCluster04r_FilterValuesSecureDefaults(E2ETestCase):
             self.assertEqual(values.status_code, status.HTTP_404_NOT_FOUND, values.content[:300])
             self.assertNotIn("north", values.content.decode(), "no value may appear")
 
-            with _env(LEX_SEC_NOT_FOUND="false"):
-                self.assertEqual(self._counts(ROWS, "region"), {"north": 1}, "legacy: the value list answers again")
+            for switch in ({"LEX_SEC_NOT_FOUND": "false"}, {"LEX_LEGACY_SECURITY": "true"}):
+                with self.subTest(switch=switch), _env(**switch):
+                    self.assertEqual(self._counts(ROWS, "region"), {"north": 1}, "legacy: the value list answers again")

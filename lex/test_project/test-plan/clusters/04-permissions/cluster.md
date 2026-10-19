@@ -133,8 +133,8 @@
 | 4.119 | raising `permission_read`, per row | the row is in neither the list nor the counts; `LEX_SEC_FAIL_CLOSED=false` still leaves it out of the counts |
 | 4.120 | raising `can_read`, per row | the serializer withholds the record from the list and the counts |
 | 4.121 | raising `permission_read`, database count | the read filter withholds the row from both; `LEX_SEC_FAIL_CLOSED=false` lists and counts it |
-| 4.122 | field withheld on every record | 400 "is not filterable", no value in the body; `LEX_SEC_FILTERS=false` 200 empty; an hr member gets the values |
+| 4.122 | field withheld on every record | 400 "is not filterable", no value in the body; `LEX_SEC_FILTERS=false` or `LEX_LEGACY_SECURITY=true` 200 empty; an hr member gets the values |
 | 4.123 | fields endpoint and bar | `value_list` false and the bar drops the column; legacy and hr keep both |
-| 4.124 | `permission_list` false | `filter_values` 404 like the list; `LEX_SEC_NOT_FOUND=false` 200 |
+| 4.124 | `permission_list` false | `filter_values` 404 like the list; `LEX_SEC_NOT_FOUND=false` or `LEX_LEGACY_SECURITY=true` 200 |
 
 **Scenario range:** 4.119 – 4.124. **Test file:** `lex/test_project/tests/permissions/test_4r_filter_values_secure_defaults.py`. **Type:** E. **Status:** ✅ Complete (2026-10-19). Batch: [4r](batches.md).
