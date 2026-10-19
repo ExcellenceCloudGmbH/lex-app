@@ -2,7 +2,7 @@
 date: 2026-10-19
 clusters: [1, 4, 10, 13, 14]
 tests_added: "9 new scenarios (4.119-4.124, 14.84-14.86); 4.113, 10.94's helper and 14.75 changed; this branch's batches renumbered past lex-app-v2's"
-suite_tally: "focused (this branch's files and lex-app-v2's new files in clusters 1, 4, 10, 13, 14, plus serializers): 290 pass / 0 fail / 2 skip / 1 xfail"
+suite_tally: "focused (this branch's files and lex-app-v2's new files in clusters 1, 4, 10, 13, 14, plus serializers): 290 pass / 0 fail / 2 skip / 1 xfail; full suite at 26f16707: 1866 pass / 36 fail / 27 skip / 6 xfail / 5 collection errors (lex-app-v2 at d936dfda: 1752 / 36 / 27 / 6 / 5, the same failing and erroring ids: cluster-15 calculation logging, reflex/reflex_enterprise not installed, stress timing, the gate self-test)"
 ---
 
 # Merging lex-app-v2 into the value-list filters — #833's secure defaults
